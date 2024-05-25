@@ -1,0 +1,41 @@
+/* src/App.css */
+body {
+  font-family: 'Roboto', sans-serif;
+  background-color: #f7f7f7;
+}
+
+.App-header {
+  background-color: #ff4081;
+  padding: 20px;
+  color: white;
+  text-align: center;
+}
+
+.App-header h1 {
+  margin: 0;
+  font-size: 2rem;
+}
+
+.App-header h2 {
+  margin: 10px 0;
+  font-size: 3rem;
+}
+
+.App-header p {
+  margin: 10px 0;
+  font-size: 1.2rem;
+}
+
+.button-group {
+  display: flex;
+  justify-content: center;
+  margin-top: 20px;
+}
+
+.button-group button {
+  margin: 0 10px;
+}
+
+.transaction-list {
+  margin: 20px 0;
+}
