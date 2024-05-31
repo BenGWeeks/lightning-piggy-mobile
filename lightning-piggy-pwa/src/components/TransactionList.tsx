@@ -2,31 +2,23 @@
 import React from 'react';
 import { List, ListItem, ListItemText, Divider } from '@mui/material';
 
-const transactions = [
-  { date: '29 April 2024', description: 'Bitrefill', amount: '- 50,000 Sats' },
-  { date: '28 April 2024', description: 'Robotechy.com', amount: '- 30,500 Sats' },
-  { date: '28 April 2024', description: 'Allowance', amount: '+ 110,000 Sats' },
-];
-
-const TransactionList: React.FC = () => {
+const TransactionList: React.FC<{ transaction: any }> = ({ transaction }) => {
   return (
     <List>
       <Divider />
-      {transactions.map((transaction, index) => (
-        <div key={index}>
-          <ListItem>
-            <ListItemText
-              primary={transaction.description}
-              secondary={transaction.date}
-            />
-            <ListItemText
-              primary={transaction.amount}
-              style={{ textAlign: 'right' }}
-            />
-          </ListItem>
-          <Divider />
-        </div>
-      ))}
+      <div>
+        <ListItem>
+          <ListItemText
+            primary={transaction.memo}
+            secondary={new Date(transaction.time * 1000).toLocaleDateString()}
+          />
+          <ListItemText
+            primary={`${transaction.pending ? '-' : '+'} ${transaction.amount} Sats`}
+            style={{ textAlign: 'right' }}
+          />
+        </ListItem>
+        <Divider />
+      </div>
     </List>
   );
 };
