@@ -20,12 +20,14 @@ interface BottomSheetProps {
   children: ReactNode;
 }
 
-const BottomSheet: React.FC<BottomSheetProps> = ({ open, onClose, children }) => {
+const BottomSheet: React.FC<BottomSheetProps> = ({
+  open,
+  onClose,
+  children,
+}) => {
   return (
     <Modal open={open} onClose={onClose} aria-labelledby="bottom-sheet-title">
-      <SheetContainer>
-        {children}
-      </SheetContainer>
+      <SheetContainer>{children}</SheetContainer>
     </Modal>
   );
 };

@@ -7,12 +7,12 @@ dotenv.config();
 
 module.exports = function(app) {
   const target = process.env.REACT_APP_LNBITS_NODE_URL;
-  const apiKey = process.env.REACT_APP_LNBITS_API_KEY;
+  //const apiKey = process.env.REACT_APP_LNBITS_API_KEY;
 
   console.log('setupProxy.js is being executed');
   console.log('API URL:', target);
-  console.log('API Key:', apiKey);
-  console.log(`Setting up proxy to ${target} with API key: ${apiKey}`);
+  //console.log('API Key:', apiKey);
+  //console.log(`Setting up proxy to ${target} with API key: ${apiKey}`);
 
   app.use(
     '/api/v1',
@@ -23,7 +23,7 @@ module.exports = function(app) {
       pathRewrite: { '^/api/v1': '/api/v1' },
       onProxyReq: (proxyReq, req, res) => {
         console.log(`Proxying request to: ${target}${req.url}`);
-        proxyReq.setHeader('X-Api-Key', apiKey);
+        //proxyReq.setHeader('X-Api-Key', apiKey);
         console.log('Request Headers:', JSON.stringify(proxyReq.getHeaders()));
       },
       onProxyRes: (proxyRes, req, res) => {
@@ -46,7 +46,7 @@ module.exports = function(app) {
       pathRewrite: { '^/lnurlp/api/v1': '/lnurlp/api/v1' },
       onProxyReq: (proxyReq, req, res) => {
         console.log(`Proxying request to: ${target}${req.url}`);
-        proxyReq.setHeader('X-Api-Key', apiKey);
+        //proxyReq.setHeader('X-Api-Key', apiKey);
         console.log('Request Headers:', JSON.stringify(proxyReq.getHeaders()));
       },
       onProxyRes: (proxyRes, req, res) => {

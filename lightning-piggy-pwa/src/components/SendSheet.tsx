@@ -1,92 +1,36 @@
-// ReceiveSheet.tsx
-import React, { useEffect, useState, useContext, useRef } from 'react';
-import { Box, Button, Drawer, Typography } from '@mui/material';
+// SendSheet.tsx
+import React, { useEffect, useState } from 'react';
+import { Box, Button, Drawer, Typography, TextField } from '@mui/material';
 import { SvgIcon } from '@mui/material';
-import QRCode from 'qrcode.react';
+import { QrReader } from 'react-qr-reader';
 import lnbitsService from '../api/lnbitsService';
-import { WalletContext } from '../contexts/WalletContext';
-import { FaCheckCircle } from 'react-icons/fa';
+import Amount from './Amount';
 
-interface ReceiveSheetProps {
+interface SendSheetProps {
   open: boolean;
   onClose: () => void;
 }
 
-const ReceiveSheet: React.FC<ReceiveSheetProps> = ({ open, onClose }) => {
-  const [invoice, setInvoice] = useState('');
-  const [paymentReceived, setPaymentReceived] = useState(false);
-  const [walletBalance, setWalletBalance] = useState(0);
+const SendSheet: React.FC<SendSheetProps> = ({ open, onClose }) => {
+  const [qrData, setQRData] = useState('No QR code detected');
+  const [isValidQRCode, setIsValidQRCode] = useState(false);
+  const [amount, setAmount] = useState('1000');
 
-  const walletContext = useContext(WalletContext);
-
-  const intervalId = useRef<NodeJS.Timeout | null>(null);
-
-  if (!walletContext) {
-    throw new Error('WalletContext is undefined');
-  }
-
-  const { walletInKey } = walletContext;
+  const validateQRCode = (code: string) => {
+    return code.startsWith('LN');
+  };
 
   useEffect(() => {
-    if (open && walletInKey) {
-      if (walletInKey) {
-        lnbitsService.createInvoice(walletInKey).then(invoice => {
-          console.log(invoice);
-          setInvoice(invoice);
-
-          // Record the current timestamp
-          const timestamp = Math.floor(Date.now() / 1000);
-
-          // Start polling for payment
-          intervalId.current = setInterval(() => {
-            lnbitsService
-              .getPaymentsSince(walletInKey, timestamp)
-              .then(payments => {
-                if (payments.length > 0) {
-                  console.log('Payment received');
-                  setPaymentReceived(true);
-                  if (intervalId.current !== null) {
-                    window.clearInterval(intervalId.current);
-                  }
-
-                  console.log(
-                    'Update the wallet balance in the context balance',
-                  );
-                  // Update the wallet balance in the context balance
-                  lnbitsService.getWalletBalance(walletInKey).then(balance => {
-                    console.log('getWalletBalance:', balance);
-                    // Use the new function to set the balance
-                    if (balance !== null) {
-                      console.log('setWalletBalance to ', balance);
-                      setWalletBalance(balance);
-                    } else {
-                      // Handle the case when balance is null
-                      // For example, set a default value or show an error message
-                      setWalletBalance(0);
-                    }
-                  });
-                }
-              });
-          }, 5000); // Check every 5 seconds
-        });
-      } else {
-        console.error('Wallet inkey is not defined yet.');
-      }
+    if (qrData !== 'No QR code detected') {
+      setIsValidQRCode(validateQRCode(qrData));
+    } else {
+      setIsValidQRCode(false);
     }
+  }, [qrData]);
 
-    // Cleanup function
-    return () => {
-      if (intervalId.current) {
-        clearInterval(intervalId.current);
-        intervalId.current = null;
-      }
-      setPaymentReceived(false); // Reset paymentReceived state
-    };
-  }, [open]);
-
-  useEffect(() => {
-    console.log('walletBalance changed:', walletBalance);
-  }, [walletBalance]);
+  const handleAmountChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    console.log(event.target.value);
+  };
 
   return (
     <Drawer anchor="bottom" open={open} onClose={onClose}>
@@ -124,7 +68,7 @@ const ReceiveSheet: React.FC<ReceiveSheetProps> = ({ open, onClose }) => {
             lineHeight: 'normal',
           }}
         >
-          <Typography>Receive</Typography>
+          Send
         </Box>
         <Box
           sx={{
@@ -140,28 +84,29 @@ const ReceiveSheet: React.FC<ReceiveSheetProps> = ({ open, onClose }) => {
             gap: '8px',
           }}
         >
-          {invoice ? (
-            <div style={{ position: 'relative' }}>
-              <QRCode
-                value={invoice}
-                size={210} // Set the size of the QR code to 210x210 pixels
-              />
-              {paymentReceived && (
-                <FaCheckCircle
-                  style={{
-                    position: 'absolute',
-                    top: '-36px',
-                    right: '-36px',
-                    color: 'green',
-                    fontSize: 50,
-                  }}
-                />
-              )}
-            </div>
-          ) : (
-            <Typography align="center">
-              No pay link configured for this wallet
-            </Typography>
+          {open && (
+            <QrReader
+              onResult={(result, error) => {
+                if (result?.getText()) {
+                  setQRData(result.getText());
+                }
+
+                if (error) {
+                  console.info(error.message);
+                }
+              }}
+              constraints={{ facingMode: 'environment' }}
+              videoStyle={{
+                width: '200px',
+                height: '200px',
+                margin: '10px',
+                background: 'black',
+                objectFit: 'cover',
+              }}
+              videoContainerStyle={{ width: '2100%', height: '100%' }}
+              containerStyle={{ width: '100%', height: '100%' }}
+              //style={{ width: '100%', height: '100%' }}
+            />
           )}
         </Box>
         <Box
@@ -179,7 +124,7 @@ const ReceiveSheet: React.FC<ReceiveSheetProps> = ({ open, onClose }) => {
           Lightning invoice
         </Box>
         <Box
-          onClick={() => navigator.clipboard.writeText(invoice)}
+          //onClick={() => navigator.clipboard.writeText(invoice)}
           sx={{
             width: '351px',
             color: 'var(--text-text-supplementary, #7C8B9A)',
@@ -193,8 +138,9 @@ const ReceiveSheet: React.FC<ReceiveSheetProps> = ({ open, onClose }) => {
             wordWrap: 'break-word',
           }}
         >
-          {invoice}
+          <p>{qrData}</p>
         </Box>
+        {/* <Amount amount={amount} handleAmountChange={handleAmountChange} /> */}
         <Box
           sx={{
             display: 'flex',
@@ -206,8 +152,7 @@ const ReceiveSheet: React.FC<ReceiveSheetProps> = ({ open, onClose }) => {
         >
           <Button
             variant="contained"
-            color="primary"
-            onClick={() => navigator.clipboard.writeText(invoice)}
+            color="secondary"
             sx={{
               display: 'flex',
               height: '52px',
@@ -237,18 +182,19 @@ const ReceiveSheet: React.FC<ReceiveSheetProps> = ({ open, onClose }) => {
                 textTransform: 'none',
               }}
             >
-              Copy
+              Cancel
             </Typography>
           </Button>
           <Button
             variant="contained"
             color="primary"
+            disabled={!isValidQRCode}
             onClick={async () => {
               if (navigator.share) {
                 try {
                   await navigator.share({
                     title: 'Invoice',
-                    text: `lightning:${invoice}`,
+                    //text: `lightning:${invoice}`,
                   });
                 } catch (error) {
                   console.error(
@@ -283,7 +229,7 @@ const ReceiveSheet: React.FC<ReceiveSheetProps> = ({ open, onClose }) => {
                 textTransform: 'none',
               }}
             >
-              Share
+              Send
             </Typography>
             <SvgIcon>
               <path
@@ -325,11 +271,11 @@ const ReceiveSheet: React.FC<ReceiveSheetProps> = ({ open, onClose }) => {
             textTransform: 'none',
           }}
         >
-          Enter custom amount
+          Add note
         </Button>
       </Box>
     </Drawer>
   );
 };
 
-export default ReceiveSheet;
+export default SendSheet;

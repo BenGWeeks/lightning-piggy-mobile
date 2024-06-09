@@ -13,7 +13,9 @@ const TransactionList: React.FC<{ transaction: any }> = ({ transaction }) => {
             secondary={new Date(transaction.time * 1000).toLocaleDateString()}
           />
           <ListItemText
-            primary={`${transaction.pending ? '-' : '+'} ${transaction.amount} Sats`}
+            primary={`${transaction.pending ? '-' : '+'} ${
+              transaction.amount
+            } Sats`}
             style={{ textAlign: 'right' }}
           />
         </ListItem>
