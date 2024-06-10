@@ -106,7 +106,7 @@ const WalletSelector: FC = () => {
             gap: '20px',
             background: 'var(--bg-secondary-background, #F5F5F5)',
             padding: '20px',
-            width: '100vw',
+            //width: '100vw',
           }}
         >
           {wallets.map(wallet => (

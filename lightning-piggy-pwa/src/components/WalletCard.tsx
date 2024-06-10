@@ -48,7 +48,14 @@ const WalletCard: React.FC<WalletCardProps> = ({
     console.log('inkey:', inkey);
     console.log('balance_msat:', balance_msat);
 
-    if (setWallet && id && adminkey && inkey && balance_msat) {
+    if (
+      setWallet &&
+      id &&
+      adminkey &&
+      inkey &&
+      balance_msat !== null &&
+      balance_msat !== undefined
+    ) {
       console.log('Setting wallet:', id, adminkey, inkey, balance_msat / 1000);
       console.log('About to set wallet');
       setWallet(id, adminkey, inkey, balance_msat / 1000);
