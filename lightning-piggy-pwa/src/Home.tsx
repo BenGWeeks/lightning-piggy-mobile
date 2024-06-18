@@ -1,5 +1,5 @@
 // Home.tsx
-import React, { useState, useEffect, FC, useContext } from 'react';
+import React, { FC, useState, useEffect, useContext } from 'react';
 import { Container, Box, Typography, Button, SvgIcon } from '@mui/material';
 import BottomSheet from './components/BottomSheet';
 import TransactionList from './components/TransactionList';
@@ -17,7 +17,6 @@ const Home: FC = () => {
   //const [balance, setBalance] = useState<number | null>(null);
   const [name, setName] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [transactions, setTransactions] = useState([]);
   const [receiveSheetOpen, setReceiveSheetOpen] = useState(false);
   const [sendSheetOpen, setSendSheetOpen] = useState(false);
   const [walletBalance, setWalletBalance] = useState(0);
@@ -83,26 +82,16 @@ const Home: FC = () => {
     }
   };
 
-  const fetchTransactions = async () => {
-    console.log('Fetching transactions ...');
-    if (walletInKey) {
-      const transactions = await lnbitsService.getPayments(walletInKey);
-      setTransactions(transactions);
-    } else {
-      console.error('WalletInKey is null');
-    }
-  };
-
   const handleRefresh = async () => {
     await fetchName();
     await fetchBalance();
-    await fetchTransactions();
+    //await fetchTransactions();
   };
 
   useEffect(() => {
     fetchName();
     fetchBalance();
-    fetchTransactions();
+    //fetchTransactions();
   }, [walletBalance]); // I don't know why this isn't firing when walletBalance changes?!
 
   return (
@@ -258,13 +247,10 @@ const Home: FC = () => {
         </Box>
       </Box>
 
+      <TransactionList />
+
       <ReceiveSheet open={receiveSheetOpen} onClose={handleCloseReceiveSheet} />
       <SendSheet open={sendSheetOpen} onClose={handleCloseSendSheet} />
-      <BottomSheet open={sheetOpen} onClose={handleCloseSheet}>
-        {transactions?.map((transaction, index) => (
-          <TransactionList key={index} transaction={transaction} />
-        ))}
-      </BottomSheet>
       <FooterNavigation />
     </Container>
   );
