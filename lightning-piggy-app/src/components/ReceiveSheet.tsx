@@ -10,7 +10,6 @@ import {
   ActivityIndicator,
   Animated,
   PanResponder,
-  Dimensions,
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
@@ -23,7 +22,7 @@ interface Props {
   onClose: () => void;
 }
 
-const SWIPE_THRESHOLD = 100;
+const SWIPE_THRESHOLD = 80;
 
 type Mode = 'address' | 'amount';
 type InputUnit = 'sats' | 'fiat';
@@ -39,37 +38,31 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [inputUnit, setInputUnit] = useState<InputUnit>('sats');
   const intervalId = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevBalance = useRef<number | null>(null);
-  const translateY = useRef(new Animated.Value(0)).current;
+  const dragY = useRef(new Animated.Value(0)).current;
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gestureState) => gestureState.dy > 5,
-      onPanResponderMove: (_, gestureState) => {
-        if (gestureState.dy > 0) {
-          translateY.setValue(gestureState.dy);
-        }
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gs) => gs.dy > 10,
+      onPanResponderMove: (_, gs) => {
+        if (gs.dy > 0) dragY.setValue(gs.dy);
       },
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dy > SWIPE_THRESHOLD) {
-          Animated.timing(translateY, {
-            toValue: Dimensions.get('window').height,
-            duration: 200,
-            useNativeDriver: true,
-          }).start(() => {
-            onClose();
-            translateY.setValue(0);
-          });
+      onPanResponderRelease: (_, gs) => {
+        if (gs.dy > SWIPE_THRESHOLD) {
+          onClose();
+          dragY.setValue(0);
         } else {
-          Animated.spring(translateY, {
-            toValue: 0,
-            useNativeDriver: true,
-          }).start();
+          Animated.spring(dragY, { toValue: 0, useNativeDriver: true }).start();
         }
       },
     })
   ).current;
+
+  // Reset dragY when opening
+  useEffect(() => {
+    if (visible) dragY.setValue(0);
+  }, [visible]);
 
   const fiatToSats = (fiat: number): number => {
     if (!btcPrice || btcPrice <= 0) return 0;
@@ -100,7 +93,6 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   useEffect(() => {
     if (visible) {
       prevBalance.current = balance;
-      // Default to address mode if we have a lightning address, otherwise amount
       setMode(lightningAddress ? 'address' : 'amount');
       setSatsValue('');
       setFiatValue('');
@@ -155,7 +147,6 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   };
 
   const currentSats = parseInt(satsValue) || 0;
-  const qrValue = mode === 'address' ? `lightning:${lightningAddress}` : invoice;
   const copyValue = mode === 'address' ? lightningAddress || '' : invoice;
 
   const handleCopy = async () => {
@@ -174,7 +165,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.overlay}>
         <Animated.View
-          style={[styles.sheet, { transform: [{ translateY }] }]}
+          style={[styles.sheet, { transform: [{ translateY: dragY }] }]}
           {...panResponder.panHandlers}
         >
           <View style={styles.handle} />
@@ -206,39 +197,30 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
           {mode === 'amount' ? (
             <View style={styles.amountSection}>
               <View style={styles.amountRow}>
-                {inputUnit === 'sats' ? (
-                  <>
-                    <TextInput
-                      style={styles.amountInput}
-                      value={satsValue}
-                      onChangeText={handleSatsChange}
-                      keyboardType="numeric"
-                      placeholder="0"
-                    />
-                    <Text style={styles.unitLabel}>sats</Text>
-                  </>
-                ) : (
-                  <>
-                    <Text style={styles.unitLabel}>{currency}</Text>
-                    <TextInput
-                      style={styles.amountInput}
-                      value={fiatValue}
-                      onChangeText={handleFiatChange}
-                      keyboardType="decimal-pad"
-                      placeholder="0.00"
-                    />
-                  </>
-                )}
+                <TextInput
+                  style={styles.amountInput}
+                  value={inputUnit === 'sats' ? satsValue : fiatValue}
+                  onChangeText={inputUnit === 'sats' ? handleSatsChange : handleFiatChange}
+                  keyboardType={inputUnit === 'sats' ? 'numeric' : 'decimal-pad'}
+                  placeholder={inputUnit === 'sats' ? '0' : '0.00'}
+                />
                 <TouchableOpacity
-                  style={styles.switchButton}
-                  onPress={() => setInputUnit(u => u === 'sats' ? 'fiat' : 'sats')}
+                  style={[styles.unitButton, inputUnit === 'sats' && styles.unitButtonActive]}
+                  onPress={() => setInputUnit('sats')}
                 >
-                  <Text style={styles.switchButtonText}>
-                    {inputUnit === 'sats' ? currency : 'sats'}
+                  <Text style={[styles.unitButtonText, inputUnit === 'sats' && styles.unitButtonTextActive]}>
+                    Sats
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.unitButton, inputUnit === 'fiat' && styles.unitButtonActive]}
+                  onPress={() => setInputUnit('fiat')}
+                >
+                  <Text style={[styles.unitButtonText, inputUnit === 'fiat' && styles.unitButtonTextActive]}>
+                    {currency}
                   </Text>
                 </TouchableOpacity>
               </View>
-              {/* Show converted amount */}
               <Text style={styles.convertedAmount}>
                 {inputUnit === 'sats'
                   ? (btcPrice && currentSats > 0 ? satsToFiatString(currentSats, btcPrice, currency) : '')
@@ -250,20 +232,18 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
 
           {/* QR Code */}
           <View style={styles.qrContainer}>
-            {mode === 'address' ? (
-              qrValue ? (
-                <View>
-                  <QRCode value={qrValue} size={200} />
-                  {paymentReceived && (
-                    <View style={styles.checkmark}>
-                      <Text style={styles.checkmarkText}>✓</Text>
-                    </View>
-                  )}
-                </View>
-              ) : null
-            ) : loading ? (
+            {mode === 'address' && lightningAddress ? (
+              <View>
+                <QRCode value={`lightning:${lightningAddress}`} size={200} />
+                {paymentReceived && (
+                  <View style={styles.checkmark}>
+                    <Text style={styles.checkmarkText}>✓</Text>
+                  </View>
+                )}
+              </View>
+            ) : mode === 'amount' && loading ? (
               <ActivityIndicator size="large" color={colors.brandPink} />
-            ) : invoice ? (
+            ) : mode === 'amount' && invoice ? (
               <View>
                 <QRCode value={invoice} size={200} />
                 {paymentReceived && (
@@ -273,7 +253,9 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
                 )}
               </View>
             ) : (
-              <Text style={styles.noInvoice}>Enter an amount to generate invoice</Text>
+              <Text style={styles.noInvoice}>
+                {mode === 'address' ? 'No lightning address set' : 'Enter an amount to generate invoice'}
+              </Text>
             )}
           </View>
 
@@ -371,21 +353,22 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
-  unitLabel: {
-    fontSize: 16,
-    color: colors.textBody,
-    fontWeight: '600',
-  },
-  switchButton: {
-    backgroundColor: colors.brandPink,
-    borderRadius: 8,
-    paddingHorizontal: 12,
+  unitButton: {
+    paddingHorizontal: 14,
     paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: colors.divider,
   },
-  switchButtonText: {
-    color: colors.white,
+  unitButtonActive: {
+    backgroundColor: colors.brandPink,
+  },
+  unitButtonText: {
     fontSize: 14,
     fontWeight: '700',
+    color: colors.textSupplementary,
+  },
+  unitButtonTextActive: {
+    color: colors.white,
   },
   convertedAmount: {
     fontSize: 13,

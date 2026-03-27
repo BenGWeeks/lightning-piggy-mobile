@@ -9,7 +9,6 @@ import {
   ActivityIndicator,
   Animated,
   PanResponder,
-  Dimensions,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useWallet } from '../contexts/WalletContext';
@@ -29,32 +28,21 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [scannedData, setScannedData] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [scanned, setScanned] = useState(false);
-  const translateY = useRef(new Animated.Value(0)).current;
+  const dragY = useRef(new Animated.Value(0)).current;
 
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gestureState) => gestureState.dy > 5,
-      onPanResponderMove: (_, gestureState) => {
-        if (gestureState.dy > 0) {
-          translateY.setValue(gestureState.dy);
-        }
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gs) => gs.dy > 10,
+      onPanResponderMove: (_, gs) => {
+        if (gs.dy > 0) dragY.setValue(gs.dy);
       },
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dy > SWIPE_THRESHOLD) {
-          Animated.timing(translateY, {
-            toValue: Dimensions.get('window').height,
-            duration: 200,
-            useNativeDriver: true,
-          }).start(() => {
-            onClose();
-            translateY.setValue(0);
-          });
+      onPanResponderRelease: (_, gs) => {
+        if (gs.dy > SWIPE_THRESHOLD) {
+          onClose();
+          dragY.setValue(0);
         } else {
-          Animated.spring(translateY, {
-            toValue: 0,
-            useNativeDriver: true,
-          }).start();
+          Animated.spring(dragY, { toValue: 0, useNativeDriver: true }).start();
         }
       },
     })
@@ -62,6 +50,7 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
 
   useEffect(() => {
     if (visible) {
+      dragY.setValue(0);
       setScannedData(null);
       setScanned(false);
       setSending(false);
@@ -117,7 +106,7 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.overlay}>
         <Animated.View
-          style={[styles.sheet, { transform: [{ translateY }] }]}
+          style={[styles.sheet, { transform: [{ translateY: dragY }] }]}
           {...panResponder.panHandlers}
         >
           <View style={styles.handle} />

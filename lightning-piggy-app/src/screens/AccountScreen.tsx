@@ -78,6 +78,12 @@ const AccountScreen: React.FC<Props> = ({ navigation }) => {
     setError(null);
   };
 
+  const handleSave = async () => {
+    await setUserName(nameInput.trim());
+    await setLightningAddress(lnAddressInput.trim() || null);
+    Alert.alert('Saved', 'Your settings have been saved.');
+  };
+
   const handleDisconnect = () => {
     Alert.alert('Disconnect', 'Are you sure you want to disconnect your wallet?', [
       { text: 'Cancel', style: 'cancel' },
@@ -105,8 +111,6 @@ const AccountScreen: React.FC<Props> = ({ navigation }) => {
           placeholderTextColor="rgba(255,255,255,0.5)"
           value={nameInput}
           onChangeText={setNameInput}
-          onEndEditing={() => setUserName(nameInput.trim())}
-          onBlur={() => setUserName(nameInput.trim())}
           autoCapitalize="words"
           autoCorrect={false}
         />
@@ -209,8 +213,6 @@ const AccountScreen: React.FC<Props> = ({ navigation }) => {
           placeholderTextColor="rgba(255,255,255,0.5)"
           value={lnAddressInput}
           onChangeText={setLnAddressInput}
-          onEndEditing={() => setLightningAddress(lnAddressInput.trim() || null)}
-          onBlur={() => setLightningAddress(lnAddressInput.trim() || null)}
           onFocus={() => {
             setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
             setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 500);
@@ -219,6 +221,11 @@ const AccountScreen: React.FC<Props> = ({ navigation }) => {
           autoCorrect={false}
           keyboardType="email-address"
         />
+
+        {/* Save button */}
+        <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
+          <Text style={styles.saveButtonText}>Save</Text>
+        </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -380,6 +387,24 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   primaryButtonText: {
+    color: colors.brandPink,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  saveButton: {
+    backgroundColor: colors.white,
+    height: 52,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  saveButtonText: {
     color: colors.brandPink,
     fontSize: 16,
     fontWeight: '700',
