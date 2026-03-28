@@ -126,13 +126,13 @@ const styles = StyleSheet.create({
   courseCard: {
     width: '47%',
     backgroundColor: colors.white,
-    borderRadius: 16,
+    borderRadius: 12,
     overflow: 'hidden',
     paddingBottom: 14,
   },
   imageWrapper: {
     width: '100%',
-    height: 120,
+    height: 130,
     position: 'relative',
   },
   courseImage: {
@@ -174,7 +174,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brandPink,
     paddingHorizontal: 14,
     paddingVertical: 5,
-    borderRadius: 12,
+    borderRadius: 100,
     alignSelf: 'flex-start',
   },
   chipNewText: {
@@ -187,7 +187,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF0F5',
     paddingHorizontal: 14,
     paddingVertical: 5,
-    borderRadius: 12,
+    borderRadius: 100,
     alignSelf: 'flex-start',
   },
   chipProgressText: {
@@ -200,7 +200,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#E8F5E9',
     paddingHorizontal: 14,
     paddingVertical: 5,
-    borderRadius: 12,
+    borderRadius: 100,
     alignSelf: 'flex-start',
   },
   chipEarnedText: {

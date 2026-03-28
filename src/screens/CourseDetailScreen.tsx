@@ -15,6 +15,7 @@ import {
   LearnProgress,
   isMissionComplete,
   isCourseComplete,
+  getCourseCompletedCount,
 } from '../services/learnProgressService';
 
 interface Props {
@@ -37,10 +38,11 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const missionIds = course.missions.map(m => m.id);
   const allDone = isCourseComplete(progress, missionIds);
+  const completed = getCourseCompletedCount(progress, missionIds);
 
   return (
     <View style={styles.container}>
-      {/* Header image */}
+      {/* Header image - taller to match Figma */}
       <View style={styles.headerContainer}>
         <Image source={course.image} style={styles.headerImage} resizeMode="cover" />
         <View style={styles.headerOverlay} />
@@ -59,7 +61,7 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
         {/* Missions list */}
         {course.missions.map((mission) => {
-          const completed = isMissionComplete(progress, mission.id);
+          const done = isMissionComplete(progress, mission.id);
 
           return (
             <TouchableOpacity
@@ -68,17 +70,14 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
               onPress={() => navigation.navigate('MissionDetail', { courseId, missionId: mission.id })}
               activeOpacity={0.7}
             >
-              <View style={styles.missionLeft}>
-                <View style={[styles.missionDot, completed && styles.missionDotComplete]}>
-                  {completed && <Text style={styles.missionDotCheck}>✓</Text>}
-                </View>
-              </View>
+              {/* Thumbnail */}
+              <Image source={course.image} style={styles.missionThumb} resizeMode="cover" />
               <View style={styles.missionRight}>
                 <Text style={styles.missionTitle}>{mission.title}</Text>
                 <Text style={styles.missionMeta}>{mission.learningOutcomes.length} outcomes</Text>
-                {completed ? (
-                  <View style={styles.chipComplete}>
-                    <Text style={styles.chipCompleteText}>Completed</Text>
+                {done ? (
+                  <View style={styles.chipEarned}>
+                    <Text style={styles.chipEarnedText}>Completed</Text>
                   </View>
                 ) : (
                   <View style={styles.chipStart}>
@@ -86,6 +85,11 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                   </View>
                 )}
               </View>
+              {done && (
+                <View style={styles.checkCircle}>
+                  <Text style={styles.checkMark}>✓</Text>
+                </View>
+              )}
             </TouchableOpacity>
           );
         })}
@@ -106,7 +110,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   headerContainer: {
-    height: 220,
+    height: 280,
     position: 'relative',
   },
   headerImage: {
@@ -115,7 +119,7 @@ const styles = StyleSheet.create({
   },
   headerOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    backgroundColor: 'rgba(0,0,0,0.3)',
   },
   backButton: {
     position: 'absolute',
@@ -124,7 +128,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.3)',
+    backgroundColor: colors.brandPink,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -136,19 +140,19 @@ const styles = StyleSheet.create({
   },
   headerContent: {
     position: 'absolute',
-    bottom: 20,
+    bottom: 24,
     left: 20,
     right: 20,
   },
   headerTitle: {
     color: colors.white,
-    fontSize: 28,
+    fontSize: 32,
     fontWeight: '700',
   },
   headerMeta: {
     color: colors.white,
     fontSize: 14,
-    opacity: 0.8,
+    opacity: 0.85,
     marginTop: 4,
   },
   scrollArea: {
@@ -156,47 +160,39 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 20,
-    gap: 16,
+    gap: 12,
+    paddingBottom: 40,
   },
   description: {
     fontSize: 14,
     color: colors.textBody,
     lineHeight: 22,
+    marginBottom: 4,
   },
   missionCard: {
     backgroundColor: colors.white,
     borderRadius: 16,
-    padding: 16,
+    padding: 12,
     flexDirection: 'row',
-    gap: 14,
-  },
-  missionLeft: {
-    paddingTop: 2,
-  },
-  missionDot: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    borderWidth: 2,
-    borderColor: colors.divider,
-    justifyContent: 'center',
     alignItems: 'center',
+    gap: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  missionDotComplete: {
-    backgroundColor: colors.brandPink,
-    borderColor: colors.brandPink,
-  },
-  missionDotCheck: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: '700',
+  missionThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 12,
   },
   missionRight: {
     flex: 1,
-    gap: 4,
+    gap: 2,
   },
   missionTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     color: colors.textHeader,
   },
@@ -204,11 +200,24 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textSupplementary,
   },
+  checkCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#4CAF50',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkMark: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: '700',
+  },
   chipStart: {
     backgroundColor: colors.brandPink,
     paddingHorizontal: 14,
-    paddingVertical: 5,
-    borderRadius: 12,
+    paddingVertical: 4,
+    borderRadius: 100,
     alignSelf: 'flex-start',
     marginTop: 4,
   },
@@ -217,15 +226,15 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
   },
-  chipComplete: {
+  chipEarned: {
     backgroundColor: '#E8F5E9',
     paddingHorizontal: 14,
-    paddingVertical: 5,
-    borderRadius: 12,
+    paddingVertical: 4,
+    borderRadius: 100,
     alignSelf: 'flex-start',
     marginTop: 4,
   },
-  chipCompleteText: {
+  chipEarnedText: {
     color: '#2E7D32',
     fontSize: 11,
     fontWeight: '700',

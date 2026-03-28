@@ -25,7 +25,7 @@ export const courses: Course[] = [
     id: 'bitcoin-basics',
     title: 'Bitcoin Basics',
     description: 'Learn the fundamentals of Bitcoin — where money came from, why Bitcoin was created, and how it works.',
-    image: require('../../assets/images/profile_01.png'),
+    image: require('../../assets/images/course-bitcoin-basics.png'),
     satsReward: 6500,
     missions: [
       {
@@ -82,7 +82,7 @@ export const courses: Course[] = [
     id: 'protect-your-treasure',
     title: 'Protect Your Treasure',
     description: 'Learn how to keep your Bitcoin safe — wallets, keys, backups, and security best practices.',
-    image: require('../../assets/images/profile_02.png'),
+    image: require('../../assets/images/course-protect-treasure.png'),
     satsReward: 4000,
     missions: [
       {
@@ -139,7 +139,7 @@ export const courses: Course[] = [
     id: 'satoshi-nakamoto',
     title: 'Satoshi Nakamoto',
     description: 'Explore the mystery behind Bitcoin\'s anonymous creator and the groundbreaking white paper that started it all.',
-    image: require('../../assets/images/profile_03.png'),
+    image: require('../../assets/images/course-satoshi.png'),
     satsReward: 3000,
     missions: [
       {
@@ -172,7 +172,7 @@ export const courses: Course[] = [
     id: 'cryptographic-secrets',
     title: 'Cryptographic Secrets',
     description: 'Peek behind the curtain at the cryptography that makes Bitcoin secure and trustworthy.',
-    image: require('../../assets/images/lightning-piggy-pig-logo.png'),
+    image: require('../../assets/images/course-crypto-secrets.png'),
     satsReward: 2500,
     missions: [
       {
@@ -197,6 +197,39 @@ export const courses: Course[] = [
           { text: 'Understand what a hash function is and its key properties' },
           { text: 'Know how hashing is used in Bitcoin mining and the blockchain' },
           { text: 'Appreciate why hash functions are called "one-way" functions' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'intro-to-investing',
+    title: 'Intro to Investing',
+    description: 'Learn the fundamentals of investing in Bitcoin — dollar cost averaging, long-term thinking, and common mistakes to avoid.',
+    image: require('../../assets/images/course-investing.png'),
+    satsReward: 18000,
+    missions: [
+      {
+        id: 'why-invest-in-bitcoin',
+        number: 1,
+        title: 'Why Invest in Bitcoin?',
+        description: 'Understand the investment case for Bitcoin — scarcity, growth potential, and how it compares to traditional assets.',
+        videoUrl: null,
+        learningOutcomes: [
+          { text: 'Understand why people invest in Bitcoin as a store of value' },
+          { text: 'Know what makes Bitcoin scarce and how supply is limited' },
+          { text: 'Compare Bitcoin to traditional investments like stocks and gold' },
+        ],
+      },
+      {
+        id: 'dollar-cost-averaging',
+        number: 2,
+        title: 'Dollar Cost Averaging',
+        description: 'Learn the simplest and most effective strategy for accumulating Bitcoin over time without trying to time the market.',
+        videoUrl: null,
+        learningOutcomes: [
+          { text: 'Understand what dollar cost averaging (DCA) is and how it works' },
+          { text: 'Know the advantages of DCA over lump-sum investing' },
+          { text: 'Recognise common investing mistakes and how to avoid them' },
         ],
       },
     ],
