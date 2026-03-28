@@ -13,6 +13,8 @@ import {
 } from 'react-native';
 import BottomSheet, { BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
 import QRCode from 'react-native-qrcode-svg';
+import CopyIcon from './icons/CopyIcon';
+import ShareIcon from './icons/ShareIcon';
 import * as Clipboard from 'expo-clipboard';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
@@ -284,10 +286,12 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
 
         <View style={styles.buttonRow}>
           <TouchableOpacity style={styles.actionButton} onPress={handleCopy}>
+            <CopyIcon color={colors.brandPink} />
             <Text style={styles.actionButtonText}>Copy</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
             <Text style={styles.actionButtonText}>Share</Text>
+            <ShareIcon color={colors.brandPink} />
           </TouchableOpacity>
         </View>
         </View>
@@ -436,8 +440,10 @@ const styles = StyleSheet.create({
     height: 52,
     paddingHorizontal: 30,
     borderRadius: 12,
+    flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
+    gap: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.15,
