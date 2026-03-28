@@ -3,6 +3,15 @@
     "version": ">= 3.0.0"
   },
   "build": {
+    "development": {
+      "distribution": "internal",
+      "env": {
+        "APP_VARIANT": "development"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
     "preview": {
       "distribution": "internal",
       "android": {
