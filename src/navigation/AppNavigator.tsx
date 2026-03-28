@@ -10,10 +10,23 @@ import IntroScreen from '../screens/IntroScreen';
 import HomeScreen from '../screens/HomeScreen';
 import EarnScreen from '../screens/EarnScreen';
 import LearnScreen from '../screens/LearnScreen';
+import CourseDetailScreen from '../screens/CourseDetailScreen';
+import MissionDetailScreen from '../screens/MissionDetailScreen';
 import AccountScreen from '../screens/AccountScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
+const LearnStack = createNativeStackNavigator();
+
+function LearnStackNavigator() {
+  return (
+    <LearnStack.Navigator screenOptions={{ headerShown: false }}>
+      <LearnStack.Screen name="LearnHome" component={LearnScreen} />
+      <LearnStack.Screen name="CourseDetail" component={CourseDetailScreen} />
+      <LearnStack.Screen name="MissionDetail" component={MissionDetailScreen} />
+    </LearnStack.Navigator>
+  );
+}
 
 function HomeTabs() {
   return (
@@ -61,7 +74,7 @@ function HomeTabs() {
       />
       <Tab.Screen
         name="Learn"
-        component={LearnScreen}
+        component={LearnStackNavigator}
         options={{
           tabBarIcon: ({ focused }) => (
             <Image
