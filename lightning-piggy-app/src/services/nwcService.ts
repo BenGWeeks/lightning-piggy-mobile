@@ -98,9 +98,13 @@ export async function payInvoice(bolt11: string): Promise<{ preimage: string }> 
 export async function getInfo(): Promise<{ alias: string; lud16?: string } | null> {
   if (!provider) return null;
   try {
-    const info = await provider.getInfo();
-    return { alias: info.alias, lud16: info.lud16 };
-  } catch {
+    const info: any = await provider.getInfo();
+    console.log('NWC getInfo response:', JSON.stringify(info));
+    const alias = info.node?.alias || info.alias || '';
+    const lud16 = info.node?.lud16 || info.lud16;
+    return { alias, lud16 };
+  } catch (error) {
+    console.warn('NWC getInfo failed:', error);
     return null;
   }
 }

@@ -17,7 +17,7 @@ import TransactionList from '../components/TransactionList';
 import * as nwcService from '../services/nwcService';
 
 const HomeScreen: React.FC = () => {
-  const { balance, refreshBalance, userName, btcPrice, currency, walletAlias } = useWallet();
+  const { balance, refreshBalance, userName, btcPrice, currency, walletAlias, isConnected } = useWallet();
   const [receiveOpen, setReceiveOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
   const [transactions, setTransactions] = useState<any[]>([]);
@@ -27,13 +27,16 @@ const HomeScreen: React.FC = () => {
     await refreshBalance();
     try {
       const txs = await nwcService.listTransactions();
+      console.log('Transactions fetched:', txs.length, JSON.stringify(txs.slice(0, 2)));
       setTransactions(txs);
-    } catch {}
+    } catch (error) {
+      console.warn('Failed to fetch transactions:', error);
+    }
   };
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (isConnected) fetchData();
+  }, [isConnected]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
