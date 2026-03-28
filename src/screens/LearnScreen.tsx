@@ -67,6 +67,7 @@ const LearnScreen: React.FC<Props> = ({ navigation }) => {
               </View>
               <Text style={styles.courseTitle} numberOfLines={2}>{course.title}</Text>
               <Text style={styles.courseMeta}>{total} missions</Text>
+              <View style={styles.chipSpacer} />
               {allDone ? (
                 <View style={styles.chipEarned}>
                   <Text style={styles.chipEarnedText}>Earned {course.satsReward.toLocaleString()} Sats</Text>
@@ -130,6 +131,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     paddingBottom: 14,
   },
+  chipSpacer: {
+    flex: 1,
+  },
   imageWrapper: {
     width: '100%',
     height: 130,
@@ -173,7 +177,8 @@ const styles = StyleSheet.create({
     marginHorizontal: 12,
     backgroundColor: colors.brandPink,
     paddingHorizontal: 14,
-    paddingVertical: 5,
+    height: 26,
+    justifyContent: 'center',
     borderRadius: 100,
     alignSelf: 'flex-start',
   },
@@ -186,7 +191,8 @@ const styles = StyleSheet.create({
     marginHorizontal: 12,
     backgroundColor: '#FFF0F5',
     paddingHorizontal: 14,
-    paddingVertical: 5,
+    height: 26,
+    justifyContent: 'center',
     borderRadius: 100,
     alignSelf: 'flex-start',
   },
@@ -199,7 +205,8 @@ const styles = StyleSheet.create({
     marginHorizontal: 12,
     backgroundColor: '#E8F5E9',
     paddingHorizontal: 14,
-    paddingVertical: 5,
+    height: 26,
+    justifyContent: 'center',
     borderRadius: 100,
     alignSelf: 'flex-start',
   },

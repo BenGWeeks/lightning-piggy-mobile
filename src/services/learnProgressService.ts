@@ -23,6 +23,13 @@ export async function markMissionComplete(missionId: string): Promise<LearnProgr
   return progress;
 }
 
+export async function markMissionIncomplete(missionId: string): Promise<LearnProgress> {
+  const progress = await getProgress();
+  progress.completedMissions = progress.completedMissions.filter(id => id !== missionId);
+  await AsyncStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
+  return progress;
+}
+
 export function isMissionComplete(progress: LearnProgress, missionId: string): boolean {
   return progress.completedMissions.includes(missionId);
 }

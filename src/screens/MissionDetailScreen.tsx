@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
+  Linking,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors } from '../styles/theme';
@@ -13,6 +14,7 @@ import { courses } from '../data/learnContent';
 import {
   getProgress,
   markMissionComplete,
+  markMissionIncomplete,
   isMissionComplete,
   LearnProgress,
 } from '../services/learnProgressService';
@@ -38,8 +40,10 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const completed = isMissionComplete(progress, mission.id);
 
-  const handleComplete = async () => {
-    const updated = await markMissionComplete(mission.id);
+  const handleToggle = async () => {
+    const updated = completed
+      ? await markMissionIncomplete(mission.id)
+      : await markMissionComplete(mission.id);
     setProgress(updated);
   };
 
@@ -53,9 +57,9 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           <Text style={styles.backArrow}>‹</Text>
         </TouchableOpacity>
         {mission.videoUrl && (
-          <View style={styles.playButton}>
+          <TouchableOpacity style={styles.playButton} onPress={() => Linking.openURL(mission.videoUrl!)}>
             <Text style={styles.playIcon}>▶</Text>
-          </View>
+          </TouchableOpacity>
         )}
       </View>
 
@@ -78,13 +82,18 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
         {/* Complete button */}
         {!completed ? (
-          <TouchableOpacity style={styles.completeButton} onPress={handleComplete}>
+          <TouchableOpacity style={styles.completeButton} onPress={handleToggle}>
             <Text style={styles.completeButtonText}>Mark as Complete</Text>
           </TouchableOpacity>
         ) : (
-          <View style={styles.completedBanner}>
-            <Text style={styles.completedBannerText}>Mission Complete!</Text>
-          </View>
+          <>
+            <View style={styles.completedBanner}>
+              <Text style={styles.completedBannerText}>Mission Complete!</Text>
+            </View>
+            <TouchableOpacity onPress={handleToggle}>
+              <Text style={styles.incompleteLink}>Mark as Incomplete</Text>
+            </TouchableOpacity>
+          </>
         )}
       </ScrollView>
     </View>
@@ -227,6 +236,13 @@ const styles = StyleSheet.create({
     color: '#2E7D32',
     fontSize: 16,
     fontWeight: '700',
+  },
+  incompleteLink: {
+    color: colors.textSupplementary,
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 8,
   },
 });
 
