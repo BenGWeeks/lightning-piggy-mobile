@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image, StyleSheet, ActivityIndicator, View } from 'react-native';
+import { Image, StyleSheet, ActivityIndicator, View, Platform } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -23,9 +23,9 @@ function HomeTabs() {
         tabBarStyle: {
           backgroundColor: colors.white,
           borderTopColor: colors.divider,
-          height: 60,
-          paddingBottom: 8,
-          paddingTop: 4,
+          height: Platform.OS === 'android' ? 80 : 70,
+          paddingBottom: Platform.OS === 'android' ? 20 : 10,
+          paddingTop: 6,
         },
         tabBarActiveTintColor: colors.brandPink,
         tabBarInactiveTintColor: colors.textSupplementary,
@@ -116,8 +116,9 @@ export default function AppNavigator() {
 
 const styles = StyleSheet.create({
   tabIcon: {
-    width: 24,
-    height: 24,
+    width: 22,
+    height: 22,
+    resizeMode: 'contain' as const,
     tintColor: colors.textSupplementary,
   },
   tabIconActive: {

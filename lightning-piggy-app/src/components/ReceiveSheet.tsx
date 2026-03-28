@@ -114,7 +114,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   const scheduleInvoice = (sats: number) => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
     debounceTimer.current = setTimeout(() => {
-      if (sats >= 0 && visible) generateInvoice(sats);
+      if (sats > 0 && visible) generateInvoice(sats);
     }, 800);
   };
 
@@ -174,8 +174,9 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
       handleIndicatorStyle={styles.handleIndicator}
       backgroundStyle={styles.sheetBackground}
     >
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
       <BottomSheetView style={styles.content}>
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+        <View style={styles.innerContent}>
         <Text style={styles.title}>Receive</Text>
 
         {/* Mode tabs */}
@@ -281,8 +282,9 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
             <Text style={styles.actionButtonText}>Share</Text>
           </TouchableOpacity>
         </View>
-      </BottomSheetView>
+        </View>
       </TouchableWithoutFeedback>
+      </BottomSheetView>
     </BottomSheet>
   );
 };
@@ -298,6 +300,9 @@ const styles = StyleSheet.create({
     width: 40,
   },
   content: {
+    flex: 1,
+  },
+  innerContent: {
     padding: 20,
     alignItems: 'center',
     gap: 12,
