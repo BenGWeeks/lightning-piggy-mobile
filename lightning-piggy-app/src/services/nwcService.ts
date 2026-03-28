@@ -95,6 +95,16 @@ export async function payInvoice(bolt11: string): Promise<{ preimage: string }> 
   return { preimage: result.preimage };
 }
 
+export async function getInfo(): Promise<{ alias: string; lud16?: string } | null> {
+  if (!provider) return null;
+  try {
+    const info = await provider.getInfo();
+    return { alias: info.alias, lud16: info.lud16 };
+  } catch {
+    return null;
+  }
+}
+
 export async function listTransactions(): Promise<any[]> {
   if (!provider) return [];
   try {

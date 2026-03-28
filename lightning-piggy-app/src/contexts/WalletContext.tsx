@@ -28,6 +28,7 @@ interface WalletContextType {
   currency: FiatCurrency;
   setCurrency: (currency: FiatCurrency) => Promise<void>;
   btcPrice: number | null;
+  walletAlias: string | null;
   lightningAddress: string | null;
   setLightningAddress: (address: string | null) => Promise<void>;
   connect: (nwcUrl: string) => Promise<{ success: boolean; error?: string }>;
@@ -47,6 +48,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [currency, setCurrencyState] = useState<FiatCurrency>('USD');
   const [btcPrice, setBtcPrice] = useState<number | null>(null);
   const [lightningAddress, setLightningAddressState] = useState<string | null>(null);
+  const [walletAlias, setWalletAlias] = useState<string | null>(null);
   const priceInterval = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const setLightningAddress = useCallback(async (address: string | null) => {
@@ -70,6 +72,18 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const price = await getBtcPrice(cur);
     setBtcPrice(price);
   }, []);
+
+  const fetchWalletInfo = useCallback(async () => {
+    const info = await nwcService.getInfo();
+    if (info) {
+      setWalletAlias(info.alias || null);
+      // Auto-detect lightning address from wallet if not already set
+      if (info.lud16 && !lightningAddress) {
+        setLightningAddressState(info.lud16);
+        await AsyncStorage.setItem(LIGHTNING_ADDRESS_KEY, info.lud16);
+      }
+    }
+  }, [lightningAddress]);
 
   const fetchPrice = useCallback(async (cur: FiatCurrency) => {
     const price = await getBtcPrice(cur);
@@ -102,6 +116,15 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           if (result.success) {
             setIsConnected(true);
             setBalance(result.balance ?? null);
+            // Fetch wallet info (alias, lud16)
+            const info = await nwcService.getInfo();
+            if (info) {
+              setWalletAlias(info.alias || null);
+              if (info.lud16 && !savedAddress) {
+                setLightningAddressState(info.lud16);
+                await AsyncStorage.setItem(LIGHTNING_ADDRESS_KEY, info.lud16);
+              }
+            }
           }
         }
       } catch (error) {
@@ -129,14 +152,16 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (result.success) {
       setIsConnected(true);
       setBalance(result.balance ?? null);
+      await fetchWalletInfo();
     }
     return { success: result.success, error: result.error };
-  }, [setLightningAddress]);
+  }, [setLightningAddress, fetchWalletInfo]);
 
   const disconnect = useCallback(async () => {
     await nwcService.disconnect();
     setIsConnected(false);
     setBalance(null);
+    setWalletAlias(null);
     await setLightningAddress(null);
   }, [setLightningAddress]);
 
@@ -166,6 +191,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         currency,
         setCurrency,
         btcPrice,
+        walletAlias,
         lightningAddress,
         setLightningAddress,
         connect,

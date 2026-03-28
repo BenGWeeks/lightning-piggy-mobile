@@ -72,7 +72,7 @@ function HomeTabs() {
         }}
       />
       <Tab.Screen
-        name="Account"
+        name="Settings"
         component={AccountScreen}
         options={{
           tabBarIcon: ({ focused }) => (

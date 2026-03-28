@@ -17,7 +17,7 @@ import TransactionList from '../components/TransactionList';
 import * as nwcService from '../services/nwcService';
 
 const HomeScreen: React.FC = () => {
-  const { balance, refreshBalance, userName, btcPrice, currency } = useWallet();
+  const { balance, refreshBalance, userName, btcPrice, currency, walletAlias } = useWallet();
   const [receiveOpen, setReceiveOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
   const [transactions, setTransactions] = useState<any[]>([]);
@@ -52,6 +52,9 @@ const HomeScreen: React.FC = () => {
         />
         <View style={styles.headerContent}>
           <Text style={styles.hello}>Hello{userName ? `, ${userName}` : ''}!</Text>
+          {walletAlias ? (
+            <Text style={styles.walletAlias}>{walletAlias}</Text>
+          ) : null}
           <TouchableOpacity onPress={handleRefresh}>
             <Text style={styles.balance}>
               {balance !== null ? `${balance.toLocaleString()} Sats` : 'Loading...'}
@@ -119,6 +122,13 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 28,
     fontWeight: '400',
+  },
+  walletAlias: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: '500',
+    opacity: 0.7,
+    marginTop: -16,
   },
   balance: {
     color: colors.white,

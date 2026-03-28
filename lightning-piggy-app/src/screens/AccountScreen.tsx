@@ -24,7 +24,7 @@ const AccountScreen: React.FC<Props> = ({ navigation }) => {
   const {
     isConnected, balance, userName, setUserName,
     currency, setCurrency, connect, disconnect,
-    lightningAddress, setLightningAddress,
+    lightningAddress, setLightningAddress, walletAlias,
   } = useWallet();
   const [nameInput, setNameInput] = useState(userName);
   const [lnAddressInput, setLnAddressInput] = useState(lightningAddress || '');
@@ -105,7 +105,7 @@ const AccountScreen: React.FC<Props> = ({ navigation }) => {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView ref={scrollRef} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Text style={styles.title}>Account</Text>
+        <Text style={styles.title}>Settings</Text>
 
         {/* Name */}
         <Text style={styles.sectionLabel}>Your Name</Text>
@@ -140,6 +140,12 @@ const AccountScreen: React.FC<Props> = ({ navigation }) => {
 
         {isConnected ? (
           <View style={styles.card}>
+            {walletAlias ? (
+              <View style={styles.row}>
+                <Text style={styles.label}>Wallet</Text>
+                <Text style={styles.value}>{walletAlias}</Text>
+              </View>
+            ) : null}
             <View style={styles.row}>
               <Text style={styles.label}>Status</Text>
               <View style={styles.statusRow}>

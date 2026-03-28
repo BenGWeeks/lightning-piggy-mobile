@@ -301,7 +301,7 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
               onPress={() => setInputMode('paste')}
             >
               <Text style={[styles.tabText, inputMode === 'paste' && styles.tabTextActive]}>
-                Paste
+                Input
               </Text>
             </TouchableOpacity>
           </View>
