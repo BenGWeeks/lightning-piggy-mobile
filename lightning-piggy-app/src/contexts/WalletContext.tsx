@@ -95,7 +95,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
         const savedUrl = await nwcService.getSavedUrl();
         if (savedUrl) {
-          setLightningAddressState(parseNwcLud16(savedUrl));
+          // Only override saved lightning address if NWC URL has a lud16 param
+          const nwcLud16 = parseNwcLud16(savedUrl);
+          if (nwcLud16) setLightningAddressState(nwcLud16);
           const result = await nwcService.connect(savedUrl);
           if (result.success) {
             setIsConnected(true);
