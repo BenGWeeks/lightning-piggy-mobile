@@ -1,15 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
-  Modal,
   StyleSheet,
   Alert,
   ActivityIndicator,
-  Animated,
-  PanResponder,
+  BackHandler,
 } from 'react-native';
+import BottomSheet, { BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
@@ -20,42 +19,36 @@ interface Props {
   onClose: () => void;
 }
 
-const SWIPE_THRESHOLD = 100;
-
 const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
   const { payInvoice, refreshBalance, balance, btcPrice, currency } = useWallet();
   const [permission, requestPermission] = useCameraPermissions();
   const [scannedData, setScannedData] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [scanned, setScanned] = useState(false);
-  const dragY = useRef(new Animated.Value(0)).current;
+  const bottomSheetRef = useRef<BottomSheet>(null);
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, gs) => gs.dy > 10,
-      onPanResponderMove: (_, gs) => {
-        if (gs.dy > 0) dragY.setValue(gs.dy);
-      },
-      onPanResponderRelease: (_, gs) => {
-        if (gs.dy > SWIPE_THRESHOLD) {
-          onClose();
-          dragY.setValue(0);
-        } else {
-          Animated.spring(dragY, { toValue: 0, useNativeDriver: true }).start();
-        }
-      },
-    })
-  ).current;
+  const snapPoints = useMemo(() => ['85%'], []);
 
   useEffect(() => {
     if (visible) {
-      dragY.setValue(0);
       setScannedData(null);
       setScanned(false);
       setSending(false);
+      bottomSheetRef.current?.expand();
+    } else {
+      bottomSheetRef.current?.close();
     }
   }, [visible]);
+
+  // Handle Android back button
+  useEffect(() => {
+    if (!visible) return;
+    const handler = BackHandler.addEventListener('hardwareBackPress', () => {
+      onClose();
+      return true;
+    });
+    return () => handler.remove();
+  }, [visible, onClose]);
 
   const isValidInvoice = (data: string): boolean => {
     const lower = data.toLowerCase();
@@ -64,7 +57,6 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
 
   const handleBarCodeScanned = ({ data }: { data: string }) => {
     if (scanned) return;
-    // Strip lightning: prefix if present
     let invoice = data;
     if (invoice.toLowerCase().startsWith('lightning:')) {
       invoice = invoice.substring(10);
@@ -98,111 +90,104 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
     onClose();
   };
 
-  if (!permission) {
-    return null;
-  }
+  const handleSheetChange = useCallback((index: number) => {
+    if (index === -1) onClose();
+  }, [onClose]);
+
+  const renderBackdrop = useCallback(
+    (props: any) => <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />,
+    []
+  );
+
+  if (!visible || !permission) return null;
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.overlay}>
-        <Animated.View
-          style={[styles.sheet, { transform: [{ translateY: dragY }] }]}
-          {...panResponder.panHandlers}
-        >
-          <View style={styles.handle} />
-          <Text style={styles.title}>Send</Text>
+    <BottomSheet
+      ref={bottomSheetRef}
+      index={0}
+      snapPoints={snapPoints}
+      onChange={handleSheetChange}
+      enablePanDownToClose
+      backdropComponent={renderBackdrop}
+      handleIndicatorStyle={styles.handleIndicator}
+      backgroundStyle={styles.sheetBackground}
+    >
+      <BottomSheetView style={styles.content}>
+        <Text style={styles.title}>Send</Text>
 
-          <View style={styles.cameraContainer}>
-            {!permission.granted ? (
-              <View style={styles.permissionContainer}>
-                <Text style={styles.permissionText}>Camera access is needed to scan QR codes</Text>
-                <TouchableOpacity style={styles.permissionButton} onPress={requestPermission}>
-                  <Text style={styles.permissionButtonText}>Grant Permission</Text>
-                </TouchableOpacity>
-              </View>
-            ) : visible && !scannedData ? (
-              <CameraView
-                style={styles.camera}
-                facing="back"
-                barcodeScannerSettings={{
-                  barcodeTypes: ['qr'],
-                }}
-                onBarcodeScanned={handleBarCodeScanned}
-              />
-            ) : scannedData ? (
-              <View style={styles.scannedContainer}>
-                <Text style={styles.scannedLabel}>Invoice detected</Text>
-              </View>
-            ) : null}
-          </View>
+        <View style={styles.cameraContainer}>
+          {!permission.granted ? (
+            <View style={styles.permissionContainer}>
+              <Text style={styles.permissionText}>Camera access is needed to scan QR codes</Text>
+              <TouchableOpacity style={styles.permissionButton} onPress={requestPermission}>
+                <Text style={styles.permissionButtonText}>Grant Permission</Text>
+              </TouchableOpacity>
+            </View>
+          ) : visible && !scannedData ? (
+            <CameraView
+              style={styles.camera}
+              facing="back"
+              barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+              onBarcodeScanned={handleBarCodeScanned}
+            />
+          ) : scannedData ? (
+            <View style={styles.scannedContainer}>
+              <Text style={styles.scannedLabel}>Invoice detected</Text>
+            </View>
+          ) : null}
+        </View>
 
-          <Text style={styles.label}>Lightning invoice</Text>
-          <Text style={styles.invoiceText} numberOfLines={4}>
-            {scannedData || 'Scan a QR code to detect an invoice'}
+        <Text style={styles.label}>Lightning invoice</Text>
+        <Text style={styles.invoiceText} numberOfLines={4}>
+          {scannedData || 'Scan a QR code to detect an invoice'}
+        </Text>
+
+        {balance !== null && btcPrice !== null && (
+          <Text style={styles.balanceText}>
+            Balance: {balance.toLocaleString()} sats ({satsToFiatString(balance, btcPrice, currency)})
           </Text>
+        )}
 
-          {balance !== null && btcPrice !== null && (
-            <Text style={styles.balanceText}>
-              Balance: {balance.toLocaleString()} sats ({satsToFiatString(balance, btcPrice, currency)})
-            </Text>
-          )}
-
-          <View style={styles.buttonRow}>
-            <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.sendButton, (!scannedData || sending) && styles.sendButtonDisabled]}
-              onPress={handleSend}
-              disabled={!scannedData || sending}
-            >
-              {sending ? (
-                <ActivityIndicator color={colors.brandPink} />
-              ) : (
-                <Text style={styles.sendButtonText}>Send</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-
-          <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-            <Text style={styles.closeButtonText}>Close</Text>
+        <View style={styles.buttonRow}>
+          <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
+            <Text style={styles.cancelButtonText}>Cancel</Text>
           </TouchableOpacity>
-        </Animated.View>
-      </View>
-    </Modal>
+          <TouchableOpacity
+            style={[styles.sendButton, (!scannedData || sending) && styles.sendButtonDisabled]}
+            onPress={handleSend}
+            disabled={!scannedData || sending}
+          >
+            {sending ? (
+              <ActivityIndicator color={colors.brandPink} />
+            ) : (
+              <Text style={styles.sendButtonText}>Send</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </BottomSheetView>
+    </BottomSheet>
   );
 };
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
+  sheetBackground: {
     backgroundColor: colors.background,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
+  },
+  handleIndicator: {
+    backgroundColor: colors.divider,
+    width: 40,
+  },
+  content: {
     padding: 20,
     alignItems: 'center',
     gap: 16,
-  },
-  handle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.divider,
-    marginBottom: 8,
   },
   title: {
     fontSize: 16,
     fontWeight: '700',
     color: colors.textHeader,
-  },
-  balanceText: {
-    fontSize: 13,
-    color: colors.textSupplementary,
-    fontWeight: '600',
   },
   cameraContainer: {
     width: 220,
@@ -259,6 +244,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: 20,
   },
+  balanceText: {
+    fontSize: 13,
+    color: colors.textSupplementary,
+    fontWeight: '600',
+  },
   buttonRow: {
     flexDirection: 'row',
     gap: 20,
@@ -301,14 +291,6 @@ const styles = StyleSheet.create({
     color: colors.brandPink,
     fontSize: 16,
     fontWeight: '700',
-  },
-  closeButton: {
-    paddingVertical: 12,
-  },
-  closeButtonText: {
-    color: colors.textSupplementary,
-    fontSize: 16,
-    fontWeight: '600',
   },
 });
 

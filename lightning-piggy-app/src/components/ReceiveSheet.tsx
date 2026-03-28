@@ -1,16 +1,17 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
-  Modal,
   StyleSheet,
   Share,
   TextInput,
   ActivityIndicator,
-  Animated,
-  PanResponder,
+  BackHandler,
+  Keyboard,
+  TouchableWithoutFeedback,
 } from 'react-native';
+import BottomSheet, { BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
 import { useWallet } from '../contexts/WalletContext';
@@ -21,8 +22,6 @@ interface Props {
   visible: boolean;
   onClose: () => void;
 }
-
-const SWIPE_THRESHOLD = 80;
 
 type Mode = 'address' | 'amount';
 type InputUnit = 'sats' | 'fiat';
@@ -38,31 +37,10 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [inputUnit, setInputUnit] = useState<InputUnit>('sats');
   const intervalId = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevBalance = useRef<number | null>(null);
-  const dragY = useRef(new Animated.Value(0)).current;
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bottomSheetRef = useRef<BottomSheet>(null);
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, gs) => gs.dy > 10,
-      onPanResponderMove: (_, gs) => {
-        if (gs.dy > 0) dragY.setValue(gs.dy);
-      },
-      onPanResponderRelease: (_, gs) => {
-        if (gs.dy > SWIPE_THRESHOLD) {
-          onClose();
-          dragY.setValue(0);
-        } else {
-          Animated.spring(dragY, { toValue: 0, useNativeDriver: true }).start();
-        }
-      },
-    })
-  ).current;
-
-  // Reset dragY when opening
-  useEffect(() => {
-    if (visible) dragY.setValue(0);
-  }, [visible]);
+  const snapPoints = useMemo(() => ['85%'], []);
 
   const fiatToSats = (fiat: number): number => {
     if (!btcPrice || btcPrice <= 0) return 0;
@@ -89,7 +67,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
     }
   }, [makeInvoice, refreshBalance]);
 
-  // Reset state when opening
+  // Open/close the sheet
   useEffect(() => {
     if (visible) {
       prevBalance.current = balance;
@@ -99,6 +77,9 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
       setInvoice('');
       setPaymentReceived(false);
       setInputUnit('sats');
+      bottomSheetRef.current?.expand();
+    } else {
+      bottomSheetRef.current?.close();
     }
     return () => {
       if (intervalId.current) {
@@ -108,6 +89,16 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
     };
   }, [visible]);
+
+  // Handle Android back button
+  useEffect(() => {
+    if (!visible) return;
+    const handler = BackHandler.addEventListener('hardwareBackPress', () => {
+      onClose();
+      return true;
+    });
+    return () => handler.remove();
+  }, [visible, onClose]);
 
   // Detect payment by watching balance changes
   useEffect(() => {
@@ -130,10 +121,10 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   const handleSatsChange = (text: string) => {
     setSatsValue(text);
     const sats = parseInt(text) || 0;
-    if (btcPrice && sats > 0) {
+    if (btcPrice) {
       setFiatValue(satsToFiat(sats, btcPrice).toFixed(2));
     } else {
-      setFiatValue('');
+      setFiatValue('0.00');
     }
     scheduleInvoice(sats);
   };
@@ -142,7 +133,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
     setFiatValue(text);
     const fiat = parseFloat(text) || 0;
     const sats = fiatToSats(fiat);
-    setSatsValue(sats > 0 ? sats.toString() : '');
+    setSatsValue(sats.toString());
     scheduleInvoice(sats);
   };
 
@@ -161,151 +152,155 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
     }
   };
 
+  const handleSheetChange = useCallback((index: number) => {
+    if (index === -1) onClose();
+  }, [onClose]);
+
+  const renderBackdrop = useCallback(
+    (props: any) => <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />,
+    []
+  );
+
+  if (!visible) return null;
+
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.overlay}>
-        <Animated.View
-          style={[styles.sheet, { transform: [{ translateY: dragY }] }]}
-          {...panResponder.panHandlers}
-        >
-          <View style={styles.handle} />
-          <Text style={styles.title}>Receive</Text>
+    <BottomSheet
+      ref={bottomSheetRef}
+      index={0}
+      snapPoints={snapPoints}
+      onChange={handleSheetChange}
+      enablePanDownToClose
+      backdropComponent={renderBackdrop}
+      handleIndicatorStyle={styles.handleIndicator}
+      backgroundStyle={styles.sheetBackground}
+    >
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+      <BottomSheetView style={styles.content}>
+        <Text style={styles.title}>Receive</Text>
 
-          {/* Mode tabs - only show if we have a lightning address */}
-          {lightningAddress ? (
-            <View style={styles.tabRow}>
+        {/* Mode tabs */}
+        {lightningAddress ? (
+          <View style={styles.tabRow}>
+            <TouchableOpacity
+              style={[styles.tab, mode === 'address' && styles.tabActive]}
+              onPress={() => setMode('address')}
+            >
+              <Text style={[styles.tabText, mode === 'address' && styles.tabTextActive]}>
+                Address
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tab, mode === 'amount' && styles.tabActive]}
+              onPress={() => setMode('amount')}
+            >
+              <Text style={[styles.tabText, mode === 'amount' && styles.tabTextActive]}>
+                Amount
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {/* Amount input */}
+        {mode === 'amount' ? (
+          <View style={styles.amountSection}>
+            <View style={styles.amountRow}>
+              <TextInput
+                style={styles.amountInput}
+                value={inputUnit === 'sats' ? satsValue : fiatValue}
+                onChangeText={inputUnit === 'sats' ? handleSatsChange : handleFiatChange}
+                keyboardType={inputUnit === 'sats' ? 'numeric' : 'decimal-pad'}
+                placeholder={inputUnit === 'sats' ? '0' : '0.00'}
+              />
               <TouchableOpacity
-                style={[styles.tab, mode === 'address' && styles.tabActive]}
-                onPress={() => setMode('address')}
+                style={[styles.unitButton, inputUnit === 'sats' && styles.unitButtonActive]}
+                onPress={() => setInputUnit('sats')}
               >
-                <Text style={[styles.tabText, mode === 'address' && styles.tabTextActive]}>
-                  Address
+                <Text style={[styles.unitButtonText, inputUnit === 'sats' && styles.unitButtonTextActive]}>
+                  Sats
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.tab, mode === 'amount' && styles.tabActive]}
-                onPress={() => setMode('amount')}
+                style={[styles.unitButton, inputUnit === 'fiat' && styles.unitButtonActive]}
+                onPress={() => setInputUnit('fiat')}
               >
-                <Text style={[styles.tabText, mode === 'amount' && styles.tabTextActive]}>
-                  Amount
+                <Text style={[styles.unitButtonText, inputUnit === 'fiat' && styles.unitButtonTextActive]}>
+                  {currency}
                 </Text>
               </TouchableOpacity>
             </View>
-          ) : null}
+            <Text style={styles.convertedAmount}>
+              {inputUnit === 'sats'
+                ? (btcPrice && currentSats > 0 ? satsToFiatString(currentSats, btcPrice, currency) : '')
+                : (currentSats > 0 ? `${currentSats.toLocaleString()} sats` : '')
+              }
+            </Text>
+          </View>
+        ) : null}
 
-          {/* Amount input - only in amount mode */}
-          {mode === 'amount' ? (
-            <View style={styles.amountSection}>
-              <View style={styles.amountRow}>
-                <TextInput
-                  style={styles.amountInput}
-                  value={inputUnit === 'sats' ? satsValue : fiatValue}
-                  onChangeText={inputUnit === 'sats' ? handleSatsChange : handleFiatChange}
-                  keyboardType={inputUnit === 'sats' ? 'numeric' : 'decimal-pad'}
-                  placeholder={inputUnit === 'sats' ? '0' : '0.00'}
-                />
-                <TouchableOpacity
-                  style={[styles.unitButton, inputUnit === 'sats' && styles.unitButtonActive]}
-                  onPress={() => setInputUnit('sats')}
-                >
-                  <Text style={[styles.unitButtonText, inputUnit === 'sats' && styles.unitButtonTextActive]}>
-                    Sats
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.unitButton, inputUnit === 'fiat' && styles.unitButtonActive]}
-                  onPress={() => setInputUnit('fiat')}
-                >
-                  <Text style={[styles.unitButtonText, inputUnit === 'fiat' && styles.unitButtonTextActive]}>
-                    {currency}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.convertedAmount}>
-                {inputUnit === 'sats'
-                  ? (btcPrice && currentSats > 0 ? satsToFiatString(currentSats, btcPrice, currency) : '')
-                  : (currentSats > 0 ? `${currentSats.toLocaleString()} sats` : '')
-                }
-              </Text>
+        {/* QR Code */}
+        <View style={styles.qrContainer}>
+          {mode === 'address' && lightningAddress ? (
+            <View>
+              <QRCode value={`lightning:${lightningAddress}`} size={200} />
+              {paymentReceived && (
+                <View style={styles.checkmark}>
+                  <Text style={styles.checkmarkText}>✓</Text>
+                </View>
+              )}
             </View>
-          ) : null}
+          ) : mode === 'amount' && loading ? (
+            <ActivityIndicator size="large" color={colors.brandPink} />
+          ) : mode === 'amount' && invoice ? (
+            <View>
+              <QRCode value={invoice} size={200} />
+              {paymentReceived && (
+                <View style={styles.checkmark}>
+                  <Text style={styles.checkmarkText}>✓</Text>
+                </View>
+              )}
+            </View>
+          ) : (
+            <Text style={styles.noInvoice}>
+              {mode === 'address' ? 'No lightning address set' : 'Enter an amount to generate invoice'}
+            </Text>
+          )}
+        </View>
 
-          {/* QR Code */}
-          <View style={styles.qrContainer}>
-            {mode === 'address' && lightningAddress ? (
-              <View>
-                <QRCode value={`lightning:${lightningAddress}`} size={200} />
-                {paymentReceived && (
-                  <View style={styles.checkmark}>
-                    <Text style={styles.checkmarkText}>✓</Text>
-                  </View>
-                )}
-              </View>
-            ) : mode === 'amount' && loading ? (
-              <ActivityIndicator size="large" color={colors.brandPink} />
-            ) : mode === 'amount' && invoice ? (
-              <View>
-                <QRCode value={invoice} size={200} />
-                {paymentReceived && (
-                  <View style={styles.checkmark}>
-                    <Text style={styles.checkmarkText}>✓</Text>
-                  </View>
-                )}
-              </View>
-            ) : (
-              <Text style={styles.noInvoice}>
-                {mode === 'address' ? 'No lightning address set' : 'Enter an amount to generate invoice'}
-              </Text>
-            )}
-          </View>
+        <Text style={styles.qrLabel}>
+          {mode === 'address' ? lightningAddress : 'Lightning invoice'}
+        </Text>
+        {mode === 'amount' && invoice ? (
+          <Text style={styles.invoiceText} numberOfLines={2}>{invoice}</Text>
+        ) : null}
 
-          {/* Label below QR */}
-          <Text style={styles.qrLabel}>
-            {mode === 'address' ? lightningAddress : 'Lightning invoice'}
-          </Text>
-          {mode === 'amount' && invoice ? (
-            <Text style={styles.invoiceText} numberOfLines={2}>{invoice}</Text>
-          ) : null}
-
-          {/* Action buttons */}
-          <View style={styles.buttonRow}>
-            <TouchableOpacity style={styles.actionButton} onPress={handleCopy}>
-              <Text style={styles.actionButtonText}>Copy</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
-              <Text style={styles.actionButtonText}>Share</Text>
-            </TouchableOpacity>
-          </View>
-
-          <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-            <Text style={styles.closeButtonText}>Close</Text>
+        <View style={styles.buttonRow}>
+          <TouchableOpacity style={styles.actionButton} onPress={handleCopy}>
+            <Text style={styles.actionButtonText}>Copy</Text>
           </TouchableOpacity>
-        </Animated.View>
-      </View>
-    </Modal>
+          <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
+            <Text style={styles.actionButtonText}>Share</Text>
+          </TouchableOpacity>
+        </View>
+      </BottomSheetView>
+      </TouchableWithoutFeedback>
+    </BottomSheet>
   );
 };
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
+  sheetBackground: {
     backgroundColor: colors.background,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
+  },
+  handleIndicator: {
+    backgroundColor: colors.divider,
+    width: 40,
+  },
+  content: {
     padding: 20,
     alignItems: 'center',
     gap: 12,
-  },
-  handle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.divider,
-    marginBottom: 4,
   },
   title: {
     fontSize: 16,
@@ -440,14 +435,6 @@ const styles = StyleSheet.create({
     color: colors.brandPink,
     fontSize: 16,
     fontWeight: '700',
-  },
-  closeButton: {
-    paddingVertical: 12,
-  },
-  closeButtonText: {
-    color: colors.textSupplementary,
-    fontSize: 16,
-    fontWeight: '600',
   },
 });
 

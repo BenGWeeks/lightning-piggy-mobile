@@ -31,9 +31,13 @@ const AccountScreen: React.FC<Props> = ({ navigation }) => {
   const scrollRef = useRef<ScrollView>(null);
   const [nwcUrl, setNwcUrl] = useState('');
 
-  // Sync when auto-detected from NWC URL
+  // Sync inputs when context values load or change
   useEffect(() => {
-    if (lightningAddress) setLnAddressInput(lightningAddress);
+    setNameInput(userName);
+  }, [userName]);
+
+  useEffect(() => {
+    setLnAddressInput(lightningAddress || '');
   }, [lightningAddress]);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
