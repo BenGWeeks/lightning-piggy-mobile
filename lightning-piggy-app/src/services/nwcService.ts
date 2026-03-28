@@ -1,5 +1,5 @@
 import { NostrWebLNProvider } from '@getalby/sdk';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
 const NWC_URL_KEY = 'nwc_connection_url';
 
@@ -51,7 +51,7 @@ export async function connect(nwcUrl: string): Promise<{ success: boolean; balan
     const balance = b.balance;
 
     // Save URL for auto-reconnect
-    await AsyncStorage.setItem(NWC_URL_KEY, nwcUrl.trim());
+    await SecureStore.setItemAsync(NWC_URL_KEY, nwcUrl.trim());
 
     return { success: true, balance };
   } catch (error) {
@@ -66,7 +66,7 @@ export async function disconnect(): Promise<void> {
     try { provider.close(); } catch {}
     provider = null;
   }
-  await AsyncStorage.removeItem(NWC_URL_KEY);
+  await SecureStore.deleteItemAsync(NWC_URL_KEY);
 }
 
 export async function getBalance(): Promise<number | null> {
@@ -117,7 +117,7 @@ export async function listTransactions(): Promise<any[]> {
 }
 
 export async function getSavedUrl(): Promise<string | null> {
-  return AsyncStorage.getItem(NWC_URL_KEY);
+  return SecureStore.getItemAsync(NWC_URL_KEY);
 }
 
 export function isConnected(): boolean {

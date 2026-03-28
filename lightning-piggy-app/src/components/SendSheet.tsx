@@ -62,7 +62,7 @@ function isLightningAddress(input: string): boolean {
 
 function isValidInvoice(data: string): boolean {
   const lower = data.toLowerCase();
-  return lower.startsWith('lnbc') || lower.startsWith('lntb') || lower.startsWith('ln');
+  return lower.startsWith('lnbc') || lower.startsWith('lntb') || lower.startsWith('lnts') || lower.startsWith('lnbs');
 }
 
 const SendSheet: React.FC<Props> = ({ visible, onClose }) => {

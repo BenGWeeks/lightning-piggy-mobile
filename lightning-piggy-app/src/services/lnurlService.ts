@@ -34,7 +34,13 @@ export async function resolveLightningAddress(address: string): Promise<LnurlPay
     throw new Error('Invalid lightning address format');
   }
 
-  const url = `https://${domain}/.well-known/lnurlp/${user}`;
+  // Validate lightning address parts
+  const addressRegex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  if (!addressRegex.test(address)) {
+    throw new Error('Invalid lightning address format');
+  }
+
+  const url = `https://${domain}/.well-known/lnurlp/${encodeURIComponent(user)}`;
   const response = await fetch(url);
 
   if (!response.ok) {
@@ -67,9 +73,19 @@ export async function resolveLightningAddress(address: string): Promise<LnurlPay
  * Fetch a bolt11 invoice from an LNURL-pay callback for a given amount.
  */
 export async function fetchInvoice(callback: string, amountSats: number): Promise<string> {
+  let callbackUrl: URL;
+  try {
+    callbackUrl = new URL(callback);
+  } catch {
+    throw new Error('Invalid callback URL');
+  }
+  if (callbackUrl.protocol !== 'https:') {
+    throw new Error('Callback URL must use HTTPS');
+  }
+
   const amountMsat = amountSats * 1000;
-  const separator = callback.includes('?') ? '&' : '?';
-  const url = `${callback}${separator}amount=${amountMsat}`;
+  callbackUrl.searchParams.set('amount', amountMsat.toString());
+  const url = callbackUrl.toString();
 
   const response = await fetch(url);
 

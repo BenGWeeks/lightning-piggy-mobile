@@ -7,8 +7,12 @@ const { withAndroidManifest } = require('expo/config-plugins');
 module.exports = function withAdjustNothing(config) {
   return withAndroidManifest(config, (config) => {
     const manifest = config.modResults;
-    const mainActivity = manifest.manifest.application[0].activity.find(
-      (a) => a.$['android:name'] === '.MainActivity'
+    const application = manifest.manifest?.application;
+    if (!application || !application[0]) return config;
+    const activities = application[0].activity;
+    if (!Array.isArray(activities)) return config;
+    const mainActivity = activities.find(
+      (a) => a.$?.['android:name'] === '.MainActivity'
     );
     if (mainActivity) {
       mainActivity.$['android:windowSoftInputMode'] = 'adjustNothing';

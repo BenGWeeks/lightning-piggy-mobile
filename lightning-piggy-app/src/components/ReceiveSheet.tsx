@@ -113,6 +113,14 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
 
   const scheduleInvoice = (sats: number) => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    if (sats <= 0) {
+      setInvoice('');
+      if (intervalId.current) {
+        clearInterval(intervalId.current);
+        intervalId.current = null;
+      }
+      return;
+    }
     debounceTimer.current = setTimeout(() => {
       if (sats > 0 && visible) generateInvoice(sats);
     }, 800);

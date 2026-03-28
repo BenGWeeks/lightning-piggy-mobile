@@ -14,7 +14,10 @@
     "ios": {
       "supportsTablet": true
     },
-    "plugins": ["./plugins/withAdjustNothing"],
+    "plugins": [
+      "./plugins/withAdjustNothing",
+      "expo-secure-store"
+    ],
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -27,6 +30,12 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "b01d6b21-2f80-40af-b58c-c40e4302fa65"
+      }
+    },
+    "owner": "bengweeks"
   }
 }

@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nwcService from '../services/nwcService';
-import { FiatCurrency, getBtcPrice } from '../services/fiatService';
+import { CURRENCIES, FiatCurrency, getBtcPrice } from '../services/fiatService';
 
 const USER_NAME_KEY = 'user_display_name';
 const CURRENCY_KEY = 'user_fiat_currency';
@@ -101,7 +101,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (savedAddress) setLightningAddressState(savedAddress);
 
         const savedCurrency = await AsyncStorage.getItem(CURRENCY_KEY);
-        const cur = (savedCurrency as FiatCurrency) || 'USD';
+        const cur = (CURRENCIES as readonly string[]).includes(savedCurrency ?? '')
+          ? (savedCurrency as FiatCurrency)
+          : 'USD';
         setCurrencyState(cur);
 
         // Fetch BTC price
