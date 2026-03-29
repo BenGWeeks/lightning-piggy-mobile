@@ -83,7 +83,7 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         {/* Watch full episode link */}
         {hasFullVideo && (
           <TouchableOpacity onPress={() => Linking.openURL(mission.fullVideoUrl!)}>
-            <Text style={styles.fullEpisodeLink}>Watch full episode free on Angel app</Text>
+            <Text style={styles.fullEpisodeLink}>Watch full episode free</Text>
           </TouchableOpacity>
         )}
 
