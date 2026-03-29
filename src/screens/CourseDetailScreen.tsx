@@ -80,9 +80,9 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             return (
               <TouchableOpacity
                 key={mission.id}
-                style={[styles.missionCard, isComingSoon && styles.missionCardDisabled]}
-                onPress={() => !isComingSoon && navigation.navigate('MissionDetail', { courseId, missionId: mission.id })}
-                activeOpacity={isComingSoon ? 1 : 0.7}
+                style={styles.missionCard}
+                onPress={() => navigation.navigate('MissionDetail', { courseId, missionId: mission.id })}
+                activeOpacity={0.7}
               >
                 <Image
                   source={
