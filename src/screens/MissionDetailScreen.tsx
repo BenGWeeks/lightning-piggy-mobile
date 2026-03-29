@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
+  Linking,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import YoutubePlayer from 'react-native-youtube-iframe';
@@ -73,13 +74,16 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           />
         </View>
       ) : isAngelVideo ? (
-        <View style={styles.headerContainer}>
+        <TouchableOpacity style={styles.headerContainer} onPress={() => Linking.openURL(mission.videoUrl!)} activeOpacity={0.8}>
           <Image source={course.image} style={styles.headerImage} resizeMode="cover" />
           <View style={styles.headerOverlay} />
+          <View style={styles.playButton}>
+            <Text style={styles.playIcon}>▶</Text>
+          </View>
           <View style={styles.angelBadge}>
             <Text style={styles.angelBadgeText}>Watch free on Angel app</Text>
           </View>
-        </View>
+        </TouchableOpacity>
       ) : mission.videoUrl === null ? (
         <View style={styles.comingSoonHeader}>
           <Text style={styles.comingSoonText}>Video coming soon</Text>
@@ -167,6 +171,24 @@ const styles = StyleSheet.create({
   headerOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.25)',
+  },
+  playButton: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    width: 56,
+    height: 56,
+    marginTop: -28,
+    marginLeft: -28,
+    borderRadius: 28,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  playIcon: {
+    fontSize: 24,
+    color: colors.brandPink,
+    marginLeft: 4,
   },
   angelBadge: {
     position: 'absolute',
