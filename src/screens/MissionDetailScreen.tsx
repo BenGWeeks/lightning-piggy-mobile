@@ -9,7 +9,6 @@ import {
   Linking,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { WebView } from 'react-native-webview';
 import { colors } from '../styles/theme';
 import { courses } from '../data/learnContent';
 import {
@@ -60,18 +59,23 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     <View style={styles.container}>
       {/* Video or header image */}
       {youtubeId ? (
-        <View style={styles.videoContainer}>
+        <TouchableOpacity
+          style={styles.videoContainer}
+          onPress={() => Linking.openURL(mission.videoUrl!)}
+          activeOpacity={0.8}
+        >
+          <Image
+            source={{ uri: `https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg` }}
+            style={styles.videoThumbnail}
+            resizeMode="cover"
+          />
           <TouchableOpacity style={styles.backButtonOverlay} onPress={() => navigation.goBack()}>
             <Text style={styles.backArrow}>‹</Text>
           </TouchableOpacity>
-          <WebView
-            style={styles.videoPlayer}
-            source={{ uri: `https://www.youtube.com/embed/${youtubeId}?rel=0&modestbranding=1&playsinline=1` }}
-            allowsFullscreenVideo
-            javaScriptEnabled
-            domStorageEnabled
-          />
-        </View>
+          <View style={styles.playButton}>
+            <Text style={styles.playIcon}>▶</Text>
+          </View>
+        </TouchableOpacity>
       ) : (
         <View style={styles.comingSoonHeader}>
           <TouchableOpacity style={styles.backButtonOnGrey} onPress={() => navigation.goBack()}>
@@ -161,12 +165,30 @@ const styles = StyleSheet.create({
   },
   videoContainer: {
     backgroundColor: '#000',
-    paddingTop: 44,
     height: 264,
+    position: 'relative',
   },
-  videoPlayer: {
-    flex: 1,
-    backgroundColor: '#000',
+  videoThumbnail: {
+    width: '100%',
+    height: '100%',
+  },
+  playButton: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    width: 64,
+    height: 64,
+    marginTop: -32,
+    marginLeft: -32,
+    borderRadius: 32,
+    backgroundColor: 'rgba(236, 0, 140, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  playIcon: {
+    fontSize: 28,
+    color: colors.white,
+    marginLeft: 4,
   },
   comingSoonHeader: {
     height: 140,
