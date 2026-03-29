@@ -19,6 +19,12 @@ import {
   getCourseCompletedCount,
 } from '../services/learnProgressService';
 
+function getYouTubeThumbnail(videoUrl: string | null): string | null {
+  if (!videoUrl) return null;
+  const match = videoUrl.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/);
+  return match ? `https://img.youtube.com/vi/${match[1]}/mqdefault.jpg` : null;
+}
+
 interface Props {
   route: any;
   navigation: any;
@@ -72,8 +78,13 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
               onPress={() => mission.videoUrl !== null || done ? navigation.navigate('MissionDetail', { courseId, missionId: mission.id }) : null}
               activeOpacity={mission.videoUrl === null && !done ? 1 : 0.7}
             >
-              {/* Thumbnail */}
-              <Image source={course.image} style={styles.missionThumb} resizeMode="cover" />
+              {/* Thumbnail — use YouTube video thumbnail if available */}
+              {(() => {
+                const thumbUrl = getYouTubeThumbnail(mission.videoUrl);
+                return thumbUrl
+                  ? <Image source={{ uri: thumbUrl }} style={styles.missionThumb} resizeMode="cover" />
+                  : <Image source={course.image} style={styles.missionThumb} resizeMode="cover" />;
+              })()}
               <View style={styles.missionRight}>
                 <Text style={styles.missionTitle}>{mission.title}</Text>
                 <Text style={styles.missionMeta}>{mission.learningOutcomes.length} outcomes</Text>
