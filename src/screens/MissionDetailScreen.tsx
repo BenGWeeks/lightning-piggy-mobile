@@ -6,9 +6,9 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  Linking,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import YoutubePlayer from 'react-native-youtube-iframe';
 import { colors } from '../styles/theme';
 import { courses } from '../data/learnContent';
 import {
@@ -22,6 +22,12 @@ import {
 interface Props {
   route: any;
   navigation: any;
+}
+
+function extractYouTubeId(url: string): string | null {
+  // Handle youtube.com/watch?v=ID and youtu.be/ID formats
+  const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/);
+  return match ? match[1] : null;
 }
 
 const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
@@ -39,6 +45,8 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   if (!course || !mission) return null;
 
   const completed = isMissionComplete(progress, mission.id);
+  const youtubeId = mission.videoUrl ? extractYouTubeId(mission.videoUrl) : null;
+  const isAngelVideo = mission.videoUrl?.includes('angel.com');
 
   const handleToggle = async () => {
     const updated = completed
@@ -49,19 +57,39 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   return (
     <View style={styles.container}>
-      {/* Header with video placeholder */}
-      <View style={styles.headerContainer}>
-        <Image source={course.image} style={styles.headerImage} resizeMode="cover" />
-        <View style={styles.headerOverlay} />
+      {/* Back button */}
+      <View style={styles.backBar}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <Text style={styles.backArrow}>‹</Text>
         </TouchableOpacity>
-        {mission.videoUrl && (
-          <TouchableOpacity style={styles.playButton} onPress={() => Linking.openURL(mission.videoUrl!)}>
-            <Text style={styles.playIcon}>▶</Text>
-          </TouchableOpacity>
-        )}
       </View>
+
+      {/* Video or header image */}
+      {youtubeId ? (
+        <View style={styles.videoContainer}>
+          <YoutubePlayer
+            height={220}
+            videoId={youtubeId}
+          />
+        </View>
+      ) : isAngelVideo ? (
+        <View style={styles.headerContainer}>
+          <Image source={course.image} style={styles.headerImage} resizeMode="cover" />
+          <View style={styles.headerOverlay} />
+          <View style={styles.angelBadge}>
+            <Text style={styles.angelBadgeText}>Watch free on Angel app</Text>
+          </View>
+        </View>
+      ) : mission.videoUrl === null ? (
+        <View style={styles.comingSoonHeader}>
+          <Text style={styles.comingSoonText}>Video coming soon</Text>
+        </View>
+      ) : (
+        <View style={styles.headerContainer}>
+          <Image source={course.image} style={styles.headerImage} resizeMode="cover" />
+          <View style={styles.headerOverlay} />
+        </View>
+      )}
 
       <ScrollView style={styles.scrollArea} contentContainerStyle={styles.scrollContent}>
         {/* Mission info */}
@@ -105,8 +133,31 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  backBar: {
+    backgroundColor: colors.background,
+    paddingTop: 44,
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  backButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.brandPink,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  backArrow: {
+    color: colors.white,
+    fontSize: 24,
+    fontWeight: '700',
+    marginTop: -2,
+  },
+  videoContainer: {
+    backgroundColor: '#000',
+  },
   headerContainer: {
-    height: 200,
+    height: 180,
     position: 'relative',
   },
   headerImage: {
@@ -117,40 +168,30 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.25)',
   },
-  backButton: {
+  angelBadge: {
     position: 'absolute',
-    top: 44,
-    left: 16,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.3)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  backArrow: {
-    color: colors.white,
-    fontSize: 24,
-    fontWeight: '700',
-    marginTop: -2,
-  },
-  playButton: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    width: 56,
-    height: 56,
-    marginTop: -28,
-    marginLeft: -28,
-    borderRadius: 28,
+    bottom: 12,
+    alignSelf: 'center',
     backgroundColor: 'rgba(255,255,255,0.9)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 100,
+  },
+  angelBadgeText: {
+    color: colors.brandPink,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  comingSoonHeader: {
+    height: 100,
+    backgroundColor: colors.divider,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  playIcon: {
-    fontSize: 24,
-    color: colors.brandPink,
-    marginLeft: 4,
+  comingSoonText: {
+    color: colors.textSupplementary,
+    fontSize: 14,
+    fontWeight: '600',
   },
   scrollArea: {
     flex: 1,
