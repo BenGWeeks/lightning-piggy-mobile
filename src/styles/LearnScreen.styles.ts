@@ -15,6 +15,23 @@ export const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  homeButton: {
+    position: 'absolute',
+    top: 44,
+    left: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  homeIcon: {
+    width: 20,
+    height: 20,
+    tintColor: '#EC008C',
+  },
   headerOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(236, 0, 140, 0.65)',

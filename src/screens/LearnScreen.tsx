@@ -39,6 +39,16 @@ const LearnScreen: React.FC<Props> = ({ navigation }) => {
           resizeMode="cover"
         />
         <View style={styles.headerOverlay} />
+        <TouchableOpacity
+          style={styles.homeButton}
+          onPress={() => navigation.getParent()?.navigate('Home')}
+        >
+          <Image
+            source={require('../../assets/images/Home.png')}
+            style={styles.homeIcon}
+            resizeMode="contain"
+          />
+        </TouchableOpacity>
         <Text style={styles.headerTitle}>Learn</Text>
       </View>
 
