@@ -10,6 +10,7 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { colors } from '../styles/theme';
 import { courses } from '../data/learnContent';
+import TipSheet from '../components/TipSheet';
 import {
   getProgress,
   LearnProgress,
@@ -27,6 +28,7 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { courseId } = route.params;
   const course = courses.find(c => c.id === courseId);
   const [progress, setProgress] = useState<LearnProgress>({ completedMissions: [] });
+  const [tipVisible, setTipVisible] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -95,11 +97,18 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         })}
 
         {allDone && (
-          <View style={styles.rewardBanner}>
-            <Text style={styles.rewardText}>Course complete! Earned {course.satsReward.toLocaleString()} Sats</Text>
-          </View>
+          <>
+            <View style={styles.rewardBanner}>
+              <Text style={styles.rewardText}>Course complete!</Text>
+            </View>
+            <TouchableOpacity style={styles.tipButton} onPress={() => setTipVisible(true)}>
+              <Text style={styles.tipButtonText}>Claim Your {course.satsReward.toLocaleString()} Sats Tip</Text>
+            </TouchableOpacity>
+          </>
         )}
       </ScrollView>
+
+      <TipSheet visible={tipVisible} onClose={() => setTipVisible(false)} course={course} />
     </View>
   );
 };
@@ -249,6 +258,18 @@ const styles = StyleSheet.create({
   rewardText: {
     color: '#2E7D32',
     fontSize: 14,
+    fontWeight: '700',
+  },
+  tipButton: {
+    backgroundColor: colors.brandPink,
+    height: 52,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tipButtonText: {
+    color: colors.white,
+    fontSize: 16,
     fontWeight: '700',
   },
 });
