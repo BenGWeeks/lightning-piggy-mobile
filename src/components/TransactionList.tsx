@@ -49,11 +49,10 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
             </View>
             <View style={styles.itemRight}>
               <Text style={[styles.itemAmount, isIncoming ? styles.incoming : styles.outgoing]}>
-                {isIncoming ? '+' : '-'}{amountSats.toLocaleString()} sats
+                {isIncoming ? '+' : '-'}
+                {amountSats.toLocaleString()} sats
               </Text>
-              {fiatStr ? (
-                <Text style={styles.itemFiat}>{fiatStr}</Text>
-              ) : null}
+              {fiatStr ? <Text style={styles.itemFiat}>{fiatStr}</Text> : null}
             </View>
           </View>
         );

@@ -145,19 +145,22 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   }, [currency, fetchPrice]);
 
-  const connect = useCallback(async (nwcUrl: string) => {
-    const detectedAddress = parseNwcLud16(nwcUrl);
-    if (detectedAddress) {
-      await setLightningAddress(detectedAddress);
-    }
-    const result = await nwcService.connect(nwcUrl);
-    if (result.success) {
-      setIsConnected(true);
-      setBalance(result.balance ?? null);
-      await fetchWalletInfo();
-    }
-    return { success: result.success, error: result.error };
-  }, [setLightningAddress, fetchWalletInfo]);
+  const connect = useCallback(
+    async (nwcUrl: string) => {
+      const detectedAddress = parseNwcLud16(nwcUrl);
+      if (detectedAddress) {
+        await setLightningAddress(detectedAddress);
+      }
+      const result = await nwcService.connect(nwcUrl);
+      if (result.success) {
+        setIsConnected(true);
+        setBalance(result.balance ?? null);
+        await fetchWalletInfo();
+      }
+      return { success: result.success, error: result.error };
+    },
+    [setLightningAddress, fetchWalletInfo],
+  );
 
   const disconnect = useCallback(async () => {
     await nwcService.disconnect();

@@ -22,9 +22,17 @@ interface Props {
 
 const AccountScreen: React.FC<Props> = ({ navigation }) => {
   const {
-    isConnected, balance, userName, setUserName,
-    currency, setCurrency, connect, disconnect,
-    lightningAddress, setLightningAddress, walletAlias,
+    isConnected,
+    balance,
+    userName,
+    setUserName,
+    currency,
+    setCurrency,
+    connect,
+    disconnect,
+    lightningAddress,
+    setLightningAddress,
+    walletAlias,
   } = useWallet();
   const [nameInput, setNameInput] = useState(userName);
   const [lnAddressInput, setLnAddressInput] = useState(lightningAddress || '');
@@ -94,7 +102,9 @@ const AccountScreen: React.FC<Props> = ({ navigation }) => {
       {
         text: 'Disconnect',
         style: 'destructive',
-        onPress: async () => { await disconnect(); },
+        onPress: async () => {
+          await disconnect();
+        },
       },
     ]);
   };
@@ -104,7 +114,11 @@ const AccountScreen: React.FC<Props> = ({ navigation }) => {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ScrollView ref={scrollRef} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={styles.title}>Settings</Text>
 
         {/* Name */}
@@ -128,7 +142,9 @@ const AccountScreen: React.FC<Props> = ({ navigation }) => {
               style={[styles.currencyChip, currency === cur && styles.currencyChipActive]}
               onPress={() => setCurrency(cur)}
             >
-              <Text style={[styles.currencyChipText, currency === cur && styles.currencyChipTextActive]}>
+              <Text
+                style={[styles.currencyChipText, currency === cur && styles.currencyChipTextActive]}
+              >
                 {cur}
               </Text>
             </TouchableOpacity>
@@ -176,10 +192,7 @@ const AccountScreen: React.FC<Props> = ({ navigation }) => {
                   barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
                   onBarcodeScanned={handleBarCodeScanned}
                 />
-                <TouchableOpacity
-                  style={styles.secondaryButton}
-                  onPress={() => setScanning(false)}
-                >
+                <TouchableOpacity style={styles.secondaryButton} onPress={() => setScanning(false)}>
                   <Text style={styles.secondaryButtonText}>Cancel</Text>
                 </TouchableOpacity>
               </View>
@@ -190,7 +203,10 @@ const AccountScreen: React.FC<Props> = ({ navigation }) => {
                   placeholder="nostr+walletconnect://..."
                   placeholderTextColor={colors.textSupplementary}
                   value={nwcUrl}
-                  onChangeText={(text) => { setNwcUrl(text); setError(null); }}
+                  onChangeText={(text) => {
+                    setNwcUrl(text);
+                    setError(null);
+                  }}
                   multiline
                   autoCapitalize="none"
                   autoCorrect={false}

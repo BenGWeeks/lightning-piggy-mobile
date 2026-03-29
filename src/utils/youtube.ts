@@ -2,7 +2,8 @@
  * Shared YouTube utilities for extracting video IDs and thumbnail URLs.
  */
 
-const YOUTUBE_ID_REGEX = /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/;
+const YOUTUBE_ID_REGEX =
+  /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/;
 
 export function extractYouTubeId(url: string): string | null {
   const match = url.match(YOUTUBE_ID_REGEX);

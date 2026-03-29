@@ -17,7 +17,8 @@ import TransactionList from '../components/TransactionList';
 import * as nwcService from '../services/nwcService';
 
 const HomeScreen: React.FC = () => {
-  const { balance, refreshBalance, userName, btcPrice, currency, walletAlias, isConnected } = useWallet();
+  const { balance, refreshBalance, userName, btcPrice, currency, walletAlias, isConnected } =
+    useWallet();
   const [receiveOpen, setReceiveOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
   const [transactions, setTransactions] = useState<any[]>([]);
@@ -55,9 +56,7 @@ const HomeScreen: React.FC = () => {
         />
         <View style={styles.headerContent}>
           <Text style={styles.hello}>Hello{userName ? `, ${userName}` : ''}!</Text>
-          {walletAlias ? (
-            <Text style={styles.walletAlias}>{walletAlias}</Text>
-          ) : null}
+          {walletAlias ? <Text style={styles.walletAlias}>{walletAlias}</Text> : null}
           <TouchableOpacity onPress={handleRefresh}>
             <Text style={styles.balance}>
               {balance !== null ? `${balance.toLocaleString()} Sats` : 'Loading...'}
@@ -84,9 +83,7 @@ const HomeScreen: React.FC = () => {
       {/* Transaction list */}
       <ScrollView
         style={styles.transactionsContainer}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       >
         <TransactionList transactions={transactions} />
       </ScrollView>

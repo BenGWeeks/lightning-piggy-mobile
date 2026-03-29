@@ -38,7 +38,7 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
   const tipSats = course.satsReward;
 
   // Collect one key learning outcome per mission for the "quiz" section
-  const quizTopics = course.missions.map(m => m.learningOutcomes[0]?.text).filter(Boolean);
+  const quizTopics = course.missions.map((m) => m.learningOutcomes[0]?.text).filter(Boolean);
 
   useEffect(() => {
     if (visible) {
@@ -74,7 +74,12 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
 
   // Detect payment
   useEffect(() => {
-    if (visible && prevBalance.current !== null && balance !== null && balance > prevBalance.current) {
+    if (
+      visible &&
+      prevBalance.current !== null &&
+      balance !== null &&
+      balance > prevBalance.current
+    ) {
       setPaymentReceived(true);
       if (intervalId.current) {
         clearInterval(intervalId.current);
@@ -92,13 +97,16 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
     return () => handler.remove();
   }, [visible, onClose]);
 
-  const handleSheetChange = useCallback((index: number) => {
-    if (index === -1) onClose();
-  }, [onClose]);
+  const handleSheetChange = useCallback(
+    (index: number) => {
+      if (index === -1) onClose();
+    },
+    [onClose],
+  );
 
   const renderBackdrop = useCallback(
     (props: any) => <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />,
-    []
+    [],
   );
 
   const handleCopy = async () => {
@@ -133,7 +141,11 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
       backgroundStyle={styles.sheetBackground}
     >
       <BottomSheetView style={styles.content}>
-        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
           {/* QR Code at top */}
           <View style={styles.qrContainer}>
             {loading ? (
@@ -169,7 +181,8 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
 
           {/* Instructions */}
           <Text style={styles.instructionText}>
-            Show this to your parent or guardian. They can scan the QR code to send you a tip as a reward for completing this course!
+            Show this to your parent or guardian. They can scan the QR code to send you a tip as a
+            reward for completing this course!
           </Text>
 
           {/* Quiz topics */}
@@ -185,9 +198,7 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
 
           {/* Close button */}
           <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-            <Text style={styles.closeButtonText}>
-              {paymentReceived ? 'Done' : 'Close'}
-            </Text>
+            <Text style={styles.closeButtonText}>{paymentReceived ? 'Done' : 'Close'}</Text>
           </TouchableOpacity>
         </ScrollView>
       </BottomSheetView>
