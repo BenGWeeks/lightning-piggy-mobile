@@ -1,5 +1,5 @@
 import { StyleSheet, Platform, StatusBar } from 'react-native';
-import { colors } from './theme';
+import { colors, withOpacity } from './theme';
 
 const STATUS_BAR_TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 40) + 4 : 44;
 
@@ -48,7 +48,7 @@ export const styles = StyleSheet.create({
     marginTop: -32,
     marginLeft: -32,
     borderRadius: 32,
-    backgroundColor: 'rgba(236, 0, 140, 0.9)',
+    backgroundColor: withOpacity(colors.brandPink, 0.9),
     justifyContent: 'center',
     alignItems: 'center',
   },

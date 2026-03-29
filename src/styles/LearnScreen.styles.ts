@@ -1,5 +1,5 @@
 import { StyleSheet, Platform, StatusBar } from 'react-native';
-import { colors } from './theme';
+import { colors, withOpacity } from './theme';
 
 const STATUS_BAR_TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 40) + 4 : 44;
 
@@ -36,7 +36,7 @@ export const styles = StyleSheet.create({
   },
   headerOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(236, 0, 140, 0.65)', // brandPink with 65% opacity
+    backgroundColor: withOpacity(colors.brandPink, 0.65),
   },
   headerTitle: {
     position: 'absolute',
