@@ -1,11 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import {
-  View,
-  Text,
-  Image,
-  TouchableOpacity,
-  ScrollView,
-} from 'react-native';
+import { View, Text, Image, TouchableOpacity, ScrollView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
 import { courses } from '../data/learnContent';
@@ -28,14 +22,14 @@ interface Props {
 
 const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { courseId } = route.params;
-  const course = courses.find(c => c.id === courseId);
+  const course = courses.find((c) => c.id === courseId);
   const [progress, setProgress] = useState<LearnProgress>({ completedMissions: [] });
   const [tipVisible, setTipVisible] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
       getProgress().then(setProgress);
-    }, [])
+    }, []),
   );
 
   if (!course) {
@@ -49,7 +43,7 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     );
   }
 
-  const missionIds = course.missions.map(m => m.id);
+  const missionIds = course.missions.map((m) => m.id);
   const allDone = isCourseComplete(progress, missionIds);
   const completed = getCourseCompletedCount(progress, missionIds);
 
@@ -87,7 +81,9 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
               <TouchableOpacity
                 key={mission.id}
                 style={styles.missionCard}
-                onPress={() => navigation.navigate('MissionDetail', { courseId, missionId: mission.id })}
+                onPress={() =>
+                  navigation.navigate('MissionDetail', { courseId, missionId: mission.id })
+                }
                 activeOpacity={0.7}
               >
                 <Image

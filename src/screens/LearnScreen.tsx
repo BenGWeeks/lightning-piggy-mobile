@@ -1,11 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import {
-  View,
-  Text,
-  Image,
-  TouchableOpacity,
-  ScrollView,
-} from 'react-native';
+import { View, Text, Image, TouchableOpacity, ScrollView } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { courses } from '../data/learnContent';
 import {
@@ -26,7 +20,7 @@ const LearnScreen: React.FC<Props> = ({ navigation }) => {
   useFocusEffect(
     useCallback(() => {
       getProgress().then(setProgress);
-    }, [])
+    }, []),
   );
 
   return (
@@ -55,7 +49,7 @@ const LearnScreen: React.FC<Props> = ({ navigation }) => {
       {/* Course grid */}
       <ScrollView style={styles.scrollArea} contentContainerStyle={styles.grid}>
         {courses.map((course) => {
-          const missionIds = course.missions.map(m => m.id);
+          const missionIds = course.missions.map((m) => m.id);
           const completed = getCourseCompletedCount(progress, missionIds);
           const total = course.missions.length;
           const allDone = isCourseComplete(progress, missionIds);
@@ -75,7 +69,9 @@ const LearnScreen: React.FC<Props> = ({ navigation }) => {
                   </View>
                 )}
               </View>
-              <Text style={styles.courseTitle} numberOfLines={2}>{course.title}</Text>
+              <Text style={styles.courseTitle} numberOfLines={2}>
+                {course.title}
+              </Text>
               <Text style={styles.courseMeta}>{total} missions</Text>
               <View style={styles.chipSpacer} />
               {allDone ? (
@@ -84,7 +80,9 @@ const LearnScreen: React.FC<Props> = ({ navigation }) => {
                 </View>
               ) : completed > 0 ? (
                 <View style={styles.chipProgress}>
-                  <Text style={styles.chipProgressText}>{completed}/{total} done</Text>
+                  <Text style={styles.chipProgressText}>
+                    {completed}/{total} done
+                  </Text>
                 </View>
               ) : (
                 <View style={styles.chipNew}>

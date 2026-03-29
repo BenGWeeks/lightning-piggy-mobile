@@ -29,7 +29,8 @@ type Mode = 'address' | 'amount';
 type InputUnit = 'sats' | 'fiat';
 
 const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
-  const { makeInvoice, refreshBalance, balance, btcPrice, currency, lightningAddress } = useWallet();
+  const { makeInvoice, refreshBalance, balance, btcPrice, currency, lightningAddress } =
+    useWallet();
   const [mode, setMode] = useState<Mode>('address');
   const [invoice, setInvoice] = useState('');
   const [paymentReceived, setPaymentReceived] = useState(false);
@@ -49,25 +50,28 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
     return Math.round((fiat / btcPrice) * 100_000_000);
   };
 
-  const generateInvoice = useCallback(async (sats: number) => {
-    if (intervalId.current) {
-      clearInterval(intervalId.current);
-      intervalId.current = null;
-    }
-    setLoading(true);
-    setPaymentReceived(false);
-    try {
-      const inv = await makeInvoice(sats, 'Lightning Piggy');
-      setInvoice(inv);
-      intervalId.current = setInterval(async () => {
-        await refreshBalance();
-      }, 5000);
-    } catch (error) {
-      console.warn('Failed to create invoice:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [makeInvoice, refreshBalance]);
+  const generateInvoice = useCallback(
+    async (sats: number) => {
+      if (intervalId.current) {
+        clearInterval(intervalId.current);
+        intervalId.current = null;
+      }
+      setLoading(true);
+      setPaymentReceived(false);
+      try {
+        const inv = await makeInvoice(sats, 'Lightning Piggy');
+        setInvoice(inv);
+        intervalId.current = setInterval(async () => {
+          await refreshBalance();
+        }, 5000);
+      } catch (error) {
+        console.warn('Failed to create invoice:', error);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [makeInvoice, refreshBalance],
+  );
 
   // Open/close the sheet
   useEffect(() => {
@@ -104,7 +108,12 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
 
   // Detect payment by watching balance changes
   useEffect(() => {
-    if (visible && prevBalance.current !== null && balance !== null && balance > prevBalance.current) {
+    if (
+      visible &&
+      prevBalance.current !== null &&
+      balance !== null &&
+      balance > prevBalance.current
+    ) {
       setPaymentReceived(true);
       if (intervalId.current) {
         clearInterval(intervalId.current);
@@ -157,18 +166,23 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   const handleShare = async () => {
     if (copyValue) {
       try {
-        await Share.share({ message: mode === 'address' ? `lightning:${lightningAddress}` : `lightning:${invoice}` });
+        await Share.share({
+          message: mode === 'address' ? `lightning:${lightningAddress}` : `lightning:${invoice}`,
+        });
       } catch {}
     }
   };
 
-  const handleSheetChange = useCallback((index: number) => {
-    if (index === -1) onClose();
-  }, [onClose]);
+  const handleSheetChange = useCallback(
+    (index: number) => {
+      if (index === -1) onClose();
+    },
+    [onClose],
+  );
 
   const renderBackdrop = useCallback(
     (props: any) => <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />,
-    []
+    [],
   );
 
   if (!visible) return null;
@@ -185,117 +199,134 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
       backgroundStyle={styles.sheetBackground}
     >
       <BottomSheetView style={styles.content}>
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
-        <View style={styles.innerContent}>
-        <Text style={styles.title}>Receive</Text>
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+          <View style={styles.innerContent}>
+            <Text style={styles.title}>Receive</Text>
 
-        {/* Mode tabs */}
-        {lightningAddress ? (
-          <View style={styles.tabRow}>
-            <TouchableOpacity
-              style={[styles.tab, mode === 'address' && styles.tabActive]}
-              onPress={() => setMode('address')}
-            >
-              <Text style={[styles.tabText, mode === 'address' && styles.tabTextActive]}>
-                Address
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.tab, mode === 'amount' && styles.tabActive]}
-              onPress={() => setMode('amount')}
-            >
-              <Text style={[styles.tabText, mode === 'amount' && styles.tabTextActive]}>
-                Amount
-              </Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
+            {/* Mode tabs */}
+            {lightningAddress ? (
+              <View style={styles.tabRow}>
+                <TouchableOpacity
+                  style={[styles.tab, mode === 'address' && styles.tabActive]}
+                  onPress={() => setMode('address')}
+                >
+                  <Text style={[styles.tabText, mode === 'address' && styles.tabTextActive]}>
+                    Address
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.tab, mode === 'amount' && styles.tabActive]}
+                  onPress={() => setMode('amount')}
+                >
+                  <Text style={[styles.tabText, mode === 'amount' && styles.tabTextActive]}>
+                    Amount
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
 
-        {/* Amount input */}
-        {mode === 'amount' ? (
-          <View style={styles.amountSection}>
-            <View style={styles.amountRow}>
-              <TextInput
-                style={styles.amountInput}
-                value={inputUnit === 'sats' ? satsValue : fiatValue}
-                onChangeText={inputUnit === 'sats' ? handleSatsChange : handleFiatChange}
-                keyboardType={inputUnit === 'sats' ? 'numeric' : 'decimal-pad'}
-                placeholder={inputUnit === 'sats' ? '0' : '0.00'}
-              />
-              <TouchableOpacity
-                style={[styles.unitButton, inputUnit === 'sats' && styles.unitButtonActive]}
-                onPress={() => setInputUnit('sats')}
-              >
-                <Text style={[styles.unitButtonText, inputUnit === 'sats' && styles.unitButtonTextActive]}>
-                  Sats
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.unitButton, inputUnit === 'fiat' && styles.unitButtonActive]}
-                onPress={() => setInputUnit('fiat')}
-              >
-                <Text style={[styles.unitButtonText, inputUnit === 'fiat' && styles.unitButtonTextActive]}>
-                  {currency}
-                </Text>
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.convertedAmount}>
-              {inputUnit === 'sats'
-                ? (btcPrice && currentSats > 0 ? satsToFiatString(currentSats, btcPrice, currency) : '')
-                : (currentSats > 0 ? `${currentSats.toLocaleString()} sats` : '')
-              }
-            </Text>
-          </View>
-        ) : null}
-
-        {/* QR Code */}
-        <View style={styles.qrContainer}>
-          {mode === 'address' && lightningAddress ? (
-            <View>
-              <QRCode value={`lightning:${lightningAddress}`} size={200} />
-              {paymentReceived && (
-                <View style={styles.checkmark}>
-                  <Text style={styles.checkmarkText}>✓</Text>
+            {/* Amount input */}
+            {mode === 'amount' ? (
+              <View style={styles.amountSection}>
+                <View style={styles.amountRow}>
+                  <TextInput
+                    style={styles.amountInput}
+                    value={inputUnit === 'sats' ? satsValue : fiatValue}
+                    onChangeText={inputUnit === 'sats' ? handleSatsChange : handleFiatChange}
+                    keyboardType={inputUnit === 'sats' ? 'numeric' : 'decimal-pad'}
+                    placeholder={inputUnit === 'sats' ? '0' : '0.00'}
+                  />
+                  <TouchableOpacity
+                    style={[styles.unitButton, inputUnit === 'sats' && styles.unitButtonActive]}
+                    onPress={() => setInputUnit('sats')}
+                  >
+                    <Text
+                      style={[
+                        styles.unitButtonText,
+                        inputUnit === 'sats' && styles.unitButtonTextActive,
+                      ]}
+                    >
+                      Sats
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.unitButton, inputUnit === 'fiat' && styles.unitButtonActive]}
+                    onPress={() => setInputUnit('fiat')}
+                  >
+                    <Text
+                      style={[
+                        styles.unitButtonText,
+                        inputUnit === 'fiat' && styles.unitButtonTextActive,
+                      ]}
+                    >
+                      {currency}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
+                <Text style={styles.convertedAmount}>
+                  {inputUnit === 'sats'
+                    ? btcPrice && currentSats > 0
+                      ? satsToFiatString(currentSats, btcPrice, currency)
+                      : ''
+                    : currentSats > 0
+                      ? `${currentSats.toLocaleString()} sats`
+                      : ''}
+                </Text>
+              </View>
+            ) : null}
+
+            {/* QR Code */}
+            <View style={styles.qrContainer}>
+              {mode === 'address' && lightningAddress ? (
+                <View>
+                  <QRCode value={`lightning:${lightningAddress}`} size={200} />
+                  {paymentReceived && (
+                    <View style={styles.checkmark}>
+                      <Text style={styles.checkmarkText}>✓</Text>
+                    </View>
+                  )}
+                </View>
+              ) : mode === 'amount' && loading ? (
+                <ActivityIndicator size="large" color={colors.brandPink} />
+              ) : mode === 'amount' && invoice ? (
+                <View>
+                  <QRCode value={invoice} size={200} />
+                  {paymentReceived && (
+                    <View style={styles.checkmark}>
+                      <Text style={styles.checkmarkText}>✓</Text>
+                    </View>
+                  )}
+                </View>
+              ) : (
+                <Text style={styles.noInvoice}>
+                  {mode === 'address'
+                    ? 'No lightning address set'
+                    : 'Enter an amount to generate invoice'}
+                </Text>
               )}
             </View>
-          ) : mode === 'amount' && loading ? (
-            <ActivityIndicator size="large" color={colors.brandPink} />
-          ) : mode === 'amount' && invoice ? (
-            <View>
-              <QRCode value={invoice} size={200} />
-              {paymentReceived && (
-                <View style={styles.checkmark}>
-                  <Text style={styles.checkmarkText}>✓</Text>
-                </View>
-              )}
-            </View>
-          ) : (
-            <Text style={styles.noInvoice}>
-              {mode === 'address' ? 'No lightning address set' : 'Enter an amount to generate invoice'}
+
+            <Text style={styles.qrLabel}>
+              {mode === 'address' ? lightningAddress : 'Lightning invoice'}
             </Text>
-          )}
-        </View>
+            {mode === 'amount' && invoice ? (
+              <Text style={styles.invoiceText} numberOfLines={2}>
+                {invoice}
+              </Text>
+            ) : null}
 
-        <Text style={styles.qrLabel}>
-          {mode === 'address' ? lightningAddress : 'Lightning invoice'}
-        </Text>
-        {mode === 'amount' && invoice ? (
-          <Text style={styles.invoiceText} numberOfLines={2}>{invoice}</Text>
-        ) : null}
-
-        <View style={styles.buttonRow}>
-          <TouchableOpacity style={styles.actionButton} onPress={handleCopy}>
-            <CopyIcon color={colors.brandPink} />
-            <Text style={styles.actionButtonText}>Copy</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
-            <Text style={styles.actionButtonText}>Share</Text>
-            <ShareIcon color={colors.brandPink} />
-          </TouchableOpacity>
-        </View>
-        </View>
-      </TouchableWithoutFeedback>
+            <View style={styles.buttonRow}>
+              <TouchableOpacity style={styles.actionButton} onPress={handleCopy}>
+                <CopyIcon color={colors.brandPink} />
+                <Text style={styles.actionButtonText}>Copy</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
+                <Text style={styles.actionButtonText}>Share</Text>
+                <ShareIcon color={colors.brandPink} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableWithoutFeedback>
       </BottomSheetView>
     </BottomSheet>
   );

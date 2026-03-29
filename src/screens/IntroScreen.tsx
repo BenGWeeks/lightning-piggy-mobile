@@ -32,20 +32,24 @@ const IntroScreen: React.FC<Props> = ({ navigation }) => {
         style={styles.introImage}
         resizeMode="cover"
       />
-      <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }], alignItems: 'center', width: '100%' }}>
+      <Animated.View
+        style={{
+          opacity: fadeAnim,
+          transform: [{ translateY: slideAnim }],
+          alignItems: 'center',
+          width: '100%',
+        }}
+      >
         <Image
           source={require('../../assets/images/lightning-piggy-logo.png')}
           style={styles.logo}
           resizeMode="contain"
         />
         <Text style={styles.description}>
-          An electronic cash piggy bank for children that accepts bitcoin sent
-          over lightning, while displaying the amount saved in satoshis
+          An electronic cash piggy bank for children that accepts bitcoin sent over lightning, while
+          displaying the amount saved in satoshis
         </Text>
-        <TouchableOpacity
-          style={styles.button}
-          onPress={() => navigation.navigate('Setup')}
-        >
+        <TouchableOpacity style={styles.button} onPress={() => navigation.navigate('Setup')}>
           <Text style={styles.buttonText}>Let's Go</Text>
         </TouchableOpacity>
         <Image

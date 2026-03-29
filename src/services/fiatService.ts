@@ -6,13 +6,17 @@ export const CURRENCIES = ['USD', 'EUR', 'GBP', 'AUD', 'CAD', 'CHF', 'JPY', 'ZAR
 export type FiatCurrency = (typeof CURRENCIES)[number];
 
 export async function getBtcPrice(currency: FiatCurrency): Promise<number | null> {
-  if (cachedRate && cachedRate.currency === currency && Date.now() - cachedRate.timestamp < CACHE_DURATION) {
+  if (
+    cachedRate &&
+    cachedRate.currency === currency &&
+    Date.now() - cachedRate.timestamp < CACHE_DURATION
+  ) {
     return cachedRate.rate;
   }
 
   try {
     const response = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=${currency.toLowerCase()}`
+      `https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=${currency.toLowerCase()}`,
     );
     const data = await response.json();
     const rate = data.bitcoin?.[currency.toLowerCase()];
@@ -40,7 +44,11 @@ export function formatFiat(amount: number, currency: FiatCurrency): string {
   });
 }
 
-export function satsToFiatString(sats: number, btcPrice: number | null, currency: FiatCurrency): string {
+export function satsToFiatString(
+  sats: number,
+  btcPrice: number | null,
+  currency: FiatCurrency,
+): string {
   if (btcPrice === null) return '';
   return formatFiat(satsToFiat(sats, btcPrice), currency);
 }

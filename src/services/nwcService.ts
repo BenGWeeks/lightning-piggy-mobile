@@ -28,7 +28,9 @@ export function validateNwcUrl(url: string): { valid: boolean; error?: string } 
   return { valid: true };
 }
 
-export async function connect(nwcUrl: string): Promise<{ success: boolean; balance?: number; error?: string }> {
+export async function connect(
+  nwcUrl: string,
+): Promise<{ success: boolean; balance?: number; error?: string }> {
   const validation = validateNwcUrl(nwcUrl);
   if (!validation.valid) {
     return { success: false, error: validation.error };
@@ -37,7 +39,9 @@ export async function connect(nwcUrl: string): Promise<{ success: boolean; balan
   try {
     // Close existing provider if any
     if (provider) {
-      try { provider.close(); } catch {}
+      try {
+        provider.close();
+      } catch {}
     }
 
     provider = new NostrWebLNProvider({
@@ -63,7 +67,9 @@ export async function connect(nwcUrl: string): Promise<{ success: boolean; balan
 
 export async function disconnect(): Promise<void> {
   if (provider) {
-    try { provider.close(); } catch {}
+    try {
+      provider.close();
+    } catch {}
     provider = null;
   }
   await SecureStore.deleteItemAsync(NWC_URL_KEY);

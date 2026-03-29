@@ -62,7 +62,12 @@ function isLightningAddress(input: string): boolean {
 
 function isValidInvoice(data: string): boolean {
   const lower = data.toLowerCase();
-  return lower.startsWith('lnbc') || lower.startsWith('lntb') || lower.startsWith('lnts') || lower.startsWith('lnbs');
+  return (
+    lower.startsWith('lnbc') ||
+    lower.startsWith('lntb') ||
+    lower.startsWith('lnts') ||
+    lower.startsWith('lnbs')
+  );
 }
 
 const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
@@ -130,7 +135,7 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
         const params = await resolveLightningAddress(invoiceData);
         if (!cancelled) {
           setLnurlParams(params);
-          setDecoded(prev => ({
+          setDecoded((prev) => ({
             ...prev!,
             description: params.description || prev?.description || null,
           }));
@@ -144,7 +149,9 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
         if (!cancelled) setResolving(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [scanned, invoiceData]);
 
   const processInput = (data: string) => {
@@ -254,20 +261,21 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
     setResolving(false);
   };
 
-  const handleSheetChange = useCallback((index: number) => {
-    if (index === -1) onClose();
-  }, [onClose]);
+  const handleSheetChange = useCallback(
+    (index: number) => {
+      if (index === -1) onClose();
+    },
+    [onClose],
+  );
 
   const renderBackdrop = useCallback(
     (props: any) => <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />,
-    []
+    [],
   );
 
   if (!visible || !permission) return null;
 
-  const canSend = needsAmount
-    ? (lnurlParams && currentSats > 0 && !resolving)
-    : !!invoiceData;
+  const canSend = needsAmount ? lnurlParams && currentSats > 0 && !resolving : !!invoiceData;
 
   return (
     <BottomSheet
@@ -281,184 +289,217 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
       backgroundStyle={styles.sheetBackground}
     >
       <BottomSheetView style={styles.content}>
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
-        <View style={styles.innerContent}>
-        <Text style={styles.title}>Send</Text>
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+          <View style={styles.innerContent}>
+            <Text style={styles.title}>Send</Text>
 
-        {/* Mode tabs */}
-        {!scanned && (
-          <View style={styles.tabRow}>
-            <TouchableOpacity
-              style={[styles.tab, inputMode === 'scan' && styles.tabActive]}
-              onPress={() => setInputMode('scan')}
-            >
-              <Text style={[styles.tabText, inputMode === 'scan' && styles.tabTextActive]}>
-                Scan
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.tab, inputMode === 'paste' && styles.tabActive]}
-              onPress={() => setInputMode('paste')}
-            >
-              <Text style={[styles.tabText, inputMode === 'paste' && styles.tabTextActive]}>
-                Input
-              </Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Scanner or paste input */}
-        {!scanned ? (
-          inputMode === 'scan' ? (
-            <View style={styles.cameraContainer}>
-              {!permission.granted ? (
-                <View style={styles.permissionContainer}>
-                  <Text style={styles.permissionText}>Camera access needed to scan QR codes</Text>
-                  <TouchableOpacity style={styles.permissionButton} onPress={requestPermission}>
-                    <Text style={styles.permissionButtonText}>Grant Permission</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <CameraView
-                  style={styles.camera}
-                  facing="back"
-                  barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-                  onBarcodeScanned={handleBarCodeScanned}
-                />
-              )}
-            </View>
-          ) : (
-            <View style={styles.pasteSection}>
-              <TextInput
-                style={styles.pasteInput}
-                placeholder="Paste invoice or lightning address..."
-                placeholderTextColor={colors.textSupplementary}
-                value={pasteText}
-                onChangeText={setPasteText}
-                multiline
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              <View style={styles.pasteButtonRow}>
-                <TouchableOpacity style={styles.pasteButton} onPress={handlePaste}>
-                  <Text style={styles.pasteButtonText}>Paste from clipboard</Text>
+            {/* Mode tabs */}
+            {!scanned && (
+              <View style={styles.tabRow}>
+                <TouchableOpacity
+                  style={[styles.tab, inputMode === 'scan' && styles.tabActive]}
+                  onPress={() => setInputMode('scan')}
+                >
+                  <Text style={[styles.tabText, inputMode === 'scan' && styles.tabTextActive]}>
+                    Scan
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.goButton, !pasteText.trim() && styles.goButtonDisabled]}
-                  onPress={handlePasteSubmit}
-                  disabled={!pasteText.trim()}
+                  style={[styles.tab, inputMode === 'paste' && styles.tabActive]}
+                  onPress={() => setInputMode('paste')}
                 >
-                  <Text style={styles.goButtonText}>Go</Text>
+                  <Text style={[styles.tabText, inputMode === 'paste' && styles.tabTextActive]}>
+                    Input
+                  </Text>
                 </TouchableOpacity>
               </View>
-            </View>
-          )
-        ) : (
-          /* Invoice/address detected - show details */
-          <View style={styles.detailsCard}>
-            {decoded?.description ? (
-              <Text style={styles.detailDescription}>{decoded.description}</Text>
-            ) : null}
+            )}
 
-            {needsAmount ? (
-              /* Lightning address: show amount input */
-              <View style={styles.amountSection}>
-                {resolving ? (
-                  <ActivityIndicator size="small" color={colors.brandPink} />
-                ) : lnurlParams ? (
-                  <>
-                    <View style={styles.amountRow}>
-                      <TextInput
-                        style={styles.amountInput}
-                        value={inputUnit === 'sats' ? satsValue : fiatValue}
-                        onChangeText={inputUnit === 'sats' ? handleSatsChange : handleFiatChange}
-                        keyboardType={inputUnit === 'sats' ? 'numeric' : 'decimal-pad'}
-                        placeholder={inputUnit === 'sats' ? '0' : '0.00'}
-                        placeholderTextColor={colors.textSupplementary}
-                      />
-                      <TouchableOpacity
-                        style={[styles.unitButton, inputUnit === 'sats' && styles.unitButtonActive]}
-                        onPress={() => setInputUnit('sats')}
-                      >
-                        <Text style={[styles.unitButtonText, inputUnit === 'sats' && styles.unitButtonTextActive]}>
-                          Sats
-                        </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.unitButton, inputUnit === 'fiat' && styles.unitButtonActive]}
-                        onPress={() => setInputUnit('fiat')}
-                      >
-                        <Text style={[styles.unitButtonText, inputUnit === 'fiat' && styles.unitButtonTextActive]}>
-                          {currency}
-                        </Text>
+            {/* Scanner or paste input */}
+            {!scanned ? (
+              inputMode === 'scan' ? (
+                <View style={styles.cameraContainer}>
+                  {!permission.granted ? (
+                    <View style={styles.permissionContainer}>
+                      <Text style={styles.permissionText}>
+                        Camera access needed to scan QR codes
+                      </Text>
+                      <TouchableOpacity style={styles.permissionButton} onPress={requestPermission}>
+                        <Text style={styles.permissionButtonText}>Grant Permission</Text>
                       </TouchableOpacity>
                     </View>
-                    <Text style={styles.convertedAmount}>
-                      {inputUnit === 'sats'
-                        ? (btcPrice && currentSats > 0 ? satsToFiatString(currentSats, btcPrice, currency) : '')
-                        : (currentSats > 0 ? `${currentSats.toLocaleString()} sats` : '')
-                      }
-                    </Text>
-                    <Text style={styles.rangeText}>
-                      {lnurlParams.minSats.toLocaleString()} – {lnurlParams.maxSats.toLocaleString()} sats
-                    </Text>
-                  </>
+                  ) : (
+                    <CameraView
+                      style={styles.camera}
+                      facing="back"
+                      barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+                      onBarcodeScanned={handleBarCodeScanned}
+                    />
+                  )}
+                </View>
+              ) : (
+                <View style={styles.pasteSection}>
+                  <TextInput
+                    style={styles.pasteInput}
+                    placeholder="Paste invoice or lightning address..."
+                    placeholderTextColor={colors.textSupplementary}
+                    value={pasteText}
+                    onChangeText={setPasteText}
+                    multiline
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                  <View style={styles.pasteButtonRow}>
+                    <TouchableOpacity style={styles.pasteButton} onPress={handlePaste}>
+                      <Text style={styles.pasteButtonText}>Paste from clipboard</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.goButton, !pasteText.trim() && styles.goButtonDisabled]}
+                      onPress={handlePasteSubmit}
+                      disabled={!pasteText.trim()}
+                    >
+                      <Text style={styles.goButtonText}>Go</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )
+            ) : (
+              /* Invoice/address detected - show details */
+              <View style={styles.detailsCard}>
+                {decoded?.description ? (
+                  <Text style={styles.detailDescription}>{decoded.description}</Text>
                 ) : null}
-              </View>
-            ) : decoded?.amountSats !== null && decoded?.amountSats !== undefined ? (
-              /* Bolt11 with amount */
-              <View style={styles.amountDisplay}>
-                <Text style={styles.amountValue}>
-                  {decoded.amountSats.toLocaleString()} sats
-                </Text>
-                {btcPrice ? (
-                  <Text style={styles.amountFiat}>
-                    {satsToFiatString(decoded.amountSats, btcPrice, currency)}
+
+                {needsAmount ? (
+                  /* Lightning address: show amount input */
+                  <View style={styles.amountSection}>
+                    {resolving ? (
+                      <ActivityIndicator size="small" color={colors.brandPink} />
+                    ) : lnurlParams ? (
+                      <>
+                        <View style={styles.amountRow}>
+                          <TextInput
+                            style={styles.amountInput}
+                            value={inputUnit === 'sats' ? satsValue : fiatValue}
+                            onChangeText={
+                              inputUnit === 'sats' ? handleSatsChange : handleFiatChange
+                            }
+                            keyboardType={inputUnit === 'sats' ? 'numeric' : 'decimal-pad'}
+                            placeholder={inputUnit === 'sats' ? '0' : '0.00'}
+                            placeholderTextColor={colors.textSupplementary}
+                          />
+                          <TouchableOpacity
+                            style={[
+                              styles.unitButton,
+                              inputUnit === 'sats' && styles.unitButtonActive,
+                            ]}
+                            onPress={() => setInputUnit('sats')}
+                          >
+                            <Text
+                              style={[
+                                styles.unitButtonText,
+                                inputUnit === 'sats' && styles.unitButtonTextActive,
+                              ]}
+                            >
+                              Sats
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[
+                              styles.unitButton,
+                              inputUnit === 'fiat' && styles.unitButtonActive,
+                            ]}
+                            onPress={() => setInputUnit('fiat')}
+                          >
+                            <Text
+                              style={[
+                                styles.unitButtonText,
+                                inputUnit === 'fiat' && styles.unitButtonTextActive,
+                              ]}
+                            >
+                              {currency}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                        <Text style={styles.convertedAmount}>
+                          {inputUnit === 'sats'
+                            ? btcPrice && currentSats > 0
+                              ? satsToFiatString(currentSats, btcPrice, currency)
+                              : ''
+                            : currentSats > 0
+                              ? `${currentSats.toLocaleString()} sats`
+                              : ''}
+                        </Text>
+                        <Text style={styles.rangeText}>
+                          {lnurlParams.minSats.toLocaleString()} –{' '}
+                          {lnurlParams.maxSats.toLocaleString()} sats
+                        </Text>
+                      </>
+                    ) : null}
+                  </View>
+                ) : decoded?.amountSats !== null && decoded?.amountSats !== undefined ? (
+                  /* Bolt11 with amount */
+                  <View style={styles.amountDisplay}>
+                    <Text style={styles.amountValue}>
+                      {decoded.amountSats.toLocaleString()} sats
+                    </Text>
+                    {btcPrice ? (
+                      <Text style={styles.amountFiat}>
+                        {satsToFiatString(decoded.amountSats, btcPrice, currency)}
+                      </Text>
+                    ) : null}
+                  </View>
+                ) : (
+                  <Text style={styles.amountValue}>Amount not specified</Text>
+                )}
+
+                {isLightningAddress(invoiceData || '') ? (
+                  <Text style={styles.detailAddress}>{invoiceData}</Text>
+                ) : (
+                  <Text style={styles.invoiceText} numberOfLines={3}>
+                    {invoiceData}
                   </Text>
-                ) : null}
+                )}
+
+                <TouchableOpacity onPress={handleReset}>
+                  <Text style={styles.resetText}>Scan / paste different invoice</Text>
+                </TouchableOpacity>
               </View>
-            ) : (
-              <Text style={styles.amountValue}>Amount not specified</Text>
             )}
 
-            {isLightningAddress(invoiceData || '') ? (
-              <Text style={styles.detailAddress}>{invoiceData}</Text>
-            ) : (
-              <Text style={styles.invoiceText} numberOfLines={3}>{invoiceData}</Text>
+            {/* Balance */}
+            {balance !== null && btcPrice !== null && (
+              <Text style={styles.balanceText}>
+                Balance: {balance.toLocaleString()} sats (
+                {satsToFiatString(balance, btcPrice, currency)})
+              </Text>
             )}
 
-            <TouchableOpacity onPress={handleReset}>
-              <Text style={styles.resetText}>Scan / paste different invoice</Text>
-            </TouchableOpacity>
+            {/* Action buttons */}
+            <View style={styles.buttonRow}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => {
+                  handleReset();
+                  onClose();
+                }}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.sendButton, (!canSend || sending) && styles.sendButtonDisabled]}
+                onPress={handleSend}
+                disabled={!canSend || sending}
+              >
+                {sending ? (
+                  <ActivityIndicator color={colors.brandPink} />
+                ) : (
+                  <Text style={styles.sendButtonText}>Send</Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
-        )}
-
-        {/* Balance */}
-        {balance !== null && btcPrice !== null && (
-          <Text style={styles.balanceText}>
-            Balance: {balance.toLocaleString()} sats ({satsToFiatString(balance, btcPrice, currency)})
-          </Text>
-        )}
-
-        {/* Action buttons */}
-        <View style={styles.buttonRow}>
-          <TouchableOpacity style={styles.cancelButton} onPress={() => { handleReset(); onClose(); }}>
-            <Text style={styles.cancelButtonText}>Cancel</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.sendButton, (!canSend || sending) && styles.sendButtonDisabled]}
-            onPress={handleSend}
-            disabled={!canSend || sending}
-          >
-            {sending ? (
-              <ActivityIndicator color={colors.brandPink} />
-            ) : (
-              <Text style={styles.sendButtonText}>Send</Text>
-            )}
-          </TouchableOpacity>
-        </View>
-        </View>
-      </TouchableWithoutFeedback>
+        </TouchableWithoutFeedback>
       </BottomSheetView>
     </BottomSheet>
   );
