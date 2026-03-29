@@ -58,16 +58,12 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   return (
     <View style={styles.container}>
-      {/* Back button */}
-      <View style={styles.backBar}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Text style={styles.backArrow}>‹</Text>
-        </TouchableOpacity>
-      </View>
-
       {/* Video or header image */}
       {youtubeId ? (
         <View style={styles.videoContainer}>
+          <TouchableOpacity style={styles.backButtonOverlay} onPress={() => navigation.goBack()}>
+            <Text style={styles.backArrow}>‹</Text>
+          </TouchableOpacity>
           <YoutubePlayer
             height={220}
             videoId={youtubeId}
@@ -77,6 +73,9 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         <TouchableOpacity style={styles.headerContainer} onPress={() => Linking.openURL(mission.videoUrl!)} activeOpacity={0.8}>
           <Image source={course.image} style={styles.headerImage} resizeMode="cover" />
           <View style={styles.headerOverlay} />
+          <TouchableOpacity style={styles.backButtonOverlay} onPress={() => navigation.goBack()}>
+            <Text style={styles.backArrow}>‹</Text>
+          </TouchableOpacity>
           <View style={styles.playButton}>
             <Text style={styles.playIcon}>▶</Text>
           </View>
@@ -86,12 +85,18 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         </TouchableOpacity>
       ) : mission.videoUrl === null ? (
         <View style={styles.comingSoonHeader}>
+          <TouchableOpacity style={styles.backButtonOnGrey} onPress={() => navigation.goBack()}>
+            <Text style={styles.backArrow}>‹</Text>
+          </TouchableOpacity>
           <Text style={styles.comingSoonText}>Video coming soon</Text>
         </View>
       ) : (
         <View style={styles.headerContainer}>
           <Image source={course.image} style={styles.headerImage} resizeMode="cover" />
           <View style={styles.headerOverlay} />
+          <TouchableOpacity style={styles.backButtonOverlay} onPress={() => navigation.goBack()}>
+            <Text style={styles.backArrow}>‹</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -137,13 +142,22 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  backBar: {
-    backgroundColor: colors.background,
-    paddingTop: 44,
-    paddingHorizontal: 16,
-    paddingBottom: 8,
+  backButtonOverlay: {
+    position: 'absolute',
+    top: 44,
+    left: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.brandPink,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
   },
-  backButton: {
+  backButtonOnGrey: {
+    position: 'absolute',
+    top: 44,
+    left: 16,
     width: 36,
     height: 36,
     borderRadius: 18,
@@ -159,6 +173,7 @@ const styles = StyleSheet.create({
   },
   videoContainer: {
     backgroundColor: '#000',
+    paddingTop: 44,
   },
   headerContainer: {
     height: 180,
@@ -205,15 +220,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   comingSoonHeader: {
-    height: 100,
-    backgroundColor: colors.divider,
+    height: 140,
+    backgroundColor: colors.brandPink,
     justifyContent: 'center',
     alignItems: 'center',
   },
   comingSoonText: {
-    color: colors.textSupplementary,
+    color: colors.white,
     fontSize: 14,
     fontWeight: '600',
+    opacity: 0.8,
   },
   scrollArea: {
     flex: 1,

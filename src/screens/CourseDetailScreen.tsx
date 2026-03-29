@@ -68,9 +68,9 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           return (
             <TouchableOpacity
               key={mission.id}
-              style={styles.missionCard}
-              onPress={() => navigation.navigate('MissionDetail', { courseId, missionId: mission.id })}
-              activeOpacity={0.7}
+              style={[styles.missionCard, mission.videoUrl === null && !done && styles.missionCardDisabled]}
+              onPress={() => mission.videoUrl !== null || done ? navigation.navigate('MissionDetail', { courseId, missionId: mission.id }) : null}
+              activeOpacity={mission.videoUrl === null && !done ? 1 : 0.7}
             >
               {/* Thumbnail */}
               <Image source={course.image} style={styles.missionThumb} resizeMode="cover" />
@@ -80,6 +80,10 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                 {done ? (
                   <View style={styles.chipEarned}>
                     <Text style={styles.chipEarnedText}>Completed</Text>
+                  </View>
+                ) : mission.videoUrl === null ? (
+                  <View style={styles.chipComingSoon}>
+                    <Text style={styles.chipComingSoonText}>Coming soon</Text>
                   </View>
                 ) : (
                   <View style={styles.chipStart}>
@@ -258,6 +262,22 @@ const styles = StyleSheet.create({
   rewardText: {
     color: '#2E7D32',
     fontSize: 14,
+    fontWeight: '700',
+  },
+  missionCardDisabled: {
+    opacity: 0.6,
+  },
+  chipComingSoon: {
+    backgroundColor: colors.divider,
+    paddingHorizontal: 14,
+    paddingVertical: 4,
+    borderRadius: 100,
+    alignSelf: 'flex-start',
+    marginTop: 4,
+  },
+  chipComingSoonText: {
+    color: colors.textSupplementary,
+    fontSize: 11,
     fontWeight: '700',
   },
   tipButton: {
