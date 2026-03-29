@@ -4,6 +4,12 @@ export interface LearningOutcome {
   text: string;
 }
 
+export interface Producer {
+  name: string;
+  channelUrl: string;
+  iconUrl: string;
+}
+
 export interface Mission {
   id: string;
   number: number;
@@ -11,6 +17,8 @@ export interface Mission {
   description: string;
   videoUrl: string | null;
   fullVideoUrl: string | null;
+  thumbnailUrl: string | null;
+  producer: Producer | null;
   learningOutcomes: LearningOutcome[];
 }
 

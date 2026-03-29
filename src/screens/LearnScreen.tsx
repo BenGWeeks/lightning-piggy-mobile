@@ -38,6 +38,8 @@ const LearnScreen: React.FC<Props> = ({ navigation }) => {
           style={styles.headerImage}
           resizeMode="cover"
         />
+        <View style={styles.headerOverlay} />
+        <Text style={styles.headerTitle}>Learn</Text>
       </View>
 
       {/* Course grid */}

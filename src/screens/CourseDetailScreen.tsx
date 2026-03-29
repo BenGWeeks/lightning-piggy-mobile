@@ -77,13 +77,18 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
               onPress={() => navigation.navigate('MissionDetail', { courseId, missionId: mission.id })}
               activeOpacity={0.7}
             >
-              {/* Thumbnail — use YouTube video thumbnail if available */}
-              {(() => {
-                const thumbUrl = getYouTubeThumbnail(mission.videoUrl);
-                return thumbUrl
-                  ? <Image source={{ uri: thumbUrl }} style={styles.missionThumb} resizeMode="cover" />
-                  : <Image source={course.image} style={styles.missionThumb} resizeMode="cover" />;
-              })()}
+              {/* Thumbnail — use mission thumbnail, YouTube thumbnail, or course image */}
+              <Image
+                source={
+                  mission.thumbnailUrl
+                    ? { uri: mission.thumbnailUrl }
+                    : getYouTubeThumbnail(mission.videoUrl)
+                      ? { uri: getYouTubeThumbnail(mission.videoUrl)! }
+                      : course.image
+                }
+                style={styles.missionThumb}
+                resizeMode="cover"
+              />
               <View style={styles.missionRight}>
                 <Text style={styles.missionTitle}>{mission.title}</Text>
                 <Text style={styles.missionMeta}>{mission.learningOutcomes.length} outcomes</Text>

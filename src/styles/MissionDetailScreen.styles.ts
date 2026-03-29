@@ -37,8 +37,12 @@ export const styles = StyleSheet.create({
   },
   videoContainer: {
     backgroundColor: '#000',
-    height: 264,
+    aspectRatio: 16 / 9,
+    width: '100%',
     position: 'relative',
+  },
+  videoTouchable: {
+    flex: 1,
   },
   videoThumbnail: {
     width: '100%',
@@ -81,6 +85,27 @@ export const styles = StyleSheet.create({
     padding: 20,
     gap: 12,
     paddingBottom: 40,
+  },
+  producerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: 8,
+  },
+  producerIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+  },
+  producerText: {
+    color: colors.brandPink,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  producerArrow: {
+    color: colors.brandPink,
+    fontSize: 16,
+    fontWeight: '700',
   },
   fullEpisodeLink: {
     color: colors.brandPink,

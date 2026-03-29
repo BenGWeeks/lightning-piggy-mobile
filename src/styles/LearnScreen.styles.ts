@@ -15,6 +15,18 @@ export const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  headerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(236, 0, 140, 0.65)',
+  },
+  headerTitle: {
+    position: 'absolute',
+    bottom: 16,
+    alignSelf: 'center',
+    color: colors.white,
+    fontSize: 22,
+    fontWeight: '700',
+  },
   scrollArea: {
     flex: 1,
   },

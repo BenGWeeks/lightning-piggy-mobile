@@ -45,6 +45,11 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const completed = isMissionComplete(progress, mission.id);
   const youtubeId = mission.videoUrl ? extractYouTubeId(mission.videoUrl) : null;
   const hasFullVideo = !!mission.fullVideoUrl;
+  const thumbnailSource = mission.thumbnailUrl
+    ? { uri: mission.thumbnailUrl }
+    : youtubeId
+      ? { uri: `https://img.youtube.com/vi/${youtubeId}/mqdefault.jpg` }
+      : course.image;
 
   const handleToggle = async () => {
     const updated = completed
@@ -55,47 +60,53 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   return (
     <View style={styles.container}>
-      {/* Video or header image */}
-      {youtubeId ? (
-        <TouchableOpacity
-          style={styles.videoContainer}
-          onPress={() => Linking.openURL(mission.videoUrl!)}
-          activeOpacity={0.8}
-        >
-          <Image
-            source={{ uri: `https://img.youtube.com/vi/${youtubeId}/mqdefault.jpg` }}
-            style={styles.videoThumbnail}
-            resizeMode="cover"
-          />
-          <TouchableOpacity style={styles.backButtonOverlay} onPress={() => navigation.goBack()}>
-            <Text style={styles.backArrow}>‹</Text>
-          </TouchableOpacity>
-          <View style={styles.playButton}>
-            <Text style={styles.playIcon}>▶</Text>
-          </View>
-        </TouchableOpacity>
-      ) : (
-        <View style={styles.videoContainer}>
-          <Image
-            source={course.image}
-            style={styles.videoThumbnail}
-            resizeMode="cover"
-          />
-          <TouchableOpacity style={styles.backButtonOverlay} onPress={() => navigation.goBack()}>
-            <Text style={styles.backArrow}>‹</Text>
-          </TouchableOpacity>
-          {hasFullVideo && (
-            <TouchableOpacity
-              style={styles.playButton}
-              onPress={() => Linking.openURL(mission.fullVideoUrl!)}
-            >
+      {/* Video thumbnail — always 16:9 */}
+      <View style={styles.videoContainer}>
+        {mission.videoUrl || hasFullVideo ? (
+          <TouchableOpacity
+            style={styles.videoTouchable}
+            onPress={() => Linking.openURL(mission.videoUrl ?? mission.fullVideoUrl!)}
+            activeOpacity={0.8}
+          >
+            <Image
+              source={thumbnailSource}
+              style={styles.videoThumbnail}
+              resizeMode="cover"
+            />
+            <View style={styles.playButton}>
               <Text style={styles.playIcon}>▶</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
+            </View>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.videoTouchable}>
+            <Image
+              source={thumbnailSource}
+              style={styles.videoThumbnail}
+              resizeMode="cover"
+            />
+          </View>
+        )}
+        <TouchableOpacity style={styles.backButtonOverlay} onPress={() => navigation.goBack()}>
+          <Text style={styles.backArrow}>‹</Text>
+        </TouchableOpacity>
+      </View>
 
       <ScrollView style={styles.scrollArea} contentContainerStyle={styles.scrollContent}>
+        {/* Producer badge */}
+        {mission.producer && (
+          <TouchableOpacity
+            style={styles.producerRow}
+            onPress={() => Linking.openURL(mission.producer!.channelUrl)}
+          >
+            <Image
+              source={{ uri: mission.producer.iconUrl }}
+              style={styles.producerIcon}
+            />
+            <Text style={styles.producerText}>{mission.producer.name}</Text>
+            <Text style={styles.producerArrow}>›</Text>
+          </TouchableOpacity>
+        )}
+
         {/* Watch full episode link */}
         {hasFullVideo && (
           <TouchableOpacity onPress={() => Linking.openURL(mission.fullVideoUrl!)}>
