@@ -60,7 +60,7 @@ export const courses: Course[] = [
         number: 3,
         title: 'Bitcoin and the Beast',
         description: 'When the twins are forced to choose between dollars and Bitcoin at a garage sale, they travel through the internet to learn what makes money good.',
-        videoUrl: null,
+        videoUrl: 'https://www.youtube.com/watch?v=_ekzsZZGfsk',
         fullVideoUrl: 'https://www.angel.com/watch/tuttle-twins/episode/de46fca9-d387-47f5-b13f-ff336885518c/season-2/episode-3/bitcoin-and-the-beast',
         learningOutcomes: [
           { text: 'Understand what makes money "good" or "bad"' },
