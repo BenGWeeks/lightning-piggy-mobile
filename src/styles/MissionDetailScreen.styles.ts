@@ -1,0 +1,200 @@
+import { StyleSheet, Platform, StatusBar } from 'react-native';
+import { colors } from './theme';
+
+const STATUS_BAR_TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 40) + 4 : 44;
+
+export const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  backButtonOverlay: {
+    position: 'absolute',
+    top: STATUS_BAR_TOP,
+    left: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.brandPink,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  backArrow: {
+    color: colors.white,
+    fontSize: 24,
+    fontWeight: '700',
+    marginTop: -2,
+  },
+  videoContainer: {
+    backgroundColor: '#000',
+    aspectRatio: 16 / 9,
+    width: '100%',
+    position: 'relative',
+  },
+  videoTouchable: {
+    flex: 1,
+  },
+  videoThumbnail: {
+    width: '100%',
+    height: '100%',
+  },
+  playButton: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    width: 64,
+    height: 64,
+    marginTop: -32,
+    marginLeft: -32,
+    borderRadius: 32,
+    backgroundColor: 'rgba(236, 0, 140, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  playIcon: {
+    fontSize: 28,
+    color: colors.white,
+    marginLeft: 4,
+  },
+  comingSoonBubble: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    marginTop: -18,
+    marginLeft: -60,
+    width: 120,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  comingSoonBubbleText: {
+    color: colors.white,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  scrollArea: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: 20,
+    gap: 12,
+    paddingBottom: 40,
+  },
+  producerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: 8,
+  },
+  producerIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+  },
+  producerText: {
+    color: colors.brandPink,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  producerArrow: {
+    color: colors.brandPink,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  fullEpisodeLink: {
+    color: colors.brandPink,
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  missionLabel: {
+    fontSize: 13,
+    color: colors.textSupplementary,
+    fontWeight: '600',
+  },
+  missionTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: colors.textHeader,
+  },
+  missionDescription: {
+    fontSize: 14,
+    color: colors.textBody,
+    lineHeight: 22,
+  },
+  outcomesTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.textHeader,
+    marginTop: 8,
+  },
+  outcomeRow: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'flex-start',
+  },
+  outcomeDot: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: colors.brandPink,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 2,
+    flexShrink: 0,
+  },
+  outcomeDotComplete: {
+    backgroundColor: colors.brandPink,
+    borderColor: colors.brandPink,
+  },
+  outcomeDotCheck: {
+    color: colors.white,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  outcomeText: {
+    fontSize: 14,
+    color: colors.textBody,
+    lineHeight: 22,
+    flex: 1,
+  },
+  completeButton: {
+    backgroundColor: colors.brandPink,
+    height: 52,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  completeButtonDisabled: {
+    backgroundColor: colors.divider,
+  },
+  completeButtonText: {
+    color: colors.white,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  completedBanner: {
+    backgroundColor: colors.greenLight,
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  completedBannerText: {
+    color: colors.greenDark,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  incompleteLink: {
+    color: colors.textSupplementary,
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 8,
+  },
+});
