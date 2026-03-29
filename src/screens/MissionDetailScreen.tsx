@@ -9,7 +9,7 @@ import {
   Linking,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import YoutubePlayer from 'react-native-youtube-iframe';
+import { WebView } from 'react-native-webview';
 import { colors } from '../styles/theme';
 import { courses } from '../data/learnContent';
 import {
@@ -64,9 +64,10 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           <TouchableOpacity style={styles.backButtonOverlay} onPress={() => navigation.goBack()}>
             <Text style={styles.backArrow}>‹</Text>
           </TouchableOpacity>
-          <YoutubePlayer
-            height={220}
-            videoId={youtubeId}
+          <WebView
+            style={styles.videoPlayer}
+            source={{ uri: `https://www.youtube.com/embed/${youtubeId}?rel=0&modestbranding=1` }}
+            allowsFullscreenVideo
           />
         </View>
       ) : (
@@ -159,6 +160,11 @@ const styles = StyleSheet.create({
   videoContainer: {
     backgroundColor: '#000',
     paddingTop: 44,
+    height: 264,
+  },
+  videoPlayer: {
+    flex: 1,
+    backgroundColor: '#000',
   },
   comingSoonHeader: {
     height: 140,
