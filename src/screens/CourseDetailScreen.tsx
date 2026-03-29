@@ -124,7 +124,7 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                 <Text style={styles.rewardText}>Course complete!</Text>
               </View>
               <TouchableOpacity style={styles.tipButton} onPress={() => setTipVisible(true)}>
-                <Text style={styles.tipButtonText}>Claim Your {course.satsReward.toLocaleString()} Sats Tip</Text>
+                <Text style={styles.tipButtonText}>Request a Tip</Text>
               </TouchableOpacity>
             </>
           )}

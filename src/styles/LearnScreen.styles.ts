@@ -78,7 +78,7 @@ export const styles = StyleSheet.create({
     position: 'absolute',
     top: 8,
     right: 8,
-    backgroundColor: colors.brandPink,
+    backgroundColor: colors.green,
     width: 28,
     height: 28,
     borderRadius: 14,

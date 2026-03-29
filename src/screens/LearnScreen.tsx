@@ -80,7 +80,7 @@ const LearnScreen: React.FC<Props> = ({ navigation }) => {
               <View style={styles.chipSpacer} />
               {allDone ? (
                 <View style={styles.chipEarned}>
-                  <Text style={styles.chipEarnedText}>Earned {course.satsReward.toLocaleString()} Sats</Text>
+                  <Text style={styles.chipEarnedText}>Completed</Text>
                 </View>
               ) : completed > 0 ? (
                 <View style={styles.chipProgress}>
