@@ -74,9 +74,9 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           return (
             <TouchableOpacity
               key={mission.id}
-              style={[styles.missionCard, mission.videoUrl === null && !done && styles.missionCardDisabled]}
-              onPress={() => mission.videoUrl !== null || done ? navigation.navigate('MissionDetail', { courseId, missionId: mission.id }) : null}
-              activeOpacity={mission.videoUrl === null && !done ? 1 : 0.7}
+              style={styles.missionCard}
+              onPress={() => navigation.navigate('MissionDetail', { courseId, missionId: mission.id })}
+              activeOpacity={0.7}
             >
               {/* Thumbnail — use YouTube video thumbnail if available */}
               {(() => {
@@ -274,9 +274,6 @@ const styles = StyleSheet.create({
     color: '#2E7D32',
     fontSize: 14,
     fontWeight: '700',
-  },
-  missionCardDisabled: {
-    opacity: 0.6,
   },
   chipComingSoon: {
     backgroundColor: colors.divider,

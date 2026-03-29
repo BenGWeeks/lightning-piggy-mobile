@@ -47,7 +47,7 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const completed = isMissionComplete(progress, mission.id);
   const youtubeId = mission.videoUrl ? extractYouTubeId(mission.videoUrl) : null;
-  const isAngelVideo = mission.videoUrl?.includes('angel.com');
+  const hasFullVideo = !!mission.fullVideoUrl;
 
   const handleToggle = async () => {
     const updated = completed
@@ -69,38 +69,23 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
             videoId={youtubeId}
           />
         </View>
-      ) : isAngelVideo ? (
-        <TouchableOpacity style={styles.headerContainer} onPress={() => Linking.openURL(mission.videoUrl!)} activeOpacity={0.8}>
-          <Image source={course.image} style={styles.headerImage} resizeMode="cover" />
-          <View style={styles.headerOverlay} />
-          <TouchableOpacity style={styles.backButtonOverlay} onPress={() => navigation.goBack()}>
-            <Text style={styles.backArrow}>‹</Text>
-          </TouchableOpacity>
-          <View style={styles.playButton}>
-            <Text style={styles.playIcon}>▶</Text>
-          </View>
-          <View style={styles.angelBadge}>
-            <Text style={styles.angelBadgeText}>Watch free on Angel app</Text>
-          </View>
-        </TouchableOpacity>
-      ) : mission.videoUrl === null ? (
+      ) : (
         <View style={styles.comingSoonHeader}>
           <TouchableOpacity style={styles.backButtonOnGrey} onPress={() => navigation.goBack()}>
             <Text style={styles.backArrow}>‹</Text>
           </TouchableOpacity>
           <Text style={styles.comingSoonText}>Video coming soon</Text>
         </View>
-      ) : (
-        <View style={styles.headerContainer}>
-          <Image source={course.image} style={styles.headerImage} resizeMode="cover" />
-          <View style={styles.headerOverlay} />
-          <TouchableOpacity style={styles.backButtonOverlay} onPress={() => navigation.goBack()}>
-            <Text style={styles.backArrow}>‹</Text>
-          </TouchableOpacity>
-        </View>
       )}
 
       <ScrollView style={styles.scrollArea} contentContainerStyle={styles.scrollContent}>
+        {/* Watch full episode link */}
+        {hasFullVideo && (
+          <TouchableOpacity onPress={() => Linking.openURL(mission.fullVideoUrl!)}>
+            <Text style={styles.fullEpisodeLink}>Watch full episode free on Angel app</Text>
+          </TouchableOpacity>
+        )}
+
         {/* Mission info */}
         <Text style={styles.missionLabel}>Mission {mission.number}</Text>
         <Text style={styles.missionTitle}>{mission.title}</Text>
@@ -175,50 +160,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
     paddingTop: 44,
   },
-  headerContainer: {
-    height: 180,
-    position: 'relative',
-  },
-  headerImage: {
-    width: '100%',
-    height: '100%',
-  },
-  headerOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.25)',
-  },
-  playButton: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    width: 56,
-    height: 56,
-    marginTop: -28,
-    marginLeft: -28,
-    borderRadius: 28,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  playIcon: {
-    fontSize: 24,
-    color: colors.brandPink,
-    marginLeft: 4,
-  },
-  angelBadge: {
-    position: 'absolute',
-    bottom: 12,
-    alignSelf: 'center',
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 100,
-  },
-  angelBadgeText: {
-    color: colors.brandPink,
-    fontSize: 13,
-    fontWeight: '700',
-  },
   comingSoonHeader: {
     height: 140,
     backgroundColor: colors.brandPink,
@@ -238,6 +179,12 @@ const styles = StyleSheet.create({
     padding: 20,
     gap: 12,
     paddingBottom: 40,
+  },
+  fullEpisodeLink: {
+    color: colors.brandPink,
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
   },
   missionLabel: {
     fontSize: 13,
