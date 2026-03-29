@@ -4,12 +4,10 @@ import {
   Text,
   Image,
   TouchableOpacity,
-  StyleSheet,
   ScrollView,
   Linking,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { colors } from '../styles/theme';
 import { courses } from '../data/learnContent';
 import {
   getProgress,
@@ -18,6 +16,7 @@ import {
   isMissionComplete,
   LearnProgress,
 } from '../services/learnProgressService';
+import { styles } from '../styles/MissionDetailScreen.styles';
 
 interface Props {
   route: any;
@@ -25,7 +24,6 @@ interface Props {
 }
 
 function extractYouTubeId(url: string): string | null {
-  // Handle youtube.com/watch?v=ID and youtu.be/ID formats
   const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/);
   return match ? match[1] : null;
 }
@@ -128,178 +126,5 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  backButtonOverlay: {
-    position: 'absolute',
-    top: 44,
-    left: 16,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.brandPink,
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 10,
-  },
-  backButtonOnGrey: {
-    position: 'absolute',
-    top: 44,
-    left: 16,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.brandPink,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  backArrow: {
-    color: colors.white,
-    fontSize: 24,
-    fontWeight: '700',
-    marginTop: -2,
-  },
-  videoContainer: {
-    backgroundColor: '#000',
-    height: 264,
-    position: 'relative',
-  },
-  videoThumbnail: {
-    width: '100%',
-    height: '100%',
-  },
-  playButton: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    width: 64,
-    height: 64,
-    marginTop: -32,
-    marginLeft: -32,
-    borderRadius: 32,
-    backgroundColor: 'rgba(236, 0, 140, 0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  playIcon: {
-    fontSize: 28,
-    color: colors.white,
-    marginLeft: 4,
-  },
-  comingSoonHeader: {
-    height: 140,
-    backgroundColor: colors.brandPink,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  comingSoonText: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: '600',
-    opacity: 0.8,
-  },
-  scrollArea: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 20,
-    gap: 12,
-    paddingBottom: 40,
-  },
-  fullEpisodeLink: {
-    color: colors.brandPink,
-    fontSize: 13,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  missionLabel: {
-    fontSize: 13,
-    color: colors.textSupplementary,
-    fontWeight: '600',
-  },
-  missionTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: colors.textHeader,
-  },
-  missionDescription: {
-    fontSize: 14,
-    color: colors.textBody,
-    lineHeight: 22,
-  },
-  outcomesTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.textHeader,
-    marginTop: 8,
-  },
-  outcomeRow: {
-    flexDirection: 'row',
-    gap: 12,
-    alignItems: 'flex-start',
-  },
-  outcomeDot: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: colors.brandPink,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 2,
-    flexShrink: 0,
-  },
-  outcomeDotComplete: {
-    backgroundColor: colors.brandPink,
-    borderColor: colors.brandPink,
-  },
-  outcomeDotCheck: {
-    color: colors.white,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  outcomeText: {
-    fontSize: 14,
-    color: colors.textBody,
-    lineHeight: 22,
-    flex: 1,
-  },
-  completeButton: {
-    backgroundColor: colors.brandPink,
-    height: 52,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 16,
-  },
-  completeButtonText: {
-    color: colors.white,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  completedBanner: {
-    backgroundColor: '#E8F5E9',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 16,
-  },
-  completedBannerText: {
-    color: '#2E7D32',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  incompleteLink: {
-    color: colors.textSupplementary,
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginTop: 8,
-  },
-});
 
 export default MissionDetailScreen;

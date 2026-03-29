@@ -4,11 +4,9 @@ import {
   Text,
   Image,
   TouchableOpacity,
-  StyleSheet,
   ScrollView,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { colors } from '../styles/theme';
 import { courses } from '../data/learnContent';
 import TipSheet from '../components/TipSheet';
 import {
@@ -18,6 +16,7 @@ import {
   isCourseComplete,
   getCourseCompletedCount,
 } from '../services/learnProgressService';
+import { styles } from '../styles/CourseDetailScreen.styles';
 
 function getYouTubeThumbnail(videoUrl: string | null): string | null {
   if (!videoUrl) return null;
@@ -50,7 +49,7 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   return (
     <View style={styles.container}>
-      {/* Header image - taller to match Figma */}
+      {/* Header image */}
       <View style={styles.headerContainer}>
         <Image source={course.image} style={styles.headerImage} resizeMode="cover" />
         <View style={styles.headerOverlay} />
@@ -127,179 +126,5 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  headerContainer: {
-    height: 280,
-    position: 'relative',
-  },
-  headerImage: {
-    width: '100%',
-    height: '100%',
-  },
-  headerOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-  },
-  backButton: {
-    position: 'absolute',
-    top: 44,
-    left: 16,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.brandPink,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  backArrow: {
-    color: colors.white,
-    fontSize: 24,
-    fontWeight: '700',
-    marginTop: -2,
-  },
-  headerContent: {
-    position: 'absolute',
-    bottom: 24,
-    left: 20,
-    right: 20,
-  },
-  headerTitle: {
-    color: colors.white,
-    fontSize: 32,
-    fontWeight: '700',
-  },
-  headerMeta: {
-    color: colors.white,
-    fontSize: 14,
-    opacity: 0.85,
-    marginTop: 4,
-  },
-  scrollArea: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 20,
-    gap: 12,
-    paddingBottom: 40,
-  },
-  description: {
-    fontSize: 14,
-    color: colors.textBody,
-    lineHeight: 22,
-    marginBottom: 4,
-  },
-  missionCard: {
-    backgroundColor: colors.white,
-    borderRadius: 16,
-    padding: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  missionThumb: {
-    width: 80,
-    height: 45,
-    borderRadius: 8,
-  },
-  missionRight: {
-    flex: 1,
-    gap: 2,
-  },
-  missionTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.textHeader,
-  },
-  missionMeta: {
-    fontSize: 12,
-    color: colors.textSupplementary,
-  },
-  checkCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#4CAF50',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  checkMark: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  chipStart: {
-    backgroundColor: colors.brandPink,
-    paddingHorizontal: 14,
-    paddingVertical: 4,
-    borderRadius: 100,
-    alignSelf: 'flex-start',
-    marginTop: 4,
-  },
-  chipStartText: {
-    color: colors.white,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  chipEarned: {
-    backgroundColor: '#E8F5E9',
-    paddingHorizontal: 14,
-    paddingVertical: 4,
-    borderRadius: 100,
-    alignSelf: 'flex-start',
-    marginTop: 4,
-  },
-  chipEarnedText: {
-    color: '#2E7D32',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  rewardBanner: {
-    backgroundColor: '#E8F5E9',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  rewardText: {
-    color: '#2E7D32',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  chipComingSoon: {
-    backgroundColor: colors.divider,
-    paddingHorizontal: 14,
-    paddingVertical: 4,
-    borderRadius: 100,
-    alignSelf: 'flex-start',
-    marginTop: 4,
-  },
-  chipComingSoonText: {
-    color: colors.textSupplementary,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  tipButton: {
-    backgroundColor: colors.brandPink,
-    height: 52,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  tipButtonText: {
-    color: colors.white,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-});
 
 export default CourseDetailScreen;
