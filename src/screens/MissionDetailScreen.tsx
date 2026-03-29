@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ScrollView,
   Linking,
+  Alert,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { courses } from '../data/learnContent';
@@ -17,6 +18,7 @@ import {
   LearnProgress,
 } from '../services/learnProgressService';
 import { styles } from '../styles/MissionDetailScreen.styles';
+import { colors } from '../styles/theme';
 import { extractYouTubeId } from '../utils/youtube';
 
 interface Props {
@@ -36,7 +38,16 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     }, [])
   );
 
-  if (!course || !mission) return null;
+  if (!course || !mission) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 16 }}>
+        <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 12 }}>Mission not found</Text>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Text style={{ color: colors.brandPink, fontWeight: '700' }}>Go back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   const completed = isMissionComplete(progress, mission.id);
   const youtubeId = mission.videoUrl ? extractYouTubeId(mission.videoUrl) : null;
@@ -62,7 +73,10 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         {mission.videoUrl || hasFullVideo ? (
           <TouchableOpacity
             style={styles.videoTouchable}
-            onPress={() => Linking.openURL(mission.videoUrl ?? mission.fullVideoUrl!).catch(() => {})}
+            onPress={() => Linking.openURL(mission.videoUrl ?? mission.fullVideoUrl!).catch((e) => {
+              console.warn('Failed to open URL:', e);
+              Alert.alert('Unable to open link', 'Please try again later.');
+            })}
             activeOpacity={0.8}
           >
             <Image
@@ -96,7 +110,10 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         {mission.producer && (
           <TouchableOpacity
             style={styles.producerRow}
-            onPress={() => Linking.openURL(mission.producer!.channelUrl).catch(() => {})}
+            onPress={() => Linking.openURL(mission.producer!.channelUrl).catch((e) => {
+              console.warn('Failed to open URL:', e);
+              Alert.alert('Unable to open link', 'Please try again later.');
+            })}
           >
             <Image
               source={{ uri: mission.producer.iconUrl }}
@@ -109,7 +126,10 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
         {/* Watch full episode link */}
         {hasFullVideo && (
-          <TouchableOpacity onPress={() => Linking.openURL(mission.fullVideoUrl!).catch(() => {})}>
+          <TouchableOpacity onPress={() => Linking.openURL(mission.fullVideoUrl!).catch((e) => {
+              console.warn('Failed to open URL:', e);
+              Alert.alert('Unable to open link', 'Please try again later.');
+            })}>
             <Text style={styles.fullEpisodeLink}>Watch full episode free</Text>
           </TouchableOpacity>
         )}

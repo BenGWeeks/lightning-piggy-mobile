@@ -38,7 +38,10 @@ const imageMap: Record<string, any> = {
   'course-investing': require('../../assets/images/course-investing.png'),
 };
 
-export const courses: Course[] = coursesJson.map((raw) => ({
-  ...raw,
-  image: imageMap[raw.image] ?? null,
-}));
+export const courses: Course[] = coursesJson.map((raw) => {
+  const image = imageMap[raw.image];
+  if (!image) {
+    throw new Error(`Unknown course image key in courses.json: "${raw.image}"`);
+  }
+  return { ...raw, image };
+});

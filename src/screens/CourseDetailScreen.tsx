@@ -38,7 +38,16 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     }, [])
   );
 
-  if (!course) return null;
+  if (!course) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 16 }}>
+        <Text style={{ fontSize: 16, fontWeight: '600', marginBottom: 12 }}>Course not found</Text>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Text style={{ color: colors.brandPink, fontWeight: '700' }}>Go back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   const missionIds = course.missions.map(m => m.id);
   const allDone = isCourseComplete(progress, missionIds);

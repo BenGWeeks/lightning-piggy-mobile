@@ -133,7 +133,7 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
       backgroundStyle={styles.sheetBackground}
     >
       <BottomSheetView style={styles.content}>
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           {/* QR Code at top */}
           <View style={styles.qrContainer}>
             {loading ? (
