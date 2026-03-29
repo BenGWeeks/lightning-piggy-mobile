@@ -207,9 +207,9 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   missionThumb: {
-    width: 56,
-    height: 56,
-    borderRadius: 12,
+    width: 80,
+    height: 45,
+    borderRadius: 8,
   },
   missionRight: {
     flex: 1,
