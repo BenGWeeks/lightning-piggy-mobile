@@ -45,6 +45,7 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const completed = isMissionComplete(progress, mission.id);
   const youtubeId = mission.videoUrl ? extractYouTubeId(mission.videoUrl) : null;
   const hasFullVideo = !!mission.fullVideoUrl;
+  const isComingSoon = !mission.videoUrl && !mission.fullVideoUrl;
   const thumbnailSource = mission.thumbnailUrl
     ? { uri: mission.thumbnailUrl }
     : youtubeId
@@ -131,7 +132,11 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         ))}
 
         {/* Complete button */}
-        {!completed ? (
+        {isComingSoon ? (
+          <View style={[styles.completeButton, styles.completeButtonDisabled]}>
+            <Text style={styles.completeButtonText}>Mark as Complete</Text>
+          </View>
+        ) : !completed ? (
           <TouchableOpacity style={styles.completeButton} onPress={handleToggle}>
             <Text style={styles.completeButtonText}>Mark as Complete</Text>
           </TouchableOpacity>

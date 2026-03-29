@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ScrollView,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
 import { courses } from '../data/learnContent';
 import TipSheet from '../components/TipSheet';
@@ -49,82 +50,88 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   return (
     <View style={styles.container}>
-      {/* Header image */}
-      <View style={styles.headerContainer}>
-        <Image source={course.image} style={styles.headerImage} resizeMode="cover" />
-        <View style={styles.headerOverlay} />
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Text style={styles.backArrow}>‹</Text>
-        </TouchableOpacity>
-        <View style={styles.headerContent}>
-          <Text style={styles.headerTitle}>{course.title}</Text>
-          <Text style={styles.headerMeta}>{course.missions.length} missions</Text>
-        </View>
-      </View>
+      {/* Back button floats above scroll */}
+      <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+        <Text style={styles.backArrow}>‹</Text>
+      </TouchableOpacity>
 
-      <ScrollView style={styles.scrollArea} contentContainerStyle={styles.scrollContent}>
-        {/* Description */}
-        <Text style={styles.description}>{course.description}</Text>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        {/* Header image with gradient and description */}
+        <View style={styles.headerContainer}>
+          <Image source={course.image} style={styles.headerImage} resizeMode="cover" />
+          <LinearGradient
+            colors={['rgba(255,255,255,0)', '#109AB8']}
+            locations={[0.24, 0.91]}
+            style={styles.headerGradient}
+          />
+          <View style={styles.headerContent}>
+            <Text style={styles.headerTitle}>{course.title}</Text>
+            <Text style={styles.headerMeta}>{course.missions.length} missions</Text>
+            <Text style={styles.headerDescription}>{course.description}</Text>
+          </View>
+        </View>
 
         {/* Missions list */}
-        {course.missions.map((mission) => {
-          const done = isMissionComplete(progress, mission.id);
+        <View style={styles.missionsContainer}>
+          {course.missions.map((mission) => {
+            const done = isMissionComplete(progress, mission.id);
+            const isComingSoon = !mission.videoUrl && !mission.fullVideoUrl;
 
-          return (
-            <TouchableOpacity
-              key={mission.id}
-              style={styles.missionCard}
-              onPress={() => navigation.navigate('MissionDetail', { courseId, missionId: mission.id })}
-              activeOpacity={0.7}
-            >
-              {/* Thumbnail — use mission thumbnail, YouTube thumbnail, or course image */}
-              <Image
-                source={
-                  mission.thumbnailUrl
-                    ? { uri: mission.thumbnailUrl }
-                    : getYouTubeThumbnail(mission.videoUrl)
-                      ? { uri: getYouTubeThumbnail(mission.videoUrl)! }
-                      : course.image
-                }
-                style={styles.missionThumb}
-                resizeMode="cover"
-              />
-              <View style={styles.missionRight}>
-                <Text style={styles.missionTitle}>{mission.title}</Text>
-                <Text style={styles.missionMeta}>{mission.learningOutcomes.length} outcomes</Text>
-                {done ? (
-                  <View style={styles.chipEarned}>
-                    <Text style={styles.chipEarnedText}>Completed</Text>
-                  </View>
-                ) : mission.videoUrl === null ? (
-                  <View style={styles.chipComingSoon}>
-                    <Text style={styles.chipComingSoonText}>Coming soon</Text>
-                  </View>
-                ) : (
-                  <View style={styles.chipStart}>
-                    <Text style={styles.chipStartText}>Start</Text>
+            return (
+              <TouchableOpacity
+                key={mission.id}
+                style={[styles.missionCard, isComingSoon && styles.missionCardDisabled]}
+                onPress={() => !isComingSoon && navigation.navigate('MissionDetail', { courseId, missionId: mission.id })}
+                activeOpacity={isComingSoon ? 1 : 0.7}
+              >
+                <Image
+                  source={
+                    mission.thumbnailUrl
+                      ? { uri: mission.thumbnailUrl }
+                      : getYouTubeThumbnail(mission.videoUrl)
+                        ? { uri: getYouTubeThumbnail(mission.videoUrl)! }
+                        : course.image
+                  }
+                  style={styles.missionThumb}
+                  resizeMode="cover"
+                />
+                <View style={styles.missionRight}>
+                  <Text style={styles.missionTitle}>{mission.title}</Text>
+                  <Text style={styles.missionMeta}>{mission.learningOutcomes.length} outcomes</Text>
+                  {done ? (
+                    <View style={styles.chipEarned}>
+                      <Text style={styles.chipEarnedText}>Completed</Text>
+                    </View>
+                  ) : isComingSoon ? (
+                    <View style={styles.chipComingSoon}>
+                      <Text style={styles.chipComingSoonText}>Coming soon</Text>
+                    </View>
+                  ) : (
+                    <View style={styles.chipStart}>
+                      <Text style={styles.chipStartText}>Start</Text>
+                    </View>
+                  )}
+                </View>
+                {done && (
+                  <View style={styles.checkCircle}>
+                    <Text style={styles.checkMark}>✓</Text>
                   </View>
                 )}
-              </View>
-              {done && (
-                <View style={styles.checkCircle}>
-                  <Text style={styles.checkMark}>✓</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          );
-        })}
+              </TouchableOpacity>
+            );
+          })}
 
-        {allDone && (
-          <>
-            <View style={styles.rewardBanner}>
-              <Text style={styles.rewardText}>Course complete!</Text>
-            </View>
-            <TouchableOpacity style={styles.tipButton} onPress={() => setTipVisible(true)}>
-              <Text style={styles.tipButtonText}>Claim Your {course.satsReward.toLocaleString()} Sats Tip</Text>
-            </TouchableOpacity>
-          </>
-        )}
+          {allDone && (
+            <>
+              <View style={styles.rewardBanner}>
+                <Text style={styles.rewardText}>Course complete!</Text>
+              </View>
+              <TouchableOpacity style={styles.tipButton} onPress={() => setTipVisible(true)}>
+                <Text style={styles.tipButtonText}>Claim Your {course.satsReward.toLocaleString()} Sats Tip</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
       </ScrollView>
 
       <TipSheet visible={tipVisible} onClose={() => setTipVisible(false)} course={course} />

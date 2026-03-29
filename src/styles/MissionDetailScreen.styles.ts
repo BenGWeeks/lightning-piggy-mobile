@@ -173,6 +173,9 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 16,
   },
+  completeButtonDisabled: {
+    backgroundColor: colors.divider,
+  },
   completeButtonText: {
     color: colors.white,
     fontSize: 16,

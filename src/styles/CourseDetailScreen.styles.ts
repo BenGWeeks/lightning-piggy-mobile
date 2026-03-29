@@ -4,19 +4,10 @@ import { colors } from './theme';
 export const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: '#109AB8',
   },
-  headerContainer: {
-    height: 280,
-    position: 'relative',
-  },
-  headerImage: {
-    width: '100%',
-    height: '100%',
-  },
-  headerOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.3)',
+  scrollContent: {
+    paddingBottom: 40,
   },
   backButton: {
     position: 'absolute',
@@ -25,21 +16,33 @@ export const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: colors.brandPink,
+    backgroundColor: colors.white,
     justifyContent: 'center',
     alignItems: 'center',
+    zIndex: 10,
   },
   backArrow: {
-    color: colors.white,
+    color: colors.brandPink,
     fontSize: 24,
     fontWeight: '700',
     marginTop: -2,
   },
+  headerContainer: {
+    minHeight: 420,
+    position: 'relative',
+    justifyContent: 'flex-end',
+  },
+  headerImage: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
+  },
+  headerGradient: {
+    ...StyleSheet.absoluteFillObject,
+  },
   headerContent: {
-    position: 'absolute',
-    bottom: 24,
-    left: 20,
-    right: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 24,
   },
   headerTitle: {
     color: colors.white,
@@ -49,22 +52,21 @@ export const styles = StyleSheet.create({
   headerMeta: {
     color: colors.white,
     fontSize: 14,
+    fontWeight: '600',
     opacity: 0.85,
     marginTop: 4,
   },
-  scrollArea: {
-    flex: 1,
+  headerDescription: {
+    color: colors.white,
+    fontSize: 14,
+    lineHeight: 22,
+    opacity: 0.9,
+    marginTop: 12,
+    textAlign: 'center',
   },
-  scrollContent: {
+  missionsContainer: {
     padding: 20,
     gap: 12,
-    paddingBottom: 40,
-  },
-  description: {
-    fontSize: 14,
-    color: colors.textBody,
-    lineHeight: 22,
-    marginBottom: 4,
   },
   missionCard: {
     backgroundColor: colors.white,
@@ -74,10 +76,13 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 14,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  missionCardDisabled: {
+    opacity: 0.5,
   },
   missionThumb: {
     width: 80,
