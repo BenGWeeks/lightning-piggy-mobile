@@ -35,11 +35,10 @@ const LearnScreen: React.FC<Props> = ({ navigation }) => {
       {/* Header */}
       <View style={styles.headerBackground}>
         <Image
-          source={require('../../assets/images/lightning-piggy-intro.png')}
+          source={require('../../assets/images/learn-header-bg.png')}
           style={styles.headerImage}
-          resizeMode="contain"
+          resizeMode="cover"
         />
-        <Text style={styles.headerTitle}>Learn</Text>
       </View>
 
       {/* Course grid */}
@@ -98,22 +97,10 @@ const styles = StyleSheet.create({
     height: 140,
     backgroundColor: colors.brandPink,
     overflow: 'hidden',
-    justifyContent: 'flex-end',
-    paddingBottom: 16,
-    paddingHorizontal: 20,
   },
   headerImage: {
-    position: 'absolute',
-    width: 300,
-    height: 300,
-    left: -40,
-    top: -80,
-    opacity: 0.4,
-  },
-  headerTitle: {
-    color: colors.white,
-    fontSize: 28,
-    fontWeight: '700',
+    width: '100%',
+    height: '100%',
   },
   scrollArea: {
     flex: 1,
