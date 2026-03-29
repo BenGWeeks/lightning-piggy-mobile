@@ -47,7 +47,7 @@ export const courses: Course[] = [
         number: 2,
         title: 'The Inflation Monster',
         description: 'With their eyes set on a big carnival prize, Ethan and Emily learn that printing more money causes prices to rise — visiting Ancient Rome and modern Zimbabwe to see the Inflation Monster at work.',
-        videoUrl: 'https://www.youtube.com/watch?v=yLjx0ha_6Qo',
+        videoUrl: null,
         fullVideoUrl: 'https://www.angel.com/watch/tuttle-twins/episode/5daf8a13-4532-4fbf-a89f-e37d544c0ec0/season-1/episode-6/the-inflation-monster',
         learningOutcomes: [
           { text: 'Understand what inflation is and why it happens' },
@@ -73,7 +73,7 @@ export const courses: Course[] = [
         number: 4,
         title: 'A Bitcoin Bash & Corrupted Cash',
         description: 'When inflation ruins movie night, the twins return to the Bitcoinverse to learn about the risks of controlled money, CBDCs, and the freedom of Bitcoin.',
-        videoUrl: 'https://www.youtube.com/watch?v=yLjx0ha_6Qo',
+        videoUrl: null,
         fullVideoUrl: 'https://www.angel.com/watch/tuttle-twins/episode/9216c5e1-fcdd-4c95-8bfd-e98502818ef2/season-3/episode-5/a-bitcoin-bash-corrupted-cash',
         learningOutcomes: [
           { text: 'Understand what CBDCs are and how they differ from Bitcoin' },
@@ -121,7 +121,7 @@ export const courses: Course[] = [
         number: 3,
         title: 'Evil Queens & Spying Screens',
         description: 'When a friend gains access to everyone\'s private digital lives, the twins learn about digital privacy and why protecting your data matters.',
-        videoUrl: 'https://www.youtube.com/watch?v=yLjx0ha_6Qo',
+        videoUrl: null,
         fullVideoUrl: 'https://www.angel.com/watch/tuttle-twins/episode/25e48cb9-4af4-49e8-a294-b2fed2b5b50a',
         learningOutcomes: [
           { text: 'Understand why digital privacy matters' },
@@ -178,7 +178,7 @@ export const courses: Course[] = [
         number: 1,
         title: "Don't Trash Success",
         description: 'When the twins hit the jackpot with a trash can cleaning business, they learn about true entrepreneurship from Joyce Chen.',
-        videoUrl: 'https://www.youtube.com/watch?v=yLjx0ha_6Qo',
+        videoUrl: null,
         fullVideoUrl: 'https://www.angel.com/watch/tuttle-twins/episode/1f5be44b-258c-4f95-99ea-415e09a8efed/season-2/episode-2/dont-trash-success',
         learningOutcomes: [
           { text: 'Understand what entrepreneurship means and how businesses start' },
@@ -191,7 +191,7 @@ export const courses: Course[] = [
         number: 2,
         title: 'Money Management Mayhem',
         description: 'It\'s Christmas time, and when the twins argue about saving versus spending, a magical board game unleashes chaos into their home.',
-        videoUrl: 'https://www.youtube.com/watch?v=yLjx0ha_6Qo',
+        videoUrl: null,
         fullVideoUrl: 'https://www.angel.com/watch/tuttle-twins/episode/cb9384bc-2adf-4318-97e2-b6d314f64088/season-2/episode-13/money-management-mayhem-a-christmas-adventure',
         learningOutcomes: [
           { text: 'Understand the difference between saving and spending' },
@@ -204,7 +204,7 @@ export const courses: Course[] = [
         number: 3,
         title: 'Melting Money & Fancy Fridges',
         description: 'The twins discover what happens when money loses its value and learn about making wise choices with what you have.',
-        videoUrl: 'https://www.youtube.com/watch?v=yLjx0ha_6Qo',
+        videoUrl: null,
         fullVideoUrl: 'https://www.angel.com/watch/tuttle-twins/episode/9a0531a6-5e9f-4893-a4a3-b27f01e37f0c/season-4/episode-2/melting-money-fancy-fridges',
         learningOutcomes: [
           { text: 'Understand how money can lose its value over time' },
