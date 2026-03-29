@@ -66,7 +66,26 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           </TouchableOpacity>
           <WebView
             style={styles.videoPlayer}
-            source={{ uri: `https://www.youtube.com/embed/${youtubeId}?rel=0&modestbranding=1&playsinline=1` }}
+            source={{ html: `
+              <!DOCTYPE html>
+              <html>
+              <head>
+                <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+                <style>
+                  * { margin: 0; padding: 0; }
+                  html, body { width: 100%; height: 100%; background: #000; }
+                  iframe { width: 100%; height: 100%; border: none; }
+                </style>
+              </head>
+              <body>
+                <iframe
+                  src="https://www.youtube.com/embed/${youtubeId}?rel=0&modestbranding=1&playsinline=1"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowfullscreen
+                ></iframe>
+              </body>
+              </html>
+            ` }}
             allowsFullscreenVideo
             javaScriptEnabled
             domStorageEnabled
