@@ -9,8 +9,15 @@ export interface LearnProgress {
 export async function getProgress(): Promise<LearnProgress> {
   try {
     const data = await AsyncStorage.getItem(PROGRESS_KEY);
-    if (data) return JSON.parse(data);
-  } catch {}
+    if (data) {
+      const parsed = JSON.parse(data);
+      if (parsed && Array.isArray(parsed.completedMissions)) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to load progress:', e);
+  }
   return { completedMissions: [] };
 }
 

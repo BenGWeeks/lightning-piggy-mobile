@@ -17,15 +17,11 @@ import {
   LearnProgress,
 } from '../services/learnProgressService';
 import { styles } from '../styles/MissionDetailScreen.styles';
+import { extractYouTubeId } from '../utils/youtube';
 
 interface Props {
   route: any;
   navigation: any;
-}
-
-function extractYouTubeId(url: string): string | null {
-  const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/);
-  return match ? match[1] : null;
 }
 
 const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
@@ -66,7 +62,7 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         {mission.videoUrl || hasFullVideo ? (
           <TouchableOpacity
             style={styles.videoTouchable}
-            onPress={() => Linking.openURL(mission.videoUrl ?? mission.fullVideoUrl!)}
+            onPress={() => Linking.openURL(mission.videoUrl ?? mission.fullVideoUrl!).catch(() => {})}
             activeOpacity={0.8}
           >
             <Image
@@ -100,7 +96,7 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         {mission.producer && (
           <TouchableOpacity
             style={styles.producerRow}
-            onPress={() => Linking.openURL(mission.producer!.channelUrl)}
+            onPress={() => Linking.openURL(mission.producer!.channelUrl).catch(() => {})}
           >
             <Image
               source={{ uri: mission.producer.iconUrl }}
@@ -113,7 +109,7 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
         {/* Watch full episode link */}
         {hasFullVideo && (
-          <TouchableOpacity onPress={() => Linking.openURL(mission.fullVideoUrl!)}>
+          <TouchableOpacity onPress={() => Linking.openURL(mission.fullVideoUrl!).catch(() => {})}>
             <Text style={styles.fullEpisodeLink}>Watch full episode free</Text>
           </TouchableOpacity>
         )}

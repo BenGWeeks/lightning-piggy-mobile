@@ -1,17 +1,19 @@
-import { StyleSheet } from 'react-native';
+import { StyleSheet, Platform, StatusBar } from 'react-native';
 import { colors } from './theme';
+
+const STATUS_BAR_TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 40) + 4 : 44;
 
 export const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#109AB8',
+    backgroundColor: colors.courseTeal,
   },
   scrollContent: {
     paddingBottom: 40,
   },
   backButton: {
     position: 'absolute',
-    top: 44,
+    top: STATUS_BAR_TOP,
     left: 16,
     width: 36,
     height: 36,
@@ -80,9 +82,6 @@ export const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 12,
     elevation: 4,
-  },
-  missionCardDisabled: {
-    opacity: 0.5,
   },
   missionThumb: {
     width: 80,

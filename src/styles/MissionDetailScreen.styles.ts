@@ -1,5 +1,7 @@
-import { StyleSheet } from 'react-native';
+import { StyleSheet, Platform, StatusBar } from 'react-native';
 import { colors } from './theme';
+
+const STATUS_BAR_TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 40) + 4 : 44;
 
 export const styles = StyleSheet.create({
   container: {
@@ -8,7 +10,7 @@ export const styles = StyleSheet.create({
   },
   backButtonOverlay: {
     position: 'absolute',
-    top: 44,
+    top: STATUS_BAR_TOP,
     left: 16,
     width: 36,
     height: 36,
@@ -17,17 +19,6 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 10,
-  },
-  backButtonOnGrey: {
-    position: 'absolute',
-    top: 44,
-    left: 16,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.brandPink,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   backArrow: {
     color: colors.white,
@@ -65,18 +56,6 @@ export const styles = StyleSheet.create({
     fontSize: 28,
     color: colors.white,
     marginLeft: 4,
-  },
-  comingSoonHeader: {
-    height: 140,
-    backgroundColor: colors.brandPink,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  comingSoonText: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: '600',
-    opacity: 0.8,
   },
   comingSoonBubble: {
     position: 'absolute',

@@ -1,5 +1,7 @@
-import { StyleSheet } from 'react-native';
+import { StyleSheet, Platform, StatusBar } from 'react-native';
 import { colors } from './theme';
+
+const STATUS_BAR_TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 40) + 4 : 44;
 
 export const styles = StyleSheet.create({
   container: {
@@ -17,7 +19,7 @@ export const styles = StyleSheet.create({
   },
   homeButton: {
     position: 'absolute',
-    top: 44,
+    top: STATUS_BAR_TOP,
     left: 16,
     width: 36,
     height: 36,
@@ -30,11 +32,11 @@ export const styles = StyleSheet.create({
   homeIcon: {
     width: 20,
     height: 20,
-    tintColor: '#EC008C',
+    tintColor: colors.brandPink,
   },
   headerOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(236, 0, 140, 0.65)',
+    backgroundColor: 'rgba(236, 0, 140, 0.65)', // brandPink with 65% opacity
   },
   headerTitle: {
     position: 'absolute',

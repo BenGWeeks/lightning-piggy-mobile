@@ -18,12 +18,8 @@ import {
   getCourseCompletedCount,
 } from '../services/learnProgressService';
 import { styles } from '../styles/CourseDetailScreen.styles';
-
-function getYouTubeThumbnail(videoUrl: string | null): string | null {
-  if (!videoUrl) return null;
-  const match = videoUrl.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/);
-  return match ? `https://img.youtube.com/vi/${match[1]}/mqdefault.jpg` : null;
-}
+import { getYouTubeThumbnail } from '../utils/youtube';
+import { colors } from '../styles/theme';
 
 interface Props {
   route: any;
@@ -60,7 +56,7 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         <View style={styles.headerContainer}>
           <Image source={course.image} style={styles.headerImage} resizeMode="cover" />
           <LinearGradient
-            colors={['rgba(255,255,255,0)', '#109AB8']}
+            colors={['rgba(255,255,255,0)', colors.courseTeal]}
             locations={[0.24, 0.91]}
             style={styles.headerGradient}
           />
@@ -76,6 +72,7 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           {course.missions.map((mission) => {
             const done = isMissionComplete(progress, mission.id);
             const isComingSoon = !mission.videoUrl && !mission.fullVideoUrl;
+            const thumbnail = getYouTubeThumbnail(mission.videoUrl);
 
             return (
               <TouchableOpacity
@@ -88,8 +85,8 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                   source={
                     mission.thumbnailUrl
                       ? { uri: mission.thumbnailUrl }
-                      : getYouTubeThumbnail(mission.videoUrl)
-                        ? { uri: getYouTubeThumbnail(mission.videoUrl)! }
+                      : thumbnail
+                        ? { uri: thumbnail }
                         : course.image
                   }
                   style={styles.missionThumb}
