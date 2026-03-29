@@ -15,13 +15,14 @@ import ReceiveSheet from '../components/ReceiveSheet';
 import SendSheet from '../components/SendSheet';
 import TransactionList from '../components/TransactionList';
 import * as nwcService from '../services/nwcService';
+import type { Nip47Transaction } from '@getalby/sdk';
 
 const HomeScreen: React.FC = () => {
   const { balance, refreshBalance, userName, btcPrice, currency, walletAlias, isConnected } =
     useWallet();
   const [receiveOpen, setReceiveOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
-  const [transactions, setTransactions] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<Nip47Transaction[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
   const fetchData = async () => {
@@ -37,6 +38,7 @@ const HomeScreen: React.FC = () => {
 
   useEffect(() => {
     if (isConnected) fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected]);
 
   const handleRefresh = async () => {

@@ -5,6 +5,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
+import { RootStackParamList, LearnStackParamList } from './types';
 
 import IntroScreen from '../screens/IntroScreen';
 import HomeScreen from '../screens/HomeScreen';
@@ -14,9 +15,9 @@ import CourseDetailScreen from '../screens/CourseDetailScreen';
 import MissionDetailScreen from '../screens/MissionDetailScreen';
 import AccountScreen from '../screens/AccountScreen';
 
-const Stack = createNativeStackNavigator();
+const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator();
-const LearnStack = createNativeStackNavigator();
+const LearnStack = createNativeStackNavigator<LearnStackParamList>();
 
 function LearnStackNavigator() {
   return (

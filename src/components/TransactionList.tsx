@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { colors } from '../styles/theme';
-import { satsToFiatString, FiatCurrency } from '../services/fiatService';
+import { satsToFiatString } from '../services/fiatService';
 import { useWallet } from '../contexts/WalletContext';
 
 interface Transaction {

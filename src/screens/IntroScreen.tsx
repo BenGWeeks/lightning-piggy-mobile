@@ -1,9 +1,10 @@
 import React, { useRef, useEffect } from 'react';
 import { View, Text, Image, TouchableOpacity, Animated } from 'react-native';
 import { styles } from '../styles/IntroScreen.styles';
+import { RootNavigation } from '../navigation/types';
 
 interface Props {
-  navigation: any;
+  navigation: RootNavigation;
 }
 
 const IntroScreen: React.FC<Props> = ({ navigation }) => {
@@ -23,6 +24,7 @@ const IntroScreen: React.FC<Props> = ({ navigation }) => {
         useNativeDriver: true,
       }),
     ]).start();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (

@@ -11,7 +11,11 @@ import {
   Keyboard,
   TouchableWithoutFeedback,
 } from 'react-native';
-import BottomSheet, { BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
+import BottomSheet, {
+  BottomSheetBackdrop,
+  BottomSheetBackdropProps,
+  BottomSheetView,
+} from '@gorhom/bottom-sheet';
 import QRCode from 'react-native-qrcode-svg';
 import CopyIcon from './icons/CopyIcon';
 import ShareIcon from './icons/ShareIcon';
@@ -73,7 +77,8 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
     [makeInvoice, refreshBalance],
   );
 
-  // Open/close the sheet
+  // Open/close the sheet — intentionally depends only on `visible`.
+  // `balance` and `lightningAddress` are read for initialisation, not as reactive triggers.
   useEffect(() => {
     if (visible) {
       prevBalance.current = balance;
@@ -94,6 +99,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
       }
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
   // Handle Android back button
@@ -181,7 +187,9 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   );
 
   const renderBackdrop = useCallback(
-    (props: any) => <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />,
+    (props: BottomSheetBackdropProps) => (
+      <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />
+    ),
     [],
   );
 
