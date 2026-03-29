@@ -1,6 +1,6 @@
 export const colors = {
-  brandPink: '#EC008C',
-  brandPinkLight: '#FFF0F5',
+  brandPink: __DEV__ ? '#4A90D9' : '#EC008C',
+  brandPinkLight: __DEV__ ? '#E3F0FF' : '#FFF0F5',
   white: '#FFFFFF',
   background: '#F5F5F5',
   textHeader: '#15171A',
