@@ -63,7 +63,7 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           activeOpacity={0.8}
         >
           <Image
-            source={{ uri: `https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg` }}
+            source={{ uri: `https://img.youtube.com/vi/${youtubeId}/mqdefault.jpg` }}
             style={styles.videoThumbnail}
             resizeMode="cover"
           />
@@ -75,11 +75,23 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           </View>
         </TouchableOpacity>
       ) : (
-        <View style={styles.comingSoonHeader}>
-          <TouchableOpacity style={styles.backButtonOnGrey} onPress={() => navigation.goBack()}>
+        <View style={styles.videoContainer}>
+          <Image
+            source={course.image}
+            style={styles.videoThumbnail}
+            resizeMode="cover"
+          />
+          <TouchableOpacity style={styles.backButtonOverlay} onPress={() => navigation.goBack()}>
             <Text style={styles.backArrow}>‹</Text>
           </TouchableOpacity>
-          <Text style={styles.comingSoonText}>Video coming soon</Text>
+          {hasFullVideo && (
+            <TouchableOpacity
+              style={styles.playButton}
+              onPress={() => Linking.openURL(mission.fullVideoUrl!)}
+            >
+              <Text style={styles.playIcon}>▶</Text>
+            </TouchableOpacity>
+          )}
         </View>
       )}
 
