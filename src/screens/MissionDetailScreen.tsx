@@ -85,6 +85,9 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
               style={styles.videoThumbnail}
               resizeMode="cover"
             />
+            <View style={styles.comingSoonBubble}>
+              <Text style={styles.comingSoonBubbleText}>Coming soon</Text>
+            </View>
           </View>
         )}
         <TouchableOpacity style={styles.backButtonOverlay} onPress={() => navigation.goBack()}>
