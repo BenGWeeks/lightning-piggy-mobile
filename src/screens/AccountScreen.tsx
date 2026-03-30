@@ -15,12 +15,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
 import { CURRENCIES } from '../services/fiatService';
-
-interface Props {
-  navigation: any;
-}
-
-const AccountScreen: React.FC<Props> = ({ navigation }) => {
+const AccountScreen: React.FC = () => {
   const {
     isConnected,
     balance,

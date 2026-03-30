@@ -135,7 +135,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setIsLoading(false);
       }
     })();
-  }, []);
+  }, [fetchPrice]);
 
   // Refresh BTC price every 5 minutes
   useEffect(() => {

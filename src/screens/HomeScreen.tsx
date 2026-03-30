@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -15,16 +15,17 @@ import ReceiveSheet from '../components/ReceiveSheet';
 import SendSheet from '../components/SendSheet';
 import TransactionList from '../components/TransactionList';
 import * as nwcService from '../services/nwcService';
+import type { Nip47Transaction } from '@getalby/sdk';
 
 const HomeScreen: React.FC = () => {
   const { balance, refreshBalance, userName, btcPrice, currency, walletAlias, isConnected } =
     useWallet();
   const [receiveOpen, setReceiveOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
-  const [transactions, setTransactions] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<Nip47Transaction[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     await refreshBalance();
     try {
       const txs = await nwcService.listTransactions();
@@ -33,11 +34,11 @@ const HomeScreen: React.FC = () => {
     } catch (error) {
       console.warn('Failed to fetch transactions:', error);
     }
-  };
+  }, [refreshBalance]);
 
   useEffect(() => {
     if (isConnected) fetchData();
-  }, [isConnected]);
+  }, [isConnected, fetchData]);
 
   const handleRefresh = async () => {
     setRefreshing(true);

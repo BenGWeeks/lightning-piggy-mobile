@@ -9,15 +9,15 @@ import {
   LearnProgress,
   isMissionComplete,
   isCourseComplete,
-  getCourseCompletedCount,
 } from '../services/learnProgressService';
 import { styles } from '../styles/CourseDetailScreen.styles';
 import { getYouTubeThumbnail } from '../utils/youtube';
 import { colors } from '../styles/theme';
+import { LearnNavigation, CourseDetailRoute } from '../navigation/types';
 
 interface Props {
-  route: any;
-  navigation: any;
+  route: CourseDetailRoute;
+  navigation: LearnNavigation;
 }
 
 const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
@@ -45,7 +45,6 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const missionIds = course.missions.map((m) => m.id);
   const allDone = isCourseComplete(progress, missionIds);
-  const completed = getCourseCompletedCount(progress, missionIds);
 
   return (
     <View style={styles.container}>

@@ -1,4 +1,5 @@
 import { NostrWebLNProvider } from '@getalby/sdk';
+import type { Nip47GetInfoResponse, Nip47Transaction } from '@getalby/sdk';
 import * as SecureStore from 'expo-secure-store';
 
 const NWC_URL_KEY = 'nwc_connection_url';
@@ -104,10 +105,10 @@ export async function payInvoice(bolt11: string): Promise<{ preimage: string }> 
 export async function getInfo(): Promise<{ alias: string; lud16?: string } | null> {
   if (!provider) return null;
   try {
-    const info: any = await provider.getInfo();
+    const info: Nip47GetInfoResponse = await provider.getInfo();
     console.log('NWC getInfo response:', JSON.stringify(info));
-    const alias = info.node?.alias || info.alias || '';
-    const lud16 = info.node?.lud16 || info.lud16;
+    const alias = info.alias || '';
+    const lud16 = info.lud16;
     return { alias, lud16 };
   } catch (error) {
     console.warn('NWC getInfo failed:', error);
@@ -115,7 +116,7 @@ export async function getInfo(): Promise<{ alias: string; lud16?: string } | nul
   }
 }
 
-export async function listTransactions(): Promise<any[]> {
+export async function listTransactions(): Promise<Nip47Transaction[]> {
   if (!provider) return [];
   try {
     const result = await provider.listTransactions({});

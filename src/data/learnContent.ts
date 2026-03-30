@@ -1,3 +1,4 @@
+import { ImageSourcePropType } from 'react-native';
 import coursesJson from './courses.json';
 
 export interface LearningOutcome {
@@ -26,12 +27,12 @@ export interface Course {
   id: string;
   title: string;
   description: string;
-  image: any; // require() image source
+  image: ImageSourcePropType;
   missions: Mission[];
   satsReward: number;
 }
 
-const imageMap: Record<string, any> = {
+const imageMap: Record<string, ImageSourcePropType> = {
   'course-bitcoin-basics': require('../../assets/images/course-bitcoin-basics.png'),
   'course-protect-treasure': require('../../assets/images/course-protect-treasure.png'),
   'course-satoshi': require('../../assets/images/course-satoshi.png'),
