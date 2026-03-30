@@ -17,6 +17,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   ios: {
     supportsTablet: true,
+    bundleIdentifier: IS_DEV
+      ? 'com.bengweeks.lightningpiggy.dev'
+      : 'com.bengweeks.lightningpiggy',
+    infoPlist: {
+      ITSAppUsesNonExemptEncryption: false,
+    },
   },
   plugins: [
     './plugins/withAdjustNothing',
