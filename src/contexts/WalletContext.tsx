@@ -274,15 +274,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       setWallets((prev) => {
         const remaining = prev.filter((w) => w.id !== walletId);
+        if (activeWalletId === walletId) {
+          setActiveWalletId(remaining.length > 0 ? remaining[0].id : null);
+        }
         return remaining;
       });
-
-      if (activeWalletId === walletId) {
-        setWallets((prev) => {
-          setActiveWalletId(prev.length > 0 ? prev[0].id : null);
-          return prev;
-        });
-      }
     },
     [activeWalletId],
   );

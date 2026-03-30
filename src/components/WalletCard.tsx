@@ -244,7 +244,6 @@ const styles = StyleSheet.create({
     width: MINI_CONTAINER_WIDTH,
     height: MINI_CONTAINER_HEIGHT,
     overflow: 'hidden',
-    transformOrigin: 'top left',
   },
 });
 

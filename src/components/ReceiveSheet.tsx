@@ -59,8 +59,13 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
     return Math.round((fiat / btcPrice) * 100_000_000);
   };
 
-  const walletName = activeWallet?.alias ?? 'Wallet';
-  const balance = activeWallet?.balance ?? null;
+  const selectedWalletId = capturedWalletId ?? activeWalletId;
+  const selectedWallet = useMemo(
+    () => wallets.find((w) => w.id === selectedWalletId) ?? null,
+    [wallets, selectedWalletId],
+  );
+  const walletName = selectedWallet?.alias ?? 'Wallet';
+  const balance = selectedWallet?.balance ?? null;
 
   const generateInvoice = useCallback(
     async (sats: number) => {

@@ -106,9 +106,14 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
     return Math.round((fiat / btcPrice) * 100_000_000);
   };
 
-  const walletId = capturedWalletId;
-  const walletBalance = activeWallet?.balance ?? null;
-  const walletName = activeWallet?.alias ?? 'Wallet';
+  const selectedWalletId = capturedWalletId ?? activeWalletId;
+  const selectedWallet = useMemo(
+    () => wallets.find((w) => w.id === selectedWalletId) ?? null,
+    [wallets, selectedWalletId],
+  );
+  const walletId = selectedWallet?.id ?? null;
+  const walletBalance = selectedWallet?.balance ?? null;
+  const walletName = selectedWallet?.alias ?? 'Wallet';
 
   useEffect(() => {
     if (visible) {

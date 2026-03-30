@@ -56,7 +56,7 @@ const HomeScreen: React.FC = () => {
     } else {
       setTransactions([]);
     }
-  }, [activeWalletId, activeWallet?.isConnected]);
+  }, [activeWalletId, activeWallet?.isConnected, fetchData]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
