@@ -71,7 +71,16 @@ function isValidInvoice(data: string): boolean {
 }
 
 const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
-  const { payInvoice, refreshBalance, balance, btcPrice, currency } = useWallet();
+  const {
+    payInvoiceForWallet,
+    refreshBalanceForWallet,
+    activeWalletId,
+    activeWallet,
+    wallets,
+    btcPrice,
+    currency,
+  } = useWallet();
+  const [capturedWalletId, setCapturedWalletId] = useState<string | null>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [invoiceData, setInvoiceData] = useState<string | null>(null);
   const [decoded, setDecoded] = useState<DecodedInvoice | null>(null);
@@ -97,8 +106,13 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
     return Math.round((fiat / btcPrice) * 100_000_000);
   };
 
+  const walletId = capturedWalletId;
+  const walletBalance = activeWallet?.balance ?? null;
+  const walletName = activeWallet?.alias ?? 'Wallet';
+
   useEffect(() => {
     if (visible) {
+      setCapturedWalletId(activeWalletId);
       setInvoiceData(null);
       setDecoded(null);
       setScanned(false);
@@ -234,11 +248,11 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
         }
         // Fetch a bolt11 invoice from the LNURL-pay callback
         const bolt11 = await fetchInvoice(lnurlParams.callback, currentSats);
-        await payInvoice(bolt11);
+        await payInvoiceForWallet(walletId!, bolt11);
       } else {
-        await payInvoice(invoiceData);
+        await payInvoiceForWallet(walletId!, invoiceData);
       }
-      await refreshBalance();
+      if (walletId) await refreshBalanceForWallet(walletId);
       Alert.alert('Payment Sent', 'Your payment was sent successfully!', [
         { text: 'OK', onPress: onClose },
       ]);
@@ -292,6 +306,36 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
         <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
           <View style={styles.innerContent}>
             <Text style={styles.title}>Send</Text>
+
+            {/* Wallet selector */}
+            {wallets.filter((w) => w.isConnected).length > 1 && (
+              <View style={styles.walletSelector}>
+                {wallets
+                  .filter((w) => w.isConnected)
+                  .map((w) => (
+                    <TouchableOpacity
+                      key={w.id}
+                      style={[
+                        styles.walletChip,
+                        capturedWalletId === w.id && styles.walletChipActive,
+                      ]}
+                      onPress={() => setCapturedWalletId(w.id)}
+                    >
+                      <Text
+                        style={[
+                          styles.walletChipText,
+                          capturedWalletId === w.id && styles.walletChipTextActive,
+                        ]}
+                      >
+                        {w.alias}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+              </View>
+            )}
+            {wallets.filter((w) => w.isConnected).length <= 1 && (
+              <Text style={styles.walletLabel}>From: {walletName}</Text>
+            )}
 
             {/* Mode tabs */}
             {!scanned && (
@@ -468,10 +512,10 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
             )}
 
             {/* Balance */}
-            {balance !== null && btcPrice !== null && (
+            {walletBalance !== null && btcPrice !== null && (
               <Text style={styles.balanceText}>
-                Balance: {balance.toLocaleString()} sats (
-                {satsToFiatString(balance, btcPrice, currency)})
+                Balance: {walletBalance.toLocaleString()} sats (
+                {satsToFiatString(walletBalance, btcPrice, currency)})
               </Text>
             )}
 
@@ -768,6 +812,34 @@ const styles = StyleSheet.create({
     color: colors.brandPink,
     fontSize: 16,
     fontWeight: '700',
+  },
+  walletSelector: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'center',
+  },
+  walletChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: colors.divider,
+  },
+  walletChipActive: {
+    backgroundColor: colors.brandPink,
+  },
+  walletChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textBody,
+  },
+  walletChipTextActive: {
+    color: colors.white,
+  },
+  walletLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textSupplementary,
   },
 });
 

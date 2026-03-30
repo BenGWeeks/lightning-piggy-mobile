@@ -29,8 +29,17 @@ type Mode = 'address' | 'amount';
 type InputUnit = 'sats' | 'fiat';
 
 const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
-  const { makeInvoice, refreshBalance, balance, btcPrice, currency, lightningAddress } =
-    useWallet();
+  const {
+    makeInvoiceForWallet,
+    refreshBalanceForWallet,
+    activeWalletId,
+    activeWallet,
+    wallets,
+    btcPrice,
+    currency,
+    lightningAddress,
+  } = useWallet();
+  const [capturedWalletId, setCapturedWalletId] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>('address');
   const [invoice, setInvoice] = useState('');
   const [paymentReceived, setPaymentReceived] = useState(false);
@@ -50,6 +59,9 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
     return Math.round((fiat / btcPrice) * 100_000_000);
   };
 
+  const walletName = activeWallet?.alias ?? 'Wallet';
+  const balance = activeWallet?.balance ?? null;
+
   const generateInvoice = useCallback(
     async (sats: number) => {
       if (intervalId.current) {
@@ -59,10 +71,12 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
       setLoading(true);
       setPaymentReceived(false);
       try {
-        const inv = await makeInvoice(sats, 'Lightning Piggy');
+        const wId = capturedWalletId;
+        if (!wId) return;
+        const inv = await makeInvoiceForWallet(wId, sats, 'Lightning Piggy');
         setInvoice(inv);
         intervalId.current = setInterval(async () => {
-          await refreshBalance();
+          if (wId) await refreshBalanceForWallet(wId);
         }, 5000);
       } catch (error) {
         console.warn('Failed to create invoice:', error);
@@ -70,12 +84,13 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
         setLoading(false);
       }
     },
-    [makeInvoice, refreshBalance],
+    [makeInvoiceForWallet, refreshBalanceForWallet, capturedWalletId],
   );
 
   // Open/close the sheet
   useEffect(() => {
     if (visible) {
+      setCapturedWalletId(activeWalletId);
       prevBalance.current = balance;
       setMode(lightningAddress ? 'address' : 'amount');
       setSatsValue('');
@@ -202,6 +217,36 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
         <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
           <View style={styles.innerContent}>
             <Text style={styles.title}>Receive</Text>
+
+            {/* Wallet selector */}
+            {wallets.filter((w) => w.isConnected).length > 1 && (
+              <View style={styles.walletSelector}>
+                {wallets
+                  .filter((w) => w.isConnected)
+                  .map((w) => (
+                    <TouchableOpacity
+                      key={w.id}
+                      style={[
+                        styles.walletChip,
+                        capturedWalletId === w.id && styles.walletChipActive,
+                      ]}
+                      onPress={() => setCapturedWalletId(w.id)}
+                    >
+                      <Text
+                        style={[
+                          styles.walletChipText,
+                          capturedWalletId === w.id && styles.walletChipTextActive,
+                        ]}
+                      >
+                        {w.alias}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+              </View>
+            )}
+            {wallets.filter((w) => w.isConnected).length <= 1 && (
+              <Text style={styles.walletLabel}>To: {walletName}</Text>
+            )}
 
             {/* Mode tabs */}
             {lightningAddress ? (
@@ -485,6 +530,34 @@ const styles = StyleSheet.create({
     color: colors.brandPink,
     fontSize: 16,
     fontWeight: '700',
+  },
+  walletSelector: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'center',
+  },
+  walletChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: colors.divider,
+  },
+  walletChipActive: {
+    backgroundColor: colors.brandPink,
+  },
+  walletChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textBody,
+  },
+  walletChipTextActive: {
+    color: colors.white,
+  },
+  walletLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textSupplementary,
   },
 });
 

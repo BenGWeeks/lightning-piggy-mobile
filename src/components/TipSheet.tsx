@@ -24,7 +24,7 @@ interface Props {
 }
 
 const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
-  const { makeInvoice, refreshBalance, balance, btcPrice, currency } = useWallet();
+  const { makeInvoice, refreshActiveBalance, balance, btcPrice, currency } = useWallet();
   const [invoice, setInvoice] = useState('');
   const [loading, setLoading] = useState(false);
   const [paymentReceived, setPaymentReceived] = useState(false);
@@ -53,7 +53,7 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
           const inv = await makeInvoice(tipSats, `Lightning Piggy: ${course.title} tip`);
           setInvoice(inv);
           intervalId.current = setInterval(async () => {
-            await refreshBalance();
+            await refreshActiveBalance();
           }, 5000);
         } catch (error) {
           console.warn('Failed to create tip invoice:', error);
