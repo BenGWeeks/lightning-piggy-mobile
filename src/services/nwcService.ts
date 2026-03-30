@@ -1,4 +1,5 @@
 import { NostrWebLNProvider } from '@getalby/sdk';
+import type { Nip47GetInfoResponse } from '@getalby/sdk';
 
 const providers = new Map<string, NostrWebLNProvider>();
 
@@ -109,10 +110,10 @@ export async function getInfo(walletId: string): Promise<{ alias: string; lud16?
   const provider = providers.get(walletId);
   if (!provider) return null;
   try {
-    const info: any = await provider.getInfo();
+    const info: Nip47GetInfoResponse = await provider.getInfo();
     console.log('NWC getInfo response:', JSON.stringify(info));
-    const alias = info.node?.alias || info.alias || '';
-    const lud16 = info.node?.lud16 || info.lud16;
+    const alias = info.alias || '';
+    const lud16 = info.lud16;
     return { alias, lud16 };
   } catch (error) {
     console.warn('NWC getInfo failed:', error);

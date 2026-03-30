@@ -10,8 +10,10 @@ import {
 } from '../services/learnProgressService';
 import { styles } from '../styles/LearnScreen.styles';
 
+import { LearnNavigation } from '../navigation/types';
+
 interface Props {
-  navigation: any;
+  navigation: LearnNavigation;
 }
 
 const LearnScreen: React.FC<Props> = ({ navigation }) => {

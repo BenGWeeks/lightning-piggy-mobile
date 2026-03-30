@@ -13,9 +13,11 @@ import { styles } from '../styles/MissionDetailScreen.styles';
 import { colors } from '../styles/theme';
 import { extractYouTubeId } from '../utils/youtube';
 
+import { LearnNavigation, MissionDetailRoute } from '../navigation/types';
+
 interface Props {
-  route: any;
-  navigation: any;
+  route: MissionDetailRoute;
+  navigation: LearnNavigation;
 }
 
 const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {

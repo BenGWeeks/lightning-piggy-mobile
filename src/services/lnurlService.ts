@@ -15,7 +15,7 @@ interface LnurlPayResponse {
 
 interface LnurlInvoiceResponse {
   pr: string; // bolt11 invoice
-  routes: any[];
+  routes: unknown[];
 }
 
 export interface LnurlPayParams {
@@ -57,7 +57,7 @@ export async function resolveLightningAddress(address: string): Promise<LnurlPay
   let description = address;
   try {
     const metadata = JSON.parse(data.metadata);
-    const textEntry = metadata.find((m: any[]) => m[0] === 'text/plain');
+    const textEntry = metadata.find((m: [string, string]) => m[0] === 'text/plain');
     if (textEntry) description = textEntry[1];
   } catch {}
 

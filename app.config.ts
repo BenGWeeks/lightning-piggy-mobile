@@ -1,10 +1,30 @@
 import { ExpoConfig, ConfigContext } from 'expo/config';
 
-const IS_DEV = process.env.APP_VARIANT === 'development';
+const APP_VARIANT = process.env.APP_VARIANT;
+const IS_DEV = APP_VARIANT === 'development';
+const IS_PREVIEW = APP_VARIANT === 'preview';
+
+const getAppName = () => {
+  if (IS_DEV) return 'Lightning Piggy (Dev)';
+  if (IS_PREVIEW) return 'Lightning Piggy (Preview)';
+  return 'Lightning Piggy';
+};
+
+const getIosBundleId = () => {
+  if (IS_DEV) return 'com.bengweeks.lightningpiggy.dev';
+  if (IS_PREVIEW) return 'com.bengweeks.lightningpiggy.preview';
+  return 'com.bengweeks.lightningpiggy';
+};
+
+const getAndroidPackage = () => {
+  if (IS_DEV) return 'com.anonymous.lightningpiggyapp.dev';
+  if (IS_PREVIEW) return 'com.anonymous.lightningpiggyapp.preview';
+  return 'com.anonymous.lightningpiggyapp';
+};
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
-  name: IS_DEV ? 'Lightning Piggy (Dev)' : 'Lightning Piggy',
+  name: getAppName(),
   slug: 'lightning-piggy-app',
   version: '1.0.0',
   orientation: 'portrait',
@@ -17,6 +37,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   ios: {
     supportsTablet: true,
+    bundleIdentifier: getIosBundleId(),
+    infoPlist: {
+      ITSAppUsesNonExemptEncryption: true,
+    },
   },
   plugins: [
     './plugins/withAdjustNothing',
@@ -30,9 +54,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       monochromeImage: './assets/android-icon-monochrome.png',
     },
     predictiveBackGestureEnabled: false,
-    package: IS_DEV
-      ? 'com.anonymous.lightningpiggyapp.dev'
-      : 'com.anonymous.lightningpiggyapp',
+    package: getAndroidPackage(),
   },
   web: {
     favicon: './assets/favicon.png',

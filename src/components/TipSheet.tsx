@@ -9,7 +9,12 @@ import {
   Share,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
-import { BottomSheetModal, BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
+import {
+  BottomSheetModal,
+  BottomSheetBackdrop,
+  BottomSheetBackdropProps,
+  BottomSheetView,
+} from '@gorhom/bottom-sheet';
 import QRCode from 'react-native-qrcode-svg';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
@@ -40,6 +45,8 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
   // Collect one key learning outcome per mission for the "quiz" section
   const quizTopics = course.missions.map((m) => m.learningOutcomes[0]?.text).filter(Boolean);
 
+  // Open/close the sheet — intentionally depends only on `visible`.
+  // Other values are read for initialisation, not as reactive triggers.
   useEffect(() => {
     if (visible) {
       prevBalance.current = balance;
@@ -70,6 +77,7 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
         intervalId.current = null;
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
   // Detect payment
@@ -105,7 +113,9 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
   );
 
   const renderBackdrop = useCallback(
-    (props: any) => <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />,
+    (props: BottomSheetBackdropProps) => (
+      <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />
+    ),
     [],
   );
 
