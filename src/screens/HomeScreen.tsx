@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -25,7 +25,7 @@ const HomeScreen: React.FC = () => {
   const [transactions, setTransactions] = useState<Nip47Transaction[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     await refreshBalance();
     try {
       const txs = await nwcService.listTransactions();
@@ -34,12 +34,11 @@ const HomeScreen: React.FC = () => {
     } catch (error) {
       console.warn('Failed to fetch transactions:', error);
     }
-  };
+  }, [refreshBalance]);
 
   useEffect(() => {
     if (isConnected) fetchData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected]);
+  }, [isConnected, fetchData]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
