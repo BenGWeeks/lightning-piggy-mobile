@@ -1,12 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-  View,
-  Text,
-  Image,
-  TouchableOpacity,
-  ScrollView,
-  RefreshControl,
-} from 'react-native';
+import { View, Text, Image, TouchableOpacity, ScrollView, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useWallet } from '../contexts/WalletContext';
 import ReceiveSheet from '../components/ReceiveSheet';
@@ -148,10 +141,7 @@ const HomeScreen: React.FC = () => {
       <ReceiveSheet visible={receiveOpen} onClose={() => setReceiveOpen(false)} />
       <SendSheet visible={sendOpen} onClose={() => setSendOpen(false)} />
       <AddWalletWizard visible={wizardOpen} onClose={() => setWizardOpen(false)} />
-      <WalletSettingsSheet
-        walletId={settingsWalletId}
-        onClose={() => setSettingsWalletId(null)}
-      />
+      <WalletSettingsSheet walletId={settingsWalletId} onClose={() => setSettingsWalletId(null)} />
     </View>
   );
 };

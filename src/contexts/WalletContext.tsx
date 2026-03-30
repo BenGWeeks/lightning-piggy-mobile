@@ -119,12 +119,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setBtcPrice(price);
   }, []);
 
-  const updateWalletInState = useCallback(
-    (walletId: string, updates: Partial<WalletState>) => {
-      setWallets((prev) => prev.map((w) => (w.id === walletId ? { ...w, ...updates } : w)));
-    },
-    [],
-  );
+  const updateWalletInState = useCallback((walletId: string, updates: Partial<WalletState>) => {
+    setWallets((prev) => prev.map((w) => (w.id === walletId ? { ...w, ...updates } : w)));
+  }, []);
 
   // Startup: load prefs, migrate, reconnect all wallets
   useEffect(() => {
@@ -293,15 +290,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const updateWalletSettings = useCallback(
     async (walletId: string, settings: { alias?: string; theme?: CardTheme }) => {
       // Update in-memory state
-      setWallets((prev) =>
-        prev.map((w) => (w.id === walletId ? { ...w, ...settings } : w)),
-      );
+      setWallets((prev) => prev.map((w) => (w.id === walletId ? { ...w, ...settings } : w)));
 
       // Persist metadata changes
       const currentList = await walletStorage.getWalletList();
-      const updatedList = currentList.map((w) =>
-        w.id === walletId ? { ...w, ...settings } : w,
-      );
+      const updatedList = currentList.map((w) => (w.id === walletId ? { ...w, ...settings } : w));
       await walletStorage.saveWalletList(updatedList);
     },
     [],
@@ -357,12 +350,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [],
   );
 
-  const payInvoiceForWallet = useCallback(
-    async (walletId: string, bolt11: string) => {
-      return nwcService.payInvoice(walletId, bolt11);
-    },
-    [],
-  );
+  const payInvoiceForWallet = useCallback(async (walletId: string, bolt11: string) => {
+    return nwcService.payInvoice(walletId, bolt11);
+  }, []);
 
   return (
     <WalletContext.Provider

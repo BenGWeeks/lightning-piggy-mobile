@@ -98,19 +98,14 @@ export async function makeInvoice(
   return invoice.paymentRequest;
 }
 
-export async function payInvoice(
-  walletId: string,
-  bolt11: string,
-): Promise<{ preimage: string }> {
+export async function payInvoice(walletId: string, bolt11: string): Promise<{ preimage: string }> {
   const provider = providers.get(walletId);
   if (!provider) throw new Error('Not connected');
   const result = await provider.sendPayment(bolt11);
   return { preimage: result.preimage };
 }
 
-export async function getInfo(
-  walletId: string,
-): Promise<{ alias: string; lud16?: string } | null> {
+export async function getInfo(walletId: string): Promise<{ alias: string; lud16?: string } | null> {
   const provider = providers.get(walletId);
   if (!provider) return null;
   try {

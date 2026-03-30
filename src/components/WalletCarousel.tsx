@@ -76,9 +76,7 @@ const WalletCarousel: React.FC<WalletCarouselProps> = ({
         ref={flatListRef}
         data={data}
         renderItem={renderItem}
-        keyExtractor={(item, index) =>
-          item.type === 'wallet' ? item.wallet.id : `add-${index}`
-        }
+        keyExtractor={(item, index) => (item.type === 'wallet' ? item.wallet.id : `add-${index}`)}
         horizontal
         showsHorizontalScrollIndicator={false}
         snapToInterval={SNAP_INTERVAL}

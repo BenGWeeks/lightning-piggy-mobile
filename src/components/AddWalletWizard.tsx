@@ -156,10 +156,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                   barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
                   onBarcodeScanned={handleBarCodeScanned}
                 />
-                <TouchableOpacity
-                  style={styles.secondaryButton}
-                  onPress={() => setScanning(false)}
-                >
+                <TouchableOpacity style={styles.secondaryButton} onPress={() => setScanning(false)}>
                   <Text style={styles.secondaryButtonText}>Cancel</Text>
                 </TouchableOpacity>
               </View>

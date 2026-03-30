@@ -71,10 +71,7 @@ const CardContent: React.FC<{
           <View style={styles.topRow}>
             <View style={styles.statusRow}>
               <View
-                style={[
-                  styles.statusDot,
-                  { backgroundColor: isConnected ? '#4CAF50' : '#F44336' },
-                ]}
+                style={[styles.statusDot, { backgroundColor: isConnected ? '#4CAF50' : '#F44336' }]}
               />
               <Text style={[styles.statusText, { color: theme.textColor }]}>
                 {isConnected ? 'Connected' : 'Disconnected'}
@@ -146,12 +143,7 @@ export const MiniWalletCard: React.FC<MiniCardProps> = ({ theme, selected, onPre
   );
 };
 
-const WalletCard: React.FC<WalletCardProps> = ({
-  wallet,
-  btcPrice,
-  currency,
-  onSettingsPress,
-}) => {
+const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onSettingsPress }) => {
   const theme = cardThemes[wallet.theme];
 
   return (

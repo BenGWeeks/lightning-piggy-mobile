@@ -1,4 +1,11 @@
-export type CardTheme = 'lightning-piggy' | 'primal' | 'lnbits' | 'nostrich' | 'lightning-goat' | 'lightning-cat' | 'lightning-whale';
+export type CardTheme =
+  | 'lightning-piggy'
+  | 'primal'
+  | 'lnbits'
+  | 'nostrich'
+  | 'lightning-goat'
+  | 'lightning-cat'
+  | 'lightning-whale';
 
 export interface WalletMetadata {
   id: string;
