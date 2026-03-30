@@ -11,7 +11,7 @@ import {
   Keyboard,
   TouchableWithoutFeedback,
 } from 'react-native';
-import BottomSheet, { BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
+import { BottomSheetModal, BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
@@ -94,7 +94,7 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [inputUnit, setInputUnit] = useState<InputUnit>('sats');
   const [lnurlParams, setLnurlParams] = useState<LnurlPayParams | null>(null);
   const [resolving, setResolving] = useState(false);
-  const bottomSheetRef = useRef<BottomSheet>(null);
+  const bottomSheetRef = useRef<BottomSheetModal>(null);
 
   const snapPoints = useMemo(() => ['90%'], []);
 
@@ -124,9 +124,9 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
       setInputUnit('sats');
       setLnurlParams(null);
       setResolving(false);
-      bottomSheetRef.current?.expand();
+      bottomSheetRef.current?.present();
     } else {
-      bottomSheetRef.current?.close();
+      bottomSheetRef.current?.dismiss();
     }
   }, [visible]);
 
@@ -292,9 +292,8 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
   const canSend = needsAmount ? lnurlParams && currentSats > 0 && !resolving : !!invoiceData;
 
   return (
-    <BottomSheet
+    <BottomSheetModal
       ref={bottomSheetRef}
-      index={0}
       snapPoints={snapPoints}
       onChange={handleSheetChange}
       enablePanDownToClose
@@ -545,7 +544,7 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
           </View>
         </TouchableWithoutFeedback>
       </BottomSheetView>
-    </BottomSheet>
+    </BottomSheetModal>
   );
 };
 

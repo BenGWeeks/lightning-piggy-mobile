@@ -7,7 +7,7 @@ import {
   StyleSheet,
   Alert,
 } from 'react-native';
-import BottomSheet, { BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
+import { BottomSheetModal, BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
 import { CardTheme } from '../types/wallet';
@@ -22,7 +22,7 @@ interface Props {
 const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const { wallets, updateWalletSettings, removeWallet } = useWallet();
   const wallet = wallets.find((w) => w.id === walletId);
-  const bottomSheetRef = useRef<BottomSheet>(null);
+  const bottomSheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['75%'], []);
 
   const [alias, setAlias] = useState('');
@@ -46,6 +46,14 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
     (props: any) => <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />,
     [],
   );
+
+  useEffect(() => {
+    if (walletId && wallet) {
+      bottomSheetRef.current?.present();
+    } else {
+      bottomSheetRef.current?.dismiss();
+    }
+  }, [walletId, wallet]);
 
   if (!walletId || !wallet) return null;
 
@@ -76,9 +84,8 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   };
 
   return (
-    <BottomSheet
+    <BottomSheetModal
       ref={bottomSheetRef}
-      index={0}
       snapPoints={snapPoints}
       enablePanDownToClose
       onChange={handleSheetChange}
@@ -119,7 +126,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
           <Text style={styles.disconnectButtonText}>Remove Wallet</Text>
         </TouchableOpacity>
       </BottomSheetView>
-    </BottomSheet>
+    </BottomSheetModal>
   );
 };
 

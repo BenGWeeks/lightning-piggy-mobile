@@ -11,7 +11,7 @@ import {
   Keyboard,
   TouchableWithoutFeedback,
 } from 'react-native';
-import BottomSheet, { BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
+import { BottomSheetModal, BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
 import QRCode from 'react-native-qrcode-svg';
 import CopyIcon from './icons/CopyIcon';
 import ShareIcon from './icons/ShareIcon';
@@ -50,7 +50,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   const intervalId = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevBalance = useRef<number | null>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const bottomSheetRef = useRef<BottomSheet>(null);
+  const bottomSheetRef = useRef<BottomSheetModal>(null);
 
   const snapPoints = useMemo(() => ['85%'], []);
 
@@ -98,9 +98,9 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
       setInvoice('');
       setPaymentReceived(false);
       setInputUnit('sats');
-      bottomSheetRef.current?.expand();
+      bottomSheetRef.current?.present();
     } else {
-      bottomSheetRef.current?.close();
+      bottomSheetRef.current?.dismiss();
     }
     return () => {
       if (intervalId.current) {
@@ -203,9 +203,8 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   if (!visible) return null;
 
   return (
-    <BottomSheet
+    <BottomSheetModal
       ref={bottomSheetRef}
-      index={0}
       snapPoints={snapPoints}
       onChange={handleSheetChange}
       enablePanDownToClose
@@ -373,7 +372,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
           </View>
         </TouchableWithoutFeedback>
       </BottomSheetView>
-    </BottomSheet>
+    </BottomSheetModal>
   );
 };
 

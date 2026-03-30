@@ -9,7 +9,7 @@ import {
   Share,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
-import BottomSheet, { BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
+import { BottomSheetModal, BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
 import QRCode from 'react-native-qrcode-svg';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
@@ -31,7 +31,7 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
   const [copied, setCopied] = useState(false);
   const intervalId = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevBalance = useRef<number | null>(null);
-  const bottomSheetRef = useRef<BottomSheet>(null);
+  const bottomSheetRef = useRef<BottomSheetModal>(null);
 
   const snapPoints = useMemo(() => ['90%'], []);
 
@@ -47,7 +47,7 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
       setPaymentReceived(false);
       setCopied(false);
       setLoading(true);
-      bottomSheetRef.current?.expand();
+      bottomSheetRef.current?.present();
       (async () => {
         try {
           const inv = await makeInvoice(tipSats, `Lightning Piggy: ${course.title} tip`);
@@ -62,7 +62,7 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
         }
       })();
     } else {
-      bottomSheetRef.current?.close();
+      bottomSheetRef.current?.dismiss();
     }
     return () => {
       if (intervalId.current) {
@@ -130,9 +130,8 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
   const fiatString = btcPrice ? satsToFiatString(tipSats, btcPrice, currency) : '';
 
   return (
-    <BottomSheet
+    <BottomSheetModal
       ref={bottomSheetRef}
-      index={0}
       snapPoints={snapPoints}
       onChange={handleSheetChange}
       enablePanDownToClose
@@ -202,7 +201,7 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
           </TouchableOpacity>
         </ScrollView>
       </BottomSheetView>
-    </BottomSheet>
+    </BottomSheetModal>
   );
 };
 

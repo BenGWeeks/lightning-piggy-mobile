@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import BottomSheet, { BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
+import { BottomSheetModal, BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
 import { CardTheme } from '../types/wallet';
@@ -34,7 +34,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
-  const bottomSheetRef = useRef<BottomSheet>(null);
+  const bottomSheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['90%'], []);
 
   const reset = useCallback(() => {
@@ -117,6 +117,14 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
     [],
   );
 
+  useEffect(() => {
+    if (visible) {
+      bottomSheetRef.current?.present();
+    } else {
+      bottomSheetRef.current?.dismiss();
+    }
+  }, [visible]);
+
   if (!visible) return null;
 
   const stepTitle = {
@@ -126,9 +134,8 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   }[step];
 
   return (
-    <BottomSheet
+    <BottomSheetModal
       ref={bottomSheetRef}
-      index={0}
       snapPoints={snapPoints}
       enablePanDownToClose
       onChange={handleSheetChange}
@@ -263,7 +270,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
           </View>
         )}
       </BottomSheetView>
-    </BottomSheet>
+    </BottomSheetModal>
   );
 };
 

@@ -3,12 +3,18 @@ import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions } from 'rea
 import { LinearGradient } from 'expo-linear-gradient';
 import { WalletState } from '../types/wallet';
 import { CardThemeConfig, cardThemes } from '../themes/cardThemes';
+import { getCardBgStyle } from '../themes/cards';
 import { satsToFiatString, FiatCurrency } from '../services/fiatService';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 export const CARD_MARGIN = 16;
 export const CARD_WIDTH = SCREEN_WIDTH - CARD_MARGIN * 2;
 const CARD_HEIGHT = 200;
+
+// Mini preview is the full card scaled down
+const MINI_CONTAINER_WIDTH = (SCREEN_WIDTH - 48 - 12) / 2; // ~47% of sheet width
+const MINI_SCALE = MINI_CONTAINER_WIDTH / CARD_WIDTH;
+const MINI_CONTAINER_HEIGHT = CARD_HEIGHT * MINI_SCALE;
 
 interface WalletCardProps {
   wallet: WalletState;
@@ -23,8 +29,8 @@ interface MiniCardProps {
   onPress?: () => void;
 }
 
-/** Reusable card visual — full size or mini preview */
-export const CardVisual: React.FC<{
+/** Full card visual — used both directly and scaled for mini previews */
+const CardContent: React.FC<{
   theme: CardThemeConfig;
   alias?: string;
   balance?: number | null;
@@ -33,7 +39,7 @@ export const CardVisual: React.FC<{
   isConnected?: boolean;
   walletAlias?: string | null;
   onSettingsPress?: () => void;
-  mini?: boolean;
+  showDetails?: boolean;
 }> = ({
   theme,
   alias,
@@ -43,26 +49,25 @@ export const CardVisual: React.FC<{
   isConnected,
   walletAlias,
   onSettingsPress,
-  mini,
+  showDetails = true,
 }) => {
   return (
     <LinearGradient
       colors={theme.gradientColors}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
-      style={[mini ? styles.miniCard : styles.card]}
+      style={styles.card}
     >
       {theme.backgroundImage && (
         <Image
           source={theme.backgroundImage}
-          style={mini ? styles.miniBackgroundImage : styles.backgroundImage}
+          style={getCardBgStyle(theme.backgroundImageStyle, false)}
           resizeMode="contain"
         />
       )}
 
-      {!mini && (
+      {showDetails ? (
         <>
-          {/* Top row: status + settings */}
           <View style={styles.topRow}>
             <View style={styles.statusRow}>
               <View
@@ -85,7 +90,6 @@ export const CardVisual: React.FC<{
             )}
           </View>
 
-          {/* Alias + Balance grouped closely */}
           <View style={styles.aliasBalanceGroup}>
             <Text style={[styles.alias, { color: theme.textColor }]} numberOfLines={1}>
               {alias}
@@ -100,25 +104,22 @@ export const CardVisual: React.FC<{
             )}
           </View>
 
-          {/* Provider alias if different from user alias */}
           {walletAlias && walletAlias !== alias && (
             <Text style={[styles.providerAlias, { color: theme.textColor }]} numberOfLines={1}>
               {walletAlias}
             </Text>
           )}
         </>
-      )}
-
-      {mini && (
-        <View style={styles.miniContent}>
-          <Text style={[styles.miniName, { color: theme.textColor }]}>{theme.name}</Text>
+      ) : (
+        <View style={styles.previewLabel}>
+          <Text style={[styles.previewName, { color: theme.textColor }]}>{theme.name}</Text>
         </View>
       )}
     </LinearGradient>
   );
 };
 
-/** Mini card for theme selection */
+/** Mini card for theme selection — renders the full card design scaled down */
 export const MiniWalletCard: React.FC<MiniCardProps> = ({ theme, selected, onPress }) => {
   return (
     <TouchableOpacity
@@ -126,7 +127,21 @@ export const MiniWalletCard: React.FC<MiniCardProps> = ({ theme, selected, onPre
       onPress={onPress}
       activeOpacity={0.7}
     >
-      <CardVisual theme={theme} mini />
+      <View style={styles.miniScaleWrapper}>
+        <View
+          style={{
+            width: CARD_WIDTH,
+            height: CARD_HEIGHT,
+            transform: [
+              { translateX: -(CARD_WIDTH * (1 - MINI_SCALE)) / 2 },
+              { translateY: -(CARD_HEIGHT * (1 - MINI_SCALE)) / 2 },
+              { scale: MINI_SCALE },
+            ],
+          }}
+        >
+          <CardContent theme={theme} showDetails={false} />
+        </View>
+      </View>
     </TouchableOpacity>
   );
 };
@@ -141,7 +156,7 @@ const WalletCard: React.FC<WalletCardProps> = ({
 
   return (
     <View style={styles.cardContainer}>
-      <CardVisual
+      <CardContent
         theme={theme}
         alias={wallet.alias}
         balance={wallet.balance}
@@ -166,14 +181,6 @@ const styles = StyleSheet.create({
     padding: 20,
     overflow: 'hidden',
     justifyContent: 'space-between',
-  },
-  backgroundImage: {
-    position: 'absolute',
-    width: 300,
-    height: 300,
-    right: -20,
-    top: -30,
-    opacity: 0.75,
   },
   topRow: {
     flexDirection: 'row',
@@ -221,10 +228,19 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     opacity: 0.6,
   },
-  // Mini card styles for theme picker
+  previewLabel: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  previewName: {
+    fontSize: 36,
+    fontWeight: '700',
+  },
   miniCardContainer: {
-    width: '47%',
-    borderRadius: 12,
+    width: MINI_CONTAINER_WIDTH,
+    height: MINI_CONTAINER_HEIGHT,
+    borderRadius: 8,
     borderWidth: 3,
     borderColor: 'transparent',
     overflow: 'hidden',
@@ -232,27 +248,11 @@ const styles = StyleSheet.create({
   miniCardSelected: {
     borderColor: '#EC008C',
   },
-  miniCard: {
-    height: 90,
-    borderRadius: 9,
+  miniScaleWrapper: {
+    width: MINI_CONTAINER_WIDTH,
+    height: MINI_CONTAINER_HEIGHT,
     overflow: 'hidden',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  miniBackgroundImage: {
-    position: 'absolute',
-    width: 120,
-    height: 120,
-    right: -20,
-    top: -20,
-    opacity: 0.3,
-  },
-  miniContent: {
-    alignItems: 'center',
-  },
-  miniName: {
-    fontSize: 14,
-    fontWeight: '700',
+    transformOrigin: 'top left',
   },
 });
 
