@@ -1,10 +1,10 @@
 export type CardTheme =
+  | 'lightning-piggy'
   | 'lightning-bee'
   | 'lightning-cat'
   | 'lightning-cow'
   | 'lightning-goat'
   | 'nostrich'
-  | 'lightning-piggy'
   | 'lightning-whale'
   | 'bitcoin'
   | 'alby'

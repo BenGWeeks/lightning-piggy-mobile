@@ -12,11 +12,20 @@ export interface CardThemeConfig {
 }
 
 export const cardThemes: Record<CardTheme, CardThemeConfig> = {
+  'lightning-piggy': {
+    id: 'lightning-piggy',
+    name: 'Lightning Piggy',
+    gradientColors: ['#9B40FF', '#7A30F3'],
+    textColor: '#FFFFFF',
+    accentColor: '#FFD700',
+    backgroundImage: require('../../assets/images/lightning-piggy-intro.png'),
+    backgroundImageStyle: 'lightning-piggy',
+  },
   'lightning-bee': {
     id: 'lightning-bee',
     name: 'Lightning Bee',
     gradientColors: ['#FFCA28', '#F9A825'],
-    textColor: '#000000',
+    textColor: '#FFFFFF',
     accentColor: '#FFFFFF',
     backgroundImage: require('../../assets/images/lightning-bee.png'),
     backgroundImageStyle: 'lightning-bee',
@@ -56,15 +65,6 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
     accentColor: '#E040FB',
     backgroundImage: require('../../assets/images/nostrich.png'),
     backgroundImageStyle: 'nostrich',
-  },
-  'lightning-piggy': {
-    id: 'lightning-piggy',
-    name: 'Lightning Piggy',
-    gradientColors: ['#9B40FF', '#7A30F3'],
-    textColor: '#FFFFFF',
-    accentColor: '#FFD700',
-    backgroundImage: require('../../assets/images/lightning-piggy-intro.png'),
-    backgroundImageStyle: 'lightning-piggy',
   },
   'lightning-whale': {
     id: 'lightning-whale',
