@@ -232,7 +232,7 @@ const styles = StyleSheet.create({
   miniCardContainer: {
     width: MINI_CONTAINER_WIDTH,
     height: MINI_CONTAINER_HEIGHT,
-    borderRadius: 8,
+    borderRadius: 16,
     borderWidth: 3,
     borderColor: 'transparent',
     overflow: 'hidden',

@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
-import { BottomSheetModal, BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
+import {
+  BottomSheetModal,
+  BottomSheetBackdrop,
+  BottomSheetScrollView,
+} from '@gorhom/bottom-sheet';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
 import { CardTheme } from '../types/wallet';
@@ -16,7 +20,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const { wallets, updateWalletSettings, removeWallet } = useWallet();
   const wallet = wallets.find((w) => w.id === walletId);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
-  const snapPoints = useMemo(() => ['75%'], []);
+  const snapPoints = useMemo(() => ['85%'], []);
 
   const [alias, setAlias] = useState('');
   const [selectedTheme, setSelectedTheme] = useState<CardTheme>('lightning-piggy');
@@ -86,7 +90,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
       backgroundStyle={styles.sheetBackground}
       handleIndicatorStyle={styles.handle}
     >
-      <BottomSheetView style={styles.content}>
+      <BottomSheetScrollView contentContainerStyle={styles.content}>
         <Text style={styles.title}>Wallet Settings</Text>
 
         <Text style={styles.label}>Alias</Text>
@@ -118,7 +122,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         <TouchableOpacity style={styles.disconnectButton} onPress={handleDisconnect}>
           <Text style={styles.disconnectButtonText}>Remove Wallet</Text>
         </TouchableOpacity>
-      </BottomSheetView>
+      </BottomSheetScrollView>
     </BottomSheetModal>
   );
 };
@@ -135,6 +139,7 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 24,
+    paddingBottom: 40,
     gap: 8,
   },
   title: {
