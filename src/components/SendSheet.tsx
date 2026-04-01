@@ -11,7 +11,8 @@ import {
   Keyboard,
   TouchableWithoutFeedback,
 } from 'react-native';
-import BottomSheet, {
+import {
+  BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetView,
@@ -75,7 +76,17 @@ function isValidInvoice(data: string): boolean {
 }
 
 const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
-  const { payInvoice, refreshBalance, balance, btcPrice, currency } = useWallet();
+  const {
+    payInvoiceForWallet,
+    refreshBalanceForWallet,
+    activeWalletId,
+    activeWallet,
+    wallets,
+    btcPrice,
+    currency,
+  } = useWallet();
+  const [capturedWalletId, setCapturedWalletId] = useState<string | null>(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [invoiceData, setInvoiceData] = useState<string | null>(null);
   const [decoded, setDecoded] = useState<DecodedInvoice | null>(null);
@@ -89,7 +100,7 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [inputUnit, setInputUnit] = useState<InputUnit>('sats');
   const [lnurlParams, setLnurlParams] = useState<LnurlPayParams | null>(null);
   const [resolving, setResolving] = useState(false);
-  const bottomSheetRef = useRef<BottomSheet>(null);
+  const bottomSheetRef = useRef<BottomSheetModal>(null);
 
   const snapPoints = useMemo(() => ['90%'], []);
 
@@ -101,8 +112,19 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
     return Math.round((fiat / btcPrice) * 100_000_000);
   };
 
+  const selectedWalletId = capturedWalletId ?? activeWalletId;
+  const selectedWallet = useMemo(
+    () => wallets.find((w) => w.id === selectedWalletId) ?? null,
+    [wallets, selectedWalletId],
+  );
+  const walletId = selectedWallet?.id ?? null;
+  const walletBalance = selectedWallet?.balance ?? null;
+  const walletName = selectedWallet?.alias ?? 'Wallet';
+
   useEffect(() => {
     if (visible) {
+      setCapturedWalletId(activeWalletId);
+      setDropdownOpen(false);
       setInvoiceData(null);
       setDecoded(null);
       setScanned(false);
@@ -114,9 +136,9 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
       setInputUnit('sats');
       setLnurlParams(null);
       setResolving(false);
-      bottomSheetRef.current?.expand();
+      bottomSheetRef.current?.present();
     } else {
-      bottomSheetRef.current?.close();
+      bottomSheetRef.current?.dismiss();
     }
   }, [visible]);
 
@@ -238,11 +260,11 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
         }
         // Fetch a bolt11 invoice from the LNURL-pay callback
         const bolt11 = await fetchInvoice(lnurlParams.callback, currentSats);
-        await payInvoice(bolt11);
+        await payInvoiceForWallet(walletId!, bolt11);
       } else {
-        await payInvoice(invoiceData);
+        await payInvoiceForWallet(walletId!, invoiceData);
       }
-      await refreshBalance();
+      if (walletId) await refreshBalanceForWallet(walletId);
       Alert.alert('Payment Sent', 'Your payment was sent successfully!', [
         { text: 'OK', onPress: onClose },
       ]);
@@ -284,9 +306,8 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
   const canSend = needsAmount ? lnurlParams && currentSats > 0 && !resolving : !!invoiceData;
 
   return (
-    <BottomSheet
+    <BottomSheetModal
       ref={bottomSheetRef}
-      index={0}
       snapPoints={snapPoints}
       onChange={handleSheetChange}
       enablePanDownToClose
@@ -298,6 +319,52 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
         <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
           <View style={styles.innerContent}>
             <Text style={styles.title}>Send</Text>
+
+            {/* Wallet selector */}
+            {wallets.filter((w) => w.isConnected).length > 1 ? (
+              <View style={styles.walletDropdownRow}>
+                <Text style={styles.walletLabel}>From:</Text>
+                <View style={styles.walletDropdownWrapper}>
+                  <TouchableOpacity
+                    style={styles.walletDropdown}
+                    onPress={() => setDropdownOpen(!dropdownOpen)}
+                  >
+                    <Text style={styles.walletDropdownText}>{walletName}</Text>
+                    <Text style={styles.walletDropdownArrow}>{dropdownOpen ? '▲' : '▼'}</Text>
+                  </TouchableOpacity>
+                  {dropdownOpen && (
+                    <View style={styles.walletDropdownMenu}>
+                      {wallets
+                        .filter((w) => w.isConnected)
+                        .map((w) => (
+                          <TouchableOpacity
+                            key={w.id}
+                            style={[
+                              styles.walletDropdownItem,
+                              capturedWalletId === w.id && styles.walletDropdownItemActive,
+                            ]}
+                            onPress={() => {
+                              setCapturedWalletId(w.id);
+                              setDropdownOpen(false);
+                            }}
+                          >
+                            <Text
+                              style={[
+                                styles.walletDropdownItemText,
+                                capturedWalletId === w.id && styles.walletDropdownItemTextActive,
+                              ]}
+                            >
+                              {w.alias}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                    </View>
+                  )}
+                </View>
+              </View>
+            ) : (
+              <Text style={styles.walletLabel}>From: {walletName}</Text>
+            )}
 
             {/* Mode tabs */}
             {!scanned && (
@@ -474,10 +541,10 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
             )}
 
             {/* Balance */}
-            {balance !== null && btcPrice !== null && (
+            {walletBalance !== null && btcPrice !== null && (
               <Text style={styles.balanceText}>
-                Balance: {balance.toLocaleString()} sats (
-                {satsToFiatString(balance, btcPrice, currency)})
+                Balance: {walletBalance.toLocaleString()} sats (
+                {satsToFiatString(walletBalance, btcPrice, currency)})
               </Text>
             )}
 
@@ -507,7 +574,7 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
           </View>
         </TouchableWithoutFeedback>
       </BottomSheetView>
-    </BottomSheet>
+    </BottomSheetModal>
   );
 };
 
@@ -526,6 +593,7 @@ const styles = StyleSheet.create({
   },
   innerContent: {
     padding: 20,
+    paddingBottom: 40,
     alignItems: 'center',
     gap: 14,
   },
@@ -774,6 +842,73 @@ const styles = StyleSheet.create({
     color: colors.brandPink,
     fontSize: 16,
     fontWeight: '700',
+  },
+  walletDropdownRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  walletDropdownWrapper: {
+    position: 'relative',
+    zIndex: 10,
+  },
+  walletDropdown: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.white,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: colors.divider,
+  },
+  walletDropdownText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textBody,
+  },
+  walletDropdownArrow: {
+    fontSize: 10,
+    color: colors.textSupplementary,
+  },
+  walletDropdownMenu: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    marginTop: 4,
+    backgroundColor: colors.white,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+    overflow: 'hidden',
+    minWidth: 160,
+  },
+  walletDropdownItem: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  walletDropdownItemActive: {
+    backgroundColor: colors.brandPink,
+  },
+  walletDropdownItemText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textBody,
+  },
+  walletDropdownItemTextActive: {
+    color: colors.white,
+  },
+  walletLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textSupplementary,
   },
 });
 

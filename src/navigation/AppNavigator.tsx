@@ -8,6 +8,7 @@ import { colors } from '../styles/theme';
 import { RootStackParamList, LearnStackParamList } from './types';
 
 import IntroScreen from '../screens/IntroScreen';
+import OnboardingScreen from '../screens/OnboardingScreen';
 import HomeScreen from '../screens/HomeScreen';
 import EarnScreen from '../screens/EarnScreen';
 import LearnScreen from '../screens/LearnScreen';
@@ -102,7 +103,7 @@ function HomeTabs() {
 }
 
 export default function AppNavigator() {
-  const { isConnected, isLoading } = useWallet();
+  const { isOnboarded, isLoading } = useWallet();
 
   if (isLoading) {
     return (
@@ -115,10 +116,10 @@ export default function AppNavigator() {
   return (
     <NavigationContainer>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {!isConnected ? (
+        {!isOnboarded ? (
           <>
             <Stack.Screen name="Intro" component={IntroScreen} />
-            <Stack.Screen name="Setup" component={AccountScreen} />
+            <Stack.Screen name="Onboarding" component={OnboardingScreen} />
           </>
         ) : (
           <Stack.Screen name="MainTabs" component={HomeTabs} />

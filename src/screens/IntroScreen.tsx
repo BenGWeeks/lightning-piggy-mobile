@@ -50,7 +50,7 @@ const IntroScreen: React.FC<Props> = ({ navigation }) => {
           An electronic cash piggy bank for children that accepts bitcoin sent over lightning, while
           displaying the amount saved in satoshis
         </Text>
-        <TouchableOpacity style={styles.button} onPress={() => navigation.navigate('Setup')}>
+        <TouchableOpacity style={styles.button} onPress={() => navigation.navigate('Onboarding')}>
           <Text style={styles.buttonText}>Let's Go</Text>
         </TouchableOpacity>
         <Image

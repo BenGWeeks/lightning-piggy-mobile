@@ -1,7 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nwcService from '../services/nwcService';
+import * as walletStorage from '../services/walletStorageService';
 import { CURRENCIES, FiatCurrency, getBtcPrice } from '../services/fiatService';
+import { CardTheme, WalletMetadata, WalletState } from '../types/wallet';
 
 const USER_NAME_KEY = 'user_display_name';
 const CURRENCY_KEY = 'user_fiat_currency';
@@ -20,36 +22,76 @@ function parseNwcLud16(nwcUrl: string | null): string | null {
 }
 
 interface WalletContextType {
-  isConnected: boolean;
+  // Multi-wallet state
+  wallets: WalletState[];
+  activeWalletId: string | null;
+  activeWallet: WalletState | null;
+  hasWallets: boolean;
+
+  // App state
+  isOnboarded: boolean;
   isLoading: boolean;
-  balance: number | null;
+
+  // User prefs
   userName: string;
   setUserName: (name: string) => Promise<void>;
   currency: FiatCurrency;
   setCurrency: (currency: FiatCurrency) => Promise<void>;
   btcPrice: number | null;
-  walletAlias: string | null;
   lightningAddress: string | null;
   setLightningAddress: (address: string | null) => Promise<void>;
-  connect: (nwcUrl: string) => Promise<{ success: boolean; error?: string }>;
-  disconnect: () => Promise<void>;
-  refreshBalance: () => Promise<void>;
+
+  // Wallet actions
+  addWallet: (
+    nwcUrl: string,
+    alias: string,
+    theme: CardTheme,
+  ) => Promise<{ success: boolean; error?: string }>;
+  removeWallet: (walletId: string) => Promise<void>;
+  updateWalletSettings: (
+    walletId: string,
+    settings: { alias?: string; theme?: CardTheme },
+  ) => Promise<void>;
+  setActiveWallet: (walletId: string) => void;
+  refreshActiveBalance: () => Promise<void>;
+  completeOnboarding: () => Promise<void>;
+
+  // Payment actions (operate on active wallet)
   makeInvoice: (amount: number, memo?: string) => Promise<string>;
   payInvoice: (bolt11: string) => Promise<{ preimage: string }>;
+
+  // Payment actions with explicit wallet ID (for sheets)
+  makeInvoiceForWallet: (walletId: string, amount: number, memo?: string) => Promise<string>;
+  payInvoiceForWallet: (walletId: string, bolt11: string) => Promise<{ preimage: string }>;
+  refreshBalanceForWallet: (walletId: string) => Promise<void>;
+
+  // Legacy compatibility
+  isConnected: boolean;
+  balance: number | null;
+  walletAlias: string | null;
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
 
 export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [isConnected, setIsConnected] = useState(false);
+  const [wallets, setWallets] = useState<WalletState[]>([]);
+  const [activeWalletId, setActiveWalletId] = useState<string | null>(null);
+  const [isOnboarded, setIsOnboarded] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [balance, setBalance] = useState<number | null>(null);
   const [userName, setUserNameState] = useState('');
   const [currency, setCurrencyState] = useState<FiatCurrency>('USD');
   const [btcPrice, setBtcPrice] = useState<number | null>(null);
   const [lightningAddress, setLightningAddressState] = useState<string | null>(null);
-  const [walletAlias, setWalletAlias] = useState<string | null>(null);
   const priceInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Derived state
+  const activeWallet = wallets.find((w) => w.id === activeWalletId) ?? null;
+  const hasWallets = wallets.length > 0;
+
+  // Legacy compatibility
+  const isConnected = activeWallet?.isConnected ?? false;
+  const balance = activeWallet?.balance ?? null;
+  const walletAlias = activeWallet?.walletAlias ?? activeWallet?.alias ?? null;
 
   const setLightningAddress = useCallback(async (address: string | null) => {
     setLightningAddressState(address);
@@ -68,32 +110,24 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const setCurrency = useCallback(async (cur: FiatCurrency) => {
     setCurrencyState(cur);
     await AsyncStorage.setItem(CURRENCY_KEY, cur);
-    // Fetch new price immediately
     const price = await getBtcPrice(cur);
     setBtcPrice(price);
   }, []);
-
-  const fetchWalletInfo = useCallback(async () => {
-    const info = await nwcService.getInfo();
-    if (info) {
-      setWalletAlias(info.alias || null);
-      // Auto-detect lightning address from wallet if not already set
-      if (info.lud16 && !lightningAddress) {
-        setLightningAddressState(info.lud16);
-        await AsyncStorage.setItem(LIGHTNING_ADDRESS_KEY, info.lud16);
-      }
-    }
-  }, [lightningAddress]);
 
   const fetchPrice = useCallback(async (cur: FiatCurrency) => {
     const price = await getBtcPrice(cur);
     setBtcPrice(price);
   }, []);
 
-  // Auto-reconnect, load saved settings, and fetch price on app start
+  const updateWalletInState = useCallback((walletId: string, updates: Partial<WalletState>) => {
+    setWallets((prev) => prev.map((w) => (w.id === walletId ? { ...w, ...updates } : w)));
+  }, []);
+
+  // Startup: load prefs, migrate, reconnect all wallets
   useEffect(() => {
     (async () => {
       try {
+        // Load user preferences
         const savedName = await AsyncStorage.getItem(USER_NAME_KEY);
         if (savedName) setUserNameState(savedName);
 
@@ -105,32 +139,73 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           ? (savedCurrency as FiatCurrency)
           : 'USD';
         setCurrencyState(cur);
-
-        // Fetch BTC price
         fetchPrice(cur);
 
-        const savedUrl = await nwcService.getSavedUrl();
-        if (savedUrl) {
-          // Only override saved lightning address if NWC URL has a lud16 param
-          const nwcLud16 = parseNwcLud16(savedUrl);
-          if (nwcLud16) setLightningAddressState(nwcLud16);
-          const result = await nwcService.connect(savedUrl);
-          if (result.success) {
-            setIsConnected(true);
-            setBalance(result.balance ?? null);
-            // Fetch wallet info (alias, lud16)
-            const info = await nwcService.getInfo();
-            if (info) {
-              setWalletAlias(info.alias || null);
-              if (info.lud16 && !savedAddress) {
-                setLightningAddressState(info.lud16);
-                await AsyncStorage.setItem(LIGHTNING_ADDRESS_KEY, info.lud16);
+        // Check onboarding status
+        const onboarded = await walletStorage.isOnboarded();
+        setIsOnboarded(onboarded);
+
+        // Migrate legacy single-wallet data
+        await walletStorage.migrateLegacy();
+
+        // Re-check onboarding after migration (migration sets it)
+        if (!onboarded) {
+          const onboardedAfterMigration = await walletStorage.isOnboarded();
+          setIsOnboarded(onboardedAfterMigration);
+        }
+
+        // Load and reconnect all wallets
+        const walletList = await walletStorage.getWalletList();
+        const walletStates: WalletState[] = walletList.map((w) => ({
+          ...w,
+          isConnected: false,
+          balance: null,
+          walletAlias: null,
+        }));
+        setWallets(walletStates);
+
+        if (walletStates.length > 0) {
+          setActiveWalletId(walletStates[0].id);
+        }
+
+        // Connect all wallets in parallel
+        await Promise.all(
+          walletList.map(async (wallet) => {
+            const nwcUrl = await walletStorage.getNwcUrl(wallet.id);
+            if (!nwcUrl) return;
+
+            const result = await nwcService.connect(wallet.id, nwcUrl);
+            if (result.success) {
+              const info = await nwcService.getInfo(wallet.id);
+              const lud16 = parseNwcLud16(nwcUrl);
+
+              setWallets((prev) =>
+                prev.map((w) =>
+                  w.id === wallet.id
+                    ? {
+                        ...w,
+                        isConnected: true,
+                        balance: result.balance ?? null,
+                        walletAlias: info?.alias || null,
+                        lightningAddress: lud16 || info?.lud16 || w.lightningAddress,
+                      }
+                    : w,
+                ),
+              );
+
+              // Update lightning address from first connected wallet if not set
+              if ((lud16 || info?.lud16) && !savedAddress) {
+                const addr = lud16 || info?.lud16 || null;
+                if (addr) {
+                  setLightningAddressState(addr);
+                  await AsyncStorage.setItem(LIGHTNING_ADDRESS_KEY, addr);
+                }
               }
             }
-          }
-        }
+          }),
+        );
       } catch (error) {
-        console.warn('Auto-reconnect failed:', error);
+        console.warn('Wallet startup failed:', error);
       } finally {
         setIsLoading(false);
       }
@@ -145,65 +220,166 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   }, [currency, fetchPrice]);
 
-  const connect = useCallback(
-    async (nwcUrl: string) => {
-      const detectedAddress = parseNwcLud16(nwcUrl);
-      if (detectedAddress) {
-        await setLightningAddress(detectedAddress);
+  const addWallet = useCallback(
+    async (nwcUrl: string, alias: string, theme: CardTheme) => {
+      const id = walletStorage.generateWalletId();
+
+      const result = await nwcService.connect(id, nwcUrl);
+      if (!result.success) {
+        return { success: false, error: result.error };
       }
-      const result = await nwcService.connect(nwcUrl);
-      if (result.success) {
-        setIsConnected(true);
-        setBalance(result.balance ?? null);
-        await fetchWalletInfo();
+
+      const info = await nwcService.getInfo(id);
+      const lud16 = parseNwcLud16(nwcUrl);
+
+      const metadata: WalletMetadata = {
+        id,
+        alias,
+        theme,
+        order: wallets.length,
+        lightningAddress: lud16 || info?.lud16 || null,
+      };
+
+      const state: WalletState = {
+        ...metadata,
+        isConnected: true,
+        balance: result.balance ?? null,
+        walletAlias: info?.alias || null,
+      };
+
+      // Persist
+      await walletStorage.saveNwcUrl(id, nwcUrl.trim());
+      const currentList = await walletStorage.getWalletList();
+      await walletStorage.saveWalletList([...currentList, metadata]);
+
+      // Update state
+      setWallets((prev) => [...prev, state]);
+      if (!activeWalletId) {
+        setActiveWalletId(id);
       }
-      return { success: result.success, error: result.error };
+
+      return { success: true };
     },
-    [setLightningAddress, fetchWalletInfo],
+    [wallets.length, activeWalletId],
   );
 
-  const disconnect = useCallback(async () => {
-    await nwcService.disconnect();
-    setIsConnected(false);
-    setBalance(null);
-    setWalletAlias(null);
-    await setLightningAddress(null);
-  }, [setLightningAddress]);
+  const removeWallet = useCallback(
+    async (walletId: string) => {
+      nwcService.disconnect(walletId);
+      await walletStorage.deleteNwcUrl(walletId);
 
-  const refreshBalance = useCallback(async () => {
-    const b = await nwcService.getBalance();
+      const currentList = await walletStorage.getWalletList();
+      const updated = currentList.filter((w) => w.id !== walletId);
+      await walletStorage.saveWalletList(updated);
+
+      setWallets((prev) => {
+        const remaining = prev.filter((w) => w.id !== walletId);
+        if (activeWalletId === walletId) {
+          setActiveWalletId(remaining.length > 0 ? remaining[0].id : null);
+        }
+        return remaining;
+      });
+    },
+    [activeWalletId],
+  );
+
+  const updateWalletSettings = useCallback(
+    async (walletId: string, settings: { alias?: string; theme?: CardTheme }) => {
+      // Update in-memory state
+      setWallets((prev) => prev.map((w) => (w.id === walletId ? { ...w, ...settings } : w)));
+
+      // Persist metadata changes
+      const currentList = await walletStorage.getWalletList();
+      const updatedList = currentList.map((w) => (w.id === walletId ? { ...w, ...settings } : w));
+      await walletStorage.saveWalletList(updatedList);
+    },
+    [],
+  );
+
+  const setActiveWallet = useCallback((walletId: string) => {
+    setActiveWalletId(walletId);
+  }, []);
+
+  const refreshActiveBalance = useCallback(async () => {
+    if (!activeWalletId) return;
+    const b = await nwcService.getBalance(activeWalletId);
     if (b !== null) {
-      setBalance(b);
+      updateWalletInState(activeWalletId, { balance: b });
     }
+  }, [activeWalletId, updateWalletInState]);
+
+  const refreshBalanceForWallet = useCallback(
+    async (walletId: string) => {
+      const b = await nwcService.getBalance(walletId);
+      if (b !== null) {
+        updateWalletInState(walletId, { balance: b });
+      }
+    },
+    [updateWalletInState],
+  );
+
+  const completeOnboarding = useCallback(async () => {
+    await walletStorage.setOnboarded();
+    setIsOnboarded(true);
   }, []);
 
-  const makeInvoice = useCallback(async (amount: number, memo?: string) => {
-    return nwcService.makeInvoice(amount, memo);
-  }, []);
+  const makeInvoice = useCallback(
+    async (amount: number, memo?: string) => {
+      if (!activeWalletId) throw new Error('No active wallet');
+      return nwcService.makeInvoice(activeWalletId, amount, memo);
+    },
+    [activeWalletId],
+  );
 
-  const payInvoice = useCallback(async (bolt11: string) => {
-    return nwcService.payInvoice(bolt11);
+  const payInvoice = useCallback(
+    async (bolt11: string) => {
+      if (!activeWalletId) throw new Error('No active wallet');
+      return nwcService.payInvoice(activeWalletId, bolt11);
+    },
+    [activeWalletId],
+  );
+
+  const makeInvoiceForWallet = useCallback(
+    async (walletId: string, amount: number, memo?: string) => {
+      return nwcService.makeInvoice(walletId, amount, memo);
+    },
+    [],
+  );
+
+  const payInvoiceForWallet = useCallback(async (walletId: string, bolt11: string) => {
+    return nwcService.payInvoice(walletId, bolt11);
   }, []);
 
   return (
     <WalletContext.Provider
       value={{
-        isConnected,
+        wallets,
+        activeWalletId,
+        activeWallet,
+        hasWallets,
+        isOnboarded,
         isLoading,
-        balance,
         userName,
         setUserName,
         currency,
         setCurrency,
         btcPrice,
-        walletAlias,
         lightningAddress,
         setLightningAddress,
-        connect,
-        disconnect,
-        refreshBalance,
+        addWallet,
+        removeWallet,
+        updateWalletSettings,
+        setActiveWallet,
+        refreshActiveBalance,
+        completeOnboarding,
         makeInvoice,
         payInvoice,
+        makeInvoiceForWallet,
+        payInvoiceForWallet,
+        refreshBalanceForWallet,
+        isConnected,
+        balance,
+        walletAlias,
       }}
     >
       {children}

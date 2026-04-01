@@ -1,10 +1,7 @@
 import { NostrWebLNProvider } from '@getalby/sdk';
-import type { Nip47GetInfoResponse, Nip47Transaction } from '@getalby/sdk';
-import * as SecureStore from 'expo-secure-store';
+import type { Nip47GetInfoResponse } from '@getalby/sdk';
 
-const NWC_URL_KEY = 'nwc_connection_url';
-
-let provider: NostrWebLNProvider | null = null;
+const providers = new Map<string, NostrWebLNProvider>();
 
 export function validateNwcUrl(url: string): { valid: boolean; error?: string } {
   url = url.trim();
@@ -30,6 +27,7 @@ export function validateNwcUrl(url: string): { valid: boolean; error?: string } 
 }
 
 export async function connect(
+  walletId: string,
   nwcUrl: string,
 ): Promise<{ success: boolean; balance?: number; error?: string }> {
   const validation = validateNwcUrl(nwcUrl);
@@ -38,56 +36,61 @@ export async function connect(
   }
 
   try {
-    // Close existing provider if any
-    if (provider) {
+    // Close existing provider for this wallet if any
+    const existing = providers.get(walletId);
+    if (existing) {
       try {
-        provider.close();
+        existing.close();
       } catch {}
     }
 
-    provider = new NostrWebLNProvider({
+    const provider = new NostrWebLNProvider({
       nostrWalletConnectUrl: nwcUrl.trim(),
     });
 
     await provider.enable();
 
-    // Get initial balance
     const b = await provider.getBalance();
     const balance = b.balance;
 
-    // Save URL for auto-reconnect
-    await SecureStore.setItemAsync(NWC_URL_KEY, nwcUrl.trim());
+    providers.set(walletId, provider);
 
     return { success: true, balance };
   } catch (error) {
-    provider = null;
+    providers.delete(walletId);
     const message = error instanceof Error ? error.message : String(error);
     return { success: false, error: message };
   }
 }
 
-export async function disconnect(): Promise<void> {
+export function disconnect(walletId: string): void {
+  const provider = providers.get(walletId);
   if (provider) {
     try {
       provider.close();
     } catch {}
-    provider = null;
+    providers.delete(walletId);
   }
-  await SecureStore.deleteItemAsync(NWC_URL_KEY);
 }
 
-export async function getBalance(): Promise<number | null> {
+export async function getBalance(walletId: string): Promise<number | null> {
+  const provider = providers.get(walletId);
   if (!provider) return null;
   try {
     const b = await provider.getBalance();
     return b.balance;
   } catch (error) {
-    console.warn('getBalance error:', error);
+    console.warn(`getBalance error for ${walletId}:`, error);
     return null;
   }
 }
 
-export async function makeInvoice(amount: number, memo?: string): Promise<string> {
+export async function makeInvoice(
+  walletId: string,
+  amount: number,
+  memo?: string,
+): Promise<string> {
+  const provider = providers.get(walletId);
   if (!provider) throw new Error('Not connected');
   const invoice = await provider.makeInvoice({
     amount,
@@ -96,13 +99,15 @@ export async function makeInvoice(amount: number, memo?: string): Promise<string
   return invoice.paymentRequest;
 }
 
-export async function payInvoice(bolt11: string): Promise<{ preimage: string }> {
+export async function payInvoice(walletId: string, bolt11: string): Promise<{ preimage: string }> {
+  const provider = providers.get(walletId);
   if (!provider) throw new Error('Not connected');
   const result = await provider.sendPayment(bolt11);
   return { preimage: result.preimage };
 }
 
-export async function getInfo(): Promise<{ alias: string; lud16?: string } | null> {
+export async function getInfo(walletId: string): Promise<{ alias: string; lud16?: string } | null> {
+  const provider = providers.get(walletId);
   if (!provider) return null;
   try {
     const info: Nip47GetInfoResponse = await provider.getInfo();
@@ -116,21 +121,17 @@ export async function getInfo(): Promise<{ alias: string; lud16?: string } | nul
   }
 }
 
-export async function listTransactions(): Promise<Nip47Transaction[]> {
+export async function listTransactions(walletId: string): Promise<any[]> {
+  const provider = providers.get(walletId);
   if (!provider) return [];
   try {
     const result = await provider.listTransactions({});
     return result.transactions || [];
   } catch {
-    // Not all wallets support listTransactions
     return [];
   }
 }
 
-export async function getSavedUrl(): Promise<string | null> {
-  return SecureStore.getItemAsync(NWC_URL_KEY);
-}
-
-export function isConnected(): boolean {
-  return provider !== null;
+export function isWalletConnected(walletId: string): boolean {
+  return providers.has(walletId);
 }

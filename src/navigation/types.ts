@@ -4,6 +4,7 @@ import { RouteProp } from '@react-navigation/native';
 // Root stack (pre-auth and post-auth)
 export type RootStackParamList = {
   Intro: undefined;
+  Onboarding: undefined;
   Setup: undefined;
   MainTabs: undefined;
 };

@@ -11,7 +11,8 @@ import {
   Keyboard,
   TouchableWithoutFeedback,
 } from 'react-native';
-import BottomSheet, {
+import {
+  BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetView,
@@ -33,8 +34,18 @@ type Mode = 'address' | 'amount';
 type InputUnit = 'sats' | 'fiat';
 
 const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
-  const { makeInvoice, refreshBalance, balance, btcPrice, currency, lightningAddress } =
-    useWallet();
+  const {
+    makeInvoiceForWallet,
+    refreshBalanceForWallet,
+    activeWalletId,
+    activeWallet,
+    wallets,
+    btcPrice,
+    currency,
+    lightningAddress,
+  } = useWallet();
+  const [capturedWalletId, setCapturedWalletId] = useState<string | null>(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
   const [mode, setMode] = useState<Mode>('address');
   const [invoice, setInvoice] = useState('');
   const [paymentReceived, setPaymentReceived] = useState(false);
@@ -45,7 +56,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   const intervalId = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevBalance = useRef<number | null>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const bottomSheetRef = useRef<BottomSheet>(null);
+  const bottomSheetRef = useRef<BottomSheetModal>(null);
 
   const snapPoints = useMemo(() => ['85%'], []);
 
@@ -53,6 +64,14 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
     if (!btcPrice || btcPrice <= 0) return 0;
     return Math.round((fiat / btcPrice) * 100_000_000);
   };
+
+  const selectedWalletId = capturedWalletId ?? activeWalletId;
+  const selectedWallet = useMemo(
+    () => wallets.find((w) => w.id === selectedWalletId) ?? null,
+    [wallets, selectedWalletId],
+  );
+  const walletName = selectedWallet?.alias ?? 'Wallet';
+  const balance = selectedWallet?.balance ?? null;
 
   const generateInvoice = useCallback(
     async (sats: number) => {
@@ -63,10 +82,12 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
       setLoading(true);
       setPaymentReceived(false);
       try {
-        const inv = await makeInvoice(sats, 'Lightning Piggy');
+        const wId = capturedWalletId;
+        if (!wId) return;
+        const inv = await makeInvoiceForWallet(wId, sats, 'Lightning Piggy');
         setInvoice(inv);
         intervalId.current = setInterval(async () => {
-          await refreshBalance();
+          if (wId) await refreshBalanceForWallet(wId);
         }, 5000);
       } catch (error) {
         console.warn('Failed to create invoice:', error);
@@ -74,13 +95,15 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
         setLoading(false);
       }
     },
-    [makeInvoice, refreshBalance],
+    [makeInvoiceForWallet, refreshBalanceForWallet, capturedWalletId],
   );
 
   // Open/close the sheet — intentionally depends only on `visible`.
   // `balance` and `lightningAddress` are read for initialisation, not as reactive triggers.
   useEffect(() => {
     if (visible) {
+      setCapturedWalletId(activeWalletId);
+      setDropdownOpen(false);
       prevBalance.current = balance;
       setMode(lightningAddress ? 'address' : 'amount');
       setSatsValue('');
@@ -88,9 +111,9 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
       setInvoice('');
       setPaymentReceived(false);
       setInputUnit('sats');
-      bottomSheetRef.current?.expand();
+      bottomSheetRef.current?.present();
     } else {
-      bottomSheetRef.current?.close();
+      bottomSheetRef.current?.dismiss();
     }
     return () => {
       if (intervalId.current) {
@@ -196,9 +219,8 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   if (!visible) return null;
 
   return (
-    <BottomSheet
+    <BottomSheetModal
       ref={bottomSheetRef}
-      index={0}
       snapPoints={snapPoints}
       onChange={handleSheetChange}
       enablePanDownToClose
@@ -210,6 +232,52 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
         <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
           <View style={styles.innerContent}>
             <Text style={styles.title}>Receive</Text>
+
+            {/* Wallet selector */}
+            {wallets.filter((w) => w.isConnected).length > 1 ? (
+              <View style={styles.walletDropdownRow}>
+                <Text style={styles.walletLabel}>To:</Text>
+                <View style={styles.walletDropdownWrapper}>
+                  <TouchableOpacity
+                    style={styles.walletDropdown}
+                    onPress={() => setDropdownOpen(!dropdownOpen)}
+                  >
+                    <Text style={styles.walletDropdownText}>{walletName}</Text>
+                    <Text style={styles.walletDropdownArrow}>{dropdownOpen ? '▲' : '▼'}</Text>
+                  </TouchableOpacity>
+                  {dropdownOpen && (
+                    <View style={styles.walletDropdownMenu}>
+                      {wallets
+                        .filter((w) => w.isConnected)
+                        .map((w) => (
+                          <TouchableOpacity
+                            key={w.id}
+                            style={[
+                              styles.walletDropdownItem,
+                              capturedWalletId === w.id && styles.walletDropdownItemActive,
+                            ]}
+                            onPress={() => {
+                              setCapturedWalletId(w.id);
+                              setDropdownOpen(false);
+                            }}
+                          >
+                            <Text
+                              style={[
+                                styles.walletDropdownItemText,
+                                capturedWalletId === w.id && styles.walletDropdownItemTextActive,
+                              ]}
+                            >
+                              {w.alias}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                    </View>
+                  )}
+                </View>
+              </View>
+            ) : (
+              <Text style={styles.walletLabel}>To: {walletName}</Text>
+            )}
 
             {/* Mode tabs */}
             {lightningAddress ? (
@@ -336,7 +404,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
           </View>
         </TouchableWithoutFeedback>
       </BottomSheetView>
-    </BottomSheet>
+    </BottomSheetModal>
   );
 };
 
@@ -355,6 +423,7 @@ const styles = StyleSheet.create({
   },
   innerContent: {
     padding: 20,
+    paddingBottom: 40,
     alignItems: 'center',
     gap: 12,
   },
@@ -493,6 +562,73 @@ const styles = StyleSheet.create({
     color: colors.brandPink,
     fontSize: 16,
     fontWeight: '700',
+  },
+  walletDropdownRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  walletDropdownWrapper: {
+    position: 'relative',
+    zIndex: 10,
+  },
+  walletDropdown: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.white,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: colors.divider,
+  },
+  walletDropdownText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textBody,
+  },
+  walletDropdownArrow: {
+    fontSize: 10,
+    color: colors.textSupplementary,
+  },
+  walletDropdownMenu: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    marginTop: 4,
+    backgroundColor: colors.white,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+    overflow: 'hidden',
+    minWidth: 160,
+  },
+  walletDropdownItem: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  walletDropdownItemActive: {
+    backgroundColor: colors.brandPink,
+  },
+  walletDropdownItemText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textBody,
+  },
+  walletDropdownItemTextActive: {
+    color: colors.white,
+  },
+  walletLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textSupplementary,
   },
 });
 

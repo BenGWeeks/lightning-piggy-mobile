@@ -1,44 +1,62 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-  View,
-  Text,
-  Image,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  RefreshControl,
-} from 'react-native';
+import { View, Text, Image, TouchableOpacity, ScrollView, RefreshControl } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useWallet } from '../contexts/WalletContext';
-import { colors } from '../styles/theme';
-import { satsToFiatString } from '../services/fiatService';
 import ReceiveSheet from '../components/ReceiveSheet';
 import SendSheet from '../components/SendSheet';
 import TransactionList from '../components/TransactionList';
+import WalletCarousel from '../components/WalletCarousel';
+import AddWalletWizard from '../components/AddWalletWizard';
+import WalletSettingsSheet from '../components/WalletSettingsSheet';
 import * as nwcService from '../services/nwcService';
-import type { Nip47Transaction } from '@getalby/sdk';
+import { styles } from '../styles/HomeScreen.styles';
 
 const HomeScreen: React.FC = () => {
-  const { balance, refreshBalance, userName, btcPrice, currency, walletAlias, isConnected } =
-    useWallet();
+  const {
+    wallets,
+    activeWalletId,
+    activeWallet,
+    hasWallets,
+    refreshActiveBalance,
+    setActiveWallet,
+    userName,
+    btcPrice,
+    currency,
+  } = useWallet();
+  const insets = useSafeAreaInsets();
+
   const [receiveOpen, setReceiveOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
-  const [transactions, setTransactions] = useState<Nip47Transaction[]>([]);
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [settingsWalletId, setSettingsWalletId] = useState<string | null>(null);
+  const [transactions, setTransactions] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
-  const fetchData = useCallback(async () => {
-    await refreshBalance();
+  const fetchTransactions = useCallback(async () => {
+    if (!activeWalletId) {
+      setTransactions([]);
+      return;
+    }
     try {
-      const txs = await nwcService.listTransactions();
-      console.log('Transactions fetched:', txs.length, JSON.stringify(txs.slice(0, 2)));
+      const txs = await nwcService.listTransactions(activeWalletId);
       setTransactions(txs);
     } catch (error) {
       console.warn('Failed to fetch transactions:', error);
     }
-  }, [refreshBalance]);
+  }, [activeWalletId]);
+
+  const fetchData = useCallback(async () => {
+    await refreshActiveBalance();
+    await fetchTransactions();
+  }, [refreshActiveBalance, fetchTransactions]);
 
   useEffect(() => {
-    if (isConnected) fetchData();
-  }, [isConnected, fetchData]);
+    if (activeWallet?.isConnected) {
+      fetchData();
+    } else {
+      setTransactions([]);
+    }
+  }, [activeWalletId, activeWallet?.isConnected, fetchData]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -46,140 +64,86 @@ const HomeScreen: React.FC = () => {
     setRefreshing(false);
   };
 
+  const handleWalletChange = useCallback(
+    (walletId: string) => {
+      if (walletId !== activeWalletId) {
+        setActiveWallet(walletId);
+      }
+    },
+    [activeWalletId, setActiveWallet],
+  );
+
+  const handleSettingsPress = useCallback((walletId: string) => {
+    setSettingsWalletId(walletId);
+  }, []);
+
+  const hasActiveConnection = activeWallet?.isConnected ?? false;
+
   return (
     <View style={styles.container}>
-      {/* Header area with pink background and faded pig */}
-      <View style={styles.headerBackground}>
+      {/* Header area with brand background + faded pig behind carousel */}
+      <View style={[styles.headerBackground, { paddingTop: insets.top + 12 }]}>
         <Image
           source={require('../../assets/images/lightning-piggy-intro.png')}
-          style={styles.pigImage}
+          style={styles.bgPigImage}
           resizeMode="contain"
         />
-        <View style={styles.headerContent}>
-          <Text style={styles.hello}>Hello{userName ? `, ${userName}` : ''}!</Text>
-          {walletAlias ? <Text style={styles.walletAlias}>{walletAlias}</Text> : null}
-          <TouchableOpacity onPress={handleRefresh}>
-            <Text style={styles.balance}>
-              {balance !== null ? `${balance.toLocaleString()} Sats` : 'Loading...'}
-            </Text>
-            {balance !== null && btcPrice !== null && (
-              <Text style={styles.fiatBalance}>
-                {satsToFiatString(balance, btcPrice, currency)}
-              </Text>
-            )}
+
+        <Text style={styles.hello}>Hello{userName ? `, ${userName}` : ''}!</Text>
+
+        <WalletCarousel
+          wallets={wallets}
+          activeWalletId={activeWalletId}
+          btcPrice={btcPrice}
+          currency={currency}
+          onWalletChange={handleWalletChange}
+          onAddWallet={() => setWizardOpen(true)}
+          onSettingsPress={handleSettingsPress}
+        />
+
+        {/* Send/Receive buttons */}
+        <View style={styles.buttonRow}>
+          <TouchableOpacity
+            style={[styles.actionButton, !hasActiveConnection && styles.actionButtonDisabled]}
+            onPress={() => setReceiveOpen(true)}
+            disabled={!hasActiveConnection}
+          >
+            <Text style={styles.actionIcon}>&#8595;</Text>
+            <Text style={styles.actionText}>Receive</Text>
           </TouchableOpacity>
-          <View style={styles.buttonRow}>
-            <TouchableOpacity style={styles.actionButton} onPress={() => setReceiveOpen(true)}>
-              <Text style={styles.actionIcon}>↓</Text>
-              <Text style={styles.actionText}>Receive</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.actionButton} onPress={() => setSendOpen(true)}>
-              <Text style={styles.actionText}>Send</Text>
-              <Text style={styles.actionIcon}>↑</Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            style={[styles.actionButton, !hasActiveConnection && styles.actionButtonDisabled]}
+            onPress={() => setSendOpen(true)}
+            disabled={!hasActiveConnection}
+          >
+            <Text style={styles.actionText}>Send</Text>
+            <Text style={styles.actionIcon}>&#8593;</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
       {/* Transaction list */}
-      <ScrollView
-        style={styles.transactionsContainer}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
-      >
-        <TransactionList transactions={transactions} />
-      </ScrollView>
+      <View style={styles.transactionsWrapper}>
+        <ScrollView
+          style={styles.transactionsContainer}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+        >
+          {hasWallets ? (
+            <TransactionList transactions={transactions} />
+          ) : (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>Add a wallet to get started</Text>
+            </View>
+          )}
+        </ScrollView>
+      </View>
 
       <ReceiveSheet visible={receiveOpen} onClose={() => setReceiveOpen(false)} />
       <SendSheet visible={sendOpen} onClose={() => setSendOpen(false)} />
+      <AddWalletWizard visible={wizardOpen} onClose={() => setWizardOpen(false)} />
+      <WalletSettingsSheet walletId={settingsWalletId} onClose={() => setSettingsWalletId(null)} />
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  headerBackground: {
-    height: 380,
-    backgroundColor: colors.brandPink,
-    overflow: 'hidden',
-  },
-  pigImage: {
-    position: 'absolute',
-    width: 420,
-    height: 420,
-    right: -60,
-    top: -20,
-    opacity: 0.6,
-  },
-  headerContent: {
-    flex: 1,
-    paddingTop: 60,
-    paddingHorizontal: 24,
-    gap: 24,
-  },
-  hello: {
-    color: colors.white,
-    fontSize: 28,
-    fontWeight: '400',
-  },
-  walletAlias: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: '500',
-    opacity: 0.7,
-    marginTop: -16,
-  },
-  balance: {
-    color: colors.white,
-    fontSize: 48,
-    fontWeight: '700',
-  },
-  fiatBalance: {
-    color: colors.white,
-    fontSize: 18,
-    fontWeight: '400',
-    opacity: 0.8,
-    marginTop: 4,
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    gap: 20,
-    marginTop: 16,
-  },
-  actionButton: {
-    flex: 1,
-    flexDirection: 'row',
-    backgroundColor: colors.white,
-    height: 52,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  actionText: {
-    color: colors.brandPink,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  actionIcon: {
-    color: colors.brandPink,
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  transactionsContainer: {
-    flex: 1,
-    backgroundColor: colors.white,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    marginTop: -20,
-  },
-});
 
 export default HomeScreen;
