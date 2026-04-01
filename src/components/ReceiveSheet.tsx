@@ -45,6 +45,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
     lightningAddress,
   } = useWallet();
   const [capturedWalletId, setCapturedWalletId] = useState<string | null>(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
   const [mode, setMode] = useState<Mode>('address');
   const [invoice, setInvoice] = useState('');
   const [paymentReceived, setPaymentReceived] = useState(false);
@@ -102,6 +103,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   useEffect(() => {
     if (visible) {
       setCapturedWalletId(activeWalletId);
+      setDropdownOpen(false);
       prevBalance.current = balance;
       setMode(lightningAddress ? 'address' : 'amount');
       setSatsValue('');
@@ -232,32 +234,48 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
             <Text style={styles.title}>Receive</Text>
 
             {/* Wallet selector */}
-            {wallets.filter((w) => w.isConnected).length > 1 && (
-              <View style={styles.walletSelector}>
-                {wallets
-                  .filter((w) => w.isConnected)
-                  .map((w) => (
-                    <TouchableOpacity
-                      key={w.id}
-                      style={[
-                        styles.walletChip,
-                        capturedWalletId === w.id && styles.walletChipActive,
-                      ]}
-                      onPress={() => setCapturedWalletId(w.id)}
-                    >
-                      <Text
-                        style={[
-                          styles.walletChipText,
-                          capturedWalletId === w.id && styles.walletChipTextActive,
-                        ]}
-                      >
-                        {w.alias}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+            {wallets.filter((w) => w.isConnected).length > 1 ? (
+              <View style={styles.walletDropdownRow}>
+                <Text style={styles.walletLabel}>To:</Text>
+                <View style={styles.walletDropdownWrapper}>
+                  <TouchableOpacity
+                    style={styles.walletDropdown}
+                    onPress={() => setDropdownOpen(!dropdownOpen)}
+                  >
+                    <Text style={styles.walletDropdownText}>{walletName}</Text>
+                    <Text style={styles.walletDropdownArrow}>{dropdownOpen ? '▲' : '▼'}</Text>
+                  </TouchableOpacity>
+                  {dropdownOpen && (
+                    <View style={styles.walletDropdownMenu}>
+                      {wallets
+                        .filter((w) => w.isConnected)
+                        .map((w) => (
+                          <TouchableOpacity
+                            key={w.id}
+                            style={[
+                              styles.walletDropdownItem,
+                              capturedWalletId === w.id && styles.walletDropdownItemActive,
+                            ]}
+                            onPress={() => {
+                              setCapturedWalletId(w.id);
+                              setDropdownOpen(false);
+                            }}
+                          >
+                            <Text
+                              style={[
+                                styles.walletDropdownItemText,
+                                capturedWalletId === w.id && styles.walletDropdownItemTextActive,
+                              ]}
+                            >
+                              {w.alias}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                    </View>
+                  )}
+                </View>
               </View>
-            )}
-            {wallets.filter((w) => w.isConnected).length <= 1 && (
+            ) : (
               <Text style={styles.walletLabel}>To: {walletName}</Text>
             )}
 
@@ -545,27 +563,66 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
-  walletSelector: {
+  walletDropdownRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    alignItems: 'center',
     gap: 8,
-    justifyContent: 'center',
   },
-  walletChip: {
+  walletDropdownWrapper: {
+    position: 'relative',
+    zIndex: 10,
+  },
+  walletDropdown: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.white,
+    borderRadius: 10,
     paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: colors.divider,
+    paddingVertical: 8,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: colors.divider,
   },
-  walletChipActive: {
-    backgroundColor: colors.brandPink,
-  },
-  walletChipText: {
-    fontSize: 13,
+  walletDropdownText: {
+    fontSize: 14,
     fontWeight: '600',
     color: colors.textBody,
   },
-  walletChipTextActive: {
+  walletDropdownArrow: {
+    fontSize: 10,
+    color: colors.textSupplementary,
+  },
+  walletDropdownMenu: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    marginTop: 4,
+    backgroundColor: colors.white,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+    overflow: 'hidden',
+    minWidth: 160,
+  },
+  walletDropdownItem: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  walletDropdownItemActive: {
+    backgroundColor: colors.brandPink,
+  },
+  walletDropdownItemText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textBody,
+  },
+  walletDropdownItemTextActive: {
     color: colors.white,
   },
   walletLabel: {
