@@ -35,6 +35,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     resizeMode: 'contain',
     backgroundColor: '#ffffff',
   },
+  scheme: 'lightningpiggy',
   ios: {
     supportsTablet: true,
     bundleIdentifier: getIosBundleId(),
@@ -44,7 +45,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   plugins: [
     './plugins/withAdjustNothing',
+    './plugins/withAmberQueries',
     'expo-secure-store',
+    [
+      'expo-contacts',
+      {
+        contactsPermission: 'Allow Lightning Piggy to access your contacts to find friends.',
+      },
+    ],
   ],
   android: {
     adaptiveIcon: {

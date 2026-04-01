@@ -1,0 +1,16 @@
+-- Merging decision tree log ---
+manifest
+ADDED from /home/benw/GitHub/lightning-piggy-mobile/modules/amber-signer/android/src/main/AndroidManifest.xml:1:1-2:12
+INJECTED from /home/benw/GitHub/lightning-piggy-mobile/modules/amber-signer/android/src/main/AndroidManifest.xml:1:1-2:12
+	package
+		INJECTED from /home/benw/GitHub/lightning-piggy-mobile/modules/amber-signer/android/src/main/AndroidManifest.xml
+	xmlns:android
+		ADDED from /home/benw/GitHub/lightning-piggy-mobile/modules/amber-signer/android/src/main/AndroidManifest.xml:1:11-69
+uses-sdk
+INJECTED from /home/benw/GitHub/lightning-piggy-mobile/modules/amber-signer/android/src/main/AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from /home/benw/GitHub/lightning-piggy-mobile/modules/amber-signer/android/src/main/AndroidManifest.xml
+INJECTED from /home/benw/GitHub/lightning-piggy-mobile/modules/amber-signer/android/src/main/AndroidManifest.xml
+	android:targetSdkVersion
+		INJECTED from /home/benw/GitHub/lightning-piggy-mobile/modules/amber-signer/android/src/main/AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from /home/benw/GitHub/lightning-piggy-mobile/modules/amber-signer/android/src/main/AndroidManifest.xml

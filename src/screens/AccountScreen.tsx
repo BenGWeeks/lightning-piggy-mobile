@@ -9,11 +9,40 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Image,
 } from 'react-native';
+import Svg, { Rect, Path as SvgPath } from 'react-native-svg';
+import * as Clipboard from 'expo-clipboard';
+import { useNavigation } from '@react-navigation/native';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useWallet } from '../contexts/WalletContext';
+import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
 import { CURRENCIES } from '../services/fiatService';
+import CopyIcon from '../components/icons/CopyIcon';
+import NostrLoginSheet from '../components/NostrLoginSheet';
+import QrSheet from '../components/QrSheet';
+import type { MainTabParamList } from '../navigation/types';
+
+const QrIcon: React.FC<{ size?: number; color?: string }> = ({ size = 20, color = '#FFFFFF' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Rect x="3" y="3" width="7" height="7" rx="1" stroke={color} strokeWidth={2} />
+    <Rect x="14" y="3" width="7" height="7" rx="1" stroke={color} strokeWidth={2} />
+    <Rect x="3" y="14" width="7" height="7" rx="1" stroke={color} strokeWidth={2} />
+    <SvgPath
+      d="M14 14h3v3h-3zM20 14v3h-3M14 20h3M20 20h0"
+      stroke={color}
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </Svg>
+);
+
 const AccountScreen: React.FC = () => {
+  const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList>>();
+  const insets = useSafeAreaInsets();
   const {
     userName,
     setUserName,
@@ -23,8 +52,11 @@ const AccountScreen: React.FC = () => {
     setLightningAddress,
     wallets,
   } = useWallet();
+  const { isLoggedIn, profile, logout } = useNostr();
   const [nameInput, setNameInput] = useState(userName);
   const [lnAddressInput, setLnAddressInput] = useState(lightningAddress || '');
+  const [loginSheetOpen, setLoginSheetOpen] = useState(false);
+  const [qrSheetOpen, setQrSheetOpen] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -35,32 +67,153 @@ const AccountScreen: React.FC = () => {
     setLnAddressInput(lightningAddress || '');
   }, [lightningAddress]);
 
+  // Profile merge: when Nostr profile is loaded and has different values
+  useEffect(() => {
+    if (!profile) return;
+
+    const nostrName = profile.displayName || profile.name;
+    const nostrLn = profile.lud16;
+    const changes: string[] = [];
+
+    if (nostrName && nostrName !== userName) {
+      changes.push(`Name: "${nostrName}"`);
+    }
+    if (nostrLn && nostrLn !== lightningAddress) {
+      changes.push(`Lightning Address: "${nostrLn}"`);
+    }
+
+    if (changes.length === 0) return;
+
+    Alert.alert(
+      'Update from Nostr Profile?',
+      `Your Nostr profile has:\n${changes.join('\n')}\n\nWould you like to use these?`,
+      [
+        { text: 'Keep Current', style: 'cancel' },
+        {
+          text: 'Update',
+          onPress: async () => {
+            if (nostrName && nostrName !== userName) {
+              await setUserName(nostrName);
+            }
+            if (nostrLn && nostrLn !== lightningAddress) {
+              await setLightningAddress(nostrLn);
+            }
+          },
+        },
+      ],
+    );
+    // Only trigger on profile change, not on userName/lightningAddress changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile]);
+
   const handleSave = async () => {
     await setUserName(nameInput.trim());
     await setLightningAddress(lnAddressInput.trim() || null);
     Alert.alert('Saved', 'Your settings have been saved.');
   };
 
+  const handleLogout = () => {
+    Alert.alert('Logout', 'Disconnect your Nostr identity?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Logout',
+        style: 'destructive',
+        onPress: () => logout(),
+      },
+    ]);
+  };
+
+  const copyNpub = async () => {
+    if (profile?.npub) {
+      await Clipboard.setStringAsync(profile.npub);
+      Alert.alert('Copied', 'Your npub has been copied to clipboard.');
+    }
+  };
+
   const connectedCount = wallets.filter((w) => w.isConnected).length;
+  const truncatedNpub = profile?.npub
+    ? `${profile.npub.slice(0, 16)}...${profile.npub.slice(-8)}`
+    : '';
 
   return (
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
+      <Image
+        source={require('../../assets/images/nostrich.png')}
+        style={styles.bgImage}
+        resizeMode="contain"
+      />
       <ScrollView
         ref={scrollRef}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.title}>Settings</Text>
+        <View style={styles.titleRow}>
+          <TouchableOpacity style={styles.homeButton} onPress={() => navigation.goBack()}>
+            <Image
+              source={require('../../assets/images/Home.png')}
+              style={styles.homeIcon}
+              resizeMode="contain"
+            />
+          </TouchableOpacity>
+          <Text style={styles.title}>Account</Text>
+        </View>
+
+        {/* Nostr Profile Section */}
+        {isLoggedIn && profile ? (
+          <View style={styles.profileSection}>
+            {profile.banner && (
+              <Image source={{ uri: profile.banner }} style={styles.banner} resizeMode="cover" />
+            )}
+            <View style={styles.profileRow}>
+              {profile.picture ? (
+                <Image source={{ uri: profile.picture }} style={styles.profilePicture} />
+              ) : (
+                <View style={styles.profilePicturePlaceholder} />
+              )}
+              <View style={styles.profileInfo}>
+                <Text style={styles.profileName}>
+                  {profile.displayName || profile.name || 'Unknown'}
+                </Text>
+                {profile.nip05 && <Text style={styles.profileNip05}>{profile.nip05}</Text>}
+              </View>
+            </View>
+
+            {/* npub */}
+            <View style={styles.npubRow}>
+              <TouchableOpacity style={styles.npubCopy} onPress={copyNpub}>
+                <Text style={styles.npubText}>{truncatedNpub}</Text>
+                <CopyIcon size={20} color={colors.textSupplementary} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setQrSheetOpen(true)}>
+                <QrIcon size={22} color={colors.textSupplementary} />
+              </TouchableOpacity>
+            </View>
+
+            {profile.lud16 && (
+              <Text style={styles.profileLn}>
+                {'\u26A1'} {profile.lud16}
+              </Text>
+            )}
+
+            <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+              <Text style={styles.logoutButtonText}>Logout</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity style={styles.connectButton} onPress={() => setLoginSheetOpen(true)}>
+            <Text style={styles.connectButtonText}>Connect Nostr</Text>
+          </TouchableOpacity>
+        )}
 
         {/* Name */}
-        <Text style={styles.sectionLabel}>Your Name</Text>
+        <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Your Name</Text>
         <TextInput
           style={styles.textInput}
           placeholder="Enter your name"
-          placeholderTextColor="rgba(255,255,255,0.5)"
+          placeholderTextColor={colors.textSupplementary}
           value={nameInput}
           onChangeText={setNameInput}
           autoCapitalize="words"
@@ -114,7 +267,7 @@ const AccountScreen: React.FC = () => {
         <TextInput
           style={styles.textInput}
           placeholder="user@wallet.com"
-          placeholderTextColor="rgba(255,255,255,0.5)"
+          placeholderTextColor={colors.textSupplementary}
           value={lnAddressInput}
           onChangeText={setLnAddressInput}
           onFocus={() => {
@@ -131,6 +284,16 @@ const AccountScreen: React.FC = () => {
           <Text style={styles.saveButtonText}>Save</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      <NostrLoginSheet visible={loginSheetOpen} onClose={() => setLoginSheetOpen(false)} />
+      {profile?.npub && (
+        <QrSheet
+          visible={qrSheetOpen}
+          onClose={() => setQrSheetOpen(false)}
+          npub={profile.npub}
+          lightningAddress={profile.lud16}
+        />
+      )}
     </KeyboardAvoidingView>
   );
 };
@@ -140,17 +303,137 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.brandPink,
   },
+  bgImage: {
+    position: 'absolute',
+    width: 420,
+    height: 420,
+    right: -60,
+    top: -20,
+    opacity: 0.15,
+  },
   content: {
-    paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 40,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 24,
+  },
+  homeButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  homeIcon: {
+    width: 20,
+    height: 20,
+    tintColor: colors.brandPink,
   },
   title: {
     color: colors.white,
     fontSize: 28,
     fontWeight: '700',
-    marginBottom: 24,
   },
+  // Nostr profile styles
+  profileSection: {
+    backgroundColor: colors.white,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  banner: {
+    width: '100%',
+    height: 100,
+  },
+  profileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    gap: 12,
+  },
+  profilePicture: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    borderWidth: 2,
+    borderColor: colors.divider,
+  },
+  profilePicturePlaceholder: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.background,
+  },
+  profileInfo: {
+    flex: 1,
+  },
+  profileName: {
+    color: colors.textHeader,
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  profileNip05: {
+    color: colors.textSupplementary,
+    fontSize: 13,
+    marginTop: 2,
+  },
+  npubRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  npubCopy: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+  },
+  npubText: {
+    color: colors.textSupplementary,
+    fontSize: 12,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  profileLn: {
+    color: colors.textBody,
+    fontSize: 14,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  logoutButton: {
+    margin: 16,
+    marginTop: 4,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: colors.brandPink,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  logoutButtonText: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  connectButton: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    height: 52,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.4)',
+  },
+  connectButtonText: {
+    color: colors.white,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  // Existing styles
   sectionLabel: {
     color: colors.white,
     fontSize: 18,
@@ -158,11 +441,11 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   textInput: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: colors.white,
     borderRadius: 12,
     padding: 16,
     fontSize: 16,
-    color: colors.white,
+    color: colors.textBody,
     fontWeight: '600',
   },
   currencyRow: {
@@ -172,9 +455,10 @@ const styles = StyleSheet.create({
   },
   currencyChip: {
     backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 8,
+    width: '23%',
+    alignItems: 'center',
   },
   currencyChipActive: {
     backgroundColor: colors.white,

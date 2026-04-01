@@ -10,6 +10,7 @@ import {
   TextInput,
   Keyboard,
   TouchableWithoutFeedback,
+  Image,
 } from 'react-native';
 import {
   BottomSheetModal,
@@ -21,6 +22,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { useWallet } from '../contexts/WalletContext';
+import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
 import { satsToFiat, satsToFiatString } from '../services/fiatService';
 import { resolveLightningAddress, fetchInvoice, LnurlPayParams } from '../services/lnurlService';
@@ -28,6 +30,9 @@ import { resolveLightningAddress, fetchInvoice, LnurlPayParams } from '../servic
 interface Props {
   visible: boolean;
   onClose: () => void;
+  initialAddress?: string;
+  initialPicture?: string;
+  recipientPubkey?: string;
 }
 
 type InputMode = 'scan' | 'paste';
@@ -75,7 +80,13 @@ function isValidInvoice(data: string): boolean {
   );
 }
 
-const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
+const SendSheet: React.FC<Props> = ({
+  visible,
+  onClose,
+  initialAddress,
+  initialPicture,
+  recipientPubkey,
+}) => {
   const {
     payInvoiceForWallet,
     refreshBalanceForWallet,
@@ -85,6 +96,7 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
     btcPrice,
     currency,
   } = useWallet();
+  const { signZapRequest } = useNostr();
   const [capturedWalletId, setCapturedWalletId] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
@@ -100,6 +112,7 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [inputUnit, setInputUnit] = useState<InputUnit>('sats');
   const [lnurlParams, setLnurlParams] = useState<LnurlPayParams | null>(null);
   const [resolving, setResolving] = useState(false);
+  const [memo, setMemo] = useState('');
   const bottomSheetRef = useRef<BottomSheetModal>(null);
 
   const snapPoints = useMemo(() => ['90%'], []);
@@ -129,17 +142,23 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
       setDecoded(null);
       setScanned(false);
       setSending(false);
-      setInputMode('scan');
-      setPasteText('');
+      setInputMode(initialAddress ? 'paste' : 'scan');
+      setPasteText(initialAddress || '');
       setSatsValue('');
       setFiatValue('');
       setInputUnit('sats');
       setLnurlParams(null);
       setResolving(false);
+      setMemo('');
       bottomSheetRef.current?.present();
+      if (initialAddress) {
+        // Use setTimeout to process after state reset
+        setTimeout(() => processInput(initialAddress), 0);
+      }
     } else {
       bottomSheetRef.current?.dismiss();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
   useEffect(() => {
@@ -258,8 +277,23 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
           setSending(false);
           return;
         }
-        // Fetch a bolt11 invoice from the LNURL-pay callback
-        const bolt11 = await fetchInvoice(lnurlParams.callback, currentSats);
+        // Build invoice options (zap request for Nostr contacts, comment for all)
+        const invoiceOptions: { nostr?: string; comment?: string } = {};
+
+        // NIP-57 zap: sign a zap request if this is a Nostr contact and the server supports it
+        if (recipientPubkey && lnurlParams.allowsNostr) {
+          const zapRequestJson = await signZapRequest(recipientPubkey, currentSats, memo);
+          if (zapRequestJson) {
+            invoiceOptions.nostr = zapRequestJson;
+          }
+        }
+
+        // LNURL-pay comment (for non-zap or if server supports comments)
+        if (memo && lnurlParams.commentAllowed > 0) {
+          invoiceOptions.comment = memo.slice(0, lnurlParams.commentAllowed);
+        }
+
+        const bolt11 = await fetchInvoice(lnurlParams.callback, currentSats, invoiceOptions);
         await payInvoiceForWallet(walletId!, bolt11);
       } else {
         await payInvoiceForWallet(walletId!, invoiceData);
@@ -283,6 +317,7 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
     setPasteText('');
     setSatsValue('');
     setFiatValue('');
+    setMemo('');
     setLnurlParams(null);
     setResolving(false);
   };
@@ -439,6 +474,9 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
             ) : (
               /* Invoice/address detected - show details */
               <View style={styles.detailsCard}>
+                {initialPicture && (
+                  <Image source={{ uri: initialPicture }} style={styles.recipientPicture} />
+                )}
                 {decoded?.description ? (
                   <Text style={styles.detailDescription}>{decoded.description}</Text>
                 ) : null}
@@ -532,6 +570,19 @@ const SendSheet: React.FC<Props> = ({ visible, onClose }) => {
                   <Text style={styles.invoiceText} numberOfLines={3}>
                     {invoiceData}
                   </Text>
+                )}
+
+                {/* Memo / comment field for Lightning address payments */}
+                {needsAmount && (
+                  <TextInput
+                    style={styles.memoInput}
+                    placeholder={recipientPubkey ? 'Zap message (optional)' : 'Comment (optional)'}
+                    placeholderTextColor={colors.textSupplementary}
+                    value={memo}
+                    onChangeText={setMemo}
+                    maxLength={lnurlParams?.commentAllowed || 150}
+                    autoCorrect
+                  />
                 )}
 
                 <TouchableOpacity onPress={handleReset}>
@@ -713,6 +764,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
+  recipientPicture: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+  },
   detailDescription: {
     fontSize: 14,
     color: colors.textBody,
@@ -788,6 +844,15 @@ const styles = StyleSheet.create({
     color: colors.textSupplementary,
     fontSize: 11,
     textAlign: 'center',
+  },
+  memoInput: {
+    backgroundColor: colors.background,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: colors.textBody,
+    width: '100%',
   },
   resetText: {
     color: colors.brandPink,

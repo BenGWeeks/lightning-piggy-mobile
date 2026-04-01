@@ -5,7 +5,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
-import { RootStackParamList, LearnStackParamList } from './types';
+import { RootStackParamList, LearnStackParamList, MainTabParamList } from './types';
 
 import IntroScreen from '../screens/IntroScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
@@ -15,9 +15,11 @@ import LearnScreen from '../screens/LearnScreen';
 import CourseDetailScreen from '../screens/CourseDetailScreen';
 import MissionDetailScreen from '../screens/MissionDetailScreen';
 import AccountScreen from '../screens/AccountScreen';
+import FriendsScreen from '../screens/FriendsScreen';
+import FriendsIcon from '../components/icons/FriendsIcon';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
-const Tab = createBottomTabNavigator();
+const Tab = createBottomTabNavigator<MainTabParamList>();
 const LearnStack = createNativeStackNavigator<LearnStackParamList>();
 
 function LearnStackNavigator() {
@@ -87,15 +89,20 @@ function HomeTabs() {
         }}
       />
       <Tab.Screen
-        name="Settings"
-        component={AccountScreen}
+        name="Friends"
+        component={FriendsScreen}
         options={{
           tabBarIcon: ({ focused }) => (
-            <Image
-              source={require('../../assets/images/Account.png')}
-              style={[styles.tabIcon, focused && styles.tabIconActive]}
-            />
+            <FriendsIcon size={22} color={focused ? colors.brandPink : colors.textSupplementary} />
           ),
+        }}
+      />
+      <Tab.Screen
+        name="Account"
+        component={AccountScreen}
+        options={{
+          tabBarButton: () => null,
+          tabBarItemStyle: { display: 'none' },
         }}
       />
     </Tab.Navigator>
@@ -114,7 +121,25 @@ export default function AppNavigator() {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer
+      theme={{
+        dark: false,
+        colors: {
+          primary: colors.brandPink,
+          background: colors.brandPink,
+          card: colors.white,
+          text: colors.textHeader,
+          border: colors.divider,
+          notification: colors.brandPink,
+        },
+        fonts: {
+          regular: { fontFamily: 'System', fontWeight: '400' },
+          medium: { fontFamily: 'System', fontWeight: '500' },
+          bold: { fontFamily: 'System', fontWeight: '700' },
+          heavy: { fontFamily: 'System', fontWeight: '900' },
+        },
+      }}
+    >
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {!isOnboarded ? (
           <>

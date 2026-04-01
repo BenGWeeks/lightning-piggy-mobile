@@ -7,18 +7,41 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { useWallet } from '../contexts/WalletContext';
+import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
 import { CURRENCIES } from '../services/fiatService';
+import NostrLoginSheet from '../components/NostrLoginSheet';
 
 const OnboardingScreen: React.FC = () => {
-  const { setUserName, currency, setCurrency, completeOnboarding } = useWallet();
+  const { setUserName, setLightningAddress, currency, setCurrency, completeOnboarding } =
+    useWallet();
+  const { isLoggedIn, profile, logout } = useNostr();
   const [nameInput, setNameInput] = useState('');
+  const [lnAddressInput, setLnAddressInput] = useState('');
+  const [loginSheetOpen, setLoginSheetOpen] = useState(false);
+
+  // Auto-fill from Nostr profile when it loads
+  React.useEffect(() => {
+    if (profile) {
+      const nostrName = profile.displayName || profile.name;
+      if (nostrName) {
+        setNameInput(nostrName);
+      }
+      if (profile.lud16) {
+        setLnAddressInput(profile.lud16);
+      }
+    }
+  }, [profile]);
 
   const handleGetStarted = async () => {
     if (nameInput.trim()) {
       await setUserName(nameInput.trim());
+    }
+    if (lnAddressInput.trim()) {
+      await setLightningAddress(lnAddressInput.trim());
     }
     await completeOnboarding();
   };
@@ -32,7 +55,37 @@ const OnboardingScreen: React.FC = () => {
         <Text style={styles.title}>Welcome!</Text>
         <Text style={styles.subtitle}>Let's set up a few things before you get started.</Text>
 
-        <Text style={styles.sectionLabel}>What's your name?</Text>
+        {/* Connect Nostr */}
+        {isLoggedIn ? (
+          <TouchableOpacity
+            style={styles.nostrConnected}
+            onPress={() =>
+              Alert.alert('Disconnect Nostr?', 'You can reconnect at any time.', [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Disconnect',
+                  style: 'destructive',
+                  onPress: () => {
+                    logout();
+                    setNameInput('');
+                    setLnAddressInput('');
+                  },
+                },
+              ])
+            }
+          >
+            <Text style={styles.nostrConnectedText}>
+              {'\u2713'} Nostr connected
+              {profile?.name ? ` as ${profile.displayName || profile.name}` : ''}
+            </Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity style={styles.nostrButton} onPress={() => setLoginSheetOpen(true)}>
+            <Text style={styles.nostrButtonText}>Connect Nostr</Text>
+          </TouchableOpacity>
+        )}
+
+        <Text style={[styles.sectionLabel, { marginTop: 24 }]}>What's your name?</Text>
         <TextInput
           style={styles.textInput}
           placeholder="Enter your name"
@@ -41,6 +94,18 @@ const OnboardingScreen: React.FC = () => {
           onChangeText={setNameInput}
           autoCapitalize="words"
           autoCorrect={false}
+        />
+
+        <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Lightning Address</Text>
+        <TextInput
+          style={styles.textInput}
+          placeholder="user@wallet.com"
+          placeholderTextColor="rgba(255,255,255,0.5)"
+          value={lnAddressInput}
+          onChangeText={setLnAddressInput}
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="email-address"
         />
 
         <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Preferred Currency</Text>
@@ -64,6 +129,8 @@ const OnboardingScreen: React.FC = () => {
           <Text style={styles.buttonText}>Get Started</Text>
         </TouchableOpacity>
       </View>
+
+      <NostrLoginSheet visible={loginSheetOpen} onClose={() => setLoginSheetOpen(false)} />
     </KeyboardAvoidingView>
   );
 };
@@ -127,6 +194,34 @@ const styles = StyleSheet.create({
   },
   currencyChipTextActive: {
     color: colors.brandPink,
+  },
+  nostrButton: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    height: 52,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.4)',
+    marginBottom: 8,
+  },
+  nostrButtonText: {
+    color: colors.white,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  nostrConnected: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    height: 48,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  nostrConnectedText: {
+    color: colors.white,
+    fontSize: 15,
+    fontWeight: '600',
   },
   button: {
     backgroundColor: colors.white,

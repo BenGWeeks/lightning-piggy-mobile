@@ -1,12 +1,24 @@
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
+import { NavigatorScreenParams } from '@react-navigation/native';
+
+// Main tab param list
+export type MainTabParamList = {
+  Home:
+    | { sendToAddress?: string; sendToName?: string; sendToPicture?: string; sendToPubkey?: string }
+    | undefined;
+  Earn: undefined;
+  Learn: undefined;
+  Friends: undefined;
+  Account: undefined;
+};
 
 // Root stack (pre-auth and post-auth)
 export type RootStackParamList = {
   Intro: undefined;
   Onboarding: undefined;
   Setup: undefined;
-  MainTabs: undefined;
+  MainTabs: NavigatorScreenParams<MainTabParamList>;
 };
 
 // Learn sub-stack
@@ -23,3 +35,4 @@ export type LearnNavigation = NativeStackNavigationProp<LearnStackParamList>;
 // Route prop shortcuts
 export type CourseDetailRoute = RouteProp<LearnStackParamList, 'CourseDetail'>;
 export type MissionDetailRoute = RouteProp<LearnStackParamList, 'MissionDetail'>;
+export type HomeRoute = RouteProp<MainTabParamList, 'Home'>;
