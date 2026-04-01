@@ -40,8 +40,8 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
           <View key={index} style={styles.item}>
             <View style={styles.itemLeft}>
               <Text style={styles.itemIcon}>{isIncoming ? '↓' : '↑'}</Text>
-              <View>
-                <Text style={styles.itemDescription}>
+              <View style={styles.itemDescriptionContainer}>
+                <Text style={styles.itemDescription} numberOfLines={1}>
                   {item.description || (isIncoming ? 'Received' : 'Sent')}
                 </Text>
                 <Text style={styles.itemDate}>{dateStr}</Text>
@@ -92,6 +92,9 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
     color: colors.brandPink,
+  },
+  itemDescriptionContainer: {
+    flex: 1,
   },
   itemDescription: {
     fontSize: 14,
