@@ -9,7 +9,8 @@ export type CardTheme =
   | 'bitcoin'
   | 'alby'
   | 'lnbits'
-  | 'primal';
+  | 'primal'
+  | 'coinos';
 
 export interface WalletMetadata {
   id: string;

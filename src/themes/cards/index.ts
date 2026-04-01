@@ -10,6 +10,7 @@ import { bgStyle as lightningPiggyStyle } from './lightning-piggy';
 import { bgStyle as lightningWhaleStyle } from './lightning-whale';
 import { bgStyle as lnbitsStyle } from './lnbits';
 import { bgStyle as nostrichStyle } from './nostrich';
+import { bgStyle as coinosStyle } from './coinos';
 import { bgStyle as primalStyle } from './primal';
 
 const cardBgStyles: Record<string, ImageStyle> = {
@@ -25,6 +26,7 @@ const cardBgStyles: Record<string, ImageStyle> = {
   alby: albyStyle.full,
   lnbits: lnbitsStyle.full,
   primal: primalStyle.full,
+  coinos: coinosStyle.full,
 };
 
 export function getCardBgStyle(styleName: string | undefined, _mini: boolean): ImageStyle {

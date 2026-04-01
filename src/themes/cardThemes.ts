@@ -111,6 +111,15 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
     backgroundImage: require('../../assets/images/primal-logo.png'),
     backgroundImageStyle: 'primal',
   },
+  coinos: {
+    id: 'coinos',
+    name: 'CoinOS',
+    gradientColors: ['#1A1A2E', '#0A0A0A'],
+    textColor: '#FFFFFF',
+    accentColor: '#CCCCCC',
+    backgroundImage: require('../../assets/images/coinos-logo.png'),
+    backgroundImageStyle: 'coinos',
+  },
 };
 
 export const themeList = Object.values(cardThemes);
