@@ -57,6 +57,7 @@ const AccountScreen: React.FC = () => {
   const [lnAddressInput, setLnAddressInput] = useState(lightningAddress || '');
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
   const [qrSheetOpen, setQrSheetOpen] = useState(false);
+  const [qrDefaultMode, setQrDefaultMode] = useState<'npub' | 'lightning'>('npub');
   const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -187,7 +188,12 @@ const AccountScreen: React.FC = () => {
                 <Text style={styles.npubText}>{truncatedNpub}</Text>
                 <CopyIcon size={20} color={colors.textSupplementary} />
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => setQrSheetOpen(true)}>
+              <TouchableOpacity
+                onPress={() => {
+                  setQrDefaultMode('npub');
+                  setQrSheetOpen(true);
+                }}
+              >
                 <QrIcon size={22} color={colors.textSupplementary} />
               </TouchableOpacity>
             </View>
@@ -264,20 +270,33 @@ const AccountScreen: React.FC = () => {
 
         {/* Lightning Address */}
         <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Lightning Address</Text>
-        <TextInput
-          style={styles.textInput}
-          placeholder="user@wallet.com"
-          placeholderTextColor={colors.textSupplementary}
-          value={lnAddressInput}
-          onChangeText={setLnAddressInput}
-          onFocus={() => {
-            setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
-            setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 500);
-          }}
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="email-address"
-        />
+        <View style={styles.lnAddressRow}>
+          <TextInput
+            style={[styles.textInput, { flex: 1 }]}
+            placeholder="user@wallet.com"
+            placeholderTextColor={colors.textSupplementary}
+            value={lnAddressInput}
+            onChangeText={setLnAddressInput}
+            onFocus={() => {
+              setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+              setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 500);
+            }}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="email-address"
+          />
+          {lnAddressInput.trim() && profile?.npub && (
+            <TouchableOpacity
+              style={styles.lnQrButton}
+              onPress={() => {
+                setQrDefaultMode('lightning');
+                setQrSheetOpen(true);
+              }}
+            >
+              <QrIcon size={22} color={colors.brandPink} />
+            </TouchableOpacity>
+          )}
+        </View>
 
         {/* Save button */}
         <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
@@ -291,7 +310,8 @@ const AccountScreen: React.FC = () => {
           visible={qrSheetOpen}
           onClose={() => setQrSheetOpen(false)}
           npub={profile.npub}
-          lightningAddress={profile.lud16}
+          lightningAddress={profile.lud16 || lnAddressInput.trim() || null}
+          defaultMode={qrDefaultMode}
         />
       )}
     </KeyboardAvoidingView>
@@ -447,6 +467,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.textBody,
     fontWeight: '600',
+  },
+  lnAddressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  lnQrButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: colors.white,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   currencyRow: {
     flexDirection: 'row',

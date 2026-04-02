@@ -8,12 +8,13 @@ interface Props {
   name: string;
   picture?: string | null;
   lightningAddress?: string | null;
+  onPress?: () => void;
   onZap?: () => void;
 }
 
-const ContactListItem: React.FC<Props> = ({ name, picture, lightningAddress, onZap }) => {
+const ContactListItem: React.FC<Props> = ({ name, picture, lightningAddress, onPress, onZap }) => {
   return (
-    <View style={styles.container}>
+    <TouchableOpacity style={styles.container} onPress={onPress} activeOpacity={onPress ? 0.6 : 1}>
       <View style={styles.avatar}>
         {picture ? (
           <Image source={{ uri: picture }} style={styles.avatarImage} />
@@ -44,7 +45,7 @@ const ContactListItem: React.FC<Props> = ({ name, picture, lightningAddress, onZ
           <ZapIcon size={22} color={colors.brandPink} />
         </TouchableOpacity>
       )}
-    </View>
+    </TouchableOpacity>
   );
 };
 

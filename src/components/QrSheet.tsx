@@ -16,18 +16,25 @@ interface Props {
   onClose: () => void;
   npub: string;
   lightningAddress?: string | null;
+  defaultMode?: 'npub' | 'lightning';
 }
 
 type QrMode = 'npub' | 'lightning';
 
-const QrSheet: React.FC<Props> = ({ visible, onClose, npub, lightningAddress }) => {
-  const [mode, setMode] = useState<QrMode>('npub');
+const QrSheet: React.FC<Props> = ({
+  visible,
+  onClose,
+  npub,
+  lightningAddress,
+  defaultMode = 'npub',
+}) => {
+  const [mode, setMode] = useState<QrMode>(defaultMode);
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['55%'], []);
 
   useEffect(() => {
     if (visible) {
-      setMode('npub');
+      setMode(defaultMode);
       sheetRef.current?.present();
     } else {
       sheetRef.current?.dismiss();

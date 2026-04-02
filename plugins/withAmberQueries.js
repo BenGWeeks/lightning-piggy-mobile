@@ -19,6 +19,11 @@ module.exports = function withAmberQueries(config) {
           category: [{ $: { 'android:name': 'android.intent.category.BROWSABLE' } }],
           data: [{ $: { 'android:scheme': 'nostrsigner' } }],
         },
+        {
+          action: [{ $: { 'android:name': 'android.intent.action.VIEW' } }],
+          category: [{ $: { 'android:name': 'android.intent.category.BROWSABLE' } }],
+          data: [{ $: { 'android:scheme': 'nostr' } }],
+        },
       ],
     });
 

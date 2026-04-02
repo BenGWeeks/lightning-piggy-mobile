@@ -10,8 +10,7 @@ interface SignEventResult {
   event: string;
 }
 
-const AmberSigner =
-  Platform.OS === 'android' ? requireNativeModule('AmberSigner') : null;
+const AmberSigner = Platform.OS === 'android' ? requireNativeModule('AmberSigner') : null;
 
 export async function getPublicKey(): Promise<GetPublicKeyResult> {
   if (!AmberSigner) {

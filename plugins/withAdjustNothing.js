@@ -11,9 +11,7 @@ module.exports = function withAdjustNothing(config) {
     if (!application || !application[0]) return config;
     const activities = application[0].activity;
     if (!Array.isArray(activities)) return config;
-    const mainActivity = activities.find(
-      (a) => a.$?.['android:name'] === '.MainActivity'
-    );
+    const mainActivity = activities.find((a) => a.$?.['android:name'] === '.MainActivity');
     if (mainActivity) {
       mainActivity.$['android:windowSoftInputMode'] = 'adjustNothing';
     }

@@ -206,6 +206,23 @@ export function signEvent(
   return finalizeEvent(event, secretKey);
 }
 
+export function createContactListEvent(
+  contacts: { pubkey: string; relay: string | null; petname: string | null }[],
+): { kind: number; created_at: number; tags: string[][]; content: string } {
+  const tags = contacts.map((c) => {
+    const tag = ['p', c.pubkey];
+    tag.push(c.relay || '');
+    tag.push(c.petname || '');
+    return tag;
+  });
+  return {
+    kind: 3,
+    created_at: Math.floor(Date.now() / 1000),
+    tags,
+    content: '',
+  };
+}
+
 export function cleanup(): void {
   pool.close(DEFAULT_RELAYS);
 }
