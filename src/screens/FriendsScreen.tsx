@@ -9,11 +9,12 @@ import {
   RefreshControl,
   Alert,
   GestureResponderEvent,
+  InteractionManager,
 } from 'react-native';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation, CompositeNavigationProp } from '@react-navigation/native';
+import { useNavigation, useIsFocused, CompositeNavigationProp } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr } from '../contexts/NostrContext';
@@ -160,8 +161,17 @@ const AlphabetBar: React.FC<{
 const FriendsScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<FriendsNavigation>();
+  const isFocused = useIsFocused();
   const { isLoggedIn, profile, contacts, refreshContacts, addContact } = useNostr();
   const [filter, setFilter] = useState<Filter>('all');
+  const [ready, setReady] = useState(false);
+
+  // Defer list rendering until after tab transition completes
+  useEffect(() => {
+    if (isFocused && !ready) {
+      InteractionManager.runAfterInteractions(() => setReady(true));
+    }
+  }, [isFocused, ready]);
   const [search, setSearch] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [phoneContacts, setPhoneContacts] = useState<PhoneContact[]>([]);
@@ -470,7 +480,7 @@ const FriendsScreen: React.FC = () => {
             <Profiler id="FriendsList" onRender={onProfilerRender}>
               <FlashList
                 ref={flatListRef}
-                data={combinedList}
+                data={ready ? combinedList : []}
                 keyExtractor={(item) => item.id}
                 renderItem={renderItem}
                 refreshControl={

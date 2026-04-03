@@ -37,6 +37,7 @@ function HomeTabs() {
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
+        lazy: true,
         tabBarStyle: {
           backgroundColor: colors.white,
           borderTopColor: colors.divider,
