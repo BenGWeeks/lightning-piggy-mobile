@@ -313,9 +313,13 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       } else if (signerType === 'amber') {
         try {
           const eventJson = JSON.stringify(zapEvent);
-          const signature = await amberService.requestEventSignature(eventJson, '', pubkey);
-          const signed = { ...zapEvent, id: '', sig: signature };
-          return JSON.stringify(signed);
+          const { event: signedEventJson } = await amberService.requestEventSignature(
+            eventJson,
+            '',
+            pubkey,
+          );
+          // Amber returns the fully signed event with correct id and sig
+          return signedEventJson || null;
         } catch {
           return null;
         }
@@ -341,8 +345,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           await nostrService.signAndPublishEvent(event, secretKey, targetRelays);
         } else if (signerType === 'amber') {
           const eventJson = JSON.stringify(event);
-          const signature = await amberService.requestEventSignature(eventJson, '', pubkey);
-          const signed = { ...event, id: '', sig: signature, pubkey };
+          const { event: signedEventJson } = await amberService.requestEventSignature(
+            eventJson,
+            '',
+            pubkey,
+          );
+          if (!signedEventJson) return false;
+          // Amber returns the fully signed event with correct id and sig
+          const signed = JSON.parse(signedEventJson);
           await Promise.any(
             targetRelays.map((r) => {
               const ws = new WebSocket(r);

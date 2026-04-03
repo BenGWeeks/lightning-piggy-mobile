@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, Image, TouchableOpacity, ScrollView, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
 import ReceiveSheet from '../components/ReceiveSheet';
@@ -29,7 +29,7 @@ const HomeScreen: React.FC = () => {
     currency,
   } = useWallet();
   const { profile } = useNostr();
-  const navigation = useNavigation<NativeStackNavigationProp<MainTabParamList>>();
+  const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList, 'Home'>>();
   const route = useRoute<RouteProp<MainTabParamList, 'Home'>>();
   const insets = useSafeAreaInsets();
 

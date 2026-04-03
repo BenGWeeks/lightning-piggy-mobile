@@ -64,6 +64,7 @@ export function parseProfileContent(content: string): {
 
 export async function fetchProfile(pubkey: string, relays: string[]): Promise<NostrProfile | null> {
   const allRelays = [...new Set([...relays, ...PROFILE_RELAYS])];
+  trackRelays(allRelays);
   try {
     const event = await pool.get(allRelays, {
       kinds: [0],
@@ -84,6 +85,7 @@ export async function fetchProfile(pubkey: string, relays: string[]): Promise<No
 }
 
 export async function fetchContactList(pubkey: string, relays: string[]): Promise<NostrContact[]> {
+  trackRelays(relays);
   try {
     const event = await pool.get(relays, {
       kinds: [3],
@@ -106,6 +108,7 @@ export async function fetchContactList(pubkey: string, relays: string[]): Promis
 }
 
 export async function fetchRelayList(pubkey: string, relays: string[]): Promise<RelayConfig[]> {
+  trackRelays(relays);
   try {
     const event = await pool.get(relays, {
       kinds: [10002],
@@ -247,6 +250,14 @@ export function createContactListEvent(
   };
 }
 
+const connectedRelays = new Set<string>();
+
+// Track all relays we connect to for proper cleanup
+function trackRelays(relays: string[]) {
+  relays.forEach((r) => connectedRelays.add(r));
+}
+
 export function cleanup(): void {
-  pool.close(DEFAULT_RELAYS);
+  pool.close([...connectedRelays, ...DEFAULT_RELAYS]);
+  connectedRelays.clear();
 }

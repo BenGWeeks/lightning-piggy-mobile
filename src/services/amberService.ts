@@ -33,10 +33,10 @@ export async function requestEventSignature(
   eventJson: string,
   eventId: string,
   currentUser: string,
-): Promise<string> {
+): Promise<{ signature: string; event: string }> {
   if (!isAmberSupported()) {
     throw new Error('Amber is only supported on Android');
   }
   const result = await AmberSigner.signEvent(eventJson, eventId, currentUser);
-  return result.signature;
+  return { signature: result.signature, event: result.event };
 }

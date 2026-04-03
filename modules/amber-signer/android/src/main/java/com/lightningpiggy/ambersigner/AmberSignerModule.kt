@@ -63,6 +63,11 @@ class AmberSignerModule : Module() {
                 return@AsyncFunction
             }
 
+            if (pendingPromise != null) {
+                promise.reject(CodedException("BUSY", "Another Amber request is already in progress", null))
+                return@AsyncFunction
+            }
+
             pendingPromise = promise
 
             val intent = Intent(Intent.ACTION_VIEW, Uri.parse("nostrsigner:"))
@@ -84,9 +89,14 @@ class AmberSignerModule : Module() {
                 return@AsyncFunction
             }
 
+            if (pendingPromise != null) {
+                promise.reject(CodedException("BUSY", "Another Amber request is already in progress", null))
+                return@AsyncFunction
+            }
+
             pendingPromise = promise
 
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("nostrsigner:$eventJson"))
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("nostrsigner:${Uri.encode(eventJson)}"))
             intent.`package` = AMBER_PACKAGE
             intent.putExtra("type", "sign_event")
             intent.putExtra("id", eventId)
