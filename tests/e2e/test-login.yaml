@@ -1,0 +1,70 @@
+appId: ${APP_ID:-com.anonymous.lightningpiggyapp}
+name: Nostr Login Test
+---
+# Tests logging in with an nsec key
+# Run: source .env && maestro test -e MAESTRO_NSEC="$MAESTRO_NSEC" tests/e2e/test-login.yaml
+
+# Wait for app to be ready
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# Navigate to Account via the profile icon
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Logout first if already logged in
+- tapOn:
+    id: 'logout-button'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+# Confirm logout dialog
+- tapOn:
+    text: 'Logout'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Re-navigate to Account (logout may have navigated away)
+- tapOn:
+    id: 'profile-icon'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Tap Connect Nostr
+- tapOn:
+    id: 'connect-nostr'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Enter nsec and dismiss keyboard
+- tapOn:
+    id: 'nsec-input'
+- inputText: ${MAESTRO_NSEC}
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Tap Login
+- tapOn:
+    id: 'login-button'
+
+# Wait for login to complete
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# Dismiss profile merge alert if it appears
+- tapOn:
+    text: 'KEEP CURRENT'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Verify the Logout button is now visible (meaning we're logged in)
+- extendedWaitUntil:
+    visible:
+      id: 'logout-button'
+    timeout: 20000

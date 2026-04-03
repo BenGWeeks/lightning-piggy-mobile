@@ -1,0 +1,95 @@
+appId: ${APP_ID:-com.anonymous.lightningpiggyapp}
+name: Login to Friends Performance Test
+---
+# Measures time from nsec login to Friends tab being responsive
+# Run: source .env && maestro test -e MAESTRO_NSEC="$MAESTRO_NSEC" tests/e2e/test-login-perf.yaml
+
+# Wait for app to be ready
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# Go to Home first
+- tapOn:
+    text: 'Home tab'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Navigate to Account via the profile icon
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Logout if already logged in
+- tapOn:
+    id: 'logout-button'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+# Confirm logout dialog
+- tapOn:
+    text: 'Logout'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Re-navigate to Account (logout may have navigated away)
+- tapOn:
+    id: 'profile-icon'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Tap Connect Nostr
+- tapOn:
+    id: 'connect-nostr'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Enter nsec
+- tapOn:
+    id: 'nsec-input'
+- inputText: ${MAESTRO_NSEC}
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Tap Login — this is T=0 for our measurement
+- tapOn:
+    id: 'login-button'
+
+# Wait for login to complete
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# Dismiss profile merge alert if it appears
+- tapOn:
+    text: 'KEEP CURRENT'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Navigate to Home tab first (dismiss any sheets)
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    text: 'Home tab'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Now tap Friends — measure responsiveness
+- tapOn:
+    text: 'Friends tab'
+
+# Wait for Friends to show content
+- extendedWaitUntil:
+    visible: 'Search...'
+    timeout: 30000
+
+# Wait for contacts to populate
+- extendedWaitUntil:
+    visible: 'Jump to M'
+    timeout: 60000

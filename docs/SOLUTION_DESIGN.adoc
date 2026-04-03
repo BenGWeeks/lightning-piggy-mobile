@@ -1,0 +1,198 @@
+= Solution Design: Nostr Integration
+
+== Overview
+
+Lightning Piggy is a Lightning wallet app for kids built with React Native (Expo). The Nostr integration adds social features: identity, friends, profile management, and zaps. Nostr is optional — the app works as a standalone wallet without it.
+
+== Architecture
+
+[source]
+----
+App.tsx
+  └─ NostrProvider (context)
+       ├─ nostrService.ts    — stateless relay I/O (read/write)
+       ├─ amberService.ts    — Android Amber signer bridge
+       └─ imageUploadService.ts — nostr.build image uploads
+----
+
+=== Key Files
+
+[cols="1,2", options="header"]
+|===
+| File | Purpose
+
+| `src/contexts/NostrContext.tsx` | React context providing login state, profile, contacts, and all Nostr actions
+| `src/services/nostrService.ts` | Stateless functions: relay connections, profile/contact fetching, event creation and signing
+| `src/services/amberService.ts` | Android Amber signer integration via NIP-55 URIs
+| `src/services/imageUploadService.ts` | Image upload to nostr.build API v2
+| `src/screens/FriendsScreen.tsx` | Friends tab with FlashList, search, alphabet sidebar
+| `src/screens/AccountScreen.tsx` | Profile display, settings, login/logout
+| `src/components/NostrLoginSheet.tsx` | Login (nsec/Amber) and account creation flows
+| `src/components/EditProfileSheet.tsx` | Profile editing with image picker + nostr.build upload
+| `src/components/ContactProfileSheet.tsx` | Contact profile card with follow/unfollow
+| `src/components/AddFriendSheet.tsx` | Add friend by npub paste or QR scan
+|===
+
+== Authentication
+
+Two sign-in methods are supported:
+
+=== nsec (Private Key)
+
+1. User enters `nsec1...` key in the login sheet
+2. Key is decoded via `nostr-tools/nip19` to derive the pubkey
+3. nsec stored in `expo-secure-store` (encrypted device storage)
+4. All event signing done locally with `nostr-tools/pure.finalizeEvent()`
+
+=== Amber Signer (Android only)
+
+1. App sends an intent to the Amber app via `Linking.openURL()`
+2. Amber returns the pubkey (no private key ever leaves Amber)
+3. Pubkey stored in `expo-secure-store`
+4. Event signing delegated to Amber via NIP-55 intents
+
+=== Auto-Login on Startup
+
+On app launch, `NostrContext` checks `expo-secure-store` for stored credentials:
+
+- **nsec path**: reads stored nsec, derives pubkey, sets `isLoggedIn = true`
+- **Amber path**: reads stored pubkey, sets `isLoggedIn = true`
+
+No re-authentication with Amber is needed on startup. The pubkey alone is sufficient to restore the logged-in state and fetch all public data.
+
+=== Account Creation
+
+New users can generate a Nostr identity directly in the app:
+
+1. `nostr-tools/pure.generateSecretKey()` creates a new keypair
+2. User enters a display name
+3. nsec is stored and the user is logged in
+4. A kind 0 (metadata) event is published with the display name
+5. User is shown their nsec with a copy button and backup warning
+
+== Data Flow
+
+=== What Requires Only the Pubkey (No Signing)
+
+All read operations use just the pubkey — no private key or Amber interaction:
+
+- Fetch profile (kind 0)
+- Fetch contact/follow list (kind 3)
+- Fetch relay list (kind 10002 / NIP-65)
+- Fetch profiles for all contacts (batch)
+- Load cached contacts from AsyncStorage
+
+=== What Requires Signing (nsec or Amber)
+
+Write operations that publish events to relays:
+
+[cols="1,1,1", options="header"]
+|===
+| Action | Event Kind | Description
+
+| Edit profile | kind 0 | Publishes updated metadata (name, picture, banner, lud16, about)
+| Follow contact | kind 3 | Publishes updated contact list with new pubkey added
+| Unfollow contact | kind 3 | Publishes updated contact list with pubkey removed
+| Zap request | kind 9734 | Signs a zap request for NIP-57 Lightning zaps
+|===
+
+Events are published to the user's **write relays** (from NIP-65), falling back to `DEFAULT_RELAYS` if none are configured.
+
+== Relay Strategy
+
+=== Default Relays
+
+[source,typescript]
+----
+DEFAULT_RELAYS = [
+  'wss://relay.damus.io',
+  'wss://relay.nostr.band',
+  'wss://nos.lol',
+  'wss://relay.primal.net',
+]
+----
+
+=== Profile Relays
+
+Additional aggregator relays queried when fetching profiles for better coverage:
+
+[source,typescript]
+----
+PROFILE_RELAYS = [
+  'wss://purplepag.es',
+  'wss://relay.nostr.band',
+  'wss://relay.primal.net',
+]
+----
+
+=== NIP-65 User Relays
+
+On login, the app fetches the user's kind 10002 event to discover their preferred read/write relays. These are merged with the defaults for all subsequent operations.
+
+== Performance
+
+Loading 500+ contacts with profiles requires careful optimization:
+
+=== Caching
+
+- Contact list and profiles cached in `AsyncStorage` with 24-hour TTL
+- On startup, cached contacts load in ~40ms (no network)
+- Fresh data fetched in background via `InteractionManager.runAfterInteractions`
+
+=== Rendering
+
+- `@shopify/flash-list` replaces FlatList for cell recycling (5-10x faster)
+- `React.startTransition()` wraps all `setContacts` calls for non-blocking renders
+- `freezeOnBlur: true` on tab navigator prevents re-renders on hidden tabs
+- Context value memoized with `useMemo` to prevent unnecessary consumer re-renders
+
+=== Profile Fetching
+
+- Batches of 50 pubkeys, 3 concurrent batches, 12s timeout per batch
+- 50ms yield between batch rounds for UI responsiveness
+- `onBatch` callback updates UI incrementally as profiles arrive
+- `expo-image` with `cachePolicy="disk"` for profile pictures
+
+== Image Upload
+
+Profile pictures and banners are uploaded via the nostr.build API:
+
+- **Endpoint**: `POST https://nostr.build/api/v2/upload/files`
+- **Method**: multipart/form-data with `file` field
+- **Auth**: Anonymous (no NIP-98 required)
+- **Response**: NIP-94 event with `url` tag containing the hosted image URL
+- **Image picker**: `expo-image-picker` with 1:1 crop for avatars, 3:1 for banners
+
+== Deep Linking
+
+- Contact profiles link to Primal via `https://primal.net/p/{npub}`
+- `nostr:` URI scheme attempted first but Primal doesn't register for it on Android
+- App registers `lightningpiggy://` scheme for Amber callbacks
+
+== Testing
+
+E2E tests use Maestro with accessibility labels (never coordinates):
+
+[cols="1,2", options="header"]
+|===
+| Test | What It Covers
+
+| `test-login.yaml` | nsec login flow
+| `test-logout.yaml` | Logout and state cleanup
+| `test-create-account.yaml` | Generate keypair, set name, backup nsec
+| `test-edit-profile.yaml` | Edit name, picture, banner, lightning address
+| `test-follow-unfollow.yaml` | Follow 6 npubs via Add Friend sheet
+| `test-unfollow.yaml` | Unfollow a contact via profile sheet
+| `test-search.yaml` | Search contacts by name
+| `test-alphabet-m.yaml` | Alphabet sidebar navigation (M, S, A)
+| `test-keyboard-sheet.yaml` | Bottom sheet slides up with keyboard
+| `test-login-perf.yaml` | Login to Friends tab responsiveness
+|===
+
+== Safety
+
+The app includes a safety tip on profile edit and account creation screens:
+
+> "Tip: You don't need to use your real name or photo for your profile."
+
+This is a gentle, non-intrusive reminder appropriate for a kids' app without requiring age verification.

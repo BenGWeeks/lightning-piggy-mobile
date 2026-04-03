@@ -1,15 +1,20 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, Image, TouchableOpacity, ScrollView, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useWallet } from '../contexts/WalletContext';
+import { useNostr } from '../contexts/NostrContext';
 import ReceiveSheet from '../components/ReceiveSheet';
 import SendSheet from '../components/SendSheet';
 import TransactionList from '../components/TransactionList';
 import WalletCarousel from '../components/WalletCarousel';
 import AddWalletWizard from '../components/AddWalletWizard';
 import WalletSettingsSheet from '../components/WalletSettingsSheet';
+import ProfileIcon from '../components/ProfileIcon';
 import * as nwcService from '../services/nwcService';
 import { styles } from '../styles/HomeScreen.styles';
+import type { MainTabParamList } from '../navigation/types';
 
 const HomeScreen: React.FC = () => {
   const {
@@ -23,14 +28,40 @@ const HomeScreen: React.FC = () => {
     btcPrice,
     currency,
   } = useWallet();
+  const { profile } = useNostr();
+  const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList, 'Home'>>();
+  const route = useRoute<RouteProp<MainTabParamList, 'Home'>>();
   const insets = useSafeAreaInsets();
 
   const [receiveOpen, setReceiveOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
+  const [sendToAddress, setSendToAddress] = useState<string | undefined>();
+  const [sendToPicture, setSendToPicture] = useState<string | undefined>();
+  const [sendToPubkey, setSendToPubkey] = useState<string | undefined>();
   const [wizardOpen, setWizardOpen] = useState(false);
   const [settingsWalletId, setSettingsWalletId] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Handle sendToAddress from navigation params (e.g., from Friends tab zap)
+  useEffect(() => {
+    if (route.params?.sendToAddress) {
+      setSendToAddress(route.params.sendToAddress);
+      setSendToPicture(route.params.sendToPicture);
+      setSendToPubkey(route.params.sendToPubkey);
+      setSendOpen(true);
+      navigation.setParams({
+        sendToAddress: undefined,
+        sendToPicture: undefined,
+        sendToPubkey: undefined,
+      });
+    }
+  }, [
+    route.params?.sendToAddress,
+    route.params?.sendToPicture,
+    route.params?.sendToPubkey,
+    navigation,
+  ]);
 
   const fetchTransactions = useCallback(async () => {
     if (!activeWalletId) {
@@ -46,8 +77,7 @@ const HomeScreen: React.FC = () => {
   }, [activeWalletId]);
 
   const fetchData = useCallback(async () => {
-    await refreshActiveBalance();
-    await fetchTransactions();
+    await Promise.all([refreshActiveBalance(), fetchTransactions()]);
   }, [refreshActiveBalance, fetchTransactions]);
 
   useEffect(() => {
@@ -89,7 +119,14 @@ const HomeScreen: React.FC = () => {
           resizeMode="contain"
         />
 
-        <Text style={styles.hello}>Hello{userName ? `, ${userName}` : ''}!</Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.hello}>Hello{userName ? `, ${userName}` : ''}!</Text>
+          <ProfileIcon
+            uri={profile?.picture}
+            size={36}
+            onPress={() => navigation.navigate('Account')}
+          />
+        </View>
 
         <WalletCarousel
           wallets={wallets}
@@ -139,7 +176,18 @@ const HomeScreen: React.FC = () => {
       </View>
 
       <ReceiveSheet visible={receiveOpen} onClose={() => setReceiveOpen(false)} />
-      <SendSheet visible={sendOpen} onClose={() => setSendOpen(false)} />
+      <SendSheet
+        visible={sendOpen}
+        onClose={() => {
+          setSendOpen(false);
+          setSendToAddress(undefined);
+          setSendToPicture(undefined);
+          setSendToPubkey(undefined);
+        }}
+        initialAddress={sendToAddress}
+        initialPicture={sendToPicture}
+        recipientPubkey={sendToPubkey}
+      />
       <AddWalletWizard visible={wizardOpen} onClose={() => setWizardOpen(false)} />
       <WalletSettingsSheet walletId={settingsWalletId} onClose={() => setSettingsWalletId(null)} />
     </View>

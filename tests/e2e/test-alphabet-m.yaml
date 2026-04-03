@@ -1,0 +1,34 @@
+appId: ${APP_ID:-com.anonymous.lightningpiggyapp}
+name: Alphabet Navigation Test
+---
+# Assumes app is already running via `npm start` + `adb reverse tcp:8081 tcp:8081`
+
+# Wait for app to be ready
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Tap Friends tab
+- tapOn: 'Friends tab'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Wait for contacts and alphabet to load (582 contacts ~25s)
+- extendedWaitUntil:
+    visible: 'Jump to M'
+    timeout: 40000
+- takeScreenshot: 01_friends_loaded
+
+# Tap letter M - should scroll to M contacts and highlight M
+- tapOn: 'Jump to M'
+- takeScreenshot: 02_after_tap_M
+
+# Tap letter S - should scroll to S contacts
+- tapOn: 'Jump to S'
+- takeScreenshot: 03_after_tap_S
+
+# Tap letter A - should scroll back to A contacts
+- tapOn: 'Jump to A'
+- takeScreenshot: 04_after_tap_A
+
+# Return to Home tab
+- tapOn: 'Home tab'

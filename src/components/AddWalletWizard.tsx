@@ -2,14 +2,20 @@ import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   Alert,
   ActivityIndicator,
+  Keyboard,
+  Platform,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { BottomSheetModal, BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
+import {
+  BottomSheetModal,
+  BottomSheetBackdrop,
+  BottomSheetScrollView,
+  BottomSheetTextInput,
+} from '@gorhom/bottom-sheet';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
 import { CardTheme } from '../types/wallet';
@@ -34,7 +40,9 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
+  const scrollRef = useRef<any>(null);
   const snapPoints = useMemo(() => ['90%'], []);
 
   const reset = useCallback(() => {
@@ -125,6 +133,20 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
     }
   }, [visible]);
 
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+      setTimeout(() => scrollRef.current?.scrollToEnd?.({ animated: true }), 100);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
   if (!visible) return null;
 
   const stepTitle = {
@@ -142,8 +164,16 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}
       handleIndicatorStyle={styles.handle}
+      keyboardBehavior="interactive"
+      keyboardBlurBehavior="restore"
+      android_keyboardInputMode="adjustResize"
     >
-      <BottomSheetView style={styles.content}>
+      <BottomSheetScrollView
+        ref={scrollRef}
+        style={styles.content}
+        contentContainerStyle={{ paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 }}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={styles.title}>{stepTitle}</Text>
 
         {step === 'url' && (
@@ -165,7 +195,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                 <Text style={styles.description}>
                   Paste or scan your Nostr Wallet Connect (NWC) connection string.
                 </Text>
-                <TextInput
+                <BottomSheetTextInput
                   style={styles.nwcInput}
                   placeholder="nostr+walletconnect://..."
                   placeholderTextColor={colors.textSupplementary}
@@ -195,7 +225,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
             <Text style={styles.description}>
               Give this wallet a name so you can easily identify it.
             </Text>
-            <TextInput
+            <BottomSheetTextInput
               style={styles.aliasInput}
               placeholder="e.g. My Savings, Spending Wallet"
               placeholderTextColor={colors.textSupplementary}
@@ -266,7 +296,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
             </View>
           </View>
         )}
-      </BottomSheetView>
+      </BottomSheetScrollView>
     </BottomSheetModal>
   );
 };

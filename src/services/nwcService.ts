@@ -3,6 +3,24 @@ import type { Nip47GetInfoResponse } from '@getalby/sdk';
 
 const providers = new Map<string, NostrWebLNProvider>();
 
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  { attempts = 3, delayMs = 1000, label = 'operation' } = {},
+): Promise<T> {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (i === attempts - 1) throw error;
+      if (__DEV__)
+        console.log(`[NWC] ${label} attempt ${i + 1} failed, retrying in ${delayMs}ms...`);
+      await new Promise((r) => setTimeout(r, delayMs));
+      delayMs *= 2; // exponential backoff
+    }
+  }
+  throw new Error('unreachable');
+}
+
 export function validateNwcUrl(url: string): { valid: boolean; error?: string } {
   url = url.trim();
   let parsed: URL;
@@ -48,9 +66,13 @@ export async function connect(
       nostrWalletConnectUrl: nwcUrl.trim(),
     });
 
-    await provider.enable();
+    await withRetry(() => provider.enable(), { label: 'connect', attempts: 3, delayMs: 2000 });
 
-    const b = await provider.getBalance();
+    const b = await withRetry(() => provider.getBalance(), {
+      label: 'initial getBalance',
+      attempts: 2,
+      delayMs: 1000,
+    });
     const balance = b.balance;
 
     providers.set(walletId, provider);
@@ -77,7 +99,11 @@ export async function getBalance(walletId: string): Promise<number | null> {
   const provider = providers.get(walletId);
   if (!provider) return null;
   try {
-    const b = await provider.getBalance();
+    const b = await withRetry(() => provider.getBalance(), {
+      label: 'getBalance',
+      attempts: 2,
+      delayMs: 1000,
+    });
     return b.balance;
   } catch (error) {
     console.warn(`getBalance error for ${walletId}:`, error);
@@ -111,7 +137,7 @@ export async function getInfo(walletId: string): Promise<{ alias: string; lud16?
   if (!provider) return null;
   try {
     const info: Nip47GetInfoResponse = await provider.getInfo();
-    console.log('NWC getInfo response:', JSON.stringify(info));
+    if (__DEV__) console.log('NWC getInfo response:', JSON.stringify(info));
     const alias = info.alias || '';
     const lud16 = info.lud16;
     return { alias, lud16 };
@@ -125,9 +151,14 @@ export async function listTransactions(walletId: string): Promise<any[]> {
   const provider = providers.get(walletId);
   if (!provider) return [];
   try {
-    const result = await provider.listTransactions({});
+    const result = await withRetry(() => provider.listTransactions({}), {
+      label: 'listTransactions',
+      attempts: 2,
+      delayMs: 1000,
+    });
     return result.transactions || [];
-  } catch {
+  } catch (error) {
+    console.warn(`listTransactions error for ${walletId}:`, error);
     return [];
   }
 }
