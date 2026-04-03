@@ -1,0 +1,99 @@
+appId: com.anonymous.lightningpiggyapp
+name: Add NWC Wallet Test
+---
+# Tests adding a Lightning wallet via NWC connection string.
+# Run with either NWC URL:
+#   source .env && maestro test -e MAESTRO_NWC="$MAESTRO_NWC1" -e WALLET_NAME="Wallet 1" tests/e2e/test-add-nwc-wallet.yaml
+#   source .env && maestro test -e MAESTRO_NWC="$MAESTRO_NWC2" -e WALLET_NAME="Wallet 2" tests/e2e/test-add-nwc-wallet.yaml
+
+# Wait for app to be ready
+- waitForAnimationToEnd:
+    timeout: 20000
+
+# Scroll the wallet carousel to the Add Wallet card
+- swipe:
+    start: 80%, 20%
+    end: 20%, 20%
+    duration: 400
+- waitForAnimationToEnd:
+    timeout: 1000
+- swipe:
+    start: 80%, 20%
+    end: 20%, 20%
+    duration: 400
+- waitForAnimationToEnd:
+    timeout: 1000
+- swipe:
+    start: 80%, 20%
+    end: 20%, 20%
+    duration: 400
+- waitForAnimationToEnd:
+    timeout: 1000
+- swipe:
+    start: 80%, 20%
+    end: 20%, 20%
+    duration: 400
+- waitForAnimationToEnd:
+    timeout: 1000
+- swipe:
+    start: 80%, 20%
+    end: 20%, 20%
+    duration: 400
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Tap the Add Wallet card
+- tapOn:
+    text: 'Add Wallet'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Select Lightning (NWC) wallet type
+- tapOn:
+    id: 'wallet-type-nwc'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Enter the NWC connection string
+- tapOn:
+    id: 'nwc-url-input'
+- inputText: ${MAESTRO_NWC}
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Tap Next to proceed to alias step
+- tapOn:
+    text: 'Next'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Enter wallet alias
+- tapOn:
+    id: 'wallet-alias-input'
+- inputText: ${WALLET_NAME}
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Tap Next to proceed to theme step
+- tapOn:
+    text: 'Next'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Tap Connect (theme step uses default theme)
+- tapOn:
+    text: 'Connect'
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# Verify the wallet is connected
+- extendedWaitUntil:
+    visible:
+      text: 'Connected'
+    timeout: 20000
+
+# Verify the wallet alias appears
+- assertVisible:
+    text: ${WALLET_NAME}

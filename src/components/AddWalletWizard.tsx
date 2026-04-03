@@ -308,6 +308,8 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                   multiline
                   autoCapitalize="none"
                   autoCorrect={false}
+                  testID="nwc-url-input"
+                  accessibilityLabel="NWC connection URL input"
                 />
                 <TouchableOpacity style={styles.secondaryButton} onPress={handleScan}>
                   <Text style={styles.secondaryButtonText}>Scan QR Code</Text>

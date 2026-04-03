@@ -1,0 +1,48 @@
+appId: com.anonymous.lightningpiggyapp
+name: Transfer Between Wallets Test
+---
+# Tests transferring 5 sats between two NWC wallets.
+# Requires at least 2 connected NWC wallets.
+# Run: maestro test tests/e2e/test-transfer.yaml
+
+# Wait for app to be ready and wallets to connect
+- waitForAnimationToEnd:
+    timeout: 20000
+
+# Tap the Transfer button
+- tapOn:
+    id: 'btn-transfer'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# The source wallet defaults to the first connected NWC wallet.
+# The destination defaults to the next wallet.
+# Enter amount: 5 sats
+- tapOn:
+    id: 'transfer-amount-input'
+- inputText: '5'
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Verify fee estimate appears
+- assertVisible:
+    text: 'Estimated fee.*'
+
+# Tap Transfer button to execute
+- tapOn:
+    text: 'Transfer'
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# Verify success alert
+- extendedWaitUntil:
+    visible:
+      text: 'Transfer Complete'
+    timeout: 20000
+
+# Dismiss the alert
+- tapOn:
+    text: 'OK'
+- waitForAnimationToEnd:
+    timeout: 3000

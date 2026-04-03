@@ -321,6 +321,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                 keyboardType={inputUnit === 'sats' ? 'numeric' : 'decimal-pad'}
                 placeholder={inputUnit === 'sats' ? '0' : '0.00'}
                 placeholderTextColor={colors.textSupplementary}
+                testID="transfer-amount-input"
+                accessibilityLabel="Transfer amount"
               />
               <TouchableOpacity
                 style={[styles.unitButton, inputUnit === 'sats' && styles.unitButtonActive]}

@@ -5,6 +5,7 @@ import { WalletState } from '../types/wallet';
 import { CardThemeConfig, cardThemes } from '../themes/cardThemes';
 import { getCardBgStyle } from '../themes/cards';
 import { satsToFiatString, FiatCurrency } from '../services/fiatService';
+import { ChainIcon } from './icons/ArrowIcons';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 export const CARD_MARGIN = 16;
@@ -74,7 +75,7 @@ const CardContent: React.FC<{
             <View style={styles.statusRow}>
               {walletType === 'onchain' ? (
                 <>
-                  <Text style={[styles.statusText, { color: theme.textColor }]}>{'\u26D3'}</Text>
+                  <ChainIcon size={14} color={theme.textColor} strokeWidth={2} />
                   <Text style={[styles.statusText, { color: theme.textColor }]}>On-chain</Text>
                 </>
               ) : (
