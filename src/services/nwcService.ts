@@ -151,9 +151,14 @@ export async function listTransactions(walletId: string): Promise<any[]> {
   const provider = providers.get(walletId);
   if (!provider) return [];
   try {
-    const result = await provider.listTransactions({});
+    const result = await withRetry(() => provider.listTransactions({}), {
+      label: 'listTransactions',
+      attempts: 2,
+      delayMs: 1000,
+    });
     return result.transactions || [];
-  } catch {
+  } catch (error) {
+    console.warn(`listTransactions error for ${walletId}:`, error);
     return [];
   }
 }
