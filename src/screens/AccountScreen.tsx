@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   View,
   Text,
@@ -69,6 +70,7 @@ const AccountScreen: React.FC = () => {
   }, [lightningAddress]);
 
   // Profile merge: when Nostr profile is loaded and has different values
+  // Only prompt once per unique profile values (persisted so it doesn't nag)
   useEffect(() => {
     if (!profile) return;
 
@@ -85,24 +87,35 @@ const AccountScreen: React.FC = () => {
 
     if (changes.length === 0) return;
 
-    Alert.alert(
-      'Update from Nostr Profile?',
-      `Your Nostr profile has:\n${changes.join('\n')}\n\nWould you like to use these?`,
-      [
-        { text: 'Keep Current', style: 'cancel' },
-        {
-          text: 'Update',
-          onPress: async () => {
-            if (nostrName && nostrName !== userName) {
-              await setUserName(nostrName);
-            }
-            if (nostrLn && nostrLn !== lightningAddress) {
-              await setLightningAddress(nostrLn);
-            }
+    // Check if we already prompted for these exact values
+    const profileHash = `${nostrName}|${nostrLn}`;
+    AsyncStorage.getItem('dismissed_profile_merge').then((dismissed) => {
+      if (dismissed === profileHash) return;
+
+      Alert.alert(
+        'Update from Nostr Profile?',
+        `Your Nostr profile has:\n${changes.join('\n')}\n\nWould you like to use these?`,
+        [
+          {
+            text: 'Keep Current',
+            style: 'cancel',
+            onPress: () => AsyncStorage.setItem('dismissed_profile_merge', profileHash),
           },
-        },
-      ],
-    );
+          {
+            text: 'Update',
+            onPress: async () => {
+              if (nostrName && nostrName !== userName) {
+                await setUserName(nostrName);
+              }
+              if (nostrLn && nostrLn !== lightningAddress) {
+                await setLightningAddress(nostrLn);
+              }
+              await AsyncStorage.setItem('dismissed_profile_merge', profileHash);
+            },
+          },
+        ],
+      );
+    });
     // Only trigger on profile change, not on userName/lightningAddress changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);

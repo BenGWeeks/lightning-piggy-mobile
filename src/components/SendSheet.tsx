@@ -113,6 +113,8 @@ const SendSheet: React.FC<Props> = ({
   const [lnurlParams, setLnurlParams] = useState<LnurlPayParams | null>(null);
   const [resolving, setResolving] = useState(false);
   const [memo, setMemo] = useState('');
+  const [activePubkey, setActivePubkey] = useState(recipientPubkey);
+  const [activePicture, setActivePicture] = useState(initialPicture);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
 
   const snapPoints = useMemo(() => ['90%'], []);
@@ -281,8 +283,8 @@ const SendSheet: React.FC<Props> = ({
         const invoiceOptions: { nostr?: string; comment?: string } = {};
 
         // NIP-57 zap: sign a zap request if this is a Nostr contact and the server supports it
-        if (recipientPubkey && lnurlParams.allowsNostr) {
-          const zapRequestJson = await signZapRequest(recipientPubkey, currentSats, memo);
+        if (activePubkey && lnurlParams.allowsNostr) {
+          const zapRequestJson = await signZapRequest(activePubkey, currentSats, memo);
           if (zapRequestJson) {
             invoiceOptions.nostr = zapRequestJson;
           }
@@ -320,6 +322,8 @@ const SendSheet: React.FC<Props> = ({
     setMemo('');
     setLnurlParams(null);
     setResolving(false);
+    setActivePubkey(undefined);
+    setActivePicture(undefined);
   };
 
   const handleSheetChange = useCallback(
@@ -474,8 +478,8 @@ const SendSheet: React.FC<Props> = ({
             ) : (
               /* Invoice/address detected - show details */
               <View style={styles.detailsCard}>
-                {initialPicture && (
-                  <Image source={{ uri: initialPicture }} style={styles.recipientPicture} />
+                {activePicture && (
+                  <Image source={{ uri: activePicture }} style={styles.recipientPicture} />
                 )}
                 {decoded?.description ? (
                   <Text style={styles.detailDescription}>{decoded.description}</Text>
@@ -576,7 +580,7 @@ const SendSheet: React.FC<Props> = ({
                 {needsAmount && (
                   <TextInput
                     style={styles.memoInput}
-                    placeholder={recipientPubkey ? 'Zap message (optional)' : 'Comment (optional)'}
+                    placeholder={activePubkey ? 'Zap message (optional)' : 'Comment (optional)'}
                     placeholderTextColor={colors.textSupplementary}
                     value={memo}
                     onChangeText={setMemo}

@@ -59,11 +59,20 @@ const AlphabetBar: React.FC<{
     const barLayout = useRef({ y: 0, height: 0 });
     const lastDragLetter = useRef<string | null>(null);
 
+    useEffect(() => {
+      return () => {
+        if (timerRef.current) clearTimeout(timerRef.current);
+      };
+    }, []);
+
     const handlePress = useCallback((letter: string) => {
       setTapped(letter);
       onPressRef.current(letter);
       if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => setTapped(null), 1500);
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null;
+        setTapped(null);
+      }, 1500);
     }, []);
 
     const getLetterFromY = useCallback(
