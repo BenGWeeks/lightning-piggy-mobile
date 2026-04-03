@@ -205,7 +205,7 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
             <Image source={{ uri: pictureUrl }} style={styles.avatarPreview} cachePolicy="none" />
           ) : (
             <View style={styles.avatarPlaceholder}>
-              <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+              <Svg width={32} height={32} viewBox="0 0 24 24" fill="none">
                 <Circle cx="12" cy="8" r="4" stroke={colors.textSupplementary} strokeWidth={2} />
                 <Path
                   d="M4 20c0-3.3 3.6-6 8-6s8 2.7 8 6"
@@ -214,7 +214,7 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
                   strokeLinecap="round"
                 />
               </Svg>
-              <Text style={styles.placeholderText}>Tap to choose</Text>
+              <Text style={styles.avatarPlaceholderText}>Tap</Text>
             </View>
           )}
         </TouchableOpacity>
@@ -353,7 +353,14 @@ const styles = StyleSheet.create({
   avatarPlaceholder: {
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 4,
+    gap: 2,
+    width: 80,
+    height: 80,
+  },
+  avatarPlaceholderText: {
+    fontSize: 10,
+    color: colors.textSupplementary,
+    textAlign: 'center',
   },
   placeholderContent: {
     justifyContent: 'center',
