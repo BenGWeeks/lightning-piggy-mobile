@@ -1,41 +1,35 @@
 appId: com.anonymous.lightningpiggyapp
-name: Alphabet M Navigation Test
+name: Alphabet Navigation Test
 ---
-# Launch the app and wait for it to load
-- launchApp
-- waitForAnimationToEnd:
-    timeout: 20000
+# Assumes app is already running via `npm start` + `adb reverse tcp:8081 tcp:8081`
+# Dismiss the debugger banner first: adb shell input tap 989 2192
 
-# Dismiss debugger banner (it overlaps the tab bar)
-- tapOn:
-    text: 'Open debugger.*'
-    optional: true
+# Wait for app to be ready
 - waitForAnimationToEnd:
-    timeout: 3000
-# Tap back button to dismiss any opened debugger
-- pressKey: back
-- waitForAnimationToEnd:
-    timeout: 2000
+    timeout: 10000
 
 # Tap Friends tab
 - tapOn: 'Friends tab'
 - waitForAnimationToEnd:
     timeout: 5000
 
-# Wait for contacts and alphabet to load
+# Wait for contacts and alphabet to load (582 contacts ~25s)
 - extendedWaitUntil:
     visible: 'Jump to M'
     timeout: 40000
 - takeScreenshot: 01_friends_loaded
 
-# Tap letter M - verify it scrolls to M contacts
+# Tap letter M - should scroll to M contacts and highlight M
 - tapOn: 'Jump to M'
 - takeScreenshot: 02_after_tap_M
 
-# Tap letter S
+# Tap letter S - should scroll to S contacts
 - tapOn: 'Jump to S'
 - takeScreenshot: 03_after_tap_S
 
-# Tap letter A
+# Tap letter A - should scroll back to A contacts
 - tapOn: 'Jump to A'
 - takeScreenshot: 04_after_tap_A
+
+# Return to Home tab
+- tapOn: 'Home tab'

@@ -3,6 +3,23 @@ import type { Nip47GetInfoResponse } from '@getalby/sdk';
 
 const providers = new Map<string, NostrWebLNProvider>();
 
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  { attempts = 3, delayMs = 1000, label = 'operation' } = {},
+): Promise<T> {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (i === attempts - 1) throw error;
+      console.log(`[NWC] ${label} attempt ${i + 1} failed, retrying in ${delayMs}ms...`);
+      await new Promise((r) => setTimeout(r, delayMs));
+      delayMs *= 2; // exponential backoff
+    }
+  }
+  throw new Error('unreachable');
+}
+
 export function validateNwcUrl(url: string): { valid: boolean; error?: string } {
   url = url.trim();
   let parsed: URL;
@@ -48,9 +65,13 @@ export async function connect(
       nostrWalletConnectUrl: nwcUrl.trim(),
     });
 
-    await provider.enable();
+    await withRetry(() => provider.enable(), { label: 'connect', attempts: 3, delayMs: 2000 });
 
-    const b = await provider.getBalance();
+    const b = await withRetry(() => provider.getBalance(), {
+      label: 'initial getBalance',
+      attempts: 2,
+      delayMs: 1000,
+    });
     const balance = b.balance;
 
     providers.set(walletId, provider);
@@ -77,7 +98,11 @@ export async function getBalance(walletId: string): Promise<number | null> {
   const provider = providers.get(walletId);
   if (!provider) return null;
   try {
-    const b = await provider.getBalance();
+    const b = await withRetry(() => provider.getBalance(), {
+      label: 'getBalance',
+      attempts: 2,
+      delayMs: 1000,
+    });
     return b.balance;
   } catch (error) {
     console.warn(`getBalance error for ${walletId}:`, error);
