@@ -68,14 +68,20 @@ const HomeScreen: React.FC = () => {
   ]);
 
   const fetchTransactions = useCallback(async () => {
-    if (!activeWalletId || !activeWallet) {
+    if (!activeWalletId) {
+      setTransactions([]);
+      return;
+    }
+    // Read wallet type from current wallets array to avoid depending on
+    // the activeWallet object reference (which changes on every balance update)
+    const wallet = wallets.find((w) => w.id === activeWalletId);
+    if (!wallet) {
       setTransactions([]);
       return;
     }
     try {
-      if (activeWallet.walletType === 'onchain') {
+      if (wallet.walletType === 'onchain') {
         const txs = await onchainService.getTransactions(activeWalletId);
-        // Normalize to the same shape TransactionList expects
         setTransactions(
           txs.map((tx) => ({
             type: tx.type,
@@ -92,7 +98,8 @@ const HomeScreen: React.FC = () => {
     } catch (error) {
       console.warn('Failed to fetch transactions:', error);
     }
-  }, [activeWalletId, activeWallet]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWalletId]);
 
   const fetchData = useCallback(async () => {
     await Promise.all([refreshActiveBalance(), fetchTransactions()]);
