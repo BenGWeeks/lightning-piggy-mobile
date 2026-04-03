@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { InteractionManager } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nostrService from '../services/nostrService';
@@ -8,6 +10,8 @@ import type { NostrProfile, NostrContact, RelayConfig, SignerType } from '../typ
 const NSEC_KEY = 'nostr_nsec';
 const PUBKEY_KEY = 'nostr_pubkey';
 const SIGNER_TYPE_KEY = 'nostr_signer_type';
+const CONTACTS_CACHE_KEY = 'nostr_contacts_cache';
+const PROFILES_CACHE_KEY = 'nostr_profiles_cache';
 
 interface NostrContextType {
   isLoggedIn: boolean;
@@ -56,6 +60,39 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, []);
 
+  const loadContactsFromCache = useCallback(async () => {
+    try {
+      const t0 = Date.now();
+      const [contactsJson, profilesJson] = await Promise.all([
+        AsyncStorage.getItem(CONTACTS_CACHE_KEY),
+        AsyncStorage.getItem(PROFILES_CACHE_KEY),
+      ]);
+      if (contactsJson) {
+        const cached: NostrContact[] = JSON.parse(contactsJson);
+        if (profilesJson) {
+          const profileMap: Record<string, NostrProfile> = JSON.parse(profilesJson);
+          const withProfiles = cached.map((c) => ({
+            ...c,
+            profile: profileMap[c.pubkey] ?? c.profile,
+          }));
+          setContacts(withProfiles);
+          console.log(
+            `[Nostr] loaded ${withProfiles.length} contacts from cache in ${Date.now() - t0}ms`,
+          );
+        } else {
+          setContacts(cached);
+          console.log(
+            `[Nostr] loaded ${cached.length} contacts (no profiles) from cache in ${Date.now() - t0}ms`,
+          );
+        }
+        return true;
+      }
+    } catch (error) {
+      console.warn('Failed to load contacts cache:', error);
+    }
+    return false;
+  }, []);
+
   const loadContacts = useCallback(async (pk: string, relayUrls: string[]) => {
     const t0 = Date.now();
     const fetchedContacts = await nostrService.fetchContactList(pk, relayUrls);
@@ -64,7 +101,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     );
     setContacts(fetchedContacts);
 
-    // Fetch profiles for contacts incrementally
+    // Cache the contact list
+    try {
+      await AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(fetchedContacts));
+    } catch {}
+
+    // Fetch profiles in background after UI is idle
     if (fetchedContacts.length > 0) {
       const contactPubkeys = fetchedContacts.map((c) => c.pubkey);
       const t1 = Date.now();
@@ -78,6 +120,15 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           profile: profileMap.get(c.pubkey) ?? c.profile,
         })),
       );
+
+      // Cache profiles
+      try {
+        const profileObj: Record<string, NostrProfile> = {};
+        profileMap.forEach((v, k) => {
+          profileObj[k] = v;
+        });
+        await AsyncStorage.setItem(PROFILES_CACHE_KEY, JSON.stringify(profileObj));
+      } catch {}
     }
   }, []);
 
@@ -90,40 +141,52 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
   }, []);
 
-  // Auto-login on startup
+  // Auto-login on startup: load cache immediately, refresh from relays in background
   useEffect(() => {
     (async () => {
       try {
         const storedSignerType = await SecureStore.getItemAsync(SIGNER_TYPE_KEY);
+        let pk: string | null = null;
+
         if (storedSignerType === 'nsec') {
           const storedNsec = await SecureStore.getItemAsync(NSEC_KEY);
           if (storedNsec) {
-            const { pubkey: pk } = nostrService.decodeNsec(storedNsec);
+            pk = nostrService.decodeNsec(storedNsec).pubkey;
             setPubkey(pk);
             setSignerType('nsec');
             setIsLoggedIn(true);
-
-            const readRelays = await loadRelays(pk);
-            await loadProfile(pk, readRelays);
-            await loadContacts(pk, readRelays);
           }
         } else if (storedSignerType === 'amber') {
           const storedPubkey = await SecureStore.getItemAsync(PUBKEY_KEY);
           if (storedPubkey) {
-            setPubkey(storedPubkey);
+            pk = storedPubkey;
+            setPubkey(pk);
             setSignerType('amber');
             setIsLoggedIn(true);
-
-            const readRelays = await loadRelays(storedPubkey);
-            await loadProfile(storedPubkey, readRelays);
-            await loadContacts(storedPubkey, readRelays);
           }
         }
+
+        if (!pk) return;
+
+        // Load cached contacts immediately (no network, <100ms)
+        await loadContactsFromCache();
+
+        // Defer relay fetches until after animations/rendering complete
+        InteractionManager.runAfterInteractions(async () => {
+          try {
+            const readRelays = await loadRelays(pk!);
+            await loadProfile(pk!, readRelays);
+            // Refresh contacts from relays in background
+            loadContacts(pk!, readRelays);
+          } catch (error) {
+            console.warn('Nostr background refresh failed:', error);
+          }
+        });
       } catch (error) {
         console.warn('Nostr auto-login failed:', error);
       }
     })();
-  }, [loadRelays, loadProfile, loadContacts]);
+  }, [loadRelays, loadProfile, loadContacts, loadContactsFromCache]);
 
   const loginWithNsec = useCallback(
     async (nsec: string): Promise<{ success: boolean; error?: string }> => {
@@ -200,6 +263,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     await SecureStore.deleteItemAsync(NSEC_KEY);
     await SecureStore.deleteItemAsync(PUBKEY_KEY);
     await SecureStore.deleteItemAsync(SIGNER_TYPE_KEY);
+    await AsyncStorage.multiRemove([CONTACTS_CACHE_KEY, PROFILES_CACHE_KEY]);
 
     setPubkey(null);
     setProfile(null);
