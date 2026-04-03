@@ -10,41 +10,20 @@ name: Add NWC Wallet Test
 - waitForAnimationToEnd:
     timeout: 20000
 
-# Scroll the wallet carousel to the Add Wallet card
-- swipe:
-    start: 80%, 20%
-    end: 20%, 20%
-    duration: 400
-- waitForAnimationToEnd:
-    timeout: 1000
-- swipe:
-    start: 80%, 20%
-    end: 20%, 20%
-    duration: 400
-- waitForAnimationToEnd:
-    timeout: 1000
-- swipe:
-    start: 80%, 20%
-    end: 20%, 20%
-    duration: 400
-- waitForAnimationToEnd:
-    timeout: 1000
-- swipe:
-    start: 80%, 20%
-    end: 20%, 20%
-    duration: 400
-- waitForAnimationToEnd:
-    timeout: 1000
-- swipe:
-    start: 80%, 20%
-    end: 20%, 20%
-    duration: 400
-- waitForAnimationToEnd:
-    timeout: 1000
+# Swipe carousel right to find Add Wallet card (max 6 swipes covers up to 6 wallets)
+- repeat:
+    times: 6
+    commands:
+      - swipe:
+          start: 85%, 30%
+          end: 15%, 30%
+          duration: 300
+      - waitForAnimationToEnd:
+          timeout: 800
 
 # Tap the Add Wallet card
 - tapOn:
-    text: 'Add Wallet'
+    id: 'add-wallet-card'
 - waitForAnimationToEnd:
     timeout: 3000
 
@@ -66,7 +45,7 @@ name: Add NWC Wallet Test
 - tapOn:
     text: 'Next'
 - waitForAnimationToEnd:
-    timeout: 2000
+    timeout: 5000
 
 # Enter wallet alias
 - tapOn:
@@ -82,9 +61,17 @@ name: Add NWC Wallet Test
 - waitForAnimationToEnd:
     timeout: 2000
 
-# Tap Connect (theme step uses default theme)
+# Scroll down in the bottom sheet to reveal Connect button
+- swipe:
+    start: 50%, 80%
+    end: 50%, 40%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Tap Connect
 - tapOn:
-    text: 'Connect'
+    id: 'wizard-connect-button'
 - waitForAnimationToEnd:
     timeout: 15000
 

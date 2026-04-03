@@ -143,8 +143,9 @@ const HomeScreen: React.FC = () => {
     setSettingsWalletId(walletId);
   }, []);
 
-  const hasActiveConnection =
-    activeWallet?.walletType === 'onchain' ? true : (activeWallet?.isConnected ?? false);
+  const isOnchainWatchOnly = activeWallet?.walletType === 'onchain';
+  const hasActiveConnection = isOnchainWatchOnly ? true : (activeWallet?.isConnected ?? false);
+  const canSend = hasActiveConnection && !isOnchainWatchOnly;
   const canTransfer = wallets.length >= 2;
 
   return (
@@ -203,9 +204,9 @@ const HomeScreen: React.FC = () => {
             <Text style={styles.actionText}>Transfer</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.actionButton, !hasActiveConnection && styles.actionButtonDisabled]}
+            style={[styles.actionButton, !canSend && styles.actionButtonDisabled]}
             onPress={() => setSendOpen(true)}
-            disabled={!hasActiveConnection}
+            disabled={!canSend}
             accessibilityLabel="Send"
             testID="btn-send"
           >

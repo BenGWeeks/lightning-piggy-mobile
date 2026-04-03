@@ -3,23 +3,17 @@ name: Add On-chain Wallet Test
 ---
 # Tests importing an on-chain Bitcoin wallet via xpub/zpub
 # Run: source .env && maestro test -e MAESTRO_XPUB="$MAESTRO_XPUB" tests/e2e/test-add-onchain-wallet.yaml
-#
-# NOTE: This test expects a fresh app state (no wallets configured).
-# The onboarding flow is completed first, then an on-chain wallet is added.
 
-# Wait for app to load
+# Wait for app to be ready
 - waitForAnimationToEnd:
-    timeout: 15000
+    timeout: 20000
 
-# --- Onboarding (if shown) ---
-# Tap through intro screen
+# Handle onboarding if shown (fresh install)
 - tapOn:
     text: "Let's Go"
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000
-
-# Skip onboarding — just tap Get Started
 - tapOn:
     text: 'GBP'
     optional: true
@@ -29,50 +23,24 @@ name: Add On-chain Wallet Test
 - waitForAnimationToEnd:
     timeout: 5000
 
-# --- Home screen: Navigate to Add Wallet ---
-# Swipe wallet carousel to reach the Add Wallet card
-- swipe:
-    start: 80%, 20%
-    end: 20%, 20%
-    duration: 400
-- waitForAnimationToEnd:
-    timeout: 1000
-- swipe:
-    start: 80%, 20%
-    end: 20%, 20%
-    duration: 400
-- waitForAnimationToEnd:
-    timeout: 1000
-- swipe:
-    start: 80%, 20%
-    end: 20%, 20%
-    duration: 400
-- waitForAnimationToEnd:
-    timeout: 1000
-- swipe:
-    start: 80%, 20%
-    end: 20%, 20%
-    duration: 400
-- waitForAnimationToEnd:
-    timeout: 1000
-- swipe:
-    start: 80%, 20%
-    end: 20%, 20%
-    duration: 400
-- waitForAnimationToEnd:
-    timeout: 1000
+# Swipe carousel right to find Add Wallet card
+- repeat:
+    times: 6
+    commands:
+      - swipe:
+          start: 85%, 30%
+          end: 15%, 30%
+          duration: 300
+      - waitForAnimationToEnd:
+          timeout: 800
 
-# Tap the Add Wallet card (by text or id)
+# Tap the Add Wallet card
 - tapOn:
     id: 'add-wallet-card'
-    optional: true
-- tapOn:
-    text: 'Add Wallet'
-    optional: true
 - waitForAnimationToEnd:
     timeout: 3000
 
-# Scroll down in the bottom sheet to reveal Bitcoin option
+# Scroll down to reveal Bitcoin option if needed
 - swipe:
     start: 50%, 80%
     end: 50%, 50%
@@ -86,9 +54,9 @@ name: Add On-chain Wallet Test
 - waitForAnimationToEnd:
     timeout: 2000
 
-# Enter the zpub key using the placeholder text
+# Enter the xpub/zpub key
 - tapOn:
-    text: 'xpub6...'
+    id: 'xpub-input'
 - inputText: ${MAESTRO_XPUB}
 - pressKey: back
 - waitForAnimationToEnd:
@@ -114,7 +82,15 @@ name: Add On-chain Wallet Test
 - waitForAnimationToEnd:
     timeout: 2000
 
-# Tap Add Wallet / Connect button on theme step
+# Scroll down to reveal Add Wallet button
+- swipe:
+    start: 50%, 80%
+    end: 50%, 40%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Tap Add Wallet button
 - tapOn:
     id: 'wizard-connect-button'
 - waitForAnimationToEnd:
