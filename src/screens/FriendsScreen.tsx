@@ -3,13 +3,13 @@ import {
   View,
   Text,
   TextInput,
-  FlatList,
   TouchableOpacity,
   Image,
   StyleSheet,
   RefreshControl,
   Alert,
 } from 'react-native';
+import { FlashList, FlashListRef } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, CompositeNavigationProp } from '@react-navigation/native';
@@ -159,6 +159,7 @@ const FriendsScreen: React.FC = () => {
   const [sendOpen, setSendOpen] = useState(false);
   const [zapTarget, setZapTarget] = useState<ListItem | null>(null);
   const [currentLetter, setCurrentLetter] = useState<string | null>(null);
+  const scrollTrackingPaused = useRef(false);
   const screenMountTime = useRef(Date.now());
   const firstRenderLogged = useRef(false);
 
@@ -246,7 +247,7 @@ const FriendsScreen: React.FC = () => {
     return result;
   }, [contacts, phoneContacts, filter, search]);
 
-  const flatListRef = useRef<FlatList>(null);
+  const flatListRef = useRef<FlashListRef<ListItem>>(null);
 
   const availableLetters = useMemo(() => {
     const letters = new Set<string>();
@@ -265,6 +266,7 @@ const FriendsScreen: React.FC = () => {
 
   const handleScroll = useCallback(
     (e: { nativeEvent: { contentOffset: { y: number } } }) => {
+      if (scrollTrackingPaused.current) return;
       const offsetY = e.nativeEvent.contentOffset.y;
       const index = Math.floor(offsetY / ITEM_HEIGHT);
       if (index >= 0 && index < combinedList.length) {
@@ -285,7 +287,13 @@ const FriendsScreen: React.FC = () => {
         return first === letter;
       });
       if (index >= 0) {
-        flatListRef.current?.scrollToOffset({ offset: index * ITEM_HEIGHT, animated: false });
+        // Pause scroll tracking to prevent currentLetter flashing during scroll
+        scrollTrackingPaused.current = true;
+        setCurrentLetter(letter);
+        flatListRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0 });
+        setTimeout(() => {
+          scrollTrackingPaused.current = false;
+        }, 500);
         console.log(
           `[Perf] scrollToLetter(${letter}): ${(performance.now() - t0).toFixed(1)}ms, index=${index}`,
         );
@@ -447,7 +455,7 @@ const FriendsScreen: React.FC = () => {
               />
             )}
             <Profiler id="FriendsList" onRender={onProfilerRender}>
-              <FlatList
+              <FlashList
                 ref={flatListRef}
                 data={combinedList}
                 keyExtractor={(item) => item.id}
@@ -463,17 +471,8 @@ const FriendsScreen: React.FC = () => {
                   </View>
                 }
                 contentContainerStyle={styles.listContent}
-                getItemLayout={(_data, index) => ({
-                  length: ITEM_HEIGHT,
-                  offset: ITEM_HEIGHT * index,
-                  index,
-                })}
                 onScroll={handleScroll}
                 scrollEventThrottle={100}
-                maxToRenderPerBatch={20}
-                windowSize={10}
-                removeClippedSubviews
-                style={{ flex: 1 }}
               />
             </Profiler>
           </View>
