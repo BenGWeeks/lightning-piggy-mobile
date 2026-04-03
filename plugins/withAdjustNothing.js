@@ -1,8 +1,9 @@
 const { withAndroidManifest } = require('expo/config-plugins');
 
 /**
- * Sets android:windowSoftInputMode="adjustNothing" on the main activity.
- * This prevents the keyboard from pushing/resizing the app layout.
+ * Sets android:windowSoftInputMode="adjustResize" on the main activity.
+ * This allows the keyboard to resize the layout so bottom sheets can
+ * slide up above the keyboard.
  */
 module.exports = function withAdjustNothing(config) {
   return withAndroidManifest(config, (config) => {
@@ -13,7 +14,7 @@ module.exports = function withAdjustNothing(config) {
     if (!Array.isArray(activities)) return config;
     const mainActivity = activities.find((a) => a.$?.['android:name'] === '.MainActivity');
     if (mainActivity) {
-      mainActivity.$['android:windowSoftInputMode'] = 'adjustNothing';
+      mainActivity.$['android:windowSoftInputMode'] = 'adjustResize';
     }
     return config;
   });
