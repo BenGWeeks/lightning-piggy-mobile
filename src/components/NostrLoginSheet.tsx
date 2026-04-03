@@ -2,14 +2,12 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
   Platform,
   BackHandler,
   Keyboard,
-  TouchableWithoutFeedback,
 } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import * as Clipboard from 'expo-clipboard';
@@ -17,7 +15,8 @@ import {
   BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
-  BottomSheetView,
+  BottomSheetScrollView,
+  BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
 import { colors } from '../styles/theme';
 import { useNostr } from '../contexts/NostrContext';
@@ -31,8 +30,10 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
   const { loginWithNsec, loginWithAmber, isLoggingIn } = useNostr();
   const [nsecInput, setNsecInput] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const sheetRef = useRef<BottomSheetModal>(null);
-  const snapPoints = useMemo(() => ['55%'], []);
+  const scrollRef = useRef<any>(null);
+  const snapPoints = useMemo(() => ['65%'], []);
 
   useEffect(() => {
     if (visible) {
@@ -50,6 +51,20 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
     });
     return () => sub.remove();
   }, [visible, onClose]);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+      setTimeout(() => scrollRef.current?.scrollToEnd?.({ animated: true }), 100);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
@@ -95,85 +110,88 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}
       handleIndicatorStyle={styles.handleIndicator}
-      keyboardBehavior="extend"
+      keyboardBehavior="interactive"
       keyboardBlurBehavior="restore"
       android_keyboardInputMode="adjustResize"
     >
-      <BottomSheetView style={styles.content}>
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <View style={styles.inner}>
-            <Text style={styles.title}>Connect Nostr</Text>
-            <Text style={styles.subtitle}>
-              Enter your private key to connect your Nostr identity.
-            </Text>
+      <BottomSheetScrollView
+        ref={scrollRef}
+        style={styles.content}
+        contentContainerStyle={{ paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 }}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={styles.title}>Connect Nostr</Text>
+        <Text style={styles.subtitle}>
+          Enter your private key to connect your Nostr identity.
+        </Text>
 
-            <View style={styles.inputRow}>
-              <TextInput
-                style={styles.input}
-                placeholder="nsec1..."
-                placeholderTextColor={colors.textSupplementary}
-                value={nsecInput}
-                onChangeText={(text) => {
-                  setNsecInput(text);
-                  setError(null);
-                }}
-                autoCapitalize="none"
-                autoCorrect={false}
-                secureTextEntry
-                editable={!isLoggingIn}
-                accessibilityLabel="nsec input"
-                testID="nsec-input"
+        <View style={styles.inputRow}>
+          <BottomSheetTextInput
+            style={styles.input}
+            placeholder="nsec1..."
+            placeholderTextColor={colors.textSupplementary}
+            value={nsecInput}
+            onChangeText={(text) => {
+              setNsecInput(text);
+              setError(null);
+            }}
+            autoCapitalize="none"
+            autoCorrect={false}
+            secureTextEntry
+            editable={!isLoggingIn}
+            accessibilityLabel="nsec input"
+            testID="nsec-input"
+          />
+          <TouchableOpacity
+            style={styles.pasteButton}
+            onPress={handlePaste}
+            accessibilityLabel="Paste"
+            testID="paste-nsec"
+          >
+            <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+              <Path
+                d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"
+                stroke={colors.textSupplementary}
+                strokeWidth={2}
+                strokeLinecap="round"
               />
-              <TouchableOpacity
-                style={styles.pasteButton}
-                onPress={handlePaste}
-                accessibilityLabel="Paste"
-                testID="paste-nsec"
-              >
-                <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                  <Path
-                    d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"
-                    stroke={colors.textSupplementary}
-                    strokeWidth={2}
-                    strokeLinecap="round"
-                  />
-                  <Path
-                    d="M15 2H9a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1Z"
-                    stroke={colors.textSupplementary}
-                    strokeWidth={2}
-                  />
-                </Svg>
-              </TouchableOpacity>
-            </View>
+              <Path
+                d="M15 2H9a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1Z"
+                stroke={colors.textSupplementary}
+                strokeWidth={2}
+              />
+            </Svg>
+          </TouchableOpacity>
+        </View>
 
-            {error && <Text style={styles.error}>{error}</Text>}
+        {error && <Text style={styles.error}>{error}</Text>}
 
-            <TouchableOpacity
-              style={[styles.loginButton, (!nsecInput.trim() || isLoggingIn) && styles.disabled]}
-              onPress={handleLogin}
-              disabled={!nsecInput.trim() || isLoggingIn}
-              accessibilityLabel="Login"
-              testID="login-button"
-            >
-              {isLoggingIn ? (
-                <ActivityIndicator color={colors.white} />
-              ) : (
-                <Text style={styles.loginButtonText}>Login</Text>
-              )}
-            </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.loginButton, (!nsecInput.trim() || isLoggingIn) && styles.disabled]}
+          onPress={handleLogin}
+          disabled={!nsecInput.trim() || isLoggingIn}
+          accessibilityLabel="Login"
+          testID="login-button"
+        >
+          {isLoggingIn ? (
+            <ActivityIndicator color={colors.white} />
+          ) : (
+            <Text style={styles.loginButtonText}>Login</Text>
+          )}
+        </TouchableOpacity>
 
-            {Platform.OS === 'android' && (
-              <TouchableOpacity
-                style={styles.amberButton}
-                onPress={handleAmber}
-                disabled={isLoggingIn}
-              >
-                <Text style={styles.amberButtonText}>Use Amber Signer</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </TouchableWithoutFeedback>
-      </BottomSheetView>
+        {Platform.OS === 'android' && (
+          <TouchableOpacity
+            style={styles.amberButton}
+            onPress={handleAmber}
+            disabled={isLoggingIn}
+            accessibilityLabel="Use Amber Signer"
+            testID="amber-button"
+          >
+            <Text style={styles.amberButtonText}>Use Amber Signer</Text>
+          </TouchableOpacity>
+        )}
+      </BottomSheetScrollView>
     </BottomSheetModal>
   );
 };
@@ -190,12 +208,8 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-  },
-  inner: {
-    flex: 1,
     paddingHorizontal: 24,
     paddingTop: 8,
-    paddingBottom: 40,
   },
   title: {
     fontSize: 22,

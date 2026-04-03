@@ -1,0 +1,27 @@
+= Troubleshooting
+
+[cols="1,2", options="header"]
+|===
+| Problem | Solution
+
+| Bottom sheet doesn't slide up when keyboard opens on Android
+| Use `BottomSheetTextInput` from `@gorhom/bottom-sheet` instead of React Native's `TextInput` inside bottom sheets. The library needs its own input component to detect keyboard events. Also set `keyboardBehavior="interactive"` and `android_keyboardInputMode="adjustResize"` on the `BottomSheetModal`, and ensure `android:windowSoftInputMode="adjustResize"` in AndroidManifest (via `plugins/withAdjustNothing.js`).
+
+| Maestro can't find elements behind a modal Alert dialog
+| Dismiss the alert first (e.g. tap "KEEP CURRENT" or "Cancel") before asserting visibility of elements underneath.
+
+| Maestro `inputText` produces invalid bech32 checksum on secure fields
+| Add `.trim()` to the input value before processing. Maestro may append whitespace characters to secure text fields.
+
+| Profiles not loading for some Nostr contacts
+| Add more relay aggregators to `PROFILE_RELAYS` in `nostrService.ts` (e.g. `relay.primal.net`, `purplepag.es`). Use smaller batch sizes (50) with longer timeouts (12s) for `fetchProfiles`.
+
+| App unresponsive after Nostr login (20s lockup)
+| Wrap `setContacts` calls in `startTransition()`, use `InteractionManager.runAfterInteractions` to defer network I/O, add `freezeOnBlur: true` to tab navigator, and yield to event loop between profile fetch batches with `setTimeout(r, 50)`.
+
+| `npx expo start` fails but `npm start` works
+| The `start` script includes `--dev-client` which is required for custom native modules. Always use `npm start`.
+
+| Metro not connecting to device over USB
+| Run `adb reverse tcp:8081 tcp:8081` for USB port forwarding before launching the app.
+|===

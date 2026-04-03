@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   BackHandler,
@@ -14,6 +13,7 @@ import {
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetView,
+  BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
@@ -28,7 +28,7 @@ interface Props {
 
 const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
   const sheetRef = useRef<BottomSheetModal>(null);
-  const snapPoints = useMemo(() => ['55%'], []);
+  const snapPoints = useMemo(() => ['65%'], []);
   const [mode, setMode] = useState<'paste' | 'scan'>('paste');
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
@@ -110,7 +110,7 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}
       handleIndicatorStyle={styles.handleIndicator}
-      keyboardBehavior="extend"
+      keyboardBehavior="interactive"
       keyboardBlurBehavior="restore"
       android_keyboardInputMode="adjustResize"
     >
@@ -140,7 +140,7 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
         {mode === 'paste' ? (
           <View style={styles.pasteContent}>
             <View style={styles.inputRow}>
-              <TextInput
+              <BottomSheetTextInput
                 style={styles.input}
                 placeholder="npub1..."
                 placeholderTextColor={colors.textSupplementary}
