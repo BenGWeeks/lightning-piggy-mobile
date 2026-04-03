@@ -57,6 +57,10 @@ name: Add On-chain Wallet Test
 # Enter the xpub/zpub key
 - tapOn:
     id: 'xpub-input'
+- tapOn:
+    id: 'xpub-input'
+- eraseText:
+    charactersToErase: 500
 - inputText: ${MAESTRO_XPUB}
 - pressKey: back
 - waitForAnimationToEnd:
@@ -71,6 +75,10 @@ name: Add On-chain Wallet Test
 # Enter wallet alias
 - tapOn:
     id: 'wallet-alias-input'
+- tapOn:
+    id: 'wallet-alias-input'
+- eraseText:
+    charactersToErase: 100
 - inputText: 'Test BTC Wallet'
 - pressKey: back
 - waitForAnimationToEnd:

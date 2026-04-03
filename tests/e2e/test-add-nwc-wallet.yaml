@@ -34,8 +34,13 @@ name: Add NWC Wallet Test
     timeout: 2000
 
 # Enter the NWC connection string
+# Tap twice to ensure focus — BottomSheetTextInput needs this for onChangeText
 - tapOn:
     id: 'nwc-url-input'
+- tapOn:
+    id: 'nwc-url-input'
+- eraseText:
+    charactersToErase: 500
 - inputText: ${MAESTRO_NWC}
 - pressKey: back
 - waitForAnimationToEnd:
@@ -50,6 +55,10 @@ name: Add NWC Wallet Test
 # Enter wallet alias
 - tapOn:
     id: 'wallet-alias-input'
+- tapOn:
+    id: 'wallet-alias-input'
+- eraseText:
+    charactersToErase: 100
 - inputText: ${WALLET_NAME}
 - pressKey: back
 - waitForAnimationToEnd:
