@@ -220,12 +220,22 @@ const AccountScreen: React.FC = () => {
               </Text>
             )}
 
-            <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} accessibilityLabel="Logout" testID="logout-button">
+            <TouchableOpacity
+              style={styles.logoutButton}
+              onPress={handleLogout}
+              accessibilityLabel="Logout"
+              testID="logout-button"
+            >
               <Text style={styles.logoutButtonText}>Logout</Text>
             </TouchableOpacity>
           </View>
         ) : (
-          <TouchableOpacity style={styles.connectButton} onPress={() => setLoginSheetOpen(true)} accessibilityLabel="Connect Nostr" testID="connect-nostr">
+          <TouchableOpacity
+            style={styles.connectButton}
+            onPress={() => setLoginSheetOpen(true)}
+            accessibilityLabel="Connect Nostr"
+            testID="connect-nostr"
+          >
             <Text style={styles.connectButtonText}>Connect Nostr</Text>
           </TouchableOpacity>
         )}

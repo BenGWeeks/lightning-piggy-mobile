@@ -12,7 +12,12 @@ interface Props {
 
 const ProfileIcon: React.FC<Props> = ({ uri, size = 36, onPress }) => {
   return (
-    <TouchableOpacity onPress={onPress} activeOpacity={0.7} accessibilityLabel="Profile" testID="profile-icon">
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.7}
+      accessibilityLabel="Profile"
+      testID="profile-icon"
+    >
       <View style={[styles.container, { width: size, height: size, borderRadius: size / 2 }]}>
         {uri ? (
           <Image

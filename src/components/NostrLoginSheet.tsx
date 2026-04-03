@@ -121,9 +121,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
         keyboardShouldPersistTaps="handled"
       >
         <Text style={styles.title}>Connect Nostr</Text>
-        <Text style={styles.subtitle}>
-          Enter your private key to connect your Nostr identity.
-        </Text>
+        <Text style={styles.subtitle}>Enter your private key to connect your Nostr identity.</Text>
 
         <View style={styles.inputRow}>
           <BottomSheetTextInput

@@ -380,7 +380,12 @@ const FriendsScreen: React.FC = () => {
           </TouchableOpacity>
           <Text style={styles.title}>Friends</Text>
           {isLoggedIn && (
-            <TouchableOpacity style={styles.addButton} onPress={() => setAddFriendVisible(true)} accessibilityLabel="Add friend" testID="add-friend-button">
+            <TouchableOpacity
+              style={styles.addButton}
+              onPress={() => setAddFriendVisible(true)}
+              accessibilityLabel="Add friend"
+              testID="add-friend-button"
+            >
               <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
                 <Path
                   d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"
