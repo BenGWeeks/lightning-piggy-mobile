@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, Image, TouchableOpacity, ScrollView, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -103,15 +103,23 @@ const HomeScreen: React.FC = () => {
 
   const fetchData = useCallback(async () => {
     await Promise.all([refreshActiveBalance(), fetchTransactions()]);
-  }, [refreshActiveBalance, fetchTransactions]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWalletId]);
 
   const isWalletAvailable =
     activeWallet?.walletType === 'onchain' ? true : (activeWallet?.isConnected ?? false);
 
+  // Fetch data once when wallet becomes available or wallet changes.
+  // Uses a ref to track the last fetched state and avoid re-fetching
+  // when unrelated wallet state (balance, etc.) changes.
+  const lastFetchKey = useRef<string | null>(null);
   useEffect(() => {
-    if (isWalletAvailable) {
+    const fetchKey = `${activeWalletId}-${isWalletAvailable}`;
+    if (isWalletAvailable && fetchKey !== lastFetchKey.current) {
+      lastFetchKey.current = fetchKey;
       fetchData();
-    } else {
+    } else if (!isWalletAvailable) {
+      lastFetchKey.current = null;
       setTransactions([]);
     }
   }, [activeWalletId, isWalletAvailable, fetchData]);
