@@ -1,0 +1,61 @@
+appId: com.anonymous.lightningpiggyapp
+name: Unfollow Contact Test
+---
+# Tests unfollowing a contact via the contact profile sheet
+# Assumes already logged in with contacts loaded
+# Run: maestro test tests/e2e/test-unfollow.yaml
+
+# Wait for app to be ready
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# Navigate to Friends tab
+- tapOn:
+    text: 'Friends tab'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Wait for contacts to load
+- extendedWaitUntil:
+    visible: 'Search...'
+    timeout: 30000
+
+# Search for a specific contact to unfollow
+- tapOn:
+    text: 'Search...'
+- inputText: 'Satoshi'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Tap the first search result to open profile sheet
+- tapOn:
+    text: 'Satoshi'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Tap Unfollow button on profile sheet
+- tapOn:
+    text: 'Unfollow'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Confirm unfollow dialog
+- tapOn:
+    text: 'Unfollow'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Dismiss profile sheet
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Clear search
+- eraseText: 7
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Return to Home
+- tapOn:
+    text: 'Home tab'

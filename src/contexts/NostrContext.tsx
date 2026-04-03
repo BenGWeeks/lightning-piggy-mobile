@@ -125,23 +125,25 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(fetchedContacts)).catch(() => {});
     }, 100);
 
-    // Fetch profiles in background
+    // Fetch profiles in background with incremental UI updates
     if (fetchedContacts.length > 0) {
       const contactPubkeys = fetchedContacts.map((c) => c.pubkey);
       const t1 = Date.now();
-      const profileMap = await nostrService.fetchProfiles(contactPubkeys, relayUrls);
+      const profileMap = await nostrService.fetchProfiles(contactPubkeys, relayUrls, (partial) => {
+        // Update UI incrementally as each batch of profiles arrives
+        startTransition(() =>
+          setContacts((prev) =>
+            prev.map((c) => ({
+              ...c,
+              profile: partial.get(c.pubkey) ?? c.profile,
+            })),
+          ),
+        );
+      });
       if (__DEV__)
         console.log(
           `[Nostr] fetchProfiles: ${Date.now() - t1}ms, ${profileMap.size}/${contactPubkeys.length} profiles loaded`,
         );
-      startTransition(() =>
-        setContacts((prev) =>
-          prev.map((c) => ({
-            ...c,
-            profile: profileMap.get(c.pubkey) ?? c.profile,
-          })),
-        ),
-      );
 
       // Cache profiles (deferred to not block UI)
       setTimeout(() => {

@@ -13,7 +13,7 @@ export const DEFAULT_RELAYS = [
 ];
 
 // Relays that aggregate profile metadata across the network
-const PROFILE_RELAYS = ['wss://purplepag.es', 'wss://relay.nostr.band'];
+const PROFILE_RELAYS = ['wss://purplepag.es', 'wss://relay.nostr.band', 'wss://relay.primal.net'];
 
 export function decodeNsec(nsec: string): { pubkey: string; secretKey: Uint8Array } {
   const decoded = nip19.decode(nsec);
@@ -164,8 +164,8 @@ export async function fetchProfiles(
   };
 
   try {
-    // Batch in groups of 100, run 3 batches concurrently, 8s timeout per batch
-    const batchSize = 100;
+    // Batch in groups of 50, run 3 batches concurrently, 12s timeout per batch
+    const batchSize = 50;
     const concurrency = 3;
     const batches: string[][] = [];
     for (let i = 0; i < pubkeys.length; i += batchSize) {
@@ -174,12 +174,13 @@ export async function fetchProfiles(
 
     for (let i = 0; i < batches.length; i += concurrency) {
       // Yield to event loop between batch rounds so UI stays responsive
-      if (i > 0) await new Promise((r) => setTimeout(r, 0));
+      // Use 50ms delay to give React time to process renders and user input
+      if (i > 0) await new Promise((r) => setTimeout(r, 50));
 
       const concurrent = batches.slice(i, i + concurrency);
       const results = await Promise.all(
         concurrent.map((batch) =>
-          withTimeout(pool.querySync(allRelays, { kinds: [0], authors: batch }), 8000),
+          withTimeout(pool.querySync(allRelays, { kinds: [0], authors: batch }), 12000),
         ),
       );
       for (const events of results) {
