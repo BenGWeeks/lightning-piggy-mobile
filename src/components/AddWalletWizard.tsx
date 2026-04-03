@@ -2,6 +2,7 @@ import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   Alert,
@@ -10,12 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import {
-  BottomSheetModal,
-  BottomSheetBackdrop,
-  BottomSheetScrollView,
-  BottomSheetTextInput,
-} from '@gorhom/bottom-sheet';
+import { BottomSheetModal, BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
 import { CardTheme, WalletType } from '../types/wallet';
@@ -296,7 +292,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                 <Text style={styles.description}>
                   Paste or scan your Nostr Wallet Connect (NWC) connection string.
                 </Text>
-                <BottomSheetTextInput
+                <TextInput
                   style={styles.nwcInput}
                   placeholder="nostr+walletconnect://..."
                   placeholderTextColor={colors.textSupplementary}
@@ -358,7 +354,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                   Paste or scan your extended public key (xpub, ypub, or zpub) to add a watch-only
                   wallet.
                 </Text>
-                <BottomSheetTextInput
+                <TextInput
                   style={styles.nwcInput}
                   placeholder="xpub6..."
                   placeholderTextColor={colors.textSupplementary}
@@ -404,7 +400,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
             <Text style={styles.description}>
               Give this wallet a name so you can easily identify it.
             </Text>
-            <BottomSheetTextInput
+            <TextInput
               style={styles.aliasInput}
               placeholder="e.g. My Savings, Spending Wallet"
               placeholderTextColor={colors.textSupplementary}
