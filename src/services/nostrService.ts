@@ -13,7 +13,13 @@ export const DEFAULT_RELAYS = [
 ];
 
 // Relays that aggregate profile metadata across the network
-const PROFILE_RELAYS = ['wss://purplepag.es', 'wss://relay.nostr.band', 'wss://relay.primal.net'];
+const PROFILE_RELAYS = [
+  'wss://purplepag.es',
+  'wss://relay.nostr.band',
+  'wss://relay.primal.net',
+  'wss://relay.damus.io',
+  'wss://nos.lol',
+];
 
 export function decodeNsec(nsec: string): { pubkey: string; secretKey: Uint8Array } {
   const decoded = nip19.decode(nsec);

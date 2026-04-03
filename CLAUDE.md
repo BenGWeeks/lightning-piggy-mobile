@@ -21,3 +21,13 @@
 
 - Prettier and ESLint must pass before committing
 - TypeScript strict mode — `npx tsc --noEmit` must pass
+
+## Screenshots
+
+- Always use ADB to capture screenshots from the Android device: `adb exec-out screencap -p > /tmp/screen.png`
+- High-DPI devices produce images >2000px which hit Claude's dimension limit. Always resize before reading: `convert /tmp/screen.png -resize 1200x1200\> /tmp/screen_small.png` (uses ImageMagick, `\>` means only shrink, never enlarge)
+
+## Troubleshooting
+
+- See `docs/TROUBLESHOOTING.adoc` for known issues and resolutions
+- When you encounter and resolve a development issue, add it to TROUBLESHOOTING.adoc so future developers (and AI assistants) can reference it

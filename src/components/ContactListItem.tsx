@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 import Svg, { Path, Circle } from 'react-native-svg';
@@ -14,16 +14,38 @@ interface Props {
 }
 
 const ContactListItem: React.FC<Props> = ({ name, picture, lightningAddress, onPress, onZap }) => {
+  const [avatarError, setAvatarError] = useState(false);
+  const [avatarLoaded, setAvatarLoaded] = useState(false);
+
+  // Reset state when picture URL changes
+  useEffect(() => {
+    setAvatarError(false);
+    setAvatarLoaded(false);
+  }, [picture]);
+
+  // Timeout: if image hasn't loaded in 3s, show fallback
+  useEffect(() => {
+    if (!picture || avatarLoaded || avatarError) return;
+    const timer = setTimeout(() => {
+      if (!avatarLoaded) setAvatarError(true);
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [picture, avatarLoaded, avatarError]);
+
+  const showImage = !!picture && !avatarError;
+
   return (
     <TouchableOpacity style={styles.container} onPress={onPress} activeOpacity={onPress ? 0.6 : 1}>
       <View style={styles.avatar}>
-        {picture ? (
+        {showImage ? (
           <Image
             source={{ uri: picture }}
             style={styles.avatarImage}
             cachePolicy="disk"
             transition={200}
             recyclingKey={picture || undefined}
+            onError={() => setAvatarError(true)}
+            onLoad={() => setAvatarLoaded(true)}
           />
         ) : (
           <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">

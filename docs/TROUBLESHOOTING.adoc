@@ -24,4 +24,10 @@
 
 | Metro not connecting to device over USB
 | Run `adb reverse tcp:8081 tcp:8081` for USB port forwarding before launching the app.
+
+| App shows black screen or "Unable to load script" after force-stop
+| The Metro bundler connection can break when force-stopping the app. Fix: (1) Kill Metro with `pkill -f "expo start"`, (2) restart with `npm start` (or `npx expo start --clear` to also clear cache), (3) run `adb reverse tcp:8081 tcp:8081` again, (4) relaunch the app. If still black, do a full rebuild with `npx expo run:android`.
+
+| Claude Code warns "image exceeds the dimension limit for many-image requests (2000px)"
+| Screenshots captured with `adb exec-out screencap -p` can exceed 2000px on high-DPI devices. Before sending to Claude, resize: `adb exec-out screencap -p > /tmp/screen.png && convert /tmp/screen.png -resize 1200x1200\> /tmp/screen_small.png`. Or run `/compact` to clear old images from context, or start a new conversation.
 |===

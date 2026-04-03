@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   BackHandler,
@@ -38,9 +39,16 @@ interface Props {
   onClose: () => void;
   contact: ContactData | null;
   onZap?: () => void;
+  onSetLightningAddress?: (address: string) => void;
 }
 
-const ContactProfileSheet: React.FC<Props> = ({ visible, onClose, contact, onZap }) => {
+const ContactProfileSheet: React.FC<Props> = ({
+  visible,
+  onClose,
+  contact,
+  onZap,
+  onSetLightningAddress,
+}) => {
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['55%'], []);
   const { contacts, followContact, unfollowContact } = useNostr();
@@ -48,23 +56,36 @@ const ContactProfileSheet: React.FC<Props> = ({ visible, onClose, contact, onZap
   const [loadingFollow, setLoadingFollow] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
   const [avatarLoaded, setAvatarLoaded] = useState(false);
+  const [editingLnAddress, setEditingLnAddress] = useState(false);
+  const [lnAddressDraft, setLnAddressDraft] = useState('');
 
   // Timeout: if image hasn't loaded in 5s, show fallback
   useEffect(() => {
     if (!contact?.picture || avatarLoaded || avatarError) return;
     const timer = setTimeout(() => {
       if (!avatarLoaded) setAvatarError(true);
-    }, 5000);
+    }, 3000);
     return () => clearTimeout(timer);
   }, [contact?.picture, avatarLoaded, avatarError]);
 
+  // Update follow state when contacts list changes
   useEffect(() => {
     if (contact?.pubkey) {
       setFollowing(contacts.some((c) => c.pubkey === contact.pubkey));
-      setAvatarError(false);
-      setAvatarLoaded(false);
     }
-  }, [contact, contacts]);
+  }, [contact?.pubkey, contacts]);
+
+  // Reset avatar state only when the picture URL changes
+  useEffect(() => {
+    setAvatarError(false);
+    setAvatarLoaded(false);
+  }, [contact?.picture]);
+
+  // Reset lightning address editing state when contact changes
+  useEffect(() => {
+    setEditingLnAddress(false);
+    setLnAddressDraft(contact?.lightningAddress ?? '');
+  }, [contact?.name]);
 
   useEffect(() => {
     if (visible) {
@@ -213,11 +234,61 @@ const ContactProfileSheet: React.FC<Props> = ({ visible, onClose, contact, onZap
         )}
 
         {/* Lightning Address */}
-        {contact.lightningAddress && (
+        {contact.source === 'contacts' && onSetLightningAddress ? (
+          editingLnAddress ? (
+            <View style={styles.lnAddressEditRow}>
+              <TextInput
+                style={styles.lnAddressInput}
+                placeholder="user@domain.com"
+                placeholderTextColor={colors.textSupplementary}
+                value={lnAddressDraft}
+                onChangeText={setLnAddressDraft}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+              />
+              <TouchableOpacity
+                style={styles.lnAddressSaveButton}
+                onPress={() => {
+                  const trimmed = lnAddressDraft.trim();
+                  if (trimmed) {
+                    onSetLightningAddress(trimmed);
+                  }
+                  setEditingLnAddress(false);
+                }}
+              >
+                <Text style={styles.lnAddressSaveText}>
+                  {lnAddressDraft.trim() ? 'Save' : 'Cancel'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={styles.lnAddressRow}
+              onPress={() => {
+                setLnAddressDraft(contact.lightningAddress ?? '');
+                setEditingLnAddress(true);
+              }}
+            >
+              <Text style={styles.lightningAddress} numberOfLines={1}>
+                {contact.lightningAddress || 'Add Lightning Address'}
+              </Text>
+              <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
+                <Path
+                  d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"
+                  stroke={colors.brandPink}
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </Svg>
+            </TouchableOpacity>
+          )
+        ) : contact.lightningAddress ? (
           <Text style={styles.lightningAddress} numberOfLines={1}>
             {contact.lightningAddress}
           </Text>
-        )}
+        ) : null}
 
         {/* Action buttons */}
         <View style={styles.actionRow}>
@@ -300,10 +371,11 @@ const styles = StyleSheet.create({
   },
   avatarContainer: {
     marginTop: -36,
-    borderRadius: 36,
+    borderRadius: 39,
     borderWidth: 3,
     borderColor: colors.white,
     overflow: 'hidden',
+    backgroundColor: colors.background,
   },
   avatar: {
     width: 72,
@@ -352,6 +424,41 @@ const styles = StyleSheet.create({
     marginTop: 4,
     paddingHorizontal: 24,
     maxWidth: '100%',
+  },
+  lnAddressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+    paddingHorizontal: 24,
+  },
+  lnAddressEditRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    paddingHorizontal: 24,
+  },
+  lnAddressInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.brandPinkLight,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: colors.textHeader,
+  },
+  lnAddressSaveButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: colors.brandPink,
+  },
+  lnAddressSaveText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.white,
   },
   actionRow: {
     flexDirection: 'row',

@@ -5,7 +5,6 @@ import {
   TextInput,
   TouchableOpacity,
   Image,
-  StyleSheet,
   RefreshControl,
   Alert,
   GestureResponderEvent,
@@ -22,8 +21,8 @@ import ContactListItem from '../components/ContactListItem';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import AddFriendSheet from '../components/AddFriendSheet';
 import SendSheet from '../components/SendSheet';
-import { fetchPhoneContacts, PhoneContact } from '../services/contactsService';
-import { colors } from '../styles/theme';
+import { fetchPhoneContacts, PhoneContact, setLightningAddress } from '../services/contactsService';
+import { styles } from '../styles/FriendsScreen.styles';
 import type { MainTabParamList, RootStackParamList } from '../navigation/types';
 
 type FriendsNavigation = CompositeNavigationProp<
@@ -163,6 +162,8 @@ const FriendsScreen: React.FC = () => {
   const { isLoggedIn, profile, contacts, refreshContacts, addContact } = useNostr();
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
+  const [searchExpanded, setSearchExpanded] = useState(false);
+  const searchInputRef = useRef<TextInput>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [phoneContacts, setPhoneContacts] = useState<PhoneContact[]>([]);
   const [selectedContact, setSelectedContact] = useState<ListItem | null>(null);
@@ -373,6 +374,11 @@ const FriendsScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
+      <Image
+        source={require('../../assets/images/friends-bg.png')}
+        style={styles.bgImage}
+        resizeMode="contain"
+      />
       <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <View style={styles.titleRow}>
           <TouchableOpacity
@@ -386,30 +392,6 @@ const FriendsScreen: React.FC = () => {
             />
           </TouchableOpacity>
           <Text style={styles.title}>Friends</Text>
-          {isLoggedIn && (
-            <TouchableOpacity
-              style={styles.addButton}
-              onPress={() => setAddFriendVisible(true)}
-              accessibilityLabel="Add friend"
-              testID="add-friend-button"
-            >
-              <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-                <Path
-                  d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"
-                  stroke={colors.brandPink}
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                />
-                <Circle cx="9" cy="7" r="4" stroke={colors.brandPink} strokeWidth={2} />
-                <Path
-                  d="M19 8v6M22 11h-6"
-                  stroke={colors.brandPink}
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                />
-              </Svg>
-            </TouchableOpacity>
-          )}
           <View style={{ flex: 1 }} />
           <ProfileIcon
             uri={profile?.picture}
@@ -418,41 +400,108 @@ const FriendsScreen: React.FC = () => {
           />
         </View>
 
-        {/* Filter chips */}
+        {/* Filter chips + search toggle */}
         <View style={styles.chipRow}>
-          {filters.map((f) => (
-            <TouchableOpacity
-              key={f.key}
-              style={[styles.chip, filter === f.key && styles.chipActive]}
-              onPress={() => setFilter(f.key)}
-            >
-              <Text style={[styles.chipText, filter === f.key && styles.chipTextActive]}>
-                {f.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Search bar */}
-        <View style={styles.searchRow}>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search..."
-            placeholderTextColor="rgba(255,255,255,0.5)"
-            value={search}
-            onChangeText={setSearch}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
-            <Circle cx="11" cy="11" r="8" stroke="rgba(255,255,255,0.5)" strokeWidth={2} />
-            <Path
-              d="m21 21-4.3-4.3"
-              stroke="rgba(255,255,255,0.5)"
-              strokeWidth={2}
-              strokeLinecap="round"
-            />
-          </Svg>
+          {searchExpanded ? (
+            <View style={styles.searchRow}>
+              <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
+                <Circle cx="11" cy="11" r="8" stroke="rgba(255,255,255,0.7)" strokeWidth={2} />
+                <Path
+                  d="m21 21-4.3-4.3"
+                  stroke="rgba(255,255,255,0.7)"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                />
+              </Svg>
+              <TextInput
+                ref={searchInputRef}
+                style={styles.searchInput}
+                placeholder="Search..."
+                placeholderTextColor="rgba(255,255,255,0.5)"
+                value={search}
+                onChangeText={setSearch}
+                autoCapitalize="none"
+                autoCorrect={false}
+                accessibilityLabel="Search friends"
+                testID="search-input"
+              />
+              <TouchableOpacity
+                onPress={() => {
+                  setSearch('');
+                  setSearchExpanded(false);
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityLabel="Close search"
+                testID="close-search"
+              >
+                <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
+                  <Path
+                    d="M18 6 6 18M6 6l12 12"
+                    stroke="rgba(255,255,255,0.8)"
+                    strokeWidth={2.5}
+                    strokeLinecap="round"
+                  />
+                </Svg>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              {filters.map((f) => (
+                <TouchableOpacity
+                  key={f.key}
+                  style={[styles.chip, filter === f.key && styles.chipActive]}
+                  onPress={() => setFilter(f.key)}
+                >
+                  <Text style={[styles.chipText, filter === f.key && styles.chipTextActive]}>
+                    {f.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              <TouchableOpacity
+                style={styles.searchToggle}
+                onPress={() => {
+                  setSearchExpanded(true);
+                  setTimeout(() => searchInputRef.current?.focus(), 100);
+                }}
+                accessibilityLabel="Search friends"
+                testID="search-toggle"
+              >
+                <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                  <Circle cx="11" cy="11" r="8" stroke="rgba(255,255,255,0.8)" strokeWidth={2} />
+                  <Path
+                    d="m21 21-4.3-4.3"
+                    stroke="rgba(255,255,255,0.8)"
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                  />
+                </Svg>
+              </TouchableOpacity>
+              {isLoggedIn && (
+                <TouchableOpacity
+                  style={styles.addButton}
+                  onPress={() => setAddFriendVisible(true)}
+                  accessibilityLabel="Add friend"
+                  testID="add-friend-button"
+                >
+                  <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                    <Path
+                      d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"
+                      stroke="rgba(255,255,255,0.8)"
+                      strokeWidth={2}
+                      strokeLinecap="round"
+                    />
+                    <Circle cx="9" cy="7" r="4" stroke="rgba(255,255,255,0.8)" strokeWidth={2} />
+                    <Path
+                      d="M19 8v6M22 11h-6"
+                      stroke="rgba(255,255,255,0.8)"
+                      strokeWidth={2}
+                      strokeLinecap="round"
+                    />
+                  </Svg>
+                </TouchableOpacity>
+              )}
+            </>
+          )}
         </View>
       </View>
 
@@ -519,6 +568,20 @@ const FriendsScreen: React.FC = () => {
               }
             : undefined
         }
+        onSetLightningAddress={
+          selectedContact?.source === 'contacts'
+            ? async (address: string) => {
+                const phoneId = selectedContact.id.replace('phone-', '');
+                await setLightningAddress(phoneId, address);
+                setPhoneContacts((prev) =>
+                  prev.map((c) => (c.id === phoneId ? { ...c, lightningAddress: address } : c)),
+                );
+                setSelectedContact((prev) =>
+                  prev ? { ...prev, lightningAddress: address } : prev,
+                );
+              }
+            : undefined
+        }
       />
 
       <AddFriendSheet
@@ -540,156 +603,5 @@ const FriendsScreen: React.FC = () => {
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  header: {
-    backgroundColor: colors.brandPink,
-    paddingHorizontal: 20,
-    paddingBottom: 16,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 12,
-  },
-  addButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  homeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  homeIcon: {
-    width: 20,
-    height: 20,
-    tintColor: colors.brandPink,
-  },
-  title: {
-    color: colors.white,
-    fontSize: 28,
-    fontWeight: '700',
-  },
-  chipRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
-    marginBottom: 12,
-  },
-  chip: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 16,
-    paddingVertical: 7,
-    borderRadius: 20,
-  },
-  chipActive: {
-    backgroundColor: colors.white,
-  },
-  chipText: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  chipTextActive: {
-    color: colors.brandPink,
-  },
-  searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    gap: 8,
-  },
-  searchInput: {
-    flex: 1,
-    paddingVertical: 10,
-    fontSize: 15,
-    color: colors.white,
-    fontWeight: '500',
-  },
-  content: {
-    flex: 1,
-    backgroundColor: colors.white,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    marginTop: -12,
-    paddingTop: 12,
-    overflow: 'hidden',
-  },
-  listContent: {
-    paddingTop: 12,
-    paddingBottom: 20,
-  },
-  alphabetBar: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 8,
-    width: 32,
-    marginLeft: 4,
-  },
-  alphabetLetterTouch: {
-    paddingVertical: 2,
-    paddingHorizontal: 4,
-    borderRadius: 10,
-    width: 20,
-    height: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  alphabetLetterActive: {
-    backgroundColor: colors.brandPink,
-    borderRadius: 10,
-  },
-  alphabetLetter: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.textSupplementary,
-    textAlign: 'center',
-  },
-  alphabetLetterTextActive: {
-    color: colors.white,
-  },
-  emptyState: {
-    padding: 40,
-    alignItems: 'center',
-    gap: 8,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.textHeader,
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    color: colors.textSupplementary,
-    textAlign: 'center',
-  },
-  connectButton: {
-    backgroundColor: colors.brandPink,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 10,
-    marginTop: 8,
-  },
-  connectButtonText: {
-    color: colors.white,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-});
 
 export default FriendsScreen;
