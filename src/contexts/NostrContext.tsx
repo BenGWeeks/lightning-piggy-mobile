@@ -130,9 +130,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     startTransition(() => setContacts(fetchedContacts));
 
     // Cache the contact list (deferred to not block UI)
-    setTimeout(() => {
+    InteractionManager.runAfterInteractions(() => {
       AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(fetchedContacts)).catch(() => {});
-    }, 100);
+    });
 
     // Fetch profiles in background with incremental UI updates
     if (fetchedContacts.length > 0) {
@@ -155,14 +155,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         );
 
       // Cache profiles (deferred to not block UI)
-      setTimeout(() => {
+      InteractionManager.runAfterInteractions(() => {
         const profileObj: Record<string, NostrProfile> = {};
         profileMap.forEach((v, k) => {
           profileObj[k] = v;
         });
         AsyncStorage.setItem(PROFILES_CACHE_KEY, JSON.stringify(profileObj)).catch(() => {});
         AsyncStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
-      }, 100);
+      });
     }
   }, []);
 
@@ -212,7 +212,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             const readRelays = await loadRelays(pk!);
             await loadProfile(pk!, readRelays);
             // Refresh contacts from relays in background
-            loadContacts(pk!, readRelays);
+            loadContacts(pk!, readRelays).catch((e) =>
+              console.warn('Background contact refresh failed:', e),
+            );
           } catch (error) {
             console.warn('Nostr background refresh failed:', error);
           }
@@ -249,7 +251,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           try {
             const readRelays = await loadRelays(pk);
             await loadProfile(pk, readRelays);
-            loadContacts(pk, readRelays);
+            loadContacts(pk, readRelays).catch((e) =>
+              console.warn('Background contact refresh failed:', e),
+            );
           } catch (error) {
             console.warn('Nsec post-login refresh failed:', error);
           }
@@ -257,7 +261,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
         return { success: true };
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to login';
+        // Sanitize error messages to never expose nsec
+        let message = error instanceof Error ? error.message : 'Failed to login';
+        if (message.includes('nsec')) message = 'Invalid private key';
         return { success: false, error: message };
       } finally {
         setIsLoggingIn(false);
@@ -289,7 +295,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         try {
           const readRelays = await loadRelays(pk);
           await loadProfile(pk, readRelays);
-          loadContacts(pk, readRelays);
+          loadContacts(pk, readRelays).catch((e) =>
+            console.warn('Background contact refresh failed:', e),
+          );
         } catch (error) {
           console.warn('Amber post-login refresh failed:', error);
         }

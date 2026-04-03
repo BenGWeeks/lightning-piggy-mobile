@@ -164,6 +164,9 @@ export async function fetchProfiles(
   };
 
   try {
+    // Overall timeout: 90s max for all profile fetching
+    const overallDeadline = Date.now() + 90000;
+
     // Batch in groups of 50, run 3 batches concurrently, 12s timeout per batch
     const batchSize = 50;
     const concurrency = 3;
@@ -173,6 +176,11 @@ export async function fetchProfiles(
     }
 
     for (let i = 0; i < batches.length; i += concurrency) {
+      // Bail if overall deadline exceeded
+      if (Date.now() > overallDeadline) {
+        if (__DEV__) console.warn('[Nostr] fetchProfiles: overall timeout reached');
+        break;
+      }
       // Yield to event loop between batch rounds so UI stays responsive
       // Use 50ms delay to give React time to process renders and user input
       if (i > 0) await new Promise((r) => setTimeout(r, 50));

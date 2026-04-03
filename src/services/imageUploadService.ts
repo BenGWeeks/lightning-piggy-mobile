@@ -6,11 +6,8 @@ export async function uploadToNostrBuild(imageUri: string): Promise<string> {
   const type = match ? `image/${match[1]}` : 'image/jpeg';
 
   const formData = new FormData();
-  formData.append('file', {
-    uri: imageUri,
-    name: filename,
-    type,
-  } as unknown as Blob);
+  // React Native FormData accepts {uri, name, type} but TypeScript expects Blob
+  formData.append('file', { uri: imageUri, name: filename, type } as unknown as Blob);
 
   const response = await fetch(NOSTR_BUILD_UPLOAD_URL, {
     method: 'POST',
@@ -29,8 +26,11 @@ export async function uploadToNostrBuild(imageUri: string): Promise<string> {
     throw new Error('Upload failed: ' + (data.message || 'unknown error'));
   }
 
-  // Extract URL from NIP-94 tags
-  const urlTag = data.nip94_event?.tags?.find((t: string[]) => t[0] === 'url');
+  // Validate and extract URL from NIP-94 tags
+  if (!data.nip94_event || !Array.isArray(data.nip94_event.tags)) {
+    throw new Error('Invalid response structure from nostr.build');
+  }
+  const urlTag = data.nip94_event.tags.find((t: string[]) => t[0] === 'url');
   if (!urlTag || !urlTag[1]) {
     throw new Error('No URL in upload response');
   }

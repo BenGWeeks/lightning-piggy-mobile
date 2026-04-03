@@ -126,11 +126,15 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
       return;
     }
 
-    // Publish initial profile with display name
-    await publishProfile({
+    // Publish initial profile with display name (best-effort, don't block)
+    const published = await publishProfile({
       display_name: newName.trim(),
       name: newName.trim(),
     });
+    if (!published) {
+      // Profile publish failed but account is created — user can edit later
+      if (__DEV__) console.warn('Initial profile publish failed');
+    }
 
     // Show backup screen
     setMode('backup');

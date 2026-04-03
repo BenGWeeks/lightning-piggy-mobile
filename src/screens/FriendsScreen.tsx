@@ -200,7 +200,9 @@ const FriendsScreen: React.FC = () => {
   );
 
   useEffect(() => {
-    fetchPhoneContacts().then(setPhoneContacts);
+    fetchPhoneContacts()
+      .then(setPhoneContacts)
+      .catch(() => {});
   }, []);
 
   const combinedList = useMemo(() => {
@@ -211,7 +213,12 @@ const FriendsScreen: React.FC = () => {
       for (const c of contacts) {
         items.push({
           id: `nostr-${c.pubkey}`,
-          name: c.profile?.displayName || c.profile?.name || c.petname || c.pubkey.slice(0, 12),
+          name: (
+            c.profile?.displayName ||
+            c.profile?.name ||
+            c.petname ||
+            c.pubkey.slice(0, 12)
+          ).trim(),
           picture: c.profile?.picture ?? null,
           banner: c.profile?.banner ?? null,
           nip05: c.profile?.nip05 ?? null,
