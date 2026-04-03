@@ -46,10 +46,12 @@ const ContactProfileSheet: React.FC<Props> = ({ visible, onClose, contact, onZap
   const { contacts, followContact, unfollowContact } = useNostr();
   const [following, setFollowing] = useState(false);
   const [loadingFollow, setLoadingFollow] = useState(false);
+  const [avatarError, setAvatarError] = useState(false);
 
   useEffect(() => {
     if (contact?.pubkey) {
       setFollowing(contacts.some((c) => c.pubkey === contact.pubkey));
+      setAvatarError(false);
     }
   }, [contact, contacts]);
 
@@ -155,12 +157,13 @@ const ContactProfileSheet: React.FC<Props> = ({ visible, onClose, contact, onZap
 
         {/* Avatar */}
         <View style={styles.avatarContainer}>
-          {contact.picture ? (
+          {contact.picture && !avatarError ? (
             <Image
               source={{ uri: contact.picture }}
               style={styles.avatar}
               cachePolicy="disk"
               transition={200}
+              onError={() => setAvatarError(true)}
             />
           ) : (
             <View style={styles.avatarDefault}>

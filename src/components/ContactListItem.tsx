@@ -23,6 +23,7 @@ const ContactListItem: React.FC<Props> = ({ name, picture, lightningAddress, onP
             style={styles.avatarImage}
             cachePolicy="disk"
             transition={200}
+            recyclingKey={picture || undefined}
           />
         ) : (
           <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
