@@ -7,9 +7,6 @@ name: Add On-chain Wallet Test
 # NOTE: This test expects a fresh app state (no wallets configured).
 # The onboarding flow is completed first, then an on-chain wallet is added.
 
-# Relaunch app
-- launchApp
-
 # Wait for app to load
 - waitForAnimationToEnd:
     timeout: 15000
@@ -32,13 +29,46 @@ name: Add On-chain Wallet Test
 - waitForAnimationToEnd:
     timeout: 5000
 
-# --- Home screen: Add a wallet ---
-# The home screen should show "Add a wallet to get started" or
-# have the Add Wallet card visible since there are no wallets yet.
+# --- Home screen: Navigate to Add Wallet ---
+# Swipe wallet carousel to reach the Add Wallet card
+- swipe:
+    start: 80%, 20%
+    end: 20%, 20%
+    duration: 400
+- waitForAnimationToEnd:
+    timeout: 1000
+- swipe:
+    start: 80%, 20%
+    end: 20%, 20%
+    duration: 400
+- waitForAnimationToEnd:
+    timeout: 1000
+- swipe:
+    start: 80%, 20%
+    end: 20%, 20%
+    duration: 400
+- waitForAnimationToEnd:
+    timeout: 1000
+- swipe:
+    start: 80%, 20%
+    end: 20%, 20%
+    duration: 400
+- waitForAnimationToEnd:
+    timeout: 1000
+- swipe:
+    start: 80%, 20%
+    end: 20%, 20%
+    duration: 400
+- waitForAnimationToEnd:
+    timeout: 1000
 
-# Tap the Add Wallet card (it's the only card when no wallets exist)
+# Tap the Add Wallet card (by text or id)
 - tapOn:
     id: 'add-wallet-card'
+    optional: true
+- tapOn:
+    text: 'Add Wallet'
+    optional: true
 - waitForAnimationToEnd:
     timeout: 3000
 
@@ -84,9 +114,9 @@ name: Add On-chain Wallet Test
 - waitForAnimationToEnd:
     timeout: 2000
 
-# Tap Add Wallet (theme step defaults to bitcoin theme)
+# Tap Add Wallet / Connect button on theme step
 - tapOn:
-    text: 'Add Wallet'
+    id: 'wizard-connect-button'
 - waitForAnimationToEnd:
     timeout: 10000
 

@@ -467,6 +467,10 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                 style={[styles.primaryButton, { flex: 1 }, connecting && { opacity: 0.7 }]}
                 onPress={handleConnect}
                 disabled={connecting}
+                testID="wizard-connect-button"
+                accessibilityLabel={
+                  walletType === 'onchain' ? 'Add on-chain wallet' : 'Connect wallet'
+                }
               >
                 {connecting ? (
                   <ActivityIndicator color={colors.white} />
