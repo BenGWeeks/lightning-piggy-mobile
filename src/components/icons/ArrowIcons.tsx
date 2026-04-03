@@ -57,3 +57,37 @@ export const ArrowLeftRightIcon: React.FC<IconProps> = ({
     />
   </Svg>
 );
+
+/** Lightning bolt — Lucide Zap style */
+export const LightningIcon: React.FC<IconProps> = ({
+  size = 24,
+  color = '#F7931A',
+  strokeWidth = 2.5,
+}) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path
+      d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"
+      stroke={color}
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </Svg>
+);
+
+/** Chain link — Lucide Link style */
+export const ChainIcon: React.FC<IconProps> = ({
+  size = 24,
+  color = '#F7931A',
+  strokeWidth = 2.5,
+}) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path
+      d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"
+      stroke={color}
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </Svg>
+);

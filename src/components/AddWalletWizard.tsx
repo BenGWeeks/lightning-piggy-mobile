@@ -23,6 +23,7 @@ import { themeList } from '../themes/cardThemes';
 import { MiniWalletCard } from './WalletCard';
 import { validateNwcUrl } from '../services/nwcService';
 import { validateXpub } from '../services/onchainService';
+import { LightningIcon, ChainIcon } from './icons/ArrowIcons';
 
 interface Props {
   visible: boolean;
@@ -231,7 +232,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
       <BottomSheetScrollView
         ref={scrollRef}
         style={styles.content}
-        contentContainerStyle={{ paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 }}
+        contentContainerStyle={{ paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 60 }}
         keyboardShouldPersistTaps="handled"
       >
         <Text style={styles.title}>{stepTitle[step]}</Text>
@@ -241,7 +242,9 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
           <View style={styles.stepContent}>
             <Text style={styles.description}>What type of wallet would you like to add?</Text>
             <TouchableOpacity style={styles.typeCard} onPress={() => handleTypeSelect('nwc')}>
-              <Text style={styles.typeCardIcon}>{'\u26A1'}</Text>
+              <View style={styles.typeCardIconWrapper}>
+                <LightningIcon size={28} color={colors.brandPink} strokeWidth={2.5} />
+              </View>
               <View style={styles.typeCardText}>
                 <Text style={styles.typeCardTitle}>Lightning (NWC)</Text>
                 <Text style={styles.typeCardDesc}>
@@ -250,7 +253,9 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
               </View>
             </TouchableOpacity>
             <TouchableOpacity style={styles.typeCard} onPress={() => handleTypeSelect('onchain')}>
-              <Text style={styles.typeCardIcon}>{'\u26D3'}</Text>
+              <View style={styles.typeCardIconWrapper}>
+                <ChainIcon size={28} color={colors.brandPink} strokeWidth={2.5} />
+              </View>
               <View style={styles.typeCardText}>
                 <Text style={styles.typeCardTitle}>Bitcoin (On-chain)</Text>
                 <Text style={styles.typeCardDesc}>
@@ -500,8 +505,11 @@ const styles = StyleSheet.create({
     padding: 20,
     gap: 16,
   },
-  typeCardIcon: {
-    fontSize: 28,
+  typeCardIconWrapper: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   typeCardText: {
     flex: 1,
