@@ -119,6 +119,9 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
         keyboardShouldPersistTaps="handled"
       >
         <Text style={styles.title}>Edit Profile</Text>
+        <Text style={styles.safetyTip}>
+          Tip: You don't need to use your real name or photo for your profile.
+        </Text>
 
         <Text style={styles.label}>Display Name</Text>
         <BottomSheetTextInput
@@ -225,7 +228,13 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '700',
     color: colors.textHeader,
-    marginBottom: 20,
+    marginBottom: 4,
+  },
+  safetyTip: {
+    fontSize: 13,
+    color: colors.textSupplementary,
+    marginBottom: 16,
+    fontStyle: 'italic',
   },
   label: {
     fontSize: 14,

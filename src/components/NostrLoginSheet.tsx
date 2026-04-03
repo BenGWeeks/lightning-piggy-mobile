@@ -270,6 +270,9 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
           <>
             <Text style={styles.title}>Create Account</Text>
             <Text style={styles.subtitle}>Choose a display name for your new Nostr identity.</Text>
+            <Text style={styles.safetyTip}>
+              Tip: You don't need to use your real name or photo.
+            </Text>
 
             <Text style={styles.fieldLabel}>Display Name</Text>
             <BottomSheetTextInput
@@ -453,6 +456,12 @@ const styles = StyleSheet.create({
     color: colors.textHeader,
     fontSize: 16,
     fontWeight: '700',
+  },
+  safetyTip: {
+    fontSize: 13,
+    color: colors.textSupplementary,
+    marginBottom: 12,
+    fontStyle: 'italic',
   },
   fieldLabel: {
     fontSize: 14,
