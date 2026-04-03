@@ -173,6 +173,9 @@ export async function fetchProfiles(
     }
 
     for (let i = 0; i < batches.length; i += concurrency) {
+      // Yield to event loop between batch rounds so UI stays responsive
+      if (i > 0) await new Promise((r) => setTimeout(r, 0));
+
       const concurrent = batches.slice(i, i + concurrency);
       const results = await Promise.all(
         concurrent.map((batch) =>

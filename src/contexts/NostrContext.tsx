@@ -120,12 +120,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       );
     startTransition(() => setContacts(fetchedContacts));
 
-    // Cache the contact list
-    try {
-      await AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(fetchedContacts));
-    } catch {}
+    // Cache the contact list (deferred to not block UI)
+    setTimeout(() => {
+      AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(fetchedContacts)).catch(() => {});
+    }, 100);
 
-    // Fetch profiles in background after UI is idle
+    // Fetch profiles in background
     if (fetchedContacts.length > 0) {
       const contactPubkeys = fetchedContacts.map((c) => c.pubkey);
       const t1 = Date.now();
@@ -143,15 +143,15 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         ),
       );
 
-      // Cache profiles
-      try {
+      // Cache profiles (deferred to not block UI)
+      setTimeout(() => {
         const profileObj: Record<string, NostrProfile> = {};
         profileMap.forEach((v, k) => {
           profileObj[k] = v;
         });
-        await AsyncStorage.setItem(PROFILES_CACHE_KEY, JSON.stringify(profileObj));
-        await AsyncStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString());
-      } catch {}
+        AsyncStorage.setItem(PROFILES_CACHE_KEY, JSON.stringify(profileObj)).catch(() => {});
+        AsyncStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+      }, 100);
     }
   }, []);
 
@@ -230,14 +230,19 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
         setSignerType('nsec');
         setIsLoggedIn(true);
-
-        // Fetch relay list and profile, then dismiss spinner
-        const readRelays = await loadRelays(pk);
-        await loadProfile(pk, readRelays);
         setIsLoggingIn(false);
 
-        // Contacts fetched in the background after sheet closes
-        loadContacts(pk, readRelays);
+        // Load cached contacts immediately, fetch fresh data in background
+        await loadContactsFromCache();
+        InteractionManager.runAfterInteractions(async () => {
+          try {
+            const readRelays = await loadRelays(pk);
+            await loadProfile(pk, readRelays);
+            loadContacts(pk, readRelays);
+          } catch (error) {
+            console.warn('Nsec post-login refresh failed:', error);
+          }
+        });
 
         return { success: true };
       } catch (error) {
@@ -247,7 +252,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setIsLoggingIn(false);
       }
     },
-    [loadRelays, loadProfile, loadContacts],
+    [loadRelays, loadProfile, loadContacts, loadContactsFromCache],
   );
 
   const loginWithAmber = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
@@ -265,14 +270,19 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       setSignerType('amber');
       setIsLoggedIn(true);
-
-      // Fetch relay list and profile, then dismiss spinner
-      const readRelays = await loadRelays(pk);
-      await loadProfile(pk, readRelays);
       setIsLoggingIn(false);
 
-      // Contacts fetched in the background after sheet closes
-      loadContacts(pk, readRelays);
+      // Load cached contacts immediately, fetch fresh data in background
+      await loadContactsFromCache();
+      InteractionManager.runAfterInteractions(async () => {
+        try {
+          const readRelays = await loadRelays(pk);
+          await loadProfile(pk, readRelays);
+          loadContacts(pk, readRelays);
+        } catch (error) {
+          console.warn('Amber post-login refresh failed:', error);
+        }
+      });
 
       return { success: true };
     } catch (error) {
@@ -281,7 +291,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } finally {
       setIsLoggingIn(false);
     }
-  }, [loadRelays, loadProfile, loadContacts]);
+  }, [loadRelays, loadProfile, loadContacts, loadContactsFromCache]);
 
   const logout = useCallback(async () => {
     await SecureStore.deleteItemAsync(NSEC_KEY);
