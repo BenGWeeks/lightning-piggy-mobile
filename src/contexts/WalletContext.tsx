@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nwcService from '../services/nwcService';
+import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
 import { CURRENCIES, FiatCurrency, getBtcPrice } from '../services/fiatService';
 import { CardTheme, WalletMetadata, WalletState } from '../types/wallet';
@@ -47,6 +48,12 @@ interface WalletContextType {
     alias: string,
     theme: CardTheme,
   ) => Promise<{ success: boolean; error?: string }>;
+  addOnchainWallet: (
+    xpub: string,
+    alias: string,
+    theme: CardTheme,
+    electrumServer?: string,
+  ) => Promise<{ success: boolean; error?: string }>;
   removeWallet: (walletId: string) => Promise<void>;
   updateWalletSettings: (
     walletId: string,
@@ -64,6 +71,9 @@ interface WalletContextType {
   makeInvoiceForWallet: (walletId: string, amount: number, memo?: string) => Promise<string>;
   payInvoiceForWallet: (walletId: string, bolt11: string) => Promise<{ preimage: string }>;
   refreshBalanceForWallet: (walletId: string) => Promise<void>;
+
+  // On-chain actions
+  getReceiveAddress: (walletId: string) => Promise<string>;
 
   // Legacy compatibility
   isConnected: boolean;
@@ -88,8 +98,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const activeWallet = wallets.find((w) => w.id === activeWalletId) ?? null;
   const hasWallets = wallets.length > 0;
 
-  // Legacy compatibility
-  const isConnected = activeWallet?.isConnected ?? false;
+  // Legacy compatibility — on-chain wallets are always "available"
+  const isConnected =
+    activeWallet?.walletType === 'onchain' ? true : (activeWallet?.isConnected ?? false);
   const balance = activeWallet?.balance ?? null;
   const walletAlias = activeWallet?.walletAlias ?? activeWallet?.alias ?? null;
 
@@ -171,6 +182,18 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // Connect all wallets in parallel
         await Promise.all(
           walletList.map(async (wallet) => {
+            if (wallet.walletType === 'onchain') {
+              // On-chain wallet: fetch balance from block explorer
+              const bal = await onchainService.getBalance(wallet.id);
+              setWallets((prev) =>
+                prev.map((w) =>
+                  w.id === wallet.id ? { ...w, isConnected: false, balance: bal } : w,
+                ),
+              );
+              return;
+            }
+
+            // NWC wallet: connect via Nostr
             const nwcUrl = await walletStorage.getNwcUrl(wallet.id);
             if (!nwcUrl) return;
 
@@ -237,6 +260,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         alias,
         theme,
         order: wallets.length,
+        walletType: 'nwc',
         lightningAddress: lud16 || info?.lud16 || null,
       };
 
@@ -263,10 +287,62 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [wallets.length, activeWalletId],
   );
 
+  const addOnchainWallet = useCallback(
+    async (xpub: string, alias: string, theme: CardTheme, electrumServer?: string) => {
+      const validationError = onchainService.validateXpub(xpub.trim());
+      if (validationError) {
+        return { success: false, error: validationError };
+      }
+
+      const id = walletStorage.generateWalletId();
+
+      const metadata: WalletMetadata = {
+        id,
+        alias,
+        theme,
+        order: wallets.length,
+        walletType: 'onchain',
+        lightningAddress: null,
+        onchainImportMethod: 'xpub',
+        electrumServer,
+      };
+
+      // Persist xpub securely
+      await walletStorage.saveXpub(id, xpub.trim());
+      const currentList = await walletStorage.getWalletList();
+      await walletStorage.saveWalletList([...currentList, metadata]);
+
+      // Fetch initial balance
+      const bal = await onchainService.getBalance(id);
+
+      const state: WalletState = {
+        ...metadata,
+        isConnected: false, // on-chain wallets don't have persistent connections
+        balance: bal,
+        walletAlias: null,
+      };
+
+      setWallets((prev) => [...prev, state]);
+      if (!activeWalletId) {
+        setActiveWalletId(id);
+      }
+
+      return { success: true };
+    },
+    [wallets.length, activeWalletId],
+  );
+
   const removeWallet = useCallback(
     async (walletId: string) => {
-      nwcService.disconnect(walletId);
-      await walletStorage.deleteNwcUrl(walletId);
+      const wallet = wallets.find((w) => w.id === walletId);
+
+      if (wallet?.walletType === 'onchain') {
+        await walletStorage.deleteXpub(walletId);
+        await onchainService.removeWallet(walletId);
+      } else {
+        nwcService.disconnect(walletId);
+        await walletStorage.deleteNwcUrl(walletId);
+      }
 
       const currentList = await walletStorage.getWalletList();
       const updated = currentList.filter((w) => w.id !== walletId);
@@ -280,7 +356,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return remaining;
       });
     },
-    [activeWalletId],
+    [activeWalletId, wallets],
   );
 
   const updateWalletSettings = useCallback(
@@ -302,20 +378,30 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const refreshActiveBalance = useCallback(async () => {
     if (!activeWalletId) return;
-    const b = await nwcService.getBalance(activeWalletId);
-    if (b !== null) {
-      updateWalletInState(activeWalletId, { balance: b });
+    const wallet = wallets.find((w) => w.id === activeWalletId);
+
+    if (wallet?.walletType === 'onchain') {
+      const b = await onchainService.getBalance(activeWalletId);
+      if (b !== null) updateWalletInState(activeWalletId, { balance: b });
+    } else {
+      const b = await nwcService.getBalance(activeWalletId);
+      if (b !== null) updateWalletInState(activeWalletId, { balance: b });
     }
-  }, [activeWalletId, updateWalletInState]);
+  }, [activeWalletId, wallets, updateWalletInState]);
 
   const refreshBalanceForWallet = useCallback(
     async (walletId: string) => {
-      const b = await nwcService.getBalance(walletId);
-      if (b !== null) {
-        updateWalletInState(walletId, { balance: b });
+      const wallet = wallets.find((w) => w.id === walletId);
+
+      if (wallet?.walletType === 'onchain') {
+        const b = await onchainService.getBalance(walletId);
+        if (b !== null) updateWalletInState(walletId, { balance: b });
+      } else {
+        const b = await nwcService.getBalance(walletId);
+        if (b !== null) updateWalletInState(walletId, { balance: b });
       }
     },
-    [updateWalletInState],
+    [wallets, updateWalletInState],
   );
 
   const completeOnboarding = useCallback(async () => {
@@ -350,6 +436,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return nwcService.payInvoice(walletId, bolt11);
   }, []);
 
+  const getReceiveAddress = useCallback(async (walletId: string) => {
+    return onchainService.getCurrentReceiveAddress(walletId);
+  }, []);
+
   return (
     <WalletContext.Provider
       value={{
@@ -367,6 +457,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         lightningAddress,
         setLightningAddress,
         addWallet,
+        addOnchainWallet,
         removeWallet,
         updateWalletSettings,
         setActiveWallet,
@@ -377,6 +468,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         makeInvoiceForWallet,
         payInvoiceForWallet,
         refreshBalanceForWallet,
+        getReceiveAddress,
         isConnected,
         balance,
         walletAlias,

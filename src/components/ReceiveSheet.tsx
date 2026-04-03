@@ -24,6 +24,7 @@ import * as Clipboard from 'expo-clipboard';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
 import { satsToFiatString, satsToFiat } from '../services/fiatService';
+// On-chain address fetching is done via WalletContext.getReceiveAddress
 
 interface Props {
   visible: boolean;
@@ -43,6 +44,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
     btcPrice,
     currency,
     lightningAddress,
+    getReceiveAddress,
   } = useWallet();
   const [capturedWalletId, setCapturedWalletId] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -53,6 +55,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [satsValue, setSatsValue] = useState('');
   const [fiatValue, setFiatValue] = useState('');
   const [inputUnit, setInputUnit] = useState<InputUnit>('sats');
+  const [onchainAddress, setOnchainAddress] = useState<string | null>(null);
   const intervalId = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevBalance = useRef<number | null>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -98,6 +101,8 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
     [makeInvoiceForWallet, refreshBalanceForWallet, capturedWalletId],
   );
 
+  const isOnchainWallet = activeWallet?.walletType === 'onchain';
+
   // Open/close the sheet — intentionally depends only on `visible`.
   // `balance` and `lightningAddress` are read for initialisation, not as reactive triggers.
   useEffect(() => {
@@ -105,12 +110,23 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
       setCapturedWalletId(activeWalletId);
       setDropdownOpen(false);
       prevBalance.current = balance;
-      setMode(lightningAddress ? 'address' : 'amount');
+      setOnchainAddress(null);
       setSatsValue('');
       setFiatValue('');
       setInvoice('');
       setPaymentReceived(false);
       setInputUnit('sats');
+
+      if (activeWallet?.walletType === 'onchain' && activeWalletId) {
+        // On-chain wallet: fetch a receive address
+        setMode('address');
+        getReceiveAddress(activeWalletId)
+          .then((addr) => setOnchainAddress(addr))
+          .catch(() => {});
+      } else {
+        setMode(lightningAddress ? 'address' : 'amount');
+      }
+
       bottomSheetRef.current?.present();
     } else {
       bottomSheetRef.current?.dismiss();
@@ -186,7 +202,11 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   };
 
   const currentSats = parseInt(satsValue) || 0;
-  const copyValue = mode === 'address' ? lightningAddress || '' : invoice;
+  const copyValue = isOnchainWallet
+    ? onchainAddress || ''
+    : mode === 'address'
+      ? lightningAddress || ''
+      : invoice;
 
   const handleCopy = async () => {
     if (copyValue) await Clipboard.setStringAsync(copyValue);
@@ -195,9 +215,12 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   const handleShare = async () => {
     if (copyValue) {
       try {
-        await Share.share({
-          message: mode === 'address' ? `lightning:${lightningAddress}` : `lightning:${invoice}`,
-        });
+        const shareMsg = isOnchainWallet
+          ? `bitcoin:${onchainAddress}`
+          : mode === 'address'
+            ? `lightning:${lightningAddress}`
+            : `lightning:${invoice}`;
+        await Share.share({ message: shareMsg });
       } catch {}
     }
   };
@@ -234,7 +257,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
             <Text style={styles.title}>Receive</Text>
 
             {/* Wallet selector */}
-            {wallets.filter((w) => w.isConnected).length > 1 ? (
+            {wallets.filter((w) => w.isConnected || w.walletType === 'onchain').length > 1 ? (
               <View style={styles.walletDropdownRow}>
                 <Text style={styles.walletLabel}>To:</Text>
                 <View style={styles.walletDropdownWrapper}>
@@ -248,7 +271,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
                   {dropdownOpen && (
                     <View style={styles.walletDropdownMenu}>
                       {wallets
-                        .filter((w) => w.isConnected)
+                        .filter((w) => w.isConnected || w.walletType === 'onchain')
                         .map((w) => (
                           <TouchableOpacity
                             key={w.id}
@@ -279,8 +302,8 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
               <Text style={styles.walletLabel}>To: {walletName}</Text>
             )}
 
-            {/* Mode tabs */}
-            {lightningAddress ? (
+            {/* Mode tabs — hidden for on-chain wallets (address-only) */}
+            {!isOnchainWallet && lightningAddress ? (
               <View style={styles.tabRow}>
                 <TouchableOpacity
                   style={[styles.tab, mode === 'address' && styles.tabActive]}
@@ -353,12 +376,21 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
 
             {/* QR Code */}
             <View style={styles.qrContainer}>
-              {mode === 'address' && lightningAddress ? (
+              {isOnchainWallet && onchainAddress ? (
+                <View>
+                  <QRCode value={`bitcoin:${onchainAddress}`} size={200} />
+                  {paymentReceived && (
+                    <View style={styles.checkmark}>
+                      <Text style={styles.checkmarkText}>{'\u2713'}</Text>
+                    </View>
+                  )}
+                </View>
+              ) : mode === 'address' && lightningAddress ? (
                 <View>
                   <QRCode value={`lightning:${lightningAddress}`} size={200} />
                   {paymentReceived && (
                     <View style={styles.checkmark}>
-                      <Text style={styles.checkmarkText}>✓</Text>
+                      <Text style={styles.checkmarkText}>{'\u2713'}</Text>
                     </View>
                   )}
                 </View>
@@ -383,7 +415,11 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
             </View>
 
             <Text style={styles.qrLabel}>
-              {mode === 'address' ? lightningAddress : 'Lightning invoice'}
+              {isOnchainWallet
+                ? onchainAddress || 'Loading address...'
+                : mode === 'address'
+                  ? lightningAddress
+                  : 'Lightning invoice'}
             </Text>
             {mode === 'amount' && invoice ? (
               <Text style={styles.invoiceText} numberOfLines={2}>

@@ -4,8 +4,13 @@ import { WalletMetadata } from '../types/wallet';
 
 const WALLET_LIST_KEY = 'wallet_list';
 const NWC_URL_PREFIX = 'nwc_url_';
+const ONCHAIN_XPUB_PREFIX = 'onchain_xpub_';
+const ELECTRUM_SERVER_KEY = 'electrum_server';
 const LEGACY_NWC_KEY = 'nwc_connection_url';
 const ONBOARDING_KEY = 'onboarding_complete';
+
+/** Default block-explorer API used for on-chain balance/tx lookups */
+export const DEFAULT_ELECTRUM_SERVER = 'https://mempool.space/api';
 
 export async function getWalletList(): Promise<WalletMetadata[]> {
   const json = await AsyncStorage.getItem(WALLET_LIST_KEY);
@@ -21,6 +26,8 @@ export async function saveWalletList(wallets: WalletMetadata[]): Promise<void> {
   await AsyncStorage.setItem(WALLET_LIST_KEY, JSON.stringify(wallets));
 }
 
+// --- NWC ---
+
 export async function saveNwcUrl(walletId: string, url: string): Promise<void> {
   await SecureStore.setItemAsync(`${NWC_URL_PREFIX}${walletId}`, url);
 }
@@ -33,6 +40,33 @@ export async function deleteNwcUrl(walletId: string): Promise<void> {
   await SecureStore.deleteItemAsync(`${NWC_URL_PREFIX}${walletId}`);
 }
 
+// --- On-chain (xpub) ---
+
+export async function saveXpub(walletId: string, xpub: string): Promise<void> {
+  await SecureStore.setItemAsync(`${ONCHAIN_XPUB_PREFIX}${walletId}`, xpub);
+}
+
+export async function getXpub(walletId: string): Promise<string | null> {
+  return SecureStore.getItemAsync(`${ONCHAIN_XPUB_PREFIX}${walletId}`);
+}
+
+export async function deleteXpub(walletId: string): Promise<void> {
+  await SecureStore.deleteItemAsync(`${ONCHAIN_XPUB_PREFIX}${walletId}`);
+}
+
+// --- Electrum / block-explorer server ---
+
+export async function getElectrumServer(): Promise<string> {
+  const saved = await AsyncStorage.getItem(ELECTRUM_SERVER_KEY);
+  return saved || DEFAULT_ELECTRUM_SERVER;
+}
+
+export async function setElectrumServer(url: string): Promise<void> {
+  await AsyncStorage.setItem(ELECTRUM_SERVER_KEY, url);
+}
+
+// --- Onboarding ---
+
 export async function isOnboarded(): Promise<boolean> {
   const value = await AsyncStorage.getItem(ONBOARDING_KEY);
   return value === 'true';
@@ -41,6 +75,8 @@ export async function isOnboarded(): Promise<boolean> {
 export async function setOnboarded(): Promise<void> {
   await AsyncStorage.setItem(ONBOARDING_KEY, 'true');
 }
+
+// --- Utilities ---
 
 export function generateWalletId(): string {
   const bytes = new Uint8Array(16);
@@ -53,30 +89,42 @@ export function generateWalletId(): string {
 
 /**
  * Migrate legacy single-wallet storage to multi-wallet format.
- * Idempotent — no-op if already migrated or no legacy data exists.
+ * Also backfills `walletType` for wallets created before on-chain support.
+ * Idempotent — safe to call on every startup.
  */
 export async function migrateLegacy(): Promise<void> {
+  // 1. Legacy single-wallet → multi-wallet migration
   const legacyUrl = await SecureStore.getItemAsync(LEGACY_NWC_KEY);
-  if (!legacyUrl) return;
-
-  const existingList = await getWalletList();
-  if (existingList.length > 0) {
-    // Already migrated, just clean up legacy key
+  if (legacyUrl) {
+    const existingList = await getWalletList();
+    if (existingList.length === 0) {
+      const id = generateWalletId();
+      const wallet: WalletMetadata = {
+        id,
+        alias: 'My Wallet',
+        theme: 'lightning-piggy',
+        order: 0,
+        walletType: 'nwc',
+        lightningAddress: null,
+      };
+      await saveNwcUrl(id, legacyUrl);
+      await saveWalletList([wallet]);
+      await setOnboarded();
+    }
     await SecureStore.deleteItemAsync(LEGACY_NWC_KEY);
-    return;
   }
 
-  const id = generateWalletId();
-  const wallet: WalletMetadata = {
-    id,
-    alias: 'My Wallet',
-    theme: 'lightning-piggy',
-    order: 0,
-    lightningAddress: null,
-  };
-
-  await saveNwcUrl(id, legacyUrl);
-  await saveWalletList([wallet]);
-  await SecureStore.deleteItemAsync(LEGACY_NWC_KEY);
-  await setOnboarded();
+  // 2. Backfill walletType for wallets that predate on-chain support
+  const wallets = await getWalletList();
+  let needsSave = false;
+  const updated = wallets.map((w) => {
+    if (!w.walletType) {
+      needsSave = true;
+      return { ...w, walletType: 'nwc' as const };
+    }
+    return w;
+  });
+  if (needsSave) {
+    await saveWalletList(updated);
+  }
 }

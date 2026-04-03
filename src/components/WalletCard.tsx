@@ -37,6 +37,7 @@ const CardContent: React.FC<{
   btcPrice?: number | null;
   currency?: FiatCurrency;
   isConnected?: boolean;
+  walletType?: 'nwc' | 'onchain';
   walletAlias?: string | null;
   onSettingsPress?: () => void;
   showDetails?: boolean;
@@ -47,6 +48,7 @@ const CardContent: React.FC<{
   btcPrice,
   currency,
   isConnected,
+  walletType = 'nwc',
   walletAlias,
   onSettingsPress,
   showDetails = true,
@@ -70,12 +72,24 @@ const CardContent: React.FC<{
         <>
           <View style={styles.topRow}>
             <View style={styles.statusRow}>
-              <View
-                style={[styles.statusDot, { backgroundColor: isConnected ? '#4CAF50' : '#F44336' }]}
-              />
-              <Text style={[styles.statusText, { color: theme.textColor }]}>
-                {isConnected ? 'Connected' : 'Disconnected'}
-              </Text>
+              {walletType === 'onchain' ? (
+                <>
+                  <Text style={[styles.statusText, { color: theme.textColor }]}>{'\u26D3'}</Text>
+                  <Text style={[styles.statusText, { color: theme.textColor }]}>On-chain</Text>
+                </>
+              ) : (
+                <>
+                  <View
+                    style={[
+                      styles.statusDot,
+                      { backgroundColor: isConnected ? '#4CAF50' : '#F44336' },
+                    ]}
+                  />
+                  <Text style={[styles.statusText, { color: theme.textColor }]}>
+                    {isConnected ? 'Connected' : 'Disconnected'}
+                  </Text>
+                </>
+              )}
             </View>
             {onSettingsPress && (
               <TouchableOpacity
@@ -155,6 +169,7 @@ const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onS
         btcPrice={btcPrice}
         currency={currency}
         isConnected={wallet.isConnected}
+        walletType={wallet.walletType}
         walletAlias={wallet.walletAlias}
         onSettingsPress={onSettingsPress}
       />

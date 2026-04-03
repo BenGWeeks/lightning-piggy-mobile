@@ -34,7 +34,7 @@ export const styles = StyleSheet.create({
   },
   buttonRow: {
     flexDirection: 'row',
-    gap: 16,
+    gap: 10,
     paddingHorizontal: 24,
     marginTop: 12,
   },

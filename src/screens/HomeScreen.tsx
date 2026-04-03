@@ -7,12 +7,14 @@ import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
 import ReceiveSheet from '../components/ReceiveSheet';
 import SendSheet from '../components/SendSheet';
+import TransferSheet from '../components/TransferSheet';
 import TransactionList from '../components/TransactionList';
 import WalletCarousel from '../components/WalletCarousel';
 import AddWalletWizard from '../components/AddWalletWizard';
 import WalletSettingsSheet from '../components/WalletSettingsSheet';
 import ProfileIcon from '../components/ProfileIcon';
 import * as nwcService from '../services/nwcService';
+import * as onchainService from '../services/onchainService';
 import { styles } from '../styles/HomeScreen.styles';
 import type { MainTabParamList } from '../navigation/types';
 
@@ -35,6 +37,7 @@ const HomeScreen: React.FC = () => {
 
   const [receiveOpen, setReceiveOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
   const [sendToAddress, setSendToAddress] = useState<string | undefined>();
   const [sendToPicture, setSendToPicture] = useState<string | undefined>();
   const [sendToPubkey, setSendToPubkey] = useState<string | undefined>();
@@ -64,29 +67,46 @@ const HomeScreen: React.FC = () => {
   ]);
 
   const fetchTransactions = useCallback(async () => {
-    if (!activeWalletId) {
+    if (!activeWalletId || !activeWallet) {
       setTransactions([]);
       return;
     }
     try {
-      const txs = await nwcService.listTransactions(activeWalletId);
-      setTransactions(txs);
+      if (activeWallet.walletType === 'onchain') {
+        const txs = await onchainService.getTransactions(activeWalletId);
+        // Normalize to the same shape TransactionList expects
+        setTransactions(
+          txs.map((tx) => ({
+            type: tx.type,
+            amount: tx.amount,
+            description: tx.txid.slice(0, 12) + '...',
+            settled_at: tx.timestamp,
+            created_at: tx.timestamp,
+          })),
+        );
+      } else {
+        const txs = await nwcService.listTransactions(activeWalletId);
+        setTransactions(txs);
+      }
     } catch (error) {
       console.warn('Failed to fetch transactions:', error);
     }
-  }, [activeWalletId]);
+  }, [activeWalletId, activeWallet]);
 
   const fetchData = useCallback(async () => {
     await Promise.all([refreshActiveBalance(), fetchTransactions()]);
   }, [refreshActiveBalance, fetchTransactions]);
 
+  const isWalletAvailable =
+    activeWallet?.walletType === 'onchain' ? true : (activeWallet?.isConnected ?? false);
+
   useEffect(() => {
-    if (activeWallet?.isConnected) {
+    if (isWalletAvailable) {
       fetchData();
     } else {
       setTransactions([]);
     }
-  }, [activeWalletId, activeWallet?.isConnected, fetchData]);
+  }, [activeWalletId, isWalletAvailable, fetchData]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -107,7 +127,9 @@ const HomeScreen: React.FC = () => {
     setSettingsWalletId(walletId);
   }, []);
 
-  const hasActiveConnection = activeWallet?.isConnected ?? false;
+  const hasActiveConnection =
+    activeWallet?.walletType === 'onchain' ? true : (activeWallet?.isConnected ?? false);
+  const canTransfer = wallets.length >= 2;
 
   return (
     <View style={styles.container}>
@@ -138,20 +160,34 @@ const HomeScreen: React.FC = () => {
           onSettingsPress={handleSettingsPress}
         />
 
-        {/* Send/Receive buttons */}
+        {/* Send/Receive/Transfer buttons */}
         <View style={styles.buttonRow}>
           <TouchableOpacity
             style={[styles.actionButton, !hasActiveConnection && styles.actionButtonDisabled]}
             onPress={() => setReceiveOpen(true)}
             disabled={!hasActiveConnection}
+            accessibilityLabel="Receive"
+            testID="btn-receive"
           >
             <Text style={styles.actionIcon}>&#8595;</Text>
             <Text style={styles.actionText}>Receive</Text>
           </TouchableOpacity>
           <TouchableOpacity
+            style={[styles.actionButton, !canTransfer && styles.actionButtonDisabled]}
+            onPress={() => setTransferOpen(true)}
+            disabled={!canTransfer}
+            accessibilityLabel="Transfer"
+            testID="btn-transfer"
+          >
+            <Text style={styles.actionIcon}>&#8596;</Text>
+            <Text style={styles.actionText}>Transfer</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
             style={[styles.actionButton, !hasActiveConnection && styles.actionButtonDisabled]}
             onPress={() => setSendOpen(true)}
             disabled={!hasActiveConnection}
+            accessibilityLabel="Send"
+            testID="btn-send"
           >
             <Text style={styles.actionText}>Send</Text>
             <Text style={styles.actionIcon}>&#8593;</Text>
@@ -188,6 +224,7 @@ const HomeScreen: React.FC = () => {
         initialPicture={sendToPicture}
         recipientPubkey={sendToPubkey}
       />
+      <TransferSheet visible={transferOpen} onClose={() => setTransferOpen(false)} />
       <AddWalletWizard visible={wizardOpen} onClose={() => setWizardOpen(false)} />
       <WalletSettingsSheet walletId={settingsWalletId} onClose={() => setSettingsWalletId(null)} />
     </View>

@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Platform } from 'react-native';
 import { BottomSheetModal, BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import * as Clipboard from 'expo-clipboard';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
 import { CardTheme } from '../types/wallet';
 import { themeList } from '../themes/cardThemes';
 import { MiniWalletCard } from './WalletCard';
+import { getXpub } from '../services/walletStorageService';
 
 interface Props {
   walletId: string | null;
@@ -20,13 +22,21 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
 
   const [alias, setAlias] = useState('');
   const [selectedTheme, setSelectedTheme] = useState<CardTheme>('lightning-piggy');
+  const [xpubDisplay, setXpubDisplay] = useState<string | null>(null);
 
   useEffect(() => {
     if (wallet) {
       setAlias(wallet.alias);
       setSelectedTheme(wallet.theme);
+
+      // Load xpub for on-chain wallets
+      if (wallet.walletType === 'onchain' && walletId) {
+        getXpub(walletId).then((xpub) => setXpubDisplay(xpub));
+      } else {
+        setXpubDisplay(null);
+      }
     }
-  }, [wallet]);
+  }, [wallet, walletId]);
 
   const handleSheetChange = useCallback(
     (index: number) => {
@@ -59,21 +69,25 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   };
 
   const handleDisconnect = () => {
-    Alert.alert(
-      'Remove Wallet',
-      `Are you sure you want to remove "${wallet.alias}"? This will disconnect the wallet.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            await removeWallet(walletId);
-            onClose();
-          },
+    const actionText = wallet.walletType === 'onchain' ? 'remove' : 'disconnect';
+    Alert.alert('Remove Wallet', `Are you sure you want to ${actionText} "${wallet.alias}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          await removeWallet(walletId);
+          onClose();
         },
-      ],
-    );
+      },
+    ]);
+  };
+
+  const handleCopyXpub = async () => {
+    if (xpubDisplay) {
+      await Clipboard.setStringAsync(xpubDisplay);
+      Alert.alert('Copied', 'Extended public key copied to clipboard.');
+    }
   };
 
   return (
@@ -98,6 +112,19 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
           placeholderTextColor={colors.textSupplementary}
           autoCapitalize="words"
         />
+
+        {/* On-chain wallet: show xpub (read-only) */}
+        {wallet.walletType === 'onchain' && xpubDisplay && (
+          <>
+            <Text style={[styles.label, { marginTop: 20 }]}>Extended Public Key</Text>
+            <TouchableOpacity onPress={handleCopyXpub} activeOpacity={0.7}>
+              <Text style={styles.xpubText} numberOfLines={3}>
+                {xpubDisplay}
+              </Text>
+              <Text style={styles.copyHint}>Tap to copy</Text>
+            </TouchableOpacity>
+          </>
+        )}
 
         <Text style={[styles.label, { marginTop: 20 }]}>Card Design</Text>
         <View style={styles.themeGrid}>
@@ -156,6 +183,21 @@ const styles = StyleSheet.create({
     padding: 16,
     fontSize: 16,
     color: colors.textBody,
+  },
+  xpubText: {
+    backgroundColor: colors.background,
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 12,
+    color: colors.textSupplementary,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  copyHint: {
+    fontSize: 12,
+    color: colors.brandPink,
+    fontWeight: '600',
+    marginTop: 4,
+    textAlign: 'right',
   },
   themeGrid: {
     flexDirection: 'row',

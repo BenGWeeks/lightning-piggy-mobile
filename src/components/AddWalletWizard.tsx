@@ -18,22 +18,25 @@ import {
 } from '@gorhom/bottom-sheet';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
-import { CardTheme } from '../types/wallet';
-import { themeList, cardThemes } from '../themes/cardThemes';
+import { CardTheme, WalletType } from '../types/wallet';
+import { themeList } from '../themes/cardThemes';
 import { MiniWalletCard } from './WalletCard';
 import { validateNwcUrl } from '../services/nwcService';
+import { validateXpub } from '../services/onchainService';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
 }
 
-type Step = 'url' | 'alias' | 'theme';
+type Step = 'type' | 'url' | 'xpub' | 'alias' | 'theme';
 
 const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
-  const { addWallet } = useWallet();
-  const [step, setStep] = useState<Step>('url');
+  const { addWallet, addOnchainWallet } = useWallet();
+  const [step, setStep] = useState<Step>('type');
+  const [walletType, setWalletType] = useState<WalletType>('nwc');
   const [nwcUrl, setNwcUrl] = useState('');
+  const [xpub, setXpub] = useState('');
   const [alias, setAlias] = useState('');
   const [selectedTheme, setSelectedTheme] = useState<CardTheme>('lightning-piggy');
   const [connecting, setConnecting] = useState(false);
@@ -46,8 +49,10 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   const snapPoints = useMemo(() => ['90%'], []);
 
   const reset = useCallback(() => {
-    setStep('url');
+    setStep('type');
+    setWalletType('nwc');
     setNwcUrl('');
+    setXpub('');
     setAlias('');
     setSelectedTheme('lightning-piggy');
     setError(null);
@@ -60,10 +65,35 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
     onClose();
   }, [reset, onClose]);
 
+  // --- Step: Wallet Type Selection ---
+  const handleTypeSelect = (type: WalletType) => {
+    setWalletType(type);
+    setError(null);
+    if (type === 'nwc') {
+      setSelectedTheme('lightning-piggy');
+      setStep('url');
+    } else {
+      setSelectedTheme('bitcoin');
+      setStep('xpub');
+    }
+  };
+
+  // --- Step: NWC URL ---
   const handleUrlNext = () => {
     const validation = validateNwcUrl(nwcUrl.trim());
     if (!validation.valid) {
       setError(validation.error || 'Invalid NWC URL');
+      return;
+    }
+    setError(null);
+    setStep('alias');
+  };
+
+  // --- Step: xpub ---
+  const handleXpubNext = () => {
+    const err = validateXpub(xpub.trim());
+    if (err) {
+      setError(err);
       return;
     }
     setError(null);
@@ -83,11 +113,20 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
     setConnecting(true);
     setError(null);
     try {
-      const result = await addWallet(nwcUrl.trim(), alias.trim(), selectedTheme);
-      if (result.success) {
-        handleClose();
+      if (walletType === 'onchain') {
+        const result = await addOnchainWallet(xpub.trim(), alias.trim(), selectedTheme);
+        if (result.success) {
+          handleClose();
+        } else {
+          setError(result.error || 'Failed to add wallet');
+        }
       } else {
-        setError(result.error || 'Connection failed');
+        const result = await addWallet(nwcUrl.trim(), alias.trim(), selectedTheme);
+        if (result.success) {
+          handleClose();
+        } else {
+          setError(result.error || 'Connection failed');
+        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Connection failed');
@@ -109,7 +148,12 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
 
   const handleBarCodeScanned = ({ data }: { data: string }) => {
     setScanning(false);
-    setNwcUrl(data.trim());
+    const trimmed = data.trim();
+    if (walletType === 'onchain') {
+      setXpub(trimmed);
+    } else {
+      setNwcUrl(trimmed);
+    }
     setError(null);
   };
 
@@ -149,11 +193,27 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
 
   if (!visible) return null;
 
-  const stepTitle = {
+  const stepTitle: Record<Step, string> = {
+    type: 'Add Wallet',
     url: 'Step 1: Connect Wallet',
+    xpub: 'Step 1: Import Public Key',
     alias: 'Step 2: Name Your Wallet',
     theme: 'Step 3: Choose a Design',
-  }[step];
+  };
+
+  const backStep = (): Step => {
+    switch (step) {
+      case 'url':
+      case 'xpub':
+        return 'type';
+      case 'alias':
+        return walletType === 'onchain' ? 'xpub' : 'url';
+      case 'theme':
+        return 'alias';
+      default:
+        return 'type';
+    }
+  };
 
   return (
     <BottomSheetModal
@@ -174,8 +234,34 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
         contentContainerStyle={{ paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 }}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.title}>{stepTitle}</Text>
+        <Text style={styles.title}>{stepTitle[step]}</Text>
 
+        {/* Step: Wallet Type Selection */}
+        {step === 'type' && (
+          <View style={styles.stepContent}>
+            <Text style={styles.description}>What type of wallet would you like to add?</Text>
+            <TouchableOpacity style={styles.typeCard} onPress={() => handleTypeSelect('nwc')}>
+              <Text style={styles.typeCardIcon}>{'\u26A1'}</Text>
+              <View style={styles.typeCardText}>
+                <Text style={styles.typeCardTitle}>Lightning (NWC)</Text>
+                <Text style={styles.typeCardDesc}>
+                  Connect a Lightning wallet via Nostr Wallet Connect
+                </Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.typeCard} onPress={() => handleTypeSelect('onchain')}>
+              <Text style={styles.typeCardIcon}>{'\u26D3'}</Text>
+              <View style={styles.typeCardText}>
+                <Text style={styles.typeCardTitle}>Bitcoin (On-chain)</Text>
+                <Text style={styles.typeCardDesc}>
+                  Import a watch-only wallet using an extended public key (xpub)
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Step: NWC URL */}
         {step === 'url' && (
           <View style={styles.stepContent}>
             {scanning ? (
@@ -212,9 +298,83 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                   <Text style={styles.secondaryButtonText}>Scan QR Code</Text>
                 </TouchableOpacity>
                 {error && <Text style={styles.errorText}>{error}</Text>}
-                <TouchableOpacity style={styles.primaryButton} onPress={handleUrlNext}>
-                  <Text style={styles.primaryButtonText}>Next</Text>
+                <View style={styles.buttonRow}>
+                  <TouchableOpacity
+                    style={styles.backButton}
+                    onPress={() => {
+                      setError(null);
+                      setStep('type');
+                    }}
+                  >
+                    <Text style={styles.backButtonText}>Back</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.primaryButton, { flex: 1 }]}
+                    onPress={handleUrlNext}
+                  >
+                    <Text style={styles.primaryButtonText}>Next</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+        )}
+
+        {/* Step: xpub import */}
+        {step === 'xpub' && (
+          <View style={styles.stepContent}>
+            {scanning ? (
+              <View style={styles.scannerContainer}>
+                <CameraView
+                  style={styles.scanner}
+                  facing="back"
+                  barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+                  onBarcodeScanned={handleBarCodeScanned}
+                />
+                <TouchableOpacity style={styles.secondaryButton} onPress={() => setScanning(false)}>
+                  <Text style={styles.secondaryButtonText}>Cancel</Text>
                 </TouchableOpacity>
+              </View>
+            ) : (
+              <>
+                <Text style={styles.description}>
+                  Paste or scan your extended public key (xpub, ypub, or zpub) to add a watch-only
+                  wallet.
+                </Text>
+                <BottomSheetTextInput
+                  style={styles.nwcInput}
+                  placeholder="xpub6..."
+                  placeholderTextColor={colors.textSupplementary}
+                  value={xpub}
+                  onChangeText={(text) => {
+                    setXpub(text);
+                    setError(null);
+                  }}
+                  multiline
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <TouchableOpacity style={styles.secondaryButton} onPress={handleScan}>
+                  <Text style={styles.secondaryButtonText}>Scan QR Code</Text>
+                </TouchableOpacity>
+                {error && <Text style={styles.errorText}>{error}</Text>}
+                <View style={styles.buttonRow}>
+                  <TouchableOpacity
+                    style={styles.backButton}
+                    onPress={() => {
+                      setError(null);
+                      setStep('type');
+                    }}
+                  >
+                    <Text style={styles.backButtonText}>Back</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.primaryButton, { flex: 1 }]}
+                    onPress={handleXpubNext}
+                  >
+                    <Text style={styles.primaryButtonText}>Next</Text>
+                  </TouchableOpacity>
+                </View>
               </>
             )}
           </View>
@@ -243,7 +403,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                 style={styles.backButton}
                 onPress={() => {
                   setError(null);
-                  setStep('url');
+                  setStep(backStep());
                 }}
               >
                 <Text style={styles.backButtonText}>Back</Text>
@@ -290,7 +450,9 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                 {connecting ? (
                   <ActivityIndicator color={colors.white} />
                 ) : (
-                  <Text style={styles.primaryButtonText}>Connect</Text>
+                  <Text style={styles.primaryButtonText}>
+                    {walletType === 'onchain' ? 'Add Wallet' : 'Connect'}
+                  </Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -329,6 +491,33 @@ const styles = StyleSheet.create({
     color: colors.textBody,
     lineHeight: 20,
   },
+  // --- Wallet type selection ---
+  typeCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    borderRadius: 16,
+    padding: 20,
+    gap: 16,
+  },
+  typeCardIcon: {
+    fontSize: 28,
+  },
+  typeCardText: {
+    flex: 1,
+    gap: 4,
+  },
+  typeCardTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.textHeader,
+  },
+  typeCardDesc: {
+    fontSize: 13,
+    color: colors.textSupplementary,
+    lineHeight: 18,
+  },
+  // --- Inputs ---
   nwcInput: {
     backgroundColor: colors.background,
     borderRadius: 12,

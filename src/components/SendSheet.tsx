@@ -26,6 +26,7 @@ import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
 import { satsToFiat, satsToFiatString } from '../services/fiatService';
 import { resolveLightningAddress, fetchInvoice, LnurlPayParams } from '../services/lnurlService';
+import * as boltzService from '../services/boltzService';
 
 interface Props {
   visible: boolean;
@@ -80,6 +81,10 @@ function isValidInvoice(data: string): boolean {
   );
 }
 
+function isBitcoinAddress(input: string): boolean {
+  return boltzService.isBitcoinAddress(input);
+}
+
 const SendSheet: React.FC<Props> = ({
   visible,
   onClose,
@@ -91,7 +96,6 @@ const SendSheet: React.FC<Props> = ({
     payInvoiceForWallet,
     refreshBalanceForWallet,
     activeWalletId,
-    activeWallet,
     wallets,
     btcPrice,
     currency,
@@ -115,11 +119,14 @@ const SendSheet: React.FC<Props> = ({
   const [memo, setMemo] = useState('');
   const [activePubkey, setActivePubkey] = useState(recipientPubkey);
   const [activePicture, setActivePicture] = useState(initialPicture);
+  const [isOnchainAddress, setIsOnchainAddress] = useState(false);
+  const [boltzFees, setBoltzFees] = useState<boltzService.SwapFees | null>(null);
+  const [loadingBoltzFees, setLoadingBoltzFees] = useState(false);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
 
   const snapPoints = useMemo(() => ['90%'], []);
 
-  const needsAmount = scanned && isLightningAddress(invoiceData || '');
+  const needsAmount = scanned && (isLightningAddress(invoiceData || '') || isOnchainAddress);
   const currentSats = parseInt(satsValue) || 0;
 
   const fiatToSats = (fiat: number): number => {
@@ -206,12 +213,36 @@ const SendSheet: React.FC<Props> = ({
     if (input.toLowerCase().startsWith('lightning:')) {
       input = input.substring(10);
     }
+    // Strip bitcoin: URI prefix
+    if (input.toLowerCase().startsWith('bitcoin:')) {
+      input = input.substring(8).split('?')[0]; // remove query params
+    }
 
     if (isLightningAddress(input)) {
+      setIsOnchainAddress(false);
       setInvoiceData(input);
       setDecoded({ amountSats: null, description: `Pay to ${input}`, expiry: null });
       setScanned(true);
+    } else if (isBitcoinAddress(input)) {
+      setIsOnchainAddress(true);
+      setInvoiceData(input);
+      setDecoded({ amountSats: null, description: `Send to on-chain address`, expiry: null });
+      setScanned(true);
+      // Fetch Boltz swap fees
+      setLoadingBoltzFees(true);
+      boltzService
+        .getSwapFees()
+        .then((fees) => {
+          setBoltzFees(fees);
+        })
+        .catch(() => {
+          setBoltzFees(null);
+        })
+        .finally(() => {
+          setLoadingBoltzFees(false);
+        });
     } else if (isValidInvoice(input)) {
+      setIsOnchainAddress(false);
       setInvoiceData(input);
       setDecoded(decodeInvoice(input));
       setScanned(true);
@@ -258,7 +289,16 @@ const SendSheet: React.FC<Props> = ({
     if (!invoiceData) return;
     setSending(true);
     try {
-      if (isLightningAddress(invoiceData)) {
+      if (isOnchainAddress) {
+        // Boltz submarine swap: Lightning → on-chain
+        if (currentSats <= 0) {
+          Alert.alert('Error', 'Please enter an amount.');
+          setSending(false);
+          return;
+        }
+        const swap = await boltzService.createSubmarineSwap(invoiceData, currentSats);
+        await payInvoiceForWallet(walletId!, swap.invoice);
+      } else if (isLightningAddress(invoiceData)) {
         if (!lnurlParams) {
           Alert.alert('Error', 'Lightning address not resolved yet. Please wait.');
           setSending(false);
@@ -324,6 +364,9 @@ const SendSheet: React.FC<Props> = ({
     setResolving(false);
     setActivePubkey(undefined);
     setActivePicture(undefined);
+    setIsOnchainAddress(false);
+    setBoltzFees(null);
+    setLoadingBoltzFees(false);
   };
 
   const handleSheetChange = useCallback(
@@ -342,7 +385,11 @@ const SendSheet: React.FC<Props> = ({
 
   if (!visible || !permission) return null;
 
-  const canSend = needsAmount ? lnurlParams && currentSats > 0 && !resolving : !!invoiceData;
+  const canSend = isOnchainAddress
+    ? currentSats > 0 && !loadingBoltzFees
+    : needsAmount
+      ? lnurlParams && currentSats > 0 && !resolving
+      : !!invoiceData;
 
   return (
     <BottomSheetModal
@@ -453,7 +500,7 @@ const SendSheet: React.FC<Props> = ({
                 <View style={styles.pasteSection}>
                   <TextInput
                     style={styles.pasteInput}
-                    placeholder="Paste invoice or lightning address..."
+                    placeholder="Paste invoice, lightning or bitcoin address..."
                     placeholderTextColor={colors.textSupplementary}
                     value={pasteText}
                     onChangeText={setPasteText}
@@ -568,11 +615,24 @@ const SendSheet: React.FC<Props> = ({
                   <Text style={styles.amountValue}>Amount not specified</Text>
                 )}
 
-                {isLightningAddress(invoiceData || '') ? (
+                {isOnchainAddress ? (
+                  <Text style={styles.detailAddress}>{invoiceData}</Text>
+                ) : isLightningAddress(invoiceData || '') ? (
                   <Text style={styles.detailAddress}>{invoiceData}</Text>
                 ) : (
                   <Text style={styles.invoiceText} numberOfLines={3}>
                     {invoiceData}
+                  </Text>
+                )}
+
+                {/* Boltz swap fee estimate for on-chain addresses */}
+                {isOnchainAddress && currentSats > 0 && (
+                  <Text style={styles.feeText}>
+                    {loadingBoltzFees
+                      ? 'Loading fees...'
+                      : boltzFees
+                        ? `Swap fee: ~${boltzService.calculateSwapFee(currentSats, boltzFees).toLocaleString()} sats (Boltz)`
+                        : 'Fee estimate unavailable'}
                   </Text>
                 )}
 
@@ -857,6 +917,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textBody,
     width: '100%',
+  },
+  feeText: {
+    fontSize: 12,
+    color: colors.textSupplementary,
+    fontWeight: '500',
+    textAlign: 'center',
   },
   resetText: {
     color: colors.brandPink,
