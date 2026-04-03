@@ -47,11 +47,22 @@ const ContactProfileSheet: React.FC<Props> = ({ visible, onClose, contact, onZap
   const [following, setFollowing] = useState(false);
   const [loadingFollow, setLoadingFollow] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
+  const [avatarLoaded, setAvatarLoaded] = useState(false);
+
+  // Timeout: if image hasn't loaded in 5s, show fallback
+  useEffect(() => {
+    if (!contact?.picture || avatarLoaded || avatarError) return;
+    const timer = setTimeout(() => {
+      if (!avatarLoaded) setAvatarError(true);
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [contact?.picture, avatarLoaded, avatarError]);
 
   useEffect(() => {
     if (contact?.pubkey) {
       setFollowing(contacts.some((c) => c.pubkey === contact.pubkey));
       setAvatarError(false);
+      setAvatarLoaded(false);
     }
   }, [contact, contacts]);
 
@@ -164,6 +175,7 @@ const ContactProfileSheet: React.FC<Props> = ({ visible, onClose, contact, onZap
               cachePolicy="disk"
               transition={200}
               onError={() => setAvatarError(true)}
+              onLoad={() => setAvatarLoaded(true)}
             />
           ) : (
             <View style={styles.avatarDefault}>
