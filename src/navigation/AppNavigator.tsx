@@ -56,6 +56,8 @@ function HomeTabs() {
         name="Home"
         component={HomeScreen}
         options={{
+          tabBarButtonTestID: 'tab-home',
+          tabBarAccessibilityLabel: 'Home tab',
           tabBarIcon: ({ focused }) => (
             <Image
               source={require('../../assets/images/Home.png')}
@@ -68,6 +70,8 @@ function HomeTabs() {
         name="Earn"
         component={EarnScreen}
         options={{
+          tabBarButtonTestID: 'tab-earn',
+          tabBarAccessibilityLabel: 'Earn tab',
           tabBarIcon: ({ focused }) => (
             <Image
               source={require('../../assets/images/Earn.png')}
@@ -80,6 +84,8 @@ function HomeTabs() {
         name="Learn"
         component={LearnStackNavigator}
         options={{
+          tabBarButtonTestID: 'tab-learn',
+          tabBarAccessibilityLabel: 'Learn tab',
           tabBarIcon: ({ focused }) => (
             <Image
               source={require('../../assets/images/Learn.png')}
@@ -92,6 +98,8 @@ function HomeTabs() {
         name="Friends"
         component={FriendsScreen}
         options={{
+          tabBarButtonTestID: 'tab-friends',
+          tabBarAccessibilityLabel: 'Friends tab',
           tabBarIcon: ({ focused }) => (
             <FriendsIcon size={22} color={focused ? colors.brandPink : colors.textSupplementary} />
           ),

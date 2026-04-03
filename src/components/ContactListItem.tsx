@@ -94,4 +94,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default ContactListItem;
+export default React.memo(ContactListItem);

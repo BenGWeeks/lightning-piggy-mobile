@@ -109,12 +109,17 @@ const ContactProfileSheet: React.FC<Props> = ({ visible, onClose, contact, onZap
     await Clipboard.setStringAsync(npubEncode(contact.pubkey));
   };
 
-  const handleViewProfile = useCallback(() => {
+  const handleViewProfile = useCallback(async () => {
     if (!contact?.pubkey) return;
     const npub = require('../services/nostrService').npubEncode(contact.pubkey);
-    Linking.openURL(`nostr:${npub}`).catch(() => {
-      Alert.alert('No Nostr app', 'Install a Nostr app like Primal or Amethyst to view profiles.');
-    });
+    // Try nostr: URI first (NIP-21), fall back to Primal web URL
+    const nostrUri = `nostr:${npub}`;
+    const canOpen = await Linking.canOpenURL(nostrUri);
+    if (canOpen) {
+      Linking.openURL(nostrUri);
+    } else {
+      Linking.openURL(`https://primal.net/p/${npub}`);
+    }
   }, [contact?.pubkey]);
 
   if (!contact) return null;

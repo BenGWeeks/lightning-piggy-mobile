@@ -152,7 +152,10 @@ const AccountScreen: React.FC = () => {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.titleRow}>
-          <TouchableOpacity style={styles.homeButton} onPress={() => navigation.goBack()}>
+          <TouchableOpacity
+            style={styles.homeButton}
+            onPress={() => navigation.navigate('Home', {})}
+          >
             <Image
               source={require('../../assets/images/Home.png')}
               style={styles.homeIcon}

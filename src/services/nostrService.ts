@@ -12,6 +12,9 @@ export const DEFAULT_RELAYS = [
   'wss://relay.primal.net',
 ];
 
+// Relays that aggregate profile metadata across the network
+const PROFILE_RELAYS = ['wss://purplepag.es', 'wss://relay.nostr.band'];
+
 export function decodeNsec(nsec: string): { pubkey: string; secretKey: Uint8Array } {
   const decoded = nip19.decode(nsec);
   if (decoded.type !== 'nsec') {
@@ -60,8 +63,9 @@ export function parseProfileContent(content: string): {
 }
 
 export async function fetchProfile(pubkey: string, relays: string[]): Promise<NostrProfile | null> {
+  const allRelays = [...new Set([...relays, ...PROFILE_RELAYS])];
   try {
-    const event = await pool.get(relays, {
+    const event = await pool.get(allRelays, {
       kinds: [0],
       authors: [pubkey],
     });
@@ -126,37 +130,57 @@ export async function fetchRelayList(pubkey: string, relays: string[]): Promise<
   }
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return Promise.race([
+    promise,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+  ]);
+}
+
 export async function fetchProfiles(
   pubkeys: string[],
   relays: string[],
+  onBatch?: (profiles: Map<string, NostrProfile>) => void,
 ): Promise<Map<string, NostrProfile>> {
   const profiles = new Map<string, NostrProfile>();
   if (pubkeys.length === 0) return profiles;
 
-  try {
-    // Batch in groups of 50 to avoid overwhelming relays
-    const batchSize = 50;
-    for (let i = 0; i < pubkeys.length; i += batchSize) {
-      const batch = pubkeys.slice(i, i + batchSize);
-      const events = await pool.querySync(relays, {
-        kinds: [0],
-        authors: batch,
-      });
+  // Include profile aggregator relays for better coverage
+  const allRelays = [...new Set([...relays, ...PROFILE_RELAYS])];
 
-      for (const event of events) {
-        // Only keep the most recent profile per pubkey
-        const existing = profiles.get(event.pubkey);
-        if (existing) {
-          // We already have one — skip if this event is older
-          continue;
-        }
-        const parsed = parseProfileContent(event.content);
-        profiles.set(event.pubkey, {
-          pubkey: event.pubkey,
-          npub: npubEncode(event.pubkey),
-          ...parsed,
-        });
+  const processEvents = (events: { pubkey: string; content: string }[]) => {
+    for (const event of events) {
+      if (profiles.has(event.pubkey)) continue;
+      const parsed = parseProfileContent(event.content);
+      profiles.set(event.pubkey, {
+        pubkey: event.pubkey,
+        npub: npubEncode(event.pubkey),
+        ...parsed,
+      });
+    }
+  };
+
+  try {
+    // Batch in groups of 100, run 3 batches concurrently, 8s timeout per batch
+    const batchSize = 100;
+    const concurrency = 3;
+    const batches: string[][] = [];
+    for (let i = 0; i < pubkeys.length; i += batchSize) {
+      batches.push(pubkeys.slice(i, i + batchSize));
+    }
+
+    for (let i = 0; i < batches.length; i += concurrency) {
+      const concurrent = batches.slice(i, i + concurrency);
+      const results = await Promise.all(
+        concurrent.map((batch) =>
+          withTimeout(pool.querySync(allRelays, { kinds: [0], authors: batch }), 8000),
+        ),
+      );
+      for (const events of results) {
+        if (events) processEvents(events);
       }
+      // Notify caller with partial results so UI updates incrementally
+      if (onBatch) onBatch(new Map(profiles));
     }
   } catch (error) {
     console.warn('Failed to batch fetch profiles:', error);

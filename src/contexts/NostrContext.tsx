@@ -48,20 +48,30 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [relays]);
 
   const loadProfile = useCallback(async (pk: string, relayUrls: string[]) => {
+    const t0 = Date.now();
     const fetchedProfile = await nostrService.fetchProfile(pk, relayUrls);
+    console.log(`[Nostr] fetchProfile: ${Date.now() - t0}ms`);
     if (fetchedProfile) {
       setProfile(fetchedProfile);
     }
   }, []);
 
   const loadContacts = useCallback(async (pk: string, relayUrls: string[]) => {
+    const t0 = Date.now();
     const fetchedContacts = await nostrService.fetchContactList(pk, relayUrls);
+    console.log(
+      `[Nostr] fetchContactList: ${Date.now() - t0}ms, ${fetchedContacts.length} contacts`,
+    );
     setContacts(fetchedContacts);
 
-    // Fetch profiles for contacts in the background
+    // Fetch profiles for contacts incrementally
     if (fetchedContacts.length > 0) {
       const contactPubkeys = fetchedContacts.map((c) => c.pubkey);
+      const t1 = Date.now();
       const profileMap = await nostrService.fetchProfiles(contactPubkeys, relayUrls);
+      console.log(
+        `[Nostr] fetchProfiles: ${Date.now() - t1}ms, ${profileMap.size}/${contactPubkeys.length} profiles loaded`,
+      );
       setContacts((prev) =>
         prev.map((c) => ({
           ...c,
@@ -72,7 +82,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   const loadRelays = useCallback(async (pk: string): Promise<string[]> => {
+    const t0 = Date.now();
     const relayList = await nostrService.fetchRelayList(pk, nostrService.DEFAULT_RELAYS);
+    console.log(`[Nostr] fetchRelayList: ${Date.now() - t0}ms, ${relayList.length} relays`);
     setRelays(relayList);
     const readRelays = relayList.filter((r) => r.read).map((r) => r.url);
     return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef, Profiler } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,6 @@ import {
   Image,
   StyleSheet,
   RefreshControl,
-  PanResponder,
   Alert,
 } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
@@ -44,6 +43,108 @@ interface ListItem {
   source: 'nostr' | 'contacts';
 }
 
+const AlphabetBar: React.FC<{
+  letters: string[];
+  currentLetter: string | null;
+  onLetterPress: (letter: string) => void;
+}> = React.memo(
+  ({ letters, currentLetter, onLetterPress }) => {
+    const [tapped, setTapped] = useState<string | null>(null);
+    const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const onPressRef = useRef(onLetterPress);
+    onPressRef.current = onLetterPress;
+
+    const barRef = useRef<View>(null);
+    const barLayout = useRef({ y: 0, height: 0 });
+    const lastDragLetter = useRef<string | null>(null);
+
+    const handlePress = useCallback((letter: string) => {
+      setTapped(letter);
+      onPressRef.current(letter);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setTapped(null), 1500);
+    }, []);
+
+    const getLetterFromY = useCallback(
+      (pageY: number) => {
+        const { y, height } = barLayout.current;
+        if (height === 0 || letters.length === 0) return null;
+        const relY = pageY - y;
+        const idx = Math.max(
+          0,
+          Math.min(Math.floor((relY / height) * letters.length), letters.length - 1),
+        );
+        return letters[idx];
+      },
+      [letters],
+    );
+
+    const handleTouchStart = useCallback((e: any) => {
+      // Store absolute Y offset for drag calculations — don't scroll here,
+      // let TouchableOpacity.onPress handle taps to avoid double-scroll
+      const { locationY, pageY } = e.nativeEvent;
+      barLayout.current.y = pageY - locationY;
+      lastDragLetter.current = null;
+    }, []);
+
+    const handleTouchMove = useCallback(
+      (e: any) => {
+        const pageY = e.nativeEvent.pageY;
+        const letter = getLetterFromY(pageY);
+        if (letter && letter !== lastDragLetter.current) {
+          lastDragLetter.current = letter;
+          setTapped(letter);
+          onPressRef.current(letter);
+          if (timerRef.current) clearTimeout(timerRef.current);
+        }
+      },
+      [getLetterFromY],
+    );
+
+    const handleTouchEnd = useCallback(() => {
+      lastDragLetter.current = null;
+      timerRef.current = setTimeout(() => setTapped(null), 1500);
+    }, []);
+
+    return (
+      <View
+        ref={barRef}
+        style={styles.alphabetBar}
+        accessibilityRole="list"
+        accessibilityLabel="Alphabet index"
+        onLayout={(e) => {
+          barLayout.current.height = e.nativeEvent.layout.height;
+        }}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      >
+        {letters.map((letter) => {
+          const isActive = tapped === letter || (tapped === null && currentLetter === letter);
+          return (
+            <TouchableOpacity
+              key={letter}
+              style={[styles.alphabetLetterTouch, isActive && styles.alphabetLetterActive]}
+              activeOpacity={0.7}
+              onPress={() => handlePress(letter)}
+              accessibilityRole="button"
+              accessibilityLabel={`Jump to ${letter}`}
+              testID={`alphabet-${letter}`}
+            >
+              <Text style={[styles.alphabetLetter, isActive && styles.alphabetLetterTextActive]}>
+                {letter}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    );
+  },
+  (prev, next) => {
+    return prev.letters.join() === next.letters.join() && prev.currentLetter === next.currentLetter;
+  },
+);
+
 const FriendsScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<FriendsNavigation>();
@@ -52,12 +153,42 @@ const FriendsScreen: React.FC = () => {
   const [search, setSearch] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [phoneContacts, setPhoneContacts] = useState<PhoneContact[]>([]);
-  const [activeLetter, setActiveLetter] = useState<string | null>(null);
   const [selectedContact, setSelectedContact] = useState<ListItem | null>(null);
   const [profileSheetVisible, setProfileSheetVisible] = useState(false);
   const [addFriendVisible, setAddFriendVisible] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
   const [zapTarget, setZapTarget] = useState<ListItem | null>(null);
+  const [currentLetter, setCurrentLetter] = useState<string | null>(null);
+  const screenMountTime = useRef(Date.now());
+  const firstRenderLogged = useRef(false);
+
+  // Performance: log time from screen mount to first meaningful render
+  const onProfilerRender = useCallback(
+    (
+      id: string,
+      phase: 'mount' | 'update' | 'nested-update',
+      actualDuration: number,
+      baseDuration: number,
+      startTime: number,
+      commitTime: number,
+    ) => {
+      if (!firstRenderLogged.current && contacts.length > 0) {
+        firstRenderLogged.current = true;
+        console.log(
+          `[Perf] FriendsList first render with ${contacts.length} contacts: ` +
+            `${Date.now() - screenMountTime.current}ms from mount, ` +
+            `actualDuration=${actualDuration.toFixed(1)}ms, baseDuration=${baseDuration.toFixed(1)}ms`,
+        );
+      }
+      if (actualDuration > 16) {
+        console.log(
+          `[Perf] FriendsList ${phase}: actualDuration=${actualDuration.toFixed(1)}ms, ` +
+            `baseDuration=${baseDuration.toFixed(1)}ms, items=${contacts.length}`,
+        );
+      }
+    },
+    [contacts.length],
+  );
 
   useEffect(() => {
     fetchPhoneContacts().then(setPhoneContacts);
@@ -116,8 +247,6 @@ const FriendsScreen: React.FC = () => {
   }, [contacts, phoneContacts, filter, search]);
 
   const flatListRef = useRef<FlatList>(null);
-  const alphabetBarRef = useRef<View>(null);
-  const alphabetBarLayout = useRef({ y: 0, height: 0 });
 
   const availableLetters = useMemo(() => {
     const letters = new Set<string>();
@@ -134,8 +263,22 @@ const FriendsScreen: React.FC = () => {
 
   const ITEM_HEIGHT = 72;
 
+  const handleScroll = useCallback(
+    (e: { nativeEvent: { contentOffset: { y: number } } }) => {
+      const offsetY = e.nativeEvent.contentOffset.y;
+      const index = Math.floor(offsetY / ITEM_HEIGHT);
+      if (index >= 0 && index < combinedList.length) {
+        const first = combinedList[index].name.charAt(0).toUpperCase();
+        const letter = /[A-Z]/.test(first) ? first : '#';
+        setCurrentLetter(letter);
+      }
+    },
+    [combinedList],
+  );
+
   const scrollToLetter = useCallback(
     (letter: string) => {
+      const t0 = performance.now();
       const index = combinedList.findIndex((item) => {
         const first = item.name.charAt(0).toUpperCase();
         if (letter === '#') return !/[A-Z]/.test(first);
@@ -143,65 +286,12 @@ const FriendsScreen: React.FC = () => {
       });
       if (index >= 0) {
         flatListRef.current?.scrollToOffset({ offset: index * ITEM_HEIGHT, animated: false });
+        console.log(
+          `[Perf] scrollToLetter(${letter}): ${(performance.now() - t0).toFixed(1)}ms, index=${index}`,
+        );
       }
     },
     [combinedList],
-  );
-
-  const lastScrolledLetter = useRef<string | null>(null);
-
-  const getLetterFromPageY = useCallback(
-    (pageY: number) => {
-      const { y, height } = alphabetBarLayout.current;
-      if (height === 0 || availableLetters.length === 0) return null;
-      const relativeY = pageY - y;
-      const letterHeight = height / availableLetters.length;
-      const idx = Math.max(
-        0,
-        Math.min(Math.floor(relativeY / letterHeight), availableLetters.length - 1),
-      );
-      return availableLetters[idx];
-    },
-    [availableLetters],
-  );
-
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: (evt) => {
-          // Re-measure on every touch to ensure accuracy
-          alphabetBarRef.current?.measureInWindow((_x, y, _w, h) => {
-            if (h > 0) {
-              alphabetBarLayout.current = { y, height: h };
-            }
-            const letter = getLetterFromPageY(evt.nativeEvent.pageY);
-            if (letter) {
-              setActiveLetter(letter);
-              if (letter !== lastScrolledLetter.current) {
-                lastScrolledLetter.current = letter;
-                scrollToLetter(letter);
-              }
-            }
-          });
-        },
-        onPanResponderMove: (evt) => {
-          const letter = getLetterFromPageY(evt.nativeEvent.pageY);
-          if (letter) {
-            setActiveLetter(letter);
-            if (letter !== lastScrolledLetter.current) {
-              lastScrolledLetter.current = letter;
-              scrollToLetter(letter);
-            }
-          }
-        },
-        onPanResponderRelease: () => {
-          lastScrolledLetter.current = null;
-          setActiveLetter(null);
-        },
-      }),
-    [getLetterFromPageY, scrollToLetter],
   );
 
   const handleRefresh = useCallback(async () => {
@@ -350,55 +440,42 @@ const FriendsScreen: React.FC = () => {
         ) : (
           <View style={{ flex: 1, flexDirection: 'row' }}>
             {availableLetters.length > 1 && (
-              <View
-                ref={alphabetBarRef}
-                style={styles.alphabetBar}
-                onLayout={() => {
-                  alphabetBarRef.current?.measureInWindow((_x, y, _w, h) => {
-                    if (h > 0) {
-                      alphabetBarLayout.current = { y, height: h };
-                    }
-                  });
-                }}
-                {...panResponder.panHandlers}
-              >
-                {availableLetters.map((letter) => (
-                  <View
-                    key={letter}
-                    style={[
-                      styles.alphabetLetterTouch,
-                      activeLetter === letter && styles.alphabetLetterActive,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.alphabetLetter,
-                        activeLetter === letter && styles.alphabetLetterTextActive,
-                      ]}
-                    >
-                      {letter}
+              <AlphabetBar
+                letters={availableLetters}
+                currentLetter={currentLetter}
+                onLetterPress={scrollToLetter}
+              />
+            )}
+            <Profiler id="FriendsList" onRender={onProfilerRender}>
+              <FlatList
+                ref={flatListRef}
+                data={combinedList}
+                keyExtractor={(item) => item.id}
+                renderItem={renderItem}
+                refreshControl={
+                  <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+                }
+                ListEmptyComponent={
+                  <View style={styles.emptyState}>
+                    <Text style={styles.emptySubtitle}>
+                      {search ? 'No contacts match your search.' : 'No contacts found.'}
                     </Text>
                   </View>
-                ))}
-              </View>
-            )}
-            <FlatList
-              ref={flatListRef}
-              data={combinedList}
-              keyExtractor={(item) => item.id}
-              renderItem={renderItem}
-              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
-              ListEmptyComponent={
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptySubtitle}>
-                    {search ? 'No contacts match your search.' : 'No contacts found.'}
-                  </Text>
-                </View>
-              }
-              contentContainerStyle={styles.listContent}
-              onScrollToIndexFailed={() => {}}
-              style={{ flex: 1 }}
-            />
+                }
+                contentContainerStyle={styles.listContent}
+                getItemLayout={(_data, index) => ({
+                  length: ITEM_HEIGHT,
+                  offset: ITEM_HEIGHT * index,
+                  index,
+                })}
+                onScroll={handleScroll}
+                scrollEventThrottle={100}
+                maxToRenderPerBatch={20}
+                windowSize={10}
+                removeClippedSubviews
+                style={{ flex: 1 }}
+              />
+            </Profiler>
           </View>
         )}
       </View>
@@ -537,7 +614,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: 8,
-    width: 28,
+    width: 32,
+    marginLeft: 4,
   },
   alphabetLetterTouch: {
     paddingVertical: 2,
@@ -549,7 +627,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   alphabetLetterActive: {
-    backgroundColor: colors.divider,
+    backgroundColor: colors.brandPink,
+    borderRadius: 10,
   },
   alphabetLetter: {
     fontSize: 10,
@@ -558,7 +637,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   alphabetLetterTextActive: {
-    color: colors.brandPink,
+    color: colors.white,
   },
   emptyState: {
     padding: 40,
