@@ -1,16 +1,17 @@
 /**
  * On-chain Bitcoin wallet service for watch-only (xpub) wallets.
  *
- * Uses the mempool.space REST API (or compatible) for balance / transaction
- * lookups.  Address derivation is done locally via bitcoinjs-lib + bip32.
+ * Uses bitcoinjs-lib + bip32 + @bitcoinerlab/secp256k1 for local address
+ * derivation (same stack as BlueWallet). Balance and transaction lookups
+ * use the mempool.space REST API.
  *
  * Future: when mnemonic import is added, `buildTransaction` and
- * `broadcastTransaction` can be implemented here.
+ * `broadcastTransaction` can be implemented here using the same libraries.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import BIP32Factory, { BIP32Interface } from 'bip32';
-import * as ecc from 'tiny-secp256k1';
+import * as ecc from '@bitcoinerlab/secp256k1';
 import * as bitcoin from 'bitcoinjs-lib';
 import { getXpub, getElectrumServer } from './walletStorageService';
 

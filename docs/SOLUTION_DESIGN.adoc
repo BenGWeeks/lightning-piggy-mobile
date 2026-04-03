@@ -1,4 +1,108 @@
-= Solution Design: Nostr Integration
+= Solution Design
+
+== On-Chain Wallet Support & Transfer (Issues #10, #11)
+
+=== Overview
+
+Adds on-chain Bitcoin wallet support (watch-only via xpub) alongside existing NWC Lightning wallets, plus a Transfer feature for moving funds between wallets and Boltz submarine swaps for Lightning-to-on-chain payments.
+
+=== Bitcoin Crypto Library Stack
+
+The same libraries used by BlueWallet (1M+ users, React Native):
+
+[cols="1,1,2", options="header"]
+|===
+| Package | Version | Purpose
+
+| https://github.com/bitcoinjs/bitcoinjs-lib[bitcoinjs-lib] | 7.x | Core Bitcoin library — address generation, transaction building
+| https://github.com/bitcoinjs/bip32[bip32] | 5.x | BIP-32 HD wallet key derivation from xpub
+| https://github.com/bitcoinerlab/secp256k1[`@bitcoinerlab/secp256k1`] | latest | Pure JS secp256k1 (replaces WASM-based `tiny-secp256k1` which doesn't work in React Native)
+| https://github.com/paulmillr/noble-curves[`@noble/curves`] | 2.x | Audited elliptic curve cryptography (dependency of @bitcoinerlab/secp256k1)
+| https://github.com/paulmillr/noble-hashes[`@noble/hashes`] | 2.x | Audited hash functions (dependency of @noble/curves)
+| https://github.com/feross/buffer[`buffer`] | latest | Node.js Buffer polyfill for React Native
+|===
+
+**Why these libraries?**
+
+- `tiny-secp256k1` uses WebAssembly which is incompatible with React Native's Hermes engine
+- `@bitcoinerlab/secp256k1` provides the same interface using `@noble/secp256k1` (pure JavaScript)
+- All address derivation happens locally on-device — no third-party API needed for crypto operations
+- Balance and transaction lookups use mempool.space REST API (configurable, self-hostable)
+
+**Metro configuration:** `@noble/curves` and `@noble/hashes` use ES module `exports` maps with `.js` extensions. Metro requires `unstable_enablePackageExports: true` in `metro.config.js` to resolve these correctly.
+
+=== Architecture
+
+[source]
+----
+WalletContext.tsx
+  ├─ NWC wallets → nwcService.ts (existing)
+  └─ On-chain wallets → onchainService.ts (new)
+       ├─ bitcoinjs-lib + bip32 — local address derivation
+       └─ mempool.space API — balance & transaction lookups
+
+HomeScreen.tsx
+  ├─ [Receive] → ReceiveSheet (Lightning invoice OR Bitcoin address QR)
+  ├─ [Transfer] → TransferSheet (wallet-to-wallet)
+  └─ [Send] → SendSheet (Lightning invoice, address, OR Bitcoin address via Boltz)
+----
+
+=== Wallet Types
+
+[source,typescript]
+----
+type WalletType = 'nwc' | 'onchain';
+type OnchainImportMethod = 'xpub' | 'mnemonic' | 'generated';
+----
+
+On-chain wallets are currently watch-only (xpub import). The type system is designed for future mnemonic import and wallet generation.
+
+=== Key Files
+
+[cols="1,2", options="header"]
+|===
+| File | Purpose
+
+| `src/types/wallet.ts` | Wallet type discriminator (`nwc` / `onchain`), extensible import methods
+| `src/services/onchainService.ts` | Local BIP-84 address derivation, mempool.space balance/tx lookups
+| `src/services/boltzService.ts` | Boltz Exchange submarine swaps (Lightning → on-chain)
+| `src/services/walletStorageService.ts` | xpub secure storage, electrum server config, migration
+| `src/contexts/WalletContext.tsx` | Wallet-type-aware operations for both NWC and on-chain
+| `src/components/TransferSheet.tsx` | Wallet-to-wallet transfer bottom sheet
+| `src/components/AddWalletWizard.tsx` | Wallet type selection + xpub import (scan/paste)
+| `metro.config.js` | Enables package exports for @noble/curves ESM resolution
+| `src/polyfills.ts` | Buffer polyfill for bitcoinjs-lib
+|===
+
+=== Transfer Logic
+
+[cols="1,1,1", options="header"]
+|===
+| Source | Destination | Method
+
+| NWC Lightning | NWC Lightning | Generate invoice on dest, pay from source
+| NWC Lightning | On-chain | Boltz submarine swap (pay LN invoice, receive on-chain tx)
+| On-chain | Any | Not supported (watch-only) — future: enable with mnemonic import
+|===
+
+=== Visual Differentiation
+
+- **NWC wallets**: Green/red status dot + "Connected"/"Disconnected"
+- **On-chain wallets**: Chain icon (⛓) + "On-chain" label, no connection status
+
+=== Future: Hot Wallet Support
+
+When mnemonic import is added, the following will be implemented in `onchainService.ts`:
+
+- `buildTransaction()` — construct PSBTs using bitcoinjs-lib
+- `broadcastTransaction()` — sign locally and broadcast via mempool.space API
+- Transfer from on-chain wallets (currently disabled for watch-only)
+
+The crypto library stack (bitcoinjs-lib, bip32, @bitcoinerlab/secp256k1) already supports all of this.
+
+'''
+
+= Nostr Integration
 
 == Overview
 
