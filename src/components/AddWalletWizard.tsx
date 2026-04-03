@@ -241,7 +241,12 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
         {step === 'type' && (
           <View style={styles.stepContent}>
             <Text style={styles.description}>What type of wallet would you like to add?</Text>
-            <TouchableOpacity style={styles.typeCard} onPress={() => handleTypeSelect('nwc')}>
+            <TouchableOpacity
+              style={styles.typeCard}
+              onPress={() => handleTypeSelect('nwc')}
+              testID="wallet-type-nwc"
+              accessibilityLabel="Lightning NWC"
+            >
               <View style={styles.typeCardIconWrapper}>
                 <LightningIcon size={28} color={colors.brandPink} strokeWidth={2.5} />
               </View>
@@ -252,7 +257,12 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                 </Text>
               </View>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.typeCard} onPress={() => handleTypeSelect('onchain')}>
+            <TouchableOpacity
+              style={styles.typeCard}
+              onPress={() => handleTypeSelect('onchain')}
+              testID="wallet-type-onchain"
+              accessibilityLabel="Bitcoin On-chain"
+            >
               <View style={styles.typeCardIconWrapper}>
                 <ChainIcon size={28} color={colors.brandPink} strokeWidth={2.5} />
               </View>
@@ -358,6 +368,8 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                   multiline
                   autoCapitalize="none"
                   autoCorrect={false}
+                  testID="xpub-input"
+                  accessibilityLabel="Extended public key input"
                 />
                 <TouchableOpacity style={styles.secondaryButton} onPress={handleScan}>
                   <Text style={styles.secondaryButtonText}>Scan QR Code</Text>
@@ -401,6 +413,8 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
               }}
               autoCapitalize="words"
               autoCorrect={false}
+              testID="wallet-alias-input"
+              accessibilityLabel="Wallet alias input"
             />
             {error && <Text style={styles.errorText}>{error}</Text>}
             <View style={styles.buttonRow}>

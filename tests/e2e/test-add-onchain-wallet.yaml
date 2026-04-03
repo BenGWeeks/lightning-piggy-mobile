@@ -1,0 +1,82 @@
+appId: ${APP_ID:-com.anonymous.lightningpiggyapp}
+name: Add On-chain Wallet Test
+---
+# Tests importing an on-chain Bitcoin wallet via xpub/zpub
+# Run: source .env && maestro test -e MAESTRO_XPUB="$MAESTRO_XPUB" tests/e2e/test-add-onchain-wallet.yaml
+
+# Wait for app to be ready and wallets to connect
+- waitForAnimationToEnd:
+    timeout: 20000
+
+# Swipe left on wallet carousel to reach the Add Wallet card
+- swipe:
+    direction: LEFT
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+- swipe:
+    direction: LEFT
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+- swipe:
+    direction: LEFT
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Tap the Add Wallet card
+- tapOn:
+    id: 'add-wallet-card'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Select Bitcoin (On-chain) wallet type
+- tapOn:
+    id: 'wallet-type-onchain'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Enter the zpub key
+- tapOn:
+    id: 'xpub-input'
+- inputText: ${MAESTRO_XPUB}
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Tap Next to proceed to alias step
+- tapOn:
+    text: 'Next'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Enter wallet alias
+- tapOn:
+    id: 'wallet-alias-input'
+- inputText: 'Test BTC Wallet'
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Tap Next to proceed to theme step
+- tapOn:
+    text: 'Next'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Tap Add Wallet (theme step defaults to bitcoin theme)
+- tapOn:
+    text: 'Add Wallet'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Verify the on-chain wallet card is visible with "On-chain" label
+- extendedWaitUntil:
+    visible:
+      text: 'On-chain'
+    timeout: 15000
+
+# Verify the wallet alias appears
+- assertVisible:
+    text: 'Test BTC Wallet'

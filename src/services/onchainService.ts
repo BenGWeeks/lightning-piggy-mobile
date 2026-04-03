@@ -13,9 +13,40 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import BIP32Factory, { BIP32Interface } from 'bip32';
 import * as ecc from '@bitcoinerlab/secp256k1';
 import * as bitcoin from 'bitcoinjs-lib';
+import bs58check from 'bs58check';
 import { getXpub, getElectrumServer } from './walletStorageService';
 
 const bip32 = BIP32Factory(ecc);
+
+// Version byte hex strings for extended public keys
+const XPUB_HEX = '0488b21e'; // xpub (BIP-44)
+const YPUB_HEX = '049d7cb2'; // ypub (BIP-49)
+const ZPUB_HEX = '04b24746'; // zpub (BIP-84)
+
+/**
+ * Convert ypub/zpub to xpub format so bip32 can parse it.
+ * All three contain the same HD key data, just different version bytes.
+ */
+function toXpub(extPubKey: string): string {
+  const trimmed = extPubKey.trim();
+  if (trimmed.startsWith('xpub')) return trimmed;
+
+  const data = Buffer.from(bs58check.decode(trimmed));
+  const versionHex = data.subarray(0, 4).toString('hex');
+
+  if (versionHex === YPUB_HEX || versionHex === ZPUB_HEX) {
+    // Replace version bytes with xpub version
+    const xpubBytes = Buffer.from(XPUB_HEX, 'hex');
+    data[0] = xpubBytes[0];
+    data[1] = xpubBytes[1];
+    data[2] = xpubBytes[2];
+    data[3] = xpubBytes[3];
+    return bs58check.encode(data);
+  }
+
+  // Unknown prefix — return as-is and let bip32 handle the error
+  return trimmed;
+}
 
 const ADDRESS_INDEX_PREFIX = 'onchain_addr_index_';
 
@@ -51,8 +82,8 @@ const hdNodeCache = new Map<string, BIP32Interface>();
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function getHdNode(xpub: string): BIP32Interface {
-  return bip32.fromBase58(xpub);
+function getHdNode(extPubKey: string): BIP32Interface {
+  return bip32.fromBase58(toXpub(extPubKey));
 }
 
 async function getCachedNode(walletId: string): Promise<BIP32Interface> {
@@ -75,9 +106,9 @@ async function apiBase(_walletId?: string): Promise<string> {
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /** Validate an xpub / ypub / zpub string. Returns an error message or null. */
-export function validateXpub(xpub: string): string | null {
+export function validateXpub(extPubKey: string): string | null {
   try {
-    bip32.fromBase58(xpub.trim());
+    bip32.fromBase58(toXpub(extPubKey));
     return null;
   } catch (e) {
     return e instanceof Error ? e.message : 'Invalid extended public key';
