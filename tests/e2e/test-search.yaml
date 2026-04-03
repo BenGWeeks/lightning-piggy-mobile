@@ -1,0 +1,43 @@
+appId: com.anonymous.lightningpiggyapp
+name: Friends Search Test
+---
+# Assumes app is already running via npm start
+# Dismiss debugger banner first: adb shell input tap 989 2192
+
+# Wait for app to be ready
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Navigate to Friends tab
+- tapOn: 'Friends tab'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Wait for contacts to load
+- extendedWaitUntil:
+    visible: 'Jump to M'
+    timeout: 40000
+- takeScreenshot: 01_friends_loaded
+
+# Tap search input and type "Matt"
+- tapOn: 'Search...'
+- inputText: 'Matt'
+- takeScreenshot: 02_search_matt
+
+# Verify search filters the list
+- assertVisible: 'Matt'
+
+# Clear search and search for "Ben"
+- eraseText: 4
+- inputText: 'Ben'
+- takeScreenshot: 03_search_ben
+- assertVisible: 'Ben'
+
+# Clear search and dismiss keyboard
+- eraseText: 3
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Return to Home
+- tapOn: 'Home tab'
