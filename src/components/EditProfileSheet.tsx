@@ -343,6 +343,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     justifyContent: 'center',
     alignItems: 'center',
+    alignSelf: 'center',
   },
   avatarPreview: {
     width: 80,
