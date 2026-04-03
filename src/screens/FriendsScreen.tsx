@@ -155,6 +155,7 @@ const AlphabetBar: React.FC<{
     return prev.letters === next.letters || prev.letters.every((l, i) => l === next.letters[i]);
   },
 );
+AlphabetBar.displayName = 'AlphabetBar';
 
 const FriendsScreen: React.FC = () => {
   const insets = useSafeAreaInsets();

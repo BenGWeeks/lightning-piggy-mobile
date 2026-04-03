@@ -1,5 +1,10 @@
 import { SimplePool } from 'nostr-tools/pool';
-import { generateSecretKey, getPublicKey, finalizeEvent } from 'nostr-tools/pure';
+import {
+  generateSecretKey,
+  getPublicKey,
+  finalizeEvent,
+  type VerifiedEvent,
+} from 'nostr-tools/pure';
 import * as nip19 from 'nostr-tools/nip19';
 import type { NostrProfile, NostrContact, RelayConfig } from '../types/nostr';
 
@@ -170,10 +175,10 @@ export async function fetchProfiles(
   };
 
   try {
-    // Overall timeout: 90s max for all profile fetching
-    const overallDeadline = Date.now() + 90000;
+    // Overall timeout: 120s max for all profile fetching
+    const overallDeadline = Date.now() + 120000;
 
-    // Batch in groups of 50, run 3 batches concurrently, 12s timeout per batch
+    // Batch in groups of 50, run 3 batches concurrently, 15s timeout per batch
     const batchSize = 50;
     const concurrency = 3;
     const batches: string[][] = [];
@@ -194,7 +199,7 @@ export async function fetchProfiles(
       const concurrent = batches.slice(i, i + concurrency);
       const results = await Promise.all(
         concurrent.map((batch) =>
-          withTimeout(pool.querySync(allRelays, { kinds: [0], authors: batch }), 12000),
+          withTimeout(pool.querySync(allRelays, { kinds: [0], authors: batch }), 15000),
         ),
       );
       for (const events of results) {
@@ -202,6 +207,30 @@ export async function fetchProfiles(
       }
       // Notify caller with partial results so UI updates incrementally
       if (onBatch) onBatch(new Map(profiles));
+    }
+
+    // Retry pass for missing profiles (smaller batches, longer timeout)
+    const missing = pubkeys.filter((pk) => !profiles.has(pk));
+    if (missing.length > 0 && missing.length < pubkeys.length && Date.now() < overallDeadline) {
+      if (__DEV__)
+        console.log(`[Nostr] fetchProfiles: retrying ${missing.length} missing profiles`);
+      const retryBatches: string[][] = [];
+      for (let i = 0; i < missing.length; i += 20) {
+        retryBatches.push(missing.slice(i, i + 20));
+      }
+      for (let i = 0; i < retryBatches.length; i += concurrency) {
+        if (Date.now() > overallDeadline) break;
+        const concurrent = retryBatches.slice(i, i + concurrency);
+        const results = await Promise.all(
+          concurrent.map((batch) =>
+            withTimeout(pool.querySync(allRelays, { kinds: [0], authors: batch }), 10000),
+          ),
+        );
+        for (const events of results) {
+          if (events) processEvents(events);
+        }
+        if (onBatch) onBatch(new Map(profiles));
+      }
     }
   } catch (error) {
     console.warn('Failed to batch fetch profiles:', error);
@@ -238,7 +267,7 @@ export async function publishSignedEvent(
   relays: string[],
 ): Promise<void> {
   trackRelays(relays);
-  await Promise.any(pool.publish(relays, signedEvent as any));
+  await Promise.any(pool.publish(relays, signedEvent as VerifiedEvent));
 }
 
 export function createZapRequestEvent(

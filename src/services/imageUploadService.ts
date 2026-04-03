@@ -12,9 +12,6 @@ export async function uploadToNostrBuild(imageUri: string): Promise<string> {
   const response = await fetch(NOSTR_BUILD_UPLOAD_URL, {
     method: 'POST',
     body: formData,
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
   });
 
   if (!response.ok) {

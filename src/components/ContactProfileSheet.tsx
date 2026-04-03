@@ -59,12 +59,12 @@ const ContactProfileSheet: React.FC<Props> = ({
   const [editingLnAddress, setEditingLnAddress] = useState(false);
   const [lnAddressDraft, setLnAddressDraft] = useState('');
 
-  // Timeout: if image hasn't loaded in 5s, show fallback
+  // Timeout: if image hasn't loaded in 8s, show fallback
   useEffect(() => {
     if (!contact?.picture || avatarLoaded || avatarError) return;
     const timer = setTimeout(() => {
       if (!avatarLoaded) setAvatarError(true);
-    }, 3000);
+    }, 8000);
     return () => clearTimeout(timer);
   }, [contact?.picture, avatarLoaded, avatarError]);
 
@@ -85,7 +85,7 @@ const ContactProfileSheet: React.FC<Props> = ({
   useEffect(() => {
     setEditingLnAddress(false);
     setLnAddressDraft(contact?.lightningAddress ?? '');
-  }, [contact?.name]);
+  }, [contact?.name, contact?.lightningAddress]);
 
   useEffect(() => {
     if (visible) {
