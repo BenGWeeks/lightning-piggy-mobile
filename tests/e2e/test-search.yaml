@@ -1,4 +1,4 @@
-appId: ${APP_ID:-com.anonymous.lightningpiggyapp}
+appId: com.anonymous.lightningpiggyapp
 name: Friends Search Test
 ---
 # Assumes app is already running via npm start

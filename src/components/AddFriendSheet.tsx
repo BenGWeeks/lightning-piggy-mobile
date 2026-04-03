@@ -110,6 +110,9 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}
       handleIndicatorStyle={styles.handleIndicator}
+      keyboardBehavior="extend"
+      keyboardBlurBehavior="restore"
+      android_keyboardInputMode="adjustResize"
     >
       <BottomSheetView style={styles.content}>
         <Text style={styles.title}>Add Nostr Friend</Text>
@@ -145,6 +148,8 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
                 onChangeText={setInputValue}
                 autoCapitalize="none"
                 autoCorrect={false}
+                accessibilityLabel="npub input"
+                testID="npub-input"
               />
               <TouchableOpacity style={styles.pasteButton} onPress={handlePaste}>
                 <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
@@ -169,6 +174,8 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
               ]}
               onPress={handleAdd}
               disabled={!inputValue.trim() || loading}
+              accessibilityLabel="Add Friend"
+              testID="add-friend-submit"
             >
               {loading ? (
                 <ActivityIndicator color={colors.white} />

@@ -11,6 +11,8 @@ import {
   Keyboard,
   TouchableWithoutFeedback,
 } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
+import * as Clipboard from 'expo-clipboard';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
@@ -58,12 +60,20 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
 
   const handleLogin = async () => {
     setError(null);
-    const result = await loginWithNsec(nsecInput);
+    const result = await loginWithNsec(nsecInput.trim());
     if (result.success) {
       setNsecInput('');
       onClose();
     } else {
       setError(result.error || 'Login failed');
+    }
+  };
+
+  const handlePaste = async () => {
+    const text = await Clipboard.getStringAsync();
+    if (text) {
+      setNsecInput(text.trim());
+      setError(null);
     }
   };
 
@@ -85,6 +95,9 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}
       handleIndicatorStyle={styles.handleIndicator}
+      keyboardBehavior="extend"
+      keyboardBlurBehavior="restore"
+      android_keyboardInputMode="adjustResize"
     >
       <BottomSheetView style={styles.content}>
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
@@ -94,20 +107,44 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
               Enter your private key to connect your Nostr identity.
             </Text>
 
-            <TextInput
-              style={styles.input}
-              placeholder="nsec1..."
-              placeholderTextColor={colors.textSupplementary}
-              value={nsecInput}
-              onChangeText={(text) => {
-                setNsecInput(text);
-                setError(null);
-              }}
-              autoCapitalize="none"
-              autoCorrect={false}
-              secureTextEntry
-              editable={!isLoggingIn}
-            />
+            <View style={styles.inputRow}>
+              <TextInput
+                style={styles.input}
+                placeholder="nsec1..."
+                placeholderTextColor={colors.textSupplementary}
+                value={nsecInput}
+                onChangeText={(text) => {
+                  setNsecInput(text);
+                  setError(null);
+                }}
+                autoCapitalize="none"
+                autoCorrect={false}
+                secureTextEntry
+                editable={!isLoggingIn}
+                accessibilityLabel="nsec input"
+                testID="nsec-input"
+              />
+              <TouchableOpacity
+                style={styles.pasteButton}
+                onPress={handlePaste}
+                accessibilityLabel="Paste"
+                testID="paste-nsec"
+              >
+                <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                  <Path
+                    d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"
+                    stroke={colors.textSupplementary}
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                  />
+                  <Path
+                    d="M15 2H9a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1Z"
+                    stroke={colors.textSupplementary}
+                    strokeWidth={2}
+                  />
+                </Svg>
+              </TouchableOpacity>
+            </View>
 
             {error && <Text style={styles.error}>{error}</Text>}
 
@@ -115,6 +152,8 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
               style={[styles.loginButton, (!nsecInput.trim() || isLoggingIn) && styles.disabled]}
               onPress={handleLogin}
               disabled={!nsecInput.trim() || isLoggingIn}
+              accessibilityLabel="Login"
+              testID="login-button"
             >
               {isLoggingIn ? (
                 <ActivityIndicator color={colors.white} />
@@ -169,13 +208,22 @@ const styles = StyleSheet.create({
     color: colors.textSupplementary,
     marginBottom: 20,
   },
-  input: {
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: colors.background,
     borderRadius: 12,
-    padding: 16,
+    paddingHorizontal: 12,
+  },
+  input: {
+    flex: 1,
+    paddingVertical: 16,
     fontSize: 16,
     color: colors.textBody,
     fontWeight: '500',
+  },
+  pasteButton: {
+    padding: 8,
   },
   error: {
     color: colors.red,

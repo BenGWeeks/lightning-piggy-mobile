@@ -31,6 +31,7 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
 
 # typescript
@@ -46,6 +47,12 @@ modules/*/android/build/
 *_friends_*.png
 *_search_*.png
 *_scrolled_*.png
+*_account_*.png
+*_logged_*.png
+*_login_*.png
+*_logout_*.png
+*_home_*.png
+*_contacts_*.png
 
 # Build artifacts
 *.apk

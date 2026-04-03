@@ -1,0 +1,128 @@
+appId: com.anonymous.lightningpiggyapp
+name: Follow and Unfollow Test
+---
+# Tests following npubs via the Add Friend sheet
+# Assumes already logged in with a Nostr account
+# Run: maestro test tests/e2e/test-follow-unfollow.yaml
+
+# Wait for app to be ready
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# Navigate to Friends tab
+- tapOn:
+    text: 'Friends tab'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# --- Follow first npub ---
+- tapOn:
+    id: 'add-friend-button'
+- extendedWaitUntil:
+    visible:
+      id: 'npub-input'
+    timeout: 5000
+- tapOn:
+    id: 'npub-input'
+- inputText: 'npub1m2s0px84gd8a6wypttjrmd8shtfak0drvy02vl3q3h0gfq2m98ws2gjtul'
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+- tapOn:
+    id: 'add-friend-submit'
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# --- Follow second npub ---
+- tapOn:
+    id: 'add-friend-button'
+- extendedWaitUntil:
+    visible:
+      id: 'npub-input'
+    timeout: 5000
+- tapOn:
+    id: 'npub-input'
+- inputText: 'npub1jutptdc2m8kgjmudtws095qk2tcale0eemvp4j2xnjnl4nh6669slrf04x'
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+- tapOn:
+    id: 'add-friend-submit'
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# --- Follow third npub ---
+- tapOn:
+    id: 'add-friend-button'
+- extendedWaitUntil:
+    visible:
+      id: 'npub-input'
+    timeout: 5000
+- tapOn:
+    id: 'npub-input'
+- inputText: 'npub1kue7etfxtkxlv0s4u2xjf9epgxj7hssmlhc4x2k66tn8q8598zfqj322ar'
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+- tapOn:
+    id: 'add-friend-submit'
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# --- Follow fourth npub ---
+- tapOn:
+    id: 'add-friend-button'
+- extendedWaitUntil:
+    visible:
+      id: 'npub-input'
+    timeout: 5000
+- tapOn:
+    id: 'npub-input'
+- inputText: 'npub1yy0nyk6nj6tg4sx8nd7q5qcdw6pqd5e2cc0e8u2rmcgjhpvm63hsk67xe5'
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+- tapOn:
+    id: 'add-friend-submit'
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# --- Follow fifth npub ---
+- tapOn:
+    id: 'add-friend-button'
+- extendedWaitUntil:
+    visible:
+      id: 'npub-input'
+    timeout: 5000
+- tapOn:
+    id: 'npub-input'
+- inputText: 'npub10fgnt66jfwpq5efecz9f7w6jv5exyksvs6p8vp4azhyqvhjusjas480z79'
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+- tapOn:
+    id: 'add-friend-submit'
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# --- Follow sixth npub ---
+- tapOn:
+    id: 'add-friend-button'
+- extendedWaitUntil:
+    visible:
+      id: 'npub-input'
+    timeout: 5000
+- tapOn:
+    id: 'npub-input'
+- inputText: 'npub1sfpeyr9k5jms37q4900mw9q4vze4xwhdxd4avdxjml8rqgjkre8s4lcq9l'
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+- tapOn:
+    id: 'add-friend-submit'
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# Return to Home tab
+- tapOn:
+    text: 'Home tab'

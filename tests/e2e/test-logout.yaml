@@ -1,0 +1,45 @@
+appId: com.anonymous.lightningpiggyapp
+name: Nostr Logout Test
+---
+# Tests logging out from Nostr (assumes already logged in)
+# Run: maestro test tests/e2e/test-logout.yaml
+
+# Wait for app to be ready
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# Navigate to Account via the profile icon
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Verify we're logged in first
+- extendedWaitUntil:
+    visible:
+      id: 'logout-button'
+    timeout: 5000
+
+# Tap Logout
+- tapOn:
+    id: 'logout-button'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Confirm logout
+- tapOn:
+    text: 'Logout'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Navigate back to Account and verify Connect Nostr button is visible
+- tapOn:
+    id: 'profile-icon'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- extendedWaitUntil:
+    visible:
+      id: 'connect-nostr'
+    timeout: 10000
