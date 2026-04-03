@@ -48,6 +48,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     './plugins/withAmberQueries',
     'expo-secure-store',
     [
+      'expo-image-picker',
+      {
+        photosPermission:
+          'Allow Lightning Piggy to access your photos to set your profile picture.',
+      },
+    ],
+    [
       'expo-contacts',
       {
         contactsPermission: 'Allow Lightning Piggy to access your contacts to find friends.',

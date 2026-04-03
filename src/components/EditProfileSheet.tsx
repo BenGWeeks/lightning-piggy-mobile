@@ -10,6 +10,8 @@ import {
   Keyboard,
   Alert,
 } from 'react-native';
+import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
@@ -17,8 +19,10 @@ import {
   BottomSheetScrollView,
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
+import Svg, { Path, Circle } from 'react-native-svg';
 import { colors } from '../styles/theme';
 import { useNostr } from '../contexts/NostrContext';
+import { uploadToNostrBuild } from '../services/imageUploadService';
 
 interface Props {
   visible: boolean;
@@ -33,6 +37,8 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [lud16, setLud16] = useState('');
   const [about, setAbout] = useState('');
   const [saving, setSaving] = useState(false);
+  const [uploadingPicture, setUploadingPicture] = useState(false);
+  const [uploadingBanner, setUploadingBanner] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const sheetRef = useRef<BottomSheetModal>(null);
   const scrollRef = useRef<any>(null);
@@ -81,6 +87,31 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
     [],
   );
 
+  const pickAndUpload = async (type: 'picture' | 'banner'): Promise<void> => {
+    const setUploading = type === 'picture' ? setUploadingPicture : setUploadingBanner;
+    const setUrl = type === 'picture' ? setPictureUrl : setBannerUrl;
+    const aspect: [number, number] = type === 'picture' ? [1, 1] : [3, 1];
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect,
+      quality: 0.8,
+    });
+
+    if (result.canceled || !result.assets?.[0]) return;
+
+    setUploading(true);
+    try {
+      const url = await uploadToNostrBuild(result.assets[0].uri);
+      setUrl(url);
+    } catch (error) {
+      Alert.alert('Upload Failed', error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const handleSave = async () => {
     setSaving(true);
     const success = await publishProfile({
@@ -123,6 +154,71 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
           Tip: You don't need to use your real name or photo for your profile.
         </Text>
 
+        {/* Banner image */}
+        <Text style={styles.label}>Banner Image</Text>
+        <TouchableOpacity
+          style={styles.bannerPicker}
+          onPress={() => pickAndUpload('banner')}
+          disabled={uploadingBanner}
+          accessibilityLabel="Change banner image"
+          testID="edit-banner-picker"
+        >
+          {uploadingBanner ? (
+            <ActivityIndicator color={colors.brandPink} />
+          ) : bannerUrl ? (
+            <Image source={{ uri: bannerUrl }} style={styles.bannerPreview} cachePolicy="none" />
+          ) : (
+            <View style={styles.placeholderContent}>
+              <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+                <Path
+                  d="M21 15l-5-5L5 21"
+                  stroke={colors.textSupplementary}
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <Path
+                  d="M3 3h18v18H3z"
+                  stroke={colors.textSupplementary}
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                />
+                <Circle cx="8.5" cy="8.5" r="1.5" fill={colors.textSupplementary} />
+              </Svg>
+              <Text style={styles.placeholderText}>Tap to choose banner</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+
+        {/* Profile picture */}
+        <Text style={styles.label}>Profile Picture</Text>
+        <TouchableOpacity
+          style={styles.avatarPicker}
+          onPress={() => pickAndUpload('picture')}
+          disabled={uploadingPicture}
+          accessibilityLabel="Change profile picture"
+          testID="edit-picture-picker"
+        >
+          {uploadingPicture ? (
+            <ActivityIndicator color={colors.brandPink} />
+          ) : pictureUrl ? (
+            <Image source={{ uri: pictureUrl }} style={styles.avatarPreview} cachePolicy="none" />
+          ) : (
+            <View style={styles.avatarPlaceholder}>
+              <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+                <Circle cx="12" cy="8" r="4" stroke={colors.textSupplementary} strokeWidth={2} />
+                <Path
+                  d="M4 20c0-3.3 3.6-6 8-6s8 2.7 8 6"
+                  stroke={colors.textSupplementary}
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                />
+              </Svg>
+              <Text style={styles.placeholderText}>Tap to choose</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+
         <Text style={styles.label}>Display Name</Text>
         <BottomSheetTextInput
           style={styles.input}
@@ -134,34 +230,6 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
           autoCorrect={false}
           accessibilityLabel="Display name"
           testID="edit-display-name"
-        />
-
-        <Text style={styles.label}>Profile Picture URL</Text>
-        <BottomSheetTextInput
-          style={styles.input}
-          placeholder="https://example.com/avatar.jpg"
-          placeholderTextColor={colors.textSupplementary}
-          value={pictureUrl}
-          onChangeText={setPictureUrl}
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="url"
-          accessibilityLabel="Profile picture URL"
-          testID="edit-picture-url"
-        />
-
-        <Text style={styles.label}>Banner Image URL</Text>
-        <BottomSheetTextInput
-          style={styles.input}
-          placeholder="https://example.com/banner.jpg"
-          placeholderTextColor={colors.textSupplementary}
-          value={bannerUrl}
-          onChangeText={setBannerUrl}
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="url"
-          accessibilityLabel="Banner image URL"
-          testID="edit-banner-url"
         />
 
         <Text style={styles.label}>Lightning Address</Text>
@@ -254,6 +322,46 @@ const styles = StyleSheet.create({
   textArea: {
     minHeight: 80,
     textAlignVertical: 'top',
+  },
+  bannerPicker: {
+    height: 100,
+    borderRadius: 12,
+    backgroundColor: colors.background,
+    overflow: 'hidden',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  bannerPreview: {
+    width: '100%',
+    height: '100%',
+  },
+  avatarPicker: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: colors.background,
+    overflow: 'hidden',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarPreview: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+  },
+  avatarPlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 4,
+  },
+  placeholderContent: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 4,
+  },
+  placeholderText: {
+    fontSize: 12,
+    color: colors.textSupplementary,
   },
   saveButton: {
     backgroundColor: colors.brandPink,
