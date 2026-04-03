@@ -202,8 +202,25 @@ export async function signAndPublishEvent(
   secretKey: Uint8Array,
   relays: string[],
 ): Promise<void> {
+  trackRelays(relays);
   const signed = finalizeEvent(event, secretKey);
   await Promise.any(pool.publish(relays, signed));
+}
+
+export async function publishSignedEvent(
+  signedEvent: {
+    id: string;
+    pubkey: string;
+    sig: string;
+    kind: number;
+    created_at: number;
+    tags: string[][];
+    content: string;
+  },
+  relays: string[],
+): Promise<void> {
+  trackRelays(relays);
+  await Promise.any(pool.publish(relays, signedEvent as any));
 }
 
 export function createZapRequestEvent(

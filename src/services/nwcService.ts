@@ -12,7 +12,8 @@ async function withRetry<T>(
       return await fn();
     } catch (error) {
       if (i === attempts - 1) throw error;
-      console.log(`[NWC] ${label} attempt ${i + 1} failed, retrying in ${delayMs}ms...`);
+      if (__DEV__)
+        console.log(`[NWC] ${label} attempt ${i + 1} failed, retrying in ${delayMs}ms...`);
       await new Promise((r) => setTimeout(r, delayMs));
       delayMs *= 2; // exponential backoff
     }
@@ -136,7 +137,7 @@ export async function getInfo(walletId: string): Promise<{ alias: string; lud16?
   if (!provider) return null;
   try {
     const info: Nip47GetInfoResponse = await provider.getInfo();
-    console.log('NWC getInfo response:', JSON.stringify(info));
+    if (__DEV__) console.log('NWC getInfo response:', JSON.stringify(info));
     const alias = info.alias || '';
     const lud16 = info.lud16;
     return { alias, lud16 };

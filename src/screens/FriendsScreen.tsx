@@ -8,6 +8,7 @@ import {
   StyleSheet,
   RefreshControl,
   Alert,
+  GestureResponderEvent,
 } from 'react-native';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
@@ -79,7 +80,7 @@ const AlphabetBar: React.FC<{
       [letters],
     );
 
-    const handleTouchStart = useCallback((e: any) => {
+    const handleTouchStart = useCallback((e: GestureResponderEvent) => {
       // Store absolute Y offset for drag calculations — don't scroll here,
       // let TouchableOpacity.onPress handle taps to avoid double-scroll
       const { locationY, pageY } = e.nativeEvent;
@@ -88,7 +89,7 @@ const AlphabetBar: React.FC<{
     }, []);
 
     const handleTouchMove = useCallback(
-      (e: any) => {
+      (e: GestureResponderEvent) => {
         const pageY = e.nativeEvent.pageY;
         const letter = getLetterFromY(pageY);
         if (letter && letter !== lastDragLetter.current) {
@@ -141,7 +142,9 @@ const AlphabetBar: React.FC<{
     );
   },
   (prev, next) => {
-    return prev.letters.join() === next.letters.join() && prev.currentLetter === next.currentLetter;
+    if (prev.currentLetter !== next.currentLetter) return false;
+    if (prev.letters.length !== next.letters.length) return false;
+    return prev.letters === next.letters || prev.letters.every((l, i) => l === next.letters[i]);
   },
 );
 
@@ -160,31 +163,27 @@ const FriendsScreen: React.FC = () => {
   const [zapTarget, setZapTarget] = useState<ListItem | null>(null);
   const [currentLetter, setCurrentLetter] = useState<string | null>(null);
   const scrollTrackingPaused = useRef(false);
+  // Performance instrumentation (dev only)
   const screenMountTime = useRef(Date.now());
   const firstRenderLogged = useRef(false);
-
-  // Performance: log time from screen mount to first meaningful render
   const onProfilerRender = useCallback(
     (
-      id: string,
+      _id: string,
       phase: 'mount' | 'update' | 'nested-update',
       actualDuration: number,
       baseDuration: number,
-      startTime: number,
-      commitTime: number,
     ) => {
+      if (!__DEV__) return;
       if (!firstRenderLogged.current && contacts.length > 0) {
         firstRenderLogged.current = true;
         console.log(
-          `[Perf] FriendsList first render with ${contacts.length} contacts: ` +
-            `${Date.now() - screenMountTime.current}ms from mount, ` +
-            `actualDuration=${actualDuration.toFixed(1)}ms, baseDuration=${baseDuration.toFixed(1)}ms`,
+          `[Perf] FriendsList first render: ${Date.now() - screenMountTime.current}ms from mount, ` +
+            `actual=${actualDuration.toFixed(1)}ms, base=${baseDuration.toFixed(1)}ms`,
         );
       }
       if (actualDuration > 16) {
         console.log(
-          `[Perf] FriendsList ${phase}: actualDuration=${actualDuration.toFixed(1)}ms, ` +
-            `baseDuration=${baseDuration.toFixed(1)}ms, items=${contacts.length}`,
+          `[Perf] FriendsList ${phase}: actual=${actualDuration.toFixed(1)}ms, base=${baseDuration.toFixed(1)}ms`,
         );
       }
     },
@@ -262,6 +261,7 @@ const FriendsScreen: React.FC = () => {
     return Array.from(letters).sort();
   }, [combinedList]);
 
+  // Approximate item height for scroll-position letter tracking only (not used for layout)
   const ITEM_HEIGHT = 72;
 
   const handleScroll = useCallback(
@@ -272,15 +272,17 @@ const FriendsScreen: React.FC = () => {
       if (index >= 0 && index < combinedList.length) {
         const first = combinedList[index].name.charAt(0).toUpperCase();
         const letter = /[A-Z]/.test(first) ? first : '#';
-        setCurrentLetter(letter);
+        if (letter !== currentLetter) {
+          setCurrentLetter(letter);
+        }
       }
     },
-    [combinedList],
+    [combinedList, currentLetter],
   );
 
   const scrollToLetter = useCallback(
     (letter: string) => {
-      const t0 = performance.now();
+      const t0 = __DEV__ ? performance.now() : 0;
       const index = combinedList.findIndex((item) => {
         const first = item.name.charAt(0).toUpperCase();
         if (letter === '#') return !/[A-Z]/.test(first);
@@ -294,9 +296,11 @@ const FriendsScreen: React.FC = () => {
         setTimeout(() => {
           scrollTrackingPaused.current = false;
         }, 500);
-        console.log(
-          `[Perf] scrollToLetter(${letter}): ${(performance.now() - t0).toFixed(1)}ms, index=${index}`,
-        );
+        if (__DEV__) {
+          console.log(
+            `[Perf] scrollToLetter(${letter}): ${(performance.now() - t0).toFixed(1)}ms, index=${index}`,
+          );
+        }
       }
     },
     [combinedList],
@@ -472,7 +476,7 @@ const FriendsScreen: React.FC = () => {
                 }
                 contentContainerStyle={styles.listContent}
                 onScroll={handleScroll}
-                scrollEventThrottle={100}
+                scrollEventThrottle={250}
               />
             </Profiler>
           </View>

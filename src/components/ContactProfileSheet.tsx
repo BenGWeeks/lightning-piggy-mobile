@@ -19,6 +19,7 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import ZapIcon from './icons/ZapIcon';
 import CopyIcon from './icons/CopyIcon';
 import * as Clipboard from 'expo-clipboard';
+import { npubEncode } from '../services/nostrService';
 import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
 
@@ -105,13 +106,12 @@ const ContactProfileSheet: React.FC<Props> = ({ visible, onClose, contact, onZap
 
   const handleCopyNpub = async () => {
     if (!contact?.pubkey) return;
-    const { npubEncode } = await import('../services/nostrService');
     await Clipboard.setStringAsync(npubEncode(contact.pubkey));
   };
 
   const handleViewProfile = useCallback(async () => {
     if (!contact?.pubkey) return;
-    const npub = require('../services/nostrService').npubEncode(contact.pubkey);
+    const npub = npubEncode(contact.pubkey);
     // Try nostr: URI first (NIP-21), fall back to Primal web URL
     const nostrUri = `nostr:${npub}`;
     const canOpen = await Linking.canOpenURL(nostrUri);
@@ -126,7 +126,7 @@ const ContactProfileSheet: React.FC<Props> = ({ visible, onClose, contact, onZap
 
   const npubDisplay = contact.pubkey
     ? (() => {
-        const full = require('../services/nostrService').npubEncode(contact.pubkey);
+        const full = npubEncode(contact.pubkey);
         return `${full.slice(0, 16)}...${full.slice(-8)}`;
       })()
     : null;

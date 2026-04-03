@@ -12,6 +12,8 @@ const PUBKEY_KEY = 'nostr_pubkey';
 const SIGNER_TYPE_KEY = 'nostr_signer_type';
 const CONTACTS_CACHE_KEY = 'nostr_contacts_cache';
 const PROFILES_CACHE_KEY = 'nostr_profiles_cache';
+const CACHE_TIMESTAMP_KEY = 'nostr_cache_timestamp';
+const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 interface NostrContextType {
   isLoggedIn: boolean;
@@ -54,7 +56,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const loadProfile = useCallback(async (pk: string, relayUrls: string[]) => {
     const t0 = Date.now();
     const fetchedProfile = await nostrService.fetchProfile(pk, relayUrls);
-    console.log(`[Nostr] fetchProfile: ${Date.now() - t0}ms`);
+    if (__DEV__) console.log(`[Nostr] fetchProfile: ${Date.now() - t0}ms`);
     if (fetchedProfile) {
       setProfile(fetchedProfile);
     }
@@ -63,10 +65,16 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const loadContactsFromCache = useCallback(async () => {
     try {
       const t0 = Date.now();
-      const [contactsJson, profilesJson] = await Promise.all([
+      const [contactsJson, profilesJson, timestampStr] = await Promise.all([
         AsyncStorage.getItem(CONTACTS_CACHE_KEY),
         AsyncStorage.getItem(PROFILES_CACHE_KEY),
+        AsyncStorage.getItem(CACHE_TIMESTAMP_KEY),
       ]);
+      // Skip stale cache (older than 24h)
+      if (timestampStr && Date.now() - parseInt(timestampStr, 10) > CACHE_MAX_AGE_MS) {
+        if (__DEV__) console.log('[Nostr] cache expired, skipping');
+        return false;
+      }
       if (contactsJson) {
         const cached: NostrContact[] = JSON.parse(contactsJson);
         if (profilesJson) {
@@ -76,14 +84,16 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             profile: profileMap[c.pubkey] ?? c.profile,
           }));
           setContacts(withProfiles);
-          console.log(
-            `[Nostr] loaded ${withProfiles.length} contacts from cache in ${Date.now() - t0}ms`,
-          );
+          if (__DEV__)
+            console.log(
+              `[Nostr] loaded ${withProfiles.length} contacts from cache in ${Date.now() - t0}ms`,
+            );
         } else {
           setContacts(cached);
-          console.log(
-            `[Nostr] loaded ${cached.length} contacts (no profiles) from cache in ${Date.now() - t0}ms`,
-          );
+          if (__DEV__)
+            console.log(
+              `[Nostr] loaded ${cached.length} contacts (no profiles) from cache in ${Date.now() - t0}ms`,
+            );
         }
         return true;
       }
@@ -96,9 +106,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const loadContacts = useCallback(async (pk: string, relayUrls: string[]) => {
     const t0 = Date.now();
     const fetchedContacts = await nostrService.fetchContactList(pk, relayUrls);
-    console.log(
-      `[Nostr] fetchContactList: ${Date.now() - t0}ms, ${fetchedContacts.length} contacts`,
-    );
+    if (__DEV__)
+      console.log(
+        `[Nostr] fetchContactList: ${Date.now() - t0}ms, ${fetchedContacts.length} contacts`,
+      );
     setContacts(fetchedContacts);
 
     // Cache the contact list
@@ -111,9 +122,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const contactPubkeys = fetchedContacts.map((c) => c.pubkey);
       const t1 = Date.now();
       const profileMap = await nostrService.fetchProfiles(contactPubkeys, relayUrls);
-      console.log(
-        `[Nostr] fetchProfiles: ${Date.now() - t1}ms, ${profileMap.size}/${contactPubkeys.length} profiles loaded`,
-      );
+      if (__DEV__)
+        console.log(
+          `[Nostr] fetchProfiles: ${Date.now() - t1}ms, ${profileMap.size}/${contactPubkeys.length} profiles loaded`,
+        );
       setContacts((prev) =>
         prev.map((c) => ({
           ...c,
@@ -128,6 +140,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           profileObj[k] = v;
         });
         await AsyncStorage.setItem(PROFILES_CACHE_KEY, JSON.stringify(profileObj));
+        await AsyncStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString());
       } catch {}
     }
   }, []);
@@ -135,7 +148,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const loadRelays = useCallback(async (pk: string): Promise<string[]> => {
     const t0 = Date.now();
     const relayList = await nostrService.fetchRelayList(pk, nostrService.DEFAULT_RELAYS);
-    console.log(`[Nostr] fetchRelayList: ${Date.now() - t0}ms, ${relayList.length} relays`);
+    if (__DEV__)
+      console.log(`[Nostr] fetchRelayList: ${Date.now() - t0}ms, ${relayList.length} relays`);
     setRelays(relayList);
     const readRelays = relayList.filter((r) => r.read).map((r) => r.url);
     return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
@@ -263,7 +277,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     await SecureStore.deleteItemAsync(NSEC_KEY);
     await SecureStore.deleteItemAsync(PUBKEY_KEY);
     await SecureStore.deleteItemAsync(SIGNER_TYPE_KEY);
-    await AsyncStorage.multiRemove([CONTACTS_CACHE_KEY, PROFILES_CACHE_KEY]);
+    await AsyncStorage.multiRemove([CONTACTS_CACHE_KEY, PROFILES_CACHE_KEY, CACHE_TIMESTAMP_KEY]);
 
     setPubkey(null);
     setProfile(null);
@@ -351,23 +365,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             pubkey,
           );
           if (!signedEventJson) return false;
-          // Amber returns the fully signed event with correct id and sig
           const signed = JSON.parse(signedEventJson);
-          await Promise.any(
-            targetRelays.map((r) => {
-              const ws = new WebSocket(r);
-              return new Promise<void>((resolve, reject) => {
-                ws.onopen = () => {
-                  ws.send(JSON.stringify(['EVENT', signed]));
-                  setTimeout(() => {
-                    ws.close();
-                    resolve();
-                  }, 1000);
-                };
-                ws.onerror = () => reject();
-              });
-            }),
-          );
+          await nostrService.publishSignedEvent(signed, targetRelays);
         }
         return true;
       } catch (error) {
