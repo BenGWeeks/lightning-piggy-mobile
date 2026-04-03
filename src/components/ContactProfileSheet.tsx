@@ -3,12 +3,12 @@ import {
   View,
   Text,
   TouchableOpacity,
-  Image,
   StyleSheet,
   BackHandler,
   Alert,
   Linking,
 } from 'react-native';
+import { Image } from 'expo-image';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
@@ -144,7 +144,7 @@ const ContactProfileSheet: React.FC<Props> = ({ visible, onClose, contact, onZap
         {/* Banner with handle overlay */}
         <View style={styles.bannerContainer}>
           {contact.banner ? (
-            <Image source={{ uri: contact.banner }} style={styles.bannerImage} />
+            <Image source={{ uri: contact.banner }} style={styles.bannerImage} cachePolicy="disk" />
           ) : (
             <View style={styles.bannerPlaceholder} />
           )}
@@ -156,7 +156,12 @@ const ContactProfileSheet: React.FC<Props> = ({ visible, onClose, contact, onZap
         {/* Avatar */}
         <View style={styles.avatarContainer}>
           {contact.picture ? (
-            <Image source={{ uri: contact.picture }} style={styles.avatar} />
+            <Image
+              source={{ uri: contact.picture }}
+              style={styles.avatar}
+              cachePolicy="disk"
+              transition={200}
+            />
           ) : (
             <View style={styles.avatarDefault}>
               <Svg width={32} height={32} viewBox="0 0 24 24" fill="none">

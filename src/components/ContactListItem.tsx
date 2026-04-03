@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, Image, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Image } from 'expo-image';
 import Svg, { Path, Circle } from 'react-native-svg';
 import ZapIcon from './icons/ZapIcon';
 import { colors } from '../styles/theme';
@@ -17,7 +18,12 @@ const ContactListItem: React.FC<Props> = ({ name, picture, lightningAddress, onP
     <TouchableOpacity style={styles.container} onPress={onPress} activeOpacity={onPress ? 0.6 : 1}>
       <View style={styles.avatar}>
         {picture ? (
-          <Image source={{ uri: picture }} style={styles.avatarImage} />
+          <Image
+            source={{ uri: picture }}
+            style={styles.avatarImage}
+            cachePolicy="disk"
+            transition={200}
+          />
         ) : (
           <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
             <Circle cx="12" cy="8" r="4" fill={colors.textSupplementary} />

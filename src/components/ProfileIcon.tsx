@@ -1,5 +1,6 @@
 import React from 'react';
-import { TouchableOpacity, Image, StyleSheet, View } from 'react-native';
+import { TouchableOpacity, StyleSheet, View } from 'react-native';
+import { Image } from 'expo-image';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { colors } from '../styles/theme';
 
@@ -14,7 +15,11 @@ const ProfileIcon: React.FC<Props> = ({ uri, size = 36, onPress }) => {
     <TouchableOpacity onPress={onPress} activeOpacity={0.7}>
       <View style={[styles.container, { width: size, height: size, borderRadius: size / 2 }]}>
         {uri ? (
-          <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size / 2 }} />
+          <Image
+            source={{ uri }}
+            style={{ width: size, height: size, borderRadius: size / 2 }}
+            cachePolicy="disk"
+          />
         ) : (
           <Svg width={size * 0.6} height={size * 0.6} viewBox="0 0 24 24" fill="none">
             <Circle cx="12" cy="8" r="4" fill={colors.white} />
