@@ -9,7 +9,6 @@ import {
   RefreshControl,
   Alert,
   GestureResponderEvent,
-  InteractionManager,
 } from 'react-native';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
@@ -163,13 +162,6 @@ const FriendsScreen: React.FC = () => {
   const navigation = useNavigation<FriendsNavigation>();
   const { isLoggedIn, profile, contacts, refreshContacts, addContact } = useNostr();
   const [filter, setFilter] = useState<Filter>('all');
-  const [ready, setReady] = useState(false);
-
-  // Defer heavy list rendering until after mount + transition animation
-  useEffect(() => {
-    const handle = InteractionManager.runAfterInteractions(() => setReady(true));
-    return () => handle.cancel();
-  }, []);
   const [search, setSearch] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [phoneContacts, setPhoneContacts] = useState<PhoneContact[]>([]);
@@ -212,9 +204,6 @@ const FriendsScreen: React.FC = () => {
   }, []);
 
   const combinedList = useMemo(() => {
-    // Skip heavy computation until after tab transition
-    if (!ready) return [];
-
     const items: ListItem[] = [];
 
     // Nostr contacts
@@ -264,7 +253,7 @@ const FriendsScreen: React.FC = () => {
     result.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
 
     return result;
-  }, [contacts, phoneContacts, filter, search, ready]);
+  }, [contacts, phoneContacts, filter, search]);
 
   const flatListRef = useRef<FlashListRef<ListItem>>(null);
 

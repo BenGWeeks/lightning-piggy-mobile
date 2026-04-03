@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { InteractionManager } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
@@ -446,29 +446,44 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [contacts, followContact],
   );
 
-  return (
-    <NostrContext.Provider
-      value={{
-        isLoggedIn,
-        isLoggingIn,
-        profile,
-        contacts,
-        relays,
-        signerType,
-        loginWithNsec,
-        loginWithAmber,
-        logout,
-        refreshProfile,
-        refreshContacts,
-        signZapRequest,
-        followContact,
-        unfollowContact,
-        addContact,
-      }}
-    >
-      {children}
-    </NostrContext.Provider>
+  const contextValue = useMemo(
+    () => ({
+      isLoggedIn,
+      isLoggingIn,
+      profile,
+      contacts,
+      relays,
+      signerType,
+      loginWithNsec,
+      loginWithAmber,
+      logout,
+      refreshProfile,
+      refreshContacts,
+      signZapRequest,
+      followContact,
+      unfollowContact,
+      addContact,
+    }),
+    [
+      isLoggedIn,
+      isLoggingIn,
+      profile,
+      contacts,
+      relays,
+      signerType,
+      loginWithNsec,
+      loginWithAmber,
+      logout,
+      refreshProfile,
+      refreshContacts,
+      signZapRequest,
+      followContact,
+      unfollowContact,
+      addContact,
+    ],
   );
+
+  return <NostrContext.Provider value={contextValue}>{children}</NostrContext.Provider>;
 };
 
 export function useNostr() {
