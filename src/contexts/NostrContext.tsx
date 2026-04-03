@@ -1,4 +1,12 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  startTransition,
+} from 'react';
 import { InteractionManager } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
@@ -83,13 +91,13 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             ...c,
             profile: profileMap[c.pubkey] ?? c.profile,
           }));
-          setContacts(withProfiles);
+          startTransition(() => setContacts(withProfiles));
           if (__DEV__)
             console.log(
               `[Nostr] loaded ${withProfiles.length} contacts from cache in ${Date.now() - t0}ms`,
             );
         } else {
-          setContacts(cached);
+          startTransition(() => setContacts(cached));
           if (__DEV__)
             console.log(
               `[Nostr] loaded ${cached.length} contacts (no profiles) from cache in ${Date.now() - t0}ms`,
@@ -110,7 +118,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       console.log(
         `[Nostr] fetchContactList: ${Date.now() - t0}ms, ${fetchedContacts.length} contacts`,
       );
-    setContacts(fetchedContacts);
+    startTransition(() => setContacts(fetchedContacts));
 
     // Cache the contact list
     try {
@@ -126,11 +134,13 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         console.log(
           `[Nostr] fetchProfiles: ${Date.now() - t1}ms, ${profileMap.size}/${contactPubkeys.length} profiles loaded`,
         );
-      setContacts((prev) =>
-        prev.map((c) => ({
-          ...c,
-          profile: profileMap.get(c.pubkey) ?? c.profile,
-        })),
+      startTransition(() =>
+        setContacts((prev) =>
+          prev.map((c) => ({
+            ...c,
+            profile: profileMap.get(c.pubkey) ?? c.profile,
+          })),
+        ),
       );
 
       // Cache profiles
@@ -389,13 +399,15 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const updatedContacts = [...contacts, newContact];
       const success = await publishContactList(updatedContacts);
       if (success) {
-        setContacts(updatedContacts);
+        startTransition(() => setContacts(updatedContacts));
         // Fetch profile for the new contact
         const readRelays = getReadRelays();
         const profileData = await nostrService.fetchProfile(contactPubkey, readRelays);
         if (profileData) {
-          setContacts((prev) =>
-            prev.map((c) => (c.pubkey === contactPubkey ? { ...c, profile: profileData } : c)),
+          startTransition(() =>
+            setContacts((prev) =>
+              prev.map((c) => (c.pubkey === contactPubkey ? { ...c, profile: profileData } : c)),
+            ),
           );
         }
       }
@@ -409,7 +421,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const updatedContacts = contacts.filter((c) => c.pubkey !== contactPubkey);
       const success = await publishContactList(updatedContacts);
       if (success) {
-        setContacts(updatedContacts);
+        startTransition(() => setContacts(updatedContacts));
       }
       return success;
     },
