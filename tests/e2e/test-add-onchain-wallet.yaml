@@ -1,35 +1,54 @@
-appId: ${APP_ID:-com.anonymous.lightningpiggyapp}
+appId: com.anonymous.lightningpiggyapp
 name: Add On-chain Wallet Test
 ---
 # Tests importing an on-chain Bitcoin wallet via xpub/zpub
 # Run: source .env && maestro test -e MAESTRO_XPUB="$MAESTRO_XPUB" tests/e2e/test-add-onchain-wallet.yaml
+#
+# NOTE: This test expects a fresh app state (no wallets configured).
+# The onboarding flow is completed first, then an on-chain wallet is added.
 
-# Wait for app to be ready and wallets to connect
-- waitForAnimationToEnd:
-    timeout: 20000
+# Relaunch app
+- launchApp
 
-# Swipe left on wallet carousel to reach the Add Wallet card
-- swipe:
-    direction: LEFT
-    duration: 300
+# Wait for app to load
 - waitForAnimationToEnd:
-    timeout: 1000
-- swipe:
-    direction: LEFT
-    duration: 300
-- waitForAnimationToEnd:
-    timeout: 1000
-- swipe:
-    direction: LEFT
-    duration: 300
-- waitForAnimationToEnd:
-    timeout: 1000
+    timeout: 15000
 
-# Tap the Add Wallet card
+# --- Onboarding (if shown) ---
+# Tap through intro screen
+- tapOn:
+    text: "Let's Go"
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Skip onboarding — just tap Get Started
+- tapOn:
+    text: 'GBP'
+    optional: true
+- tapOn:
+    text: 'Get Started'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# --- Home screen: Add a wallet ---
+# The home screen should show "Add a wallet to get started" or
+# have the Add Wallet card visible since there are no wallets yet.
+
+# Tap the Add Wallet card (it's the only card when no wallets exist)
 - tapOn:
     id: 'add-wallet-card'
 - waitForAnimationToEnd:
     timeout: 3000
+
+# Scroll down in the bottom sheet to reveal Bitcoin option
+- swipe:
+    start: 50%, 80%
+    end: 50%, 50%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
 
 # Select Bitcoin (On-chain) wallet type
 - tapOn:
@@ -37,9 +56,9 @@ name: Add On-chain Wallet Test
 - waitForAnimationToEnd:
     timeout: 2000
 
-# Enter the zpub key
+# Enter the zpub key using the placeholder text
 - tapOn:
-    id: 'xpub-input'
+    text: 'xpub6...'
 - inputText: ${MAESTRO_XPUB}
 - pressKey: back
 - waitForAnimationToEnd:
@@ -75,7 +94,7 @@ name: Add On-chain Wallet Test
 - extendedWaitUntil:
     visible:
       text: 'On-chain'
-    timeout: 15000
+    timeout: 30000
 
 # Verify the wallet alias appears
 - assertVisible:

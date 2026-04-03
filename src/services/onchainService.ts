@@ -18,10 +18,14 @@ import { getXpub, getElectrumServer } from './walletStorageService';
 
 const bip32 = BIP32Factory(ecc);
 
-// Version byte hex strings for extended public keys
-const XPUB_HEX = '0488b21e'; // xpub (BIP-44)
+// Version byte hex strings for extended public key prefixes
 const YPUB_HEX = '049d7cb2'; // ypub (BIP-49)
 const ZPUB_HEX = '04b24746'; // zpub (BIP-84)
+
+/** Convert a byte to 2-char hex */
+function byteToHex(b: number): string {
+  return b.toString(16).padStart(2, '0');
+}
 
 /**
  * Convert ypub/zpub to xpub format so bip32 can parse it.
@@ -31,16 +35,17 @@ function toXpub(extPubKey: string): string {
   const trimmed = extPubKey.trim();
   if (trimmed.startsWith('xpub')) return trimmed;
 
-  const data = Buffer.from(bs58check.decode(trimmed));
-  const versionHex = data.subarray(0, 4).toString('hex');
+  const decoded = bs58check.decode(trimmed);
+  const versionHex =
+    byteToHex(decoded[0]) + byteToHex(decoded[1]) + byteToHex(decoded[2]) + byteToHex(decoded[3]);
 
   if (versionHex === YPUB_HEX || versionHex === ZPUB_HEX) {
-    // Replace version bytes with xpub version
-    const xpubBytes = Buffer.from(XPUB_HEX, 'hex');
-    data[0] = xpubBytes[0];
-    data[1] = xpubBytes[1];
-    data[2] = xpubBytes[2];
-    data[3] = xpubBytes[3];
+    // Replace version bytes with xpub version (0x0488b21e)
+    const data = new Uint8Array(decoded);
+    data[0] = 0x04;
+    data[1] = 0x88;
+    data[2] = 0xb2;
+    data[3] = 0x1e;
     return bs58check.encode(data);
   }
 
