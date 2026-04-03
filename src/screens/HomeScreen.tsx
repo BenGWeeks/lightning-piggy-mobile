@@ -15,6 +15,7 @@ import WalletSettingsSheet from '../components/WalletSettingsSheet';
 import ProfileIcon from '../components/ProfileIcon';
 import * as nwcService from '../services/nwcService';
 import * as onchainService from '../services/onchainService';
+import { ArrowDownIcon, ArrowUpIcon, ArrowLeftRightIcon } from '../components/icons/ArrowIcons';
 import { styles } from '../styles/HomeScreen.styles';
 import type { MainTabParamList } from '../navigation/types';
 
@@ -169,7 +170,9 @@ const HomeScreen: React.FC = () => {
             accessibilityLabel="Receive"
             testID="btn-receive"
           >
-            <Text style={styles.actionIcon}>&#8595;</Text>
+            <View style={styles.actionCircle}>
+              <ArrowDownIcon size={24} strokeWidth={3} />
+            </View>
             <Text style={styles.actionText}>Receive</Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -179,7 +182,9 @@ const HomeScreen: React.FC = () => {
             accessibilityLabel="Transfer"
             testID="btn-transfer"
           >
-            <Text style={styles.actionIcon}>&#8596;</Text>
+            <View style={styles.actionCircle}>
+              <ArrowLeftRightIcon size={24} strokeWidth={3} />
+            </View>
             <Text style={styles.actionText}>Transfer</Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -189,8 +194,10 @@ const HomeScreen: React.FC = () => {
             accessibilityLabel="Send"
             testID="btn-send"
           >
+            <View style={styles.actionCircle}>
+              <ArrowUpIcon size={24} strokeWidth={3} />
+            </View>
             <Text style={styles.actionText}>Send</Text>
-            <Text style={styles.actionIcon}>&#8593;</Text>
           </TouchableOpacity>
         </View>
       </View>

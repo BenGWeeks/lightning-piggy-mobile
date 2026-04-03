@@ -18,9 +18,6 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
     return context.resolveRequest(context, rewritten, platform);
   }
 
-  // Handle relative imports within @noble packages that use .js extensions
-  // These should resolve fine through Metro's default resolver
-
   // Fall through to default resolution
   if (originalResolveRequest) {
     return originalResolveRequest(context, moduleName, platform);
