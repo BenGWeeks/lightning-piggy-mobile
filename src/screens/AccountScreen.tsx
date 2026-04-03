@@ -170,6 +170,8 @@ const AccountScreen: React.FC = () => {
           <TouchableOpacity
             style={styles.homeButton}
             onPress={() => navigation.navigate('Home', {})}
+            accessibilityLabel="Go home"
+            testID="account-home-button"
           >
             <Image
               source={require('../../assets/images/Home.png')}
