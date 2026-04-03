@@ -476,14 +476,22 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const success = await publishContactList(updatedContacts);
       if (success) {
         startTransition(() => setContacts(updatedContacts));
+        // Update cache so restarts reflect the follow immediately
+        AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(updatedContacts)).catch(() => {});
+        AsyncStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
         // Fetch profile for the new contact
         const readRelays = getReadRelays();
         const profileData = await nostrService.fetchProfile(contactPubkey, readRelays);
         if (profileData) {
           startTransition(() =>
-            setContacts((prev) =>
-              prev.map((c) => (c.pubkey === contactPubkey ? { ...c, profile: profileData } : c)),
-            ),
+            setContacts((prev) => {
+              const updated = prev.map((c) =>
+                c.pubkey === contactPubkey ? { ...c, profile: profileData } : c,
+              );
+              // Update cache with profile data
+              AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(updated)).catch(() => {});
+              return updated;
+            }),
           );
         }
       }
@@ -498,6 +506,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const success = await publishContactList(updatedContacts);
       if (success) {
         startTransition(() => setContacts(updatedContacts));
+        // Update cache so restarts reflect the unfollow immediately
+        AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(updatedContacts)).catch(() => {});
+        AsyncStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
       }
       return success;
     },

@@ -28,7 +28,7 @@ const ContactListItem: React.FC<Props> = ({ name, picture, lightningAddress, onP
     if (!picture || avatarLoaded || avatarError) return;
     const timer = setTimeout(() => {
       if (!avatarLoaded) setAvatarError(true);
-    }, 3000);
+    }, 5000);
     return () => clearTimeout(timer);
   }, [picture, avatarLoaded, avatarError]);
 

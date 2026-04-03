@@ -1,8 +1,7 @@
-appId: com.anonymous.lightningpiggyapp
+appId: ${APP_ID:-com.anonymous.lightningpiggyapp}
 name: Friends Search Test
 ---
 # Assumes app is already running via npm start
-# Dismiss debugger banner first: adb shell input tap 989 2192
 
 # Wait for app to be ready
 - waitForAnimationToEnd:

@@ -1,4 +1,4 @@
-appId: com.anonymous.lightningpiggyapp
+appId: ${APP_ID:-com.anonymous.lightningpiggyapp}
 name: Follow and Unfollow Test
 ---
 # Tests following npubs via the Add Friend sheet

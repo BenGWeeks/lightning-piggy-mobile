@@ -1,4 +1,4 @@
-appId: com.anonymous.lightningpiggyapp
+appId: ${APP_ID:-com.anonymous.lightningpiggyapp}
 name: Create Nostr Account Test
 ---
 # Tests creating a new Nostr identity from scratch

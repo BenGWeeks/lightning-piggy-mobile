@@ -1,8 +1,7 @@
-appId: com.anonymous.lightningpiggyapp
+appId: ${APP_ID:-com.anonymous.lightningpiggyapp}
 name: Alphabet Navigation Test
 ---
 # Assumes app is already running via `npm start` + `adb reverse tcp:8081 tcp:8081`
-# Dismiss the debugger banner first: adb shell input tap 989 2192
 
 # Wait for app to be ready
 - waitForAnimationToEnd:

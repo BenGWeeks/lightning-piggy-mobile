@@ -44,7 +44,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     },
   },
   plugins: [
-    './plugins/withAdjustNothing',
+    './plugins/withAdjustResize',
     './plugins/withAmberQueries',
     'expo-secure-store',
     [

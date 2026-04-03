@@ -5,7 +5,7 @@ const { withAndroidManifest } = require('expo/config-plugins');
  * This allows the keyboard to resize the layout so bottom sheets can
  * slide up above the keyboard.
  */
-module.exports = function withAdjustNothing(config) {
+module.exports = function withAdjustResize(config) {
   return withAndroidManifest(config, (config) => {
     const manifest = config.modResults;
     const application = manifest.manifest?.application;
