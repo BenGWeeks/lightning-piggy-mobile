@@ -1,0 +1,110 @@
+appId: com.anonymous.lightningpiggyapp
+name: Create Nostr Account Test
+---
+# Tests creating a new Nostr identity from scratch
+# Run: maestro test tests/e2e/test-create-account.yaml
+
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# Navigate to Account
+- tapOn:
+    text: 'Home tab'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Logout if already logged in
+- tapOn:
+    id: 'logout-button'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    text: 'Logout'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Re-navigate to Account
+- tapOn:
+    id: 'profile-icon'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Open Connect Nostr sheet
+- tapOn:
+    id: 'connect-nostr'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Tap Create a Nostr Account
+- tapOn:
+    id: 'create-account-button'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Enter a display name
+- tapOn:
+    id: 'create-name-input'
+- inputText: 'Test User Piggy'
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Submit account creation
+- tapOn:
+    id: 'create-account-submit'
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# Should show backup screen with nsec
+- assertVisible:
+    id: 'copy-nsec'
+
+# Copy the nsec
+- tapOn:
+    id: 'copy-nsec'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Dismiss copy alert
+- tapOn:
+    text: 'OK'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Tap Done
+- tapOn:
+    id: 'backup-done'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Dismiss profile merge alert if it appears
+- tapOn:
+    text: 'KEEP CURRENT'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Verify we're logged in (Logout button visible)
+- extendedWaitUntil:
+    visible:
+      id: 'logout-button'
+    timeout: 10000
+
+# Logout the test account to clean up
+- tapOn:
+    id: 'logout-button'
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    text: 'Logout'
+- waitForAnimationToEnd:
+    timeout: 3000

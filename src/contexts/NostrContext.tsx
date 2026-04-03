@@ -40,6 +40,15 @@ interface NostrContextType {
     amountSats: number,
     comment: string,
   ) => Promise<string | null>;
+  publishProfile: (profileData: {
+    name?: string;
+    display_name?: string;
+    picture?: string;
+    banner?: string;
+    about?: string;
+    lud16?: string;
+    nip05?: string;
+  }) => Promise<boolean>;
   followContact: (pubkey: string) => Promise<boolean>;
   unfollowContact: (pubkey: string) => Promise<boolean>;
   addContact: (npubOrHex: string) => Promise<{ success: boolean; error?: string }>;
@@ -399,6 +408,53 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [pubkey, isLoggedIn, signerType, relays],
   );
 
+  const publishProfile = useCallback(
+    async (profileData: {
+      name?: string;
+      display_name?: string;
+      picture?: string;
+      banner?: string;
+      about?: string;
+      lud16?: string;
+      nip05?: string;
+    }): Promise<boolean> => {
+      if (!pubkey || !isLoggedIn) return false;
+      try {
+        const event = nostrService.createProfileEvent(profileData);
+        const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+        const targetRelays = writeRelays.length > 0 ? writeRelays : nostrService.DEFAULT_RELAYS;
+
+        if (signerType === 'nsec') {
+          const nsec = await SecureStore.getItemAsync(NSEC_KEY);
+          if (!nsec) return false;
+          const { secretKey } = nostrService.decodeNsec(nsec);
+          await nostrService.signAndPublishEvent(event, secretKey, targetRelays);
+        } else if (signerType === 'amber') {
+          const eventJson = JSON.stringify(event);
+          const { event: signedEventJson } = await amberService.requestEventSignature(
+            eventJson,
+            '',
+            pubkey,
+          );
+          if (!signedEventJson) return false;
+          const signed = JSON.parse(signedEventJson);
+          await nostrService.publishSignedEvent(signed, targetRelays);
+        }
+
+        // Refresh profile to pick up changes
+        const readRelays = getReadRelays();
+        const updated = await nostrService.fetchProfile(pubkey, readRelays);
+        if (updated) setProfile(updated);
+
+        return true;
+      } catch (error) {
+        console.warn('Failed to publish profile:', error);
+        return false;
+      }
+    },
+    [pubkey, isLoggedIn, signerType, relays, getReadRelays],
+  );
+
   const followContact = useCallback(
     async (contactPubkey: string): Promise<boolean> => {
       if (contacts.some((c) => c.pubkey === contactPubkey)) return true; // already following
@@ -484,6 +540,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       refreshProfile,
       refreshContacts,
       signZapRequest,
+      publishProfile,
       followContact,
       unfollowContact,
       addContact,
@@ -501,6 +558,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       refreshProfile,
       refreshContacts,
       signZapRequest,
+      publishProfile,
       followContact,
       unfollowContact,
       addContact,

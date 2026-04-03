@@ -1,5 +1,5 @@
 import { SimplePool } from 'nostr-tools/pool';
-import { getPublicKey, finalizeEvent } from 'nostr-tools/pure';
+import { generateSecretKey, getPublicKey, finalizeEvent } from 'nostr-tools/pure';
 import * as nip19 from 'nostr-tools/nip19';
 import type { NostrProfile, NostrContact, RelayConfig } from '../types/nostr';
 
@@ -269,6 +269,35 @@ export function createContactListEvent(
     tags,
     content: '',
   };
+}
+
+export function createProfileEvent(profileData: {
+  name?: string;
+  display_name?: string;
+  picture?: string;
+  banner?: string;
+  about?: string;
+  lud16?: string;
+  nip05?: string;
+}): { kind: number; created_at: number; tags: string[][]; content: string } {
+  // Remove undefined/empty values
+  const cleaned: Record<string, string> = {};
+  for (const [key, value] of Object.entries(profileData)) {
+    if (value) cleaned[key] = value;
+  }
+  return {
+    kind: 0,
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [],
+    content: JSON.stringify(cleaned),
+  };
+}
+
+export function generateKeypair(): { secretKey: Uint8Array; pubkey: string; nsec: string } {
+  const secretKey = generateSecretKey();
+  const pubkey = getPublicKey(secretKey);
+  const nsec = nip19.nsecEncode(secretKey);
+  return { secretKey, pubkey, nsec };
 }
 
 const connectedRelays = new Set<string>();

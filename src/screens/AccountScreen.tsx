@@ -23,6 +23,7 @@ import { colors } from '../styles/theme';
 import { CURRENCIES } from '../services/fiatService';
 import CopyIcon from '../components/icons/CopyIcon';
 import NostrLoginSheet from '../components/NostrLoginSheet';
+import EditProfileSheet from '../components/EditProfileSheet';
 import QrSheet from '../components/QrSheet';
 import type { MainTabParamList } from '../navigation/types';
 
@@ -57,6 +58,7 @@ const AccountScreen: React.FC = () => {
   const [nameInput, setNameInput] = useState(userName);
   const [lnAddressInput, setLnAddressInput] = useState(lightningAddress || '');
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
+  const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [qrSheetOpen, setQrSheetOpen] = useState(false);
   const [qrDefaultMode, setQrDefaultMode] = useState<'npub' | 'lightning'>('npub');
   const scrollRef = useRef<ScrollView>(null);
@@ -221,6 +223,15 @@ const AccountScreen: React.FC = () => {
             )}
 
             <TouchableOpacity
+              style={styles.editProfileButton}
+              onPress={() => setEditProfileOpen(true)}
+              accessibilityLabel="Edit Profile"
+              testID="edit-profile-button"
+            >
+              <Text style={styles.editProfileButtonText}>Edit Profile</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
               style={styles.logoutButton}
               onPress={handleLogout}
               accessibilityLabel="Logout"
@@ -331,6 +342,7 @@ const AccountScreen: React.FC = () => {
       </ScrollView>
 
       <NostrLoginSheet visible={loginSheetOpen} onClose={() => setLoginSheetOpen(false)} />
+      <EditProfileSheet visible={editProfileOpen} onClose={() => setEditProfileOpen(false)} />
       {profile?.npub && (
         <QrSheet
           visible={qrSheetOpen}
@@ -451,9 +463,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 12,
   },
+  editProfileButton: {
+    margin: 16,
+    marginBottom: 0,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: colors.white,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: colors.brandPink,
+  },
+  editProfileButtonText: {
+    color: colors.brandPink,
+    fontSize: 14,
+    fontWeight: '600',
+  },
   logoutButton: {
     margin: 16,
-    marginTop: 4,
+    marginTop: 8,
     height: 44,
     borderRadius: 10,
     backgroundColor: colors.brandPink,
