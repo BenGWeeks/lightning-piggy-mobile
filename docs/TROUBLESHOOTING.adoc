@@ -30,4 +30,25 @@
 
 | Claude Code warns "image exceeds the dimension limit for many-image requests (2000px)"
 | Screenshots captured with `adb exec-out screencap -p` can exceed 2000px on high-DPI devices. Before sending to Claude, resize: `adb exec-out screencap -p > /tmp/screen.png && convert /tmp/screen.png -resize 1200x1200\> /tmp/screen_small.png`. Or run `/compact` to clear old images from context, or start a new conversation.
+
+| Maestro `inputText` doesn't update React state in `BottomSheetTextInput`
+| `BottomSheetTextInput` from `@gorhom/bottom-sheet` doesn't always trigger `onChangeText` when Maestro uses `inputText`. The text appears visually in the input but the React state stays empty, causing validation to fail. **Do not** replace with regular `TextInput` — the bottom sheet needs its own input to adjust when the keyboard opens. Workarounds: (1) Use Maestro's clipboard paste approach, (2) tap the input field first to ensure focus before typing, (3) accept intermittent flakiness — the first test run in a session usually works.
+
+| Maestro carousel swipes trigger notification shade or leave the app
+| Horizontal swipes at the top of the screen (y < 25%) can pull down the notification shade or swipe away the app. Use `y: 30%` or higher for carousel swipes. The wallet carousel sits at roughly 15-25% from the top, so swipe at `start: 85%, 30%` / `end: 15%, 30%` to target it safely.
+
+| `tiny-secp256k1` fails to resolve in React Native (WASM not supported)
+| Hermes doesn't support WebAssembly. Use `@bitcoinerlab/secp256k1` (pure JS) instead. This is the same approach used by BlueWallet. See `metro.config.js` for the custom resolver needed for `@noble/curves` ESM exports.
+
+| Metro can't resolve `@noble/curves/secp256k1` or `@noble/hashes/sha2`
+| These packages use ESM `exports` maps with `.js` extensions that Metro doesn't handle by default. Add a custom resolver in `metro.config.js` that appends `.js` to `@noble/*` subpath imports. Also add `'cjs'` to `resolver.sourceExts` for `bitcoinjs-lib`'s CommonJS entry point.
+
+| `Buffer.equals is not a function` in React Native
+| The `buffer` npm polyfill doesn't implement all Node.js Buffer methods. Use `Uint8Array` operations or hex string comparison instead of `Buffer.equals()`, `Buffer.copy()`, etc.
+
+| `Invalid network version` when importing zpub or ypub
+| `bip32.fromBase58()` only recognises `xpub` version bytes by default. Convert zpub/ypub to xpub by swapping the 4-byte version prefix (see `toXpub()` in `onchainService.ts`). The key data is identical across all three formats.
+
+| Maestro `clearState` wipes all app data (wallets, Nostr login, settings)
+| `clearState` deletes AsyncStorage and SecureStore. Only use it when you want a truly fresh install. For tests that need existing wallets, use `launchApp` without `clearState`.
 |===
