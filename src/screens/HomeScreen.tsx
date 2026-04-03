@@ -77,8 +77,7 @@ const HomeScreen: React.FC = () => {
   }, [activeWalletId]);
 
   const fetchData = useCallback(async () => {
-    await refreshActiveBalance();
-    await fetchTransactions();
+    await Promise.all([refreshActiveBalance(), fetchTransactions()]);
   }, [refreshActiveBalance, fetchTransactions]);
 
   useEffect(() => {
