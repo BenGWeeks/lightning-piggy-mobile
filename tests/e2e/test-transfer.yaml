@@ -36,7 +36,6 @@ name: Transfer Between Wallets Test
     timeout: 1000
 - tapOn:
     text: 'Wallet 2.*'
-    optional: true
 - waitForAnimationToEnd:
     timeout: 1000
 

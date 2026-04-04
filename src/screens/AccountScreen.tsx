@@ -22,6 +22,7 @@ import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
 import { CURRENCIES } from '../services/fiatService';
 import { getElectrumServer, setElectrumServer } from '../services/walletStorageService';
+import { disconnectElectrum } from '../services/onchainService';
 import CopyIcon from '../components/icons/CopyIcon';
 import NostrLoginSheet from '../components/NostrLoginSheet';
 import EditProfileSheet from '../components/EditProfileSheet';
@@ -84,6 +85,7 @@ const AccountScreen: React.FC = () => {
     setElectrumHostPort(hostPort);
     const value = `${hostPort}:${electrumSSL ? 's' : 't'}`;
     await setElectrumServer(value);
+    disconnectElectrum(); // Force reconnect to new server on next sync
   };
 
   useEffect(() => {
@@ -329,6 +331,7 @@ const AccountScreen: React.FC = () => {
                   // Auto-save when toggling
                   const hostPort = electrumHostPort.trim() || 'electrum.blockstream.info:50002';
                   setElectrumServer(`${hostPort}:${!electrumSSL ? 's' : 't'}`);
+                  disconnectElectrum();
                 }}
                 testID="electrum-ssl-toggle"
                 accessibilityLabel="Use SSL"

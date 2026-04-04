@@ -97,10 +97,16 @@ const HomeScreen: React.FC = () => {
 
   // Transactions from the active wallet (owned by WalletContext)
   const transactions = activeWallet?.transactions ?? [];
-  const loadingTransactions = isWalletAvailable && transactions.length === 0;
+  const fetchedWallets = useRef<Set<string>>(new Set());
+
+  // Show spinner only while first fetch is in progress (not for zero-tx wallets)
+  const loadingTransactions =
+    isWalletAvailable &&
+    transactions.length === 0 &&
+    activeWalletId != null &&
+    !fetchedWallets.current.has(activeWalletId);
 
   // Fetch fresh data once per wallet (not on every swipe back)
-  const fetchedWallets = useRef<Set<string>>(new Set());
   useEffect(() => {
     // Clear refresh spinner when wallet changes (don't carry over from previous wallet)
     setRefreshing(false);

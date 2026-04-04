@@ -190,10 +190,15 @@ export async function waitForLockup(
     const data = await res.json();
 
     if (data.status === 'transaction.mempool' || data.status === 'transaction.confirmed') {
+      const txId = data.transaction?.id;
+      const amount = data.onchainAmount;
+      if (!txId || !amount) {
+        throw new Error(`Boltz lockup missing transaction data: txId=${txId}, amount=${amount}`);
+      }
       return {
-        txId: data.transaction?.id ?? '',
+        txId,
         vout: data.transaction?.index ?? 0,
-        amount: data.onchainAmount ?? 0,
+        amount,
       };
     }
 
