@@ -18,6 +18,10 @@ import { getXpub, getElectrumServer } from './walletStorageService';
 
 const bip32 = BIP32Factory(ecc);
 
+// Rate limiting for mempool.space API (max ~10 requests/second)
+const BATCH_SIZE = 5;
+const BATCH_DELAY_MS = 500;
+
 // Version byte hex strings for extended public key prefixes
 const YPUB_HEX = '049d7cb2'; // ypub (BIP-49)
 const ZPUB_HEX = '04b24746'; // zpub (BIP-84)
@@ -169,21 +173,29 @@ export async function getBalance(walletId: string): Promise<number | null> {
   try {
     const addresses = await getDerivedAddresses(walletId, 20);
     const base = await apiBase(walletId);
+    let total = 0;
 
-    // Batch all address UTXO lookups in parallel
-    const results = await Promise.all(
-      addresses.map(async (addr) => {
-        try {
-          const res = await fetch(`${base}/address/${addr}/utxo`);
-          if (!res.ok) return 0;
-          const utxos: MempoolUtxo[] = await res.json();
-          return utxos.reduce((sum, utxo) => sum + utxo.value, 0);
-        } catch {
-          return 0;
-        }
-      }),
-    );
-    return results.reduce((sum, v) => sum + v, 0);
+    // Batch in groups of 5 to avoid mempool.space rate limiting
+    for (let i = 0; i < addresses.length; i += BATCH_SIZE) {
+      const batch = addresses.slice(i, i + BATCH_SIZE);
+      const results = await Promise.all(
+        batch.map(async (addr) => {
+          try {
+            const res = await fetch(`${base}/address/${addr}/utxo`);
+            if (!res.ok) return 0;
+            const utxos: MempoolUtxo[] = await res.json();
+            return utxos.reduce((sum, utxo) => sum + utxo.value, 0);
+          } catch {
+            return 0;
+          }
+        }),
+      );
+      total += results.reduce((sum, v) => sum + v, 0);
+      if (i + BATCH_SIZE < addresses.length) {
+        await new Promise((r) => setTimeout(r, BATCH_DELAY_MS));
+      }
+    }
+    return total;
   } catch (e) {
     console.warn('onchainService.getBalance failed:', e);
     return null;
@@ -200,18 +212,26 @@ export async function getTransactions(walletId: string): Promise<OnchainTransact
     const base = await apiBase(walletId);
     const txMap = new Map<string, OnchainTransaction>();
 
-    // Batch all address tx lookups in parallel
-    const allTxResults = await Promise.all(
-      addresses.map(async (addr) => {
-        try {
-          const res = await fetch(`${base}/address/${addr}/txs`);
-          if (!res.ok) return [];
-          return (await res.json()) as MempoolTx[];
-        } catch {
-          return [];
-        }
-      }),
-    );
+    // Batch in groups of 5 to avoid mempool.space rate limiting
+    const allTxResults: MempoolTx[][] = [];
+    for (let i = 0; i < addresses.length; i += BATCH_SIZE) {
+      const batch = addresses.slice(i, i + BATCH_SIZE);
+      const batchResults = await Promise.all(
+        batch.map(async (addr) => {
+          try {
+            const res = await fetch(`${base}/address/${addr}/txs`);
+            if (!res.ok) return [];
+            return (await res.json()) as MempoolTx[];
+          } catch {
+            return [];
+          }
+        }),
+      );
+      allTxResults.push(...batchResults);
+      if (i + BATCH_SIZE < addresses.length) {
+        await new Promise((r) => setTimeout(r, BATCH_DELAY_MS));
+      }
+    }
 
     for (const txs of allTxResults) {
       for (const tx of txs) {
