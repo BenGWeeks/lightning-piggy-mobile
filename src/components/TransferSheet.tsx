@@ -194,19 +194,17 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         await payInvoiceForWallet(sourceId, invoice);
       } else if (transferType === 'ln-to-onchain') {
         // Full Boltz reverse swap: LN → on-chain
-        const address = await onchainService.getCurrentReceiveAddress(destId);
+        const address = await onchainService.getNextReceiveAddress(destId);
         const swap = await boltzService.createReverseSwap(address, currentSats);
 
         // Step 1: Pay the Lightning invoice
         await payInvoiceForWallet(sourceId, swap.invoice);
 
         // Step 2: Wait for Boltz to lock BTC on-chain (polls every 3s)
-        await boltzService.waitForLockup(swap.id, 120000);
+        const lockup = await boltzService.waitForLockup(swap.id, 120000);
 
-        // Note: The claim transaction construction will be added in a
-        // follow-up. For now, Boltz's Protocol 11 fallback will send
-        // funds to the claimAddress after the timeout period.
-        // TODO: Construct and broadcast script-path claim tx for ~10 min settlement.
+        // Step 3: Build and broadcast the script-path claim transaction
+        await boltzService.claimSwap(swap, lockup, address);
       }
 
       // Refresh both balances

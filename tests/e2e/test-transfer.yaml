@@ -29,21 +29,11 @@ name: Transfer Between Wallets Test
 - waitForAnimationToEnd:
     timeout: 3000
 
-# Select destination wallet — tap the "To" dropdown and pick Wallet 2
+# Select destination wallet — open dropdown and pick Wallet 2
 - tapOn:
-    text: 'To'
+    id: 'transfer-dest-dropdown'
 - waitForAnimationToEnd:
     timeout: 1000
-
-# Tap on the To dropdown to open it
-- swipe:
-    start: 50%, 60%
-    end: 50%, 50%
-    duration: 200
-- waitForAnimationToEnd:
-    timeout: 500
-
-# Look for Wallet 2 in the dropdown
 - tapOn:
     text: 'Wallet 2.*'
     optional: true

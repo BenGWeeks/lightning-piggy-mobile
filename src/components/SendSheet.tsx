@@ -286,14 +286,16 @@ const SendSheet: React.FC<Props> = ({
     setSending(true);
     try {
       if (isOnchainAddress) {
-        // Boltz submarine swap: Lightning → on-chain
+        // Boltz reverse swap: Lightning → on-chain
         if (currentSats <= 0) {
           Alert.alert('Error', 'Please enter an amount.');
           setSending(false);
           return;
         }
-        const swap = await boltzService.createSubmarineSwap(invoiceData, currentSats);
+        const swap = await boltzService.createReverseSwap(invoiceData, currentSats);
         await payInvoiceForWallet(walletId!, swap.invoice);
+        const lockup = await boltzService.waitForLockup(swap.id, 120000);
+        await boltzService.claimSwap(swap, lockup, invoiceData);
       } else if (isLightningAddress(invoiceData)) {
         if (!lnurlParams) {
           Alert.alert('Error', 'Lightning address not resolved yet. Please wait.');

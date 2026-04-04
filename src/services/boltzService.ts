@@ -210,6 +210,87 @@ export async function waitForLockup(
 }
 
 /**
+ * Build and broadcast a script-path claim transaction for a reverse swap.
+ *
+ * After Boltz locks BTC on-chain in a Taproot HTLC, we claim it by
+ * revealing the preimage and signing with our claim key via script-path.
+ */
+export async function claimSwap(
+  swap: ReverseSwapResult,
+  lockup: { txId: string; vout: number; amount: number },
+  destinationAddress: string,
+  feeRate: number = 2,
+): Promise<string> {
+  // Use ecc (already imported) for Schnorr signing
+
+  const claimScript = Buffer.from(swap.swapTree.claimLeaf.output, 'hex');
+  const refundScript = Buffer.from(swap.swapTree.refundLeaf.output, 'hex');
+  const claimPrivKey = Buffer.from(swap.claimPrivateKey, 'hex');
+  const preimageBytes = Buffer.from(swap.preimage, 'hex');
+  const refundPubKey = Buffer.from(swap.refundPublicKey, 'hex');
+  const claimLeafVersion = swap.swapTree.claimLeaf.version ?? 0xc0;
+  const refundLeafVersion = swap.swapTree.refundLeaf.version ?? 0xc0;
+
+  // Estimate fee (~150 vbytes for 1-in-1-out Taproot script-path)
+  const fee = Math.ceil(150 * feeRate);
+  const outputAmount = lockup.amount - fee;
+  if (outputAmount <= 546) {
+    throw new Error(`Claim amount (${lockup.amount}) too small after fee (${fee})`);
+  }
+
+  // Build transaction
+  const tx = new bitcoin.Transaction();
+  tx.version = 2;
+  tx.addInput(Buffer.from(lockup.txId, 'hex').reverse(), lockup.vout, 0xfffffffd);
+  tx.addOutput(bitcoin.address.toOutputScript(destinationAddress), BigInt(outputAmount));
+
+  // Compute tapleaf hashes
+  const claimLeafHash = bitcoin.crypto.taggedHash(
+    'TapLeaf',
+    Buffer.concat([
+      Buffer.from([claimLeafVersion]),
+      Buffer.concat([Buffer.from([claimScript.length]), claimScript]),
+    ]),
+  );
+  const refundLeafHash = bitcoin.crypto.taggedHash(
+    'TapLeaf',
+    Buffer.concat([
+      Buffer.from([refundLeafVersion]),
+      Buffer.concat([Buffer.from([refundScript.length]), refundScript]),
+    ]),
+  );
+
+  // x-only internal key (Boltz's refund pubkey)
+  const internalKey = refundPubKey.length === 33 ? refundPubKey.subarray(1) : refundPubKey;
+
+  // Control block: <leaf_version | parity> <internal_key> <merkle_sibling>
+  const controlBlock = Buffer.concat([
+    Buffer.from([claimLeafVersion]), // parity bit 0
+    internalKey,
+    refundLeafHash, // merkle proof (sibling of claim leaf)
+  ]);
+
+  // Compute sighash for Taproot script-path (BIP-341)
+  const prevOutScript = bitcoin.address.toOutputScript(swap.lockupAddress);
+  const sighash = tx.hashForWitnessV1(
+    0,
+    [prevOutScript],
+    [BigInt(lockup.amount)],
+    0x01, // SIGHASH_ALL
+    claimLeafHash,
+  );
+
+  // Schnorr sign using @bitcoinerlab/secp256k1
+  const sig = ecc.signSchnorr(new Uint8Array(sighash), new Uint8Array(claimPrivKey));
+  const sigWithType = Buffer.concat([Buffer.from(sig), Buffer.from([0x01])]);
+
+  // Set witness: <sig> <preimage> <claim_script> <control_block>
+  tx.setWitness(0, [sigWithType, preimageBytes, claimScript, controlBlock]);
+
+  return broadcastTransaction(tx.toHex());
+}
+
+/**
  * Broadcast a raw transaction via mempool.space API.
  */
 export async function broadcastTransaction(txHex: string): Promise<string> {

@@ -7,7 +7,7 @@ config.resolver.sourceExts = [...(config.resolver.sourceExts || []), 'cjs'];
 
 // Custom resolver for @noble/curves and @noble/hashes which use ESM exports
 // maps with .js extensions that Metro can't resolve by default.
-// We rewrite the module name to include .js and let Metro resolve normally.
+// We rewrite the module name to include .js and delegate to the original resolver.
 const originalResolveRequest = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   // Handle @noble/curves/* and @noble/hashes/* imports without .js extension
@@ -15,6 +15,11 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   const nobleMatch = moduleName.match(/^(@noble\/(curves|hashes)\/.+)$/);
   if (nobleMatch && !moduleName.endsWith('.js')) {
     const rewritten = moduleName + '.js';
+    // Use the original resolver (not context.resolveRequest) to avoid
+    // recursion through this custom resolver.
+    if (originalResolveRequest) {
+      return originalResolveRequest(context, rewritten, platform);
+    }
     return context.resolveRequest(context, rewritten, platform);
   }
 
