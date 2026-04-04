@@ -102,6 +102,13 @@ async function getElectrumClient(): Promise<any> {
   const serverStr = await getElectrumServer();
   const { host, port, protocol } = parseElectrumServer(serverStr);
 
+  // Close any existing stale connection
+  if (electrumClient) {
+    try {
+      electrumClient.close();
+    } catch {}
+  }
+
   electrumClient = new ElectrumClient(
     TcpSocket, // net module
     TcpSocket, // tls module (react-native-tcp-socket handles both)
@@ -109,6 +116,12 @@ async function getElectrumClient(): Promise<any> {
     host,
     protocol === 's' ? 'tls' : 'tcp',
   );
+
+  // Handle connection errors — mark as disconnected so next call reconnects
+  electrumClient.onError = () => {
+    electrumConnected = false;
+  };
+
   await electrumClient.connect('lightning-piggy', '1.4');
   electrumConnected = true;
 
@@ -236,40 +249,15 @@ export async function getTransactions(walletId: string): Promise<OnchainTransact
       for (const item of history) {
         if (txMap.has(item.tx_hash)) continue;
 
-        // Get full transaction to determine amount and direction
-        const txHex = await client.blockchainTransaction_get(item.tx_hash, true);
-
-        // Calculate net value for this wallet
-        let inputSum = 0;
-        let outputSum = 0;
-        const addressSet = new Set(addresses);
-
-        if (txHex.vin) {
-          for (const vin of txHex.vin) {
-            if (
-              vin.prevout?.scriptPubKey?.address &&
-              addressSet.has(vin.prevout.scriptPubKey.address)
-            ) {
-              inputSum += Math.round((vin.prevout.value || 0) * 1e8);
-            }
-          }
-        }
-        if (txHex.vout) {
-          for (const vout of txHex.vout) {
-            if (vout.scriptPubKey?.address && addressSet.has(vout.scriptPubKey.address)) {
-              outputSum += Math.round((vout.value || 0) * 1e8);
-            }
-          }
-        }
-
-        const net = outputSum - inputSum;
+        // Electrum history returns tx_hash + height only.
+        // Direction/amount require parsing the raw tx — deferred to #38.
         txMap.set(item.tx_hash, {
           txid: item.tx_hash,
-          type: net >= 0 ? 'incoming' : 'outgoing',
-          amount: Math.abs(net),
+          type: 'incoming', // placeholder — will be resolved in tx detail sheet
+          amount: 0,
           confirmed: item.height > 0,
           blockHeight: item.height > 0 ? item.height : null,
-          timestamp: txHex.time || txHex.blocktime || null,
+          timestamp: null,
         });
       }
     }
