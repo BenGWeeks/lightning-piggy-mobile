@@ -7,12 +7,12 @@ import {
   Alert,
   ActivityIndicator,
   BackHandler,
-  TextInput,
   Keyboard,
   TouchableWithoutFeedback,
 } from 'react-native';
 import {
   BottomSheetModal,
+  BottomSheetTextInput,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetView,
@@ -333,7 +333,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             {/* Amount input */}
             <Text style={styles.sectionLabel}>Amount</Text>
             <View style={styles.amountRow}>
-              <TextInput
+              <BottomSheetTextInput
                 style={styles.amountInput}
                 value={inputUnit === 'sats' ? satsValue : fiatValue}
                 onChangeText={inputUnit === 'sats' ? handleSatsChange : handleFiatChange}

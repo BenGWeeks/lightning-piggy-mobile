@@ -21,6 +21,7 @@
 
 import * as ecc from '@bitcoinerlab/secp256k1';
 import BIP32Factory from 'bip32';
+import * as bitcoin from 'bitcoinjs-lib';
 import { getElectrumServer } from './walletStorageService';
 
 const bip32 = BIP32Factory(ecc);
@@ -85,10 +86,9 @@ function fromHex(hex: string): Uint8Array {
   return bytes;
 }
 
-/** SHA-256 hash using Web Crypto API */
-async function sha256(data: Uint8Array): Promise<Uint8Array> {
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data.buffer as ArrayBuffer);
-  return new Uint8Array(hashBuffer);
+/** SHA-256 hash using bitcoinjs-lib's crypto (already works in RN) */
+function sha256(data: Uint8Array): Uint8Array {
+  return new Uint8Array(bitcoin.crypto.sha256(Buffer.from(data)));
 }
 
 /** Generate a claim keypair using bip32 */
@@ -144,7 +144,7 @@ export async function createReverseSwap(
   const preimageBytes = new Uint8Array(32);
   crypto.getRandomValues(preimageBytes);
   const preimage = toHex(preimageBytes);
-  const preimageHashBytes = await sha256(preimageBytes);
+  const preimageHashBytes = sha256(preimageBytes);
   const preimageHash = toHex(preimageHashBytes);
 
   // Generate temporary claim keypair
