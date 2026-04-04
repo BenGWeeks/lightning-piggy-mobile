@@ -51,4 +51,16 @@
 
 | Maestro `clearState` wipes all app data (wallets, Nostr login, settings)
 | `clearState` deletes AsyncStorage and SecureStore. Only use it when you want a truly fresh install. For tests that need existing wallets, use `launchApp` without `clearState`.
+
+| NWC "failed to publish: All promises were rejected"
+| The LNbits Nostrclient relay proxy does not send NIP-20 OK responses after receiving EVENT messages (see https://github.com/lnbits/nostrclient/issues/52[lnbits/nostrclient#52]). The `@getalby/sdk` uses `nostr-tools` `SimplePool.publish()` which waits for an OK response from the relay — when none comes, it times out (4.4s) and rejects with `AggregateError`. +
+*Fix:* `nwcService.ts` monkey-patches the relay pool's `publish` method to resolve immediately (fire-and-forget) since the NWC response comes back via the subscription, not the OK acknowledgement. This patch is applied during `connect()`.
+
+| NWC "reply timeout" after publish succeeds
+| The NWC request event was published to the relay but the wallet's response didn't arrive within the SDK's reply timeout (~10s). This can happen when the LNbits NWC extension is slow to process requests, or the relay is slow to forward the response event. +
+*Workaround:* The `withRetry` helper retries with exponential backoff (2s, 4s, 8s). If persistent, check the LNbits NWC extension is running and the Nostrclient relay has active upstream relay connections (green status indicators in the Nostrclient admin).
+
+| NWC relay intermittently drops WebSocket connections
+| The `@getalby/sdk` opens a WebSocket to the NWC relay during `enable()`. If the connection drops (idle timeout, network change), all subsequent requests fail with "failed to publish". +
+*Fix:* `nwcService.ts` detects publish failures and automatically reconnects by creating a fresh `NostrWebLNProvider` with the stored NWC URL. The reconnect logic is in `getBalance()`, `payInvoice()`, and `listTransactions()`.
 |===
