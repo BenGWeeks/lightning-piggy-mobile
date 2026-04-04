@@ -66,7 +66,8 @@ const AccountScreen: React.FC = () => {
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [qrSheetOpen, setQrSheetOpen] = useState(false);
   const [qrDefaultMode, setQrDefaultMode] = useState<'npub' | 'lightning'>('npub');
-  const [electrumServer, setElectrumServerState] = useState(DEFAULT_ELECTRUM_SERVER);
+  const [electrumHostPort, setElectrumHostPort] = useState('electrum.blockstream.info:50002');
+  const [electrumSSL, setElectrumSSL] = useState(true);
   const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -74,12 +75,18 @@ const AccountScreen: React.FC = () => {
   }, [userName]);
 
   useEffect(() => {
-    getElectrumServer().then(setElectrumServerState);
+    getElectrumServer().then((server) => {
+      const parts = server.split(':');
+      const protocol = parts.pop(); // 's' or 't'
+      setElectrumHostPort(parts.join(':'));
+      setElectrumSSL(protocol === 's');
+    });
   }, []);
 
   const handleElectrumSave = async () => {
-    const value = electrumServer.trim() || DEFAULT_ELECTRUM_SERVER;
-    setElectrumServerState(value);
+    const hostPort = electrumHostPort.trim() || 'electrum.blockstream.info:50002';
+    setElectrumHostPort(hostPort);
+    const value = `${hostPort}:${electrumSSL ? 's' : 't'}`;
     await setElectrumServer(value);
   };
 
@@ -307,8 +314,8 @@ const AccountScreen: React.FC = () => {
             <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Electrum Server</Text>
             <TextInput
               style={styles.textInput}
-              value={electrumServer.replace(/:s$|:t$/, '')}
-              onChangeText={(text) => setElectrumServerState(text + ':s')}
+              value={electrumHostPort}
+              onChangeText={setElectrumHostPort}
               placeholder="electrum.blockstream.info:50002"
               placeholderTextColor={colors.textSupplementary}
               autoCapitalize="none"
@@ -317,9 +324,22 @@ const AccountScreen: React.FC = () => {
               testID="electrum-server-input"
               accessibilityLabel="Electrum server"
             />
-            <Text style={styles.fieldHint}>
-              SSL connection (port 50002). Default: electrum.blockstream.info:50002
-            </Text>
+            <View style={styles.sslRow}>
+              <Text style={styles.sslLabel}>Use SSL</Text>
+              <TouchableOpacity
+                style={[styles.sslToggle, electrumSSL && styles.sslToggleActive]}
+                onPress={() => {
+                  setElectrumSSL(!electrumSSL);
+                  // Auto-save when toggling
+                  const hostPort = electrumHostPort.trim() || 'electrum.blockstream.info:50002';
+                  setElectrumServer(`${hostPort}:${!electrumSSL ? 's' : 't'}`);
+                }}
+                testID="electrum-ssl-toggle"
+                accessibilityLabel="Use SSL"
+              >
+                <View style={[styles.sslToggleThumb, electrumSSL && styles.sslToggleThumbActive]} />
+              </TouchableOpacity>
+            </View>
           </>
         )}
 
@@ -580,6 +600,38 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.6)',
     fontSize: 12,
     marginTop: 4,
+  },
+  sslRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+    paddingHorizontal: 4,
+  },
+  sslLabel: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  sslToggle: {
+    width: 48,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+  sslToggleActive: {
+    backgroundColor: '#4CAF50',
+  },
+  sslToggleThumb: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.white,
+  },
+  sslToggleThumbActive: {
+    alignSelf: 'flex-end',
   },
   lnAddressRow: {
     flexDirection: 'row',
