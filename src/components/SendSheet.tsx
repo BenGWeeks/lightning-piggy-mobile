@@ -631,7 +631,7 @@ const SendSheet: React.FC<Props> = ({
                     {loadingBoltzFees
                       ? 'Loading fees...'
                       : boltzFees
-                        ? `Swap fee: ~${boltzService.calculateSwapFee(currentSats, boltzFees).toLocaleString()} sats (Boltz)`
+                        ? `Swap fee: ~${boltzService.calculateSwapFee(currentSats, boltzFees).toLocaleString()} sats \u00B7 ~10-60 min (on-chain)`
                         : 'Fee estimate unavailable'}
                   </Text>
                 )}

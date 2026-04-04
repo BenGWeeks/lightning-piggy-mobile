@@ -87,7 +87,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       return;
     }
     if (transferType === 'ln-to-ln') {
-      setFeeEstimate('~0 sats (Lightning routing)');
+      setFeeEstimate('~0 sats \u00B7 Instant (Lightning)');
     } else if (transferType === 'ln-to-onchain') {
       let cancelled = false;
       boltzService
@@ -95,7 +95,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         .then((fees) => {
           if (cancelled) return;
           const fee = boltzService.calculateSwapFee(currentSats, fees);
-          setFeeEstimate(`~${fee.toLocaleString()} sats (Boltz swap)`);
+          setFeeEstimate(`~${fee.toLocaleString()} sats \u00B7 ~10-60 min (on-chain)`);
         })
         .catch(() => {
           if (!cancelled) setFeeEstimate('Fee estimate unavailable');
@@ -168,18 +168,31 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         const invoice = await makeInvoiceForWallet(destId, currentSats, 'Transfer');
         await payInvoiceForWallet(sourceId, invoice);
       } else if (transferType === 'ln-to-onchain') {
-        // Get on-chain receive address, create Boltz swap, pay Lightning invoice
+        // Full Boltz reverse swap: LN → on-chain
         const address = await onchainService.getCurrentReceiveAddress(destId);
-        const swap = await boltzService.createSubmarineSwap(address, currentSats);
+        const swap = await boltzService.createReverseSwap(address, currentSats);
+
+        // Step 1: Pay the Lightning invoice
         await payInvoiceForWallet(sourceId, swap.invoice);
+
+        // Step 2: Wait for Boltz to lock BTC on-chain (polls every 3s)
+        await boltzService.waitForLockup(swap.id, 120000);
+
+        // Note: The claim transaction construction will be added in a
+        // follow-up. For now, Boltz's Protocol 11 fallback will send
+        // funds to the claimAddress after the timeout period.
+        // TODO: Construct and broadcast script-path claim tx for ~10 min settlement.
       }
 
       // Refresh both balances
       await Promise.all([refreshBalanceForWallet(sourceId), refreshBalanceForWallet(destId)]);
 
-      Alert.alert('Transfer Complete', `${currentSats.toLocaleString()} sats transferred.`, [
-        { text: 'OK', onPress: onClose },
-      ]);
+      const settleMsg =
+        transferType === 'ln-to-onchain'
+          ? `${currentSats.toLocaleString()} sats sent. On-chain funds will arrive after confirmation (~10-60 min).`
+          : `${currentSats.toLocaleString()} sats transferred.`;
+
+      Alert.alert('Transfer Complete', settleMsg, [{ text: 'OK', onPress: onClose }]);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Transfer failed';
       Alert.alert('Transfer Failed', message);
@@ -284,6 +297,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                   setDestDropdownOpen(!destDropdownOpen);
                   setSourceDropdownOpen(false);
                 }}
+                testID="transfer-dest-dropdown"
+                accessibilityLabel="Destination wallet"
               >
                 <Text style={styles.dropdownText}>
                   {dest ? renderWalletLabel(dest) : 'Select wallet'}

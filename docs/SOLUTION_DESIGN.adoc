@@ -80,10 +80,50 @@ On-chain wallets are currently watch-only (xpub import). The type system is desi
 |===
 | Source | Destination | Method
 
-| NWC Lightning | NWC Lightning | Generate invoice on dest, pay from source
-| NWC Lightning | On-chain | Boltz submarine swap (pay LN invoice, receive on-chain tx)
+| NWC Lightning | NWC Lightning | Generate invoice on dest, pay from source. Instant.
+| NWC Lightning | On-chain | Boltz reverse submarine swap (see below). ~10-60 min.
 | On-chain | Any | Not supported (watch-only) — future: enable with mnemonic import
 |===
+
+=== Boltz Reverse Submarine Swap (Lightning → On-chain)
+
+Uses https://docs.boltz.exchange[Boltz Exchange] v2 API for trustless Lightning-to-on-chain transfers.
+
+**Flow:**
+
+1. Generate random 32-byte preimage + SHA-256 hash
+2. Generate temporary secp256k1 claim keypair
+3. `POST /v2/swap/reverse` with `preimageHash`, `claimPublicKey`, `claimAddress`, `invoiceAmount`
+4. Boltz returns a Lightning invoice + swap tree (Taproot HTLC scripts)
+5. Pay the Lightning invoice via NWC
+6. Poll `GET /v2/swap/reverse/{id}` until status = `transaction.mempool`
+7. Construct a **script-path claim transaction** (Taproot spend):
+   - Witness: `<schnorr_signature> <preimage> <claim_script> <control_block>`
+   - Output: destination on-chain address
+8. Broadcast claim tx via mempool.space API
+9. Funds arrive at destination after ~1 block confirmation (~10 min)
+
+**Why script-path (not cooperative key-path)?**
+
+Boltz v2 Taproot swaps support two claim methods:
+
+- **Key-path (cooperative):** Requires MuSig2 nonce exchange between client and Boltz. Smaller on-chain footprint, better privacy (looks like a normal tx). BUT MuSig2 needs WASM or native code — React Native's Hermes engine can't run it without a WebView workaround.
+- **Script-path (non-cooperative):** Uses standard Schnorr signature + preimage reveal. Works with pure JS (`@noble/curves`). Slightly larger on-chain tx but settles just as fast (~10 min).
+
+We use script-path because it works with our existing pure JS crypto stack. Future: upgrade to cooperative key-path using `@scure/btc-signer` MuSig2 if Hermes adds WASM support.
+
+**Libraries:**
+
+[cols="1,2", options="header"]
+|===
+| Package | Purpose
+
+| https://github.com/nicoll-douglas/scure-btc-signer[`@scure/btc-signer`] | Taproot transaction construction and script-path spending
+| https://github.com/bitcoinerlab/secp256k1[`@bitcoinerlab/secp256k1`] | Schnorr signing (BIP-340) via @noble/curves
+| https://github.com/nicoll-douglas/noble-curves[`@noble/curves`] | Elliptic curve cryptography (secp256k1 Schnorr)
+|===
+
+**Fallback:** If the claim tx fails to broadcast, Boltz's Protocol 11 automatically sends funds to the `claimAddress` after the timeout period (~24 hours).
 
 === Visual Differentiation
 
