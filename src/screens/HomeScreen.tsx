@@ -137,15 +137,23 @@ const HomeScreen: React.FC = () => {
   // Fetch data once when wallet becomes available or wallet changes.
   // Uses a ref to track the last fetched state and avoid re-fetching
   // when unrelated wallet state (balance, etc.) changes.
+  // Show cached transactions immediately when active wallet changes
+  useEffect(() => {
+    if (activeWalletId) {
+      const cached = txCache.current.get(activeWalletId);
+      setTransactions(cached || []);
+      if (!cached) setLoadingTransactions(true);
+    } else {
+      setTransactions([]);
+    }
+  }, [activeWalletId]);
+
+  // Fetch fresh data when wallet becomes available
   const lastFetchKey = useRef<string | null>(null);
   useEffect(() => {
     const fetchKey = `${activeWalletId}-${isWalletAvailable}`;
     if (isWalletAvailable && fetchKey !== lastFetchKey.current) {
       lastFetchKey.current = fetchKey;
-      // Show cached transactions immediately, or clear + show spinner
-      const cached = activeWalletId ? txCache.current.get(activeWalletId) : null;
-      setTransactions(cached || []);
-      if (!cached) setLoadingTransactions(true);
       fetchData();
     } else if (!isWalletAvailable) {
       lastFetchKey.current = null;
