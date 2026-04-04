@@ -102,6 +102,8 @@ const HomeScreen: React.FC = () => {
   // Fetch fresh data once per wallet (not on every swipe back)
   const fetchedWallets = useRef<Set<string>>(new Set());
   useEffect(() => {
+    // Clear refresh spinner when wallet changes (don't carry over from previous wallet)
+    setRefreshing(false);
     if (isWalletAvailable && activeWalletId && !fetchedWallets.current.has(activeWalletId)) {
       fetchedWallets.current.add(activeWalletId);
       fetchData();
