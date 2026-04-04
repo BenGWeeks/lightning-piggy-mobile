@@ -111,8 +111,12 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       // Default: first NWC wallet as source
       const defaultSource = sourceWallets.length > 0 ? sourceWallets[0].id : null;
       setSourceId(defaultSource);
-      // Default dest: first wallet that isn't the source
-      const defaultDest = wallets.find((w) => w.id !== defaultSource)?.id ?? null;
+      // Default dest: prefer another NWC wallet over on-chain (simpler fee)
+      const defaultDest =
+        wallets.find((w) => w.id !== defaultSource && w.walletType === 'nwc' && w.isConnected)
+          ?.id ??
+        wallets.find((w) => w.id !== defaultSource)?.id ??
+        null;
       setDestId(defaultDest);
       setSatsValue('');
       setFiatValue('');
