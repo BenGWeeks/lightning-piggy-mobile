@@ -24,6 +24,7 @@
     "@scure/btc-signer": "^2.0.1",
     "@shopify/flash-list": "^2.3.1",
     "babel-preset-expo": "~55.0.8",
+    "bdk-rn": "github:BenGWeeks/bdk-rn#fix/rn083-gettype-compat",
     "bip32": "^5.0.1",
     "bitcoinjs-lib": "^7.0.1",
     "buffer": "^6.0.3",
