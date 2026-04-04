@@ -67,6 +67,32 @@ export async function connect(
       nostrWalletConnectUrl: nwcUrl.trim(),
     });
 
+    // Patch relay pool to not wait for NIP-20 OK responses.
+    // The LNbits Nostrclient relay proxy doesn't send OK responses
+    // (see https://github.com/lnbits/nostrclient/issues/52),
+    // causing every publish to timeout. This patches the relay's
+    // publish method to resolve immediately after sending.
+    try {
+      const pool = (provider as any).client?.pool;
+      if (pool) {
+        const origEnsureRelay = pool.ensureRelay.bind(pool);
+        pool.ensureRelay = async (url: string, opts?: any) => {
+          const relay = await origEnsureRelay(url, opts);
+          if (relay && !relay._publishPatched) {
+            relay._publishPatched = true;
+            const origPublish = relay.publish.bind(relay);
+            relay.publish = (event: any) => {
+              origPublish(event).catch(() => {}); // fire and forget
+              return Promise.resolve(); // resolve immediately
+            };
+          }
+          return relay;
+        };
+      }
+    } catch {
+      // If patching fails, continue with default behavior
+    }
+
     await withRetry(() => provider.enable(), { label: 'connect', attempts: 3, delayMs: 2000 });
 
     // Allow relay connection to stabilize before first request
