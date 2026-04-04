@@ -1,0 +1,58 @@
+appId: com.anonymous.lightningpiggyapp
+name: Wallet Swipe Speed Test
+---
+# Tests that swiping between wallets updates transactions quickly.
+# Requires at least 1 NWC wallet + 1 on-chain wallet.
+# Run: maestro test tests/e2e/test-swipe-speed.yaml
+
+# Wait for app to be ready and wallets to connect
+- waitForAnimationToEnd:
+    timeout: 25000
+
+# Verify we're on a wallet with transactions
+- extendedWaitUntil:
+    visible:
+      text: 'Connected'
+    timeout: 20000
+
+# Swipe to next wallet
+- swipe:
+    start: 85%, 30%
+    end: 15%, 30%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Transactions or "No transactions yet" should appear within 3 seconds
+# (from cache or quick NWC fetch — not a full Electrum re-sync)
+- extendedWaitUntil:
+    visible:
+      text: '(Received|Sent|No transactions yet|sats)'
+    timeout: 3000
+
+# Swipe back to previous wallet
+- swipe:
+    start: 15%, 30%
+    end: 85%, 30%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Previous wallet's transactions should appear within 3 seconds (from cache)
+- extendedWaitUntil:
+    visible:
+      text: '(Received|Sent|No transactions yet|sats)'
+    timeout: 3000
+
+# Swipe forward again — should be instant from cache
+- swipe:
+    start: 85%, 30%
+    end: 15%, 30%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- extendedWaitUntil:
+    visible:
+      text: '(Received|Sent|No transactions yet|sats)'
+    timeout: 2000

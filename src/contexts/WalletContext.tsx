@@ -426,8 +426,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       try {
         let txs: WalletTransaction[];
         if (wallet.walletType === 'onchain') {
-          const raw = await onchainService.getTransactions(walletId);
-          txs = raw.map((tx) => ({
+          // Single sync for both balance + transactions (avoids double Electrum sync)
+          const result = await onchainService.syncAndRefresh(walletId);
+          if (result.balance !== null) {
+            updateWalletInState(walletId, { balance: result.balance });
+          }
+          txs = result.transactions.map((tx) => ({
             type: tx.type,
             amount: tx.amount,
             description: tx.type === 'incoming' ? 'Received' : 'Sent',

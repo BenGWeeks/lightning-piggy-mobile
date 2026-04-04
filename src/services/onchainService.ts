@@ -140,18 +140,51 @@ export async function getCurrentReceiveAddress(walletId: string): Promise<string
   return await info.address.asString();
 }
 
-export async function getBalance(walletId: string): Promise<number | null> {
+/**
+ * Sync once and return both balance and transactions.
+ * Avoids double Electrum sync when fetching both.
+ */
+export async function syncAndRefresh(
+  walletId: string,
+): Promise<{ balance: number | null; transactions: OnchainTransaction[] }> {
   try {
     const wallet = await getBdkWallet(walletId);
     const chain = await getBlockchain();
     await wallet.sync(chain);
-    const balance = await wallet.getBalance();
-    return balance.total;
+
+    const bal = await wallet.getBalance();
+    const txList = await wallet.listTransactions(false);
+
+    const transactions = txList
+      .map((tx) => {
+        const net = tx.received - tx.sent;
+        return {
+          txid: tx.txid,
+          type: net >= 0 ? ('incoming' as const) : ('outgoing' as const),
+          amount: Math.abs(net),
+          confirmed: tx.confirmationTime != null,
+          blockHeight: tx.confirmationTime?.height ?? null,
+          timestamp: tx.confirmationTime?.timestamp ?? null,
+        };
+      })
+      .sort((a, b) => {
+        if (a.timestamp === null && b.timestamp === null) return 0;
+        if (a.timestamp === null) return -1;
+        if (b.timestamp === null) return 1;
+        return b.timestamp - a.timestamp;
+      });
+
+    return { balance: bal.total, transactions };
   } catch (e) {
-    console.warn('onchainService.getBalance failed:', e);
+    console.warn('onchainService.syncAndRefresh failed:', e);
     blockchain = null;
-    return null;
+    return { balance: null, transactions: [] };
   }
+}
+
+export async function getBalance(walletId: string): Promise<number | null> {
+  const result = await syncAndRefresh(walletId);
+  return result.balance;
 }
 
 export async function getTransactions(walletId: string): Promise<OnchainTransaction[]> {
