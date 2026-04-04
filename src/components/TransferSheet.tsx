@@ -232,6 +232,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       onChange={handleSheetChange}
       enablePanDownToClose
       backdropComponent={renderBackdrop}
+      keyboardBehavior="interactive"
+      keyboardBlurBehavior="restore"
+      android_keyboardInputMode="adjustResize"
       handleIndicatorStyle={styles.handleIndicator}
       backgroundStyle={styles.sheetBackground}
     >
