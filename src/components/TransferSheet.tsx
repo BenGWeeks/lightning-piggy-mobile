@@ -17,6 +17,7 @@ import {
   BottomSheetBackdropProps,
   BottomSheetScrollView,
 } from '@gorhom/bottom-sheet';
+import * as SecureStore from 'expo-secure-store';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
 import { satsToFiat, satsToFiatString } from '../services/fiatService';
@@ -71,8 +72,11 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     [wallets],
   );
 
-  // Available wallets for destination: all wallets except source
-  const destWallets = useMemo(() => wallets.filter((w) => w.id !== sourceId), [wallets, sourceId]);
+  // Available wallets for destination: exclude source, only show connected NWC or on-chain
+  const destWallets = useMemo(
+    () => wallets.filter((w) => w.id !== sourceId && (w.walletType === 'onchain' || w.isConnected)),
+    [wallets, sourceId],
+  );
 
   // Determine transfer type
   const transferType = useMemo(() => {
@@ -197,6 +201,18 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         const address = await onchainService.getNextReceiveAddress(destId);
         const swap = await boltzService.createReverseSwap(address, currentSats);
 
+        // Persist swap state to SecureStore for crash recovery (TODO #38)
+        await SecureStore.setItemAsync(
+          `boltz_swap_${swap.id}`,
+          JSON.stringify({
+            id: swap.id,
+            preimage: swap.preimage,
+            claimPrivateKey: swap.claimPrivateKey,
+            lockupAddress: swap.lockupAddress,
+            destinationAddress: address,
+          }),
+        );
+
         // Step 1: Pay the Lightning invoice
         await payInvoiceForWallet(sourceId, swap.invoice);
 
@@ -205,6 +221,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
 
         // Step 3: Build and broadcast the script-path claim transaction
         await boltzService.claimSwap(swap, lockup, address);
+
+        // Clean up persisted swap state on success
+        await SecureStore.deleteItemAsync(`boltz_swap_${swap.id}`);
       }
 
       // Refresh both balances

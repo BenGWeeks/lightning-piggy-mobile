@@ -232,3 +232,19 @@ export async function removeWallet(walletId: string): Promise<void> {
 export function disconnectElectrum(): void {
   blockchain = null;
 }
+
+/**
+ * Broadcast a raw transaction hex via the configured Electrum server.
+ * Uses BDK's blockchain.broadcast which handles the Electrum protocol.
+ */
+export async function broadcastRawTx(txHex: string): Promise<void> {
+  const { Transaction } = await import('bdk-rn');
+  const chain = await getBlockchain();
+  // Convert hex string to byte array for BDK
+  const bytes: number[] = [];
+  for (let i = 0; i < txHex.length; i += 2) {
+    bytes.push(parseInt(txHex.substring(i, i + 2), 16));
+  }
+  const tx = await new Transaction().create(bytes);
+  await chain.broadcast(tx);
+}

@@ -22,7 +22,6 @@
 import * as ecc from '@bitcoinerlab/secp256k1';
 import BIP32Factory from 'bip32';
 import * as bitcoin from 'bitcoinjs-lib';
-import { getElectrumServer } from './walletStorageService';
 
 const bip32 = BIP32Factory(ecc);
 const BOLTZ_API = 'https://api.boltz.exchange/v2';
@@ -302,26 +301,10 @@ export async function claimSwap(
   // Set witness: <sig> <preimage> <claim_script> <control_block>
   tx.setWitness(0, [sigWithType, preimageBytes, claimScript, controlBlock]);
 
-  return broadcastTransaction(tx.toHex());
-}
-
-/**
- * Broadcast a raw transaction via mempool.space API.
- */
-export async function broadcastTransaction(txHex: string): Promise<string> {
-  const base = await getElectrumServer();
-  const res = await fetch(`${base}/tx`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain' },
-    body: txHex,
-  });
-
-  if (!res.ok) {
-    const errBody = await res.text();
-    throw new Error(`Broadcast failed: ${errBody}`);
-  }
-
-  return res.text(); // Returns txid
+  // Broadcast via the configured Electrum server (BDK)
+  const onchainService = await import('./onchainService');
+  await onchainService.broadcastRawTx(tx.toHex());
+  return tx.getId();
 }
 
 /**
