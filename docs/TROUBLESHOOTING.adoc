@@ -74,4 +74,12 @@
 | LNbits "Payment in flight" log spam blocks NWC processing
 | A Lightning payment stuck in `IN_FLIGHT` status causes LNbits to poll LND at ~16 checks/second with no backoff, producing 50,000+ log lines/hour and starving the asyncio event loop. NWC, Nostrclient, and all WebSocket-based extensions stop responding while the HTTP UI continues working. +
 *Fix:* `docker restart lnbits-family` (or your LNbits container). See https://github.com/lnbits/lnbits/issues/3917[lnbits/lnbits#3917] for the upstream bug report.
+
+| Electrum connection drops with "keepalive ping failed" / "close connect"
+| The `electrum-client` library has an internal keepalive ping that can fail with `close connect`, followed by a reconnect crash: `Cannot read property 'client' of undefined`. This happens when `react-native-tcp-socket`'s TLS connection is interrupted (network change, sleep, etc.). +
+*Fix:* `onchainService.ts` sets `electrumConnected = false` on error, so the next call creates a fresh connection. The `onError` handler catches socket-level errors. If persistent, force-restart the app.
+
+| On-chain transactions slow to load
+| Each on-chain transaction requires an Electrum `blockchain.scripthash.get_history` call per address (20 addresses), then a `blockchain.transaction.get` call per unique transaction to parse amounts, plus `blockchain.block.get_header` per unique block height for timestamps. For wallets with many transactions (e.g. the BIP-84 test vector zpub with 100+ txs), this can take 10-30 seconds. +
+*Mitigations:* In-memory transaction cache per wallet ID (shows cached data instantly on wallet swipe). Future: persist cache to AsyncStorage, only fetch new transactions since last known block height.
 |===

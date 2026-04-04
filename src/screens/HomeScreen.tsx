@@ -109,7 +109,7 @@ const HomeScreen: React.FC = () => {
         freshTxs = txs.map((tx) => ({
           type: tx.type,
           amount: tx.amount,
-          description: tx.txid.slice(0, 12) + '...',
+          description: tx.type === 'incoming' ? 'Received' : 'Sent',
           settled_at: tx.timestamp,
           created_at: tx.timestamp,
         }));
