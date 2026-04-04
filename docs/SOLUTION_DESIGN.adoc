@@ -27,9 +27,9 @@ The same libraries used by BlueWallet (1M+ users, React Native):
 - `tiny-secp256k1` uses WebAssembly which is incompatible with React Native's Hermes engine
 - `@bitcoinerlab/secp256k1` provides the same interface using `@noble/secp256k1` (pure JavaScript)
 - All address derivation happens locally on-device — no third-party API needed for crypto operations
-- Balance and transaction lookups use mempool.space REST API (configurable, self-hostable)
+- Balance and transaction lookups use an Electrum server (same protocol as BlueWallet)
 
-**Metro configuration:** `@noble/curves` and `@noble/hashes` use ES module `exports` maps with `.js` extensions. Metro requires `unstable_enablePackageExports: true` in `metro.config.js` to resolve these correctly.
+**Metro configuration:** `@noble/curves` and `@noble/hashes` use ES module `exports` maps with `.js` extensions. A custom resolver in `metro.config.js` rewrites `@noble/*` subpath imports to include `.js` extensions, using the original resolver to avoid recursion.
 
 === Architecture
 
@@ -39,7 +39,7 @@ WalletContext.tsx
   ├─ NWC wallets → nwcService.ts (existing)
   └─ On-chain wallets → onchainService.ts (new)
        ├─ bitcoinjs-lib + bip32 — local address derivation
-       └─ mempool.space API — balance & transaction lookups
+       └─ Electrum server — balance & transaction lookups
 
 HomeScreen.tsx
   ├─ [Receive] → ReceiveSheet (Lightning invoice OR Bitcoin address QR)
@@ -64,7 +64,7 @@ On-chain wallets are currently watch-only (xpub import). The type system is desi
 | File | Purpose
 
 | `src/types/wallet.ts` | Wallet type discriminator (`nwc` / `onchain`), extensible import methods
-| `src/services/onchainService.ts` | Local BIP-84 address derivation, mempool.space balance/tx lookups
+| `src/services/onchainService.ts` | Local BIP-84 address derivation, Electrum server balance/tx lookups
 | `src/services/boltzService.ts` | Boltz Exchange submarine swaps (Lightning → on-chain)
 | `src/services/walletStorageService.ts` | xpub secure storage, electrum server config, migration
 | `src/contexts/WalletContext.tsx` | Wallet-type-aware operations for both NWC and on-chain
@@ -100,7 +100,7 @@ Uses https://docs.boltz.exchange[Boltz Exchange] v2 API for trustless Lightning-
 7. Construct a **script-path claim transaction** (Taproot spend):
    - Witness: `<schnorr_signature> <preimage> <claim_script> <control_block>`
    - Output: destination on-chain address
-8. Broadcast claim tx via mempool.space API
+8. Broadcast claim tx via mempool.space REST API (`POST /tx`)
 9. Funds arrive at destination after ~1 block confirmation (~10 min)
 
 **Why script-path (not cooperative key-path)?**
@@ -118,14 +118,43 @@ We use script-path because it works with our existing pure JS crypto stack. Futu
 |===
 | Package | Purpose
 
-| https://github.com/nicoll-douglas/scure-btc-signer[`@scure/btc-signer`] | Taproot transaction construction and script-path spending
-| https://github.com/bitcoinerlab/secp256k1[`@bitcoinerlab/secp256k1`] | Schnorr signing (BIP-340) via @noble/curves
-| https://github.com/nicoll-douglas/noble-curves[`@noble/curves`] | Elliptic curve cryptography (secp256k1 Schnorr)
+| https://github.com/bitcoinjs/bitcoinjs-lib[`bitcoinjs-lib`] | Taproot claim transaction construction, raw tx parsing
+| https://github.com/bitcoinerlab/secp256k1[`@bitcoinerlab/secp256k1`] | Schnorr signing (BIP-340) for claim transactions
+| https://github.com/BlueWallet/rn-electrum-client[`electrum-client`] | Electrum protocol client for balance/tx lookups
+| https://github.com/nicoll-douglas/react-native-tcp-socket[`react-native-tcp-socket`] | TCP/SSL sockets for Electrum connections in React Native
 |===
 
 **Fallback:** If the claim tx fails to broadcast, Boltz's Protocol 11 automatically sends funds to the `claimAddress` after the timeout period (~24 hours).
 
 **Current status:** The full Boltz reverse swap flow is implemented: swap creation, invoice payment, lockup detection, and script-path claim transaction (Schnorr signature + preimage reveal). The claim tx is broadcast via mempool.space and funds arrive after ~1 block confirmation (~10 min). The swap state (preimage + claim private key) needs to be persisted to SecureStore so it survives app restarts — tracked in https://github.com/BenGWeeks/lightning-piggy-mobile/issues/38[#38]. The claim keypair and preimage should be viewable in the transaction detail bottom sheet for manual recovery or Boltz support contact.
+
+=== Electrum Server Integration
+
+On-chain balance and transaction lookups use the Electrum protocol (same as BlueWallet) instead of REST APIs like mempool.space. This provides:
+
+- **Single TCP/SSL connection** for all address queries (vs 20+ HTTP requests)
+- **No rate limiting** — Electrum servers are designed for wallet queries
+- **User-configurable** — default is `electrum.blockstream.info:50002` (SSL), users can set their own in Account settings
+- **Protocol**: JSON-RPC over TCP/SSL sockets via https://github.com/nicoll-douglas/electrum-client[`electrum-client`] + https://github.com/nicoll-douglas/react-native-tcp-socket[`react-native-tcp-socket`]
+
+**How it works:**
+
+1. Derive 20 receive addresses from the xpub (BIP-84, `m/0/0` through `m/0/19`)
+2. Convert each address to an Electrum scripthash (SHA-256 of output script, reversed)
+3. Query `blockchain.scripthash.get_balance` for each scripthash → aggregate balance
+4. Query `blockchain.scripthash.get_history` for each scripthash → transaction hashes + heights
+5. Fetch raw transaction hex via `blockchain.transaction.get` and parse with `bitcoinjs-lib` to determine amounts and direction (incoming/outgoing)
+
+**Connection lifecycle:**
+
+- Shared singleton Electrum client, created on first on-chain wallet query
+- Auto-reconnects on socket errors (broken pipe, keepalive timeout)
+- `onError` handler marks connection as disconnected, next call creates a fresh connection
+- Green/red status dot on the wallet card indicates Electrum connection status
+
+**Electrum server format:** `host:port:protocol` where protocol is `s` (SSL) or `t` (TCP). Account settings shows host:port with a "Use SSL" toggle.
+
+**Future:** Transaction caching in AsyncStorage to avoid re-fetching all history on every wallet switch. Only fetch new transactions since the last known block height.
 
 === NWC Relay Compatibility
 
@@ -140,7 +169,7 @@ Additionally, `nwcService.ts` includes auto-reconnect logic: if a publish fails 
 === Visual Differentiation
 
 - **NWC wallets**: Green/red status dot + "Connected"/"Disconnected"
-- **On-chain wallets**: Chain icon (⛓) + "On-chain" label, no connection status
+- **On-chain wallets**: Green/red status dot + chain icon (Lucide SVG) + "On-chain" label. Green when Electrum balance loaded successfully, red when connection failed.
 
 === Future: Hot Wallet Support
 
