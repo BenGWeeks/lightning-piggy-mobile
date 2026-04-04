@@ -73,39 +73,50 @@ const CardContent: React.FC<{
         <>
           <View style={styles.topRow}>
             <View style={styles.statusRow}>
+              <View
+                style={[
+                  styles.statusDot,
+                  {
+                    backgroundColor:
+                      walletType === 'onchain'
+                        ? balance !== null
+                          ? '#4CAF50'
+                          : '#F44336'
+                        : isConnected
+                          ? '#4CAF50'
+                          : '#F44336',
+                  },
+                ]}
+              />
+              <Text style={[styles.statusText, { color: theme.textColor }]}>
+                {walletType === 'onchain'
+                  ? balance !== null
+                    ? 'Connected'
+                    : 'Disconnected'
+                  : isConnected
+                    ? 'Connected'
+                    : 'Disconnected'}
+              </Text>
+            </View>
+            <View style={styles.topRightIcons}>
               {walletType === 'onchain' ? (
-                <>
-                  <View
-                    style={[
-                      styles.statusDot,
-                      { backgroundColor: balance !== null ? '#4CAF50' : '#F44336' },
-                    ]}
-                  />
-                  <ChainIcon size={16} color={theme.textColor} strokeWidth={2.5} />
-                  <Text style={[styles.statusText, { color: theme.textColor }]}>On-chain</Text>
-                </>
+                <ChainIcon size={20} color={theme.textColor} strokeWidth={2.5} />
               ) : (
-                <>
-                  <View
-                    style={[
-                      styles.statusDot,
-                      { backgroundColor: isConnected ? '#4CAF50' : '#F44336' },
-                    ]}
-                  />
-                  <Text style={[styles.statusText, { color: theme.textColor }]}>
-                    {isConnected ? 'Connected' : 'Disconnected'}
-                  </Text>
-                </>
+                <Image
+                  source={require('../../assets/images/nwc-icon.png')}
+                  style={[styles.walletTypeIcon, { tintColor: theme.textColor }]}
+                  resizeMode="contain"
+                />
+              )}
+              {onSettingsPress && (
+                <TouchableOpacity
+                  onPress={onSettingsPress}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <Text style={[styles.settingsCog, { color: theme.textColor }]}>&#9881;</Text>
+                </TouchableOpacity>
               )}
             </View>
-            {onSettingsPress && (
-              <TouchableOpacity
-                onPress={onSettingsPress}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Text style={[styles.settingsCog, { color: theme.textColor }]}>&#9881;</Text>
-              </TouchableOpacity>
-            )}
           </View>
 
           <View style={styles.aliasBalanceGroup}>
@@ -216,8 +227,18 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     opacity: 0.8,
   },
+  topRightIcons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  walletTypeIcon: {
+    width: 22,
+    height: 22,
+    opacity: 0.9,
+  },
   settingsCog: {
-    fontSize: 22,
+    fontSize: 26,
     opacity: 0.9,
   },
   aliasBalanceGroup: {
