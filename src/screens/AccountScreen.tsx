@@ -21,11 +21,7 @@ import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
 import { CURRENCIES } from '../services/fiatService';
-import {
-  getElectrumServer,
-  setElectrumServer,
-  DEFAULT_ELECTRUM_SERVER,
-} from '../services/walletStorageService';
+import { getElectrumServer, setElectrumServer } from '../services/walletStorageService';
 import CopyIcon from '../components/icons/CopyIcon';
 import NostrLoginSheet from '../components/NostrLoginSheet';
 import EditProfileSheet from '../components/EditProfileSheet';

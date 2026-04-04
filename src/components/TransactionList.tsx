@@ -17,8 +17,14 @@ interface Props {
   transactions: Transaction[];
 }
 
+const INITIAL_COUNT = 20;
+
 const TransactionList: React.FC<Props> = ({ transactions }) => {
   const { btcPrice, currency } = useWallet();
+  const [showAll, setShowAll] = useState(false);
+
+  // Reset when transaction list changes (wallet swipe)
+  React.useEffect(() => setShowAll(false), [transactions]);
 
   if (transactions.length === 0) {
     return (
@@ -28,10 +34,6 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
     );
   }
 
-  const INITIAL_COUNT = 20;
-  const [showAll, setShowAll] = useState(false);
-  // Reset when transaction list changes (wallet swipe)
-  React.useEffect(() => setShowAll(false), [transactions]);
   const visibleTransactions = showAll ? transactions : transactions.slice(0, INITIAL_COUNT);
   const hasMore = transactions.length > INITIAL_COUNT;
 
