@@ -5,7 +5,7 @@ import { WalletState } from '../types/wallet';
 import { CardThemeConfig, cardThemes } from '../themes/cardThemes';
 import { getCardBgStyle } from '../themes/cards';
 import { satsToFiatString, FiatCurrency } from '../services/fiatService';
-import { ChainIcon } from './icons/ArrowIcons';
+import { ChainIcon, SettingsIcon } from './icons/ArrowIcons';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 export const CARD_MARGIN = 16;
@@ -113,7 +113,7 @@ const CardContent: React.FC<{
                   onPress={onSettingsPress}
                   hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 >
-                  <Text style={[styles.settingsCog, { color: theme.textColor }]}>&#9881;</Text>
+                  <SettingsIcon size={22} color={theme.textColor} strokeWidth={1.5} />
                 </TouchableOpacity>
               )}
             </View>
@@ -235,10 +235,6 @@ const styles = StyleSheet.create({
   walletTypeIcon: {
     width: 22,
     height: 22,
-    opacity: 0.9,
-  },
-  settingsCog: {
-    fontSize: 26,
     opacity: 0.9,
   },
   aliasBalanceGroup: {
