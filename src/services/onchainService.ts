@@ -18,6 +18,8 @@ import { getXpub, getElectrumServer } from './walletStorageService';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const ElectrumClient = require('electrum-client');
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const TcpSocket = require('react-native-tcp-socket');
 
 const bip32 = BIP32Factory(ecc);
 
@@ -100,7 +102,13 @@ async function getElectrumClient(): Promise<any> {
   const serverStr = await getElectrumServer();
   const { host, port, protocol } = parseElectrumServer(serverStr);
 
-  electrumClient = new ElectrumClient(port, host, protocol === 's' ? 'tls' : 'tcp');
+  electrumClient = new ElectrumClient(
+    TcpSocket, // net module
+    TcpSocket, // tls module (react-native-tcp-socket handles both)
+    port,
+    host,
+    protocol === 's' ? 'tls' : 'tcp',
+  );
   await electrumClient.connect('lightning-piggy', '1.4');
   electrumConnected = true;
 
