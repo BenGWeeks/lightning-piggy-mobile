@@ -179,7 +179,11 @@ const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onS
   const theme = cardThemes[wallet.theme];
 
   return (
-    <View style={styles.cardContainer}>
+    <View
+      style={styles.cardContainer}
+      testID={`wallet-card-${wallet.walletType}`}
+      accessibilityLabel={`${wallet.alias} ${wallet.walletType} wallet`}
+    >
       <CardContent
         theme={theme}
         alias={wallet.alias}

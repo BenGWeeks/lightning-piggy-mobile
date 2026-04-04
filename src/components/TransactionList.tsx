@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { colors } from '../styles/theme';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet } from '../contexts/WalletContext';
@@ -28,9 +28,16 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
     );
   }
 
+  const INITIAL_COUNT = 20;
+  const [showAll, setShowAll] = useState(false);
+  // Reset when transaction list changes (wallet swipe)
+  React.useEffect(() => setShowAll(false), [transactions]);
+  const visibleTransactions = showAll ? transactions : transactions.slice(0, INITIAL_COUNT);
+  const hasMore = transactions.length > INITIAL_COUNT;
+
   return (
     <View style={styles.list}>
-      {transactions.map((item, index) => {
+      {visibleTransactions.map((item, index) => {
         const isIncoming = item.type === 'incoming';
         const amountSats = Math.abs(item.amount);
         const date = item.settled_at || item.created_at;
@@ -62,6 +69,11 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
           </View>
         );
       })}
+      {hasMore && !showAll && (
+        <TouchableOpacity style={styles.showMore} onPress={() => setShowAll(true)}>
+          <Text style={styles.showMoreText}>Show all {transactions.length} transactions</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 };
@@ -122,6 +134,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textSupplementary,
     marginTop: 2,
+  },
+  showMore: {
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  showMoreText: {
+    color: colors.brandPink,
+    fontSize: 14,
+    fontWeight: '600',
   },
   incoming: {
     color: colors.green,
