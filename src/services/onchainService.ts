@@ -242,6 +242,8 @@ export async function getTransactions(walletId: string): Promise<OnchainTransact
     const addresses = await getDerivedAddresses(walletId, 20);
     const txMap = new Map<string, OnchainTransaction>();
 
+    const addressSet = new Set(addresses);
+
     for (const addr of addresses) {
       const scripthash = addressToScripthash(addr);
       const history = await client.blockchainScripthash_getHistory(scripthash);
@@ -249,16 +251,50 @@ export async function getTransactions(walletId: string): Promise<OnchainTransact
       for (const item of history) {
         if (txMap.has(item.tx_hash)) continue;
 
-        // Electrum history returns tx_hash + height only.
-        // Direction/amount require parsing the raw tx — deferred to #38.
-        txMap.set(item.tx_hash, {
-          txid: item.tx_hash,
-          type: 'incoming', // placeholder — will be resolved in tx detail sheet
-          amount: 0,
-          confirmed: item.height > 0,
-          blockHeight: item.height > 0 ? item.height : null,
-          timestamp: null,
-        });
+        // Fetch raw tx hex and parse with bitcoinjs-lib to get amounts
+        try {
+          const rawHex = await client.blockchainTransaction_get(item.tx_hash, false);
+          const tx = bitcoin.Transaction.fromHex(rawHex);
+
+          let outputSum = 0;
+          let inputRelated = false;
+
+          // Check outputs going to our addresses
+          for (const out of tx.outs) {
+            try {
+              const outAddr = bitcoin.address.fromOutputScript(out.script);
+              if (addressSet.has(outAddr)) {
+                outputSum += Number(out.value);
+              }
+            } catch {
+              // Skip unrecognized output scripts
+            }
+          }
+
+          // Check if any inputs reference our addresses (outgoing tx)
+          // For watch-only, we can't decode inputs directly from the tx
+          // but if outputSum > 0, funds came TO us; if 0, funds left
+          const isIncoming = outputSum > 0;
+
+          txMap.set(item.tx_hash, {
+            txid: item.tx_hash,
+            type: isIncoming ? 'incoming' : 'outgoing',
+            amount: outputSum,
+            confirmed: item.height > 0,
+            blockHeight: item.height > 0 ? item.height : null,
+            timestamp: null,
+          });
+        } catch {
+          // If raw tx fetch fails, still show the tx with unknown amount
+          txMap.set(item.tx_hash, {
+            txid: item.tx_hash,
+            type: 'incoming',
+            amount: 0,
+            confirmed: item.height > 0,
+            blockHeight: item.height > 0 ? item.height : null,
+            timestamp: null,
+          });
+        }
       }
     }
 
