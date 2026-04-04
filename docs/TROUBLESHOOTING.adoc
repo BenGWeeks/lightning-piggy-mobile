@@ -5,7 +5,7 @@
 | Problem | Solution
 
 | Bottom sheet doesn't slide up when keyboard opens on Android
-| Use `BottomSheetTextInput` from `@gorhom/bottom-sheet` instead of React Native's `TextInput` inside bottom sheets. The library needs its own input component to detect keyboard events. Also set `keyboardBehavior="interactive"` and `android_keyboardInputMode="adjustResize"` on the `BottomSheetModal`, and ensure `android:windowSoftInputMode="adjustResize"` in AndroidManifest (via `plugins/withAdjustNothing.js`).
+| All of these are required: (1) Use `BottomSheetTextInput` from `@gorhom/bottom-sheet` instead of React Native's `TextInput`. (2) Use `BottomSheetScrollView` (not `BottomSheetView`) as the content wrapper. (3) Set `keyboardBehavior="interactive"`, `keyboardBlurBehavior="restore"`, and `android_keyboardInputMode="adjustResize"` on the `BottomSheetModal`. (4) Ensure `android:windowSoftInputMode="adjustResize"` in AndroidManifest (via `plugins/withAdjustResize.js`). (5) Add a `Keyboard.addListener` to track keyboard height and set dynamic `paddingBottom` on the `contentContainerStyle` (e.g. `paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40`). (6) Do NOT wrap content in `TouchableWithoutFeedback` with `Keyboard.dismiss` — this interferes with the sheet's keyboard handling. See `NostrLoginSheet.tsx` as the reference implementation.
 
 | Maestro can't find elements behind a modal Alert dialog
 | Dismiss the alert first (e.g. tap "KEEP CURRENT" or "Cancel") before asserting visibility of elements underneath.

@@ -7,6 +7,8 @@ import {
   Alert,
   ActivityIndicator,
   BackHandler,
+  Keyboard,
+  Platform,
 } from 'react-native';
 import {
   BottomSheetModal,
@@ -48,7 +50,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [inputUnit, setInputUnit] = useState<InputUnit>('sats');
   const [sending, setSending] = useState(false);
   const [feeEstimate, setFeeEstimate] = useState<string | null>(null);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
+  const scrollRef = useRef<any>(null);
   const snapPoints = useMemo(() => ['85%'], []);
 
   const currentSats = parseInt(satsValue) || 0;
@@ -138,6 +142,21 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     });
     return () => handler.remove();
   }, [visible, onClose]);
+
+  // Track keyboard height for dynamic padding (matches NostrLoginSheet pattern)
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+      setTimeout(() => scrollRef.current?.scrollToEnd?.({ animated: true }), 100);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   const handleSatsChange = (text: string) => {
     setSatsValue(text);
@@ -237,8 +256,12 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       backgroundStyle={styles.sheetBackground}
     >
       <BottomSheetScrollView
+        ref={scrollRef}
         style={styles.content}
-        contentContainerStyle={styles.innerContent}
+        contentContainerStyle={{
+          ...styles.innerContent,
+          paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40,
+        }}
         keyboardShouldPersistTaps="handled"
       >
         <Text style={styles.title}>Transfer</Text>
