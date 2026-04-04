@@ -75,6 +75,12 @@ const CardContent: React.FC<{
             <View style={styles.statusRow}>
               {walletType === 'onchain' ? (
                 <>
+                  <View
+                    style={[
+                      styles.statusDot,
+                      { backgroundColor: balance !== null ? '#4CAF50' : '#F44336' },
+                    ]}
+                  />
                   <ChainIcon size={16} color={theme.textColor} strokeWidth={2.5} />
                   <Text style={[styles.statusText, { color: theme.textColor }]}>On-chain</Text>
                 </>

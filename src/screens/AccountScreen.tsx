@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   View,
@@ -21,6 +21,11 @@ import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
 import { CURRENCIES } from '../services/fiatService';
+import {
+  getElectrumServer,
+  setElectrumServer,
+  DEFAULT_ELECTRUM_SERVER,
+} from '../services/walletStorageService';
 import CopyIcon from '../components/icons/CopyIcon';
 import NostrLoginSheet from '../components/NostrLoginSheet';
 import EditProfileSheet from '../components/EditProfileSheet';
@@ -61,11 +66,22 @@ const AccountScreen: React.FC = () => {
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [qrSheetOpen, setQrSheetOpen] = useState(false);
   const [qrDefaultMode, setQrDefaultMode] = useState<'npub' | 'lightning'>('npub');
+  const [electrumServer, setElectrumServerState] = useState(DEFAULT_ELECTRUM_SERVER);
   const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     setNameInput(userName);
   }, [userName]);
+
+  useEffect(() => {
+    getElectrumServer().then(setElectrumServerState);
+  }, []);
+
+  const handleElectrumSave = async () => {
+    const value = electrumServer.trim() || DEFAULT_ELECTRUM_SERVER;
+    setElectrumServerState(value);
+    await setElectrumServer(value);
+  };
 
   useEffect(() => {
     setLnAddressInput(lightningAddress || '');
@@ -146,7 +162,9 @@ const AccountScreen: React.FC = () => {
     }
   };
 
-  const connectedCount = wallets.filter((w) => w.isConnected).length;
+  const connectedCount = wallets.filter((w) =>
+    w.walletType === 'onchain' ? w.balance !== null : w.isConnected,
+  ).length;
   const truncatedNpub = profile?.npub
     ? `${profile.npub.slice(0, 16)}...${profile.npub.slice(-8)}`
     : '';
@@ -283,6 +301,28 @@ const AccountScreen: React.FC = () => {
           ))}
         </View>
 
+        {/* Electrum Server */}
+        {wallets.some((w) => w.walletType === 'onchain') && (
+          <>
+            <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Electrum Server</Text>
+            <TextInput
+              style={styles.textInput}
+              value={electrumServer.replace(/:s$|:t$/, '')}
+              onChangeText={(text) => setElectrumServerState(text + ':s')}
+              placeholder="electrum.blockstream.info:50002"
+              placeholderTextColor={colors.textSupplementary}
+              autoCapitalize="none"
+              autoCorrect={false}
+              onBlur={handleElectrumSave}
+              testID="electrum-server-input"
+              accessibilityLabel="Electrum server"
+            />
+            <Text style={styles.fieldHint}>
+              SSL connection (port 50002). Default: electrum.blockstream.info:50002
+            </Text>
+          </>
+        )}
+
         {/* Wallets summary */}
         <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Wallets</Text>
         <View style={styles.card}>
@@ -296,10 +336,22 @@ const AccountScreen: React.FC = () => {
               <View
                 style={[
                   styles.statusDot,
-                  { backgroundColor: w.isConnected ? colors.green : colors.red },
+                  {
+                    backgroundColor:
+                      w.walletType === 'onchain'
+                        ? w.balance !== null
+                          ? colors.green
+                          : colors.red
+                        : w.isConnected
+                          ? colors.green
+                          : colors.red,
+                  },
                 ]}
               />
-              <Text style={styles.walletName}>{w.alias}</Text>
+              <Text style={styles.walletName}>
+                {w.alias}
+                {w.walletType === 'onchain' ? ' (on-chain)' : ''}
+              </Text>
               {w.balance !== null && (
                 <Text style={styles.walletBalance}>{w.balance.toLocaleString()} sats</Text>
               )}
@@ -523,6 +575,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.textBody,
     fontWeight: '600',
+  },
+  fieldHint: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 12,
+    marginTop: 4,
   },
   lnAddressRow: {
     flexDirection: 'row',
