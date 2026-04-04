@@ -69,10 +69,13 @@ export async function connect(
 
     await withRetry(() => provider.enable(), { label: 'connect', attempts: 3, delayMs: 2000 });
 
+    // Allow relay connection to stabilize before first request
+    await new Promise((r) => setTimeout(r, 500));
+
     const b = await withRetry(() => provider.getBalance(), {
       label: 'initial getBalance',
-      attempts: 2,
-      delayMs: 1000,
+      attempts: 3,
+      delayMs: 2000,
     });
     const balance = b.balance;
 
