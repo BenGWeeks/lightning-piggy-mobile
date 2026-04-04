@@ -64,9 +64,9 @@ name: Transfer Between Wallets Test
 - assertVisible:
     text: '.*Lightning.*'
 
-# Tap Transfer button to execute
+# Tap Transfer execute button (not the title)
 - tapOn:
-    text: 'Transfer'
+    id: 'transfer-execute'
 - waitForAnimationToEnd:
     timeout: 20000
 

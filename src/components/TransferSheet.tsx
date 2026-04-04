@@ -377,13 +377,20 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
 
             {/* Action buttons */}
             <View style={styles.buttonRow}>
-              <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={onClose}
+                testID="transfer-cancel"
+                accessibilityLabel="Cancel transfer"
+              >
                 <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.transferButton, (!canTransfer || sending) && styles.buttonDisabled]}
                 onPress={handleTransfer}
                 disabled={!canTransfer || sending}
+                testID="transfer-execute"
+                accessibilityLabel="Execute transfer"
               >
                 {sending ? (
                   <ActivityIndicator color={colors.brandPink} />
