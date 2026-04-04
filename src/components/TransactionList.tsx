@@ -10,6 +10,7 @@ interface Transaction {
   description?: string;
   created_at?: number;
   settled_at?: number;
+  blockHeight?: number | null;
 }
 
 interface Props {
@@ -33,7 +34,11 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
         const isIncoming = item.type === 'incoming';
         const amountSats = Math.abs(item.amount);
         const date = item.settled_at || item.created_at;
-        const dateStr = date ? new Date(date * 1000).toLocaleDateString() : '';
+        const dateStr = date
+          ? new Date(date * 1000).toLocaleDateString()
+          : item.blockHeight
+            ? `Block ${item.blockHeight.toLocaleString()}`
+            : '';
         const fiatStr = satsToFiatString(amountSats, btcPrice, currency);
 
         return (

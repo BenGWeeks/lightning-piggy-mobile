@@ -298,37 +298,9 @@ export async function getTransactions(walletId: string): Promise<OnchainTransact
       }
     }
 
-    // Fetch block timestamps for confirmed transactions
-    const uniqueHeights = new Set<number>();
-    for (const tx of txMap.values()) {
-      if (tx.blockHeight) uniqueHeights.add(tx.blockHeight);
-    }
-    const heightToTimestamp = new Map<number, number>();
-    for (const height of uniqueHeights) {
-      try {
-        const headerHex = await client.blockchainBlock_getHeader(height);
-        if (typeof headerHex === 'string' && headerHex.length >= 152) {
-          // Block header: 4 bytes version + 32 bytes prevhash + 32 bytes merkle + 4 bytes timestamp
-          // Timestamp is at byte offset 68 (136 hex chars), 4 bytes little-endian
-          const tsHex = headerHex.substring(136, 144);
-          const ts = parseInt(
-            tsHex.substring(6, 8) +
-              tsHex.substring(4, 6) +
-              tsHex.substring(2, 4) +
-              tsHex.substring(0, 2),
-            16,
-          );
-          heightToTimestamp.set(height, ts);
-        }
-      } catch {
-        // Skip timestamp for this block
-      }
-    }
-    for (const tx of txMap.values()) {
-      if (tx.blockHeight && heightToTimestamp.has(tx.blockHeight)) {
-        tx.timestamp = heightToTimestamp.get(tx.blockHeight)!;
-      }
-    }
+    // Note: timestamps require fetching block headers per unique height,
+    // which is too slow and causes connection drops. Deferred to #38
+    // when transaction caching is implemented.
 
     return Array.from(txMap.values()).sort((a, b) => {
       if (a.timestamp === null && b.timestamp === null) return 0;

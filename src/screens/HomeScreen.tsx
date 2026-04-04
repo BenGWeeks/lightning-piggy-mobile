@@ -112,6 +112,8 @@ const HomeScreen: React.FC = () => {
           description: tx.type === 'incoming' ? 'Received' : 'Sent',
           settled_at: tx.timestamp,
           created_at: tx.timestamp,
+          // Show block height as subtitle when no timestamp available
+          blockHeight: tx.blockHeight,
         }));
       } else {
         freshTxs = await nwcService.listTransactions(activeWalletId);
