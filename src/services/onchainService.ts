@@ -256,10 +256,8 @@ export async function getTransactions(walletId: string): Promise<OnchainTransact
           const rawHex = await client.blockchainTransaction_get(item.tx_hash, false);
           const tx = bitcoin.Transaction.fromHex(rawHex);
 
+          // Sum outputs going to our addresses
           let outputSum = 0;
-          let inputRelated = false;
-
-          // Check outputs going to our addresses
           for (const out of tx.outs) {
             try {
               const outAddr = bitcoin.address.fromOutputScript(out.script);
@@ -271,15 +269,30 @@ export async function getTransactions(walletId: string): Promise<OnchainTransact
             }
           }
 
-          // Check if any inputs reference our addresses (outgoing tx)
-          // For watch-only, we can't decode inputs directly from the tx
-          // but if outputSum > 0, funds came TO us; if 0, funds left
-          const isIncoming = outputSum > 0;
+          // Sum inputs coming from our addresses (need to look up prev txs)
+          let inputSum = 0;
+          for (const inp of tx.ins) {
+            try {
+              const prevTxId = Buffer.from(inp.hash).reverse().toString('hex');
+              const prevRaw = await client.blockchainTransaction_get(prevTxId, false);
+              const prevTx = bitcoin.Transaction.fromHex(prevRaw);
+              const prevOut = prevTx.outs[inp.index];
+              if (prevOut) {
+                const prevAddr = bitcoin.address.fromOutputScript(prevOut.script);
+                if (addressSet.has(prevAddr)) {
+                  inputSum += Number(prevOut.value);
+                }
+              }
+            } catch {
+              // Skip if we can't look up the input
+            }
+          }
 
+          const net = outputSum - inputSum;
           txMap.set(item.tx_hash, {
             txid: item.tx_hash,
-            type: isIncoming ? 'incoming' : 'outgoing',
-            amount: outputSum,
+            type: net >= 0 ? 'incoming' : 'outgoing',
+            amount: Math.abs(net),
             confirmed: item.height > 0,
             blockHeight: item.height > 0 ? item.height : null,
             timestamp: null,

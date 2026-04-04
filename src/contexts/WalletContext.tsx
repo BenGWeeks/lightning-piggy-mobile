@@ -427,16 +427,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         let txs: WalletTransaction[];
         if (wallet.walletType === 'onchain') {
           const raw = await onchainService.getTransactions(walletId);
-          txs = raw
-            .filter((tx) => tx.amount > 0) // Skip txs with unknown amounts
-            .map((tx) => ({
-              type: tx.type,
-              amount: tx.amount,
-              description: tx.type === 'incoming' ? 'Received' : 'Sent',
-              settled_at: tx.timestamp,
-              created_at: tx.timestamp,
-              blockHeight: tx.blockHeight,
-            }));
+          txs = raw.map((tx) => ({
+            type: tx.type,
+            amount: tx.amount,
+            description: tx.type === 'incoming' ? 'Received' : 'Sent',
+            settled_at: tx.timestamp,
+            created_at: tx.timestamp,
+            blockHeight: tx.blockHeight,
+          }));
         } else {
           const raw = await nwcService.listTransactions(walletId);
           txs = raw.map((tx: any) => ({
