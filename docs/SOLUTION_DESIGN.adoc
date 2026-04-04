@@ -125,7 +125,7 @@ We use script-path because it works with our existing pure JS crypto stack. Futu
 
 **Fallback:** If the claim tx fails to broadcast, Boltz's Protocol 11 automatically sends funds to the `claimAddress` after the timeout period (~24 hours).
 
-**Current status:** The Boltz API integration (swap creation, invoice payment, lockup detection) is implemented. The script-path claim transaction construction is a TODO — funds currently rely on Boltz Protocol 11 fallback (~24 hours). The swap state (preimage + claim private key) needs to be persisted to SecureStore so it survives app restarts. The claim keypair and preimage should be viewable in the transaction detail bottom sheet (see https://github.com/BenGWeeks/lightning-piggy-mobile/issues/38[#38]) for manual recovery or Boltz support contact.
+**Current status:** The full Boltz reverse swap flow is implemented: swap creation, invoice payment, lockup detection, and script-path claim transaction (Schnorr signature + preimage reveal). The claim tx is broadcast via mempool.space and funds arrive after ~1 block confirmation (~10 min). The swap state (preimage + claim private key) needs to be persisted to SecureStore so it survives app restarts — tracked in https://github.com/BenGWeeks/lightning-piggy-mobile/issues/38[#38]. The claim keypair and preimage should be viewable in the transaction detail bottom sheet for manual recovery or Boltz support contact.
 
 === NWC Relay Compatibility
 

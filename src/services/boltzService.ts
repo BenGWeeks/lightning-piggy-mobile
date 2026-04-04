@@ -263,9 +263,24 @@ export async function claimSwap(
   // x-only internal key (Boltz's refund pubkey)
   const internalKey = refundPubKey.length === 33 ? refundPubKey.subarray(1) : refundPubKey;
 
+  // Compute the Taproot tweak to determine output key parity (BIP-341)
+  // Merkle root: sort and hash the two leaf hashes
+  const merkleRoot =
+    Buffer.compare(claimLeafHash, refundLeafHash) < 0
+      ? bitcoin.crypto.taggedHash('TapBranch', Buffer.concat([claimLeafHash, refundLeafHash]))
+      : bitcoin.crypto.taggedHash('TapBranch', Buffer.concat([refundLeafHash, claimLeafHash]));
+
+  // Compute the tweak: taggedHash('TapTweak', internalKey || merkleRoot)
+  const tweak = bitcoin.crypto.taggedHash('TapTweak', Buffer.concat([internalKey, merkleRoot]));
+
+  // Derive the tweaked public key to get the output parity bit
+  const tweakedKey = ecc.xOnlyPointAddTweak(new Uint8Array(internalKey), new Uint8Array(tweak));
+  if (!tweakedKey) throw new Error('Failed to compute tweaked key');
+  const parityBit = tweakedKey.parity;
+
   // Control block: <leaf_version | parity> <internal_key> <merkle_sibling>
   const controlBlock = Buffer.concat([
-    Buffer.from([claimLeafVersion]), // parity bit 0
+    Buffer.from([claimLeafVersion | parityBit]),
     internalKey,
     refundLeafHash, // merkle proof (sibling of claim leaf)
   ]);
