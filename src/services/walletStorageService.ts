@@ -9,8 +9,8 @@ const ELECTRUM_SERVER_KEY = 'electrum_server';
 const LEGACY_NWC_KEY = 'nwc_connection_url';
 const ONBOARDING_KEY = 'onboarding_complete';
 
-/** Default block-explorer API used for on-chain balance/tx lookups */
-export const DEFAULT_ELECTRUM_SERVER = 'https://mempool.space/api';
+/** Default Electrum server for on-chain balance/tx lookups (same default as BlueWallet) */
+export const DEFAULT_ELECTRUM_SERVER = 'electrum1.bluewallet.io:443:s';
 
 export async function getWalletList(): Promise<WalletMetadata[]> {
   const json = await AsyncStorage.getItem(WALLET_LIST_KEY);

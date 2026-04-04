@@ -3,7 +3,7 @@
  *
  * Uses bitcoinjs-lib + bip32 + @bitcoinerlab/secp256k1 for local address
  * derivation (same stack as BlueWallet). Balance and transaction lookups
- * use the mempool.space REST API.
+ * use an Electrum server via electrum-client (same as BlueWallet).
  *
  * Future: when mnemonic import is added, `buildTransaction` and
  * `broadcastTransaction` can be implemented here using the same libraries.
@@ -16,11 +16,10 @@ import * as bitcoin from 'bitcoinjs-lib';
 import bs58check from 'bs58check';
 import { getXpub, getElectrumServer } from './walletStorageService';
 
-const bip32 = BIP32Factory(ecc);
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const ElectrumClient = require('electrum-client');
 
-// Rate limiting for mempool.space API (max ~10 requests/second)
-const BATCH_SIZE = 5;
-const BATCH_DELAY_MS = 500;
+const bip32 = BIP32Factory(ecc);
 
 // Version byte hex strings for extended public key prefixes
 const YPUB_HEX = '049d7cb2'; // ypub (BIP-49)
@@ -44,7 +43,6 @@ function toXpub(extPubKey: string): string {
     byteToHex(decoded[0]) + byteToHex(decoded[1]) + byteToHex(decoded[2]) + byteToHex(decoded[3]);
 
   if (versionHex === YPUB_HEX || versionHex === ZPUB_HEX) {
-    // Replace version bytes with xpub version (0x0488b21e)
     const data = new Uint8Array(decoded);
     data[0] = 0x04;
     data[1] = 0x88;
@@ -53,7 +51,6 @@ function toXpub(extPubKey: string): string {
     return bs58check.encode(data);
   }
 
-  // Unknown prefix — return as-is and let bip32 handle the error
   return trimmed;
 }
 
@@ -70,26 +67,59 @@ export interface OnchainTransaction {
   timestamp: number | null;
 }
 
-interface MempoolUtxo {
-  txid: string;
-  vout: number;
-  value: number;
-  status: { confirmed: boolean; block_height?: number; block_time?: number };
-}
-
-interface MempoolTx {
-  txid: string;
-  vin: { prevout: { scriptpubkey_address?: string; value: number } }[];
-  vout: { scriptpubkey_address?: string; value: number }[];
-  status: { confirmed: boolean; block_height?: number; block_time?: number };
-}
-
 // ─── Internal state ───────────────────────────────────────────────────────────
 
 /** Cache of derived HD nodes keyed by walletId */
 const hdNodeCache = new Map<string, BIP32Interface>();
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+/** Shared Electrum client instance */
+let electrumClient: any = null;
+let electrumConnected = false;
+
+// ─── Electrum helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Parse Electrum server string (format: "host:port:protocol")
+ * Protocol: 's' = SSL, 't' = TCP
+ */
+function parseElectrumServer(server: string): { host: string; port: number; protocol: string } {
+  const parts = server.split(':');
+  return {
+    host: parts[0],
+    port: parseInt(parts[1], 10) || 50002,
+    protocol: parts[2] || 's',
+  };
+}
+
+/** Get or create an Electrum client connection */
+async function getElectrumClient(): Promise<any> {
+  if (electrumClient && electrumConnected) {
+    return electrumClient;
+  }
+
+  const serverStr = await getElectrumServer();
+  const { host, port, protocol } = parseElectrumServer(serverStr);
+
+  electrumClient = new ElectrumClient(port, host, protocol === 's' ? 'tls' : 'tcp');
+  await electrumClient.connect('lightning-piggy', '1.4');
+  electrumConnected = true;
+
+  return electrumClient;
+}
+
+/**
+ * Convert a Bitcoin address to an Electrum scripthash.
+ * Electrum uses reversed SHA-256 of the output script.
+ */
+function addressToScripthash(address: string): string {
+  const script = bitcoin.address.toOutputScript(address);
+  const hash = bitcoin.crypto.sha256(script);
+  // Reverse the hash bytes
+  const reversed = Buffer.from(hash).reverse();
+  return reversed.toString('hex');
+}
+
+// ─── HD key helpers ───────────────────────────────────────────────────────────
 
 function getHdNode(extPubKey: string): BIP32Interface {
   return bip32.fromBase58(toXpub(extPubKey));
@@ -105,11 +135,6 @@ async function getCachedNode(walletId: string): Promise<BIP32Interface> {
   const node = getHdNode(xpub);
   hdNodeCache.set(walletId, node);
   return node;
-}
-
-async function apiBase(_walletId?: string): Promise<string> {
-  // Per-wallet override could be added via WalletMetadata.electrumServer
-  return getElectrumServer();
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -147,7 +172,6 @@ export async function getNextReceiveAddress(walletId: string): Promise<string> {
   const { address } = bitcoin.payments.p2wpkh({ pubkey: child.publicKey });
   if (!address) throw new Error('Failed to derive address');
 
-  // Increment for next call
   await AsyncStorage.setItem(key, String(index + 1));
   return address;
 }
@@ -166,108 +190,83 @@ export async function getCurrentReceiveAddress(walletId: string): Promise<string
 }
 
 /**
- * Fetch the aggregate balance (confirmed + unconfirmed) for a wallet by
- * scanning the first N derived addresses.
+ * Fetch the aggregate balance for a wallet via Electrum.
  */
 export async function getBalance(walletId: string): Promise<number | null> {
   try {
+    const client = await getElectrumClient();
     const addresses = await getDerivedAddresses(walletId, 20);
-    const base = await apiBase(walletId);
     let total = 0;
 
-    // Batch in groups of 5 to avoid mempool.space rate limiting
-    for (let i = 0; i < addresses.length; i += BATCH_SIZE) {
-      const batch = addresses.slice(i, i + BATCH_SIZE);
-      const results = await Promise.all(
-        batch.map(async (addr) => {
-          try {
-            const res = await fetch(`${base}/address/${addr}/utxo`);
-            if (!res.ok) return 0;
-            const utxos: MempoolUtxo[] = await res.json();
-            return utxos.reduce((sum, utxo) => sum + utxo.value, 0);
-          } catch {
-            return 0;
-          }
-        }),
-      );
-      total += results.reduce((sum, v) => sum + v, 0);
-      if (i + BATCH_SIZE < addresses.length) {
-        await new Promise((r) => setTimeout(r, BATCH_DELAY_MS));
-      }
+    for (const addr of addresses) {
+      const scripthash = addressToScripthash(addr);
+      const result = await client.blockchainScripthash_getBalance(scripthash);
+      total += (result.confirmed || 0) + (result.unconfirmed || 0);
     }
+
     return total;
   } catch (e) {
     console.warn('onchainService.getBalance failed:', e);
+    electrumConnected = false; // Force reconnect on next call
     return null;
   }
 }
 
 /**
- * Fetch recent transactions for a wallet by scanning derived addresses.
+ * Fetch recent transactions for a wallet via Electrum.
  */
 export async function getTransactions(walletId: string): Promise<OnchainTransaction[]> {
   try {
+    const client = await getElectrumClient();
     const addresses = await getDerivedAddresses(walletId, 20);
-    const addressSet = new Set(addresses);
-    const base = await apiBase(walletId);
     const txMap = new Map<string, OnchainTransaction>();
 
-    // Batch in groups of 5 to avoid mempool.space rate limiting
-    const allTxResults: MempoolTx[][] = [];
-    for (let i = 0; i < addresses.length; i += BATCH_SIZE) {
-      const batch = addresses.slice(i, i + BATCH_SIZE);
-      const batchResults = await Promise.all(
-        batch.map(async (addr) => {
-          try {
-            const res = await fetch(`${base}/address/${addr}/txs`);
-            if (!res.ok) return [];
-            return (await res.json()) as MempoolTx[];
-          } catch {
-            return [];
-          }
-        }),
-      );
-      allTxResults.push(...batchResults);
-      if (i + BATCH_SIZE < addresses.length) {
-        await new Promise((r) => setTimeout(r, BATCH_DELAY_MS));
-      }
-    }
+    for (const addr of addresses) {
+      const scripthash = addressToScripthash(addr);
+      const history = await client.blockchainScripthash_getHistory(scripthash);
 
-    for (const txs of allTxResults) {
-      for (const tx of txs) {
-        if (txMap.has(tx.txid)) continue;
+      for (const item of history) {
+        if (txMap.has(item.tx_hash)) continue;
 
+        // Get full transaction to determine amount and direction
+        const txHex = await client.blockchainTransaction_get(item.tx_hash, true);
+
+        // Calculate net value for this wallet
         let inputSum = 0;
         let outputSum = 0;
+        const addressSet = new Set(addresses);
 
-        for (const vin of tx.vin) {
-          if (
-            vin.prevout?.scriptpubkey_address &&
-            addressSet.has(vin.prevout.scriptpubkey_address)
-          ) {
-            inputSum += vin.prevout.value;
+        if (txHex.vin) {
+          for (const vin of txHex.vin) {
+            if (
+              vin.prevout?.scriptPubKey?.address &&
+              addressSet.has(vin.prevout.scriptPubKey.address)
+            ) {
+              inputSum += Math.round((vin.prevout.value || 0) * 1e8);
+            }
           }
         }
-        for (const vout of tx.vout) {
-          if (vout.scriptpubkey_address && addressSet.has(vout.scriptpubkey_address)) {
-            outputSum += vout.value;
+        if (txHex.vout) {
+          for (const vout of txHex.vout) {
+            if (vout.scriptPubKey?.address && addressSet.has(vout.scriptPubKey.address)) {
+              outputSum += Math.round((vout.value || 0) * 1e8);
+            }
           }
         }
 
         const net = outputSum - inputSum;
-        txMap.set(tx.txid, {
-          txid: tx.txid,
+        txMap.set(item.tx_hash, {
+          txid: item.tx_hash,
           type: net >= 0 ? 'incoming' : 'outgoing',
           amount: Math.abs(net),
-          confirmed: tx.status.confirmed,
-          blockHeight: tx.status.block_height ?? null,
-          timestamp: tx.status.block_time ?? null,
+          confirmed: item.height > 0,
+          blockHeight: item.height > 0 ? item.height : null,
+          timestamp: txHex.time || txHex.blocktime || null,
         });
       }
     }
 
     return Array.from(txMap.values()).sort((a, b) => {
-      // Unconfirmed (null timestamp) txs sort first
       if (a.timestamp === null && b.timestamp === null) return 0;
       if (a.timestamp === null) return -1;
       if (b.timestamp === null) return 1;
@@ -275,13 +274,13 @@ export async function getTransactions(walletId: string): Promise<OnchainTransact
     });
   } catch (e) {
     console.warn('onchainService.getTransactions failed:', e);
+    electrumConnected = false;
     return [];
   }
 }
 
 /** Returns true for xpub-imported wallets (all wallets currently). */
 export function isWatchOnly(_walletId: string): boolean {
-  // Future: check import method — mnemonic wallets will return false
   return true;
 }
 
@@ -291,11 +290,22 @@ export async function removeWallet(walletId: string): Promise<void> {
   await AsyncStorage.removeItem(`${ADDRESS_INDEX_PREFIX}${walletId}`);
 }
 
+/** Disconnect the Electrum client */
+export function disconnectElectrum(): void {
+  if (electrumClient) {
+    try {
+      electrumClient.close();
+    } catch {}
+    electrumClient = null;
+    electrumConnected = false;
+  }
+}
+
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 async function getDerivedAddresses(walletId: string, count: number): Promise<string[]> {
   const node = await getCachedNode(walletId);
-  const chain = node.derive(0); // cache the chain-level node
+  const chain = node.derive(0);
   const addresses: string[] = [];
   for (let i = 0; i < count; i++) {
     const child = chain.derive(i);
@@ -306,6 +316,6 @@ async function getDerivedAddresses(walletId: string, count: number): Promise<str
 }
 
 // ─── Future stubs ─────────────────────────────────────────────────────────────
-// TODO: Implement when mnemonic/generated wallet support is added
+// TODO(#39): Implement when mnemonic/generated wallet support is added
 // export async function buildTransaction(...) { }
 // export async function broadcastTransaction(...) { }
