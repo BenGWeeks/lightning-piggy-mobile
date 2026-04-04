@@ -63,4 +63,15 @@
 | NWC relay intermittently drops WebSocket connections
 | The `@getalby/sdk` opens a WebSocket to the NWC relay during `enable()`. If the connection drops (idle timeout, network change), all subsequent requests fail with "failed to publish". +
 *Fix:* `nwcService.ts` detects publish failures and automatically reconnects by creating a fresh `NostrWebLNProvider` with the stored NWC URL. The reconnect logic is in `getBalance()`, `payInvoice()`, and `listTransactions()`.
+
+| App shows "Unable to load script" on physical device
+| The device can't reach Metro bundler. Run `adb reverse tcp:8081 tcp:8081` to forward the port from the device to the host machine. Then tap RELOAD (R, R) on the device.
+
+| Black screen after reload / app launch (eventually loads)
+| The NWC wallet connection retries block the loading spinner. Each wallet attempts `getBalance()` with 3 retries and exponential backoff (2s, 4s, 8s) = ~14s per wallet. With 2 NWC wallets, startup can take ~30 seconds before the UI renders. The wallet is marked "Connected" after `enable()` succeeds (not after `getBalance()`), but the loading state (`isLoading`) waits for all wallets to finish connecting. +
+*Workaround:* Force restart the app and wait ~30-40 seconds. If persistent, check the LNbits NWC relay is running.
+
+| LNbits "Payment in flight" log spam blocks NWC processing
+| A Lightning payment stuck in `IN_FLIGHT` status causes LNbits to poll LND at ~16 checks/second with no backoff, producing 50,000+ log lines/hour and starving the asyncio event loop. NWC, Nostrclient, and all WebSocket-based extensions stop responding while the HTTP UI continues working. +
+*Fix:* `docker restart lnbits-family` (or your LNbits container). See https://github.com/lnbits/lnbits/issues/3917[lnbits/lnbits#3917] for the upstream bug report.
 |===
