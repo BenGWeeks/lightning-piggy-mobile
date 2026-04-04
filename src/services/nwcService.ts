@@ -95,22 +95,31 @@ export async function connect(
 
     await withRetry(() => provider.enable(), { label: 'connect', attempts: 3, delayMs: 2000 });
 
+    // Store provider immediately after enable() — the relay connection is
+    // established even if getBalance fails (e.g. slow relay response).
+    providers.set(walletId, provider);
+    nwcUrls.set(walletId, nwcUrl.trim());
+
     // Allow relay connection to stabilize before first request
     await new Promise((r) => setTimeout(r, 500));
 
-    const b = await withRetry(() => provider.getBalance(), {
-      label: 'initial getBalance',
-      attempts: 3,
-      delayMs: 2000,
-    });
-    const balance = b.balance;
-
-    providers.set(walletId, provider);
-    nwcUrls.set(walletId, nwcUrl.trim());
+    // Try to get initial balance, but don't fail the connection if it times out
+    let balance: number | undefined;
+    try {
+      const b = await withRetry(() => provider.getBalance(), {
+        label: 'initial getBalance',
+        attempts: 3,
+        delayMs: 2000,
+      });
+      balance = b.balance;
+    } catch (error) {
+      if (__DEV__) console.log('[NWC] Initial getBalance failed, wallet still connected');
+    }
 
     return { success: true, balance };
   } catch (error) {
     providers.delete(walletId);
+    nwcUrls.delete(walletId);
     const message = error instanceof Error ? error.message : String(error);
     return { success: false, error: message };
   }
