@@ -1,5 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Text, Image, TouchableOpacity, ScrollView, RefreshControl } from 'react-native';
+import {
+  View,
+  Text,
+  Image,
+  TouchableOpacity,
+  ScrollView,
+  RefreshControl,
+  ActivityIndicator,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
@@ -46,6 +54,9 @@ const HomeScreen: React.FC = () => {
   const [settingsWalletId, setSettingsWalletId] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingTransactions, setLoadingTransactions] = useState(false);
+  // In-memory cache: wallet ID → transactions (avoids re-fetching on swipe)
+  const txCache = useRef<Map<string, any[]>>(new Map());
 
   // Handle sendToAddress from navigation params (e.g., from Friends tab zap)
   useEffect(() => {
@@ -70,6 +81,7 @@ const HomeScreen: React.FC = () => {
   const fetchTransactions = useCallback(async () => {
     if (!activeWalletId) {
       setTransactions([]);
+      setLoadingTransactions(false);
       return;
     }
     // Read wallet type from current wallets array to avoid depending on
@@ -77,26 +89,39 @@ const HomeScreen: React.FC = () => {
     const wallet = wallets.find((w) => w.id === activeWalletId);
     if (!wallet) {
       setTransactions([]);
+      setLoadingTransactions(false);
       return;
     }
+    // Show cached transactions immediately (if any)
+    const cached = txCache.current.get(activeWalletId);
+    if (cached) {
+      setTransactions(cached);
+      setLoadingTransactions(false);
+    } else {
+      setLoadingTransactions(true);
+    }
+
+    // Fetch fresh transactions in background
     try {
+      let freshTxs: any[];
       if (wallet.walletType === 'onchain') {
         const txs = await onchainService.getTransactions(activeWalletId);
-        setTransactions(
-          txs.map((tx) => ({
-            type: tx.type,
-            amount: tx.amount,
-            description: tx.txid.slice(0, 12) + '...',
-            settled_at: tx.timestamp,
-            created_at: tx.timestamp,
-          })),
-        );
+        freshTxs = txs.map((tx) => ({
+          type: tx.type,
+          amount: tx.amount,
+          description: tx.txid.slice(0, 12) + '...',
+          settled_at: tx.timestamp,
+          created_at: tx.timestamp,
+        }));
       } else {
-        const txs = await nwcService.listTransactions(activeWalletId);
-        setTransactions(txs);
+        freshTxs = await nwcService.listTransactions(activeWalletId);
       }
+      txCache.current.set(activeWalletId, freshTxs);
+      setTransactions(freshTxs);
     } catch (error) {
       console.warn('Failed to fetch transactions:', error);
+    } finally {
+      setLoadingTransactions(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWalletId]);
@@ -117,6 +142,10 @@ const HomeScreen: React.FC = () => {
     const fetchKey = `${activeWalletId}-${isWalletAvailable}`;
     if (isWalletAvailable && fetchKey !== lastFetchKey.current) {
       lastFetchKey.current = fetchKey;
+      // Show cached transactions immediately, or clear + show spinner
+      const cached = activeWalletId ? txCache.current.get(activeWalletId) : null;
+      setTransactions(cached || []);
+      if (!cached) setLoadingTransactions(true);
       fetchData();
     } else if (!isWalletAvailable) {
       lastFetchKey.current = null;
@@ -226,12 +255,16 @@ const HomeScreen: React.FC = () => {
           style={styles.transactionsContainer}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         >
-          {hasWallets ? (
-            <TransactionList transactions={transactions} />
-          ) : (
+          {!hasWallets ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyText}>Add a wallet to get started</Text>
             </View>
+          ) : loadingTransactions && transactions.length === 0 ? (
+            <View style={styles.emptyState}>
+              <ActivityIndicator size="small" color="#EC008C" />
+            </View>
+          ) : (
+            <TransactionList transactions={transactions} />
           )}
         </ScrollView>
       </View>
