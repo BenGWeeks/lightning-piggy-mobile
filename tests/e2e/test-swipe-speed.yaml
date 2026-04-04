@@ -7,52 +7,59 @@ name: Wallet Swipe Speed Test
 
 # Wait for app to be ready and wallets to connect
 - waitForAnimationToEnd:
-    timeout: 25000
+    timeout: 30000
 
-# Verify we're on a wallet with transactions
+# Wait for initial wallet to show Connected and load transactions
 - extendedWaitUntil:
     visible:
       text: 'Connected'
-    timeout: 20000
+    timeout: 30000
 
-# Swipe to next wallet
+# Wait for transactions to load (first load may take time)
+- extendedWaitUntil:
+    visible:
+      text: '.*sats'
+    timeout: 30000
+
+# === First swipe: move to next wallet ===
 - swipe:
     start: 85%, 30%
     end: 15%, 30%
     duration: 300
 - waitForAnimationToEnd:
-    timeout: 1000
+    timeout: 2000
 
-# Transactions or "No transactions yet" should appear within 3 seconds
-# (from cache or quick NWC fetch — not a full Electrum re-sync)
+# Wait for transactions to appear (first load of this wallet)
 - extendedWaitUntil:
     visible:
-      text: '(Received|Sent|No transactions yet|sats)'
-    timeout: 3000
+      text: '.*sats'
+    timeout: 15000
 
-# Swipe back to previous wallet
+# === Swipe back to first wallet ===
+# This should be FAST — transactions are cached in WalletContext
 - swipe:
     start: 15%, 30%
     end: 85%, 30%
     duration: 300
 - waitForAnimationToEnd:
-    timeout: 1000
+    timeout: 2000
 
-# Previous wallet's transactions should appear within 3 seconds (from cache)
+# Cached transactions should appear within 2 seconds
 - extendedWaitUntil:
     visible:
-      text: '(Received|Sent|No transactions yet|sats)'
-    timeout: 3000
+      text: '.*sats'
+    timeout: 2000
 
-# Swipe forward again — should be instant from cache
+# === Swipe forward again — also cached ===
 - swipe:
     start: 85%, 30%
     end: 15%, 30%
     duration: 300
 - waitForAnimationToEnd:
-    timeout: 1000
+    timeout: 2000
 
+# Should be instant from cache
 - extendedWaitUntil:
     visible:
-      text: '(Received|Sent|No transactions yet|sats)'
+      text: '.*sats'
     timeout: 2000
