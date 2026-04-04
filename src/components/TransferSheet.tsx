@@ -82,7 +82,27 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     return null;
   }, [source, dest]);
 
-  // Fetch fee estimate when transfer type or amount changes
+  // Cache Boltz fees — fetch once when transfer type changes, not per keystroke
+  const [cachedBoltzFees, setCachedBoltzFees] = useState<boltzService.SwapFees | null>(null);
+
+  useEffect(() => {
+    if (transferType === 'ln-to-onchain') {
+      let cancelled = false;
+      boltzService
+        .getSwapFees()
+        .then((fees) => {
+          if (!cancelled) setCachedBoltzFees(fees);
+        })
+        .catch(() => {});
+      return () => {
+        cancelled = true;
+      };
+    } else {
+      setCachedBoltzFees(null);
+    }
+  }, [transferType]);
+
+  // Update fee estimate display based on cached fees + current amount
   useEffect(() => {
     if (!transferType || currentSats <= 0) {
       setFeeEstimate(null);
@@ -90,23 +110,11 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     }
     if (transferType === 'ln-to-ln') {
       setFeeEstimate('~0 sats \u00B7 Instant (Lightning)');
-    } else if (transferType === 'ln-to-onchain') {
-      let cancelled = false;
-      boltzService
-        .getSwapFees()
-        .then((fees) => {
-          if (cancelled) return;
-          const fee = boltzService.calculateSwapFee(currentSats, fees);
-          setFeeEstimate(`~${fee.toLocaleString()} sats \u00B7 ~10-60 min (on-chain)`);
-        })
-        .catch(() => {
-          if (!cancelled) setFeeEstimate('Fee estimate unavailable');
-        });
-      return () => {
-        cancelled = true;
-      };
+    } else if (transferType === 'ln-to-onchain' && cachedBoltzFees) {
+      const fee = boltzService.calculateSwapFee(currentSats, cachedBoltzFees);
+      setFeeEstimate(`~${fee.toLocaleString()} sats \u00B7 ~10-60 min (on-chain)`);
     }
-  }, [transferType, currentSats]);
+  }, [transferType, currentSats, cachedBoltzFees]);
 
   useEffect(() => {
     if (visible) {

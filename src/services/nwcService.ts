@@ -112,7 +112,7 @@ export async function connect(
         delayMs: 2000,
       });
       balance = b.balance;
-    } catch (error) {
+    } catch {
       if (__DEV__) console.log('[NWC] Initial getBalance failed, wallet still connected');
     }
 

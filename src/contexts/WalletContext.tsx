@@ -70,7 +70,6 @@ interface WalletContextType {
   // Payment actions with explicit wallet ID (for sheets)
   makeInvoiceForWallet: (walletId: string, amount: number, memo?: string) => Promise<string>;
   payInvoiceForWallet: (walletId: string, bolt11: string) => Promise<{ preimage: string }>;
-  payInvoiceAsyncForWallet: (walletId: string, bolt11: string) => Promise<void>;
   refreshBalanceForWallet: (walletId: string) => Promise<void>;
 
   // On-chain actions
@@ -437,12 +436,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return nwcService.payInvoice(walletId, bolt11);
   }, []);
 
-  const payInvoiceAsyncForWallet = useCallback(async (walletId: string, bolt11: string) => {
-    return nwcService.payInvoiceAsync(walletId, bolt11);
-  }, []);
-
   const getReceiveAddress = useCallback(async (walletId: string) => {
-    return onchainService.getCurrentReceiveAddress(walletId);
+    return onchainService.getNextReceiveAddress(walletId);
   }, []);
 
   return (
@@ -472,7 +467,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         payInvoice,
         makeInvoiceForWallet,
         payInvoiceForWallet,
-        payInvoiceAsyncForWallet,
         refreshBalanceForWallet,
         getReceiveAddress,
         isConnected,

@@ -78,14 +78,6 @@ function toHex(arr: Uint8Array): string {
   return Array.from(arr, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-function fromHex(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < hex.length; i += 2) {
-    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
-  }
-  return bytes;
-}
-
 /** SHA-256 hash using bitcoinjs-lib's crypto (already works in RN) */
 function sha256(data: Uint8Array): Uint8Array {
   return new Uint8Array(bitcoin.crypto.sha256(Buffer.from(data)));

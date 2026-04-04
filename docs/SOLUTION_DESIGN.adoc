@@ -125,6 +125,18 @@ We use script-path because it works with our existing pure JS crypto stack. Futu
 
 **Fallback:** If the claim tx fails to broadcast, Boltz's Protocol 11 automatically sends funds to the `claimAddress` after the timeout period (~24 hours).
 
+**Current status:** The Boltz API integration (swap creation, invoice payment, lockup detection) is implemented. The script-path claim transaction construction is a TODO — funds currently rely on Boltz Protocol 11 fallback (~24 hours). The swap state (preimage + claim private key) needs to be persisted to SecureStore so it survives app restarts. The claim keypair and preimage should be viewable in the transaction detail bottom sheet (see https://github.com/BenGWeeks/lightning-piggy-mobile/issues/38[#38]) for manual recovery or Boltz support contact.
+
+=== NWC Relay Compatibility
+
+The LNbits Nostrclient relay proxy does not send NIP-01 OK responses after receiving EVENT messages (see https://github.com/lnbits/nostrclient/issues/52[lnbits/nostrclient#52]). This causes `nostr-tools` `SimplePool.publish()` to timeout, breaking all NWC operations.
+
+**Workaround in `nwcService.ts`:** The relay pool's `publish` method is monkey-patched during `connect()` to resolve immediately (fire-and-forget) instead of waiting for OK. The NWC response comes back via the subscription, not the OK acknowledgement.
+
+**Proper fix:** PR https://github.com/lnbits/nostrclient/pull/68[lnbits/nostrclient#68] adds NIP-01 OK and CLOSED responses to Nostrclient. Once merged, the monkey-patch can be removed.
+
+Additionally, `nwcService.ts` includes auto-reconnect logic: if a publish fails with "failed to publish" (relay disconnected), it creates a fresh `NostrWebLNProvider` and retries. The wallet is marked as "Connected" after `enable()` succeeds, not after `getBalance()`, so slow relay responses don't show the wallet as disconnected.
+
 === Visual Differentiation
 
 - **NWC wallets**: Green/red status dot + "Connected"/"Disconnected"

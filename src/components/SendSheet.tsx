@@ -81,10 +81,6 @@ function isValidInvoice(data: string): boolean {
   );
 }
 
-function isBitcoinAddress(input: string): boolean {
-  return boltzService.isBitcoinAddress(input);
-}
-
 const SendSheet: React.FC<Props> = ({
   visible,
   onClose,
@@ -223,7 +219,7 @@ const SendSheet: React.FC<Props> = ({
       setInvoiceData(input);
       setDecoded({ amountSats: null, description: `Pay to ${input}`, expiry: null });
       setScanned(true);
-    } else if (isBitcoinAddress(input)) {
+    } else if (boltzService.isBitcoinAddress(input)) {
       setIsOnchainAddress(true);
       setInvoiceData(input);
       setDecoded({ amountSats: null, description: `Send to on-chain address`, expiry: null });

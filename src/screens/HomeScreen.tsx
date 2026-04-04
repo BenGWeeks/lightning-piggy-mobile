@@ -146,7 +146,9 @@ const HomeScreen: React.FC = () => {
   const isOnchainWatchOnly = activeWallet?.walletType === 'onchain';
   const hasActiveConnection = isOnchainWatchOnly ? true : (activeWallet?.isConnected ?? false);
   const canSend = hasActiveConnection && !isOnchainWatchOnly;
-  const canTransfer = wallets.length >= 2;
+  // Transfer requires at least 1 connected NWC wallet + 1 other wallet
+  const hasConnectedNwc = wallets.some((w) => w.walletType === 'nwc' && w.isConnected);
+  const canTransfer = hasConnectedNwc && wallets.length >= 2;
 
   return (
     <View style={styles.container}>

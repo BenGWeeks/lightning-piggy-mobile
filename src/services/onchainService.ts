@@ -169,17 +169,21 @@ export async function getBalance(walletId: string): Promise<number | null> {
   try {
     const addresses = await getDerivedAddresses(walletId, 20);
     const base = await apiBase(walletId);
-    let total = 0;
 
-    for (const addr of addresses) {
-      const res = await fetch(`${base}/address/${addr}/utxo`);
-      if (!res.ok) continue;
-      const utxos: MempoolUtxo[] = await res.json();
-      for (const utxo of utxos) {
-        total += utxo.value;
-      }
-    }
-    return total;
+    // Batch all address UTXO lookups in parallel
+    const results = await Promise.all(
+      addresses.map(async (addr) => {
+        try {
+          const res = await fetch(`${base}/address/${addr}/utxo`);
+          if (!res.ok) return 0;
+          const utxos: MempoolUtxo[] = await res.json();
+          return utxos.reduce((sum, utxo) => sum + utxo.value, 0);
+        } catch {
+          return 0;
+        }
+      }),
+    );
+    return results.reduce((sum, v) => sum + v, 0);
   } catch (e) {
     console.warn('onchainService.getBalance failed:', e);
     return null;
@@ -196,11 +200,20 @@ export async function getTransactions(walletId: string): Promise<OnchainTransact
     const base = await apiBase(walletId);
     const txMap = new Map<string, OnchainTransaction>();
 
-    for (const addr of addresses) {
-      const res = await fetch(`${base}/address/${addr}/txs`);
-      if (!res.ok) continue;
-      const txs: MempoolTx[] = await res.json();
+    // Batch all address tx lookups in parallel
+    const allTxResults = await Promise.all(
+      addresses.map(async (addr) => {
+        try {
+          const res = await fetch(`${base}/address/${addr}/txs`);
+          if (!res.ok) return [];
+          return (await res.json()) as MempoolTx[];
+        } catch {
+          return [];
+        }
+      }),
+    );
 
+    for (const txs of allTxResults) {
       for (const tx of txs) {
         if (txMap.has(tx.txid)) continue;
 
@@ -233,9 +246,13 @@ export async function getTransactions(walletId: string): Promise<OnchainTransact
       }
     }
 
-    return Array.from(txMap.values()).sort(
-      (a, b) => (b.timestamp ?? Infinity) - (a.timestamp ?? Infinity),
-    );
+    return Array.from(txMap.values()).sort((a, b) => {
+      // Unconfirmed (null timestamp) txs sort first
+      if (a.timestamp === null && b.timestamp === null) return 0;
+      if (a.timestamp === null) return -1;
+      if (b.timestamp === null) return 1;
+      return b.timestamp - a.timestamp;
+    });
   } catch (e) {
     console.warn('onchainService.getTransactions failed:', e);
     return [];
@@ -258,9 +275,10 @@ export async function removeWallet(walletId: string): Promise<void> {
 
 async function getDerivedAddresses(walletId: string, count: number): Promise<string[]> {
   const node = await getCachedNode(walletId);
+  const chain = node.derive(0); // cache the chain-level node
   const addresses: string[] = [];
   for (let i = 0; i < count; i++) {
-    const child = node.derive(0).derive(i);
+    const child = chain.derive(i);
     const { address } = bitcoin.payments.p2wpkh({ pubkey: child.publicKey });
     if (address) addresses.push(address);
   }
