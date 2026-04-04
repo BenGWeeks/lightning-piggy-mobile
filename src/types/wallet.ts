@@ -32,8 +32,18 @@ export interface WalletMetadata {
   electrumServer?: string;
 }
 
+export interface WalletTransaction {
+  type: string;
+  amount: number;
+  description?: string;
+  created_at?: number | null;
+  settled_at?: number | null;
+  blockHeight?: number | null;
+}
+
 export interface WalletState extends WalletMetadata {
   isConnected: boolean;
   balance: number | null;
   walletAlias: string | null; // alias from NWC getInfo()
+  transactions: WalletTransaction[];
 }

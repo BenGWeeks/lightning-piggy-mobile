@@ -4,7 +4,7 @@ import * as nwcService from '../services/nwcService';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
 import { CURRENCIES, FiatCurrency, getBtcPrice } from '../services/fiatService';
-import { CardTheme, WalletMetadata, WalletState } from '../types/wallet';
+import { CardTheme, WalletMetadata, WalletState, WalletTransaction } from '../types/wallet';
 
 const USER_NAME_KEY = 'user_display_name';
 const CURRENCY_KEY = 'user_fiat_currency';
@@ -71,6 +71,7 @@ interface WalletContextType {
   makeInvoiceForWallet: (walletId: string, amount: number, memo?: string) => Promise<string>;
   payInvoiceForWallet: (walletId: string, bolt11: string) => Promise<{ preimage: string }>;
   refreshBalanceForWallet: (walletId: string) => Promise<void>;
+  fetchTransactionsForWallet: (walletId: string) => Promise<void>;
 
   // On-chain actions
   getReceiveAddress: (walletId: string) => Promise<string>;
@@ -167,12 +168,23 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
         // Load and reconnect all wallets
         const walletList = await walletStorage.getWalletList();
-        const walletStates: WalletState[] = walletList.map((w) => ({
-          ...w,
-          isConnected: false,
-          balance: null,
-          walletAlias: null,
-        }));
+        const walletStates: WalletState[] = await Promise.all(
+          walletList.map(async (w) => {
+            // Load cached transactions from AsyncStorage
+            let cachedTxs: WalletTransaction[] = [];
+            try {
+              const txJson = await AsyncStorage.getItem(`txs_${w.id}`);
+              if (txJson) cachedTxs = JSON.parse(txJson);
+            } catch {}
+            return {
+              ...w,
+              isConnected: false,
+              balance: null,
+              walletAlias: null,
+              transactions: cachedTxs,
+            };
+          }),
+        );
         setWallets(walletStates);
 
         if (walletStates.length > 0) {
@@ -269,6 +281,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         isConnected: true,
         balance: result.balance ?? null,
         walletAlias: info?.alias || null,
+        transactions: [],
       };
 
       // Persist
@@ -317,9 +330,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       const state: WalletState = {
         ...metadata,
-        isConnected: false, // on-chain wallets don't have persistent connections
+        isConnected: false,
         balance: bal,
         walletAlias: null,
+        transactions: [],
       };
 
       setWallets((prev) => [...prev, state]);
@@ -404,6 +418,46 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [wallets, updateWalletInState],
   );
 
+  const fetchTransactionsForWallet = useCallback(
+    async (walletId: string) => {
+      const wallet = wallets.find((w) => w.id === walletId);
+      if (!wallet) return;
+
+      try {
+        let txs: WalletTransaction[];
+        if (wallet.walletType === 'onchain') {
+          const raw = await onchainService.getTransactions(walletId);
+          txs = raw
+            .filter((tx) => tx.amount > 0) // Skip txs with unknown amounts
+            .map((tx) => ({
+              type: tx.type,
+              amount: tx.amount,
+              description: tx.type === 'incoming' ? 'Received' : 'Sent',
+              settled_at: tx.timestamp,
+              created_at: tx.timestamp,
+              blockHeight: tx.blockHeight,
+            }));
+        } else {
+          const raw = await nwcService.listTransactions(walletId);
+          txs = raw.map((tx: any) => ({
+            type: tx.type,
+            amount: tx.amount,
+            description: tx.description,
+            settled_at: tx.settled_at,
+            created_at: tx.created_at,
+          }));
+        }
+        updateWalletInState(walletId, { transactions: txs });
+
+        // Persist to AsyncStorage for fast loading on next startup
+        await AsyncStorage.setItem(`txs_${walletId}`, JSON.stringify(txs));
+      } catch (error) {
+        console.warn(`fetchTransactions failed for ${walletId}:`, error);
+      }
+    },
+    [wallets, updateWalletInState],
+  );
+
   const completeOnboarding = useCallback(async () => {
     await walletStorage.setOnboarded();
     setIsOnboarded(true);
@@ -468,6 +522,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         makeInvoiceForWallet,
         payInvoiceForWallet,
         refreshBalanceForWallet,
+        fetchTransactionsForWallet,
         getReceiveAddress,
         isConnected,
         balance,

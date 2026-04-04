@@ -8,8 +8,8 @@ interface Transaction {
   type: string;
   amount: number;
   description?: string;
-  created_at?: number;
-  settled_at?: number;
+  created_at?: number | null;
+  settled_at?: number | null;
   blockHeight?: number | null;
 }
 

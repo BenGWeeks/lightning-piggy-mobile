@@ -21,8 +21,6 @@ import WalletCarousel from '../components/WalletCarousel';
 import AddWalletWizard from '../components/AddWalletWizard';
 import WalletSettingsSheet from '../components/WalletSettingsSheet';
 import ProfileIcon from '../components/ProfileIcon';
-import * as nwcService from '../services/nwcService';
-import * as onchainService from '../services/onchainService';
 import { ArrowDownIcon, ArrowUpIcon, ArrowLeftRightIcon } from '../components/icons/ArrowIcons';
 import { styles } from '../styles/HomeScreen.styles';
 import type { MainTabParamList } from '../navigation/types';
@@ -34,6 +32,7 @@ const HomeScreen: React.FC = () => {
     activeWallet,
     hasWallets,
     refreshActiveBalance,
+    fetchTransactionsForWallet,
     setActiveWallet,
     userName,
     btcPrice,
@@ -52,11 +51,7 @@ const HomeScreen: React.FC = () => {
   const [sendToPubkey, setSendToPubkey] = useState<string | undefined>();
   const [wizardOpen, setWizardOpen] = useState(false);
   const [settingsWalletId, setSettingsWalletId] = useState<string | null>(null);
-  const [transactions, setTransactions] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [loadingTransactions, setLoadingTransactions] = useState(false);
-  // In-memory cache: wallet ID → transactions (avoids re-fetching on swipe)
-  const txCache = useRef<Map<string, any[]>>(new Map());
 
   // Handle sendToAddress from navigation params (e.g., from Friends tab zap)
   useEffect(() => {
@@ -79,52 +74,8 @@ const HomeScreen: React.FC = () => {
   ]);
 
   const fetchTransactions = useCallback(async () => {
-    if (!activeWalletId) {
-      setTransactions([]);
-      setLoadingTransactions(false);
-      return;
-    }
-    // Read wallet type from current wallets array to avoid depending on
-    // the activeWallet object reference (which changes on every balance update)
-    const wallet = wallets.find((w) => w.id === activeWalletId);
-    if (!wallet) {
-      setTransactions([]);
-      setLoadingTransactions(false);
-      return;
-    }
-    // Show cached transactions immediately (if any)
-    const cached = txCache.current.get(activeWalletId);
-    if (cached) {
-      setTransactions(cached);
-      setLoadingTransactions(false);
-    } else {
-      setLoadingTransactions(true);
-    }
-
-    // Fetch fresh transactions in background
-    try {
-      let freshTxs: any[];
-      if (wallet.walletType === 'onchain') {
-        const txs = await onchainService.getTransactions(activeWalletId);
-        freshTxs = txs.map((tx) => ({
-          type: tx.type,
-          amount: tx.amount,
-          description: tx.type === 'incoming' ? 'Received' : 'Sent',
-          settled_at: tx.timestamp,
-          created_at: tx.timestamp,
-          // Show block height as subtitle when no timestamp available
-          blockHeight: tx.blockHeight,
-        }));
-      } else {
-        freshTxs = await nwcService.listTransactions(activeWalletId);
-      }
-      txCache.current.set(activeWalletId, freshTxs);
-      setTransactions(freshTxs);
-    } catch (error) {
-      console.warn('Failed to fetch transactions:', error);
-    } finally {
-      setLoadingTransactions(false);
-    }
+    if (!activeWalletId) return;
+    await fetchTransactionsForWallet(activeWalletId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWalletId]);
 
@@ -136,19 +87,9 @@ const HomeScreen: React.FC = () => {
   const isWalletAvailable =
     activeWallet?.walletType === 'onchain' ? true : (activeWallet?.isConnected ?? false);
 
-  // Fetch data once when wallet becomes available or wallet changes.
-  // Uses a ref to track the last fetched state and avoid re-fetching
-  // when unrelated wallet state (balance, etc.) changes.
-  // Show cached transactions immediately when active wallet changes
-  useEffect(() => {
-    if (activeWalletId) {
-      const cached = txCache.current.get(activeWalletId);
-      setTransactions(cached || []);
-      if (!cached) setLoadingTransactions(true);
-    } else {
-      setTransactions([]);
-    }
-  }, [activeWalletId]);
+  // Transactions from the active wallet (owned by WalletContext)
+  const transactions = activeWallet?.transactions ?? [];
+  const loadingTransactions = isWalletAvailable && transactions.length === 0;
 
   // Fetch fresh data when wallet becomes available
   const lastFetchKey = useRef<string | null>(null);
@@ -157,9 +98,6 @@ const HomeScreen: React.FC = () => {
     if (isWalletAvailable && fetchKey !== lastFetchKey.current) {
       lastFetchKey.current = fetchKey;
       fetchData();
-    } else if (!isWalletAvailable) {
-      lastFetchKey.current = null;
-      setTransactions([]);
     }
   }, [activeWalletId, isWalletAvailable, fetchData]);
 
