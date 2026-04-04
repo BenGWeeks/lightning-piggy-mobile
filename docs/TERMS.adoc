@@ -1,0 +1,137 @@
+= Glossary & Reference
+
+== Terms
+
+[cols="1,3", options="header"]
+|===
+| Term | Definition
+
+| Bitcoin
+| A decentralised digital currency and payment network. Transactions are recorded on a public blockchain.
+
+| Lightning Network
+| A layer-2 payment protocol built on top of Bitcoin enabling fast, low-cost transactions via payment channels.
+
+| Lightning Address
+| A human-readable email-like identifier (e.g. `user@wallet.com`) that resolves to a Lightning payment endpoint via LNURL-pay. Defined by https://lightningaddress.com[lightningaddress.com].
+
+| Boltz
+| A non-custodial exchange service (https://boltz.exchange[boltz.exchange]) that enables trustless atomic swaps between Lightning and on-chain Bitcoin using submarine swaps and reverse submarine swaps.
+
+| BOLT11
+| The standard Lightning Network invoice format (https://github.com/lightning/bolts/blob/master/11-payment-encoding.md[BOLT #11]). Encodes payment amount, description, expiry, and routing hints in a bech32-encoded string starting with `lnbc`.
+
+| BOLT12
+| A newer Lightning invoice format (https://github.com/lightning/bolts/blob/master/12-offer-encoding.md[BOLT #12]) that supports reusable offers, recurring payments, and payer/payee privacy. Not yet widely adopted.
+
+| LNURL
+| A set of protocols (https://github.com/lnurl/luds[LUD specs]) for interacting with Lightning wallets via HTTP. Enables features like pay requests, withdrawals, authentication, and channel requests.
+
+| LUD-16
+| The LNURL spec for Lightning Addresses (https://github.com/lnurl/luds/blob/luds/16.md[LUD-16]). Defines how `user@domain` identifiers resolve to LNURL-pay endpoints via `https://domain/.well-known/lnurlp/user`.
+
+| Nostr
+| Notes and Other Stuff Transmitted by Relays — a decentralised protocol for social networking and messaging (https://github.com/nostr-protocol/nostr[nostr-protocol/nostr]). Uses public/private key cryptography for identity.
+
+| NWC
+| Nostr Wallet Connect (https://github.com/nostr-protocol/nips/blob/master/47.md[NIP-47]) — a protocol for controlling a Lightning wallet remotely via Nostr relays. The app sends encrypted payment requests, and the wallet service executes them.
+
+| Schnorr
+| A digital signature scheme (https://bips.dev/340/[BIP-340]) used by Bitcoin Taproot. Produces 64-byte signatures (vs 72 for ECDSA), enables key and signature aggregation (MuSig2), and improves on-chain privacy.
+
+| Taproot
+| A Bitcoin upgrade (https://bips.dev/341/[BIP-341]) that enables more complex smart contracts with better privacy. Uses Schnorr signatures and Merkleized Abstract Syntax Trees (MAST) for script-path spending.
+
+| Submarine Swap
+| An atomic swap between Lightning and on-chain Bitcoin. "Submarine" (on-chain → Lightning) sends on-chain BTC and receives Lightning. "Reverse submarine" (Lightning → on-chain) pays a Lightning invoice and receives on-chain BTC.
+
+| xpub / ypub / zpub
+| Extended public keys for HD (hierarchical deterministic) wallets. `xpub` = BIP-44 (legacy), `ypub` = BIP-49 (wrapped segwit), `zpub` = BIP-84 (native segwit). All contain the same key data with different version byte prefixes.
+
+| Watch-only Wallet
+| A wallet that can generate addresses and monitor balance/transactions but cannot sign transactions (no private key). Created by importing an xpub/ypub/zpub.
+
+| Hot Wallet
+| A wallet with access to private keys (via mnemonic or generated keypair) that can sign and broadcast transactions.
+
+| BIP-32
+| Bitcoin Improvement Proposal for hierarchical deterministic wallets (https://bips.dev/32/[BIP-32]). Derives child keys from a master key using a tree structure.
+
+| BIP-39
+| Bitcoin Improvement Proposal for mnemonic seed phrases (https://bips.dev/39/[BIP-39]). Encodes wallet entropy as 12 or 24 human-readable words.
+
+| BIP-84
+| Bitcoin Improvement Proposal for native segwit HD wallets (https://bips.dev/84/[BIP-84]). Derivation path `m/84'/0'/0'`, generates `bc1q...` addresses.
+
+| MuSig2
+| A multi-signature scheme (https://bips.dev/327/[BIP-327]) that aggregates multiple Schnorr signatures into a single signature. Used by Boltz for cooperative Taproot key-path spending.
+
+| NIP-20
+| Nostr Implementation Possibility for OK responses (https://github.com/nostr-protocol/nips/blob/master/01.md[NIP-01]). Relays must send `["OK", event_id, success, message]` after receiving an EVENT.
+
+| HTLC
+| Hash Time-Locked Contract — a conditional payment used in Lightning channels and atomic swaps. Funds are locked by a hash and released when the preimage is revealed, or refunded after a timeout.
+|===
+
+== Dependent Libraries
+
+[cols="1,1,2", options="header"]
+|===
+| Package | Source | Purpose
+
+| https://github.com/nicoll-douglas/getalby-sdk[`@getalby/sdk`]
+| Alby
+| NWC (Nostr Wallet Connect) client — connects to Lightning wallets via Nostr relays
+
+| https://github.com/nbd-wtf/nostr-tools[`nostr-tools`]
+| nbd-wtf
+| Nostr protocol utilities — event signing, relay connections, NIP-19 encoding
+
+| https://github.com/nicoll-douglas/light-bolt11-decoder[`light-bolt11-decoder`]
+| nicoll-douglas
+| Lightweight BOLT-11 Lightning invoice decoder
+
+| https://github.com/bitcoinjs/bitcoinjs-lib[`bitcoinjs-lib`]
+| bitcoinjs
+| Core Bitcoin library — address generation, transaction construction, script handling
+
+| https://github.com/bitcoinjs/bip32[`bip32`]
+| bitcoinjs
+| BIP-32 HD wallet key derivation from xpub/mnemonic
+
+| https://github.com/bitcoinerlab/secp256k1[`@bitcoinerlab/secp256k1`]
+| bitcoinerlab
+| Pure JS secp256k1 elliptic curve (replaces WASM-based `tiny-secp256k1` for React Native)
+
+| https://github.com/paulmillr/noble-curves[`@noble/curves`]
+| paulmillr
+| Audited elliptic curve cryptography — secp256k1 Schnorr signatures (BIP-340)
+
+| https://github.com/paulmillr/noble-hashes[`@noble/hashes`]
+| paulmillr
+| Audited cryptographic hash functions — SHA-256, RIPEMD-160
+
+| https://github.com/nicoll-douglas/scure-btc-signer[`@scure/btc-signer`]
+| paulmillr
+| Bitcoin transaction signing — Taproot script-path spending, PSBT support
+
+| https://github.com/nicoll-douglas/bs58check[`bs58check`]
+| nicoll-douglas
+| Base58Check encoding/decoding — used for xpub/ypub/zpub version byte conversion
+
+| https://github.com/feross/buffer[`buffer`]
+| feross
+| Node.js Buffer polyfill for React Native
+
+| https://github.com/nicoll-douglas/gorhom-bottom-sheet[`@gorhom/bottom-sheet`]
+| gorhom
+| Bottom sheet modal component for React Native
+
+| https://github.com/nicoll-douglas/react-native-qrcode-svg[`react-native-qrcode-svg`]
+| awesomejerry
+| QR code generation as SVG for React Native
+
+| https://github.com/nicoll-douglas/react-native-svg[`react-native-svg`]
+| react-native-svg
+| SVG rendering for React Native — used for custom Lucide-style icons
+|===
