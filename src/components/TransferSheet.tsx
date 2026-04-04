@@ -7,15 +7,13 @@ import {
   Alert,
   ActivityIndicator,
   BackHandler,
-  Keyboard,
-  TouchableWithoutFeedback,
 } from 'react-native';
 import {
   BottomSheetModal,
   BottomSheetTextInput,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
-  BottomSheetView,
+  BottomSheetScrollView,
 } from '@gorhom/bottom-sheet';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
@@ -238,188 +236,182 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       handleIndicatorStyle={styles.handleIndicator}
       backgroundStyle={styles.sheetBackground}
     >
-      <BottomSheetView style={styles.content}>
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
-          <View style={styles.innerContent}>
-            <Text style={styles.title}>Transfer</Text>
+      <BottomSheetScrollView
+        style={styles.content}
+        contentContainerStyle={styles.innerContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={styles.title}>Transfer</Text>
 
-            {/* Source wallet selector */}
-            <Text style={styles.sectionLabel}>From</Text>
-            <View style={styles.dropdownWrapper}>
-              <TouchableOpacity
-                style={styles.dropdown}
-                onPress={() => {
-                  setSourceDropdownOpen(!sourceDropdownOpen);
-                  setDestDropdownOpen(false);
-                }}
-              >
-                <Text style={styles.dropdownText}>
-                  {source ? renderWalletLabel(source) : 'Select wallet'}
-                </Text>
-                <Text style={styles.dropdownArrow}>{sourceDropdownOpen ? '\u25B2' : '\u25BC'}</Text>
-              </TouchableOpacity>
-              {sourceDropdownOpen && (
-                <View style={styles.dropdownMenu}>
-                  {sourceWallets.map((w) => (
-                    <TouchableOpacity
-                      key={w.id}
-                      style={[styles.dropdownItem, sourceId === w.id && styles.dropdownItemActive]}
-                      onPress={() => {
-                        setSourceId(w.id);
-                        setSourceDropdownOpen(false);
-                        // Adjust dest if same
-                        if (destId === w.id) {
-                          const alt = wallets.find((ww) => ww.id !== w.id);
-                          setDestId(alt?.id ?? null);
-                        }
-                      }}
-                    >
-                      <Text
-                        style={[
-                          styles.dropdownItemText,
-                          sourceId === w.id && styles.dropdownItemTextActive,
-                        ]}
-                      >
-                        {renderWalletLabel(w)}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                  {sourceWallets.length === 0 && (
-                    <Text style={styles.dropdownEmpty}>No connected Lightning wallets</Text>
-                  )}
-                </View>
-              )}
-            </View>
-
-            {/* Destination wallet selector */}
-            <Text style={styles.sectionLabel}>To</Text>
-            <View style={styles.dropdownWrapper}>
-              <TouchableOpacity
-                style={styles.dropdown}
-                onPress={() => {
-                  setDestDropdownOpen(!destDropdownOpen);
-                  setSourceDropdownOpen(false);
-                }}
-                testID="transfer-dest-dropdown"
-                accessibilityLabel="Destination wallet"
-              >
-                <Text style={styles.dropdownText}>
-                  {dest ? renderWalletLabel(dest) : 'Select wallet'}
-                </Text>
-                <Text style={styles.dropdownArrow}>{destDropdownOpen ? '\u25B2' : '\u25BC'}</Text>
-              </TouchableOpacity>
-              {destDropdownOpen && (
-                <View style={styles.dropdownMenu}>
-                  {destWallets.map((w) => (
-                    <TouchableOpacity
-                      key={w.id}
-                      style={[styles.dropdownItem, destId === w.id && styles.dropdownItemActive]}
-                      onPress={() => {
-                        setDestId(w.id);
-                        setDestDropdownOpen(false);
-                      }}
-                    >
-                      <Text
-                        style={[
-                          styles.dropdownItemText,
-                          destId === w.id && styles.dropdownItemTextActive,
-                        ]}
-                      >
-                        {renderWalletLabel(w)}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-            </View>
-
-            {/* Amount input */}
-            <Text style={styles.sectionLabel}>Amount</Text>
-            <View style={styles.amountRow}>
-              <BottomSheetTextInput
-                style={styles.amountInput}
-                value={inputUnit === 'sats' ? satsValue : fiatValue}
-                onChangeText={inputUnit === 'sats' ? handleSatsChange : handleFiatChange}
-                keyboardType={inputUnit === 'sats' ? 'numeric' : 'decimal-pad'}
-                placeholder={inputUnit === 'sats' ? '0' : '0.00'}
-                placeholderTextColor={colors.textSupplementary}
-                testID="transfer-amount-input"
-                accessibilityLabel="Transfer amount"
-              />
-              <TouchableOpacity
-                style={[styles.unitButton, inputUnit === 'sats' && styles.unitButtonActive]}
-                onPress={() => setInputUnit('sats')}
-              >
-                <Text
-                  style={[
-                    styles.unitButtonText,
-                    inputUnit === 'sats' && styles.unitButtonTextActive,
-                  ]}
-                >
-                  Sats
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.unitButton, inputUnit === 'fiat' && styles.unitButtonActive]}
-                onPress={() => setInputUnit('fiat')}
-              >
-                <Text
-                  style={[
-                    styles.unitButtonText,
-                    inputUnit === 'fiat' && styles.unitButtonTextActive,
-                  ]}
-                >
-                  {currency}
-                </Text>
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.convertedAmount}>
-              {inputUnit === 'sats'
-                ? btcPrice && currentSats > 0
-                  ? satsToFiatString(currentSats, btcPrice, currency)
-                  : ''
-                : currentSats > 0
-                  ? `${currentSats.toLocaleString()} sats`
-                  : ''}
+        {/* Source wallet selector */}
+        <Text style={styles.sectionLabel}>From</Text>
+        <View style={styles.dropdownWrapper}>
+          <TouchableOpacity
+            style={styles.dropdown}
+            onPress={() => {
+              setSourceDropdownOpen(!sourceDropdownOpen);
+              setDestDropdownOpen(false);
+            }}
+          >
+            <Text style={styles.dropdownText}>
+              {source ? renderWalletLabel(source) : 'Select wallet'}
             </Text>
-
-            {/* Fee estimate */}
-            {feeEstimate && <Text style={styles.feeText}>Estimated fee: {feeEstimate}</Text>}
-
-            {/* Watch-only warning */}
-            {source?.walletType === 'onchain' && (
-              <Text style={styles.warningText}>
-                Watch-only wallets cannot send. Select a Lightning wallet as source.
-              </Text>
-            )}
-
-            {/* Action buttons */}
-            <View style={styles.buttonRow}>
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={onClose}
-                testID="transfer-cancel"
-                accessibilityLabel="Cancel transfer"
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.transferButton, (!canTransfer || sending) && styles.buttonDisabled]}
-                onPress={handleTransfer}
-                disabled={!canTransfer || sending}
-                testID="transfer-execute"
-                accessibilityLabel="Execute transfer"
-              >
-                {sending ? (
-                  <ActivityIndicator color={colors.brandPink} />
-                ) : (
-                  <Text style={styles.transferButtonText}>Transfer</Text>
-                )}
-              </TouchableOpacity>
+            <Text style={styles.dropdownArrow}>{sourceDropdownOpen ? '\u25B2' : '\u25BC'}</Text>
+          </TouchableOpacity>
+          {sourceDropdownOpen && (
+            <View style={styles.dropdownMenu}>
+              {sourceWallets.map((w) => (
+                <TouchableOpacity
+                  key={w.id}
+                  style={[styles.dropdownItem, sourceId === w.id && styles.dropdownItemActive]}
+                  onPress={() => {
+                    setSourceId(w.id);
+                    setSourceDropdownOpen(false);
+                    // Adjust dest if same
+                    if (destId === w.id) {
+                      const alt = wallets.find((ww) => ww.id !== w.id);
+                      setDestId(alt?.id ?? null);
+                    }
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.dropdownItemText,
+                      sourceId === w.id && styles.dropdownItemTextActive,
+                    ]}
+                  >
+                    {renderWalletLabel(w)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              {sourceWallets.length === 0 && (
+                <Text style={styles.dropdownEmpty}>No connected Lightning wallets</Text>
+              )}
             </View>
-          </View>
-        </TouchableWithoutFeedback>
-      </BottomSheetView>
+          )}
+        </View>
+
+        {/* Destination wallet selector */}
+        <Text style={styles.sectionLabel}>To</Text>
+        <View style={styles.dropdownWrapper}>
+          <TouchableOpacity
+            style={styles.dropdown}
+            onPress={() => {
+              setDestDropdownOpen(!destDropdownOpen);
+              setSourceDropdownOpen(false);
+            }}
+            testID="transfer-dest-dropdown"
+            accessibilityLabel="Destination wallet"
+          >
+            <Text style={styles.dropdownText}>
+              {dest ? renderWalletLabel(dest) : 'Select wallet'}
+            </Text>
+            <Text style={styles.dropdownArrow}>{destDropdownOpen ? '\u25B2' : '\u25BC'}</Text>
+          </TouchableOpacity>
+          {destDropdownOpen && (
+            <View style={styles.dropdownMenu}>
+              {destWallets.map((w) => (
+                <TouchableOpacity
+                  key={w.id}
+                  style={[styles.dropdownItem, destId === w.id && styles.dropdownItemActive]}
+                  onPress={() => {
+                    setDestId(w.id);
+                    setDestDropdownOpen(false);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.dropdownItemText,
+                      destId === w.id && styles.dropdownItemTextActive,
+                    ]}
+                  >
+                    {renderWalletLabel(w)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </View>
+
+        {/* Amount input */}
+        <Text style={styles.sectionLabel}>Amount</Text>
+        <View style={styles.amountRow}>
+          <BottomSheetTextInput
+            style={styles.amountInput}
+            value={inputUnit === 'sats' ? satsValue : fiatValue}
+            onChangeText={inputUnit === 'sats' ? handleSatsChange : handleFiatChange}
+            keyboardType={inputUnit === 'sats' ? 'numeric' : 'decimal-pad'}
+            placeholder={inputUnit === 'sats' ? '0' : '0.00'}
+            placeholderTextColor={colors.textSupplementary}
+            testID="transfer-amount-input"
+            accessibilityLabel="Transfer amount"
+          />
+          <TouchableOpacity
+            style={[styles.unitButton, inputUnit === 'sats' && styles.unitButtonActive]}
+            onPress={() => setInputUnit('sats')}
+          >
+            <Text
+              style={[styles.unitButtonText, inputUnit === 'sats' && styles.unitButtonTextActive]}
+            >
+              Sats
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.unitButton, inputUnit === 'fiat' && styles.unitButtonActive]}
+            onPress={() => setInputUnit('fiat')}
+          >
+            <Text
+              style={[styles.unitButtonText, inputUnit === 'fiat' && styles.unitButtonTextActive]}
+            >
+              {currency}
+            </Text>
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.convertedAmount}>
+          {inputUnit === 'sats'
+            ? btcPrice && currentSats > 0
+              ? satsToFiatString(currentSats, btcPrice, currency)
+              : ''
+            : currentSats > 0
+              ? `${currentSats.toLocaleString()} sats`
+              : ''}
+        </Text>
+
+        {/* Fee estimate */}
+        {feeEstimate && <Text style={styles.feeText}>Estimated fee: {feeEstimate}</Text>}
+
+        {/* Watch-only warning */}
+        {source?.walletType === 'onchain' && (
+          <Text style={styles.warningText}>
+            Watch-only wallets cannot send. Select a Lightning wallet as source.
+          </Text>
+        )}
+
+        {/* Action buttons */}
+        <View style={styles.buttonRow}>
+          <TouchableOpacity
+            style={styles.cancelButton}
+            onPress={onClose}
+            testID="transfer-cancel"
+            accessibilityLabel="Cancel transfer"
+          >
+            <Text style={styles.cancelButtonText}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.transferButton, (!canTransfer || sending) && styles.buttonDisabled]}
+            onPress={handleTransfer}
+            disabled={!canTransfer || sending}
+            testID="transfer-execute"
+            accessibilityLabel="Execute transfer"
+          >
+            {sending ? (
+              <ActivityIndicator color={colors.brandPink} />
+            ) : (
+              <Text style={styles.transferButtonText}>Transfer</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </BottomSheetScrollView>
     </BottomSheetModal>
   );
 };
