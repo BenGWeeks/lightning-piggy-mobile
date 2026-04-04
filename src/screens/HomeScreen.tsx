@@ -80,7 +80,15 @@ const HomeScreen: React.FC = () => {
   }, [activeWalletId]);
 
   const fetchData = useCallback(async () => {
-    await Promise.all([refreshActiveBalance(), fetchTransactions()]);
+    // For on-chain wallets, fetchTransactions already does syncAndRefresh
+    // which updates both balance and transactions in a single sync.
+    // Only call refreshActiveBalance separately for NWC wallets.
+    const wallet = wallets.find((w) => w.id === activeWalletId);
+    if (wallet?.walletType === 'onchain') {
+      await fetchTransactions();
+    } else {
+      await Promise.all([refreshActiveBalance(), fetchTransactions()]);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWalletId]);
 
@@ -91,18 +99,19 @@ const HomeScreen: React.FC = () => {
   const transactions = activeWallet?.transactions ?? [];
   const loadingTransactions = isWalletAvailable && transactions.length === 0;
 
-  // Fetch fresh data when wallet becomes available
-  const lastFetchKey = useRef<string | null>(null);
+  // Fetch fresh data once per wallet (not on every swipe back)
+  const fetchedWallets = useRef<Set<string>>(new Set());
   useEffect(() => {
-    const fetchKey = `${activeWalletId}-${isWalletAvailable}`;
-    if (isWalletAvailable && fetchKey !== lastFetchKey.current) {
-      lastFetchKey.current = fetchKey;
+    if (isWalletAvailable && activeWalletId && !fetchedWallets.current.has(activeWalletId)) {
+      fetchedWallets.current.add(activeWalletId);
       fetchData();
     }
-  }, [activeWalletId, isWalletAvailable, fetchData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWalletId, isWalletAvailable]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
+    if (activeWalletId) fetchedWallets.current.delete(activeWalletId);
     await fetchData();
     setRefreshing(false);
   };
