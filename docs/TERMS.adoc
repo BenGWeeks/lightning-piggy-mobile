@@ -91,13 +91,17 @@
 | nicoll-douglas
 | Lightweight BOLT-11 Lightning invoice decoder
 
+| https://github.com/BenGWeeks/bdk-rn[`bdk-rn`]
+| BDK / Peach2Peach (fork)
+| Bitcoin Development Kit for React Native — HD wallet, Electrum sync, balance, transactions, UTXO management. Native Rust via FFI. Forked from https://github.com/Peach2Peach/bdk-rn[Peach2Peach] with RN 0.83 fix.
+
 | https://github.com/bitcoinjs/bitcoinjs-lib[`bitcoinjs-lib`]
 | bitcoinjs
-| Core Bitcoin library — address generation, transaction construction, script handling
+| Bitcoin transaction construction — used for Boltz claim transactions (Taproot script-path spend)
 
 | https://github.com/bitcoinjs/bip32[`bip32`]
 | bitcoinjs
-| BIP-32 HD wallet key derivation from xpub/mnemonic
+| BIP-32 HD wallet key derivation — used for zpub/ypub to xpub conversion
 
 | https://github.com/bitcoinerlab/secp256k1[`@bitcoinerlab/secp256k1`]
 | bitcoinerlab
@@ -110,10 +114,6 @@
 | https://github.com/paulmillr/noble-hashes[`@noble/hashes`]
 | paulmillr
 | Audited cryptographic hash functions — SHA-256, RIPEMD-160
-
-| https://github.com/nicoll-douglas/scure-btc-signer[`@scure/btc-signer`]
-| paulmillr
-| Bitcoin transaction signing — Taproot script-path spending, PSBT support
 
 | https://github.com/nicoll-douglas/bs58check[`bs58check`]
 | nicoll-douglas

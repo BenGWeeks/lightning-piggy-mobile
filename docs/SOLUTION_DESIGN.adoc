@@ -8,26 +8,29 @@ Adds on-chain Bitcoin wallet support (watch-only via xpub) alongside existing NW
 
 === Bitcoin Crypto Library Stack
 
-The same libraries used by BlueWallet (1M+ users, React Native):
-
 [cols="1,1,2", options="header"]
 |===
 | Package | Version | Purpose
 
-| https://github.com/bitcoinjs/bitcoinjs-lib[bitcoinjs-lib] | 7.x | Core Bitcoin library — address generation, transaction building
-| https://github.com/bitcoinjs/bip32[bip32] | 5.x | BIP-32 HD wallet key derivation from xpub
-| https://github.com/bitcoinerlab/secp256k1[`@bitcoinerlab/secp256k1`] | latest | Pure JS secp256k1 (replaces WASM-based `tiny-secp256k1` which doesn't work in React Native)
+| https://github.com/BenGWeeks/bdk-rn[`bdk-rn`] | 0.30.0 (fork) | Bitcoin Development Kit for React Native — HD wallet, Electrum sync, balance, transactions, UTXO management. Native Rust via FFI. Forked from https://github.com/Peach2Peach/bdk-rn[Peach2Peach] with RN 0.83 compatibility fix (https://github.com/Peach2Peach/bdk-rn/pull/13[PR #13]).
+| https://github.com/bitcoinjs/bitcoinjs-lib[bitcoinjs-lib] | 7.x | Bitcoin transaction construction — used for Boltz claim transactions (Taproot script-path spend)
+| https://github.com/bitcoinerlab/secp256k1[`@bitcoinerlab/secp256k1`] | latest | Pure JS secp256k1 — Schnorr signing for Boltz claim transactions
 | https://github.com/paulmillr/noble-curves[`@noble/curves`] | 2.x | Audited elliptic curve cryptography (dependency of @bitcoinerlab/secp256k1)
 | https://github.com/paulmillr/noble-hashes[`@noble/hashes`] | 2.x | Audited hash functions (dependency of @noble/curves)
 | https://github.com/feross/buffer[`buffer`] | latest | Node.js Buffer polyfill for React Native
 |===
 
-**Why these libraries?**
+**Why BDK?**
 
-- `tiny-secp256k1` uses WebAssembly which is incompatible with React Native's Hermes engine
-- `@bitcoinerlab/secp256k1` provides the same interface using `@noble/secp256k1` (pure JavaScript)
-- All address derivation happens locally on-device — no third-party API needed for crypto operations
-- Balance and transaction lookups use an Electrum server (same protocol as BlueWallet)
+Previously, on-chain wallet operations used manual Electrum JSON-RPC calls (`electrum-client` + `react-native-tcp-socket`) with `bitcoinjs-lib` for transaction parsing. This approach had multiple issues:
+
+- Fragile TCP/SSL connections that dropped under load
+- Manual raw transaction parsing to determine amounts (slow, unreliable)
+- Couldn't determine outgoing tx amounts without looking up each input's previous output
+- No timestamps without fetching block headers
+- Rate limiting / connection drops with many sequential requests
+
+BDK (same library used by https://peachbitcoin.com[Peach Bitcoin]) handles all of this natively in Rust via a single `wallet.sync()` call, providing correct balance, transaction history with amounts/directions/timestamps, and address derivation.
 
 **Metro configuration:** `@noble/curves` and `@noble/hashes` use ES module `exports` maps with `.js` extensions. A custom resolver in `metro.config.js` rewrites `@noble/*` subpath imports to include `.js` extensions, using the original resolver to avoid recursion.
 
@@ -38,8 +41,8 @@ The same libraries used by BlueWallet (1M+ users, React Native):
 WalletContext.tsx
   ├─ NWC wallets → nwcService.ts (existing)
   └─ On-chain wallets → onchainService.ts (new)
-       ├─ bitcoinjs-lib + bip32 — local address derivation
-       └─ Electrum server — balance & transaction lookups
+       └─ BDK (bdk-rn) — native Rust: xpub derivation, Electrum sync,
+          balance, transactions, UTXO management
 
 HomeScreen.tsx
   ├─ [Receive] → ReceiveSheet (Lightning invoice OR Bitcoin address QR)
@@ -130,31 +133,16 @@ We use script-path because it works with our existing pure JS crypto stack. Futu
 
 === Electrum Server Integration
 
-On-chain balance and transaction lookups use the Electrum protocol (same as BlueWallet) instead of REST APIs like mempool.space. This provides:
+On-chain balance and transaction lookups use the Electrum protocol via BDK's native Rust implementation. BDK handles the Electrum connection, address scanning, UTXO tracking, and transaction parsing internally — `onchainService.ts` just calls `wallet.sync(blockchain)`.
 
-- **Single TCP/SSL connection** for all address queries (vs 20+ HTTP requests)
-- **No rate limiting** — Electrum servers are designed for wallet queries
-- **User-configurable** — default is `electrum.blockstream.info:50002` (SSL), users can set their own in Account settings
-- **Protocol**: JSON-RPC over TCP/SSL sockets via https://github.com/nicoll-douglas/electrum-client[`electrum-client`] + https://github.com/nicoll-douglas/react-native-tcp-socket[`react-native-tcp-socket`]
-
-**How it works:**
-
-1. Derive 20 receive addresses from the xpub (BIP-84, `m/0/0` through `m/0/19`)
-2. Convert each address to an Electrum scripthash (SHA-256 of output script, reversed)
-3. Query `blockchain.scripthash.get_balance` for each scripthash → aggregate balance
-4. Query `blockchain.scripthash.get_history` for each scripthash → transaction hashes + heights
-5. Fetch raw transaction hex via `blockchain.transaction.get` and parse with `bitcoinjs-lib` to determine amounts and direction (incoming/outgoing)
-
-**Connection lifecycle:**
-
-- Shared singleton Electrum client, created on first on-chain wallet query
-- Auto-reconnects on socket errors (broken pipe, keepalive timeout)
-- `onError` handler marks connection as disconnected, next call creates a fresh connection
-- Green/red status dot on the wallet card indicates Electrum connection status
+- **User-configurable** — default is `electrum.blockstream.info:50002` (SSL), users can set their own in Account settings (host:port + SSL toggle)
+- **Incremental sync** — BDK only fetches changes since the last sync (no full re-scan)
+- **Native performance** — Electrum communication runs in Rust, not in JS TCP sockets
+- **Correct amounts** — BDK tracks `received` and `sent` per transaction using UTXO analysis
 
 **Electrum server format:** `host:port:protocol` where protocol is `s` (SSL) or `t` (TCP). Account settings shows host:port with a "Use SSL" toggle.
 
-**Future:** Transaction caching in AsyncStorage to avoid re-fetching all history on every wallet switch. Only fetch new transactions since the last known block height.
+**Transaction caching:** Transactions are stored per wallet in `WalletContext` and persisted to AsyncStorage. On startup, cached transactions display immediately (~40ms); BDK syncs fresh data in the background.
 
 === NWC Relay Compatibility
 
