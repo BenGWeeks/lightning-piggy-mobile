@@ -33,7 +33,7 @@ const TransactionList: React.FC<Props> = ({ transactions, onTransactionPress }) 
 
         return (
           <TouchableOpacity
-            key={index}
+            key={item.payment_hash || `tx-${index}`}
             style={styles.item}
             onPress={() => onTransactionPress?.(item)}
             accessibilityLabel={`${isIncoming ? 'Received' : 'Sent'} ${amountSats} sats`}

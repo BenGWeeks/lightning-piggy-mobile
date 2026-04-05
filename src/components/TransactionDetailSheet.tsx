@@ -11,6 +11,7 @@ import * as Clipboard from 'expo-clipboard';
 import * as nip19 from 'nostr-tools/nip19';
 import CopyIcon from './icons/CopyIcon';
 import FeedbackSheet from './FeedbackSheet';
+import NostrLoginSheet from './NostrLoginSheet';
 import { colors } from '../styles/theme';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet } from '../contexts/WalletContext';
@@ -72,10 +73,19 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, onClose, transaction
   const { btcPrice, currency } = useWallet();
   const { isLoggedIn, signerType, sendDirectMessage } = useNostr();
   const [boltzSupportOpen, setBoltzSupportOpen] = useState(false);
+  const [loginSheetOpen, setLoginSheetOpen] = useState(false);
+  const lastTransactionRef = useRef<Nip47Transaction | null>(null);
+
+  // Retain last transaction so the modal stays mounted during dismiss animation
+  if (transaction) {
+    lastTransactionRef.current = transaction;
+  }
+  const displayTransaction = transaction ?? lastTransactionRef.current;
 
   useEffect(() => {
     if (visible) {
       setBoltzSupportOpen(false);
+      setLoginSheetOpen(false);
       sheetRef.current?.present();
     } else {
       sheetRef.current?.dismiss();
@@ -147,14 +157,14 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, onClose, transaction
     [sendDirectMessage],
   );
 
-  if (!transaction) return null;
+  if (!displayTransaction) return null;
 
-  const isIncoming = transaction.type === 'incoming';
-  const amountSats = Math.abs(transaction.amount);
+  const isIncoming = displayTransaction.type === 'incoming';
+  const amountSats = Math.abs(displayTransaction.amount);
   const fiatStr = satsToFiatString(amountSats, btcPrice, currency);
-  const date = transaction.settled_at || transaction.created_at;
+  const date = displayTransaction.settled_at || displayTransaction.created_at;
   const dateStr = date ? new Date(date * 1000).toLocaleString() : '';
-  const status = formatStatus(transaction.state);
+  const status = formatStatus(displayTransaction.state);
 
   return (
     <>
@@ -205,43 +215,43 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, onClose, transaction
 
           {/* Details */}
           <View style={styles.detailsSection}>
-            {transaction.description ? (
+            {displayTransaction.description ? (
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Description</Text>
-                <Text style={styles.detailValueText}>{transaction.description}</Text>
+                <Text style={styles.detailValueText}>{displayTransaction.description}</Text>
               </View>
             ) : null}
 
-            {transaction.payment_hash ? (
+            {displayTransaction.payment_hash ? (
               <CopyableRow
                 label="Payment Hash"
-                value={truncateHash(transaction.payment_hash)}
-                fullValue={transaction.payment_hash}
+                value={truncateHash(displayTransaction.payment_hash)}
+                fullValue={displayTransaction.payment_hash}
               />
             ) : null}
 
-            {transaction.preimage ? (
+            {displayTransaction.preimage ? (
               <CopyableRow
                 label="Preimage"
-                value={truncateHash(transaction.preimage)}
-                fullValue={transaction.preimage}
+                value={truncateHash(displayTransaction.preimage)}
+                fullValue={displayTransaction.preimage}
               />
             ) : null}
 
-            {transaction.fees_paid > 0 ? (
+            {displayTransaction.fees_paid > 0 ? (
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Fee Paid</Text>
                 <Text style={styles.detailValueText}>
-                  {transaction.fees_paid.toLocaleString()} sats
+                  {displayTransaction.fees_paid.toLocaleString()} sats
                 </Text>
               </View>
             ) : null}
 
-            {transaction.invoice ? (
+            {displayTransaction.invoice ? (
               <CopyableRow
                 label="Invoice"
-                value={truncateHash(transaction.invoice, 12, 8)}
-                fullValue={transaction.invoice}
+                value={truncateHash(displayTransaction.invoice, 12, 8)}
+                fullValue={displayTransaction.invoice}
               />
             ) : null}
           </View>
@@ -268,13 +278,16 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, onClose, transaction
         signerType={signerType}
         onLoginPress={() => {
           setBoltzSupportOpen(false);
+          setLoginSheetOpen(true);
         }}
         title="Contact Boltz Support"
         subtitle="Send an encrypted Nostr DM to Boltz with your transaction details."
         initialMessage={buildSupportMessage()}
+        messagePrefix="[Boltz Support Request]"
         successTitle="Message Sent"
         successMessage="Your support request has been sent to Boltz."
       />
+      <NostrLoginSheet visible={loginSheetOpen} onClose={() => setLoginSheetOpen(false)} />
     </>
   );
 };

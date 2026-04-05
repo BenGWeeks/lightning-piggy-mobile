@@ -29,6 +29,7 @@ interface Props {
   title?: string;
   subtitle?: string;
   initialMessage?: string;
+  messagePrefix?: string;
   successTitle?: string;
   successMessage?: string;
 }
@@ -43,6 +44,7 @@ const FeedbackSheet: React.FC<Props> = ({
   title = 'Send Feedback',
   subtitle = 'Your message will be sent as an encrypted Nostr DM to the Lightning Piggy team.',
   initialMessage = '',
+  messagePrefix = '[Feedback]',
   successTitle = 'Message Sent',
   successMessage = 'Thank you for your feedback!',
 }) => {
@@ -77,7 +79,7 @@ const FeedbackSheet: React.FC<Props> = ({
     setSending(true);
     try {
       const deviceInfo = `${Platform.OS} ${Platform.Version}`;
-      const fullMessage = `[Feedback] ${trimmed}\n\n---\nDevice: ${deviceInfo}`;
+      const fullMessage = `${messagePrefix} ${trimmed}\n\n---\nDevice: ${deviceInfo}`;
 
       const result = await onSend(fullMessage);
       if (result.success) {
