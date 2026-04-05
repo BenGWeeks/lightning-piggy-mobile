@@ -361,7 +361,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         const invoice = await makeInvoiceForWallet(destId, currentSats, 'Transfer');
         const swap = await boltzService.createSubmarineSwapForward(invoice);
 
-        // Persist swap state for crash recovery (includes refund key for failed swaps)
+        // Persist swap state for crash recovery + refund (includes all keys and scripts)
         await SecureStore.setItemAsync(
           `submarine_swap_${swap.id}`,
           JSON.stringify({
@@ -369,7 +369,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             address: swap.address,
             expectedAmount: swap.expectedAmount,
             refundPrivateKey: swap.refundPrivateKey,
+            claimPublicKey: swap.claimPublicKey,
             timeoutBlockHeight: swap.timeoutBlockHeight,
+            swapTree: swap.swapTree,
             createdAt: Date.now(),
           }),
         );
@@ -379,7 +381,48 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         );
         await onchainService.sendTransaction(sourceId, swap.address, swap.expectedAmount);
         console.log('[Transfer] On-chain tx broadcast, waiting for Boltz to pay LN invoice...');
-        await boltzService.waitForSubmarineSwapComplete(swap.id, 900000); // 15 min — needs on-chain confirmation
+
+        try {
+          await boltzService.waitForSubmarineSwapComplete(swap.id, 900000);
+        } catch (swapError) {
+          // Check if this is a refundable failure
+          const msg = swapError instanceof Error ? swapError.message : '';
+          if (
+            msg.includes('swap.expired') ||
+            msg.includes('invoice.failedToPay') ||
+            msg.includes('transaction.lockupFailed')
+          ) {
+            // Attempt refund
+            const lockup = await boltzService.getSubmarineSwapLockup(swap.id);
+            if (lockup) {
+              const destAddr = await onchainService.getNextReceiveAddress(sourceId);
+              Alert.alert(
+                'Swap Failed — Refund Available',
+                `The swap failed (${msg}). Your on-chain funds can be refunded after block ${swap.timeoutBlockHeight}.`,
+                [
+                  {
+                    text: 'Refund Now',
+                    onPress: async () => {
+                      try {
+                        await boltzService.refundSwap(swap, lockup, destAddr);
+                        await SecureStore.deleteItemAsync(`submarine_swap_${swap.id}`);
+                        Alert.alert('Refund Sent', 'Your refund transaction has been broadcast.');
+                      } catch (refundErr) {
+                        Alert.alert(
+                          'Refund Failed',
+                          refundErr instanceof Error ? refundErr.message : 'Refund failed',
+                        );
+                      }
+                    },
+                  },
+                  { text: 'Later', style: 'cancel' },
+                ],
+              );
+            }
+            throw swapError;
+          }
+          throw swapError;
+        }
 
         // Clean up persisted swap state on success
         await SecureStore.deleteItemAsync(`submarine_swap_${swap.id}`);

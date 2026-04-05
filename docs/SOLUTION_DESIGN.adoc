@@ -90,46 +90,100 @@ On-chain wallets are currently watch-only (xpub import). The type system is desi
 
 === Boltz Reverse Submarine Swap (Lightning → On-chain)
 
-Uses https://docs.boltz.exchange[Boltz Exchange] v2 API for trustless Lightning-to-on-chain transfers.
+Uses https://docs.boltz.exchange[Boltz Exchange] v2 API for trustless cross-chain transfers. Verified against https://api.docs.boltz.exchange/lifecycle.html[Boltz v2 lifecycle docs] and reference implementations (boltz-core, Breez SDK).
 
-**Flow:**
+==== Reverse Swap: Lightning → On-chain (`claimSwap`)
 
 1. Generate random 32-byte preimage + SHA-256 hash
 2. Generate temporary secp256k1 claim keypair
-3. `POST /v2/swap/reverse` with `preimageHash`, `claimPublicKey`, `claimAddress`, `invoiceAmount`
+3. `POST /v2/swap/reverse` with `preimageHash`, `claimPublicKey`, `claimAddress`, `invoiceAmount`, `referralId`
 4. Boltz returns a Lightning invoice + swap tree (Taproot HTLC scripts)
-5. Pay the Lightning invoice via NWC
-6. Poll `GET /v2/swap/reverse/{id}` until status = `transaction.mempool`
-7. Construct a **script-path claim transaction** (Taproot spend):
-   - Witness: `<schnorr_signature> <preimage> <claim_script> <control_block>`
-   - Output: destination on-chain address
-8. Broadcast claim tx via mempool.space REST API (`POST /tx`)
-9. Funds arrive at destination after ~1 block confirmation (~10 min)
+5. Persist swap state (preimage, claimPrivateKey, lockupAddress) to SecureStore
+6. Pay the Lightning invoice via NWC
+7. Subscribe to swap status via WebSocket (`wss://api.boltz.exchange/v2/ws`) with polling fallback
+8. Wait for `transaction.mempool` or `transaction.confirmed`
+9. Construct **script-path claim transaction** (Taproot spend):
+   - Witness: `<schnorr_sig_64bytes> <preimage> <claim_script> <control_block>`
+   - Uses SIGHASH_DEFAULT (0x00) — 64-byte signature, no sighash byte appended
+   - Script lengths encoded with Bitcoin CompactSize varint
+10. Broadcast claim tx via BDK Electrum
+11. Clean up persisted swap state on success
 
-**Why script-path (not cooperative key-path)?**
+==== Submarine Swap: On-chain → Lightning (`refundSwap`)
 
-Boltz v2 Taproot swaps support two claim methods:
+1. Generate LN invoice on destination NWC wallet
+2. Generate temporary secp256k1 refund keypair
+3. `POST /v2/swap/submarine` with `invoice`, `refundPublicKey`, `referralId`
+4. Boltz returns on-chain address + expected amount + swap tree + claimPublicKey
+5. Persist swap state (refundPrivateKey, claimPublicKey, swapTree, timeoutBlockHeight) to SecureStore
+6. Send BTC from hot wallet to Boltz address via BDK
+7. Subscribe to swap status via WebSocket with polling fallback
+8. Wait for `invoice.settled` or `transaction.claimed`
+9. Clean up persisted swap state on success
 
-- **Key-path (cooperative):** Requires MuSig2 nonce exchange between client and Boltz. Smaller on-chain footprint, better privacy (looks like a normal tx). BUT MuSig2 needs WASM or native code — React Native's Hermes engine can't run it without a WebView workaround.
-- **Script-path (non-cooperative):** Uses standard Schnorr signature + preimage reveal. Works with pure JS (`@noble/curves`). Slightly larger on-chain tx but settles just as fast (~10 min).
+**Refund recovery** — if swap fails (`swap.expired`, `invoice.failedToPay`, `transaction.lockupFailed`):
 
-We use script-path because it works with our existing pure JS crypto stack. Future: upgrade to cooperative key-path using `@scure/btc-signer` MuSig2 if Hermes adds WASM support.
+1. Fetch lockup UTXO details via `GET /v2/swap/submarine/{id}/transaction`
+2. Construct **script-path refund transaction**:
+   - `nLockTime` = `timeoutBlockHeight` (refund only valid after timeout)
+   - Input sequence `0xFFFFFFFE` (enables nLockTime)
+   - Witness: `<schnorr_sig_64bytes> <refund_script> <control_block>` (no preimage needed)
+   - Internal key: Boltz's `claimPublicKey`
+   - Merkle sibling: `claimLeafHash`
+3. Broadcast refund tx via BDK Electrum
 
-**Libraries:**
+==== Status Monitoring
+
+Swap status is monitored via **WebSocket subscription** to `wss://api.boltz.exchange/v2/ws`:
+
+```json
+{"op": "subscribe", "channel": "swap.update", "args": ["<swapId>"]}
+```
+
+Falls back to HTTP polling (`GET /v2/swap/{id}` every 3s) if WebSocket fails. All production Boltz clients (Breez SDK, boltz-client) use WebSocket.
+
+==== Boltz v2 Swap Statuses
+
+[cols="1,1,2", options="header"]
+|===
+| Status | Type | Meaning
+
+| `swap.created` | Both | Initial state
+| `transaction.mempool` | Both | On-chain tx in mempool
+| `transaction.confirmed` | Both | On-chain tx confirmed
+| `invoice.set` | Submarine | Invoice provided
+| `invoice.pending` | Submarine | LN payment in progress
+| `invoice.paid` | Submarine | LN invoice paid
+| `transaction.claim.pending` | Submarine | Boltz waiting for cooperative signature (MuSig2)
+| `transaction.claimed` | Submarine | Boltz claimed on-chain funds (success)
+| `invoice.settled` | Reverse | Client claimed with preimage (success)
+| `swap.expired` | Both | Timeout reached (failure)
+| `invoice.failedToPay` | Submarine | LN payment failed
+| `transaction.lockupFailed` | Submarine | Wrong amount sent
+| `transaction.refunded` | Both | Boltz refunded locked funds
+| `transaction.failed` | Reverse | Boltz failed to lock on-chain
+| `invoice.expired` | Reverse | Invoice expired
+|===
+
+==== Script-Path vs Cooperative Key-Path
+
+Boltz v2 Taproot swaps support two spending methods:
+
+- **Key-path (cooperative MuSig2):** Requires nonce exchange between client and Boltz. Smaller on-chain footprint (~30-50% fee savings), better privacy. Requires MuSig2 library.
+- **Script-path (non-cooperative):** Standard Schnorr signature + preimage/timelock. Works with pure JS crypto. Slightly larger witness but settles identically.
+
+We use **script-path** for both claims and refunds because MuSig2 is not available in our JS stack. This matches boltz-python and Breez Go client. Future: upgrade to cooperative key-path when MuSig2 support is available.
+
+==== Libraries
 
 [cols="1,2", options="header"]
 |===
 | Package | Purpose
 
-| https://github.com/bitcoinjs/bitcoinjs-lib[`bitcoinjs-lib`] | Taproot claim transaction construction, raw tx parsing
-| https://github.com/bitcoinerlab/secp256k1[`@bitcoinerlab/secp256k1`] | Schnorr signing (BIP-340) for claim transactions
-| https://github.com/BlueWallet/rn-electrum-client[`electrum-client`] | Electrum protocol client for balance/tx lookups
-| https://github.com/nicoll-douglas/react-native-tcp-socket[`react-native-tcp-socket`] | TCP/SSL sockets for Electrum connections in React Native
+| https://github.com/bitcoinjs/bitcoinjs-lib[`bitcoinjs-lib`] | Taproot transaction construction, address validation
+| https://github.com/bitcoinerlab/secp256k1[`@bitcoinerlab/secp256k1`] | Schnorr signing (BIP-340)
+| https://github.com/nicoll-douglas/react-native-tcp-socket[`react-native-tcp-socket`] | TCP/SSL sockets for Electrum
 |===
-
-**Fallback:** If the claim tx fails to broadcast, Boltz's Protocol 11 automatically sends funds to the `claimAddress` after the timeout period (~24 hours).
-
-**Current status:** The full Boltz reverse swap flow is implemented: swap creation, invoice payment, lockup detection, and script-path claim transaction (Schnorr signature + preimage reveal). The claim tx is broadcast via mempool.space and funds arrive after ~1 block confirmation (~10 min). The swap state (preimage + claim private key) needs to be persisted to SecureStore so it survives app restarts — tracked in https://github.com/BenGWeeks/lightning-piggy-mobile/issues/38[#38]. The claim keypair and preimage should be viewable in the transaction detail bottom sheet for manual recovery or Boltz support contact.
 
 === Electrum Server Integration
 

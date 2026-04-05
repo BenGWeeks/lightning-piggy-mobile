@@ -86,6 +86,18 @@ export type SwapStatus =
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Bitcoin CompactSize varint encoding for script lengths in tapleaf hashes. */
+function compactSize(len: number): Buffer {
+  if (len < 0xfd) return Buffer.from([len]);
+  if (len <= 0xffff) {
+    const buf = Buffer.alloc(3);
+    buf[0] = 0xfd;
+    buf.writeUInt16LE(len, 1);
+    return buf;
+  }
+  throw new Error(`Script too large for CompactSize: ${len}`);
+}
+
 function toHex(arr: Uint8Array): string {
   return Array.from(arr, (b) => b.toString(16).padStart(2, '0')).join('');
 }
@@ -209,6 +221,7 @@ export async function createReverseSwap(
       claimPublicKey,
       claimAddress: onchainAddress,
       invoiceAmount: amountSats,
+      referralId: 'lightning-piggy',
     }),
   });
 
@@ -234,55 +247,144 @@ export async function createReverseSwap(
   };
 }
 
+const BOLTZ_WS = 'wss://api.boltz.exchange/v2/ws';
+
 /**
- * Poll swap status until the lockup transaction appears on-chain.
- * Returns the lockup transaction details when found.
+ * Subscribe to swap status updates via WebSocket, falling back to polling.
+ * Calls onStatus for each status update until it returns true (terminal).
+ */
+async function waitForSwapStatus(
+  swapId: string,
+  isTerminal: (status: string, data: any) => boolean,
+  timeoutMs: number,
+): Promise<any> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      settled = true;
+      reject(new Error(`Timeout waiting for swap ${swapId} after ${timeoutMs / 1000}s`));
+    }, timeoutMs);
+
+    const cleanup = (ws?: WebSocket) => {
+      clearTimeout(timer);
+      try {
+        ws?.close();
+      } catch {}
+    };
+
+    // Try WebSocket first
+    try {
+      const ws = new WebSocket(BOLTZ_WS);
+      let wsConnected = false;
+
+      ws.onopen = () => {
+        wsConnected = true;
+        ws.send(JSON.stringify({ op: 'subscribe', channel: 'swap.update', args: [swapId] }));
+        console.log(`[Boltz] WebSocket subscribed to swap ${swapId}`);
+      };
+
+      ws.onmessage = (event) => {
+        if (settled) return;
+        try {
+          const msg = JSON.parse(typeof event.data === 'string' ? event.data : '');
+          if (msg.channel === 'swap.update' && msg.args?.[0]) {
+            const data = msg.args[0];
+            console.log(`[Boltz] WS swap ${swapId} status: ${data.status}`);
+            if (isTerminal(data.status, data)) {
+              settled = true;
+              cleanup(ws);
+              resolve(data);
+            }
+          }
+        } catch {}
+      };
+
+      ws.onerror = () => {
+        if (!settled && !wsConnected) {
+          console.warn('[Boltz] WebSocket failed, falling back to polling');
+          cleanup(ws);
+          // Fall back to polling
+          pollSwapStatus(swapId, isTerminal, timeoutMs - (Date.now() % timeoutMs))
+            .then(resolve)
+            .catch(reject);
+        }
+      };
+
+      ws.onclose = () => {
+        if (!settled) {
+          console.warn('[Boltz] WebSocket closed, falling back to polling');
+          pollSwapStatus(swapId, isTerminal, timeoutMs - (Date.now() % timeoutMs))
+            .then(resolve)
+            .catch(reject);
+        }
+      };
+    } catch {
+      // WebSocket constructor failed — fall back to polling
+      pollSwapStatus(swapId, isTerminal, timeoutMs).then(resolve).catch(reject);
+    }
+  });
+}
+
+/** Polling fallback for swap status. */
+async function pollSwapStatus(
+  swapId: string,
+  isTerminal: (status: string, data: any) => boolean,
+  timeoutMs: number,
+): Promise<any> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const res = await fetchWithTimeout(`${BOLTZ_API}/swap/${swapId}`);
+    if (!res.ok) throw new Error(`Boltz status check failed: ${res.status}`);
+    const data = await res.json();
+    console.log(`[Boltz] Poll swap ${swapId} status: ${data.status}`);
+    if (isTerminal(data.status, data)) return data;
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  throw new Error(`Timeout polling swap ${swapId}`);
+}
+
+/**
+ * Wait for reverse swap lockup transaction to appear on-chain.
+ * Uses WebSocket with polling fallback.
  */
 export async function waitForLockup(
   swapId: string,
   timeoutMs: number = 60000,
 ): Promise<{ txId: string; vout: number; amount: number }> {
-  console.log(`[Boltz] Polling reverse swap lockup: ${swapId} (timeout ${timeoutMs / 1000}s)`);
-  const start = Date.now();
+  console.log(`[Boltz] Waiting for reverse swap lockup: ${swapId} (timeout ${timeoutMs / 1000}s)`);
 
-  while (Date.now() - start < timeoutMs) {
-    const res = await fetchWithTimeout(`${BOLTZ_API}/swap/${swapId}`);
-    if (!res.ok) throw new Error(`Boltz status check failed: ${res.status}`);
-    const data = await res.json();
-    console.log(`[Boltz] Swap ${swapId} status: ${data.status}`);
+  const FAIL_STATUSES = [
+    'swap.expired',
+    'transaction.refunded',
+    'transaction.failed',
+    'invoice.expired',
+  ];
 
-    if (data.status === 'transaction.mempool' || data.status === 'transaction.confirmed') {
-      const txId = data.transaction?.id;
-      const vout = data.transaction?.index;
-      const amount = data.onchainAmount;
+  const data = await waitForSwapStatus(
+    swapId,
+    (status) => {
+      if (status === 'transaction.mempool' || status === 'transaction.confirmed') return true;
+      if (FAIL_STATUSES.includes(status)) throw new Error(`Swap failed with status: ${status}`);
+      return false;
+    },
+    timeoutMs,
+  );
 
-      if (typeof txId !== 'string' || txId.length === 0) {
-        throw new Error(`Boltz lockup missing valid transaction.id for swap ${swapId}`);
-      }
-      if (!Number.isInteger(vout) || vout < 0) {
-        throw new Error(`Boltz lockup missing valid transaction.index for swap ${swapId}`);
-      }
-      if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
-        throw new Error(`Boltz lockup missing valid onchainAmount for swap ${swapId}`);
-      }
+  const txId = data.transaction?.id;
+  const vout = data.transaction?.index;
+  const amount = data.onchainAmount;
 
-      return { txId, vout, amount };
-    }
-
-    if (
-      data.status === 'swap.expired' ||
-      data.status === 'transaction.refunded' ||
-      data.status === 'transaction.failed' ||
-      data.status === 'invoice.expired'
-    ) {
-      throw new Error(`Swap failed with status: ${data.status}`);
-    }
-
-    // Wait 3 seconds before polling again
-    await new Promise((r) => setTimeout(r, 3000));
+  if (typeof txId !== 'string' || txId.length === 0) {
+    throw new Error(`Boltz lockup missing valid transaction.id for swap ${swapId}`);
+  }
+  if (!Number.isInteger(vout) || vout < 0) {
+    throw new Error(`Boltz lockup missing valid transaction.index for swap ${swapId}`);
+  }
+  if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+    throw new Error(`Boltz lockup missing valid onchainAmount for swap ${swapId}`);
   }
 
-  throw new Error('Timeout waiting for Boltz lockup transaction');
+  return { txId, vout, amount };
 }
 
 /**
@@ -323,16 +425,14 @@ export async function claimSwap(
   // Compute tapleaf hashes
   const claimLeafHash = bitcoin.crypto.taggedHash(
     'TapLeaf',
-    Buffer.concat([
-      Buffer.from([claimLeafVersion]),
-      Buffer.concat([Buffer.from([claimScript.length]), claimScript]),
-    ]),
+    Buffer.concat([Buffer.from([claimLeafVersion]), compactSize(claimScript.length), claimScript]),
   );
   const refundLeafHash = bitcoin.crypto.taggedHash(
     'TapLeaf',
     Buffer.concat([
       Buffer.from([refundLeafVersion]),
-      Buffer.concat([Buffer.from([refundScript.length]), refundScript]),
+      compactSize(refundScript.length),
+      refundScript,
     ]),
   );
 
@@ -361,22 +461,21 @@ export async function claimSwap(
     refundLeafHash, // merkle proof (sibling of claim leaf)
   ]);
 
-  // Compute sighash for Taproot script-path (BIP-341)
+  // Compute sighash for Taproot script-path (BIP-341, SIGHASH_DEFAULT)
   const prevOutScript = bitcoin.address.toOutputScript(swap.lockupAddress);
   const sighash = tx.hashForWitnessV1(
     0,
     [prevOutScript],
     [BigInt(lockup.amount)],
-    0x01, // SIGHASH_ALL
+    0x00, // SIGHASH_DEFAULT — 64-byte sig, no sighash byte appended
     claimLeafHash,
   );
 
-  // Schnorr sign using @bitcoinerlab/secp256k1
-  const sig = ecc.signSchnorr(new Uint8Array(sighash), new Uint8Array(claimPrivKey));
-  const sigWithType = Buffer.concat([Buffer.from(sig), Buffer.from([0x01])]);
+  // Schnorr sign — no sighash byte appended (SIGHASH_DEFAULT)
+  const sig = Buffer.from(ecc.signSchnorr(new Uint8Array(sighash), new Uint8Array(claimPrivKey)));
 
   // Set witness: <sig> <preimage> <claim_script> <control_block>
-  tx.setWitness(0, [sigWithType, preimageBytes, claimScript, controlBlock]);
+  tx.setWitness(0, [sig, preimageBytes, claimScript, controlBlock]);
 
   // Broadcast via the configured Electrum server (BDK)
   const txId = tx.getId();
@@ -401,6 +500,126 @@ export function isBitcoinAddress(input: string): boolean {
   }
 }
 
+/**
+ * Fetch lockup transaction details for a submarine swap.
+ * Used to get the UTXO needed for refund transaction construction.
+ */
+export async function getSubmarineSwapLockup(
+  swapId: string,
+): Promise<{ txId: string; vout: number; amount: number } | null> {
+  try {
+    const res = await fetchWithTimeout(`${BOLTZ_API}/swap/submarine/${swapId}/transaction`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const txId = data.transactionId ?? data.id;
+    if (!txId) return null;
+    // Fetch expected amount from swap status
+    const statusRes = await fetchWithTimeout(`${BOLTZ_API}/swap/${swapId}`);
+    if (!statusRes.ok) return null;
+    const statusData = await statusRes.json();
+    return {
+      txId,
+      vout: data.index ?? 0,
+      amount: statusData.onchainAmount ?? 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build and broadcast a script-path refund transaction for a failed submarine swap.
+ *
+ * After the timeout block height, the user can reclaim their on-chain BTC
+ * by spending the HTLC via the refund script path.
+ */
+export async function refundSwap(
+  swap: SubmarineSwapResult,
+  lockup: { txId: string; vout: number; amount: number },
+  destinationAddress: string,
+  feeRate: number = 2,
+): Promise<string> {
+  console.log(`[Boltz] Building refund tx for swap ${swap.id} to ${destinationAddress}`);
+
+  const refundScript = Buffer.from(swap.swapTree.refundLeaf.output, 'hex');
+  const claimScript = Buffer.from(swap.swapTree.claimLeaf.output, 'hex');
+  const refundPrivKey = Buffer.from(swap.refundPrivateKey, 'hex');
+  const claimPubKey = Buffer.from(swap.claimPublicKey, 'hex');
+  const refundLeafVersion = swap.swapTree.refundLeaf.version ?? 0xc0;
+  const claimLeafVersion = swap.swapTree.claimLeaf.version ?? 0xc0;
+
+  const fee = Math.ceil(150 * feeRate);
+  const outputAmount = lockup.amount - fee;
+  if (outputAmount <= 546) {
+    throw new Error(`Refund amount (${lockup.amount}) too small after fee (${fee})`);
+  }
+
+  // Build transaction with nLockTime for timelock
+  const tx = new bitcoin.Transaction();
+  tx.version = 2;
+  tx.locktime = swap.timeoutBlockHeight;
+  // Sequence 0xFFFFFFFE enables nLockTime (BIP-125 RBF compatible)
+  tx.addInput(Buffer.from(lockup.txId, 'hex').reverse(), lockup.vout, 0xfffffffe);
+  tx.addOutput(bitcoin.address.toOutputScript(destinationAddress), BigInt(outputAmount));
+
+  // Compute tapleaf hashes (same as claimSwap but we spend refundLeaf)
+  const refundLeafHash = bitcoin.crypto.taggedHash(
+    'TapLeaf',
+    Buffer.concat([
+      Buffer.from([refundLeafVersion]),
+      compactSize(refundScript.length),
+      refundScript,
+    ]),
+  );
+  const claimLeafHash = bitcoin.crypto.taggedHash(
+    'TapLeaf',
+    Buffer.concat([Buffer.from([claimLeafVersion]), compactSize(claimScript.length), claimScript]),
+  );
+
+  // Internal key: x-only Boltz claim public key (they are the internal key for submarine swaps)
+  const internalKey = claimPubKey.length === 33 ? claimPubKey.subarray(1) : claimPubKey;
+
+  // Merkle root (sorted)
+  const merkleRoot =
+    Buffer.compare(claimLeafHash, refundLeafHash) < 0
+      ? bitcoin.crypto.taggedHash('TapBranch', Buffer.concat([claimLeafHash, refundLeafHash]))
+      : bitcoin.crypto.taggedHash('TapBranch', Buffer.concat([refundLeafHash, claimLeafHash]));
+
+  const tweak = bitcoin.crypto.taggedHash('TapTweak', Buffer.concat([internalKey, merkleRoot]));
+  const tweakedKey = ecc.xOnlyPointAddTweak(new Uint8Array(internalKey), new Uint8Array(tweak));
+  if (!tweakedKey) throw new Error('Failed to compute tweaked key for refund');
+  const parityBit = tweakedKey.parity;
+
+  // Control block: refund leaf version | parity, internal key, claim leaf hash (merkle sibling)
+  const controlBlock = Buffer.concat([
+    Buffer.from([refundLeafVersion | parityBit]),
+    internalKey,
+    claimLeafHash,
+  ]);
+
+  // Sighash for Taproot script-path
+  const prevOutScript = bitcoin.address.toOutputScript(swap.address);
+  const sighash = tx.hashForWitnessV1(
+    0,
+    [prevOutScript],
+    [BigInt(lockup.amount)],
+    0x00, // SIGHASH_DEFAULT
+    refundLeafHash,
+  );
+
+  const sig = ecc.signSchnorr(new Uint8Array(sighash), new Uint8Array(refundPrivKey));
+
+  // Witness: <sig> <refund_script> <control_block> (no preimage for refund)
+  tx.setWitness(0, [Buffer.from(sig), refundScript, controlBlock]);
+
+  const txId = tx.getId();
+  console.log(`[Boltz] Broadcasting refund tx: ${txId}`);
+  const onchainService = await import('./onchainService');
+  await onchainService.broadcastRawTx(tx.toHex());
+  console.log(`[Boltz] Refund tx broadcast successfully: ${txId}`);
+  return txId;
+}
+
 // ─── Submarine swap (on-chain → Lightning) ───────────────────────────────────
 
 export interface SubmarineSwapResult {
@@ -413,6 +632,8 @@ export interface SubmarineSwapResult {
   timeoutBlockHeight: number;
   /** Refund private key (hex) — needed if swap fails and we need to reclaim on-chain funds */
   refundPrivateKey: string;
+  /** Boltz's claim public key (hex) — Taproot internal key for refund tree */
+  claimPublicKey: string;
   /** Swap tree for script-path refund */
   swapTree: SwapTree;
 }
@@ -439,6 +660,7 @@ export async function createSubmarineSwapForward(invoice: string): Promise<Subma
       to: 'BTC',
       invoice,
       refundPublicKey: toHex(refundKeys.publicKey),
+      referralId: 'lightning-piggy',
     }),
   });
 
@@ -457,6 +679,7 @@ export async function createSubmarineSwapForward(invoice: string): Promise<Subma
     expectedAmount: data.expectedAmount,
     timeoutBlockHeight: data.timeoutBlockHeight ?? 0,
     refundPrivateKey: toHex(refundKeys.privateKey),
+    claimPublicKey: data.claimPublicKey ?? '',
     swapTree: data.swapTree,
   };
 }
@@ -468,42 +691,31 @@ export async function waitForSubmarineSwapComplete(
   swapId: string,
   timeoutMs: number = 120000,
 ): Promise<void> {
-  const start = Date.now();
+  console.log(
+    `[Boltz] Waiting for submarine swap completion: ${swapId} (timeout ${timeoutMs / 1000}s)`,
+  );
 
-  console.log(`[Boltz] Polling submarine swap status: ${swapId} (timeout ${timeoutMs / 1000}s)`);
-  while (Date.now() - start < timeoutMs) {
-    const res = await fetchWithTimeout(`${BOLTZ_API}/swap/${swapId}`);
-    if (!res.ok) {
-      console.warn(`[Boltz] Status check failed: ${res.status} for swap ${swapId}`);
-      throw new Error(`Boltz status check failed: ${res.status}`);
-    }
-    const data = await res.json();
-    console.log(`[Boltz] Swap ${swapId} status: ${data.status}`);
+  const FAIL_STATUSES = [
+    'swap.expired',
+    'transaction.refunded',
+    'invoice.failedToPay',
+    'transaction.lockupFailed',
+  ];
 
-    if (
-      data.status === 'invoice.settled' ||
-      data.status === 'transaction.claimed' ||
-      data.status === 'transaction.claim.pending'
-    ) {
-      console.log(`[Boltz] Submarine swap ${swapId} complete`);
-      return;
-    }
-
-    if (
-      data.status === 'swap.expired' ||
-      data.status === 'swap.refunded' ||
-      data.status === 'invoice.failedToPay' ||
-      data.status === 'transaction.lockupFailed'
-    ) {
-      console.warn(`[Boltz] Swap ${swapId} failed: ${data.status}`);
-      throw new Error(`Swap failed with status: ${data.status}`);
-    }
-
-    await new Promise((r) => setTimeout(r, 3000));
-  }
-
-  console.warn(`[Boltz] Swap ${swapId} timed out after ${timeoutMs / 1000}s`);
-  throw new Error('Timeout waiting for Boltz to pay Lightning invoice');
+  await waitForSwapStatus(
+    swapId,
+    (status) => {
+      if (status === 'invoice.settled' || status === 'transaction.claimed') {
+        console.log(`[Boltz] Submarine swap ${swapId} complete: ${status}`);
+        return true;
+      }
+      if (FAIL_STATUSES.includes(status)) {
+        throw new Error(`Swap failed with status: ${status}`);
+      }
+      return false;
+    },
+    timeoutMs,
+  );
 }
 
 // ─── Legacy alias for backward compatibility ──────────────────────────────────
