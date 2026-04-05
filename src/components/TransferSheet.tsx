@@ -52,6 +52,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [fiatValue, setFiatValue] = useState('');
   const [inputUnit, setInputUnit] = useState<InputUnit>('sats');
   const [sending, setSending] = useState(false);
+  const [progressMsg, setProgressMsg] = useState<string | null>(null);
   const [feeEstimate, setFeeEstimate] = useState<string | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
@@ -322,15 +323,19 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     }
 
     setSending(true);
+    setProgressMsg('Preparing transfer...');
     console.log(
       `[Transfer] Starting ${transferType}: ${currentSats} sats from ${source.alias} to ${dest.alias}`,
     );
     try {
       if (transferType === 'ln-to-ln') {
+        setProgressMsg('Creating invoice...');
         const invoice = await makeInvoiceForWallet(destId, currentSats, 'Transfer');
+        setProgressMsg('Sending payment...');
         await payInvoiceForWallet(sourceId, invoice);
       } else if (transferType === 'ln-to-onchain') {
         // Full Boltz reverse swap: LN → on-chain
+        setProgressMsg('Creating Boltz swap...');
         const address = await onchainService.getNextReceiveAddress(destId);
         const swap = await boltzService.createReverseSwap(address, currentSats);
 
@@ -346,19 +351,18 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
           }),
         );
 
-        // Step 1: Pay the Lightning invoice
+        setProgressMsg('Paying Lightning invoice...');
         await payInvoiceForWallet(sourceId, swap.invoice);
 
-        // Step 2: Wait for Boltz to lock BTC on-chain (polls every 3s)
-        const lockup = await boltzService.waitForLockup(swap.id, 900000); // 15 min — Boltz needs to lock on-chain
+        setProgressMsg('Waiting for on-chain confirmation...');
+        const lockup = await boltzService.waitForLockup(swap.id, 900000);
 
-        // Step 3: Build and broadcast the script-path claim transaction
+        setProgressMsg('Claiming on-chain funds...');
         await boltzService.claimSwap(swap, lockup, address);
 
-        // Clean up persisted swap state on success
         await SecureStore.deleteItemAsync(`boltz_swap_${swap.id}`);
       } else if (transferType === 'onchain-to-ln') {
-        // Boltz submarine swap: on-chain → Lightning
+        setProgressMsg('Creating Boltz swap...');
         const invoice = await makeInvoiceForWallet(destId, currentSats, 'Transfer');
         const swap = await boltzService.createSubmarineSwapForward(invoice);
 
@@ -377,10 +381,13 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
           }),
         );
 
+        setProgressMsg('Broadcasting on-chain transaction...');
         console.log(
           `[Transfer] Sending ${swap.expectedAmount} sats on-chain to Boltz address ${swap.address}`,
         );
         await onchainService.sendTransaction(sourceId, swap.address, swap.expectedAmount);
+
+        setProgressMsg('Waiting for Boltz to pay Lightning invoice...\nThis may take ~10 minutes.');
         console.log('[Transfer] On-chain tx broadcast, waiting for Boltz to pay LN invoice...');
 
         try {
@@ -428,10 +435,12 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         // Clean up persisted swap state on success
         await SecureStore.deleteItemAsync(`submarine_swap_${swap.id}`);
       } else if (transferType === 'onchain-to-onchain') {
-        // Direct on-chain send from hot wallet
+        setProgressMsg('Sending on-chain transaction...');
         const address = await onchainService.getNextReceiveAddress(destId);
         await onchainService.sendTransaction(sourceId, address, currentSats);
       }
+
+      setProgressMsg('Refreshing wallets...');
 
       // Refresh balances and transactions for both wallets (non-critical)
       try {
@@ -458,6 +467,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       Alert.alert('Transfer Failed', message);
     } finally {
       setSending(false);
+      setProgressMsg(null);
     }
   };
 
@@ -657,6 +667,14 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
           </Text>
         )}
 
+        {/* Progress indicator */}
+        {sending && progressMsg && (
+          <View style={styles.progressContainer}>
+            <ActivityIndicator size="small" color={colors.brandPink} />
+            <Text style={styles.progressText}>{progressMsg}</Text>
+          </View>
+        )}
+
         {/* Action buttons */}
         <View style={styles.buttonRow}>
           <TouchableOpacity
@@ -827,6 +845,24 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   // --- Buttons ---
+  progressContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    backgroundColor: colors.background,
+    borderRadius: 12,
+    marginTop: 8,
+  },
+  progressText: {
+    fontSize: 14,
+    color: colors.textBody,
+    fontWeight: '500',
+    textAlign: 'center',
+    flex: 1,
+  },
   buttonRow: {
     flexDirection: 'row',
     gap: 20,
