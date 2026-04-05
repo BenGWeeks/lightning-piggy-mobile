@@ -1,7 +1,8 @@
 appId: com.anonymous.lightningpiggyapp
 name: Add Hot Wallet Test
 ---
-# Enables dev mode (if not already) then imports a hot wallet via mnemonic.
+# Imports a hot wallet via mnemonic seed phrase.
+# Pre-requisite: Developer mode must be enabled (triple-tap version in Account settings).
 # Run: source .env && maestro test -e MAESTRO_MNEMONIC="$MAESTRO_MNEMONIC1" -e WALLET_NAME="Hot Wallet 1" tests/e2e/test-add-hot-wallet.yaml
 
 # Wait for app to be ready
@@ -10,70 +11,7 @@ name: Add Hot Wallet Test
       id: 'tab-home'
     timeout: 40000
 
-# === Enable Developer Mode ===
-# Navigate to Account settings
-- tapOn:
-    id: 'tab-home'
-    optional: true
-- waitForAnimationToEnd:
-    timeout: 2000
-- tapOn:
-    id: 'profile-icon'
-- waitForAnimationToEnd:
-    timeout: 3000
-
-# Scroll to bottom to find version
-- swipe:
-    start: 50%, 80%
-    end: 50%, 20%
-    duration: 300
-- waitForAnimationToEnd:
-    timeout: 1000
-- swipe:
-    start: 50%, 80%
-    end: 50%, 20%
-    duration: 300
-- waitForAnimationToEnd:
-    timeout: 1000
-
-# Check if already in dev mode
-- tapOn:
-    id: 'version-text'
-- tapOn:
-    id: 'version-text'
-- tapOn:
-    id: 'version-text'
-- waitForAnimationToEnd:
-    timeout: 2000
-
-# Dismiss alert (Enabled or Disabled)
-- tapOn:
-    text: 'OK'
-    optional: true
-- waitForAnimationToEnd:
-    timeout: 1000
-
-# If it said "Disabled", we need to triple-tap again to re-enable
-# Check if (dev) is visible — if not, tap again
-- tapOn:
-    id: 'version-text'
-    optional: true
-- tapOn:
-    id: 'version-text'
-    optional: true
-- tapOn:
-    id: 'version-text'
-    optional: true
-- waitForAnimationToEnd:
-    timeout: 2000
-- tapOn:
-    text: 'OK'
-    optional: true
-- waitForAnimationToEnd:
-    timeout: 1000
-
-# === Add Hot Wallet ===
-# Go back to Home
+# Ensure we're on Home
 - tapOn:
     id: 'tab-home'
 - waitForAnimationToEnd:
@@ -104,7 +42,7 @@ name: Add Hot Wallet Test
 - waitForAnimationToEnd:
     timeout: 1000
 
-# Select "Import Seed Phrase (Beta)"
+# Select "Import Seed Phrase (Beta)" — requires dev mode enabled
 - tapOn:
     id: 'wallet-type-mnemonic'
 - waitForAnimationToEnd:
