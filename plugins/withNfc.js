@@ -7,7 +7,7 @@ const {
 /**
  * Expo config plugin that adds NFC permissions and entitlements for
  * both Android and iOS so the app can read and write NDEF NFC tags.
- * Also registers lightning: and nostr: URI scheme intent filters.
+ * Also registers lightning: URI scheme intent filter and NDEF discovery.
  */
 function withNfcAndroid(config) {
   return withAndroidManifest(config, (config) => {
@@ -42,9 +42,9 @@ function withNfcAndroid(config) {
       });
     }
 
-    // Add NDEF discovered intent filter and lightning:/nostr: URI schemes
+    // Add NDEF discovered intent filter and lightning: URI scheme
     // to the main activity so the app handles NFC tags and deep links
-    const application = manifest.manifest?.application;
+    const application = manifest.application;
     if (application && application[0]) {
       const activities = application[0].activity;
       if (Array.isArray(activities)) {

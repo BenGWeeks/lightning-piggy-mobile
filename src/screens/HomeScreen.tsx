@@ -20,6 +20,7 @@ import {
   isNfcSupported,
   isNfcEnabled,
   openNfcSettings,
+  initNfc,
   scanNfcTag,
 } from '../services/nfcService';
 import { fetchProfile, DEFAULT_RELAYS } from '../services/nostrService';
@@ -131,9 +132,15 @@ const HomeScreen: React.FC = () => {
     setSettingsWalletId(walletId);
   }, []);
 
-  // Check NFC hardware support
+  // Check NFC hardware support and initialize NFC manager
   useEffect(() => {
-    isNfcSupported().then(setNfcSupported);
+    (async () => {
+      const supported = await isNfcSupported();
+      setNfcSupported(supported);
+      if (supported) {
+        await initNfc();
+      }
+    })();
   }, []);
 
   const handleNfcScan = async () => {
@@ -156,16 +163,20 @@ const HomeScreen: React.FC = () => {
 
       switch (result.type) {
         case 'lnurl': {
-          // Resolve LNURL to determine pay vs withdraw
+          // Resolve LNURL to determine pay vs withdraw.
+          // We must resolve here to route correctly, but for pay requests
+          // SendSheet will also resolve (acceptable trade-off for correct routing).
           try {
             const resolved = await resolveLnurl(result.data);
             if (resolved.tag === 'payRequest') {
               setSendToAddress(result.data);
               setSendOpen(true);
             } else if (resolved.tag === 'withdrawRequest') {
-              // For LNURL-withdraw, open receive sheet
-              // TODO: extend ReceiveSheet to handle LNURL-withdraw
-              setReceiveOpen(true);
+              Alert.alert(
+                'LNURL Withdraw',
+                `This tag offers ${resolved.params.maxSats.toLocaleString()} sats. ` +
+                  'LNURL-withdraw support is coming soon.',
+              );
             }
           } catch (err) {
             const msg = err instanceof Error ? err.message : 'Failed to resolve LNURL';

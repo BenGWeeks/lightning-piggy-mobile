@@ -287,7 +287,7 @@ const SendSheet: React.FC<Props> = ({
     try {
       if (isLightningAddress(invoiceData) || invoiceData.toLowerCase().startsWith('lnurl1')) {
         if (!lnurlParams) {
-          Alert.alert('Error', 'Lightning address not resolved yet. Please wait.');
+          Alert.alert('Error', 'Payment details not resolved yet. Please wait.');
           setSending(false);
           return;
         }
