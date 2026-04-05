@@ -79,6 +79,15 @@
 | The `electrum-client` library has an internal keepalive ping that can fail with `close connect`, followed by a reconnect crash: `Cannot read property 'client' of undefined`. This happens when `react-native-tcp-socket`'s TLS connection is interrupted (network change, sleep, etc.). +
 *Fix:* `onchainService.ts` sets `electrumConnected = false` on error, so the next call creates a fresh connection. The `onError` handler catches socket-level errors. If persistent, force-restart the app.
 
+| NIP-20 OK fix lost after LNbits upgrade or container recreate
+| The Nostrclient extension bundled with the LNbits Docker image does not include our NIP-20 OK fix (PR https://github.com/lnbits/nostrclient/pull/68[lnbits/nostrclient#68]). Without it, NWC clients using `@getalby/sdk` timeout waiting for OK responses after publishing events. +
+*To re-apply the fix after upgrading LNbits:* +
+1. Copy the fix script into the container: `cat apply_nip20_fix.py \| ssh black-panther "cat > /tmp/apply_nip20_fix.py"` +
+2. Run inside container: `ssh black-panther "docker cp /tmp/apply_nip20_fix.py lnbits-family:/tmp/ && docker exec lnbits-family python3 /tmp/apply_nip20_fix.py"` +
+3. Restart: `ssh black-panther "docker restart lnbits-family"` +
+4. Verify: `ssh black-panther "docker exec lnbits-family grep 'NIP-01: OK' /app/lnbits/extensions/nostrclient/router.py"` +
+The fix script (`apply_nip20_fix.py`) patches `router.py` to send `["OK", event_id, true, ""]` after publishing EVENT messages, and `["OK", event_id, false, "error: no relay connections"]` when no relays are connected.
+
 | On-chain transactions slow to load
 | Each on-chain transaction requires an Electrum `blockchain.scripthash.get_history` call per address (20 addresses), then a `blockchain.transaction.get` call per unique transaction to parse amounts, plus `blockchain.block.get_header` per unique block height for timestamps. For wallets with many transactions (e.g. the BIP-84 test vector zpub with 100+ txs), this can take 10-30 seconds. +
 *Mitigations:* In-memory transaction cache per wallet ID (shows cached data instantly on wallet swipe). Future: persist cache to AsyncStorage, only fetch new transactions since last known block height.
