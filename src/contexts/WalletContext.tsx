@@ -255,6 +255,28 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   }, [currency, fetchPrice]);
 
+  // NWC keepalive: ping connected wallets every 2 minutes to prevent
+  // relay WebSocket idle timeout disconnections
+  const keepaliveInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    keepaliveInterval.current = setInterval(
+      async () => {
+        for (const w of wallets.filter((ww) => ww.walletType === 'nwc' && ww.isConnected)) {
+          try {
+            const b = await nwcService.getBalance(w.id);
+            if (b !== null) updateWalletInState(w.id, { balance: b });
+          } catch {
+            // Reconnect will be triggered by the error handler in nwcService
+          }
+        }
+      },
+      2 * 60 * 1000,
+    );
+    return () => {
+      if (keepaliveInterval.current) clearInterval(keepaliveInterval.current);
+    };
+  }, [wallets, updateWalletInState]);
+
   const addNwcWallet = useCallback(
     async (nwcUrl: string, alias: string, theme: CardTheme) => {
       // Check for duplicate NWC wallet (same connection URL)
