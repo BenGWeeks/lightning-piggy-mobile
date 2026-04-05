@@ -17,6 +17,7 @@ import {
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
+import { ChevronUp, ChevronDown, Check } from 'lucide-react-native';
 import QRCode from 'react-native-qrcode-svg';
 import CopyIcon from './icons/CopyIcon';
 import ShareIcon from './icons/ShareIcon';
@@ -243,7 +244,11 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
                     onPress={() => setDropdownOpen(!dropdownOpen)}
                   >
                     <Text style={styles.walletDropdownText}>{walletName}</Text>
-                    <Text style={styles.walletDropdownArrow}>{dropdownOpen ? '▲' : '▼'}</Text>
+                    {dropdownOpen ? (
+                      <ChevronUp size={16} color={colors.white} />
+                    ) : (
+                      <ChevronDown size={16} color={colors.white} />
+                    )}
                   </TouchableOpacity>
                   {dropdownOpen && (
                     <View style={styles.walletDropdownMenu}>
@@ -358,7 +363,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
                   <QRCode value={`lightning:${lightningAddress}`} size={200} />
                   {paymentReceived && (
                     <View style={styles.checkmark}>
-                      <Text style={styles.checkmarkText}>✓</Text>
+                      <Check size={28} color={colors.white} />
                     </View>
                   )}
                 </View>
@@ -369,7 +374,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
                   <QRCode value={invoice} size={200} />
                   {paymentReceived && (
                     <View style={styles.checkmark}>
-                      <Text style={styles.checkmarkText}>✓</Text>
+                      <Check size={28} color={colors.white} />
                     </View>
                   )}
                 </View>

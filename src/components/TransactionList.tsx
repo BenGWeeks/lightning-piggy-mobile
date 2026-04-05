@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { ArrowDown, ArrowUp } from 'lucide-react-native';
 import { colors } from '../styles/theme';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet } from '../contexts/WalletContext';
@@ -39,7 +40,11 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
         return (
           <View key={index} style={styles.item}>
             <View style={styles.itemLeft}>
-              <Text style={styles.itemIcon}>{isIncoming ? '↓' : '↑'}</Text>
+              {isIncoming ? (
+                <ArrowDown size={18} color={colors.brandPink} />
+              ) : (
+                <ArrowUp size={18} color={colors.brandPink} />
+              )}
               <View style={styles.itemDescriptionContainer}>
                 <Text style={styles.itemDescription} numberOfLines={1}>
                   {item.description || (isIncoming ? 'Received' : 'Sent')}

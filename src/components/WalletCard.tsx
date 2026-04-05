@@ -5,6 +5,7 @@ import { WalletState } from '../types/wallet';
 import { CardThemeConfig, cardThemes } from '../themes/cardThemes';
 import { getCardBgStyle } from '../themes/cards';
 import { satsToFiatString, FiatCurrency } from '../services/fiatService';
+import { Settings } from 'lucide-react-native';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 export const CARD_MARGIN = 16;
@@ -38,6 +39,7 @@ const CardContent: React.FC<{
   currency?: FiatCurrency;
   isConnected?: boolean;
   walletAlias?: string | null;
+  hideBalance?: boolean;
   onSettingsPress?: () => void;
   showDetails?: boolean;
 }> = ({
@@ -48,6 +50,7 @@ const CardContent: React.FC<{
   currency,
   isConnected,
   walletAlias,
+  hideBalance,
   onSettingsPress,
   showDetails = true,
 }) => {
@@ -82,7 +85,7 @@ const CardContent: React.FC<{
                 onPress={onSettingsPress}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
-                <Text style={[styles.settingsCog, { color: theme.textColor }]}>&#9881;</Text>
+                <Settings size={20} color={theme.textColor} />
               </TouchableOpacity>
             )}
           </View>
@@ -92,9 +95,9 @@ const CardContent: React.FC<{
               {alias}
             </Text>
             <Text style={[styles.balance, { color: theme.textColor }]}>
-              {balance !== null ? `${balance!.toLocaleString()} sats` : '---'}
+              {hideBalance ? '***' : balance !== null ? `${balance!.toLocaleString()} sats` : '---'}
             </Text>
-            {balance !== null && btcPrice !== null && currency && (
+            {!hideBalance && balance !== null && btcPrice !== null && currency && (
               <Text style={[styles.fiatBalance, { color: theme.textColor }]}>
                 {satsToFiatString(balance!, btcPrice!, currency)}
               </Text>
@@ -156,6 +159,7 @@ const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onS
         currency={currency}
         isConnected={wallet.isConnected}
         walletAlias={wallet.walletAlias}
+        hideBalance={wallet.hideBalance}
         onSettingsPress={onSettingsPress}
       />
     </View>

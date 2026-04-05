@@ -12,6 +12,7 @@ import WalletCarousel from '../components/WalletCarousel';
 import AddWalletWizard from '../components/AddWalletWizard';
 import WalletSettingsSheet from '../components/WalletSettingsSheet';
 import ProfileIcon from '../components/ProfileIcon';
+import { ArrowDown, ArrowUp } from 'lucide-react-native';
 import * as nwcService from '../services/nwcService';
 import { styles } from '../styles/HomeScreen.styles';
 import type { MainTabParamList } from '../navigation/types';
@@ -145,7 +146,7 @@ const HomeScreen: React.FC = () => {
             onPress={() => setReceiveOpen(true)}
             disabled={!hasActiveConnection}
           >
-            <Text style={styles.actionIcon}>&#8595;</Text>
+            <ArrowDown size={24} color="#FFFFFF" />
             <Text style={styles.actionText}>Receive</Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -154,7 +155,7 @@ const HomeScreen: React.FC = () => {
             disabled={!hasActiveConnection}
           >
             <Text style={styles.actionText}>Send</Text>
-            <Text style={styles.actionIcon}>&#8593;</Text>
+            <ArrowUp size={24} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
       </View>

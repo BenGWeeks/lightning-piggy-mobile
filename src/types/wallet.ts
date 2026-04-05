@@ -18,6 +18,7 @@ export interface WalletMetadata {
   theme: CardTheme;
   order: number;
   lightningAddress: string | null;
+  hideBalance?: boolean;
 }
 
 export interface WalletState extends WalletMetadata {

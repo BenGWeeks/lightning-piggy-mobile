@@ -50,8 +50,9 @@ interface WalletContextType {
   removeWallet: (walletId: string) => Promise<void>;
   updateWalletSettings: (
     walletId: string,
-    settings: { alias?: string; theme?: CardTheme },
+    settings: { alias?: string; theme?: CardTheme; hideBalance?: boolean },
   ) => Promise<void>;
+  reorderWallet: (walletId: string, direction: 'up' | 'down') => Promise<void>;
   setActiveWallet: (walletId: string) => void;
   refreshActiveBalance: () => Promise<void>;
   completeOnboarding: () => Promise<void>;
@@ -284,13 +285,37 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   const updateWalletSettings = useCallback(
-    async (walletId: string, settings: { alias?: string; theme?: CardTheme }) => {
+    async (walletId: string, settings: { alias?: string; theme?: CardTheme; hideBalance?: boolean }) => {
       // Update in-memory state
       setWallets((prev) => prev.map((w) => (w.id === walletId ? { ...w, ...settings } : w)));
 
       // Persist metadata changes
       const currentList = await walletStorage.getWalletList();
       const updatedList = currentList.map((w) => (w.id === walletId ? { ...w, ...settings } : w));
+      await walletStorage.saveWalletList(updatedList);
+    },
+    [],
+  );
+
+  const reorderWallet = useCallback(
+    async (walletId: string, direction: 'up' | 'down') => {
+      setWallets((prev) => {
+        const idx = prev.findIndex((w) => w.id === walletId);
+        if (idx < 0) return prev;
+        const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+        if (targetIdx < 0 || targetIdx >= prev.length) return prev;
+        const reordered = [...prev];
+        [reordered[idx], reordered[targetIdx]] = [reordered[targetIdx], reordered[idx]];
+        return reordered.map((w, i) => ({ ...w, order: i }));
+      });
+
+      const currentList = await walletStorage.getWalletList();
+      const idx = currentList.findIndex((w) => w.id === walletId);
+      if (idx < 0) return;
+      const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= currentList.length) return;
+      [currentList[idx], currentList[targetIdx]] = [currentList[targetIdx], currentList[idx]];
+      const updatedList = currentList.map((w, i) => ({ ...w, order: i }));
       await walletStorage.saveWalletList(updatedList);
     },
     [],
@@ -369,6 +394,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         addWallet,
         removeWallet,
         updateWalletSettings,
+        reorderWallet,
         setActiveWallet,
         refreshActiveBalance,
         completeOnboarding,

@@ -10,6 +10,7 @@ import {
   isMissionComplete,
   isCourseComplete,
 } from '../services/learnProgressService';
+import { ChevronLeft, Check } from 'lucide-react-native';
 import { styles } from '../styles/CourseDetailScreen.styles';
 import { getYouTubeThumbnail } from '../utils/youtube';
 import { colors } from '../styles/theme';
@@ -50,7 +51,7 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     <View style={styles.container}>
       {/* Back button floats above scroll */}
       <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-        <Text style={styles.backArrow}>‹</Text>
+        <ChevronLeft size={28} color="#FFFFFF" />
       </TouchableOpacity>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -115,7 +116,7 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                 </View>
                 {done && (
                   <View style={styles.checkCircle}>
-                    <Text style={styles.checkMark}>✓</Text>
+                    <Check size={14} color="#FFFFFF" />
                   </View>
                 )}
               </TouchableOpacity>

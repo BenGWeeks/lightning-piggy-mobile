@@ -16,6 +16,7 @@ import {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import QRCode from 'react-native-qrcode-svg';
+import { Check } from 'lucide-react-native';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
 import { satsToFiatString } from '../services/fiatService';
@@ -161,7 +162,7 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
               <ActivityIndicator size="large" color={colors.brandPink} />
             ) : paymentReceived ? (
               <View style={styles.successOverlay}>
-                <Text style={styles.successCheck}>✓</Text>
+                <Check size={48} color={colors.green} />
                 <Text style={styles.successText}>Tip Received!</Text>
               </View>
             ) : invoice ? (

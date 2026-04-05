@@ -21,6 +21,7 @@ import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
 import { CURRENCIES } from '../services/fiatService';
+import { Trash2, Eye, EyeOff, ChevronUp, ChevronDown, Zap } from 'lucide-react-native';
 import CopyIcon from '../components/icons/CopyIcon';
 import NostrLoginSheet from '../components/NostrLoginSheet';
 import EditProfileSheet from '../components/EditProfileSheet';
@@ -53,6 +54,9 @@ const AccountScreen: React.FC = () => {
     lightningAddress,
     setLightningAddress,
     wallets,
+    removeWallet,
+    updateWalletSettings,
+    reorderWallet,
   } = useWallet();
   const { isLoggedIn, profile, logout } = useNostr();
   const [nameInput, setNameInput] = useState(userName);
@@ -220,7 +224,7 @@ const AccountScreen: React.FC = () => {
 
             {profile.lud16 && (
               <Text style={styles.profileLn}>
-                {'\u26A1'} {profile.lud16}
+                <Zap size={14} color={colors.white} /> {profile.lud16}
               </Text>
             )}
 
@@ -291,7 +295,7 @@ const AccountScreen: React.FC = () => {
               ? 'No wallets connected. Add one from the Home screen.'
               : `${wallets.length} wallet${wallets.length !== 1 ? 's' : ''} (${connectedCount} connected)`}
           </Text>
-          {wallets.map((w) => (
+          {wallets.map((w, index) => (
             <View key={w.id} style={styles.walletRow}>
               <View
                 style={[
@@ -299,10 +303,63 @@ const AccountScreen: React.FC = () => {
                   { backgroundColor: w.isConnected ? colors.green : colors.red },
                 ]}
               />
-              <Text style={styles.walletName}>{w.alias}</Text>
-              {w.balance !== null && (
-                <Text style={styles.walletBalance}>{w.balance.toLocaleString()} sats</Text>
-              )}
+              <Text style={styles.walletName} numberOfLines={1}>
+                {w.alias}
+              </Text>
+              <Text style={styles.walletBalance}>
+                {w.hideBalance ? '***' : w.balance !== null ? `${w.balance.toLocaleString()} sats` : '---'}
+              </Text>
+              <View style={styles.walletActions}>
+                <TouchableOpacity
+                  onPress={() => reorderWallet(w.id, 'up')}
+                  disabled={index === 0}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <ChevronUp size={18} color={colors.white} opacity={index === 0 ? 0.3 : 0.8} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => reorderWallet(w.id, 'down')}
+                  disabled={index === wallets.length - 1}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <ChevronDown
+                    size={18}
+                    color={colors.white}
+                    opacity={index === wallets.length - 1 ? 0.3 : 0.8}
+                  />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() =>
+                    updateWalletSettings(w.id, { hideBalance: !w.hideBalance })
+                  }
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  {w.hideBalance ? (
+                    <EyeOff size={18} color={colors.white} opacity={0.8} />
+                  ) : (
+                    <Eye size={18} color={colors.white} opacity={0.8} />
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() =>
+                    Alert.alert(
+                      'Remove Wallet',
+                      `Remove "${w.alias}"? This will disconnect the wallet.`,
+                      [
+                        { text: 'Cancel', style: 'cancel' },
+                        {
+                          text: 'Remove',
+                          style: 'destructive',
+                          onPress: () => removeWallet(w.id),
+                        },
+                      ],
+                    )
+                  }
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Trash2 size={18} color={colors.white} opacity={0.8} />
+                </TouchableOpacity>
+              </View>
             </View>
           ))}
         </View>
@@ -592,6 +649,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '400',
     opacity: 0.8,
+  },
+  walletActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   saveButton: {
     backgroundColor: colors.white,
