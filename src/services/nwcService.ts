@@ -112,8 +112,12 @@ export function disconnect(walletId: string): void {
 }
 
 export async function getBalance(walletId: string): Promise<number | null> {
-  let provider = providers.get(walletId);
-  if (!provider) return null;
+  let provider: NostrWebLNProvider;
+  try {
+    provider = await ensureConnected(walletId);
+  } catch {
+    return null;
+  }
   try {
     const b = await provider.getBalance();
     return b.balance;
@@ -138,8 +142,7 @@ export async function makeInvoice(
   amount: number,
   memo?: string,
 ): Promise<string> {
-  const provider = providers.get(walletId);
-  if (!provider) throw new Error('Not connected');
+  const provider = await ensureConnected(walletId);
   const invoice = await provider.makeInvoice({
     amount,
     defaultMemo: memo || 'Lightning Piggy',
@@ -201,9 +204,24 @@ async function reconnect(walletId: string): Promise<NostrWebLNProvider> {
   return provider;
 }
 
-export async function payInvoice(walletId: string, bolt11: string): Promise<{ preimage: string }> {
+/**
+ * Ensure the NWC provider is connected. Reconnect if the WebSocket dropped.
+ */
+async function ensureConnected(walletId: string): Promise<NostrWebLNProvider> {
   let provider = providers.get(walletId);
   if (!provider) throw new Error('Not connected');
+
+  // Check if the underlying client is still connected
+  const client = (provider as any).client;
+  if (client && !client.connected && nwcUrls.has(walletId)) {
+    if (__DEV__) console.log('[NWC] Connection lost, reconnecting...');
+    provider = await reconnect(walletId);
+  }
+  return provider;
+}
+
+export async function payInvoice(walletId: string, bolt11: string): Promise<{ preimage: string }> {
+  let provider = await ensureConnected(walletId);
   try {
     const result = await provider.sendPayment(bolt11);
     return { preimage: result.preimage };
@@ -223,8 +241,12 @@ export async function payInvoice(walletId: string, bolt11: string): Promise<{ pr
 }
 
 export async function getInfo(walletId: string): Promise<{ alias: string; lud16?: string } | null> {
-  const provider = providers.get(walletId);
-  if (!provider) return null;
+  let provider: NostrWebLNProvider;
+  try {
+    provider = await ensureConnected(walletId);
+  } catch {
+    return null;
+  }
   try {
     const info: Nip47GetInfoResponse = await provider.getInfo();
     if (__DEV__) console.log('NWC getInfo response:', JSON.stringify(info));
@@ -238,8 +260,12 @@ export async function getInfo(walletId: string): Promise<{ alias: string; lud16?
 }
 
 export async function listTransactions(walletId: string): Promise<any[]> {
-  let provider = providers.get(walletId);
-  if (!provider) return [];
+  let provider: NostrWebLNProvider;
+  try {
+    provider = await ensureConnected(walletId);
+  } catch {
+    return [];
+  }
   try {
     const result = await provider.listTransactions({});
     return result.transactions || [];
