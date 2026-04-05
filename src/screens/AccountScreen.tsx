@@ -759,8 +759,8 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.6)',
     fontSize: 12,
     textAlign: 'center',
-    paddingTop: 8,
-    paddingBottom: 24,
+    paddingTop: 24,
+    paddingBottom: 0,
   },
 });
 
