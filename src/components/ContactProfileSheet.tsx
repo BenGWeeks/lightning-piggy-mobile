@@ -19,9 +19,12 @@ import {
 import Svg, { Circle, Path } from 'react-native-svg';
 import ZapIcon from './icons/ZapIcon';
 import CopyIcon from './icons/CopyIcon';
+import NfcIcon from './icons/NfcIcon';
+import NfcWriteSheet from './NfcWriteSheet';
 import * as Clipboard from 'expo-clipboard';
 import { npubEncode } from '../services/nostrService';
 import { useNostr } from '../contexts/NostrContext';
+import { isNfcSupported, isNfcEnabled, openNfcSettings } from '../services/nfcService';
 import { colors } from '../styles/theme';
 
 interface ContactData {
@@ -58,6 +61,9 @@ const ContactProfileSheet: React.FC<Props> = ({
   const [avatarLoaded, setAvatarLoaded] = useState(false);
   const [editingLnAddress, setEditingLnAddress] = useState(false);
   const [lnAddressDraft, setLnAddressDraft] = useState('');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [nfcWriteOpen, setNfcWriteOpen] = useState(false);
+  const [nfcAvailable, setNfcAvailable] = useState(false);
 
   // Timeout: if image hasn't loaded in 8s, show fallback
   useEffect(() => {
@@ -85,7 +91,13 @@ const ContactProfileSheet: React.FC<Props> = ({
   useEffect(() => {
     setEditingLnAddress(false);
     setLnAddressDraft(contact?.lightningAddress ?? '');
+    setMenuOpen(false);
   }, [contact?.name, contact?.lightningAddress]);
+
+  // Check NFC support
+  useEffect(() => {
+    isNfcSupported().then(setNfcAvailable);
+  }, []);
 
   useEffect(() => {
     if (visible) {
@@ -141,6 +153,40 @@ const ContactProfileSheet: React.FC<Props> = ({
   const handleCopyNpub = async () => {
     if (!contact?.pubkey) return;
     await Clipboard.setStringAsync(npubEncode(contact.pubkey));
+    setMenuOpen(false);
+    Alert.alert('Copied', 'npub copied to clipboard.');
+  };
+
+  const handleNfcWrite = async () => {
+    setMenuOpen(false);
+    if (!contact?.pubkey) return;
+    const enabled = await isNfcEnabled();
+    if (!enabled) {
+      Alert.alert(
+        'NFC is Off',
+        'Please enable NFC in your device settings to write to NFC tags.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: openNfcSettings },
+        ],
+      );
+      return;
+    }
+    setNfcWriteOpen(true);
+  };
+
+  const handleShare = async () => {
+    setMenuOpen(false);
+    if (!contact?.pubkey) return;
+    const npub = npubEncode(contact.pubkey);
+    const url = `https://primal.net/p/${npub}`;
+    try {
+      await (await import('react-native')).Share.share({
+        message: `${contact.name}: ${url}`,
+      });
+    } catch {
+      // user cancelled share
+    }
   };
 
   const handleViewProfile = useCallback(async () => {
@@ -322,7 +368,60 @@ const ContactProfileSheet: React.FC<Props> = ({
               </Svg>
             </TouchableOpacity>
           )}
+          {contact.pubkey && (
+            <View>
+              <TouchableOpacity
+                style={styles.moreButton}
+                onPress={() => setMenuOpen(!menuOpen)}
+                accessibilityLabel="More options"
+                testID="contact-more-menu"
+              >
+                <Text style={styles.moreButtonText}>...</Text>
+              </TouchableOpacity>
+              {menuOpen && (
+                <View style={styles.menuDropdown}>
+                  <TouchableOpacity
+                    style={styles.menuItem}
+                    onPress={handleShare}
+                    accessibilityLabel="Share contact"
+                    testID="contact-share"
+                  >
+                    <Text style={styles.menuItemText}>Share</Text>
+                  </TouchableOpacity>
+                  {nfcAvailable && (
+                    <TouchableOpacity
+                      style={styles.menuItem}
+                      onPress={handleNfcWrite}
+                      accessibilityLabel="Write to NFC tag"
+                      testID="contact-nfc-write"
+                    >
+                      <NfcIcon size={16} color={colors.textBody} />
+                      <Text style={styles.menuItemText}>Write to NFC</Text>
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity
+                    style={styles.menuItem}
+                    onPress={handleCopyNpub}
+                    accessibilityLabel="Copy npub"
+                    testID="contact-copy-npub"
+                  >
+                    <CopyIcon size={16} color={colors.textBody} />
+                    <Text style={styles.menuItemText}>Copy npub</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          )}
         </View>
+
+        {contact.pubkey && (
+          <NfcWriteSheet
+            visible={nfcWriteOpen}
+            onClose={() => setNfcWriteOpen(false)}
+            npub={npubEncode(contact.pubkey)}
+            displayName={contact.name}
+          />
+        )}
       </BottomSheetView>
     </BottomSheetModal>
   );
@@ -507,6 +606,50 @@ const styles = StyleSheet.create({
     borderColor: colors.brandPink,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  moreButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: colors.divider,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  moreButtonText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.textSupplementary,
+    lineHeight: 18,
+  },
+  menuDropdown: {
+    position: 'absolute',
+    top: 48,
+    right: 0,
+    backgroundColor: colors.white,
+    borderRadius: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 5,
+    minWidth: 160,
+    zIndex: 10,
+    overflow: 'hidden',
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.divider,
+  },
+  menuItemText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textBody,
   },
 });
 

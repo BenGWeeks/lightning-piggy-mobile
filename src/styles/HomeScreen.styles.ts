@@ -66,6 +66,11 @@ export const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
   },
+  nfcButton: {
+    flex: 0,
+    width: 52,
+    paddingHorizontal: 0,
+  },
   transactionsWrapper: {
     flex: 1,
     marginTop: -16,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   View,
@@ -22,9 +22,12 @@ import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
 import { CURRENCIES } from '../services/fiatService';
 import CopyIcon from '../components/icons/CopyIcon';
+import NfcIcon from '../components/icons/NfcIcon';
 import NostrLoginSheet from '../components/NostrLoginSheet';
 import EditProfileSheet from '../components/EditProfileSheet';
 import QrSheet from '../components/QrSheet';
+import NfcWriteSheet from '../components/NfcWriteSheet';
+import { isNfcSupported, isNfcEnabled, openNfcSettings } from '../services/nfcService';
 import type { MainTabParamList } from '../navigation/types';
 
 const QrIcon: React.FC<{ size?: number; color?: string }> = ({ size = 20, color = '#FFFFFF' }) => (
@@ -61,6 +64,9 @@ const AccountScreen: React.FC = () => {
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [qrSheetOpen, setQrSheetOpen] = useState(false);
   const [qrDefaultMode, setQrDefaultMode] = useState<'npub' | 'lightning'>('npub');
+  const [nfcSupported, setNfcSupported] = useState(false);
+  const [nfcEnabled, setNfcEnabled] = useState(false);
+  const [nfcWriteOpen, setNfcWriteOpen] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -70,6 +76,18 @@ const AccountScreen: React.FC = () => {
   useEffect(() => {
     setLnAddressInput(lightningAddress || '');
   }, [lightningAddress]);
+
+  // Check NFC hardware and status
+  useEffect(() => {
+    (async () => {
+      const supported = await isNfcSupported();
+      setNfcSupported(supported);
+      if (supported) {
+        const enabled = await isNfcEnabled();
+        setNfcEnabled(enabled);
+      }
+    })();
+  }, []);
 
   // Profile merge: when Nostr profile is loaded and has different values
   // Only prompt once per unique profile values (persisted so it doesn't nag)
@@ -146,6 +164,24 @@ const AccountScreen: React.FC = () => {
     }
   };
 
+  const handleNfcWrite = async () => {
+    if (!nfcSupported) return;
+    const enabled = await isNfcEnabled();
+    setNfcEnabled(enabled);
+    if (!enabled) {
+      Alert.alert(
+        'NFC is Off',
+        'Please enable NFC in your device settings to write to NFC tags.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: openNfcSettings },
+        ],
+      );
+      return;
+    }
+    setNfcWriteOpen(true);
+  };
+
   const connectedCount = wallets.filter((w) => w.isConnected).length;
   const truncatedNpub = profile?.npub
     ? `${profile.npub.slice(0, 16)}...${profile.npub.slice(-8)}`
@@ -216,6 +252,15 @@ const AccountScreen: React.FC = () => {
               >
                 <QrIcon size={22} color={colors.textSupplementary} />
               </TouchableOpacity>
+              {nfcSupported && (
+                <TouchableOpacity
+                  onPress={handleNfcWrite}
+                  accessibilityLabel="Write npub to NFC tag"
+                  testID="nfc-write-npub"
+                >
+                  <NfcIcon size={22} color={colors.textSupplementary} />
+                </TouchableOpacity>
+              )}
             </View>
 
             {profile.lud16 && (
@@ -337,6 +382,28 @@ const AccountScreen: React.FC = () => {
           )}
         </View>
 
+        {/* NFC Status */}
+        {nfcSupported && (
+          <>
+            <Text style={[styles.sectionLabel, { marginTop: 24 }]}>NFC</Text>
+            <View style={styles.nfcStatusRow}>
+              <NfcIcon size={20} color={nfcEnabled ? colors.green : colors.red} />
+              <Text style={styles.nfcStatusText}>
+                {nfcEnabled ? 'NFC is enabled' : 'NFC is disabled'}
+              </Text>
+              {!nfcEnabled && (
+                <TouchableOpacity
+                  onPress={openNfcSettings}
+                  accessibilityLabel="Enable NFC in settings"
+                  testID="nfc-enable-settings"
+                >
+                  <Text style={styles.nfcEnableText}>Enable</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </>
+        )}
+
         {/* Save button */}
         <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
           <Text style={styles.saveButtonText}>Save</Text>
@@ -346,13 +413,21 @@ const AccountScreen: React.FC = () => {
       <NostrLoginSheet visible={loginSheetOpen} onClose={() => setLoginSheetOpen(false)} />
       <EditProfileSheet visible={editProfileOpen} onClose={() => setEditProfileOpen(false)} />
       {profile?.npub && (
-        <QrSheet
-          visible={qrSheetOpen}
-          onClose={() => setQrSheetOpen(false)}
-          npub={profile.npub}
-          lightningAddress={profile.lud16 || lnAddressInput.trim() || null}
-          defaultMode={qrDefaultMode}
-        />
+        <>
+          <QrSheet
+            visible={qrSheetOpen}
+            onClose={() => setQrSheetOpen(false)}
+            npub={profile.npub}
+            lightningAddress={profile.lud16 || lnAddressInput.trim() || null}
+            defaultMode={qrDefaultMode}
+          />
+          <NfcWriteSheet
+            visible={nfcWriteOpen}
+            onClose={() => setNfcWriteOpen(false)}
+            npub={profile.npub}
+            displayName={profile.displayName || profile.name || 'Your'}
+          />
+        </>
       )}
     </KeyboardAvoidingView>
   );
@@ -592,6 +667,26 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '400',
     opacity: 0.8,
+  },
+  nfcStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 12,
+    padding: 16,
+  },
+  nfcStatusText: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: '600',
+    flex: 1,
+  },
+  nfcEnableText: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
   },
   saveButton: {
     backgroundColor: colors.white,

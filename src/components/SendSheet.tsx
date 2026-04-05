@@ -25,7 +25,12 @@ import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
 import { satsToFiat, satsToFiatString } from '../services/fiatService';
-import { resolveLightningAddress, fetchInvoice, LnurlPayParams } from '../services/lnurlService';
+import {
+  resolveLightningAddress,
+  resolveLnurl,
+  fetchInvoice,
+  LnurlPayParams,
+} from '../services/lnurlService';
 
 interface Props {
   visible: boolean;
@@ -119,7 +124,9 @@ const SendSheet: React.FC<Props> = ({
 
   const snapPoints = useMemo(() => ['90%'], []);
 
-  const needsAmount = scanned && isLightningAddress(invoiceData || '');
+  const needsAmount =
+    scanned &&
+    (isLightningAddress(invoiceData || '') || (invoiceData || '').toLowerCase().startsWith('lnurl1'));
   const currentSats = parseInt(satsValue) || 0;
 
   const fiatToSats = (fiat: number): number => {
@@ -172,14 +179,28 @@ const SendSheet: React.FC<Props> = ({
     return () => handler.remove();
   }, [visible, onClose]);
 
-  // Resolve lightning address when scanned
+  // Resolve lightning address or LNURL when scanned
   useEffect(() => {
-    if (!scanned || !invoiceData || !isLightningAddress(invoiceData)) return;
+    if (!scanned || !invoiceData) return;
+    const isAddress = isLightningAddress(invoiceData);
+    const isLnurl = invoiceData.toLowerCase().startsWith('lnurl1');
+    if (!isAddress && !isLnurl) return;
+
     let cancelled = false;
     (async () => {
       setResolving(true);
       try {
-        const params = await resolveLightningAddress(invoiceData);
+        let params: LnurlPayParams;
+        if (isLnurl) {
+          const resolved = await resolveLnurl(invoiceData);
+          if (resolved.tag !== 'payRequest') {
+            Alert.alert('Error', 'This LNURL is not a pay request.');
+            return;
+          }
+          params = resolved.params;
+        } else {
+          params = await resolveLightningAddress(invoiceData);
+        }
         if (!cancelled) {
           setLnurlParams(params);
           setDecoded((prev) => ({
@@ -207,7 +228,13 @@ const SendSheet: React.FC<Props> = ({
       input = input.substring(10);
     }
 
-    if (isLightningAddress(input)) {
+    if (input.toLowerCase().startsWith('lnurl1')) {
+      // LNURL string — treat as a lightning address-like flow
+      // The LNURL will be resolved when the address resolution effect runs
+      setInvoiceData(input);
+      setDecoded({ amountSats: null, description: 'Resolving LNURL...', expiry: null });
+      setScanned(true);
+    } else if (isLightningAddress(input)) {
       setInvoiceData(input);
       setDecoded({ amountSats: null, description: `Pay to ${input}`, expiry: null });
       setScanned(true);
@@ -258,7 +285,7 @@ const SendSheet: React.FC<Props> = ({
     if (!invoiceData) return;
     setSending(true);
     try {
-      if (isLightningAddress(invoiceData)) {
+      if (isLightningAddress(invoiceData) || invoiceData.toLowerCase().startsWith('lnurl1')) {
         if (!lnurlParams) {
           Alert.alert('Error', 'Lightning address not resolved yet. Please wait.');
           setSending(false);

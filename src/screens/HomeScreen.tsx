@@ -1,20 +1,32 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, Image, TouchableOpacity, ScrollView, RefreshControl } from 'react-native';
+import { View, Text, Image, TouchableOpacity, ScrollView, RefreshControl, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import * as nip19 from 'nostr-tools/nip19';
 import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
 import ReceiveSheet from '../components/ReceiveSheet';
 import SendSheet from '../components/SendSheet';
+import ContactProfileSheet from '../components/ContactProfileSheet';
 import TransactionList from '../components/TransactionList';
 import WalletCarousel from '../components/WalletCarousel';
 import AddWalletWizard from '../components/AddWalletWizard';
 import WalletSettingsSheet from '../components/WalletSettingsSheet';
+import NfcIcon from '../components/icons/NfcIcon';
 import ProfileIcon from '../components/ProfileIcon';
 import * as nwcService from '../services/nwcService';
+import {
+  isNfcSupported,
+  isNfcEnabled,
+  openNfcSettings,
+  scanNfcTag,
+} from '../services/nfcService';
+import { fetchProfile, DEFAULT_RELAYS } from '../services/nostrService';
+import { resolveLnurl } from '../services/lnurlService';
 import { styles } from '../styles/HomeScreen.styles';
 import type { MainTabParamList } from '../navigation/types';
+import type { NostrProfile } from '../types/nostr';
 
 const HomeScreen: React.FC = () => {
   const {
@@ -42,6 +54,18 @@ const HomeScreen: React.FC = () => {
   const [settingsWalletId, setSettingsWalletId] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [nfcSupported, setNfcSupported] = useState(false);
+  const [nfcScanning, setNfcScanning] = useState(false);
+  const [nfcContact, setNfcContact] = useState<{
+    pubkey: string;
+    name: string;
+    picture: string | null;
+    banner?: string | null;
+    nip05?: string | null;
+    lightningAddress: string | null;
+    source: 'nostr';
+  } | null>(null);
+  const [nfcContactSheetOpen, setNfcContactSheetOpen] = useState(false);
 
   // Handle sendToAddress from navigation params (e.g., from Friends tab zap)
   useEffect(() => {
@@ -107,6 +131,91 @@ const HomeScreen: React.FC = () => {
     setSettingsWalletId(walletId);
   }, []);
 
+  // Check NFC hardware support
+  useEffect(() => {
+    isNfcSupported().then(setNfcSupported);
+  }, []);
+
+  const handleNfcScan = async () => {
+    const enabled = await isNfcEnabled();
+    if (!enabled) {
+      Alert.alert(
+        'NFC is Off',
+        'Please enable NFC in your device settings to scan NFC tags.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: openNfcSettings },
+        ],
+      );
+      return;
+    }
+
+    setNfcScanning(true);
+    try {
+      const result = await scanNfcTag();
+
+      switch (result.type) {
+        case 'lnurl': {
+          // Resolve LNURL to determine pay vs withdraw
+          try {
+            const resolved = await resolveLnurl(result.data);
+            if (resolved.tag === 'payRequest') {
+              setSendToAddress(result.data);
+              setSendOpen(true);
+            } else if (resolved.tag === 'withdrawRequest') {
+              // For LNURL-withdraw, open receive sheet
+              // TODO: extend ReceiveSheet to handle LNURL-withdraw
+              setReceiveOpen(true);
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : 'Failed to resolve LNURL';
+            Alert.alert('LNURL Error', msg);
+          }
+          break;
+        }
+        case 'lightning-invoice':
+        case 'lightning-address':
+          setSendToAddress(result.data);
+          setSendOpen(true);
+          break;
+        case 'npub': {
+          try {
+            const decoded = nip19.decode(result.data);
+            if (decoded.type !== 'npub') {
+              Alert.alert('Error', 'Invalid npub on NFC tag.');
+              break;
+            }
+            const hexPubkey = decoded.data;
+            const profileData: NostrProfile | null = await fetchProfile(hexPubkey, DEFAULT_RELAYS);
+            setNfcContact({
+              pubkey: hexPubkey,
+              name: profileData?.displayName || profileData?.name || result.data.slice(0, 16) + '...',
+              picture: profileData?.picture || null,
+              banner: profileData?.banner || null,
+              nip05: profileData?.nip05 || null,
+              lightningAddress: profileData?.lud16 || null,
+              source: 'nostr',
+            });
+            setNfcContactSheetOpen(true);
+          } catch {
+            Alert.alert('Error', 'Could not resolve npub from NFC tag.');
+          }
+          break;
+        }
+        case 'unknown':
+          Alert.alert('Unrecognized NFC Tag', `Tag content: ${result.data.slice(0, 100)}`);
+          break;
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'NFC scan failed';
+      if (!msg.includes('cancelled')) {
+        Alert.alert('NFC Error', msg);
+      }
+    } finally {
+      setNfcScanning(false);
+    }
+  };
+
   const hasActiveConnection = activeWallet?.isConnected ?? false;
 
   return (
@@ -138,7 +247,7 @@ const HomeScreen: React.FC = () => {
           onSettingsPress={handleSettingsPress}
         />
 
-        {/* Send/Receive buttons */}
+        {/* Send/Receive/NFC buttons */}
         <View style={styles.buttonRow}>
           <TouchableOpacity
             style={[styles.actionButton, !hasActiveConnection && styles.actionButtonDisabled]}
@@ -156,6 +265,21 @@ const HomeScreen: React.FC = () => {
             <Text style={styles.actionText}>Send</Text>
             <Text style={styles.actionIcon}>&#8593;</Text>
           </TouchableOpacity>
+          {nfcSupported && (
+            <TouchableOpacity
+              style={[
+                styles.actionButton,
+                styles.nfcButton,
+                (!hasActiveConnection || nfcScanning) && styles.actionButtonDisabled,
+              ]}
+              onPress={handleNfcScan}
+              disabled={!hasActiveConnection || nfcScanning}
+              accessibilityLabel="Scan NFC tag"
+              testID="nfc-scan-button"
+            >
+              <NfcIcon size={22} color="#EC008C" />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -190,6 +314,25 @@ const HomeScreen: React.FC = () => {
       />
       <AddWalletWizard visible={wizardOpen} onClose={() => setWizardOpen(false)} />
       <WalletSettingsSheet walletId={settingsWalletId} onClose={() => setSettingsWalletId(null)} />
+      <ContactProfileSheet
+        visible={nfcContactSheetOpen}
+        onClose={() => {
+          setNfcContactSheetOpen(false);
+          setNfcContact(null);
+        }}
+        contact={nfcContact}
+        onZap={
+          nfcContact?.lightningAddress
+            ? () => {
+                setNfcContactSheetOpen(false);
+                setSendToAddress(nfcContact.lightningAddress!);
+                setSendToPicture(nfcContact.picture ?? undefined);
+                setSendToPubkey(nfcContact.pubkey);
+                setSendOpen(true);
+              }
+            : undefined
+        }
+      />
     </View>
   );
 };
