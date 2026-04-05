@@ -2,7 +2,7 @@ appId: com.anonymous.lightningpiggyapp
 name: Add On-chain Wallet Test
 ---
 # Tests importing an on-chain Bitcoin wallet via xpub/zpub
-# Run: source .env && maestro test -e MAESTRO_XPUB="$MAESTRO_XPUB" tests/e2e/test-add-onchain-wallet.yaml
+# Run: source .env && maestro test -e MAESTRO_XPUB="$MAESTRO_XPUB1" -e WALLET_NAME="Test Wallet 1" tests/e2e/test-add-onchain-wallet.yaml
 
 # Wait for app to be ready
 - waitForAnimationToEnd:
@@ -61,7 +61,7 @@ name: Add On-chain Wallet Test
     id: 'xpub-input'
 - eraseText:
     charactersToErase: 500
-- inputText: ${MAESTRO_XPUB}
+- inputText: ${MAESTRO_XPUB1}
 - pressKey: back
 - waitForAnimationToEnd:
     timeout: 1000
@@ -79,7 +79,7 @@ name: Add On-chain Wallet Test
     id: 'wallet-alias-input'
 - eraseText:
     charactersToErase: 100
-- inputText: 'Test BTC Wallet'
+- inputText: ${WALLET_NAME}
 - pressKey: back
 - waitForAnimationToEnd:
     timeout: 1000
@@ -112,4 +112,4 @@ name: Add On-chain Wallet Test
 
 # Verify the wallet alias appears
 - assertVisible:
-    text: 'Test BTC Wallet'
+    text: ${WALLET_NAME}
