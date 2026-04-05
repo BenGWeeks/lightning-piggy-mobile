@@ -43,30 +43,49 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
         const isIncoming = item.type === 'incoming';
         const amountSats = Math.abs(item.amount);
         const date = item.settled_at || item.created_at;
+        const isPending = !date && !item.blockHeight;
         const dateStr = date
-          ? new Date(date * 1000).toLocaleDateString()
+          ? new Date(date * 1000).toLocaleString(undefined, {
+              dateStyle: 'short',
+              timeStyle: 'short',
+            })
           : item.blockHeight
             ? `Block ${item.blockHeight.toLocaleString()}`
             : '';
+        const label = isPending
+          ? 'Pending'
+          : item.description || (isIncoming ? 'Received' : 'Sent');
         const fiatStr = satsToFiatString(amountSats, btcPrice, currency);
 
         return (
-          <View key={index} style={styles.item}>
+          <View key={index} style={[styles.item, isPending && styles.itemPending]}>
             <View style={styles.itemLeft}>
-              <Text style={styles.itemIcon}>{isIncoming ? '↓' : '↑'}</Text>
+              <Text style={[styles.itemIcon, isPending && styles.pendingText]}>
+                {isIncoming ? '↓' : '↑'}
+              </Text>
               <View style={styles.itemDescriptionContainer}>
-                <Text style={styles.itemDescription} numberOfLines={1}>
-                  {item.description || (isIncoming ? 'Received' : 'Sent')}
+                <Text
+                  style={[styles.itemDescription, isPending && styles.pendingText]}
+                  numberOfLines={1}
+                >
+                  {label}
                 </Text>
                 <Text style={styles.itemDate}>{dateStr}</Text>
               </View>
             </View>
             <View style={styles.itemRight}>
-              <Text style={[styles.itemAmount, isIncoming ? styles.incoming : styles.outgoing]}>
+              <Text
+                style={[
+                  styles.itemAmount,
+                  isPending ? styles.pendingText : isIncoming ? styles.incoming : styles.outgoing,
+                ]}
+              >
                 {isIncoming ? '+' : '-'}
                 {amountSats.toLocaleString()} sats
               </Text>
-              {fiatStr ? <Text style={styles.itemFiat}>{fiatStr}</Text> : null}
+              {fiatStr ? (
+                <Text style={[styles.itemFiat, isPending && styles.pendingText]}>{fiatStr}</Text>
+              ) : null}
             </View>
           </View>
         );
@@ -151,6 +170,12 @@ const styles = StyleSheet.create({
   },
   outgoing: {
     color: colors.red,
+  },
+  itemPending: {
+    opacity: 0.5,
+  },
+  pendingText: {
+    color: colors.textSupplementary,
   },
 });
 

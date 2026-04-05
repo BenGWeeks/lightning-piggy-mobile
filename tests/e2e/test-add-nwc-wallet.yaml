@@ -7,19 +7,24 @@ name: Add NWC Wallet Test
 #   source .env && maestro test -e MAESTRO_NWC="$MAESTRO_NWC2" -e WALLET_NAME="Wallet 2" tests/e2e/test-add-nwc-wallet.yaml
 
 # Wait for app to be ready
-- waitForAnimationToEnd:
-    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 40000
 
-# Swipe carousel right to find Add Wallet card (max 6 swipes covers up to 6 wallets)
-- repeat:
-    times: 6
-    commands:
-      - swipe:
-          start: 85%, 30%
-          end: 15%, 30%
-          duration: 300
-      - waitForAnimationToEnd:
-          timeout: 800
+# Ensure we're on Home
+- tapOn:
+    id: 'tab-home'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Swipe carousel right until Add Wallet card is visible
+- scrollUntilVisible:
+    element:
+      id: 'add-wallet-card'
+    direction: RIGHT
+    timeout: 20000
+    speed: 40
 
 # Tap the Add Wallet card
 - tapOn:

@@ -45,6 +45,7 @@
     "nostr-tools": "^2.23.3",
     "react": "19.2.0",
     "react-native": "0.83.4",
+    "react-native-color-matrix-image-filters": "^8.0.2",
     "react-native-gesture-handler": "^2.30.1",
     "react-native-get-random-values": "~1.11.0",
     "react-native-qrcode-svg": "^6.3.21",

@@ -156,18 +156,56 @@ Additionally, `nwcService.ts` includes auto-reconnect logic: if a publish fails 
 
 === Visual Differentiation
 
-- **NWC wallets**: Green/red status dot + "Connected"/"Disconnected"
-- **On-chain wallets**: Green/red status dot + chain icon (Lucide SVG) + "On-chain" label. Green when Electrum balance loaded successfully, red when connection failed.
+- **NWC wallets**: Green/red status dot + NWC icon (tinted to theme) + "Connected"/"Disconnected"
+- **On-chain wallets**: Green/red status dot + chain icon (Lucide SVG) + "Connected"/"Disconnected". Green when BDK Electrum sync succeeds, red when connection failed.
+- Both wallet types show a Lucide settings cog icon in the top-right
+- Connection status polled every 30 seconds via `nwcService.isWalletConnected()` (checks actual WebSocket state)
 
-=== Future: Hot Wallet Support
+=== NWC Connection Reliability
 
-When mnemonic import is added, the following will be implemented in `onchainService.ts`:
+Multiple layers protect against NWC relay disconnections:
 
-- `buildTransaction()` — construct PSBTs using bitcoinjs-lib
-- `broadcastTransaction()` — sign locally and broadcast via mempool.space API
-- Transfer from on-chain wallets (currently disabled for watch-only)
+1. **Proactive check**: `ensureConnected()` checks `client.connected` before every NWC operation — reconnects immediately if the WebSocket dropped
+2. **Connection polling**: Every 30 seconds, poll `isWalletConnected()` and update the wallet card status dot
+3. **Publish patch**: Monkey-patch the relay pool to not wait for NIP-20 OK responses (lnbits/nostrclient#52 workaround, can be removed once lnbits/nostrclient#68 is merged)
 
-The crypto library stack (bitcoinjs-lib, bip32, @bitcoinerlab/secp256k1) already supports all of this.
+=== Hot Wallet Support (Developer Mode)
+
+Hot wallet (mnemonic import) is available behind a **developer mode** toggle:
+
+- **Enable**: Triple-tap the version number at the bottom of Account settings
+- **Stored**: `dev_mode` flag in AsyncStorage (persists across sessions)
+- **Visual**: Version displays "(dev)" suffix when enabled
+
+**Mnemonic import flow:**
+
+1. User selects "Import Seed Phrase (Beta)" in Add Wallet wizard (dev mode only)
+2. Enters 12 or 24 word mnemonic — input normalised: strips numbers, colons, extra whitespace, lowercased
+3. Mnemonic validated via `bip39.validateMnemonic()`
+4. Stored in `expo-secure-store` (encrypted device storage) under `onchain_mnemonic_{walletId}`
+5. BDK creates a full signing wallet via `Descriptor.newBip84()` with `DescriptorSecretKey`
+
+**Sending from hot wallets:**
+
+- Send button enabled for hot wallets (disabled for watch-only xpub imports)
+- `onchainService.sendTransaction()` uses BDK's `TxBuilder` for UTXO selection + fee calculation, `wallet.sign()` for signing, and `blockchain.broadcast()` for broadcasting
+- All signing happens locally on-device — private keys never leave the device
+
+**Watch-only vs hot wallet detection:**
+
+- `onchainImportMethod` field in `WalletMetadata`: `'xpub'` (watch-only) or `'mnemonic'` (hot)
+- `onchainService.isWatchOnly()` checks if a mnemonic is stored for the wallet
+- HomeScreen Send button uses this to enable/disable
+
+=== Transaction Caching
+
+Transactions are owned by `WalletContext` (not local HomeScreen state):
+
+- Each `WalletState` has a `transactions: WalletTransaction[]` array
+- On startup, cached transactions loaded from AsyncStorage (`txs_{walletId}`) — renders in ~40ms
+- On wallet swipe, cached transactions display instantly from memory
+- Background refresh via `fetchTransactionsForWallet()` syncs with BDK/NWC
+- `TransactionList` renders first 20 transactions with "Show all N transactions" button to avoid render blocking (was causing 4+ second delay with 259 txs)
 
 '''
 

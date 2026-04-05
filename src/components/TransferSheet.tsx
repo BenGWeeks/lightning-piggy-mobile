@@ -66,9 +66,15 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const source = useMemo(() => wallets.find((w) => w.id === sourceId) ?? null, [wallets, sourceId]);
   const dest = useMemo(() => wallets.find((w) => w.id === destId) ?? null, [wallets, destId]);
 
-  // Available wallets for source: NWC wallets that are connected (on-chain are watch-only, can't send)
+  // Available wallets for source: NWC wallets that are connected, or hot wallets (mnemonic)
+  // Available wallets for source: NWC wallets that are connected, or hot wallets (mnemonic)
   const sourceWallets = useMemo(
-    () => wallets.filter((w) => w.walletType === 'nwc' && w.isConnected),
+    () =>
+      wallets.filter(
+        (w) =>
+          (w.walletType === 'nwc' && w.isConnected) ||
+          (w.walletType === 'onchain' && w.onchainImportMethod === 'mnemonic'),
+      ),
     [wallets],
   );
 
@@ -83,6 +89,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     if (!source || !dest) return null;
     if (source.walletType === 'nwc' && dest.walletType === 'nwc') return 'ln-to-ln';
     if (source.walletType === 'nwc' && dest.walletType === 'onchain') return 'ln-to-onchain';
+    if (source.walletType === 'onchain' && dest.walletType === 'onchain') return 'onchain-to-onchain';
+    if (source.walletType === 'onchain' && dest.walletType === 'nwc') return 'onchain-to-ln';
     return null;
   }, [source, dest]);
 
@@ -93,7 +101,18 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     if (transferType === 'ln-to-onchain') {
       let cancelled = false;
       boltzService
-        .getSwapFees()
+        .getReverseSwapFees()
+        .then((fees) => {
+          if (!cancelled) setCachedBoltzFees(fees);
+        })
+        .catch(() => {});
+      return () => {
+        cancelled = true;
+      };
+    } else if (transferType === 'onchain-to-ln') {
+      let cancelled = false;
+      boltzService
+        .getSubmarineSwapFees()
         .then((fees) => {
           if (!cancelled) setCachedBoltzFees(fees);
         })
@@ -117,6 +136,11 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     } else if (transferType === 'ln-to-onchain' && cachedBoltzFees) {
       const fee = boltzService.calculateSwapFee(currentSats, cachedBoltzFees);
       setFeeEstimate(`~${fee.toLocaleString()} sats \u00B7 ~10-60 min (on-chain)`);
+    } else if (transferType === 'onchain-to-ln' && cachedBoltzFees) {
+      const fee = boltzService.calculateSwapFee(currentSats, cachedBoltzFees);
+      setFeeEstimate(`~${fee.toLocaleString()} sats \u00B7 ~10-60 min (Boltz swap)`);
+    } else if (transferType === 'onchain-to-onchain') {
+      setFeeEstimate('~200-2000 sats \u00B7 ~10-60 min (on-chain)');
     }
   }, [transferType, currentSats, cachedBoltzFees]);
 
@@ -190,6 +214,61 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const handleTransfer = async () => {
     if (!sourceId || !destId || !source || !dest || currentSats <= 0) return;
 
+    // Warn if doing a cross-chain swap when a same-chain wallet has funds
+    if (transferType === 'onchain-to-ln') {
+      const altLnWallet = wallets
+        .filter(
+          (w) =>
+            w.id !== sourceId &&
+            w.walletType === 'nwc' &&
+            w.isConnected &&
+            (w.balance ?? 0) >= currentSats,
+        )
+        .sort((a, b) => (b.balance ?? 0) - (a.balance ?? 0))[0] ?? null;
+      if (altLnWallet) {
+        const confirmed = await new Promise<boolean>((resolve) =>
+          Alert.alert(
+            'Use Lightning wallet instead?',
+            `"${altLnWallet.alias}" has ${altLnWallet.balance?.toLocaleString()} sats. Sending from a Lightning wallet avoids Boltz swap fees.`,
+            [
+              { text: 'Use Lightning', onPress: () => resolve(true), style: 'cancel' },
+              { text: 'Continue with on-chain', onPress: () => resolve(false) },
+            ],
+          ),
+        );
+        if (confirmed) {
+          setSourceId(altLnWallet.id);
+          return;
+        }
+      }
+    } else if (transferType === 'ln-to-onchain') {
+      const altOnchainWallet = wallets
+        .filter(
+          (w) =>
+            w.id !== sourceId &&
+            w.walletType === 'onchain' &&
+            w.onchainImportMethod === 'mnemonic' &&
+            (w.balance ?? 0) >= currentSats,
+        )
+        .sort((a, b) => (b.balance ?? 0) - (a.balance ?? 0))[0] ?? null;
+      if (altOnchainWallet) {
+        const confirmed = await new Promise<boolean>((resolve) =>
+          Alert.alert(
+            'Use on-chain wallet instead?',
+            `"${altOnchainWallet.alias}" has ${altOnchainWallet.balance?.toLocaleString()} sats. Sending from an on-chain wallet avoids Boltz swap fees.`,
+            [
+              { text: 'Use on-chain', onPress: () => resolve(true), style: 'cancel' },
+              { text: 'Continue with Lightning', onPress: () => resolve(false) },
+            ],
+          ),
+        );
+        if (confirmed) {
+          setSourceId(altOnchainWallet.id);
+          return;
+        }
+      }
+    }
+
     setSending(true);
     try {
       if (transferType === 'ln-to-ln') {
@@ -224,15 +303,34 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
 
         // Clean up persisted swap state on success
         await SecureStore.deleteItemAsync(`boltz_swap_${swap.id}`);
+      } else if (transferType === 'onchain-to-ln') {
+        // Boltz submarine swap: on-chain → Lightning
+        // Step 1: Generate LN invoice on the destination NWC wallet
+        const invoice = await makeInvoiceForWallet(destId, currentSats, 'Transfer');
+
+        // Step 2: Create swap with Boltz — returns an on-chain address
+        const swap = await boltzService.createSubmarineSwapForward(invoice);
+
+        // Step 3: Send BTC on-chain to Boltz's address from the hot wallet
+        await onchainService.sendTransaction(sourceId, swap.address, swap.expectedAmount);
+
+        // Step 4: Wait for Boltz to detect the on-chain payment and pay the LN invoice
+        await boltzService.waitForSubmarineSwapComplete(swap.id, 120000);
+      } else if (transferType === 'onchain-to-onchain') {
+        // Direct on-chain send from hot wallet
+        const address = await onchainService.getNextReceiveAddress(destId);
+        await onchainService.sendTransaction(sourceId, address, currentSats);
       }
 
       // Refresh both balances
       await Promise.all([refreshBalanceForWallet(sourceId), refreshBalanceForWallet(destId)]);
 
       const settleMsg =
-        transferType === 'ln-to-onchain'
+        transferType === 'ln-to-onchain' || transferType === 'onchain-to-onchain'
           ? `${currentSats.toLocaleString()} sats sent. On-chain funds will arrive after confirmation (~10-60 min).`
-          : `${currentSats.toLocaleString()} sats transferred.`;
+          : transferType === 'onchain-to-ln'
+            ? `${currentSats.toLocaleString()} sats sent via Boltz swap.`
+            : `${currentSats.toLocaleString()} sats transferred.`;
 
       Alert.alert('Transfer Complete', settleMsg, [{ text: 'OK', onPress: onClose }]);
     } catch (error) {
@@ -262,9 +360,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const canTransfer = sourceId && destId && currentSats > 0 && transferType !== null;
 
   const renderWalletLabel = (w: WalletState) => {
-    const balanceStr = w.balance !== null ? ` (${w.balance.toLocaleString()} sats)` : '';
-    const typeLabel = w.walletType === 'onchain' ? ' \u26D3' : ' \u26A1';
-    return `${w.alias}${typeLabel}${balanceStr}`;
+    const balanceStr = w.balance !== null ? ` · ${w.balance.toLocaleString()} sats` : '';
+    const typeStr = w.walletType === 'onchain' ? 'on-chain' : 'lightning';
+    return `${w.alias} (${typeStr})${balanceStr}`;
   };
 
   return (
@@ -293,13 +391,15 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
 
         {/* Source wallet selector */}
         <Text style={styles.sectionLabel}>From</Text>
-        <View style={styles.dropdownWrapper}>
+        <View style={[styles.dropdownWrapper, sourceDropdownOpen && { zIndex: 20 }]}>
           <TouchableOpacity
             style={styles.dropdown}
             onPress={() => {
               setSourceDropdownOpen(!sourceDropdownOpen);
               setDestDropdownOpen(false);
             }}
+            testID="transfer-source-dropdown"
+            accessibilityLabel="Source wallet"
           >
             <Text style={styles.dropdownText}>
               {source ? renderWalletLabel(source) : 'Select wallet'}
@@ -311,6 +411,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
               {sourceWallets.map((w) => (
                 <TouchableOpacity
                   key={w.id}
+                  testID={`transfer-source-${w.alias.replace(/\s+/g, '-').toLowerCase()}`}
                   style={[styles.dropdownItem, sourceId === w.id && styles.dropdownItemActive]}
                   onPress={() => {
                     setSourceId(w.id);
@@ -333,7 +434,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                 </TouchableOpacity>
               ))}
               {sourceWallets.length === 0 && (
-                <Text style={styles.dropdownEmpty}>No connected Lightning wallets</Text>
+                <Text style={styles.dropdownEmpty}>No wallets that can send</Text>
               )}
             </View>
           )}
@@ -361,6 +462,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
               {destWallets.map((w) => (
                 <TouchableOpacity
                   key={w.id}
+                  testID={`transfer-dest-${w.alias.replace(/\s+/g, '-').toLowerCase()}`}
                   style={[styles.dropdownItem, destId === w.id && styles.dropdownItemActive]}
                   onPress={() => {
                     setDestId(w.id);
@@ -429,9 +531,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         {feeEstimate && <Text style={styles.feeText}>Estimated fee: {feeEstimate}</Text>}
 
         {/* Watch-only warning */}
-        {source?.walletType === 'onchain' && (
+        {source?.walletType === 'onchain' && source?.onchainImportMethod !== 'mnemonic' && (
           <Text style={styles.warningText}>
-            Watch-only wallets cannot send. Select a Lightning wallet as source.
+            Watch-only wallets cannot send. Select a different wallet as source.
           </Text>
         )}
 

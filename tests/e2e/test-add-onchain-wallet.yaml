@@ -2,37 +2,27 @@ appId: com.anonymous.lightningpiggyapp
 name: Add On-chain Wallet Test
 ---
 # Tests importing an on-chain Bitcoin wallet via xpub/zpub
-# Run: source .env && maestro test -e MAESTRO_XPUB="$MAESTRO_XPUB1" -e WALLET_NAME="Test Wallet 1" tests/e2e/test-add-onchain-wallet.yaml
+# Run: source .env && maestro test -e MAESTRO_XPUB="$MAESTRO_XPUB1" -e WALLET_NAME="Watch Wallet 1" tests/e2e/test-add-onchain-wallet.yaml
 
 # Wait for app to be ready
-- waitForAnimationToEnd:
-    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 40000
 
-# Handle onboarding if shown (fresh install)
+# Ensure we're on Home
 - tapOn:
-    text: "Let's Go"
-    optional: true
+    id: 'tab-home'
 - waitForAnimationToEnd:
     timeout: 3000
-- tapOn:
-    text: 'GBP'
-    optional: true
-- tapOn:
-    text: 'Get Started'
-    optional: true
-- waitForAnimationToEnd:
-    timeout: 5000
 
-# Swipe carousel right to find Add Wallet card
-- repeat:
-    times: 6
-    commands:
-      - swipe:
-          start: 85%, 30%
-          end: 15%, 30%
-          duration: 300
-      - waitForAnimationToEnd:
-          timeout: 800
+# Swipe carousel right until Add Wallet card is visible
+- scrollUntilVisible:
+    element:
+      id: 'add-wallet-card'
+    direction: RIGHT
+    timeout: 20000
+    speed: 40
 
 # Tap the Add Wallet card
 - tapOn:
@@ -61,7 +51,7 @@ name: Add On-chain Wallet Test
     id: 'xpub-input'
 - eraseText:
     charactersToErase: 500
-- inputText: ${MAESTRO_XPUB1}
+- inputText: ${MAESTRO_XPUB}
 - pressKey: back
 - waitForAnimationToEnd:
     timeout: 1000
@@ -93,7 +83,13 @@ name: Add On-chain Wallet Test
 # Scroll down to reveal Add Wallet button
 - swipe:
     start: 50%, 80%
-    end: 50%, 40%
+    end: 50%, 30%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+- swipe:
+    start: 50%, 80%
+    end: 50%, 30%
     duration: 300
 - waitForAnimationToEnd:
     timeout: 1000

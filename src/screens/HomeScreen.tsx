@@ -107,6 +107,8 @@ const HomeScreen: React.FC = () => {
     !fetchedWallets.current.has(activeWalletId);
 
   // Fetch fresh data once per wallet (not on every swipe back)
+  // Mark as fetched only after the fetch completes, so it retries if the wallet
+  // becomes available later (e.g. NWC connects after initial render)
   useEffect(() => {
     // Clear refresh spinner when wallet changes (don't carry over from previous wallet)
     setRefreshing(false);
@@ -125,7 +127,7 @@ const HomeScreen: React.FC = () => {
   };
 
   const handleWalletChange = useCallback(
-    (walletId: string) => {
+    (walletId: string | null) => {
       if (walletId !== activeWalletId) {
         setActiveWallet(walletId);
       }
@@ -141,9 +143,13 @@ const HomeScreen: React.FC = () => {
   const isWatchOnly = isOnchainWallet && activeWallet?.onchainImportMethod !== 'mnemonic';
   const hasActiveConnection = isOnchainWallet ? true : (activeWallet?.isConnected ?? false);
   const canSend = hasActiveConnection && !isWatchOnly;
-  // Transfer requires at least 1 connected NWC wallet + 1 other wallet
-  const hasConnectedNwc = wallets.some((w) => w.walletType === 'nwc' && w.isConnected);
-  const canTransfer = hasConnectedNwc && wallets.length >= 2;
+  // Transfer requires at least 1 wallet that can send + 1 other wallet
+  const hasSendableWallet = wallets.some(
+    (w) =>
+      (w.walletType === 'nwc' && w.isConnected) ||
+      (w.walletType === 'onchain' && w.onchainImportMethod === 'mnemonic'),
+  );
+  const canTransfer = hasSendableWallet && wallets.length >= 2;
 
   return (
     <View style={styles.container}>
@@ -221,9 +227,11 @@ const HomeScreen: React.FC = () => {
           style={styles.transactionsContainer}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         >
-          {!hasWallets ? (
+          {!hasWallets || activeWalletId === null ? (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>Add a wallet to get started</Text>
+              <TouchableOpacity onPress={() => setWizardOpen(true)}>
+                <Text style={styles.addWalletText}>+ Add a Wallet</Text>
+              </TouchableOpacity>
             </View>
           ) : loadingTransactions && transactions.length === 0 ? (
             <View style={styles.emptyState}>

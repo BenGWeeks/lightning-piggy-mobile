@@ -62,9 +62,9 @@ interface WalletContextType {
   removeWallet: (walletId: string) => Promise<void>;
   updateWalletSettings: (
     walletId: string,
-    settings: { alias?: string; theme?: CardTheme },
+    settings: { alias?: string; theme?: CardTheme; lightningAddress?: string | null },
   ) => Promise<void>;
-  setActiveWallet: (walletId: string) => void;
+  setActiveWallet: (walletId: string | null) => void;
   refreshActiveBalance: () => Promise<void>;
   completeOnboarding: () => Promise<void>;
 
@@ -196,9 +196,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           setActiveWalletId(walletStates[0].id);
         }
 
-        // Connect all wallets in parallel
-        await Promise.all(
-          walletList.map(async (wallet) => {
+        // Connect wallets sequentially to avoid overwhelming the relay
+        for (const wallet of walletList) {
+          await (async () => {
             if (wallet.walletType === 'onchain') {
               // On-chain wallet: fetch balance from block explorer
               const bal = await onchainService.getBalance(wallet.id);
@@ -242,8 +242,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 }
               }
             }
-          }),
-        );
+          })();
+        }
       } catch (error) {
         console.warn('Wallet startup failed:', error);
       } finally {
@@ -470,7 +470,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   const updateWalletSettings = useCallback(
-    async (walletId: string, settings: { alias?: string; theme?: CardTheme }) => {
+    async (
+      walletId: string,
+      settings: { alias?: string; theme?: CardTheme; lightningAddress?: string | null },
+    ) => {
       // Update in-memory state
       setWallets((prev) => prev.map((w) => (w.id === walletId ? { ...w, ...settings } : w)));
 
@@ -482,7 +485,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [],
   );
 
-  const setActiveWallet = useCallback((walletId: string) => {
+  const setActiveWallet = useCallback((walletId: string | null) => {
     setActiveWalletId(walletId);
   }, []);
 
@@ -530,7 +533,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           txs = result.transactions.map((tx) => ({
             type: tx.type,
             amount: tx.amount,
-            description: tx.type === 'incoming' ? 'Received' : 'Sent',
+            description: tx.confirmed
+              ? tx.type === 'incoming'
+                ? 'Received'
+                : 'Sent'
+              : 'Pending',
             settled_at: tx.timestamp,
             created_at: tx.timestamp,
             blockHeight: tx.blockHeight,

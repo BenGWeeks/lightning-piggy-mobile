@@ -89,4 +89,9 @@ export const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
   },
+  addWalletText: {
+    color: colors.brandPink,
+    fontSize: 18,
+    fontWeight: '700',
+  },
 });

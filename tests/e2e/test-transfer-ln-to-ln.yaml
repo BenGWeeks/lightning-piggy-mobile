@@ -1,0 +1,74 @@
+appId: com.anonymous.lightningpiggyapp
+name: Transfer LN to LN Test
+---
+# Tests transferring 7 sats between two NWC wallets (Lightning to Lightning).
+# Requires at least 2 connected NWC wallets (Wallet 1 and Wallet 2).
+# Run: maestro test tests/e2e/test-transfer-ln-to-ln.yaml
+
+# Wait for app to be ready
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 40000
+
+# Ensure we're on Home
+- tapOn:
+    id: 'tab-home'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Swipe to first wallet (Wallet 1) and wait for it to connect
+- repeat:
+    times: 10
+    commands:
+      - swipe:
+          start: 15%, 30%
+          end: 85%, 30%
+          duration: 300
+      - waitForAnimationToEnd:
+          timeout: 800
+- extendedWaitUntil:
+    visible:
+      text: 'Connected'
+    timeout: 30000
+
+# Tap the Transfer button
+- tapOn:
+    id: 'btn-transfer'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Source defaults to first connected NWC wallet (Wallet 1)
+# Destination defaults to Wallet 2 — no need to change for LN→LN
+
+# Enter amount: 7 sats
+- tapOn:
+    id: 'transfer-amount-input'
+- eraseText:
+    charactersToErase: 10
+- inputText: '7'
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Verify Lightning fee shown
+- assertVisible:
+    text: '.*Lightning.*'
+
+# Tap Transfer execute button
+- tapOn:
+    id: 'transfer-execute'
+- waitForAnimationToEnd:
+    timeout: 20000
+
+# Verify success alert
+- extendedWaitUntil:
+    visible:
+      text: 'Transfer Complete'
+    timeout: 30000
+
+# Dismiss the alert
+- tapOn:
+    text: 'OK'
+- waitForAnimationToEnd:
+    timeout: 3000

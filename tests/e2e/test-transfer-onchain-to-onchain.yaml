@@ -1,0 +1,76 @@
+appId: com.anonymous.lightningpiggyapp
+name: Transfer On-chain to On-chain Test
+---
+# Tests transferring sats between two on-chain hot wallets (direct BDK send).
+# Requires: 2 hot wallets (mnemonic-based). Hot Wallet 1 must have sufficient balance.
+# Run: maestro test tests/e2e/test-transfer-onchain-to-onchain.yaml
+
+# Wait for app to be ready
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 40000
+
+# Ensure we're on Home
+- tapOn:
+    id: 'tab-home'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Tap Transfer button
+- tapOn:
+    id: 'btn-transfer'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Change source to Hot Wallet 1
+- tapOn:
+    id: 'transfer-source-dropdown'
+- waitForAnimationToEnd:
+    timeout: 1000
+- tapOn:
+    id: 'transfer-source-hot-wallet-1'
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Select destination: Hot Wallet 2
+- tapOn:
+    id: 'transfer-dest-dropdown'
+- waitForAnimationToEnd:
+    timeout: 1000
+- tapOn:
+    id: 'transfer-dest-hot-wallet-2'
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Enter amount: 26000 sats
+- tapOn:
+    id: 'transfer-amount-input'
+- tapOn:
+    id: 'transfer-amount-input'
+- eraseText:
+    charactersToErase: 10
+- inputText: '26000'
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Verify on-chain fee info shown
+- assertVisible:
+    text: '.*on-chain.*'
+
+# Tap Transfer to execute
+- tapOn:
+    id: 'transfer-execute'
+
+# Wait for on-chain tx broadcast
+- extendedWaitUntil:
+    visible:
+      text: 'Transfer Complete'
+    timeout: 60000
+
+# Dismiss alert
+- tapOn:
+    text: 'OK'
+- waitForAnimationToEnd:
+    timeout: 3000

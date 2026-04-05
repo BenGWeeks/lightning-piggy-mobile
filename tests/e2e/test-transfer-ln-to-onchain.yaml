@@ -1,13 +1,21 @@
 appId: com.anonymous.lightningpiggyapp
-name: Transfer Lightning to On-chain Test
+name: Transfer LN to On-chain Test
 ---
-# Tests transferring 10,000 sats from an NWC wallet to an on-chain wallet via Boltz swap.
+# Tests transferring 10,000 sats from an NWC wallet to an on-chain wallet via Boltz reverse swap.
 # Requires: at least 1 connected NWC wallet + 1 on-chain wallet.
-# Run: maestro test tests/e2e/test-transfer-to-onchain.yaml
+# Run: maestro test tests/e2e/test-transfer-ln-to-onchain.yaml
 
 # Wait for app to be ready
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 40000
+
+# Ensure we're on Home
+- tapOn:
+    id: 'tab-home'
 - waitForAnimationToEnd:
-    timeout: 20000
+    timeout: 3000
 
 # Tap Transfer button
 - tapOn:
@@ -15,31 +23,30 @@ name: Transfer Lightning to On-chain Test
 - waitForAnimationToEnd:
     timeout: 3000
 
-# Change destination to on-chain wallet
+# Source defaults to first connected NWC wallet (Wallet 1)
+# Select destination: on-chain wallet (Hot Wallet 1)
 - tapOn:
     id: 'transfer-dest-dropdown'
 - waitForAnimationToEnd:
     timeout: 1000
-
-# Select the on-chain wallet from dropdown
 - tapOn:
-    text: 'Test BTC Wallet.*'
+    id: 'transfer-dest-hot-wallet-1'
 - waitForAnimationToEnd:
     timeout: 1000
 
-# Enter amount: 10000 sats (Boltz minimum)
+# Enter amount: 26000 sats
 - tapOn:
     id: 'transfer-amount-input'
 - tapOn:
     id: 'transfer-amount-input'
 - eraseText:
     charactersToErase: 10
-- inputText: '10000'
+- inputText: '26000'
 - pressKey: back
 - waitForAnimationToEnd:
     timeout: 3000
 
-# Verify on-chain fee + timing info is shown
+# Verify on-chain fee info shown
 - assertVisible:
     text: '.*on-chain.*'
 
@@ -47,7 +54,7 @@ name: Transfer Lightning to On-chain Test
 - tapOn:
     id: 'transfer-execute'
 
-# Wait for Boltz swap creation + LN payment + lockup detection
+# Wait for Boltz swap creation + LN payment + lockup + claim
 # This can take up to 2 minutes
 - extendedWaitUntil:
     visible:

@@ -22,11 +22,13 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { useWallet } from '../contexts/WalletContext';
+import { walletLabel } from '../types/wallet';
 import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
 import { satsToFiat, satsToFiatString } from '../services/fiatService';
 import { resolveLightningAddress, fetchInvoice, LnurlPayParams } from '../services/lnurlService';
 import * as boltzService from '../services/boltzService';
+import * as onchainService from '../services/onchainService';
 
 interface Props {
   visible: boolean;
@@ -137,7 +139,7 @@ const SendSheet: React.FC<Props> = ({
   );
   const walletId = selectedWallet?.id ?? null;
   const walletBalance = selectedWallet?.balance ?? null;
-  const walletName = selectedWallet?.alias ?? 'Wallet';
+  const walletName = selectedWallet ? walletLabel(selectedWallet) : 'Wallet';
 
   useEffect(() => {
     if (visible) {
@@ -206,12 +208,24 @@ const SendSheet: React.FC<Props> = ({
 
   const processInput = (data: string) => {
     let input = data.trim();
+    let bip21Amount: number | null = null;
     if (input.toLowerCase().startsWith('lightning:')) {
       input = input.substring(10);
     }
-    // Strip bitcoin: URI prefix
+    // Parse BIP-21 bitcoin: URI — extract address and optional amount
     if (input.toLowerCase().startsWith('bitcoin:')) {
-      input = input.substring(8).split('?')[0]; // remove query params
+      const withoutScheme = input.substring(8);
+      const qIndex = withoutScheme.indexOf('?');
+      if (qIndex >= 0) {
+        const params = new URLSearchParams(withoutScheme.substring(qIndex + 1));
+        const amountBtc = parseFloat(params.get('amount') ?? '');
+        if (amountBtc > 0) {
+          bip21Amount = Math.round(amountBtc * 100_000_000);
+        }
+        input = withoutScheme.substring(0, qIndex);
+      } else {
+        input = withoutScheme;
+      }
     }
 
     if (isLightningAddress(input)) {
@@ -224,6 +238,13 @@ const SendSheet: React.FC<Props> = ({
       setInvoiceData(input);
       setDecoded({ amountSats: null, description: `Send to on-chain address`, expiry: null });
       setScanned(true);
+      // Pre-fill amount from BIP-21 URI if present
+      if (bip21Amount) {
+        setSatsValue(bip21Amount.toString());
+        if (btcPrice) {
+          setFiatValue(satsToFiat(bip21Amount, btcPrice).toFixed(2));
+        }
+      }
       // Fetch Boltz swap fees
       setLoadingBoltzFees(true);
       boltzService
@@ -286,16 +307,24 @@ const SendSheet: React.FC<Props> = ({
     setSending(true);
     try {
       if (isOnchainAddress) {
-        // Boltz reverse swap: Lightning → on-chain
         if (currentSats <= 0) {
           Alert.alert('Error', 'Please enter an amount.');
           setSending(false);
           return;
         }
-        const swap = await boltzService.createReverseSwap(invoiceData, currentSats);
-        await payInvoiceForWallet(walletId!, swap.invoice);
-        const lockup = await boltzService.waitForLockup(swap.id, 120000);
-        await boltzService.claimSwap(swap, lockup, invoiceData);
+        if (
+          selectedWallet?.walletType === 'onchain' &&
+          selectedWallet?.onchainImportMethod === 'mnemonic'
+        ) {
+          // Direct on-chain send from hot wallet
+          await onchainService.sendTransaction(walletId!, invoiceData, currentSats);
+        } else {
+          // Boltz reverse swap: Lightning → on-chain
+          const swap = await boltzService.createReverseSwap(invoiceData, currentSats);
+          await payInvoiceForWallet(walletId!, swap.invoice);
+          const lockup = await boltzService.waitForLockup(swap.id, 120000);
+          await boltzService.claimSwap(swap, lockup, invoiceData);
+        }
       } else if (isLightningAddress(invoiceData)) {
         if (!lnurlParams) {
           Alert.alert('Error', 'Lightning address not resolved yet. Please wait.');
@@ -438,7 +467,7 @@ const SendSheet: React.FC<Props> = ({
                                 capturedWalletId === w.id && styles.walletDropdownItemTextActive,
                               ]}
                             >
-                              {w.alias}
+                              {walletLabel(w)}
                             </Text>
                           </TouchableOpacity>
                         ))}
@@ -531,11 +560,11 @@ const SendSheet: React.FC<Props> = ({
                 ) : null}
 
                 {needsAmount ? (
-                  /* Lightning address: show amount input */
+                  /* Lightning address or on-chain: show amount input */
                   <View style={styles.amountSection}>
                     {resolving ? (
                       <ActivityIndicator size="small" color={colors.brandPink} />
-                    ) : lnurlParams ? (
+                    ) : lnurlParams || isOnchainAddress ? (
                       <>
                         <View style={styles.amountRow}>
                           <TextInput
@@ -590,10 +619,12 @@ const SendSheet: React.FC<Props> = ({
                               ? `${currentSats.toLocaleString()} sats`
                               : ''}
                         </Text>
-                        <Text style={styles.rangeText}>
-                          {lnurlParams.minSats.toLocaleString()} –{' '}
-                          {lnurlParams.maxSats.toLocaleString()} sats
-                        </Text>
+                        {lnurlParams ? (
+                          <Text style={styles.rangeText}>
+                            {lnurlParams.minSats.toLocaleString()} –{' '}
+                            {lnurlParams.maxSats.toLocaleString()} sats
+                          </Text>
+                        ) : null}
                       </>
                     ) : null}
                   </View>
@@ -613,8 +644,16 @@ const SendSheet: React.FC<Props> = ({
                   <Text style={styles.amountValue}>Amount not specified</Text>
                 )}
 
-                {isOnchainAddress ? (
-                  <Text style={styles.detailAddress}>{invoiceData}</Text>
+                {isOnchainAddress && invoiceData ? (
+                  <Text style={styles.detailAddress}>
+                    <Text style={styles.addressHighlight}>
+                      {invoiceData.slice(0, 6)}
+                    </Text>
+                    {invoiceData.slice(6, -6)}
+                    <Text style={styles.addressHighlight}>
+                      {invoiceData.slice(-6)}
+                    </Text>
+                  </Text>
                 ) : isLightningAddress(invoiceData || '') ? (
                   <Text style={styles.detailAddress}>{invoiceData}</Text>
                 ) : (
@@ -623,14 +662,17 @@ const SendSheet: React.FC<Props> = ({
                   </Text>
                 )}
 
-                {/* Boltz swap fee estimate for on-chain addresses */}
+                {/* Fee estimate for on-chain addresses */}
                 {isOnchainAddress && currentSats > 0 && (
                   <Text style={styles.feeText}>
-                    {loadingBoltzFees
-                      ? 'Loading fees...'
-                      : boltzFees
-                        ? `Swap fee: ~${boltzService.calculateSwapFee(currentSats, boltzFees).toLocaleString()} sats \u00B7 ~10-60 min (on-chain)`
-                        : 'Fee estimate unavailable'}
+                    {selectedWallet?.walletType === 'onchain' &&
+                    selectedWallet?.onchainImportMethod === 'mnemonic'
+                      ? '~200-2000 sats miner fee \u00B7 ~10-60 min'
+                      : loadingBoltzFees
+                        ? 'Loading fees...'
+                        : boltzFees
+                          ? `Swap fee: ~${boltzService.calculateSwapFee(currentSats, boltzFees).toLocaleString()} sats \u00B7 ~10-60 min`
+                          : 'Fee estimate unavailable'}
                   </Text>
                 )}
 
@@ -899,8 +941,12 @@ const styles = StyleSheet.create({
   },
   detailAddress: {
     fontSize: 14,
-    color: colors.brandPink,
+    color: colors.textSupplementary,
     fontWeight: '600',
+  },
+  addressHighlight: {
+    color: colors.brandPink,
+    fontWeight: '700',
   },
   invoiceText: {
     color: colors.textSupplementary,

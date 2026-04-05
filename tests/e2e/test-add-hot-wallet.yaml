@@ -17,16 +17,13 @@ name: Add Hot Wallet Test
 - waitForAnimationToEnd:
     timeout: 3000
 
-# Swipe to Add Wallet card
-- repeat:
-    times: 6
-    commands:
-      - swipe:
-          start: 85%, 30%
-          end: 15%, 30%
-          duration: 300
-      - waitForAnimationToEnd:
-          timeout: 800
+# Swipe carousel right until Add Wallet card is visible
+- scrollUntilVisible:
+    element:
+      id: 'add-wallet-card'
+    direction: RIGHT
+    timeout: 20000
+    speed: 40
 
 # Tap Add Wallet
 - tapOn:

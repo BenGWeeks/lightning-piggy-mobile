@@ -65,15 +65,12 @@ name: Enable Developer Mode Test
     timeout: 3000
 
 # Open Add Wallet wizard
-- repeat:
-    times: 6
-    commands:
-      - swipe:
-          start: 85%, 30%
-          end: 15%, 30%
-          duration: 300
-      - waitForAnimationToEnd:
-          timeout: 800
+- scrollUntilVisible:
+    element:
+      id: 'add-wallet-card'
+    direction: RIGHT
+    timeout: 20000
+    speed: 40
 
 - tapOn:
     id: 'add-wallet-card'

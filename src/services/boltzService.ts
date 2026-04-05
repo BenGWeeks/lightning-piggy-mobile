@@ -98,7 +98,7 @@ function generateClaimKeyPair(): { privateKey: Uint8Array; publicKey: Uint8Array
 /**
  * Fetch current reverse swap fee schedule (BTC Lightning → BTC on-chain).
  */
-export async function getSwapFees(): Promise<SwapFees> {
+export async function getReverseSwapFees(): Promise<SwapFees> {
   const res = await fetch(`${BOLTZ_API}/swap/reverse`);
   if (!res.ok) throw new Error(`Boltz API error: ${res.status}`);
   const data = await res.json();
@@ -109,6 +109,28 @@ export async function getSwapFees(): Promise<SwapFees> {
   return {
     percentage: pair.fees?.percentage ?? 0.5,
     minerFee: pair.fees?.minerFees?.claim ?? pair.fees?.minerFees ?? 0,
+    minAmount: pair.limits?.minimal ?? 10000,
+    maxAmount: pair.limits?.maximal ?? 25000000,
+  };
+}
+
+/** @deprecated Use getReverseSwapFees instead */
+export const getSwapFees = getReverseSwapFees;
+
+/**
+ * Fetch current submarine swap fee schedule (BTC on-chain → BTC Lightning).
+ */
+export async function getSubmarineSwapFees(): Promise<SwapFees> {
+  const res = await fetch(`${BOLTZ_API}/swap/submarine`);
+  if (!res.ok) throw new Error(`Boltz API error: ${res.status}`);
+  const data = await res.json();
+
+  const pair = data?.BTC?.BTC;
+  if (!pair) throw new Error('BTC/BTC pair not found in Boltz response');
+
+  return {
+    percentage: pair.fees?.percentage ?? 0.5,
+    minerFee: pair.fees?.minerFees ?? 0,
     minAmount: pair.limits?.minimal ?? 10000,
     maxAmount: pair.limits?.maximal ?? 25000000,
   };
@@ -321,6 +343,91 @@ export function isBitcoinAddress(input: string): boolean {
   if (/^3[a-km-zA-HJ-NP-Z1-9]{25,34}$/.test(trimmed)) return true;
   if (/^bc1[a-zA-HJ-NP-Z0-9]{25,62}$/i.test(trimmed)) return true;
   return false;
+}
+
+// ─── Submarine swap (on-chain → Lightning) ───────────────────────────────────
+
+export interface SubmarineSwapResult {
+  id: string;
+  /** On-chain address the user must send BTC to */
+  address: string;
+  /** Expected amount in sats to send on-chain (includes Boltz fee) */
+  expectedAmount: number;
+  /** Timeout block height — refund possible after this */
+  timeoutBlockHeight: number;
+}
+
+/**
+ * Create a submarine swap: on-chain → Lightning.
+ *
+ * Flow:
+ *   1. Generate an LN invoice on the destination NWC wallet (caller does this)
+ *   2. Create swap with Boltz, providing the invoice
+ *   3. Boltz returns an on-chain address + expected amount
+ *   4. Send BTC on-chain to that address from the hot wallet (caller does this)
+ *   5. Boltz detects the on-chain payment and pays the LN invoice
+ */
+export async function createSubmarineSwapForward(
+  invoice: string,
+): Promise<SubmarineSwapResult> {
+  // Generate a refund keypair — needed if swap fails and we need refund
+  const refundKeys = generateClaimKeyPair();
+
+  const res = await fetch(`${BOLTZ_API}/swap/submarine`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: 'BTC',
+      to: 'BTC',
+      invoice,
+      refundPublicKey: toHex(refundKeys.publicKey),
+    }),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(`Boltz submarine swap creation failed: ${errBody}`);
+  }
+
+  const data = await res.json();
+  return {
+    id: data.id,
+    address: data.address,
+    expectedAmount: data.expectedAmount,
+    timeoutBlockHeight: data.timeoutBlockHeight ?? 0,
+  };
+}
+
+/**
+ * Poll submarine swap status until Boltz has paid the Lightning invoice.
+ */
+export async function waitForSubmarineSwapComplete(
+  swapId: string,
+  timeoutMs: number = 120000,
+): Promise<void> {
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    const res = await fetch(`${BOLTZ_API}/swap/submarine/${swapId}`);
+    if (!res.ok) throw new Error(`Boltz status check failed: ${res.status}`);
+    const data = await res.json();
+
+    if (data.status === 'invoice.settled' || data.status === 'transaction.claimed') {
+      return;
+    }
+
+    if (
+      data.status === 'swap.expired' ||
+      data.status === 'swap.refunded' ||
+      data.status === 'invoice.failedToPay'
+    ) {
+      throw new Error(`Swap failed with status: ${data.status}`);
+    }
+
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+
+  throw new Error('Timeout waiting for Boltz to pay Lightning invoice');
 }
 
 // ─── Legacy alias for backward compatibility ──────────────────────────────────

@@ -7,7 +7,7 @@ import { colors } from '../styles/theme';
 import { CardTheme } from '../types/wallet';
 import { themeList } from '../themes/cardThemes';
 import { MiniWalletCard } from './WalletCard';
-import { getXpub } from '../services/walletStorageService';
+import { getXpub, getNwcUrl } from '../services/walletStorageService';
 
 interface Props {
   walletId: string | null;
@@ -21,19 +21,37 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const snapPoints = useMemo(() => ['85%'], []);
 
   const [alias, setAlias] = useState('');
+  const [lnAddress, setLnAddress] = useState('');
   const [selectedTheme, setSelectedTheme] = useState<CardTheme>('lightning-piggy');
   const [xpubDisplay, setXpubDisplay] = useState<string | null>(null);
+  const [relayUrl, setRelayUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (wallet) {
       setAlias(wallet.alias);
+      setLnAddress(wallet.lightningAddress ?? '');
       setSelectedTheme(wallet.theme);
 
       // Load xpub for on-chain wallets
       if (wallet.walletType === 'onchain' && walletId) {
         getXpub(walletId).then((xpub) => setXpubDisplay(xpub));
+        setRelayUrl(null);
+      } else if (wallet.walletType === 'nwc' && walletId) {
+        setXpubDisplay(null);
+        // Extract relay URL from NWC connection string
+        getNwcUrl(walletId).then((url) => {
+          if (url) {
+            try {
+              const params = new URLSearchParams(url.split('?')[1] || '');
+              setRelayUrl(params.get('relay'));
+            } catch {
+              setRelayUrl(null);
+            }
+          }
+        });
       } else {
         setXpubDisplay(null);
+        setRelayUrl(null);
       }
     }
   }, [wallet, walletId]);
@@ -64,6 +82,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
     await updateWalletSettings(walletId, {
       alias: alias.trim() || wallet.alias,
       theme: selectedTheme,
+      lightningAddress: lnAddress.trim() || null,
     });
     onClose();
   };
@@ -112,6 +131,36 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
           placeholderTextColor={colors.textSupplementary}
           autoCapitalize="words"
         />
+
+        {/* NWC wallet: lightning address (LUD-16) */}
+        {wallet.walletType === 'nwc' && (
+          <>
+            <Text style={[styles.label, { marginTop: 20 }]}>Lightning Address</Text>
+            <TextInput
+              style={styles.input}
+              value={lnAddress}
+              onChangeText={setLnAddress}
+              placeholder="user@domain.com"
+              placeholderTextColor={colors.textSupplementary}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+            />
+            <Text style={styles.hintText}>
+              LUD-16 address for receiving payments. Usually provided by the NWC connection.
+            </Text>
+          </>
+        )}
+
+        {/* NWC wallet: relay URL (read-only) */}
+        {wallet.walletType === 'nwc' && relayUrl && (
+          <>
+            <Text style={[styles.label, { marginTop: 20 }]}>Relay</Text>
+            <Text style={styles.xpubText} numberOfLines={2}>
+              {relayUrl}
+            </Text>
+          </>
+        )}
 
         {/* On-chain wallet: show xpub (read-only) */}
         {wallet.walletType === 'onchain' && xpubDisplay && (
@@ -191,6 +240,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textSupplementary,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  hintText: {
+    fontSize: 12,
+    color: colors.textSupplementary,
+    marginTop: 4,
   },
   copyHint: {
     fontSize: 12,

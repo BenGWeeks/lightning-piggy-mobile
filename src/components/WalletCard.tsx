@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Grayscale } from 'react-native-color-matrix-image-filters';
 import { WalletState } from '../types/wallet';
 import { CardThemeConfig, cardThemes } from '../themes/cardThemes';
 import { getCardBgStyle } from '../themes/cards';
@@ -42,6 +43,7 @@ const CardContent: React.FC<{
   walletAlias?: string | null;
   onSettingsPress?: () => void;
   showDetails?: boolean;
+  isWatchOnly?: boolean;
 }> = ({
   theme,
   alias,
@@ -53,21 +55,44 @@ const CardContent: React.FC<{
   walletAlias,
   onSettingsPress,
   showDetails = true,
+  isWatchOnly = false,
 }) => {
-  return (
+  const toGrey = (hex: string): string => {
+    const h = hex.replace('#', '');
+    const r = parseInt(h.substring(0, 2), 16);
+    const g = parseInt(h.substring(2, 4), 16);
+    const b = parseInt(h.substring(4, 6), 16);
+    const grey = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+    const gh = grey.toString(16).padStart(2, '0');
+    return `#${gh}${gh}${gh}`;
+  };
+
+  const gradientColors = isWatchOnly
+    ? (theme.gradientColors.map(toGrey) as [string, string, ...string[]])
+    : theme.gradientColors;
+
+  const card = (
     <LinearGradient
-      colors={theme.gradientColors}
+      colors={gradientColors}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={styles.card}
     >
-      {theme.backgroundImage && (
+      {theme.backgroundImage && isWatchOnly ? (
+        <Grayscale style={getCardBgStyle(theme.backgroundImageStyle, false)}>
+          <Image
+            source={theme.backgroundImage}
+            style={{ width: '100%', height: '100%' }}
+            resizeMode="contain"
+          />
+        </Grayscale>
+      ) : theme.backgroundImage ? (
         <Image
           source={theme.backgroundImage}
           style={getCardBgStyle(theme.backgroundImageStyle, false)}
           resizeMode="contain"
         />
-      )}
+      ) : null}
 
       {showDetails ? (
         <>
@@ -148,6 +173,8 @@ const CardContent: React.FC<{
       )}
     </LinearGradient>
   );
+
+  return card;
 };
 
 /** Mini card for theme selection — renders the full card design scaled down */
@@ -196,6 +223,9 @@ const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onS
         walletType={wallet.walletType}
         walletAlias={wallet.walletAlias}
         onSettingsPress={onSettingsPress}
+        isWatchOnly={
+          wallet.walletType === 'onchain' && wallet.onchainImportMethod !== 'mnemonic'
+        }
       />
     </View>
   );

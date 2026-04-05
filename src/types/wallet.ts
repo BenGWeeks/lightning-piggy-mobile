@@ -41,6 +41,11 @@ export interface WalletTransaction {
   blockHeight?: number | null;
 }
 
+/** Format wallet name with type suffix for dropdowns */
+export function walletLabel(w: { alias: string; walletType: WalletType }): string {
+  return `${w.alias} (${w.walletType === 'onchain' ? 'on-chain' : 'lightning'})`;
+}
+
 export interface WalletState extends WalletMetadata {
   isConnected: boolean;
   balance: number | null;

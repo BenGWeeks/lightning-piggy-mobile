@@ -246,13 +246,19 @@ export async function getInfo(walletId: string): Promise<{ alias: string; lud16?
 export async function listTransactions(walletId: string): Promise<any[]> {
   const provider = await ensureConnected(walletId);
   if (!provider) return [];
-  try {
-    const result = await provider.listTransactions({});
-    return result.transactions || [];
-  } catch (error) {
-    console.warn(`listTransactions error for ${walletId}:`, error);
-    return [];
+  // Retry once on timeout — LNbits relay can be slow to respond
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const result = await provider.listTransactions({});
+      return result.transactions || [];
+    } catch (error) {
+      console.warn(`listTransactions attempt ${attempt + 1} error for ${walletId}:`, error);
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
   }
+  return [];
 }
 
 export function isWalletConnected(walletId: string): boolean {

@@ -13,10 +13,13 @@ A mobile Bitcoin Lightning wallet built with Expo/React Native, connecting via N
 ## Features
 
 - Connect any Lightning wallet via NWC (Nostr Wallet Connect)
+- On-chain Bitcoin wallets (watch-only via xpub, or hot wallets via mnemonic)
+- Transfer funds between wallets (LN-to-LN, LN-to-on-chain, on-chain-to-LN, on-chain-to-on-chain)
 - Send payments by scanning QR codes or pasting invoices
 - Send to lightning addresses (user@domain) via LNURL-pay
+- Send to on-chain addresses (BIP-21 URI support with amount)
 - NIP-57 zaps to Nostr contacts
-- Receive payments with QR code generation
+- Receive payments with QR code generation (optional amount for BIP-21)
 - Real-time balance display with fiat conversion
 - Transaction history
 - Nostr identity login (nsec or Amber signer on Android)
@@ -26,6 +29,10 @@ A mobile Bitcoin Lightning wallet built with Expo/React Native, connecting via N
 - Contact profile cards with deep linking to Nostr apps
 - QR code sharing for npub and Lightning address
 - Secure credential storage (expo-secure-store)
+
+## Standards
+
+See [docs/STANDARDS.adoc](docs/STANDARDS.adoc) for the full list of supported BIPs, NIPs, and Lightning standards.
 
 ## Getting Started
 
