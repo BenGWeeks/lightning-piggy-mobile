@@ -180,7 +180,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             try {
               const txJson = await AsyncStorage.getItem(`txs_${w.id}`);
               if (txJson) cachedTxs = JSON.parse(txJson);
-            } catch {}
+            } catch (err) {
+              console.warn(`Corrupted cached txs for ${w.id}, clearing:`, err);
+              await AsyncStorage.removeItem(`txs_${w.id}`);
+            }
             return {
               ...w,
               isConnected: false,

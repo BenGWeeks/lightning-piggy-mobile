@@ -255,16 +255,24 @@ const SendSheet: React.FC<Props> = ({
         .then((fees) => {
           setBoltzFees(fees);
         })
-        .catch(() => {
+        .catch((err) => {
+          console.warn('Failed to fetch Boltz fees:', err);
           setBoltzFees(null);
         })
         .finally(() => {
           setLoadingBoltzFees(false);
         });
       // Fetch on-chain fee estimate for hot wallets
-      onchainService.estimateOnchainFee().then((fees) => {
-        setOnchainFeeEstimate(`~${fees.medium.toLocaleString()} sats miner fee \u00B7 ~10-60 min`);
-      });
+      onchainService
+        .estimateOnchainFee()
+        .then((fees) => {
+          setOnchainFeeEstimate(
+            `~${fees.medium.toLocaleString()} sats miner fee \u00B7 ~10-60 min`,
+          );
+        })
+        .catch((err) => {
+          console.warn('Failed to estimate on-chain fee:', err);
+        });
     } else if (isValidInvoice(input)) {
       setIsOnchainAddress(false);
       setInvoiceData(input);

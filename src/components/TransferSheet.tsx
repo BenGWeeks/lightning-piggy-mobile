@@ -358,8 +358,12 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         await onchainService.sendTransaction(sourceId, address, currentSats);
       }
 
-      // Refresh both balances
-      await Promise.all([refreshBalanceForWallet(sourceId), refreshBalanceForWallet(destId)]);
+      // Refresh both balances (non-critical — transfer already succeeded)
+      try {
+        await Promise.all([refreshBalanceForWallet(sourceId), refreshBalanceForWallet(destId)]);
+      } catch {
+        console.warn('Balance refresh failed after transfer — pull to refresh');
+      }
 
       const settleMsg =
         transferType === 'ln-to-onchain' || transferType === 'onchain-to-onchain'
