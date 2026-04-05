@@ -1,0 +1,169 @@
+appId: com.anonymous.lightningpiggyapp
+name: Add Hot Wallet Test
+---
+# Enables dev mode (if not already) then imports a hot wallet via mnemonic.
+# Run: source .env && maestro test -e MAESTRO_MNEMONIC="$MAESTRO_MNEMONIC1" -e WALLET_NAME="Hot Wallet 1" tests/e2e/test-add-hot-wallet.yaml
+
+# Wait for app to be ready
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 40000
+
+# === Enable Developer Mode ===
+# Navigate to Account settings
+- tapOn:
+    id: 'tab-home'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Scroll to bottom to find version
+- swipe:
+    start: 50%, 80%
+    end: 50%, 20%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+- swipe:
+    start: 50%, 80%
+    end: 50%, 20%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Check if already in dev mode
+- tapOn:
+    id: 'version-text'
+- tapOn:
+    id: 'version-text'
+- tapOn:
+    id: 'version-text'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Dismiss alert (Enabled or Disabled)
+- tapOn:
+    text: 'OK'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# If it said "Disabled", we need to triple-tap again to re-enable
+# Check if (dev) is visible — if not, tap again
+- tapOn:
+    id: 'version-text'
+    optional: true
+- tapOn:
+    id: 'version-text'
+    optional: true
+- tapOn:
+    id: 'version-text'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    text: 'OK'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# === Add Hot Wallet ===
+# Go back to Home
+- tapOn:
+    id: 'tab-home'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Swipe to Add Wallet card
+- repeat:
+    times: 6
+    commands:
+      - swipe:
+          start: 85%, 30%
+          end: 15%, 30%
+          duration: 300
+      - waitForAnimationToEnd:
+          timeout: 800
+
+# Tap Add Wallet
+- tapOn:
+    id: 'add-wallet-card'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Scroll down to see the mnemonic option
+- swipe:
+    start: 50%, 80%
+    end: 50%, 50%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Select "Import Seed Phrase (Beta)"
+- tapOn:
+    id: 'wallet-type-mnemonic'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Enter the mnemonic
+- tapOn:
+    id: 'mnemonic-input'
+- tapOn:
+    id: 'mnemonic-input'
+- eraseText:
+    charactersToErase: 500
+- inputText: ${MAESTRO_MNEMONIC}
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Tap Next
+- tapOn:
+    text: 'Next'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Enter wallet alias
+- tapOn:
+    id: 'wallet-alias-input'
+- tapOn:
+    id: 'wallet-alias-input'
+- eraseText:
+    charactersToErase: 100
+- inputText: ${WALLET_NAME}
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Tap Next to theme step
+- tapOn:
+    text: 'Next'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Scroll to Add Wallet button and tap
+- swipe:
+    start: 50%, 80%
+    end: 50%, 40%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+- tapOn:
+    id: 'wizard-connect-button'
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# Verify the wallet was added and shows Connected
+- extendedWaitUntil:
+    visible:
+      text: 'Connected'
+    timeout: 30000
+
+# Verify the wallet alias appears
+- assertVisible:
+    text: ${WALLET_NAME}
