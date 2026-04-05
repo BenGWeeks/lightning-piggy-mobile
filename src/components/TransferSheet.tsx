@@ -35,6 +35,7 @@ type InputUnit = 'sats' | 'fiat';
 const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const {
     wallets,
+    activeWalletId,
     btcPrice,
     currency,
     makeInvoiceForWallet,
@@ -154,15 +155,37 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
 
   useEffect(() => {
     if (visible) {
-      // Default: first NWC wallet as source
-      const defaultSource = sourceWallets.length > 0 ? sourceWallets[0].id : null;
+      const activeW = wallets.find((w) => w.id === activeWalletId);
+      const isWatchOnly =
+        activeW?.walletType === 'onchain' && activeW?.onchainImportMethod !== 'mnemonic';
+      const canSendFromActive = activeW && sourceWallets.some((w) => w.id === activeW.id);
+
+      let defaultSource: string | null;
+      let defaultDest: string | null;
+
+      if (isWatchOnly && activeWalletId) {
+        // Watch-only: default as destination, pick first sendable wallet as source
+        defaultDest = activeWalletId;
+        defaultSource = sourceWallets.find((w) => w.id !== activeWalletId)?.id ?? null;
+      } else if (canSendFromActive && activeWalletId) {
+        // Active wallet can send: use it as source
+        defaultSource = activeWalletId;
+        defaultDest =
+          wallets.find((w) => w.id !== activeWalletId && w.walletType === 'nwc' && w.isConnected)
+            ?.id ??
+          wallets.find((w) => w.id !== activeWalletId)?.id ??
+          null;
+      } else {
+        // Fallback: first sendable wallet as source
+        defaultSource = sourceWallets.length > 0 ? sourceWallets[0].id : null;
+        defaultDest =
+          wallets.find((w) => w.id !== defaultSource && w.walletType === 'nwc' && w.isConnected)
+            ?.id ??
+          wallets.find((w) => w.id !== defaultSource)?.id ??
+          null;
+      }
+
       setSourceId(defaultSource);
-      // Default dest: prefer another NWC wallet over on-chain (simpler fee)
-      const defaultDest =
-        wallets.find((w) => w.id !== defaultSource && w.walletType === 'nwc' && w.isConnected)
-          ?.id ??
-        wallets.find((w) => w.id !== defaultSource)?.id ??
-        null;
       setDestId(defaultDest);
       setSatsValue('');
       setFiatValue('');
