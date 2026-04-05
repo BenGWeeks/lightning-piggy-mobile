@@ -39,7 +39,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     resizeMode: 'contain',
     backgroundColor: '#e91e63',
   },
-  scheme: 'lightningpiggy',
+  scheme: ['lightningpiggy', 'lightning'],
   ios: {
     supportsTablet: true,
     bundleIdentifier: getIosBundleId(),
@@ -71,6 +71,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // on it don't regress — can remove once verified.
     './plugins/withAdjustResize',
     './plugins/withAmberQueries',
+    './plugins/withNfc',
     'expo-secure-store',
     [
       'expo-image-picker',
