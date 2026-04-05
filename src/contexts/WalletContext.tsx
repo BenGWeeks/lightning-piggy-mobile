@@ -267,11 +267,24 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // and reconnect if dropped (prevents idle timeout disconnections)
   const connectionCheckInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
-    connectionCheckInterval.current = setInterval(() => {
+    connectionCheckInterval.current = setInterval(async () => {
       for (const w of wallets.filter((ww) => ww.walletType === 'nwc')) {
         const connected = nwcService.isWalletConnected(w.id);
         if (connected !== w.isConnected) {
-          updateWalletInState(w.id, { isConnected: connected });
+          if (!connected) {
+            // Try to reconnect
+            try {
+              const nwcUrl = await walletStorage.getNwcUrl(w.id);
+              if (nwcUrl) {
+                const result = await nwcService.connect(w.id, nwcUrl);
+                updateWalletInState(w.id, { isConnected: result.success });
+              }
+            } catch {
+              updateWalletInState(w.id, { isConnected: false });
+            }
+          } else {
+            updateWalletInState(w.id, { isConnected: connected });
+          }
         }
       }
     }, 30 * 1000);

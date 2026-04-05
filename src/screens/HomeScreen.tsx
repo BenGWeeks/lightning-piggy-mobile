@@ -106,11 +106,16 @@ const HomeScreen: React.FC = () => {
     activeWalletId != null &&
     !fetchedWallets.current.has(activeWalletId);
 
-  // Fetch fresh data once per wallet (not on every swipe back)
-  // Mark as fetched only after the fetch completes, so it retries if the wallet
-  // becomes available later (e.g. NWC connects after initial render)
+  // When swiping to a disconnected NWC wallet, trigger reconnection
   useEffect(() => {
-    // Clear refresh spinner when wallet changes (don't carry over from previous wallet)
+    if (activeWallet?.walletType === 'nwc' && !activeWallet?.isConnected && activeWalletId) {
+      refreshActiveBalance();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWalletId]);
+
+  // Fetch fresh data once per wallet (not on every swipe back)
+  useEffect(() => {
     setRefreshing(false);
     if (isWalletAvailable && activeWalletId && !fetchedWallets.current.has(activeWalletId)) {
       fetchedWallets.current.add(activeWalletId);
