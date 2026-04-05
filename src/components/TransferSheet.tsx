@@ -321,9 +321,11 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     }
 
     setSending(true);
+    console.log(
+      `[Transfer] Starting ${transferType}: ${currentSats} sats from ${source.alias} to ${dest.alias}`,
+    );
     try {
       if (transferType === 'ln-to-ln') {
-        // Generate invoice on destination, pay from source
         const invoice = await makeInvoiceForWallet(destId, currentSats, 'Transfer');
         await payInvoiceForWallet(sourceId, invoice);
       } else if (transferType === 'ln-to-onchain') {
@@ -372,7 +374,11 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
           }),
         );
 
+        console.log(
+          `[Transfer] Sending ${swap.expectedAmount} sats on-chain to Boltz address ${swap.address}`,
+        );
         await onchainService.sendTransaction(sourceId, swap.address, swap.expectedAmount);
+        console.log('[Transfer] On-chain tx broadcast, waiting for Boltz to pay LN invoice...');
         await boltzService.waitForSubmarineSwapComplete(swap.id, 900000); // 15 min — needs on-chain confirmation
 
         // Clean up persisted swap state on success

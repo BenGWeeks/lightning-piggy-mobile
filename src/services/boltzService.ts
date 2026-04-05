@@ -181,6 +181,9 @@ export async function createReverseSwap(
   onchainAddress: string,
   amountSats: number,
 ): Promise<ReverseSwapResult> {
+  console.log(
+    `[Boltz] Creating reverse swap (LN → on-chain) for ${amountSats} sats to ${onchainAddress}`,
+  );
   if (!isBitcoinAddress(onchainAddress)) {
     throw new Error('Invalid destination Bitcoin address');
   }
@@ -215,6 +218,9 @@ export async function createReverseSwap(
   }
 
   const data = await res.json();
+  console.log(
+    `[Boltz] Reverse swap created: id=${data.id} lockup=${data.lockupAddress} onchainAmount=${data.onchainAmount}`,
+  );
   return {
     id: data.id,
     invoice: data.invoice,
@@ -236,12 +242,14 @@ export async function waitForLockup(
   swapId: string,
   timeoutMs: number = 60000,
 ): Promise<{ txId: string; vout: number; amount: number }> {
+  console.log(`[Boltz] Polling reverse swap lockup: ${swapId} (timeout ${timeoutMs / 1000}s)`);
   const start = Date.now();
 
   while (Date.now() - start < timeoutMs) {
     const res = await fetchWithTimeout(`${BOLTZ_API}/swap/${swapId}`);
     if (!res.ok) throw new Error(`Boltz status check failed: ${res.status}`);
     const data = await res.json();
+    console.log(`[Boltz] Swap ${swapId} status: ${data.status}`);
 
     if (data.status === 'transaction.mempool' || data.status === 'transaction.confirmed') {
       const txId = data.transaction?.id;
@@ -371,9 +379,12 @@ export async function claimSwap(
   tx.setWitness(0, [sigWithType, preimageBytes, claimScript, controlBlock]);
 
   // Broadcast via the configured Electrum server (BDK)
+  const txId = tx.getId();
+  console.log(`[Boltz] Broadcasting claim tx: ${txId} (${tx.toHex().length / 2} bytes)`);
   const onchainService = await import('./onchainService');
   await onchainService.broadcastRawTx(tx.toHex());
-  return tx.getId();
+  console.log(`[Boltz] Claim tx broadcast successfully: ${txId}`);
+  return txId;
 }
 
 /**
@@ -417,7 +428,7 @@ export interface SubmarineSwapResult {
  *   5. Boltz detects the on-chain payment and pays the LN invoice
  */
 export async function createSubmarineSwapForward(invoice: string): Promise<SubmarineSwapResult> {
-  // Generate a refund keypair — needed if swap fails and we need refund
+  console.log('[Boltz] Creating submarine swap (on-chain → LN)');
   const refundKeys = generateClaimKeyPair();
 
   const res = await fetchWithTimeout(`${BOLTZ_API}/swap/submarine`, {
@@ -437,6 +448,9 @@ export async function createSubmarineSwapForward(invoice: string): Promise<Subma
   }
 
   const data = await res.json();
+  console.log(
+    `[Boltz] Submarine swap created: id=${data.id} address=${data.address} amount=${data.expectedAmount}`,
+  );
   return {
     id: data.id,
     address: data.address,
@@ -456,16 +470,22 @@ export async function waitForSubmarineSwapComplete(
 ): Promise<void> {
   const start = Date.now();
 
+  console.log(`[Boltz] Polling submarine swap status: ${swapId} (timeout ${timeoutMs / 1000}s)`);
   while (Date.now() - start < timeoutMs) {
     const res = await fetchWithTimeout(`${BOLTZ_API}/swap/${swapId}`);
-    if (!res.ok) throw new Error(`Boltz status check failed: ${res.status}`);
+    if (!res.ok) {
+      console.warn(`[Boltz] Status check failed: ${res.status} for swap ${swapId}`);
+      throw new Error(`Boltz status check failed: ${res.status}`);
+    }
     const data = await res.json();
+    console.log(`[Boltz] Swap ${swapId} status: ${data.status}`);
 
     if (
       data.status === 'invoice.settled' ||
       data.status === 'transaction.claimed' ||
       data.status === 'transaction.claim.pending'
     ) {
+      console.log(`[Boltz] Submarine swap ${swapId} complete`);
       return;
     }
 
@@ -475,12 +495,14 @@ export async function waitForSubmarineSwapComplete(
       data.status === 'invoice.failedToPay' ||
       data.status === 'transaction.lockupFailed'
     ) {
+      console.warn(`[Boltz] Swap ${swapId} failed: ${data.status}`);
       throw new Error(`Swap failed with status: ${data.status}`);
     }
 
     await new Promise((r) => setTimeout(r, 3000));
   }
 
+  console.warn(`[Boltz] Swap ${swapId} timed out after ${timeoutMs / 1000}s`);
   throw new Error('Timeout waiting for Boltz to pay Lightning invoice');
 }
 
