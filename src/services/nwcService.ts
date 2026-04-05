@@ -1,5 +1,7 @@
 import { NostrWebLNProvider } from '@getalby/sdk';
-import type { Nip47GetInfoResponse } from '@getalby/sdk';
+import type { Nip47GetInfoResponse, Nip47Transaction } from '@getalby/sdk';
+
+export type { Nip47Transaction };
 
 const providers = new Map<string, NostrWebLNProvider>();
 
@@ -147,7 +149,7 @@ export async function getInfo(walletId: string): Promise<{ alias: string; lud16?
   }
 }
 
-export async function listTransactions(walletId: string): Promise<any[]> {
+export async function listTransactions(walletId: string): Promise<Nip47Transaction[]> {
   const provider = providers.get(walletId);
   if (!provider) return [];
   try {

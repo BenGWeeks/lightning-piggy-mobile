@@ -25,6 +25,11 @@ interface Props {
   isLoggedIn: boolean;
   signerType: string | null;
   onLoginPress: () => void;
+  title?: string;
+  subtitle?: string;
+  initialMessage?: string;
+  successTitle?: string;
+  successMessage?: string;
 }
 
 const FeedbackSheet: React.FC<Props> = ({
@@ -34,6 +39,11 @@ const FeedbackSheet: React.FC<Props> = ({
   isLoggedIn,
   signerType,
   onLoginPress,
+  title = 'Send Feedback',
+  subtitle = 'Your message will be sent as an encrypted Nostr DM to the Lightning Piggy team.',
+  initialMessage = '',
+  successTitle = 'Message Sent',
+  successMessage = 'Thank you for your feedback!',
 }) => {
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['55%'], []);
@@ -42,7 +52,7 @@ const FeedbackSheet: React.FC<Props> = ({
 
   useEffect(() => {
     if (visible) {
-      setMessage('');
+      setMessage(initialMessage);
       setSending(false);
       sheetRef.current?.present();
     } else {
@@ -70,9 +80,7 @@ const FeedbackSheet: React.FC<Props> = ({
 
       const result = await onSend(fullMessage);
       if (result.success) {
-        Alert.alert('Feedback Sent', 'Thank you for your feedback!', [
-          { text: 'OK', onPress: onClose },
-        ]);
+        Alert.alert(successTitle, successMessage, [{ text: 'OK', onPress: onClose }]);
       } else {
         Alert.alert('Error', result.error || 'Failed to send feedback.');
       }
@@ -112,10 +120,8 @@ const FeedbackSheet: React.FC<Props> = ({
       backgroundStyle={styles.sheetBackground}
     >
       <BottomSheetView style={styles.content}>
-        <Text style={styles.title}>Send Feedback</Text>
-        <Text style={styles.subtitle}>
-          Your message will be sent as an encrypted Nostr DM to the Lightning Piggy team.
-        </Text>
+        <Text style={styles.title}>{title}</Text>
+        <Text style={styles.subtitle}>{subtitle}</Text>
 
         {!isLoggedIn ? (
           <View style={styles.loginPrompt}>

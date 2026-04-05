@@ -8,11 +8,13 @@ import { useNostr } from '../contexts/NostrContext';
 import ReceiveSheet from '../components/ReceiveSheet';
 import SendSheet from '../components/SendSheet';
 import TransactionList from '../components/TransactionList';
+import TransactionDetailSheet from '../components/TransactionDetailSheet';
 import WalletCarousel from '../components/WalletCarousel';
 import AddWalletWizard from '../components/AddWalletWizard';
 import WalletSettingsSheet from '../components/WalletSettingsSheet';
 import ProfileIcon from '../components/ProfileIcon';
 import * as nwcService from '../services/nwcService';
+import type { Nip47Transaction } from '../services/nwcService';
 import { styles } from '../styles/HomeScreen.styles';
 import type { MainTabParamList } from '../navigation/types';
 
@@ -40,8 +42,9 @@ const HomeScreen: React.FC = () => {
   const [sendToPubkey, setSendToPubkey] = useState<string | undefined>();
   const [wizardOpen, setWizardOpen] = useState(false);
   const [settingsWalletId, setSettingsWalletId] = useState<string | null>(null);
-  const [transactions, setTransactions] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<Nip47Transaction[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [selectedTx, setSelectedTx] = useState<Nip47Transaction | null>(null);
 
   // Handle sendToAddress from navigation params (e.g., from Friends tab zap)
   useEffect(() => {
@@ -166,7 +169,7 @@ const HomeScreen: React.FC = () => {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         >
           {hasWallets ? (
-            <TransactionList transactions={transactions} />
+            <TransactionList transactions={transactions} onTransactionPress={setSelectedTx} />
           ) : (
             <View style={styles.emptyState}>
               <Text style={styles.emptyText}>Add a wallet to get started</Text>
@@ -190,6 +193,11 @@ const HomeScreen: React.FC = () => {
       />
       <AddWalletWizard visible={wizardOpen} onClose={() => setWizardOpen(false)} />
       <WalletSettingsSheet walletId={settingsWalletId} onClose={() => setSettingsWalletId(null)} />
+      <TransactionDetailSheet
+        transaction={selectedTx}
+        visible={!!selectedTx}
+        onClose={() => setSelectedTx(null)}
+      />
     </View>
   );
 };

@@ -1,22 +1,17 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { ArrowDown, ArrowUp } from 'lucide-react-native';
 import { colors } from '../styles/theme';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet } from '../contexts/WalletContext';
-
-interface Transaction {
-  type: string;
-  amount: number;
-  description?: string;
-  created_at?: number;
-  settled_at?: number;
-}
+import type { Nip47Transaction } from '../services/nwcService';
 
 interface Props {
-  transactions: Transaction[];
+  transactions: Nip47Transaction[];
+  onTransactionPress?: (tx: Nip47Transaction) => void;
 }
 
-const TransactionList: React.FC<Props> = ({ transactions }) => {
+const TransactionList: React.FC<Props> = ({ transactions, onTransactionPress }) => {
   const { btcPrice, currency } = useWallet();
 
   if (transactions.length === 0) {
@@ -37,9 +32,19 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
         const fiatStr = satsToFiatString(amountSats, btcPrice, currency);
 
         return (
-          <View key={index} style={styles.item}>
+          <TouchableOpacity
+            key={index}
+            style={styles.item}
+            onPress={() => onTransactionPress?.(item)}
+            accessibilityLabel={`${isIncoming ? 'Received' : 'Sent'} ${amountSats} sats`}
+            testID={`transaction-row-${index}`}
+          >
             <View style={styles.itemLeft}>
-              <Text style={styles.itemIcon}>{isIncoming ? '↓' : '↑'}</Text>
+              {isIncoming ? (
+                <ArrowDown size={18} color={colors.brandPink} />
+              ) : (
+                <ArrowUp size={18} color={colors.brandPink} />
+              )}
               <View style={styles.itemDescriptionContainer}>
                 <Text style={styles.itemDescription} numberOfLines={1}>
                   {item.description || (isIncoming ? 'Received' : 'Sent')}
@@ -54,7 +59,7 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
               </Text>
               {fiatStr ? <Text style={styles.itemFiat}>{fiatStr}</Text> : null}
             </View>
-          </View>
+          </TouchableOpacity>
         );
       })}
     </View>
@@ -87,11 +92,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     flex: 1,
-  },
-  itemIcon: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.brandPink,
   },
   itemDescriptionContainer: {
     flex: 1,
