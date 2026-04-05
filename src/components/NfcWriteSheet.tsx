@@ -87,7 +87,10 @@ const NfcWriteSheet: React.FC<Props> = ({ visible, onClose, npub, displayName })
 
     setState('ready');
     try {
-      await writeNpubToTag(npub);
+      await writeNpubToTag(npub, () => {
+        // Tag detected — show writing state
+        if (mountedRef.current) setState('writing');
+      });
       if (mountedRef.current) {
         setState('success');
       }

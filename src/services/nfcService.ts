@@ -202,8 +202,14 @@ export async function scanNfcTag(): Promise<NfcTagContent> {
 /**
  * Write an npub to an NFC tag as an NDEF URI record.
  * Format: nostr:npub1...
+ *
+ * @param npub - The npub string to write
+ * @param onTagDetected - Optional callback fired when a tag is detected (before write)
  */
-export async function writeNpubToTag(npub: string): Promise<void> {
+export async function writeNpubToTag(
+  npub: string,
+  onTagDetected?: () => void,
+): Promise<void> {
   if (!npub.startsWith('npub1')) {
     throw new Error('Invalid npub format');
   }
@@ -217,6 +223,9 @@ export async function writeNpubToTag(npub: string): Promise<void> {
     if (!tag) {
       throw new Error('No tag detected');
     }
+
+    // Notify caller that tag was detected (writing begins)
+    onTagDetected?.();
 
     // Build NDEF message with a URI record
     // Since "nostr:" is not in the standard NFC URI prefix table,
