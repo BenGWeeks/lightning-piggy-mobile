@@ -359,13 +359,15 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         const invoice = await makeInvoiceForWallet(destId, currentSats, 'Transfer');
         const swap = await boltzService.createSubmarineSwapForward(invoice);
 
-        // Persist swap state for crash recovery
+        // Persist swap state for crash recovery (includes refund key for failed swaps)
         await SecureStore.setItemAsync(
           `submarine_swap_${swap.id}`,
           JSON.stringify({
             id: swap.id,
             address: swap.address,
             expectedAmount: swap.expectedAmount,
+            refundPrivateKey: swap.refundPrivateKey,
+            timeoutBlockHeight: swap.timeoutBlockHeight,
             createdAt: Date.now(),
           }),
         );

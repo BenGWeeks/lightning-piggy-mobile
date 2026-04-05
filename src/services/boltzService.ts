@@ -63,17 +63,26 @@ interface SwapTree {
   refundLeaf: { version: number; output: string };
 }
 
+// Boltz v2 swap statuses (from https://api.docs.boltz.exchange/lifecycle.html)
 export type SwapStatus =
+  // Shared
   | 'swap.created'
   | 'transaction.mempool'
   | 'transaction.confirmed'
+  | 'swap.expired'
+  // Submarine (on-chain → LN)
   | 'invoice.set'
   | 'invoice.pending'
   | 'invoice.paid'
-  | 'invoice.settled'
+  | 'invoice.failedToPay'
+  | 'transaction.claim.pending'
   | 'transaction.claimed'
-  | 'swap.expired'
-  | 'swap.refunded';
+  | 'transaction.lockupFailed'
+  // Reverse (LN → on-chain)
+  | 'invoice.settled'
+  | 'invoice.expired'
+  | 'transaction.failed'
+  | 'transaction.refunded';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -252,7 +261,12 @@ export async function waitForLockup(
       return { txId, vout, amount };
     }
 
-    if (data.status === 'swap.expired' || data.status === 'swap.refunded') {
+    if (
+      data.status === 'swap.expired' ||
+      data.status === 'transaction.refunded' ||
+      data.status === 'transaction.failed' ||
+      data.status === 'invoice.expired'
+    ) {
       throw new Error(`Swap failed with status: ${data.status}`);
     }
 
@@ -386,6 +400,10 @@ export interface SubmarineSwapResult {
   expectedAmount: number;
   /** Timeout block height — refund possible after this */
   timeoutBlockHeight: number;
+  /** Refund private key (hex) — needed if swap fails and we need to reclaim on-chain funds */
+  refundPrivateKey: string;
+  /** Swap tree for script-path refund */
+  swapTree: SwapTree;
 }
 
 /**
@@ -424,6 +442,8 @@ export async function createSubmarineSwapForward(invoice: string): Promise<Subma
     address: data.address,
     expectedAmount: data.expectedAmount,
     timeoutBlockHeight: data.timeoutBlockHeight ?? 0,
+    refundPrivateKey: toHex(refundKeys.privateKey),
+    swapTree: data.swapTree,
   };
 }
 
@@ -441,14 +461,19 @@ export async function waitForSubmarineSwapComplete(
     if (!res.ok) throw new Error(`Boltz status check failed: ${res.status}`);
     const data = await res.json();
 
-    if (data.status === 'invoice.settled' || data.status === 'transaction.claimed') {
+    if (
+      data.status === 'invoice.settled' ||
+      data.status === 'transaction.claimed' ||
+      data.status === 'transaction.claim.pending'
+    ) {
       return;
     }
 
     if (
       data.status === 'swap.expired' ||
       data.status === 'swap.refunded' ||
-      data.status === 'invoice.failedToPay'
+      data.status === 'invoice.failedToPay' ||
+      data.status === 'transaction.lockupFailed'
     ) {
       throw new Error(`Swap failed with status: ${data.status}`);
     }
