@@ -263,9 +263,7 @@ const SendSheet: React.FC<Props> = ({
         });
       // Fetch on-chain fee estimate for hot wallets
       onchainService.estimateOnchainFee().then((fees) => {
-        setOnchainFeeEstimate(
-          `~${fees.medium.toLocaleString()} sats miner fee \u00B7 ~10-60 min`,
-        );
+        setOnchainFeeEstimate(`~${fees.medium.toLocaleString()} sats miner fee \u00B7 ~10-60 min`);
       });
     } else if (isValidInvoice(input)) {
       setIsOnchainAddress(false);
@@ -655,13 +653,9 @@ const SendSheet: React.FC<Props> = ({
 
                 {isOnchainAddress && invoiceData ? (
                   <Text style={styles.detailAddress}>
-                    <Text style={styles.addressHighlight}>
-                      {invoiceData.slice(0, 6)}
-                    </Text>
+                    <Text style={styles.addressHighlight}>{invoiceData.slice(0, 6)}</Text>
                     {invoiceData.slice(6, -6)}
-                    <Text style={styles.addressHighlight}>
-                      {invoiceData.slice(-6)}
-                    </Text>
+                    <Text style={styles.addressHighlight}>{invoiceData.slice(-6)}</Text>
                   </Text>
                 ) : isLightningAddress(invoiceData || '') ? (
                   <Text style={styles.detailAddress}>{invoiceData}</Text>
@@ -676,7 +670,7 @@ const SendSheet: React.FC<Props> = ({
                   <Text style={styles.feeText}>
                     {selectedWallet?.walletType === 'onchain' &&
                     selectedWallet?.onchainImportMethod === 'mnemonic'
-                      ? onchainFeeEstimate ?? 'Estimating fee...'
+                      ? (onchainFeeEstimate ?? 'Estimating fee...')
                       : loadingBoltzFees
                         ? 'Loading fees...'
                         : boltzFees

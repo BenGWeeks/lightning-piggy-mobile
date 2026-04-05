@@ -533,11 +533,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           txs = result.transactions.map((tx) => ({
             type: tx.type,
             amount: tx.amount,
-            description: tx.confirmed
-              ? tx.type === 'incoming'
-                ? 'Received'
-                : 'Sent'
-              : 'Pending',
+            description: tx.confirmed ? (tx.type === 'incoming' ? 'Received' : 'Sent') : 'Pending',
             settled_at: tx.timestamp,
             created_at: tx.timestamp,
             blockHeight: tx.blockHeight,

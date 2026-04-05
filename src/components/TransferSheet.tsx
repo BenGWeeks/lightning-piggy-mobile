@@ -89,7 +89,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     if (!source || !dest) return null;
     if (source.walletType === 'nwc' && dest.walletType === 'nwc') return 'ln-to-ln';
     if (source.walletType === 'nwc' && dest.walletType === 'onchain') return 'ln-to-onchain';
-    if (source.walletType === 'onchain' && dest.walletType === 'onchain') return 'onchain-to-onchain';
+    if (source.walletType === 'onchain' && dest.walletType === 'onchain')
+      return 'onchain-to-onchain';
     if (source.walletType === 'onchain' && dest.walletType === 'nwc') return 'onchain-to-ln';
     return null;
   }, [source, dest]);
@@ -143,9 +144,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       onchainService
         .estimateOnchainFee()
         .then((fees) => {
-          setFeeEstimate(
-            `~${fees.medium.toLocaleString()} sats \u00B7 ~10-60 min (on-chain)`,
-          );
+          setFeeEstimate(`~${fees.medium.toLocaleString()} sats \u00B7 ~10-60 min (on-chain)`);
         })
         .catch(() => {
           setFeeEstimate('Fee estimate unavailable');
@@ -225,15 +224,16 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
 
     // Warn if doing a cross-chain swap when a same-chain wallet has funds
     if (transferType === 'onchain-to-ln') {
-      const altLnWallet = wallets
-        .filter(
-          (w) =>
-            w.id !== sourceId &&
-            w.walletType === 'nwc' &&
-            w.isConnected &&
-            (w.balance ?? 0) >= currentSats,
-        )
-        .sort((a, b) => (b.balance ?? 0) - (a.balance ?? 0))[0] ?? null;
+      const altLnWallet =
+        wallets
+          .filter(
+            (w) =>
+              w.id !== sourceId &&
+              w.walletType === 'nwc' &&
+              w.isConnected &&
+              (w.balance ?? 0) >= currentSats,
+          )
+          .sort((a, b) => (b.balance ?? 0) - (a.balance ?? 0))[0] ?? null;
       if (altLnWallet) {
         const confirmed = await new Promise<boolean>((resolve) =>
           Alert.alert(
@@ -251,15 +251,16 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         }
       }
     } else if (transferType === 'ln-to-onchain') {
-      const altOnchainWallet = wallets
-        .filter(
-          (w) =>
-            w.id !== sourceId &&
-            w.walletType === 'onchain' &&
-            w.onchainImportMethod === 'mnemonic' &&
-            (w.balance ?? 0) >= currentSats,
-        )
-        .sort((a, b) => (b.balance ?? 0) - (a.balance ?? 0))[0] ?? null;
+      const altOnchainWallet =
+        wallets
+          .filter(
+            (w) =>
+              w.id !== sourceId &&
+              w.walletType === 'onchain' &&
+              w.onchainImportMethod === 'mnemonic' &&
+              (w.balance ?? 0) >= currentSats,
+          )
+          .sort((a, b) => (b.balance ?? 0) - (a.balance ?? 0))[0] ?? null;
       if (altOnchainWallet) {
         const confirmed = await new Promise<boolean>((resolve) =>
           Alert.alert(
@@ -323,7 +324,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         await payInvoiceForWallet(sourceId, swap.invoice);
 
         // Step 2: Wait for Boltz to lock BTC on-chain (polls every 3s)
-        const lockup = await boltzService.waitForLockup(swap.id, 120000);
+        const lockup = await boltzService.waitForLockup(swap.id, 900000); // 15 min — Boltz needs to lock on-chain
 
         // Step 3: Build and broadcast the script-path claim transaction
         await boltzService.claimSwap(swap, lockup, address);
@@ -347,7 +348,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         );
 
         await onchainService.sendTransaction(sourceId, swap.address, swap.expectedAmount);
-        await boltzService.waitForSubmarineSwapComplete(swap.id, 120000);
+        await boltzService.waitForSubmarineSwapComplete(swap.id, 900000); // 15 min — needs on-chain confirmation
 
         // Clean up persisted swap state on success
         await SecureStore.deleteItemAsync(`submarine_swap_${swap.id}`);

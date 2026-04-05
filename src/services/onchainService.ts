@@ -282,7 +282,9 @@ export async function sendTransaction(
     throw new Error('Cannot send from a watch-only wallet — no signing key available');
   }
   if (feeRate < MIN_FEE_RATE || feeRate > MAX_FEE_RATE) {
-    throw new Error(`Fee rate must be between ${MIN_FEE_RATE} and ${MAX_FEE_RATE} sat/vB, got ${feeRate}`);
+    throw new Error(
+      `Fee rate must be between ${MIN_FEE_RATE} and ${MAX_FEE_RATE} sat/vB, got ${feeRate}`,
+    );
   }
 
   const { TxBuilder, Address } = await import('bdk-rn');

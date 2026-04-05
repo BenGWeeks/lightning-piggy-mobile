@@ -223,9 +223,7 @@ const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onS
         walletType={wallet.walletType}
         walletAlias={wallet.walletAlias}
         onSettingsPress={onSettingsPress}
-        isWatchOnly={
-          wallet.walletType === 'onchain' && wallet.onchainImportMethod !== 'mnemonic'
-        }
+        isWatchOnly={wallet.walletType === 'onchain' && wallet.onchainImportMethod !== 'mnemonic'}
       />
     </View>
   );

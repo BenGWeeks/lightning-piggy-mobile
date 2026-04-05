@@ -87,10 +87,11 @@ name: Transfer On-chain to LN Test
 
 # Wait for on-chain tx broadcast + Boltz detection + LN invoice payment
 # This can take up to 2 minutes
+# On-chain→LN requires on-chain confirmation (~10 min) + Boltz processing
 - extendedWaitUntil:
     visible:
       text: 'Transfer Complete'
-    timeout: 120000
+    timeout: 900000
 
 # Dismiss alert
 - tapOn:

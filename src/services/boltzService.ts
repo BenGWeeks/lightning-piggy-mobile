@@ -98,7 +98,11 @@ function generateClaimKeyPair(): { privateKey: Uint8Array; publicKey: Uint8Array
 }
 
 /** Fetch with a timeout to prevent hanging on slow/unreachable APIs. */
-async function fetchWithTimeout(url: string, init?: RequestInit, timeoutMs = 10000): Promise<Response> {
+async function fetchWithTimeout(
+  url: string,
+  init?: RequestInit,
+  timeoutMs = 10000,
+): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -394,9 +398,7 @@ export interface SubmarineSwapResult {
  *   4. Send BTC on-chain to that address from the hot wallet (caller does this)
  *   5. Boltz detects the on-chain payment and pays the LN invoice
  */
-export async function createSubmarineSwapForward(
-  invoice: string,
-): Promise<SubmarineSwapResult> {
+export async function createSubmarineSwapForward(invoice: string): Promise<SubmarineSwapResult> {
   // Generate a refund keypair — needed if swap fails and we need refund
   const refundKeys = generateClaimKeyPair();
 
