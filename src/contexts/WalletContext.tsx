@@ -43,7 +43,7 @@ interface WalletContextType {
   setLightningAddress: (address: string | null) => Promise<void>;
 
   // Wallet actions
-  addWallet: (
+  addNwcWallet: (
     nwcUrl: string,
     alias: string,
     theme: CardTheme,
@@ -255,8 +255,16 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   }, [currency, fetchPrice]);
 
-  const addWallet = useCallback(
+  const addNwcWallet = useCallback(
     async (nwcUrl: string, alias: string, theme: CardTheme) => {
+      // Check for duplicate NWC wallet (same connection URL)
+      for (const w of wallets.filter((ww) => ww.walletType === 'nwc')) {
+        const storedUrl = await walletStorage.getNwcUrl(w.id);
+        if (storedUrl?.trim() === nwcUrl.trim()) {
+          return { success: false, error: 'This wallet is already connected' };
+        }
+      }
+
       const id = walletStorage.generateWalletId();
 
       const result = await nwcService.connect(id, nwcUrl);
@@ -302,7 +310,16 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const addOnchainWallet = useCallback(
     async (xpub: string, alias: string, theme: CardTheme, electrumServer?: string) => {
-      const validationError = onchainService.validateXpub(xpub.trim());
+      // Check for duplicate on-chain wallet (same xpub)
+      const trimmedXpub = xpub.trim();
+      for (const w of wallets.filter((ww) => ww.walletType === 'onchain')) {
+        const storedXpub = await walletStorage.getXpub(w.id);
+        if (storedXpub?.trim() === trimmedXpub) {
+          return { success: false, error: 'This wallet has already been imported' };
+        }
+      }
+
+      const validationError = onchainService.validateXpub(trimmedXpub);
       if (validationError) {
         return { success: false, error: validationError };
       }
@@ -321,7 +338,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       };
 
       // Persist xpub securely
-      await walletStorage.saveXpub(id, xpub.trim());
+      await walletStorage.saveXpub(id, trimmedXpub);
       const currentList = await walletStorage.getWalletList();
       await walletStorage.saveWalletList([...currentList, metadata]);
 
@@ -512,7 +529,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         btcPrice,
         lightningAddress,
         setLightningAddress,
-        addWallet,
+        addNwcWallet,
         addOnchainWallet,
         removeWallet,
         updateWalletSettings,

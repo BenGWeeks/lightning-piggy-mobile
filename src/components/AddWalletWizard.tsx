@@ -33,7 +33,7 @@ interface Props {
 type Step = 'type' | 'url' | 'xpub' | 'alias' | 'theme';
 
 const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
-  const { addWallet, addOnchainWallet } = useWallet();
+  const { addNwcWallet, addOnchainWallet } = useWallet();
   const [step, setStep] = useState<Step>('type');
   const [walletType, setWalletType] = useState<WalletType>('nwc');
   const [nwcUrl, setNwcUrl] = useState('');
@@ -122,7 +122,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
           setError(result.error || 'Failed to add wallet');
         }
       } else {
-        const result = await addWallet(nwcUrl.trim(), alias.trim(), selectedTheme);
+        const result = await addNwcWallet(nwcUrl.trim(), alias.trim(), selectedTheme);
         if (result.success) {
           handleClose();
         } else {
