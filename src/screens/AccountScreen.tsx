@@ -35,6 +35,7 @@ import type { MainTabParamList } from '../navigation/types';
 
 // Lightning Piggy team npub — update this if the team key changes
 const TEAM_NPUB = 'npub1y2qcaseaspuwvjtyk4suswdhgselydc42ttlt0t2kzhnykne7s5swvaffq';
+const TEAM_PROFILE_CACHE_KEY = 'team_profile_cache';
 
 const QrIcon: React.FC<{ size?: number; color?: string }> = ({ size = 20, color = '#FFFFFF' }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -83,7 +84,7 @@ const AccountScreen: React.FC = () => {
       try {
         const decoded = nip19.decode(TEAM_NPUB);
         if (decoded.type !== 'npub') return;
-        const cached = await AsyncStorage.getItem('team_profile_cache');
+        const cached = await AsyncStorage.getItem(TEAM_PROFILE_CACHE_KEY);
         if (cached) {
           const parsed = JSON.parse(cached) as NostrProfile;
           if (!cancelled) {
@@ -94,7 +95,7 @@ const AccountScreen: React.FC = () => {
         const fetched = await fetchProfile(decoded.data, DEFAULT_RELAYS);
         if (!cancelled && fetched) {
           setTeamProfile(fetched);
-          await AsyncStorage.setItem('team_profile_cache', JSON.stringify(fetched));
+          await AsyncStorage.setItem(TEAM_PROFILE_CACHE_KEY, JSON.stringify(fetched));
         }
       } catch (error) {
         console.warn('Failed to fetch team profile:', error);
@@ -467,12 +468,19 @@ const AccountScreen: React.FC = () => {
       <FeedbackSheet
         visible={feedbackSheetOpen}
         onClose={() => setFeedbackSheetOpen(false)}
-        onSend={(msg) => {
-          const decoded = nip19.decode(TEAM_NPUB);
-          if (decoded.type !== 'npub') {
-            return Promise.resolve({ success: false, error: 'Invalid team npub' });
+        onSend={async (msg) => {
+          try {
+            const decoded = nip19.decode(TEAM_NPUB);
+            if (decoded.type !== 'npub') {
+              return { success: false, error: 'Invalid team npub' };
+            }
+            return sendDirectMessage(decoded.data, msg);
+          } catch (error) {
+            return {
+              success: false,
+              error: error instanceof Error ? error.message : 'Invalid team npub',
+            };
           }
-          return sendDirectMessage(decoded.data, msg);
         }}
         isLoggedIn={isLoggedIn}
         signerType={signerType}

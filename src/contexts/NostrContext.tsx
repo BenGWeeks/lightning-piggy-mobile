@@ -560,13 +560,17 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (signerType !== 'nsec') {
         return { success: false, error: 'Direct messages require nsec login' };
       }
+      const normalizedRecipientPubkey = recipientPubkey.trim();
+      if (!/^[0-9a-f]{64}$/i.test(normalizedRecipientPubkey)) {
+        return { success: false, error: 'Invalid public key format' };
+      }
       try {
         const nsec = await SecureStore.getItemAsync(NSEC_KEY);
         if (!nsec) return { success: false, error: 'Key not found' };
         const { secretKey } = nostrService.decodeNsec(nsec);
         const event = await nostrService.createDirectMessageEvent(
           secretKey,
-          recipientPubkey,
+          normalizedRecipientPubkey,
           plaintext,
         );
         const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
