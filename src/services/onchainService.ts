@@ -7,11 +7,18 @@
  * Forked from Peach2Peach/bdk-rn with RN 0.83 fix.
  */
 
-import { Wallet, Blockchain, Descriptor, DatabaseConfig } from 'bdk-rn';
-import { Network, AddressIndex } from 'bdk-rn/lib/lib/enums';
+import {
+  Wallet,
+  Blockchain,
+  Descriptor,
+  DatabaseConfig,
+  DescriptorSecretKey,
+  Mnemonic,
+} from 'bdk-rn';
+import { Network, AddressIndex, KeychainKind } from 'bdk-rn/lib/lib/enums';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import bs58check from 'bs58check';
-import { getXpub, getElectrumServer } from './walletStorageService';
+import { getXpub, getMnemonic, getElectrumServer } from './walletStorageService';
 
 const ADDRESS_INDEX_PREFIX = 'onchain_addr_index_';
 
@@ -90,30 +97,34 @@ async function getBdkWallet(walletId: string): Promise<Wallet> {
   const cached = bdkWallets.get(walletId);
   if (cached) return cached;
 
-  const rawXpub = await getXpub(walletId);
-  if (!rawXpub) throw new Error(`No xpub found for wallet ${walletId}`);
+  let descriptor: Descriptor;
+  let changeDescriptor: Descriptor;
 
-  const xpub = toXpub(rawXpub);
-
-  if (__DEV__) console.log('[BDK] Creating descriptors for xpub:', xpub.substring(0, 20) + '...');
-
-  // Create BIP-84 (wpkh) descriptors
-  const descriptor = await new Descriptor().create(`wpkh(${xpub}/0/*)`, Network.Bitcoin);
-
-  if (__DEV__) console.log('[BDK] External descriptor ID:', descriptor.id);
-
-  const changeDescriptor = await new Descriptor().create(`wpkh(${xpub}/1/*)`, Network.Bitcoin);
-
-  if (__DEV__) console.log('[BDK] Change descriptor ID:', changeDescriptor.id);
+  // Try mnemonic first (hot wallet), then xpub (watch-only)
+  const mnemonic = await getMnemonic(walletId);
+  if (mnemonic) {
+    if (__DEV__) console.log('[BDK] Creating hot wallet from mnemonic');
+    const bdkMnemonic = await new Mnemonic().fromString(mnemonic);
+    const secretKey = await new DescriptorSecretKey().create(Network.Bitcoin, bdkMnemonic);
+    descriptor = await new Descriptor().newBip84(secretKey, KeychainKind.External, Network.Bitcoin);
+    changeDescriptor = await new Descriptor().newBip84(
+      secretKey,
+      KeychainKind.Internal,
+      Network.Bitcoin,
+    );
+  } else {
+    const rawXpub = await getXpub(walletId);
+    if (!rawXpub) throw new Error(`No xpub or mnemonic found for wallet ${walletId}`);
+    const xpub = toXpub(rawXpub);
+    if (__DEV__) console.log('[BDK] Creating watch-only wallet from xpub');
+    descriptor = await new Descriptor().create(`wpkh(${xpub}/0/*)`, Network.Bitcoin);
+    changeDescriptor = await new Descriptor().create(`wpkh(${xpub}/1/*)`, Network.Bitcoin);
+  }
 
   const dbConfig = await new DatabaseConfig().memory();
-
-  if (__DEV__) console.log('[BDK] DB config ID:', dbConfig.id);
-
   const wallet = await new Wallet().create(descriptor, changeDescriptor, Network.Bitcoin, dbConfig);
 
   if (__DEV__) console.log('[BDK] Wallet created:', wallet.id);
-
   bdkWallets.set(walletId, wallet);
   return wallet;
 }
@@ -220,8 +231,41 @@ export async function getTransactions(walletId: string): Promise<OnchainTransact
   }
 }
 
-export function isWatchOnly(_walletId: string): boolean {
-  return true;
+/** Check if a wallet is watch-only (no mnemonic stored). */
+export async function isWatchOnly(walletId: string): Promise<boolean> {
+  const mnemonic = await getMnemonic(walletId);
+  return !mnemonic;
+}
+
+/**
+ * Send on-chain Bitcoin from a hot wallet.
+ * Only works for wallets with stored mnemonics (not watch-only).
+ */
+export async function sendTransaction(
+  walletId: string,
+  toAddress: string,
+  amountSats: number,
+  feeRate: number = 2,
+): Promise<string> {
+  const { TxBuilder, Address } = await import('bdk-rn');
+
+  const wallet = await getBdkWallet(walletId);
+  const chain = await getBlockchain();
+  await wallet.sync(chain);
+
+  const address = await new Address().create(toAddress);
+  const script = await address.scriptPubKey();
+
+  let txBuilder = await new TxBuilder().create();
+  txBuilder = await txBuilder.addRecipient(script, amountSats);
+  txBuilder = await txBuilder.feeRate(feeRate);
+
+  const result = await txBuilder.finish(wallet);
+  const signedPsbt = await wallet.sign(result.psbt);
+  const tx = await signedPsbt.extractTx();
+  await chain.broadcast(tx);
+
+  return await signedPsbt.txid();
 }
 
 export async function removeWallet(walletId: string): Promise<void> {

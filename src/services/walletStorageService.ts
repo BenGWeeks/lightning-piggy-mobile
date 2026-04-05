@@ -54,6 +54,22 @@ export async function deleteXpub(walletId: string): Promise<void> {
   await SecureStore.deleteItemAsync(`${ONCHAIN_XPUB_PREFIX}${walletId}`);
 }
 
+// --- On-chain (mnemonic) ---
+
+const ONCHAIN_MNEMONIC_PREFIX = 'onchain_mnemonic_';
+
+export async function saveMnemonic(walletId: string, mnemonic: string): Promise<void> {
+  await SecureStore.setItemAsync(`${ONCHAIN_MNEMONIC_PREFIX}${walletId}`, mnemonic);
+}
+
+export async function getMnemonic(walletId: string): Promise<string | null> {
+  return SecureStore.getItemAsync(`${ONCHAIN_MNEMONIC_PREFIX}${walletId}`);
+}
+
+export async function deleteMnemonic(walletId: string): Promise<void> {
+  await SecureStore.deleteItemAsync(`${ONCHAIN_MNEMONIC_PREFIX}${walletId}`);
+}
+
 // --- Electrum / block-explorer server ---
 
 export async function getElectrumServer(): Promise<string> {

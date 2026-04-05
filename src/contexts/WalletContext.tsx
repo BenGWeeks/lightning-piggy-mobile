@@ -54,6 +54,11 @@ interface WalletContextType {
     theme: CardTheme,
     electrumServer?: string,
   ) => Promise<{ success: boolean; error?: string }>;
+  addHotWallet: (
+    mnemonic: string,
+    alias: string,
+    theme: CardTheme,
+  ) => Promise<{ success: boolean; error?: string }>;
   removeWallet: (walletId: string) => Promise<void>;
   updateWalletSettings: (
     walletId: string,
@@ -380,12 +385,69 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [wallets.length, activeWalletId],
   );
 
+  const addHotWallet = useCallback(
+    async (mnemonic: string, alias: string, theme: CardTheme) => {
+      // Normalize mnemonic: strip numbers, colons, extra whitespace
+      const normalized = mnemonic
+        .replace(/[0-9.:;,]/g, '')
+        .replace(/[\r\n\t]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+
+      // Validate
+      try {
+        const bip39 = await import('bip39');
+        if (!bip39.validateMnemonic(normalized)) {
+          return { success: false, error: 'Invalid mnemonic phrase' };
+        }
+      } catch {
+        return { success: false, error: 'Failed to validate mnemonic' };
+      }
+
+      const id = walletStorage.generateWalletId();
+
+      const metadata: WalletMetadata = {
+        id,
+        alias,
+        theme,
+        order: wallets.length,
+        walletType: 'onchain',
+        lightningAddress: null,
+        onchainImportMethod: 'mnemonic',
+      };
+
+      // Store mnemonic securely
+      await walletStorage.saveMnemonic(id, normalized);
+      const currentList = await walletStorage.getWalletList();
+      await walletStorage.saveWalletList([...currentList, metadata]);
+
+      // Fetch initial balance via BDK
+      const bal = await onchainService.getBalance(id);
+
+      const state: WalletState = {
+        ...metadata,
+        isConnected: false,
+        balance: bal,
+        walletAlias: null,
+        transactions: [],
+      };
+
+      setWallets((prev) => [...prev, state]);
+      if (!activeWalletId) setActiveWalletId(id);
+
+      return { success: true };
+    },
+    [wallets.length, activeWalletId],
+  );
+
   const removeWallet = useCallback(
     async (walletId: string) => {
       const wallet = wallets.find((w) => w.id === walletId);
 
       if (wallet?.walletType === 'onchain') {
         await walletStorage.deleteXpub(walletId);
+        await walletStorage.deleteMnemonic(walletId);
         await onchainService.removeWallet(walletId);
       } else {
         nwcService.disconnect(walletId);
@@ -548,6 +610,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setLightningAddress,
         addNwcWallet,
         addOnchainWallet,
+        addHotWallet,
         removeWallet,
         updateWalletSettings,
         setActiveWallet,

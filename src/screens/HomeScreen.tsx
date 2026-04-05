@@ -137,9 +137,10 @@ const HomeScreen: React.FC = () => {
     setSettingsWalletId(walletId);
   }, []);
 
-  const isOnchainWatchOnly = activeWallet?.walletType === 'onchain';
-  const hasActiveConnection = isOnchainWatchOnly ? true : (activeWallet?.isConnected ?? false);
-  const canSend = hasActiveConnection && !isOnchainWatchOnly;
+  const isOnchainWallet = activeWallet?.walletType === 'onchain';
+  const isWatchOnly = isOnchainWallet && activeWallet?.onchainImportMethod !== 'mnemonic';
+  const hasActiveConnection = isOnchainWallet ? true : (activeWallet?.isConnected ?? false);
+  const canSend = hasActiveConnection && !isWatchOnly;
   // Transfer requires at least 1 connected NWC wallet + 1 other wallet
   const hasConnectedNwc = wallets.some((w) => w.walletType === 'nwc' && w.isConnected);
   const canTransfer = hasConnectedNwc && wallets.length >= 2;

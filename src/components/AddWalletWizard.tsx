@@ -2,6 +2,7 @@ import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   Alert,
@@ -16,6 +17,7 @@ import {
   BottomSheetScrollView,
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
 import { CardTheme, WalletType } from '../types/wallet';
@@ -30,15 +32,17 @@ interface Props {
   onClose: () => void;
 }
 
-type Step = 'type' | 'url' | 'xpub' | 'alias' | 'theme';
+type Step = 'type' | 'url' | 'xpub' | 'mnemonic' | 'alias' | 'theme';
 
 const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
-  const { addNwcWallet, addOnchainWallet } = useWallet();
+  const { addNwcWallet, addOnchainWallet, addHotWallet } = useWallet();
   const [step, setStep] = useState<Step>('type');
   const [walletType, setWalletType] = useState<WalletType>('nwc');
   const [nwcUrl, setNwcUrl] = useState('');
   const [xpub, setXpub] = useState('');
+  const [mnemonicInput, setMnemonicInput] = useState('');
   const [alias, setAlias] = useState('');
+  const [devMode, setDevMode] = useState(false);
   const [selectedTheme, setSelectedTheme] = useState<CardTheme>('lightning-piggy');
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,11 +53,16 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   const scrollRef = useRef<any>(null);
   const snapPoints = useMemo(() => ['90%'], []);
 
+  useEffect(() => {
+    AsyncStorage.getItem('dev_mode').then((v) => setDevMode(v === 'true'));
+  }, [visible]);
+
   const reset = useCallback(() => {
     setStep('type');
     setWalletType('nwc');
     setNwcUrl('');
     setXpub('');
+    setMnemonicInput('');
     setAlias('');
     setSelectedTheme('lightning-piggy');
     setError(null);
@@ -77,6 +86,30 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
       setSelectedTheme('bitcoin');
       setStep('xpub');
     }
+  };
+
+  const handleMnemonicSelect = () => {
+    setWalletType('onchain');
+    setSelectedTheme('bitcoin');
+    setError(null);
+    setStep('mnemonic');
+  };
+
+  // --- Step: Mnemonic ---
+  const handleMnemonicNext = () => {
+    const normalized = mnemonicInput
+      .replace(/[0-9.:;,]/g, '')
+      .replace(/[\r\n\t]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+    const wordCount = normalized.split(' ').length;
+    if (wordCount !== 12 && wordCount !== 24) {
+      setError(`Expected 12 or 24 words, got ${wordCount}`);
+      return;
+    }
+    setError(null);
+    setStep('alias');
   };
 
   // --- Step: NWC URL ---
@@ -114,7 +147,16 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
     setConnecting(true);
     setError(null);
     try {
-      if (walletType === 'onchain') {
+      if (walletType === 'onchain' && mnemonicInput.trim()) {
+        // Hot wallet (mnemonic)
+        const result = await addHotWallet(mnemonicInput, alias.trim(), selectedTheme);
+        if (result.success) {
+          handleClose();
+        } else {
+          setError(result.error || 'Failed to add wallet');
+        }
+      } else if (walletType === 'onchain') {
+        // Watch-only (xpub)
         const result = await addOnchainWallet(xpub.trim(), alias.trim(), selectedTheme);
         if (result.success) {
           handleClose();
@@ -198,6 +240,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
     type: 'Add Wallet',
     url: 'Step 1: Connect Wallet',
     xpub: 'Step 1: Import Public Key',
+    mnemonic: 'Step 1: Import Seed Phrase',
     alias: 'Step 2: Name Your Wallet',
     theme: 'Step 3: Choose a Design',
   };
@@ -206,9 +249,10 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
     switch (step) {
       case 'url':
       case 'xpub':
+      case 'mnemonic':
         return 'type';
       case 'alias':
-        return walletType === 'onchain' ? 'xpub' : 'url';
+        return mnemonicInput.trim() ? 'mnemonic' : walletType === 'onchain' ? 'xpub' : 'url';
       case 'theme':
         return 'alias';
       default:
@@ -273,6 +317,24 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                 </Text>
               </View>
             </TouchableOpacity>
+            {devMode && (
+              <TouchableOpacity
+                style={styles.typeCard}
+                onPress={handleMnemonicSelect}
+                testID="wallet-type-mnemonic"
+                accessibilityLabel="Import seed phrase"
+              >
+                <View style={styles.typeCardIconWrapper}>
+                  <LightningIcon size={28} color="#FF9800" strokeWidth={2.5} />
+                </View>
+                <View style={styles.typeCardText}>
+                  <Text style={styles.typeCardTitle}>Import Seed Phrase (Beta)</Text>
+                  <Text style={styles.typeCardDesc}>
+                    Import a 12 or 24 word mnemonic for a full hot wallet
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
@@ -396,6 +458,49 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                 </View>
               </>
             )}
+          </View>
+        )}
+
+        {/* Step: Mnemonic import (dev mode only) */}
+        {step === 'mnemonic' && (
+          <View style={styles.stepContent}>
+            <Text style={styles.description}>
+              Enter your 12 or 24 word seed phrase. Numbers, colons, and extra whitespace will be
+              stripped automatically.
+            </Text>
+            <TextInput
+              style={[styles.nwcInput, { minHeight: 100 }]}
+              placeholder="word1 word2 word3 ..."
+              placeholderTextColor={colors.textSupplementary}
+              value={mnemonicInput}
+              onChangeText={(text) => {
+                setMnemonicInput(text);
+                setError(null);
+              }}
+              multiline
+              autoCapitalize="none"
+              autoCorrect={false}
+              testID="mnemonic-input"
+              accessibilityLabel="Seed phrase input"
+            />
+            {error && <Text style={styles.errorText}>{error}</Text>}
+            <View style={styles.buttonRow}>
+              <TouchableOpacity
+                style={styles.backButton}
+                onPress={() => {
+                  setError(null);
+                  setStep('type');
+                }}
+              >
+                <Text style={styles.backButtonText}>Back</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.primaryButton, { flex: 1 }]}
+                onPress={handleMnemonicNext}
+              >
+                <Text style={styles.primaryButtonText}>Next</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
 

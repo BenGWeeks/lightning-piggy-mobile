@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import {
   View,
   Text,
@@ -65,11 +66,39 @@ const AccountScreen: React.FC = () => {
   const [qrDefaultMode, setQrDefaultMode] = useState<'npub' | 'lightning'>('npub');
   const [electrumHostPort, setElectrumHostPort] = useState('electrum.blockstream.info:50002');
   const [electrumSSL, setElectrumSSL] = useState(true);
+  const [devMode, setDevMode] = useState(false);
+  const versionTapCount = useRef(0);
+  const versionTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     setNameInput(userName);
   }, [userName]);
+
+  useEffect(() => {
+    AsyncStorage.getItem('dev_mode').then((v) => setDevMode(v === 'true'));
+  }, []);
+
+  const handleVersionTap = () => {
+    versionTapCount.current += 1;
+    if (versionTapTimer.current) clearTimeout(versionTapTimer.current);
+    if (versionTapCount.current >= 3) {
+      versionTapCount.current = 0;
+      const newMode = !devMode;
+      setDevMode(newMode);
+      AsyncStorage.setItem('dev_mode', newMode ? 'true' : 'false');
+      Alert.alert(
+        newMode ? 'Developer Mode Enabled' : 'Developer Mode Disabled',
+        newMode
+          ? 'Hot wallet options are now available in Add Wallet.'
+          : 'Hot wallet options hidden.',
+      );
+    } else {
+      versionTapTimer.current = setTimeout(() => {
+        versionTapCount.current = 0;
+      }, 1000);
+    }
+  };
 
   useEffect(() => {
     getElectrumServer().then((server) => {
@@ -412,6 +441,14 @@ const AccountScreen: React.FC = () => {
         <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
           <Text style={styles.saveButtonText}>Save</Text>
         </TouchableOpacity>
+
+        {/* Version — triple-tap to toggle developer mode */}
+        <TouchableOpacity onPress={handleVersionTap} activeOpacity={1}>
+          <Text style={styles.versionText}>
+            v{Constants.expoConfig?.version ?? '1.0.0'}
+            {devMode ? ' (dev)' : ''}
+          </Text>
+        </TouchableOpacity>
       </ScrollView>
 
       <NostrLoginSheet visible={loginSheetOpen} onClose={() => setLoginSheetOpen(false)} />
@@ -718,6 +755,13 @@ const styles = StyleSheet.create({
     color: colors.brandPink,
     fontSize: 16,
     fontWeight: '700',
+  },
+  versionText: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 12,
+    textAlign: 'center',
+    paddingTop: 8,
+    paddingBottom: 24,
   },
 });
 
