@@ -223,9 +223,10 @@ const AccountScreen: React.FC = () => {
             </View>
 
             {profile.lud16 && (
-              <Text style={styles.profileLn}>
-                <Zap size={14} color={colors.white} /> {profile.lud16}
-              </Text>
+              <View style={styles.profileLnRow}>
+                <Zap size={14} color={colors.white} />
+                <Text style={styles.profileLn}>{profile.lud16}</Text>
+              </View>
             )}
 
             <TouchableOpacity
@@ -518,11 +519,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
+  profileLnRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    gap: 4,
+  },
   profileLn: {
     color: colors.textBody,
     fontSize: 14,
-    paddingHorizontal: 16,
-    paddingBottom: 12,
   },
   editProfileButton: {
     margin: 16,
