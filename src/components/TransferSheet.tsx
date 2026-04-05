@@ -140,11 +140,16 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       const fee = boltzService.calculateSwapFee(currentSats, cachedBoltzFees);
       setFeeEstimate(`~${fee.toLocaleString()} sats \u00B7 ~10-60 min (Boltz swap)`);
     } else if (transferType === 'onchain-to-onchain') {
-      onchainService.estimateOnchainFee().then((fees) => {
-        setFeeEstimate(
-          `~${fees.medium.toLocaleString()} sats \u00B7 ~10-60 min (on-chain)`,
-        );
-      });
+      onchainService
+        .estimateOnchainFee()
+        .then((fees) => {
+          setFeeEstimate(
+            `~${fees.medium.toLocaleString()} sats \u00B7 ~10-60 min (on-chain)`,
+          );
+        })
+        .catch(() => {
+          setFeeEstimate('Fee estimate unavailable');
+        });
     }
   }, [transferType, currentSats, cachedBoltzFees]);
 
@@ -309,17 +314,25 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         await SecureStore.deleteItemAsync(`boltz_swap_${swap.id}`);
       } else if (transferType === 'onchain-to-ln') {
         // Boltz submarine swap: on-chain → Lightning
-        // Step 1: Generate LN invoice on the destination NWC wallet
         const invoice = await makeInvoiceForWallet(destId, currentSats, 'Transfer');
-
-        // Step 2: Create swap with Boltz — returns an on-chain address
         const swap = await boltzService.createSubmarineSwapForward(invoice);
 
-        // Step 3: Send BTC on-chain to Boltz's address from the hot wallet
-        await onchainService.sendTransaction(sourceId, swap.address, swap.expectedAmount);
+        // Persist swap state for crash recovery
+        await SecureStore.setItemAsync(
+          `submarine_swap_${swap.id}`,
+          JSON.stringify({
+            id: swap.id,
+            address: swap.address,
+            expectedAmount: swap.expectedAmount,
+            createdAt: Date.now(),
+          }),
+        );
 
-        // Step 4: Wait for Boltz to detect the on-chain payment and pay the LN invoice
+        await onchainService.sendTransaction(sourceId, swap.address, swap.expectedAmount);
         await boltzService.waitForSubmarineSwapComplete(swap.id, 120000);
+
+        // Clean up persisted swap state on success
+        await SecureStore.deleteItemAsync(`submarine_swap_${swap.id}`);
       } else if (transferType === 'onchain-to-onchain') {
         // Direct on-chain send from hot wallet
         const address = await onchainService.getNextReceiveAddress(destId);

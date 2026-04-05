@@ -93,13 +93,24 @@ function generateClaimKeyPair(): { privateKey: Uint8Array; publicKey: Uint8Array
   };
 }
 
+/** Fetch with a timeout to prevent hanging on slow/unreachable APIs. */
+async function fetchWithTimeout(url: string, init?: RequestInit, timeoutMs = 10000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
  * Fetch current reverse swap fee schedule (BTC Lightning → BTC on-chain).
  */
 export async function getReverseSwapFees(): Promise<SwapFees> {
-  const res = await fetch(`${BOLTZ_API}/swap/reverse`);
+  const res = await fetchWithTimeout(`${BOLTZ_API}/swap/reverse`);
   if (!res.ok) throw new Error(`Boltz API error: ${res.status}`);
   const data = await res.json();
 
@@ -121,7 +132,7 @@ export const getSwapFees = getReverseSwapFees;
  * Fetch current submarine swap fee schedule (BTC on-chain → BTC Lightning).
  */
 export async function getSubmarineSwapFees(): Promise<SwapFees> {
-  const res = await fetch(`${BOLTZ_API}/swap/submarine`);
+  const res = await fetchWithTimeout(`${BOLTZ_API}/swap/submarine`);
   if (!res.ok) throw new Error(`Boltz API error: ${res.status}`);
   const data = await res.json();
 
@@ -153,6 +164,10 @@ export async function createReverseSwap(
   onchainAddress: string,
   amountSats: number,
 ): Promise<ReverseSwapResult> {
+  if (!isBitcoinAddress(onchainAddress)) {
+    throw new Error('Invalid destination Bitcoin address');
+  }
+
   // Generate preimage and its SHA-256 hash
   const preimageBytes = new Uint8Array(32);
   crypto.getRandomValues(preimageBytes);
@@ -164,7 +179,7 @@ export async function createReverseSwap(
   const claimKeys = generateClaimKeyPair();
   const claimPublicKey = toHex(claimKeys.publicKey);
 
-  const res = await fetch(`${BOLTZ_API}/swap/reverse`, {
+  const res = await fetchWithTimeout(`${BOLTZ_API}/swap/reverse`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -207,21 +222,26 @@ export async function waitForLockup(
   const start = Date.now();
 
   while (Date.now() - start < timeoutMs) {
-    const res = await fetch(`${BOLTZ_API}/swap/reverse/${swapId}`);
+    const res = await fetchWithTimeout(`${BOLTZ_API}/swap/reverse/${swapId}`);
     if (!res.ok) throw new Error(`Boltz status check failed: ${res.status}`);
     const data = await res.json();
 
     if (data.status === 'transaction.mempool' || data.status === 'transaction.confirmed') {
       const txId = data.transaction?.id;
+      const vout = data.transaction?.index;
       const amount = data.onchainAmount;
-      if (!txId || !amount) {
-        throw new Error(`Boltz lockup missing transaction data: txId=${txId}, amount=${amount}`);
+
+      if (typeof txId !== 'string' || txId.length === 0) {
+        throw new Error(`Boltz lockup missing valid transaction.id for swap ${swapId}`);
       }
-      return {
-        txId,
-        vout: data.transaction?.index ?? 0,
-        amount,
-      };
+      if (!Number.isInteger(vout) || vout < 0) {
+        throw new Error(`Boltz lockup missing valid transaction.index for swap ${swapId}`);
+      }
+      if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+        throw new Error(`Boltz lockup missing valid onchainAmount for swap ${swapId}`);
+      }
+
+      return { txId, vout, amount };
     }
 
     if (data.status === 'swap.expired' || data.status === 'swap.refunded') {
@@ -335,14 +355,17 @@ export async function claimSwap(
 }
 
 /**
- * Validate that a string looks like a Bitcoin on-chain address.
+ * Validate that a string is a valid Bitcoin on-chain address (with checksum).
+ * Uses bitcoinjs-lib's address.toOutputScript which validates format + checksum.
  */
 export function isBitcoinAddress(input: string): boolean {
   const trimmed = input.trim();
-  if (/^1[a-km-zA-HJ-NP-Z1-9]{25,34}$/.test(trimmed)) return true;
-  if (/^3[a-km-zA-HJ-NP-Z1-9]{25,34}$/.test(trimmed)) return true;
-  if (/^bc1[a-zA-HJ-NP-Z0-9]{25,62}$/i.test(trimmed)) return true;
-  return false;
+  try {
+    bitcoin.address.toOutputScript(trimmed);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ─── Submarine swap (on-chain → Lightning) ───────────────────────────────────
@@ -373,7 +396,7 @@ export async function createSubmarineSwapForward(
   // Generate a refund keypair — needed if swap fails and we need refund
   const refundKeys = generateClaimKeyPair();
 
-  const res = await fetch(`${BOLTZ_API}/swap/submarine`, {
+  const res = await fetchWithTimeout(`${BOLTZ_API}/swap/submarine`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -408,7 +431,7 @@ export async function waitForSubmarineSwapComplete(
   const start = Date.now();
 
   while (Date.now() - start < timeoutMs) {
-    const res = await fetch(`${BOLTZ_API}/swap/submarine/${swapId}`);
+    const res = await fetchWithTimeout(`${BOLTZ_API}/swap/submarine/${swapId}`);
     if (!res.ok) throw new Error(`Boltz status check failed: ${res.status}`);
     const data = await res.json();
 

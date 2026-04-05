@@ -32,13 +32,19 @@ export interface WalletMetadata {
   electrumServer?: string;
 }
 
+export type TransactionType = 'incoming' | 'outgoing';
+
 export interface WalletTransaction {
-  type: string;
+  type: TransactionType;
   amount: number;
   description?: string;
   created_at?: number | null;
   settled_at?: number | null;
   blockHeight?: number | null;
+  /** Boltz swap details (if this transaction was part of a swap) */
+  swapId?: string;
+  swapType?: 'reverse' | 'submarine';
+  claimTxId?: string;
 }
 
 /** Format wallet name with type suffix for dropdowns */

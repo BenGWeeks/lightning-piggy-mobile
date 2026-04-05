@@ -198,21 +198,20 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
         // Connect wallets sequentially to avoid overwhelming the relay
         for (const wallet of walletList) {
-          await (async () => {
+          try {
             if (wallet.walletType === 'onchain') {
-              // On-chain wallet: fetch balance from block explorer
               const bal = await onchainService.getBalance(wallet.id);
               setWallets((prev) =>
                 prev.map((w) =>
                   w.id === wallet.id ? { ...w, isConnected: false, balance: bal } : w,
                 ),
               );
-              return;
+              continue;
             }
 
             // NWC wallet: connect via Nostr
             const nwcUrl = await walletStorage.getNwcUrl(wallet.id);
-            if (!nwcUrl) return;
+            if (!nwcUrl) continue;
 
             const result = await nwcService.connect(wallet.id, nwcUrl);
             if (result.success) {
@@ -233,7 +232,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 ),
               );
 
-              // Update lightning address from first connected wallet if not set
               if ((lud16 || info?.lud16) && !savedAddress) {
                 const addr = lud16 || info?.lud16 || null;
                 if (addr) {
@@ -242,7 +240,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 }
               }
             }
-          })();
+          } catch (error) {
+            console.warn(`Failed to connect wallet ${wallet.alias} (${wallet.id}):`, error);
+          }
         }
       } catch (error) {
         console.warn('Wallet startup failed:', error);

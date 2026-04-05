@@ -61,6 +61,28 @@ export interface OnchainTransaction {
   timestamp: number | null;
 }
 
+/** Map a BDK transaction to our OnchainTransaction type and sort by timestamp (newest first). */
+function mapAndSortTransactions(txList: any[]): OnchainTransaction[] {
+  return txList
+    .map((tx) => {
+      const net = tx.received - tx.sent;
+      return {
+        txid: tx.txid,
+        type: net >= 0 ? ('incoming' as const) : ('outgoing' as const),
+        amount: Math.abs(net),
+        confirmed: tx.confirmationTime != null,
+        blockHeight: tx.confirmationTime?.height ?? null,
+        timestamp: tx.confirmationTime?.timestamp ?? null,
+      };
+    })
+    .sort((a, b) => {
+      if (a.timestamp === null && b.timestamp === null) return 0;
+      if (a.timestamp === null) return -1;
+      if (b.timestamp === null) return 1;
+      return b.timestamp - a.timestamp;
+    });
+}
+
 // ─── Internal state ───────────────────────────────────────────────────────────
 
 const bdkWallets = new Map<string, Wallet>();
@@ -207,26 +229,7 @@ export async function syncAndRefresh(
     const bal = await wallet.getBalance();
     const txList = await wallet.listTransactions(false);
 
-    const transactions = txList
-      .map((tx) => {
-        const net = tx.received - tx.sent;
-        return {
-          txid: tx.txid,
-          type: net >= 0 ? ('incoming' as const) : ('outgoing' as const),
-          amount: Math.abs(net),
-          confirmed: tx.confirmationTime != null,
-          blockHeight: tx.confirmationTime?.height ?? null,
-          timestamp: tx.confirmationTime?.timestamp ?? null,
-        };
-      })
-      .sort((a, b) => {
-        if (a.timestamp === null && b.timestamp === null) return 0;
-        if (a.timestamp === null) return -1;
-        if (b.timestamp === null) return 1;
-        return b.timestamp - a.timestamp;
-      });
-
-    return { balance: bal.total, transactions };
+    return { balance: bal.total, transactions: mapAndSortTransactions(txList) };
   } catch (e) {
     console.warn('onchainService.syncAndRefresh failed:', e);
     blockchain = null;
@@ -247,24 +250,7 @@ export async function getTransactions(walletId: string): Promise<OnchainTransact
 
     const txList = await wallet.listTransactions(false);
 
-    return txList
-      .map((tx) => {
-        const net = tx.received - tx.sent;
-        return {
-          txid: tx.txid,
-          type: net >= 0 ? ('incoming' as const) : ('outgoing' as const),
-          amount: Math.abs(net),
-          confirmed: tx.confirmationTime != null,
-          blockHeight: tx.confirmationTime?.height ?? null,
-          timestamp: tx.confirmationTime?.timestamp ?? null,
-        };
-      })
-      .sort((a, b) => {
-        if (a.timestamp === null && b.timestamp === null) return 0;
-        if (a.timestamp === null) return -1;
-        if (b.timestamp === null) return 1;
-        return b.timestamp - a.timestamp;
-      });
+    return mapAndSortTransactions(txList);
   } catch (e) {
     console.warn('onchainService.getTransactions failed:', e);
     blockchain = null;
@@ -282,12 +268,23 @@ export async function isWatchOnly(walletId: string): Promise<boolean> {
  * Send on-chain Bitcoin from a hot wallet.
  * Only works for wallets with stored mnemonics (not watch-only).
  */
+const MIN_FEE_RATE = 1;
+const MAX_FEE_RATE = 500;
+
 export async function sendTransaction(
   walletId: string,
   toAddress: string,
   amountSats: number,
   feeRate: number = 2,
 ): Promise<string> {
+  const watchOnly = await isWatchOnly(walletId);
+  if (watchOnly) {
+    throw new Error('Cannot send from a watch-only wallet — no signing key available');
+  }
+  if (feeRate < MIN_FEE_RATE || feeRate > MAX_FEE_RATE) {
+    throw new Error(`Fee rate must be between ${MIN_FEE_RATE} and ${MAX_FEE_RATE} sat/vB, got ${feeRate}`);
+  }
+
   const { TxBuilder, Address } = await import('bdk-rn');
 
   const wallet = await getBdkWallet(walletId);
@@ -323,9 +320,11 @@ export function disconnectElectrum(): void {
  * Uses BDK's blockchain.broadcast which handles the Electrum protocol.
  */
 export async function broadcastRawTx(txHex: string): Promise<void> {
+  if (!txHex || txHex.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(txHex)) {
+    throw new Error('Invalid transaction hex: must be a non-empty even-length hex string');
+  }
   const { Transaction } = await import('bdk-rn');
   const chain = await getBlockchain();
-  // Convert hex string to byte array for BDK
   const bytes: number[] = [];
   for (let i = 0; i < txHex.length; i += 2) {
     bytes.push(parseInt(txHex.substring(i, i + 2), 16));

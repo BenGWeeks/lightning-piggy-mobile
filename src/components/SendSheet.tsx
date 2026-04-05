@@ -220,8 +220,10 @@ const SendSheet: React.FC<Props> = ({
       if (qIndex >= 0) {
         const params = new URLSearchParams(withoutScheme.substring(qIndex + 1));
         const amountBtc = parseFloat(params.get('amount') ?? '');
-        if (amountBtc > 0) {
+        if (amountBtc > 0 && amountBtc <= 21_000_000) {
           bip21Amount = Math.round(amountBtc * 100_000_000);
+        } else if (amountBtc > 21_000_000) {
+          console.warn('BIP-21 amount exceeds Bitcoin max supply, ignoring');
         }
         input = withoutScheme.substring(0, qIndex);
       } else {

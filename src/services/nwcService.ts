@@ -157,7 +157,9 @@ function patchRelayPublish(provider: NostrWebLNProvider): void {
           relay._publishPatched = true;
           const origPublish = relay.publish.bind(relay);
           relay.publish = (event: any) => {
-            origPublish(event).catch(() => {}); // fire and forget
+            origPublish(event).catch((err: unknown) => {
+              console.warn('[NWC] Relay publish failed (fire-and-forget):', err);
+            });
             return Promise.resolve(); // resolve immediately
           };
         }
