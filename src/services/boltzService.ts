@@ -230,7 +230,7 @@ export async function waitForLockup(
   const start = Date.now();
 
   while (Date.now() - start < timeoutMs) {
-    const res = await fetchWithTimeout(`${BOLTZ_API}/swap/reverse/${swapId}`);
+    const res = await fetchWithTimeout(`${BOLTZ_API}/swap/${swapId}`);
     if (!res.ok) throw new Error(`Boltz status check failed: ${res.status}`);
     const data = await res.json();
 
@@ -437,7 +437,7 @@ export async function waitForSubmarineSwapComplete(
   const start = Date.now();
 
   while (Date.now() - start < timeoutMs) {
-    const res = await fetchWithTimeout(`${BOLTZ_API}/swap/submarine/${swapId}`);
+    const res = await fetchWithTimeout(`${BOLTZ_API}/swap/${swapId}`);
     if (!res.ok) throw new Error(`Boltz status check failed: ${res.status}`);
     const data = await res.json();
 
