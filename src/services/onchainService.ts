@@ -129,6 +129,47 @@ async function getBdkWallet(walletId: string): Promise<Wallet> {
   return wallet;
 }
 
+// ─── Fee estimation ──────────────────────────────────────────────────────────
+
+const MEMPOOL_API = 'https://mempool.space/api/v1/fees/recommended';
+const TYPICAL_VBYTES = 140; // 1-in-1-out native SegWit
+
+let cachedFees: { fast: number; medium: number; slow: number; timestamp: number } | null = null;
+const FEE_CACHE_MS = 60_000; // 1 minute
+
+/**
+ * Fetch recommended fee rates from mempool.space.
+ * Returns estimated transaction fees in sats for a typical 1-in-1-out tx.
+ */
+export async function estimateOnchainFee(): Promise<{
+  fast: number;
+  medium: number;
+  slow: number;
+}> {
+  if (cachedFees && Date.now() - cachedFees.timestamp < FEE_CACHE_MS) {
+    return cachedFees;
+  }
+
+  try {
+    const res = await fetch(MEMPOOL_API);
+    if (!res.ok) throw new Error(`mempool.space API error: ${res.status}`);
+    const data = await res.json();
+
+    const fees = {
+      fast: Math.ceil((data.fastestFee ?? 5) * TYPICAL_VBYTES),
+      medium: Math.ceil((data.halfHourFee ?? 3) * TYPICAL_VBYTES),
+      slow: Math.ceil((data.hourFee ?? 1) * TYPICAL_VBYTES),
+      timestamp: Date.now(),
+    };
+    cachedFees = fees;
+    return fees;
+  } catch (e) {
+    console.warn('estimateOnchainFee failed:', e);
+    // Fallback estimate
+    return { fast: 700, medium: 420, slow: 140 };
+  }
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export function validateXpub(extPubKey: string): string | null {

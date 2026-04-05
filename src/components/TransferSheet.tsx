@@ -140,7 +140,11 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       const fee = boltzService.calculateSwapFee(currentSats, cachedBoltzFees);
       setFeeEstimate(`~${fee.toLocaleString()} sats \u00B7 ~10-60 min (Boltz swap)`);
     } else if (transferType === 'onchain-to-onchain') {
-      setFeeEstimate('~200-2000 sats \u00B7 ~10-60 min (on-chain)');
+      onchainService.estimateOnchainFee().then((fees) => {
+        setFeeEstimate(
+          `~${fees.medium.toLocaleString()} sats \u00B7 ~10-60 min (on-chain)`,
+        );
+      });
     }
   }, [transferType, currentSats, cachedBoltzFees]);
 

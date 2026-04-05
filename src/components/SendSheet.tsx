@@ -120,6 +120,7 @@ const SendSheet: React.FC<Props> = ({
   const [isOnchainAddress, setIsOnchainAddress] = useState(false);
   const [boltzFees, setBoltzFees] = useState<boltzService.SwapFees | null>(null);
   const [loadingBoltzFees, setLoadingBoltzFees] = useState(false);
+  const [onchainFeeEstimate, setOnchainFeeEstimate] = useState<string | null>(null);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
 
   const snapPoints = useMemo(() => ['90%'], []);
@@ -245,7 +246,7 @@ const SendSheet: React.FC<Props> = ({
           setFiatValue(satsToFiat(bip21Amount, btcPrice).toFixed(2));
         }
       }
-      // Fetch Boltz swap fees
+      // Fetch fees (Boltz for LN wallets, miner fee for hot wallets)
       setLoadingBoltzFees(true);
       boltzService
         .getSwapFees()
@@ -258,6 +259,12 @@ const SendSheet: React.FC<Props> = ({
         .finally(() => {
           setLoadingBoltzFees(false);
         });
+      // Fetch on-chain fee estimate for hot wallets
+      onchainService.estimateOnchainFee().then((fees) => {
+        setOnchainFeeEstimate(
+          `~${fees.medium.toLocaleString()} sats miner fee \u00B7 ~10-60 min`,
+        );
+      });
     } else if (isValidInvoice(input)) {
       setIsOnchainAddress(false);
       setInvoiceData(input);
@@ -667,7 +674,7 @@ const SendSheet: React.FC<Props> = ({
                   <Text style={styles.feeText}>
                     {selectedWallet?.walletType === 'onchain' &&
                     selectedWallet?.onchainImportMethod === 'mnemonic'
-                      ? '~200-2000 sats miner fee \u00B7 ~10-60 min'
+                      ? onchainFeeEstimate ?? 'Estimating fee...'
                       : loadingBoltzFees
                         ? 'Loading fees...'
                         : boltzFees
