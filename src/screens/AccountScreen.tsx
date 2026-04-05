@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import Constants from 'expo-constants';
 import {
   View,
   Text,
@@ -444,8 +443,8 @@ const AccountScreen: React.FC = () => {
 
         {/* Version — triple-tap to toggle developer mode */}
         <TouchableOpacity onPress={handleVersionTap} activeOpacity={1}>
-          <Text style={styles.versionText}>
-            v{Constants.expoConfig?.version ?? '1.0.0'}
+          <Text style={styles.versionText} testID="version-text">
+            v{require('../../package.json').version}
             {devMode ? ' (dev)' : ''}
           </Text>
         </TouchableOpacity>
