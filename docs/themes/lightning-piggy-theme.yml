@@ -1,0 +1,229 @@
+extends: default
+
+font:
+  catalog:
+    merge: true
+    DejaVu Sans Mono:
+      normal: DejaVuSansMono.ttf
+      bold: DejaVuSansMono-Bold.ttf
+      italic: DejaVuSansMono-Oblique.ttf
+      bold_italic: DejaVuSansMono-BoldOblique.ttf
+
+# Lightning Piggy Brand Colors
+# Primary Pink: #EC008C
+# Pink Light: #FFF0F5
+# Text Header: #15171A
+# Text Body: #333333
+# Text Secondary: #7C8B9A
+# Background: #F5F5F5
+# Divider: #DDE1E3
+
+labels:
+  chapter: ~
+  part: ~
+
+page:
+  size: A4
+  layout: portrait
+  margin: [0.75in, 1in, 0.75in, 1in]
+  background_color: FFFFFF
+
+base:
+  font_family: Helvetica
+  font_size: 10
+  line_height: 1.4
+  text_align: left
+  font_color: 333333
+
+link:
+  font_color: EC008C
+
+header:
+  font_family: Helvetica
+  font_size: 9
+  font_color: 7C8B9A
+  height: 0.5in
+  line_height: 1
+  vertical_align: bottom
+  border_color: EC008C
+  border_width: 0.5
+  recto:
+    left:
+      content: ~
+    center:
+      content: ~
+    right:
+      content: '{document-title}'
+  verso:
+    left:
+      content: '{document-title}'
+    center:
+      content: ~
+    right:
+      content: ~
+
+footer:
+  font_family: Helvetica
+  font_size: 9
+  font_color: 7C8B9A
+  height: 0.5in
+  line_height: 1
+  vertical_align: top
+  border_color: EC008C
+  border_width: 0.5
+  recto:
+    left:
+      content: 'Lightning Piggy'
+    center:
+      content: ~
+    right:
+      content: '{page-number}'
+  verso:
+    left:
+      content: 'Lightning Piggy'
+    center:
+      content: ~
+    right:
+      content: '{page-number}'
+
+title_page:
+  font_family: Helvetica
+  background_image: image:../images/cover-background.png[fit=fill]
+  title:
+    top: 35%
+    font_size: 27
+    font_color: EC008C
+    line_height: 1.3
+    align: left
+    margin_left: 230
+  subtitle:
+    font_size: 15
+    font_color: 15171A
+    line_height: 1.2
+    margin_top: 12
+    margin_left: 230
+    align: left
+  authors:
+    font_size: 10
+    font_color: EC008C
+    align: left
+    margin_top: 30
+    margin_left: 230
+  revision:
+    font_size: 9
+    font_color: 7C8B9A
+    align: left
+    margin_top: 2
+    margin_left: 230
+
+chapter:
+  font_family: Helvetica
+  font_size: 18
+  font_color: 15171A
+  align: left
+  display_label: false
+
+heading:
+  font_family: Helvetica
+  font_color: 15171A
+  chapter:
+    break-before: always
+  h1_font_size: 18
+  h1_font_color: 15171A
+  h2_font_size: 15
+  h2_font_color: EC008C
+  h3_font_size: 12
+  h3_font_color: 15171A
+  h4_font_size: 11
+  h4_font_color: 7C8B9A
+  h5_font_size: 10
+  h6_font_size: 10
+
+list:
+  font_family: Helvetica
+  indent: 20
+  item_spacing: 4
+
+ulist:
+  font_family: Helvetica
+  marker_font_size: 10
+  text_indent: 15
+  marker_indent: 0
+
+olist:
+  font_family: Helvetica
+  marker_font_size: 10
+  text_indent: 15
+  marker_indent: 0
+
+table:
+  font_family: Helvetica
+  width: 100%
+  font_size: 8
+  cell_padding: 3
+  border_color: DDE1E3
+  border_width: 0.5
+  head:
+    font_family: Helvetica
+    font_style: bold
+    font_size: 8
+    font_color: FFFFFF
+    background_color: 15171A
+  body:
+    font_family: Helvetica
+    font_size: 8
+    stripe_background_color: FFF0F5
+
+code:
+  font_family: DejaVu Sans Mono
+  font_size: 9
+  background_color: FFF0F5
+  border_color: DDE1E3
+  border_width: 0.5
+
+codespan:
+  font_family: DejaVu Sans Mono
+  font_size: 9
+
+sidebar:
+  font_family: Helvetica
+  font_size: 10
+  background_color: FFF0F5
+  border_color: EC008C
+  border_width: 1
+
+admonition:
+  font_family: Helvetica
+  font_size: 10
+  label:
+    font_color: EC008C
+  icon:
+    important:
+      stroke_color: EC3A31
+    note:
+      stroke_color: 3A85A9
+    tip:
+      stroke_color: 2D7A5F
+    warning:
+      stroke_color: D8A300
+    caution:
+      stroke_color: EC3A31
+
+quote:
+  font_family: Helvetica
+  font_size: 10
+  font_color: 7C8B9A
+  border_color: EC008C
+  border_width: 3
+
+role:
+  grey:
+    font_color: 999999
+
+toc:
+  font_family: Helvetica
+  font_size: 10
+  line_height: 1.5
+  indent: 16
+  dot_leader:
+    font_color: C8C8C8

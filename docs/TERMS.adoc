@@ -1,0 +1,81 @@
+== Terms
+
+A glossary of key terms used throughout this document.
+
+[cols="1,3", options="header"]
+|===
+| Term | Definition
+
+| **ADB**
+| Android Debug Bridge — a command-line tool for communicating with Android devices and emulators during development.
+
+| **Amber**
+| An Android signing app for Nostr. Amber holds the user's private key and signs events on behalf of other apps via NIP-55 intents, so the private key never leaves the signer.
+
+| **AsyncStorage**
+| React Native's persistent key-value storage for non-sensitive data. Used for wallet metadata, user preferences, onboarding state, and cached Nostr contacts.
+
+| **Bitcoin**
+| A decentralised digital currency using peer-to-peer technology. Lightning Piggy enables Bitcoin payments via the Lightning Network.
+
+| **Bottom Sheet**
+| A UI component that slides up from the bottom of the screen. Used for login, send/receive, profile editing, and wallet settings. Implemented with `@gorhom/bottom-sheet`.
+
+| **Deep Link**
+| A URL that opens a specific screen within the app. Lightning Piggy registers the `lightningpiggy://` scheme for Amber callbacks.
+
+| **EAS**
+| Expo Application Services — cloud-based build and submission infrastructure for building, deploying, and updating React Native apps.
+
+| **Expo**
+| A framework and platform for React Native applications. Lightning Piggy uses Expo SDK 55 with a custom dev client for native module support.
+
+| **FlashList**
+| `@shopify/flash-list` — a high-performance list component that uses cell recycling for 5-10x faster rendering than FlatList. Used for the contacts list on the Friends screen.
+
+| **Lightning Address**
+| An email-like identifier (e.g. `user@wallet.com`) that resolves to a Lightning payment endpoint via the LNURL-pay protocol (LUD-16).
+
+| **Lightning Network**
+| A Layer 2 payment protocol built on top of Bitcoin, enabling instant, low-cost transactions. All payments in Lightning Piggy use the Lightning Network.
+
+| **LNURL**
+| A set of protocols for interacting with Lightning Network services via HTTP. Lightning Piggy uses LNURL-pay (LUD-16) for resolving lightning addresses to bolt11 invoices.
+
+| **Maestro**
+| A mobile UI testing framework used for end-to-end (E2E) tests. Tests are written in YAML and interact with the app via accessibility labels and test IDs.
+
+| **Metro**
+| The JavaScript bundler used by React Native. Metro compiles and serves the JavaScript bundle to the app during development.
+
+| **NIP**
+| Nostr Implementation Possibility — a numbered specification in the Nostr protocol. Key NIPs used: NIP-01 (events), NIP-19 (bech32 encoding), NIP-55 (Android signer), NIP-57 (zaps), NIP-65 (relay lists).
+
+| **Nostr**
+| An open protocol for decentralised social networking. Lightning Piggy uses Nostr for identity, social features (friends, profiles), and zaps.
+
+| **npub / nsec**
+| Bech32-encoded Nostr public key (`npub1...`) and secret key (`nsec1...`). The npub is the user's public identity; the nsec is their private signing key.
+
+| **NWC**
+| Nostr Wallet Connect — an open protocol for connecting Lightning wallets to applications via Nostr relays. Lightning Piggy uses NWC (via the Alby SDK) for all wallet operations.
+
+| **React Native**
+| A framework for building native mobile apps using React and TypeScript. Lightning Piggy targets both iOS and Android from a single codebase.
+
+| **Relay**
+| A server in the Nostr network that stores and forwards events. Lightning Piggy connects to multiple relays for profile data, contact lists, and publishing events.
+
+| **Sats**
+| Satoshis — the smallest unit of Bitcoin (1 BTC = 100,000,000 sats). All Lightning payments in the app are denominated in sats.
+
+| **SecureStore**
+| Expo's encrypted storage for sensitive data. Uses the device keychain on iOS and encrypted shared preferences on Android. Stores NWC URLs, Nostr private keys, and signer type.
+
+| **TypeScript**
+| A typed superset of JavaScript. Lightning Piggy uses strict TypeScript with `tsc --noEmit` for type checking.
+
+| **Zap**
+| A Lightning payment sent via the Nostr protocol (NIP-57). Zaps attach a payment to a Nostr identity, enabling tipping between users on the Friends screen.
+
+|===

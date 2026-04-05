@@ -1,0 +1,299 @@
+== Deployment
+
+This guide covers building, deploying, and distributing the Lightning Piggy mobile app.
+
+=== App Variants
+
+Lightning Piggy supports three build variants, each with distinct identifiers so they can be installed side-by-side on the same device.
+
+[cols="1,2,2,2", options="header"]
+|===
+| Variant | App Name | iOS Bundle ID | Android Package
+
+| **Development**
+| Lightning Piggy (Dev)
+| `com.bengweeks.lightningpiggy.dev`
+| `com.anonymous.lightningpiggyapp.dev`
+
+| **Preview**
+| Lightning Piggy (Preview)
+| `com.bengweeks.lightningpiggy.preview`
+| `com.anonymous.lightningpiggyapp.preview`
+
+| **Production**
+| Lightning Piggy
+| `com.bengweeks.lightningpiggy`
+| `com.anonymous.lightningpiggyapp`
+
+|===
+
+Variants are selected via the `APP_VARIANT` environment variable in `app.config.ts`. The development variant uses a blue adaptive icon background (`#4A90D9`) to distinguish it visually from production (`#E6F4FE`).
+
+=== EAS Build Profiles
+
+Build profiles are defined in `eas.json`:
+
+[cols="1,1,1,2", options="header"]
+|===
+| Profile | Distribution | Android Build Type | Notes
+
+| `development`
+| Internal
+| APK
+| For local development and testing
+
+| `preview`
+| Internal
+| APK
+| For internal distribution to testers
+
+| `production`
+| Store
+| App Bundle (AAB)
+| For Google Play Store submission
+
+|===
+
+=== Local Builds
+
+[source,bash]
+----
+# Development build for Android
+APP_VARIANT=development npx expo run:android
+
+# Production-like build
+npx expo run:android
+----
+
+=== EAS Cloud Builds
+
+[source,bash]
+----
+# Development APK
+eas build --platform android --profile development
+
+# Preview APK for testers
+eas build --platform android --profile preview
+
+# Production app bundle for Play Store
+eas build --platform android --profile production
+
+# iOS builds (macOS required for local, EAS for cloud)
+eas build --platform ios --profile production
+----
+
+=== Apple Developer Organisation Account
+
+To publish Lightning Piggy on the App Store and TestFlight, an Apple Developer Organisation account is required (an individual account is insufficient for an organisation-published app).
+
+==== Requirements
+
+* **Legal entity**: Lightning Piggy must be registered as a legal entity (company, LLC, etc.) that can enter contracts with Apple
+* **D-U-N-S Number**: A free Dun & Bradstreet number that verifies the organisation's identity. Apply at https://developer.apple.com/enroll/duns-lookup/ — processing takes up to 5 business days
+* **Public website**: A functioning website at a domain associated with the organisation (e.g. `lightningpiggy.com`)
+* **Account holder**: The person enrolling must have legal authority to bind the organisation (owner, founder, or executive)
+* **Apple Account**: Create a dedicated Apple Account using an organisation email (e.g. `dev@lightningpiggy.com`) with two-factor authentication enabled
+
+==== Enrollment Steps
+
+1. Visit https://developer.apple.com/programs/enroll/
+2. Sign in with the organisation's Apple Account
+3. Select "Organisation" as the entity type
+4. Enter the legal entity name and D-U-N-S Number
+5. Apple verifies the organisation (may take 1-2 business days, sometimes longer)
+6. Once verified, review the licence agreement and pay the $99 USD/year membership fee
+7. After payment, the organisation account is active and can manage certificates, provisioning profiles, and App Store Connect
+
+NOTE: The existing individual developer account can remain separate. The organisation account is a new, independent enrollment.
+
+=== iOS Distribution — TestFlight
+
+TestFlight is Apple's beta testing platform. EAS integrates directly with it.
+
+==== Quick Deploy
+
+Expo provides a streamlined command that builds and submits to TestFlight in one step:
+
+[source,bash]
+----
+# Build and submit to TestFlight (interactive — handles signing and API keys)
+npx testflight
+----
+
+This command walks through Apple ID sign-in, two-factor auth, certificate creation, and App Store Connect API key setup.
+
+==== Manual Steps
+
+[source,bash]
+----
+# 1. Build a production iOS archive
+eas build --platform ios --profile production
+
+# 2. Submit the build to TestFlight
+eas submit --platform ios
+----
+
+After submission, the build appears in App Store Connect under the TestFlight tab. Add internal testers (up to 100) or create external test groups (up to 10,000 testers).
+
+=== Android Distribution — Google Play Internal Testing
+
+Google Play's Internal Testing track is the Android equivalent of TestFlight.
+
+==== Setup
+
+1. Create a Google Play Developer account ($25 one-time fee) at https://play.google.com/console/
+2. Create the app listing in Google Play Console
+3. Set up a Google Service Account for automated uploads (EAS needs this)
+
+==== Deploy to Internal Testing
+
+[source,bash]
+----
+# 1. Build a production app bundle
+eas build --platform android --profile production
+
+# 2. Submit to Google Play (specify the internal track)
+eas submit --platform android
+----
+
+During `eas submit`, select the **internal** track. The app is then available to up to 100 internal testers added in Google Play Console.
+
+For wider testing, promote the build to the **closed** or **open** testing tracks.
+
+=== Zapstore (Nostr App Store)
+
+https://zapstore.dev[Zapstore] is a permissionless Android app store built on Nostr. Apps are discovered through social graphs, releases are cryptographically signed, and developers receive Bitcoin payments (zaps) directly from users.
+
+==== Why Zapstore
+
+* No registration or approval process — publish with a Nostr keypair
+* No fees — developers receive 100% of zaps
+* Cryptographic verification — releases are signed with your Nostr key; Zapstore verifies the signature on install
+* Native fit for a Bitcoin/Lightning app
+
+==== Publishing
+
+Install the `zsp` CLI tool:
+
+[source,bash]
+----
+# Install zsp (Zapstore Publisher)
+# See: https://github.com/zapstore/zsp
+----
+
+Publish a release:
+
+[source,bash]
+----
+# Build the APK
+eas build --platform android --profile preview
+
+# Run the publishing wizard (interactive)
+# Signs the release with your Nostr key and publishes metadata to relays
+zsp publish
+----
+
+The wizard guides you through source repository, metadata, signing, and relay selection. Signing options include `nsec`, NIP-07 browser extension, or NIP-46 bunker.
+
+To receive payments, add a Lightning address to your Nostr profile.
+
+=== F-Droid
+
+https://f-droid.org[F-Droid] is a catalogue of free and open-source Android apps. Publishing a React Native app to F-Droid requires additional steps because F-Droid builds apps from source and verifies all dependencies are FOSS.
+
+==== Key Considerations
+
+* F-Droid builds from source — the app must compile in their build environment
+* React Native apps have two dependency systems (npm + Gradle), both of which F-Droid scans for non-free components
+* The `android/` subdirectory must be specified via the `subdir` directive in the F-Droid metadata
+* Some npm dependencies may include pre-built binaries that F-Droid flags — these need to be reviewed and whitelisted or replaced
+
+==== Steps to Submit
+
+1. Ensure the app builds reproducibly from source
+2. Create a metadata file following the https://f-droid.org/docs/Build_Metadata_Reference/[F-Droid metadata format]
+3. Submit a merge request to the https://gitlab.com/fdroid/fdroiddata[fdroiddata] repository on GitLab
+4. F-Droid maintainers review the submission and verify the build
+
+See the official guide: https://f-droid.org/2020/10/14/adding-react-native-app-to-f-droid.html[Adding React Native Apps to F-Droid]
+
+=== Sideloading (Android / GrapheneOS)
+
+Users on Android, GrapheneOS, or other custom ROMs can install specific versions directly from APK files.
+
+==== From GitHub Releases
+
+Attach APK builds to GitHub Releases so users can download and install specific versions:
+
+[source,bash]
+----
+# Build an APK for sideloading
+eas build --platform android --profile preview
+
+# Download the APK from EAS
+eas build:list --platform android --status finished
+# Copy the build URL and download the APK
+
+# Attach to a GitHub Release
+gh release create v1.0.0 ./lightning-piggy.apk --title "v1.0.0" --notes "Release notes"
+----
+
+==== Installing on Device
+
+Users can install the APK by:
+
+1. **Direct download**: Download the `.apk` file from the GitHub Releases page on the device, then tap to install
+2. **ADB install**: Connect via USB and run `adb install lightning-piggy.apk`
+3. **Obtainium**: Users can add the GitHub repository to https://github.com/ImranR98/Obtainium[Obtainium], which automatically tracks releases and notifies users of updates
+4. **Zapstore**: If published to Zapstore, users can install and update from there
+
+On GrapheneOS, sideloading works the same as stock Android — enable "Install unknown apps" for the browser or file manager, then open the APK.
+
+==== Version Management
+
+Tag each release in Git and attach the corresponding APK to the GitHub Release. This gives users a clear history of versions to choose from:
+
+[source,bash]
+----
+# Tag a release
+git tag -a v1.0.0 -m "Release v1.0.0"
+git push origin v1.0.0
+----
+
+=== Expo Config Plugins
+
+The app uses custom Expo config plugins to modify native project settings during prebuild:
+
+[cols="1,3", options="header"]
+|===
+| Plugin | Purpose
+
+| `withAdjustResize`
+| Sets `android:windowSoftInputMode="adjustResize"` in AndroidManifest.xml. Required for bottom sheets to slide up correctly when the keyboard opens.
+
+| `withAmberQueries`
+| Adds the Amber signer package to the `<queries>` element in AndroidManifest.xml. Required on Android 11+ for the app to detect and communicate with Amber via NIP-55 intents.
+
+| `expo-secure-store`
+| Provides encrypted storage for sensitive credentials (NWC URLs, Nostr keys).
+
+| `expo-image-picker`
+| Camera and photo library access for profile picture selection. Permission message: "Allow Lightning Piggy to access your photos to set your profile picture."
+
+| `expo-contacts`
+| Device contacts access for finding friends. Permission message: "Allow Lightning Piggy to access your contacts to find friends."
+
+|===
+
+=== Deployment Checklist
+
+Before releasing to production:
+
+* [ ] TypeScript passes: `npx tsc --noEmit`
+* [ ] ESLint passes: `npm run lint`
+* [ ] Prettier passes: `npm run format:check`
+* [ ] App tested on physical Android device
+* [ ] App tested on physical iOS device (if applicable)
+* [ ] Version number incremented in `app.config.ts`
+* [ ] E2E tests pass: `maestro test tests/e2e/`
+* [ ] Git tag created for release version

@@ -1,0 +1,60 @@
+= Technical Solution Document
+Lightning Piggy — A Lightning Wallet for Kids
+:doctype: book
+:toc: macro
+:toclevels: 2
+:sectlinks:
+:sectanchors:
+:sectnums!:
+:chapter-signifier:
+:source-highlighter: highlight.js
+:icons: font
+:imagesdir: images
+:pdf-theme: lightning-piggy
+:pdf-themesdir: themes
+
+toc::[]
+
+== Document Information
+
+[cols="1,2",options="header"]
+|===
+|Attribute |Value
+
+|Document Title |Technical Solution Document — Lightning Piggy Mobile App
+|Version |1.0
+|Status |Draft
+|Author |ben@lightningpiggy.com
+|Project |lightning-piggy-mobile
+|Repository |https://github.com/BenGWeeks/lightning-piggy-mobile
+|===
+
+== Document History
+
+include::includes/document-history.adoc[]
+
+include::TERMS.adoc[]
+
+:sectnums:
+
+:leveloffset: +1
+
+include::SOLUTION_DESIGN.adoc[]
+
+:leveloffset: -1
+
+include::INSTALLATION.adoc[]
+
+include::DEPLOYMENT.adoc[]
+
+include::SECURITY.adoc[]
+
+include::TESTING.adoc[]
+
+<<<
+[appendix]
+:leveloffset: +1
+
+include::TROUBLESHOOTING.adoc[]
+
+:leveloffset: -1
