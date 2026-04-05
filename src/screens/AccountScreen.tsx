@@ -169,14 +169,10 @@ const AccountScreen: React.FC = () => {
     const enabled = await isNfcEnabled();
     setNfcEnabled(enabled);
     if (!enabled) {
-      Alert.alert(
-        'NFC is Off',
-        'Please enable NFC in your device settings to write to NFC tags.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Open Settings', onPress: openNfcSettings },
-        ],
-      );
+      Alert.alert('NFC is Off', 'Please enable NFC in your device settings to write to NFC tags.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Open Settings', onPress: openNfcSettings },
+      ]);
       return;
     }
     setNfcWriteOpen(true);

@@ -1,5 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, Image, TouchableOpacity, ScrollView, RefreshControl, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  Image,
+  TouchableOpacity,
+  ScrollView,
+  RefreshControl,
+  Alert,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
@@ -146,14 +154,10 @@ const HomeScreen: React.FC = () => {
   const handleNfcScan = async () => {
     const enabled = await isNfcEnabled();
     if (!enabled) {
-      Alert.alert(
-        'NFC is Off',
-        'Please enable NFC in your device settings to scan NFC tags.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Open Settings', onPress: openNfcSettings },
-        ],
-      );
+      Alert.alert('NFC is Off', 'Please enable NFC in your device settings to scan NFC tags.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Open Settings', onPress: openNfcSettings },
+      ]);
       return;
     }
 
@@ -200,7 +204,8 @@ const HomeScreen: React.FC = () => {
             const profileData: NostrProfile | null = await fetchProfile(hexPubkey, DEFAULT_RELAYS);
             setNfcContact({
               pubkey: hexPubkey,
-              name: profileData?.displayName || profileData?.name || result.data.slice(0, 16) + '...',
+              name:
+                profileData?.displayName || profileData?.name || result.data.slice(0, 16) + '...',
               picture: profileData?.picture || null,
               banner: profileData?.banner || null,
               nip05: profileData?.nip05 || null,

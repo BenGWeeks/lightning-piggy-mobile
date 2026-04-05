@@ -162,14 +162,10 @@ const ContactProfileSheet: React.FC<Props> = ({
     if (!contact?.pubkey) return;
     const enabled = await isNfcEnabled();
     if (!enabled) {
-      Alert.alert(
-        'NFC is Off',
-        'Please enable NFC in your device settings to write to NFC tags.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Open Settings', onPress: openNfcSettings },
-        ],
-      );
+      Alert.alert('NFC is Off', 'Please enable NFC in your device settings to write to NFC tags.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Open Settings', onPress: openNfcSettings },
+      ]);
       return;
     }
     setNfcWriteOpen(true);
@@ -181,7 +177,9 @@ const ContactProfileSheet: React.FC<Props> = ({
     const npub = npubEncode(contact.pubkey);
     const url = `https://primal.net/p/${npub}`;
     try {
-      await (await import('react-native')).Share.share({
+      await (
+        await import('react-native')
+      ).Share.share({
         message: `${contact.name}: ${url}`,
       });
     } catch {

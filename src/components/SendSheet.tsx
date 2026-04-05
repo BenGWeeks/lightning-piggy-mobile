@@ -126,7 +126,8 @@ const SendSheet: React.FC<Props> = ({
 
   const needsAmount =
     scanned &&
-    (isLightningAddress(invoiceData || '') || (invoiceData || '').toLowerCase().startsWith('lnurl1'));
+    (isLightningAddress(invoiceData || '') ||
+      (invoiceData || '').toLowerCase().startsWith('lnurl1'));
   const currentSats = parseInt(satsValue) || 0;
 
   const fiatToSats = (fiat: number): number => {

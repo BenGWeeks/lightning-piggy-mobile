@@ -14,28 +14,10 @@ const NfcIcon: React.FC<Props> = ({ size = 24, color = '#EC008C' }) => (
       fill={color}
       opacity={0.3}
     />
-    <Path
-      d="M7 12c0-2.76 2.24-5 5-5"
-      stroke={color}
-      strokeWidth={2}
-      strokeLinecap="round"
-    />
-    <Path
-      d="M5 12c0-3.87 3.13-7 7-7"
-      stroke={color}
-      strokeWidth={2}
-      strokeLinecap="round"
-    />
-    <Path
-      d="M3 12c0-4.97 4.03-9 9-9"
-      stroke={color}
-      strokeWidth={2}
-      strokeLinecap="round"
-    />
-    <Path
-      d="M12 12m-1.5 0a1.5 1.5 0 1 0 3 0 1.5 1.5 0 1 0-3 0"
-      fill={color}
-    />
+    <Path d="M7 12c0-2.76 2.24-5 5-5" stroke={color} strokeWidth={2} strokeLinecap="round" />
+    <Path d="M5 12c0-3.87 3.13-7 7-7" stroke={color} strokeWidth={2} strokeLinecap="round" />
+    <Path d="M3 12c0-4.97 4.03-9 9-9" stroke={color} strokeWidth={2} strokeLinecap="round" />
+    <Path d="M12 12m-1.5 0a1.5 1.5 0 1 0 3 0 1.5 1.5 0 1 0-3 0" fill={color} />
   </Svg>
 );
 
