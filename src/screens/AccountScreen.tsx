@@ -307,7 +307,11 @@ const AccountScreen: React.FC = () => {
                 {w.alias}
               </Text>
               <Text style={styles.walletBalance}>
-                {w.hideBalance ? '***' : w.balance !== null ? `${w.balance.toLocaleString()} sats` : '---'}
+                {w.hideBalance
+                  ? '***'
+                  : w.balance !== null
+                    ? `${w.balance.toLocaleString()} sats`
+                    : '---'}
               </Text>
               <View style={styles.walletActions}>
                 <TouchableOpacity
@@ -329,9 +333,7 @@ const AccountScreen: React.FC = () => {
                   />
                 </TouchableOpacity>
                 <TouchableOpacity
-                  onPress={() =>
-                    updateWalletSettings(w.id, { hideBalance: !w.hideBalance })
-                  }
+                  onPress={() => updateWalletSettings(w.id, { hideBalance: !w.hideBalance })}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
                   {w.hideBalance ? (
