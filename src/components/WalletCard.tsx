@@ -112,6 +112,8 @@ const CardContent: React.FC<{
                 <TouchableOpacity
                   onPress={onSettingsPress}
                   hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  testID="wallet-settings"
+                  accessibilityLabel="Wallet settings"
                 >
                   <SettingsIcon size={22} color={theme.textColor} strokeWidth={1.5} />
                 </TouchableOpacity>
