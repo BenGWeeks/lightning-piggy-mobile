@@ -261,12 +261,16 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     keepaliveInterval.current = setInterval(
       async () => {
-        for (const w of wallets.filter((ww) => ww.walletType === 'nwc' && ww.isConnected)) {
+        for (const w of wallets.filter((ww) => ww.walletType === 'nwc')) {
           try {
             const b = await nwcService.getBalance(w.id);
-            if (b !== null) updateWalletInState(w.id, { balance: b });
+            if (b !== null) {
+              updateWalletInState(w.id, { balance: b, isConnected: true });
+            } else {
+              updateWalletInState(w.id, { isConnected: false });
+            }
           } catch {
-            // Reconnect will be triggered by the error handler in nwcService
+            updateWalletInState(w.id, { isConnected: false });
           }
         }
       },
@@ -451,7 +455,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (b !== null) updateWalletInState(walletId, { balance: b });
       } else {
         const b = await nwcService.getBalance(walletId);
-        if (b !== null) updateWalletInState(walletId, { balance: b });
+        if (b !== null) {
+          updateWalletInState(walletId, { balance: b, isConnected: true });
+        } else {
+          updateWalletInState(walletId, { isConnected: false });
+        }
       }
     },
     [wallets, updateWalletInState],
