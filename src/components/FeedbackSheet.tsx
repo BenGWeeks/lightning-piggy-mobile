@@ -17,13 +17,14 @@ import {
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
 import { colors } from '../styles/theme';
+import type { SignerType } from '../types/nostr';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
   onSend: (message: string) => Promise<{ success: boolean; error?: string }>;
   isLoggedIn: boolean;
-  signerType: string | null;
+  signerType: SignerType | null;
   onLoginPress: () => void;
 }
 
@@ -96,8 +97,6 @@ const FeedbackSheet: React.FC<Props> = ({
     ),
     [],
   );
-
-  if (!visible) return null;
 
   const canSend = isLoggedIn && signerType === 'nsec' && message.trim().length > 0 && !sending;
 
