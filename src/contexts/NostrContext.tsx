@@ -52,6 +52,10 @@ interface NostrContextType {
   followContact: (pubkey: string) => Promise<boolean>;
   unfollowContact: (pubkey: string) => Promise<boolean>;
   addContact: (npubOrHex: string) => Promise<{ success: boolean; error?: string }>;
+  sendDirectMessage: (
+    recipientPubkey: string,
+    plaintext: string,
+  ) => Promise<{ success: boolean; error?: string }>;
 }
 
 const NostrContext = createContext<NostrContextType | undefined>(undefined);
@@ -545,6 +549,38 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [contacts, followContact],
   );
 
+  const sendDirectMessage = useCallback(
+    async (
+      recipientPubkey: string,
+      plaintext: string,
+    ): Promise<{ success: boolean; error?: string }> => {
+      if (!pubkey || !isLoggedIn) {
+        return { success: false, error: 'Not logged in' };
+      }
+      if (signerType !== 'nsec') {
+        return { success: false, error: 'Direct messages require nsec login' };
+      }
+      try {
+        const nsec = await SecureStore.getItemAsync(NSEC_KEY);
+        if (!nsec) return { success: false, error: 'Key not found' };
+        const { secretKey } = nostrService.decodeNsec(nsec);
+        const event = await nostrService.createDirectMessageEvent(
+          secretKey,
+          recipientPubkey,
+          plaintext,
+        );
+        const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+        const targetRelays = writeRelays.length > 0 ? writeRelays : nostrService.DEFAULT_RELAYS;
+        await nostrService.signAndPublishEvent(event, secretKey, targetRelays);
+        return { success: true };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to send message';
+        return { success: false, error: message };
+      }
+    },
+    [pubkey, isLoggedIn, signerType, relays],
+  );
+
   const contextValue = useMemo(
     () => ({
       isLoggedIn,
@@ -563,6 +599,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       followContact,
       unfollowContact,
       addContact,
+      sendDirectMessage,
     }),
     [
       isLoggedIn,
@@ -581,6 +618,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       followContact,
       unfollowContact,
       addContact,
+      sendDirectMessage,
     ],
   );
 

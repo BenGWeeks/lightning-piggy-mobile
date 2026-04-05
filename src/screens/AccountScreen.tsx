@@ -28,6 +28,7 @@ import NostrLoginSheet from '../components/NostrLoginSheet';
 import EditProfileSheet from '../components/EditProfileSheet';
 import QrSheet from '../components/QrSheet';
 import SendSheet from '../components/SendSheet';
+import FeedbackSheet from '../components/FeedbackSheet';
 import { fetchProfile, DEFAULT_RELAYS } from '../services/nostrService';
 import type { NostrProfile } from '../types/nostr';
 import type { MainTabParamList } from '../navigation/types';
@@ -62,7 +63,7 @@ const AccountScreen: React.FC = () => {
     setLightningAddress,
     wallets,
   } = useWallet();
-  const { isLoggedIn, profile, logout } = useNostr();
+  const { isLoggedIn, profile, logout, sendDirectMessage, signerType } = useNostr();
   const [nameInput, setNameInput] = useState(userName);
   const [lnAddressInput, setLnAddressInput] = useState(lightningAddress || '');
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
@@ -72,6 +73,7 @@ const AccountScreen: React.FC = () => {
   const [teamProfile, setTeamProfile] = useState<NostrProfile | null>(null);
   const [teamProfileLoading, setTeamProfileLoading] = useState(true);
   const [zapSheetOpen, setZapSheetOpen] = useState(false);
+  const [feedbackSheetOpen, setFeedbackSheetOpen] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
   // Fetch Lightning Piggy team profile
@@ -415,16 +417,26 @@ const AccountScreen: React.FC = () => {
                   )}
                 </View>
               </View>
-              {teamProfile.lud16 && (
+              <View style={styles.teamButtonRow}>
+                {teamProfile.lud16 && (
+                  <TouchableOpacity
+                    style={styles.zapButton}
+                    onPress={() => setZapSheetOpen(true)}
+                    accessibilityLabel="Zap Lightning Piggy"
+                    testID="zap-team-button"
+                  >
+                    <Text style={styles.zapButtonText}>{'\u26A1'} Zap the Team</Text>
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity
-                  style={styles.zapButton}
-                  onPress={() => setZapSheetOpen(true)}
-                  accessibilityLabel="Zap Lightning Piggy"
-                  testID="zap-team-button"
+                  style={styles.feedbackButton}
+                  onPress={() => setFeedbackSheetOpen(true)}
+                  accessibilityLabel="Send Feedback"
+                  testID="feedback-button"
                 >
-                  <Text style={styles.zapButtonText}>{'\u26A1'} Zap the Team</Text>
+                  <Text style={styles.feedbackButtonText}>Send Feedback</Text>
                 </TouchableOpacity>
-              )}
+              </View>
             </>
           ) : (
             <Text style={styles.teamFallbackText}>Could not load team profile</Text>
@@ -452,6 +464,20 @@ const AccountScreen: React.FC = () => {
           recipientPubkey={teamProfile.pubkey}
         />
       )}
+      <FeedbackSheet
+        visible={feedbackSheetOpen}
+        onClose={() => setFeedbackSheetOpen(false)}
+        onSend={(msg) => {
+          const decoded = nip19.decode(TEAM_NPUB);
+          if (decoded.type !== 'npub') {
+            return Promise.resolve({ success: false, error: 'Invalid team npub' });
+          }
+          return sendDirectMessage(decoded.data, msg);
+        }}
+        isLoggedIn={isLoggedIn}
+        signerType={signerType}
+        onLoginPress={() => setLoginSheetOpen(true)}
+      />
     </KeyboardAvoidingView>
   );
 };
@@ -751,9 +777,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
+  teamButtonRow: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    gap: 8,
+  },
   zapButton: {
-    margin: 16,
-    marginTop: 0,
     height: 44,
     borderRadius: 10,
     backgroundColor: colors.brandPink,
@@ -762,6 +791,20 @@ const styles = StyleSheet.create({
   },
   zapButtonText: {
     color: colors.white,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  feedbackButton: {
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: colors.white,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: colors.brandPink,
+  },
+  feedbackButtonText: {
+    color: colors.brandPink,
     fontSize: 14,
     fontWeight: '600',
   },
