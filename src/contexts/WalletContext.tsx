@@ -255,29 +255,20 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   }, [currency, fetchPrice]);
 
-  // NWC keepalive: ping connected wallets every 2 minutes to prevent
-  // relay WebSocket idle timeout disconnections
-  const keepaliveInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  // NWC connection status: check WebSocket state every 30 seconds
+  // and reconnect if dropped (prevents idle timeout disconnections)
+  const connectionCheckInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
-    keepaliveInterval.current = setInterval(
-      async () => {
-        for (const w of wallets.filter((ww) => ww.walletType === 'nwc')) {
-          try {
-            const b = await nwcService.getBalance(w.id);
-            if (b !== null) {
-              updateWalletInState(w.id, { balance: b, isConnected: true });
-            } else {
-              updateWalletInState(w.id, { isConnected: false });
-            }
-          } catch {
-            updateWalletInState(w.id, { isConnected: false });
-          }
+    connectionCheckInterval.current = setInterval(() => {
+      for (const w of wallets.filter((ww) => ww.walletType === 'nwc')) {
+        const connected = nwcService.isWalletConnected(w.id);
+        if (connected !== w.isConnected) {
+          updateWalletInState(w.id, { isConnected: connected });
         }
-      },
-      2 * 60 * 1000,
-    );
+      }
+    }, 30 * 1000);
     return () => {
-      if (keepaliveInterval.current) clearInterval(keepaliveInterval.current);
+      if (connectionCheckInterval.current) clearInterval(connectionCheckInterval.current);
     };
   }, [wallets, updateWalletInState]);
 
@@ -455,11 +446,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (b !== null) updateWalletInState(walletId, { balance: b });
       } else {
         const b = await nwcService.getBalance(walletId);
-        if (b !== null) {
-          updateWalletInState(walletId, { balance: b, isConnected: true });
-        } else {
-          updateWalletInState(walletId, { isConnected: false });
-        }
+        if (b !== null) updateWalletInState(walletId, { balance: b });
       }
     },
     [wallets, updateWalletInState],

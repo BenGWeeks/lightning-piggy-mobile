@@ -112,26 +112,12 @@ export function disconnect(walletId: string): void {
 }
 
 export async function getBalance(walletId: string): Promise<number | null> {
-  let provider: NostrWebLNProvider;
-  try {
-    provider = await ensureConnected(walletId);
-  } catch {
-    return null;
-  }
+  const provider = await ensureConnected(walletId);
+  if (!provider) return null;
   try {
     const b = await provider.getBalance();
     return b.balance;
   } catch (error) {
-    const msg = error instanceof Error ? error.message : '';
-    if (msg.includes('failed to publish') && nwcUrls.has(walletId)) {
-      try {
-        provider = await reconnect(walletId);
-        const b = await provider.getBalance();
-        return b.balance;
-      } catch {
-        return null;
-      }
-    }
     console.warn(`getBalance error for ${walletId}:`, error);
     return null;
   }
@@ -143,6 +129,7 @@ export async function makeInvoice(
   memo?: string,
 ): Promise<string> {
   const provider = await ensureConnected(walletId);
+  if (!provider) throw new Error('Not connected');
   const invoice = await provider.makeInvoice({
     amount,
     defaultMemo: memo || 'Lightning Piggy',
@@ -206,12 +193,12 @@ async function reconnect(walletId: string): Promise<NostrWebLNProvider> {
 
 /**
  * Ensure the NWC provider is connected. Reconnect if the WebSocket dropped.
+ * Returns null if no provider exists for this wallet.
  */
-async function ensureConnected(walletId: string): Promise<NostrWebLNProvider> {
+async function ensureConnected(walletId: string): Promise<NostrWebLNProvider | null> {
   let provider = providers.get(walletId);
-  if (!provider) throw new Error('Not connected');
+  if (!provider) return null;
 
-  // Check if the underlying client is still connected
   const client = (provider as any).client;
   if (client && !client.connected && nwcUrls.has(walletId)) {
     if (__DEV__) console.log('[NWC] Connection lost, reconnecting...');
@@ -222,6 +209,7 @@ async function ensureConnected(walletId: string): Promise<NostrWebLNProvider> {
 
 export async function payInvoice(walletId: string, bolt11: string): Promise<{ preimage: string }> {
   let provider = await ensureConnected(walletId);
+  if (!provider) throw new Error('Not connected');
   try {
     const result = await provider.sendPayment(bolt11);
     return { preimage: result.preimage };
@@ -241,12 +229,8 @@ export async function payInvoice(walletId: string, bolt11: string): Promise<{ pr
 }
 
 export async function getInfo(walletId: string): Promise<{ alias: string; lud16?: string } | null> {
-  let provider: NostrWebLNProvider;
-  try {
-    provider = await ensureConnected(walletId);
-  } catch {
-    return null;
-  }
+  const provider = await ensureConnected(walletId);
+  if (!provider) return null;
   try {
     const info: Nip47GetInfoResponse = await provider.getInfo();
     if (__DEV__) console.log('NWC getInfo response:', JSON.stringify(info));
@@ -260,31 +244,21 @@ export async function getInfo(walletId: string): Promise<{ alias: string; lud16?
 }
 
 export async function listTransactions(walletId: string): Promise<any[]> {
-  let provider: NostrWebLNProvider;
-  try {
-    provider = await ensureConnected(walletId);
-  } catch {
-    return [];
-  }
+  const provider = await ensureConnected(walletId);
+  if (!provider) return [];
   try {
     const result = await provider.listTransactions({});
     return result.transactions || [];
   } catch (error) {
-    const msg = error instanceof Error ? error.message : '';
-    if (msg.includes('failed to publish') && nwcUrls.has(walletId)) {
-      try {
-        provider = await reconnect(walletId);
-        const result = await provider.listTransactions({});
-        return result.transactions || [];
-      } catch {
-        return [];
-      }
-    }
     console.warn(`listTransactions error for ${walletId}:`, error);
     return [];
   }
 }
 
 export function isWalletConnected(walletId: string): boolean {
-  return providers.has(walletId);
+  const provider = providers.get(walletId);
+  if (!provider) return false;
+  // Check the actual WebSocket connection state
+  const client = (provider as any).client;
+  return client?.connected ?? false;
 }
