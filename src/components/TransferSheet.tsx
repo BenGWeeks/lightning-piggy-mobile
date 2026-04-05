@@ -41,6 +41,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     makeInvoiceForWallet,
     payInvoiceForWallet,
     refreshBalanceForWallet,
+    fetchTransactionsForWallet,
   } = useWallet();
 
   const [sourceId, setSourceId] = useState<string | null>(null);
@@ -432,11 +433,16 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         await onchainService.sendTransaction(sourceId, address, currentSats);
       }
 
-      // Refresh both balances (non-critical — transfer already succeeded)
+      // Refresh balances and transactions for both wallets (non-critical)
       try {
-        await Promise.all([refreshBalanceForWallet(sourceId), refreshBalanceForWallet(destId)]);
+        await Promise.all([
+          refreshBalanceForWallet(sourceId),
+          refreshBalanceForWallet(destId),
+          fetchTransactionsForWallet(sourceId),
+          fetchTransactionsForWallet(destId),
+        ]);
       } catch {
-        console.warn('Balance refresh failed after transfer — pull to refresh');
+        console.warn('Post-transfer refresh failed — pull to refresh');
       }
 
       const settleMsg =
