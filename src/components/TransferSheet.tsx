@@ -278,6 +278,24 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       }
     }
 
+    // Validate Boltz minimum amount for cross-chain transfers
+    if ((transferType === 'ln-to-onchain' || transferType === 'onchain-to-ln') && cachedBoltzFees) {
+      if (currentSats < cachedBoltzFees.minAmount) {
+        Alert.alert(
+          'Amount Too Low',
+          `Boltz swap minimum is ${cachedBoltzFees.minAmount.toLocaleString()} sats.`,
+        );
+        return;
+      }
+      if (currentSats > cachedBoltzFees.maxAmount) {
+        Alert.alert(
+          'Amount Too High',
+          `Boltz swap maximum is ${cachedBoltzFees.maxAmount.toLocaleString()} sats.`,
+        );
+        return;
+      }
+    }
+
     setSending(true);
     try {
       if (transferType === 'ln-to-ln') {
@@ -641,20 +659,11 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   dropdownMenu: {
-    position: 'absolute',
-    top: '100%',
-    left: 0,
-    right: 0,
     marginTop: 4,
     backgroundColor: colors.white,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.divider,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 8,
     overflow: 'hidden',
   },
   dropdownItem: {

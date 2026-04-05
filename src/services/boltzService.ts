@@ -26,6 +26,10 @@ import * as bitcoin from 'bitcoinjs-lib';
 const bip32 = BIP32Factory(ecc);
 const BOLTZ_API = 'https://api.boltz.exchange/v2';
 
+// Boltz BTC swap limits (from API — these are fallback defaults)
+export const BOLTZ_MIN_SATS = 25_000;
+export const BOLTZ_MAX_SATS = 25_000_000;
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface SwapFees {
