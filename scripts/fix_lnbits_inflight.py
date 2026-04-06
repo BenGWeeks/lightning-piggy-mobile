@@ -1,46 +1,52 @@
-"""Fix LNbits IN_FLIGHT payment polling starvation (lnbits/lnbits#3917).
+"""Fix LNbits IN_FLIGHT payment hot-loop (lnbits/lnbits#3917, PR #3918).
 
-Adds exponential backoff in check_pending_payments() when a payment
-remains pending, ramping from 0.5s to 30s max. Normal payments that
-resolve quickly only see a 0.5s delay.
+When get_payment_status() receives IN_FLIGHT from LND's TrackPaymentV2
+stream, stay in the stream loop instead of returning immediately.
+LND pushes the final status through the same stream — no polling needed.
+
+Also adds a 300s timeout to prevent hanging forever.
 """
 
-with open("/app/lnbits/core/services/payments.py", "r") as f:
+with open("/app/lnbits/wallets/lndrest.py", "r") as f:
     content = f.read()
 
-old = """        for i, payment in enumerate(pending_payments):
-            payment = await update_pending_payment(payment)
-            prefix = f"payment ({i+1} / {count})"
-            logger.debug(f"{prefix} {payment.status} {payment.checking_id}")
-            await asyncio.sleep(0.01)  # to avoid complete blocking"""
+old = '''                elif status == "IN_FLIGHT":
+                    logger.info(f"LNDRest Payment in flight: {checking_id}")
+                    return PaymentPendingStatus()'''
 
-new = """        for i, payment in enumerate(pending_payments):
-            payment = await update_pending_payment(payment)
-            prefix = f"payment ({i+1} / {count})"
-            logger.debug(f"{prefix} {payment.status} {payment.checking_id}")
-            if payment.pending:
-                # Exponential backoff for stuck IN_FLIGHT payments (#3917)
-                _checks = getattr(payment, '_pending_checks', 0) + 1
-                object.__setattr__(payment, '_pending_checks', _checks)
-                backoff = min(30, 0.5 * (2 ** min(_checks, 6)))
-                logger.debug(f"{prefix} pending, backoff {backoff:.1f}s")
-                await asyncio.sleep(backoff)
-            else:
-                await asyncio.sleep(0.01)"""
+new = '''                elif status == "IN_FLIGHT":
+                    # Stay in the stream loop — LND will push the final
+                    # status (SUCCEEDED/FAILED) when the payment resolves.
+                    # No polling needed; the event loop is free while we
+                    # await the next line from the stream. See #3917.
+                    logger.info(f"LNDRest Payment in flight: {checking_id}")
+                    continue'''
 
 if old in content:
+    content = content.replace(
+        'async with self.client.stream("GET", url, timeout=None) as r:',
+        'async with self.client.stream("GET", url, timeout=300) as r:'
+    )
     content = content.replace(old, new)
-    with open("/app/lnbits/core/services/payments.py", "w") as f:
+    with open("/app/lnbits/wallets/lndrest.py", "w") as f:
         f.write(content)
-    print("Fix applied: exponential backoff on pending payments (0.5s → 30s)")
+    print("Fix applied: continue on IN_FLIGHT + 300s stream timeout")
+elif "continue" in content and "IN_FLIGHT" in content and "await asyncio.sleep" not in content:
+    print("Fix already applied")
 else:
-    if "pending_checks" in content:
-        print("Fix already applied")
+    # Check for v2 fix (asyncio.sleep version) and upgrade to continue
+    old_v2 = '''                elif status == "IN_FLIGHT":
+                    logger.info(f"LNDRest Payment in flight: {checking_id}")
+                    await asyncio.sleep(30)  # backoff: avoid hot-loop (#3917)
+                    return PaymentPendingStatus()'''
+    if old_v2 in content:
+        content = content.replace(old_v2, new)
+        content = content.replace(
+            'async with self.client.stream("GET", url, timeout=None) as r:',
+            'async with self.client.stream("GET", url, timeout=300) as r:'
+        )
+        with open("/app/lnbits/wallets/lndrest.py", "w") as f:
+            f.write(content)
+        print("Upgraded from asyncio.sleep to continue + 300s timeout")
     else:
         print("ERROR: Could not find target code to patch")
-        # Show what's actually there for debugging
-        import re
-        match = re.search(r'for i, payment in enumerate\(pending_payments\).*?asyncio\.sleep', content, re.DOTALL)
-        if match:
-            print(f"Found similar code at position {match.start()}")
-            print(match.group()[:200])

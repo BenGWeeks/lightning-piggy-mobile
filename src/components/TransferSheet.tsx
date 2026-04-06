@@ -261,16 +261,18 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
           )
           .sort((a, b) => (b.balance ?? 0) - (a.balance ?? 0))[0] ?? null;
       if (altLnWallet) {
-        const confirmed = await new Promise<boolean>((resolve) =>
+        const confirmed = await new Promise<boolean | null>((resolve) =>
           Alert.alert(
             'Use Lightning wallet instead?',
             `"${altLnWallet.alias}" has ${altLnWallet.balance?.toLocaleString()} sats. Sending from a Lightning wallet avoids Boltz swap fees.`,
             [
-              { text: 'Use Lightning', onPress: () => resolve(true), style: 'cancel' },
+              { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
+              { text: 'Use Lightning', onPress: () => resolve(true) },
               { text: 'Continue with on-chain', onPress: () => resolve(false) },
             ],
           ),
         );
+        if (confirmed === null) return; // cancelled
         if (confirmed) {
           setSourceId(altLnWallet.id);
           return;
@@ -288,16 +290,18 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
           )
           .sort((a, b) => (b.balance ?? 0) - (a.balance ?? 0))[0] ?? null;
       if (altOnchainWallet) {
-        const confirmed = await new Promise<boolean>((resolve) =>
+        const confirmed = await new Promise<boolean | null>((resolve) =>
           Alert.alert(
             'Use on-chain wallet instead?',
             `"${altOnchainWallet.alias}" has ${altOnchainWallet.balance?.toLocaleString()} sats. Sending from an on-chain wallet avoids Boltz swap fees.`,
             [
-              { text: 'Use on-chain', onPress: () => resolve(true), style: 'cancel' },
+              { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
+              { text: 'Use on-chain', onPress: () => resolve(true) },
               { text: 'Continue with Lightning', onPress: () => resolve(false) },
             ],
           ),
         );
+        if (confirmed === null) return; // cancelled
         if (confirmed) {
           setSourceId(altOnchainWallet.id);
           return;
@@ -894,7 +898,7 @@ const styles = StyleSheet.create({
   progressSummary: {
     fontSize: 28,
     fontWeight: '700',
-    color: colors.textHeader,
+    color: colors.brandPink,
   },
   progressRoute: {
     fontSize: 16,
@@ -944,7 +948,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   transferButton: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.brandPink,
     height: 52,
     paddingHorizontal: 30,
     borderRadius: 12,
@@ -957,7 +961,7 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   transferButtonText: {
-    color: colors.brandPink,
+    color: colors.white,
     fontSize: 16,
     fontWeight: '700',
   },
