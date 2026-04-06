@@ -73,7 +73,11 @@
 
 | LNbits "Payment in flight" log spam blocks NWC processing
 | A Lightning payment stuck in `IN_FLIGHT` status causes LNbits to poll LND at ~16 checks/second with no backoff, producing 50,000+ log lines/hour and starving the asyncio event loop. NWC, Nostrclient, and all WebSocket-based extensions stop responding while the HTTP UI continues working. +
-*Fix:* `docker restart lnbits-family` (or your LNbits container). See https://github.com/lnbits/lnbits/issues/3917[lnbits/lnbits#3917] for the upstream bug report.
+*Fix:* Apply the exponential backoff patch: +
+1. `cat scripts/fix_lnbits_inflight.py \| ssh black-panther "cat > /tmp/fix.py"` +
+2. `ssh black-panther "docker cp /tmp/fix.py lnbits-family:/tmp/ && docker exec lnbits-family python3 /tmp/fix.py"` +
+3. `ssh black-panther "docker restart lnbits-family"` +
+The patch adds exponential backoff (0.5s → 30s) to `check_pending_payments()` in `lnbits/core/services/payments.py` for payments that remain pending. Must be re-applied after LNbits upgrades. See https://github.com/lnbits/lnbits/issues/3917[lnbits/lnbits#3917].
 
 | Electrum connection drops with "keepalive ping failed" / "close connect"
 | The `electrum-client` library has an internal keepalive ping that can fail with `close connect`, followed by a reconnect crash: `Cannot read property 'client' of undefined`. This happens when `react-native-tcp-socket`'s TLS connection is interrupted (network change, sleep, etc.). +
