@@ -42,6 +42,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     payInvoiceForWallet,
     refreshBalanceForWallet,
     fetchTransactionsForWallet,
+    addPendingTransaction,
   } = useWallet();
 
   const [sourceId, setSourceId] = useState<string | null>(null);
@@ -327,6 +328,28 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     console.log(
       `[Transfer] Starting ${transferType}: ${currentSats} sats from ${source.alias} to ${dest.alias}`,
     );
+
+    // Add pending transactions to both wallets immediately
+    const now = Math.floor(Date.now() / 1000);
+    const swapLabel =
+      transferType === 'ln-to-onchain' || transferType === 'onchain-to-ln'
+        ? 'Boltz swap in progress'
+        : 'Transfer in progress';
+    addPendingTransaction(sourceId, {
+      type: 'outgoing',
+      amount: currentSats,
+      description: swapLabel,
+      created_at: now,
+      settled_at: null,
+    });
+    addPendingTransaction(destId, {
+      type: 'incoming',
+      amount: currentSats,
+      description: swapLabel,
+      created_at: now,
+      settled_at: null,
+    });
+
     try {
       if (transferType === 'ln-to-ln') {
         setProgressMsg('Creating invoice...');

@@ -705,7 +705,12 @@ export async function waitForSubmarineSwapComplete(
   await waitForSwapStatus(
     swapId,
     (status) => {
-      if (status === 'invoice.settled' || status === 'transaction.claimed') {
+      if (
+        status === 'invoice.settled' ||
+        status === 'transaction.claimed' ||
+        status === 'invoice.paid' ||
+        status === 'transaction.claim.pending'
+      ) {
         console.log(`[Boltz] Submarine swap ${swapId} complete: ${status}`);
         return true;
       }

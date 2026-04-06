@@ -78,6 +78,9 @@ interface WalletContextType {
   refreshBalanceForWallet: (walletId: string) => Promise<void>;
   fetchTransactionsForWallet: (walletId: string) => Promise<void>;
 
+  // Transaction helpers
+  addPendingTransaction: (walletId: string, tx: WalletTransaction) => void;
+
   // On-chain actions
   getReceiveAddress: (walletId: string) => Promise<string>;
 
@@ -138,6 +141,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const updateWalletInState = useCallback((walletId: string, updates: Partial<WalletState>) => {
     setWallets((prev) => prev.map((w) => (w.id === walletId ? { ...w, ...updates } : w)));
+  }, []);
+
+  const addPendingTransaction = useCallback((walletId: string, tx: WalletTransaction) => {
+    setWallets((prev) =>
+      prev.map((w) => (w.id === walletId ? { ...w, transactions: [tx, ...w.transactions] } : w)),
+    );
   }, []);
 
   // Startup: load prefs, migrate, reconnect all wallets
@@ -641,6 +650,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         payInvoiceForWallet,
         refreshBalanceForWallet,
         fetchTransactionsForWallet,
+        addPendingTransaction,
         getReceiveAddress,
         isConnected,
         balance,
