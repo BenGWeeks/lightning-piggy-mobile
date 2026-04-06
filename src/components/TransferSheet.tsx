@@ -7,7 +7,9 @@ import {
   Alert,
   ActivityIndicator,
   BackHandler,
+  Image,
   Keyboard,
+  Linking,
   Platform,
 } from 'react-native';
 import {
@@ -143,7 +145,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       setFeeEstimate(`~${fee.toLocaleString()} sats \u00B7 ~10-60 min (on-chain)`);
     } else if (transferType === 'onchain-to-ln' && cachedBoltzFees) {
       const fee = boltzService.calculateSwapFee(currentSats, cachedBoltzFees);
-      setFeeEstimate(`~${fee.toLocaleString()} sats \u00B7 ~10-60 min (Boltz swap)`);
+      setFeeEstimate(`~${fee.toLocaleString()} sats \u00B7 ~10-60 min`);
     } else if (transferType === 'onchain-to-onchain') {
       onchainService
         .estimateOnchainFee()
@@ -558,7 +560,14 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             <Text style={styles.progressRoute}>
               {source?.alias} → {dest?.alias}
             </Text>
-            {feeEstimate && <Text style={styles.feeText}>{feeEstimate}</Text>}
+            {feeEstimate && (
+              <Text style={styles.feeText}>
+                Fee: {feeEstimate.split('\u00B7')[0].trim()}
+                {feeEstimate.includes('\u00B7')
+                  ? ` · ${feeEstimate.split('\u00B7')[1].trim()}`
+                  : ''}
+              </Text>
+            )}
             <View style={styles.progressContainer}>
               <ActivityIndicator size="small" color={colors.brandPink} />
               <Text style={styles.progressText}>{progressMsg}</Text>
@@ -713,7 +722,32 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             </Text>
 
             {/* Fee estimate */}
-            {feeEstimate && <Text style={styles.feeText}>Estimated fee: {feeEstimate}</Text>}
+            {feeEstimate && (
+              <View style={styles.feeRow}>
+                {(transferType === 'ln-to-onchain' || transferType === 'onchain-to-ln') && (
+                  <TouchableOpacity
+                    onPress={() => Linking.openURL('https://boltz.exchange')}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <Image
+                      source={require('../../assets/images/boltz-logo.png')}
+                      style={styles.boltzLogo}
+                      resizeMode="contain"
+                    />
+                  </TouchableOpacity>
+                )}
+                <View>
+                  <Text style={styles.feeText}>
+                    Estimated fee: {feeEstimate.split('\u00B7')[0].trim()}
+                  </Text>
+                  {feeEstimate.includes('\u00B7') && (
+                    <Text style={styles.feeText}>
+                      Estimated time: {feeEstimate.split('\u00B7')[1].trim()}
+                    </Text>
+                  )}
+                </View>
+              </View>
+            )}
 
             {/* Watch-only warning */}
             {source?.walletType === 'onchain' && source?.onchainImportMethod !== 'mnemonic' && (
@@ -850,8 +884,8 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     fontWeight: '700',
+    color: colors.brandPink,
     textAlign: 'center',
-    color: colors.textBody,
   },
   unitButton: {
     paddingHorizontal: 14,
@@ -876,6 +910,17 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     textAlign: 'center',
     minHeight: 18,
+  },
+  feeRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  boltzLogo: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
   },
   feeText: {
     fontSize: 13,

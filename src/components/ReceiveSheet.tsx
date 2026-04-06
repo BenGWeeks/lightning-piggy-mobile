@@ -454,13 +454,23 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
             </View>
 
             <Text style={styles.qrLabel}>
-              {isOnchainWallet
-                ? mode === 'amount' && currentSats > 0
-                  ? `${currentSats.toLocaleString()} sats`
-                  : onchainAddress || 'Loading address...'
-                : mode === 'address'
-                  ? lightningAddress
-                  : 'Lightning invoice'}
+              {isOnchainWallet && onchainAddress && !(mode === 'amount' && currentSats > 0) ? (
+                <>
+                  <Text style={styles.addressHighlight}>{onchainAddress.slice(0, 6)}</Text>
+                  {onchainAddress.slice(6, -6)}
+                  <Text style={styles.addressHighlight}>{onchainAddress.slice(-6)}</Text>
+                </>
+              ) : isOnchainWallet ? (
+                mode === 'amount' && currentSats > 0 ? (
+                  `${currentSats.toLocaleString()} sats`
+                ) : (
+                  'Loading address...'
+                )
+              ) : mode === 'address' ? (
+                lightningAddress
+              ) : (
+                'Lightning invoice'
+              )}
             </Text>
             {mode === 'amount' && invoice ? (
               <Text style={styles.invoiceText} numberOfLines={2}>
@@ -609,6 +619,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: colors.textBody,
+  },
+  addressHighlight: {
+    color: colors.green,
+    fontWeight: '700',
   },
   invoiceText: {
     color: colors.textSupplementary,
