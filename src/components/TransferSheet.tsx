@@ -913,8 +913,8 @@ const styles = StyleSheet.create({
   },
   feeRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'center',
+    alignItems: 'center',
+    alignSelf: 'center',
     gap: 8,
   },
   boltzLogo: {
@@ -925,7 +925,7 @@ const styles = StyleSheet.create({
   feeText: {
     fontSize: 13,
     color: colors.textSupplementary,
-    textAlign: 'center',
+    textAlign: 'left',
     fontWeight: '500',
   },
   warningText: {
