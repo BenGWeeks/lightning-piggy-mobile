@@ -354,7 +354,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         setProgressMsg('Paying Lightning invoice...');
         await payInvoiceForWallet(sourceId, swap.invoice);
 
-        setProgressMsg('Waiting for on-chain confirmation...');
+        setProgressMsg(
+          'Waiting for on-chain confirmation...\nThis may take ~10-60 minutes. Safe to close.',
+        );
         const lockup = await boltzService.waitForLockup(swap.id, 900000);
 
         setProgressMsg('Claiming on-chain funds...');
@@ -387,7 +389,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         );
         await onchainService.sendTransaction(sourceId, swap.address, swap.expectedAmount);
 
-        setProgressMsg('Waiting for Boltz to pay Lightning invoice...\nThis may take ~10 minutes.');
+        setProgressMsg(
+          'Waiting for Boltz to pay Lightning invoice...\nThis may take ~10-60 minutes. Safe to close.',
+        );
         console.log('[Transfer] On-chain tx broadcast, waiting for Boltz to pay LN invoice...');
 
         try {
@@ -520,185 +524,199 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         <Text style={styles.title}>Transfer</Text>
 
         {/* Source wallet selector */}
-        <Text style={styles.sectionLabel}>From</Text>
-        <View style={[styles.dropdownWrapper, sourceDropdownOpen && { zIndex: 20 }]}>
-          <TouchableOpacity
-            style={styles.dropdown}
-            onPress={() => {
-              setSourceDropdownOpen(!sourceDropdownOpen);
-              setDestDropdownOpen(false);
-            }}
-            testID="transfer-source-dropdown"
-            accessibilityLabel="Source wallet"
-          >
-            <Text style={styles.dropdownText}>
-              {source ? renderWalletLabel(source) : 'Select wallet'}
+        {sending ? (
+          /* Progress view — replaces form while transfer is executing */
+          <View style={styles.progressView}>
+            <Text style={styles.progressSummary}>{currentSats.toLocaleString()} sats</Text>
+            <Text style={styles.progressRoute}>
+              {source?.alias} → {dest?.alias}
             </Text>
-            <Text style={styles.dropdownArrow}>{sourceDropdownOpen ? '\u25B2' : '\u25BC'}</Text>
-          </TouchableOpacity>
-          {sourceDropdownOpen && (
-            <View style={styles.dropdownMenu}>
-              {sourceWallets.map((w) => (
-                <TouchableOpacity
-                  key={w.id}
-                  testID={`transfer-source-${w.alias.replace(/\s+/g, '-').toLowerCase()}`}
-                  style={[styles.dropdownItem, sourceId === w.id && styles.dropdownItemActive]}
-                  onPress={() => {
-                    setSourceId(w.id);
-                    setSourceDropdownOpen(false);
-                    // Adjust dest if same
-                    if (destId === w.id) {
-                      const alt = wallets.find((ww) => ww.id !== w.id);
-                      setDestId(alt?.id ?? null);
-                    }
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.dropdownItemText,
-                      sourceId === w.id && styles.dropdownItemTextActive,
-                    ]}
-                  >
-                    {renderWalletLabel(w)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-              {sourceWallets.length === 0 && (
-                <Text style={styles.dropdownEmpty}>No wallets that can send</Text>
+            {feeEstimate && <Text style={styles.feeText}>{feeEstimate}</Text>}
+            <View style={styles.progressContainer}>
+              <ActivityIndicator size="small" color={colors.brandPink} />
+              <Text style={styles.progressText}>{progressMsg}</Text>
+            </View>
+            <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            <Text style={styles.sectionLabel}>From</Text>
+            <View style={[styles.dropdownWrapper, sourceDropdownOpen && { zIndex: 20 }]}>
+              <TouchableOpacity
+                style={styles.dropdown}
+                onPress={() => {
+                  setSourceDropdownOpen(!sourceDropdownOpen);
+                  setDestDropdownOpen(false);
+                }}
+                testID="transfer-source-dropdown"
+                accessibilityLabel="Source wallet"
+              >
+                <Text style={styles.dropdownText}>
+                  {source ? renderWalletLabel(source) : 'Select wallet'}
+                </Text>
+                <Text style={styles.dropdownArrow}>{sourceDropdownOpen ? '\u25B2' : '\u25BC'}</Text>
+              </TouchableOpacity>
+              {sourceDropdownOpen && (
+                <View style={styles.dropdownMenu}>
+                  {sourceWallets.map((w) => (
+                    <TouchableOpacity
+                      key={w.id}
+                      testID={`transfer-source-${w.alias.replace(/\s+/g, '-').toLowerCase()}`}
+                      style={[styles.dropdownItem, sourceId === w.id && styles.dropdownItemActive]}
+                      onPress={() => {
+                        setSourceId(w.id);
+                        setSourceDropdownOpen(false);
+                        // Adjust dest if same
+                        if (destId === w.id) {
+                          const alt = wallets.find((ww) => ww.id !== w.id);
+                          setDestId(alt?.id ?? null);
+                        }
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.dropdownItemText,
+                          sourceId === w.id && styles.dropdownItemTextActive,
+                        ]}
+                      >
+                        {renderWalletLabel(w)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                  {sourceWallets.length === 0 && (
+                    <Text style={styles.dropdownEmpty}>No wallets that can send</Text>
+                  )}
+                </View>
               )}
             </View>
-          )}
-        </View>
 
-        {/* Destination wallet selector */}
-        <Text style={styles.sectionLabel}>To</Text>
-        <View style={styles.dropdownWrapper}>
-          <TouchableOpacity
-            style={styles.dropdown}
-            onPress={() => {
-              setDestDropdownOpen(!destDropdownOpen);
-              setSourceDropdownOpen(false);
-            }}
-            testID="transfer-dest-dropdown"
-            accessibilityLabel="Destination wallet"
-          >
-            <Text style={styles.dropdownText}>
-              {dest ? renderWalletLabel(dest) : 'Select wallet'}
-            </Text>
-            <Text style={styles.dropdownArrow}>{destDropdownOpen ? '\u25B2' : '\u25BC'}</Text>
-          </TouchableOpacity>
-          {destDropdownOpen && (
-            <View style={styles.dropdownMenu}>
-              {destWallets.map((w) => (
-                <TouchableOpacity
-                  key={w.id}
-                  testID={`transfer-dest-${w.alias.replace(/\s+/g, '-').toLowerCase()}`}
-                  style={[styles.dropdownItem, destId === w.id && styles.dropdownItemActive]}
-                  onPress={() => {
-                    setDestId(w.id);
-                    setDestDropdownOpen(false);
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.dropdownItemText,
-                      destId === w.id && styles.dropdownItemTextActive,
-                    ]}
-                  >
-                    {renderWalletLabel(w)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+            {/* Destination wallet selector */}
+            <Text style={styles.sectionLabel}>To</Text>
+            <View style={styles.dropdownWrapper}>
+              <TouchableOpacity
+                style={styles.dropdown}
+                onPress={() => {
+                  setDestDropdownOpen(!destDropdownOpen);
+                  setSourceDropdownOpen(false);
+                }}
+                testID="transfer-dest-dropdown"
+                accessibilityLabel="Destination wallet"
+              >
+                <Text style={styles.dropdownText}>
+                  {dest ? renderWalletLabel(dest) : 'Select wallet'}
+                </Text>
+                <Text style={styles.dropdownArrow}>{destDropdownOpen ? '\u25B2' : '\u25BC'}</Text>
+              </TouchableOpacity>
+              {destDropdownOpen && (
+                <View style={styles.dropdownMenu}>
+                  {destWallets.map((w) => (
+                    <TouchableOpacity
+                      key={w.id}
+                      testID={`transfer-dest-${w.alias.replace(/\s+/g, '-').toLowerCase()}`}
+                      style={[styles.dropdownItem, destId === w.id && styles.dropdownItemActive]}
+                      onPress={() => {
+                        setDestId(w.id);
+                        setDestDropdownOpen(false);
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.dropdownItemText,
+                          destId === w.id && styles.dropdownItemTextActive,
+                        ]}
+                      >
+                        {renderWalletLabel(w)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
             </View>
-          )}
-        </View>
 
-        {/* Amount input */}
-        <Text style={styles.sectionLabel}>Amount</Text>
-        <View style={styles.amountRow}>
-          <BottomSheetTextInput
-            style={styles.amountInput}
-            value={inputUnit === 'sats' ? satsValue : fiatValue}
-            onChangeText={inputUnit === 'sats' ? handleSatsChange : handleFiatChange}
-            keyboardType={inputUnit === 'sats' ? 'numeric' : 'decimal-pad'}
-            placeholder={inputUnit === 'sats' ? '0' : '0.00'}
-            placeholderTextColor={colors.textSupplementary}
-            testID="transfer-amount-input"
-            accessibilityLabel="Transfer amount"
-          />
-          <TouchableOpacity
-            style={[styles.unitButton, inputUnit === 'sats' && styles.unitButtonActive]}
-            onPress={() => setInputUnit('sats')}
-          >
-            <Text
-              style={[styles.unitButtonText, inputUnit === 'sats' && styles.unitButtonTextActive]}
-            >
-              Sats
+            {/* Amount input */}
+            <Text style={styles.sectionLabel}>Amount</Text>
+            <View style={styles.amountRow}>
+              <BottomSheetTextInput
+                style={styles.amountInput}
+                value={inputUnit === 'sats' ? satsValue : fiatValue}
+                onChangeText={inputUnit === 'sats' ? handleSatsChange : handleFiatChange}
+                keyboardType={inputUnit === 'sats' ? 'numeric' : 'decimal-pad'}
+                placeholder={inputUnit === 'sats' ? '0' : '0.00'}
+                placeholderTextColor={colors.textSupplementary}
+                testID="transfer-amount-input"
+                accessibilityLabel="Transfer amount"
+              />
+              <TouchableOpacity
+                style={[styles.unitButton, inputUnit === 'sats' && styles.unitButtonActive]}
+                onPress={() => setInputUnit('sats')}
+              >
+                <Text
+                  style={[
+                    styles.unitButtonText,
+                    inputUnit === 'sats' && styles.unitButtonTextActive,
+                  ]}
+                >
+                  Sats
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.unitButton, inputUnit === 'fiat' && styles.unitButtonActive]}
+                onPress={() => setInputUnit('fiat')}
+              >
+                <Text
+                  style={[
+                    styles.unitButtonText,
+                    inputUnit === 'fiat' && styles.unitButtonTextActive,
+                  ]}
+                >
+                  {currency}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.convertedAmount}>
+              {inputUnit === 'sats'
+                ? btcPrice && currentSats > 0
+                  ? satsToFiatString(currentSats, btcPrice, currency)
+                  : ''
+                : currentSats > 0
+                  ? `${currentSats.toLocaleString()} sats`
+                  : ''}
             </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.unitButton, inputUnit === 'fiat' && styles.unitButtonActive]}
-            onPress={() => setInputUnit('fiat')}
-          >
-            <Text
-              style={[styles.unitButtonText, inputUnit === 'fiat' && styles.unitButtonTextActive]}
-            >
-              {currency}
-            </Text>
-          </TouchableOpacity>
-        </View>
-        <Text style={styles.convertedAmount}>
-          {inputUnit === 'sats'
-            ? btcPrice && currentSats > 0
-              ? satsToFiatString(currentSats, btcPrice, currency)
-              : ''
-            : currentSats > 0
-              ? `${currentSats.toLocaleString()} sats`
-              : ''}
-        </Text>
 
-        {/* Fee estimate */}
-        {feeEstimate && <Text style={styles.feeText}>Estimated fee: {feeEstimate}</Text>}
+            {/* Fee estimate */}
+            {feeEstimate && <Text style={styles.feeText}>Estimated fee: {feeEstimate}</Text>}
 
-        {/* Watch-only warning */}
-        {source?.walletType === 'onchain' && source?.onchainImportMethod !== 'mnemonic' && (
-          <Text style={styles.warningText}>
-            Watch-only wallets cannot send. Select a different wallet as source.
-          </Text>
-        )}
-
-        {/* Progress indicator */}
-        {sending && progressMsg && (
-          <View style={styles.progressContainer}>
-            <ActivityIndicator size="small" color={colors.brandPink} />
-            <Text style={styles.progressText}>{progressMsg}</Text>
-          </View>
-        )}
-
-        {/* Action buttons */}
-        <View style={styles.buttonRow}>
-          <TouchableOpacity
-            style={styles.cancelButton}
-            onPress={onClose}
-            testID="transfer-cancel"
-            accessibilityLabel="Cancel transfer"
-          >
-            <Text style={styles.cancelButtonText}>Cancel</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.transferButton, (!canTransfer || sending) && styles.buttonDisabled]}
-            onPress={handleTransfer}
-            disabled={!canTransfer || sending}
-            testID="transfer-execute"
-            accessibilityLabel="Execute transfer"
-          >
-            {sending ? (
-              <ActivityIndicator color={colors.brandPink} />
-            ) : (
-              <Text style={styles.transferButtonText}>Transfer</Text>
+            {/* Watch-only warning */}
+            {source?.walletType === 'onchain' && source?.onchainImportMethod !== 'mnemonic' && (
+              <Text style={styles.warningText}>
+                Watch-only wallets cannot send. Select a different wallet as source.
+              </Text>
             )}
-          </TouchableOpacity>
-        </View>
+
+            {/* Action buttons */}
+            <View style={styles.buttonRow}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={onClose}
+                testID="transfer-cancel"
+                accessibilityLabel="Cancel transfer"
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.transferButton, (!canTransfer || sending) && styles.buttonDisabled]}
+                onPress={handleTransfer}
+                disabled={!canTransfer || sending}
+                testID="transfer-execute"
+                accessibilityLabel="Execute transfer"
+              >
+                <Text style={styles.transferButtonText}>Transfer</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
       </BottomSheetScrollView>
     </BottomSheetModal>
   );
@@ -845,6 +863,21 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   // --- Buttons ---
+  progressView: {
+    alignItems: 'center',
+    gap: 16,
+    paddingVertical: 24,
+  },
+  progressSummary: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: colors.textHeader,
+  },
+  progressRoute: {
+    fontSize: 16,
+    color: colors.textSupplementary,
+    fontWeight: '500',
+  },
   progressContainer: {
     flexDirection: 'row',
     alignItems: 'center',
