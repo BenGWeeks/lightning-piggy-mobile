@@ -34,7 +34,16 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
     );
   }
 
-  const visibleTransactions = showAll ? transactions : transactions.slice(0, INITIAL_COUNT);
+  // Sort: pending (no timestamp) first, then newest first
+  const sorted = [...transactions].sort((a, b) => {
+    const aTime = a.settled_at || a.created_at;
+    const bTime = b.settled_at || b.created_at;
+    if (!aTime && !bTime) return 0;
+    if (!aTime) return -1;
+    if (!bTime) return 1;
+    return bTime - aTime;
+  });
+  const visibleTransactions = showAll ? sorted : sorted.slice(0, INITIAL_COUNT);
   const hasMore = transactions.length > INITIAL_COUNT;
 
   return (
