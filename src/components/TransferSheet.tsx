@@ -355,7 +355,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         await payInvoiceForWallet(sourceId, swap.invoice);
 
         setProgressMsg(
-          'Waiting for on-chain confirmation...\nThis may take ~10-60 minutes. Safe to close.',
+          'Waiting for on-chain confirmation...\nThis may take ~10-60 minutes. You can close this window — progress will appear in your transaction history.',
         );
         const lockup = await boltzService.waitForLockup(swap.id, 900000);
 
@@ -390,7 +390,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         await onchainService.sendTransaction(sourceId, swap.address, swap.expectedAmount);
 
         setProgressMsg(
-          'Waiting for Boltz to pay Lightning invoice...\nThis may take ~10-60 minutes. Safe to close.',
+          'Waiting for Boltz to pay Lightning invoice...\nThis may take ~10-60 minutes. You can close this window — progress will appear in your transaction history.',
         );
         console.log('[Transfer] On-chain tx broadcast, waiting for Boltz to pay LN invoice...');
 
