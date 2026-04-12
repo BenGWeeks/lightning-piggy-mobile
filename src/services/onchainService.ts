@@ -291,17 +291,13 @@ export async function sendTransaction(
 
   const wallet = await getBdkWallet(walletId);
 
-  // Retry with fresh Electrum connection if the cached one is stale
-  let chain: Awaited<ReturnType<typeof getBlockchain>>;
-  try {
-    chain = await getBlockchain();
-    await wallet.sync(chain);
-  } catch (e) {
-    console.warn('sendTransaction: sync failed, reconnecting Electrum:', e);
-    blockchain = null;
-    chain = await getBlockchain();
-    await wallet.sync(chain);
-  }
+  // Always create a fresh Electrum connection for sends to avoid stale state
+  console.log('[BDK] sendTransaction: creating fresh Electrum connection');
+  blockchain = null;
+  const chain = await getBlockchain();
+  console.log('[BDK] sendTransaction: syncing wallet');
+  await wallet.sync(chain);
+  console.log('[BDK] sendTransaction: sync complete');
 
   const address = await new Address().create(toAddress);
   const script = await address.scriptPubKey();
@@ -315,12 +311,14 @@ export async function sendTransaction(
   const tx = await signedPsbt.extractTx();
 
   try {
+    console.log('[BDK] sendTransaction: broadcasting');
     await chain.broadcast(tx);
+    console.log('[BDK] sendTransaction: broadcast complete');
   } catch (e) {
     console.warn('sendTransaction: broadcast failed, reconnecting:', e);
     blockchain = null;
-    chain = await getBlockchain();
-    await chain.broadcast(tx);
+    const freshChain = await getBlockchain();
+    await freshChain.broadcast(tx);
   }
 
   return await signedPsbt.txid();
