@@ -587,7 +587,20 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       Alert.alert('Transfer Complete', settleMsg, [{ text: 'OK', onPress: onClose }]);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Transfer failed';
-      Alert.alert('Transfer Failed', message);
+      // "Cannot read property 'reload' of undefined" comes from
+      // react-native's HMRClient when Metro drops the dev-client
+      // connection. It is NOT a transfer failure — nothing was signed
+      // or broadcast. Surface it as a dev-mode hiccup with a clear
+      // retry hint instead of a scary "Transfer Failed" alert.
+      if (/reload.*of undefined|DevSettings/i.test(message)) {
+        Alert.alert(
+          'Development Reload Needed',
+          'Metro disconnected from the app mid-transfer. No funds were moved. Relaunch the app (or reconnect Metro) and try again.',
+          [{ text: 'OK' }],
+        );
+      } else {
+        Alert.alert('Transfer Failed', message);
+      }
     } finally {
       setSending(false);
       setProgressMsg(null);
