@@ -226,7 +226,40 @@ export async function payInvoice(walletId: string, bolt11: string): Promise<{ pr
       const result = await provider.sendPayment(bolt11);
       return { preimage: result.preimage };
     }
+    if (msg.includes('reply timeout')) {
+      // NWC SDK times out after ~60s but the payment may still be in flight.
+      // Poll lookupInvoice to check if it completes within 5 minutes.
+      console.log('[NWC] pay_invoice timed out, polling for completion...');
+      const paymentHash = extractPaymentHash(bolt11);
+      if (!paymentHash) throw error;
+      const deadline = Date.now() + 5 * 60 * 1000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 5000));
+        try {
+          const lookup = await provider.lookupInvoice({ payment_hash: paymentHash });
+          if (lookup?.preimage) {
+            console.log('[NWC] Payment completed after timeout:', paymentHash);
+            return { preimage: lookup.preimage };
+          }
+        } catch {
+          // keep polling
+        }
+      }
+    }
     throw error;
+  }
+}
+
+function extractPaymentHash(bolt11: string): string | null {
+  try {
+    // Simple bolt11 payment_hash extraction — it's tag 'p' (01 in bech32)
+    // For reliability, decode with light-bolt11-decoder if available
+    const { decode } = require('light-bolt11-decoder');
+    const decoded = decode(bolt11);
+    const hashSection = decoded.sections?.find((s: { name: string }) => s.name === 'payment_hash');
+    return hashSection?.value || null;
+  } catch {
+    return null;
   }
 }
 
