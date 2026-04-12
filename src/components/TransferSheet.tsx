@@ -57,6 +57,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [inputUnit, setInputUnit] = useState<InputUnit>('sats');
   const [sending, setSending] = useState(false);
   const [progressMsg, setProgressMsg] = useState<string | null>(null);
+  // true while in a phase where closing is safe (recovery/pending UX picks
+  // things up). false during in-flight crypto steps that must complete.
+  const [canClose, setCanClose] = useState(true);
   const [feeEstimate, setFeeEstimate] = useState<string | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
@@ -331,6 +334,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     }
 
     setSending(true);
+    setCanClose(true); // safe: nothing committed yet
     setProgressMsg('Preparing transfer...');
     console.log(
       `[Transfer] Starting ${transferType}: ${currentSats} sats from ${source.alias} to ${dest.alias}`,
@@ -361,8 +365,10 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       if (transferType === 'ln-to-ln') {
         setProgressMsg('Creating invoice...');
         const invoice = await makeInvoiceForWallet(destId, currentSats, 'Transfer');
+        setCanClose(false); // unsafe: Lightning payment in flight
         setProgressMsg('Sending payment...');
         await payInvoiceForWallet(sourceId, invoice);
+        setCanClose(true);
       } else if (transferType === 'ln-to-onchain') {
         // Full Boltz reverse swap: LN → on-chain
         setProgressMsg('Creating Boltz swap...');
@@ -385,16 +391,22 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         );
         await swapRecoveryService.registerPendingSwap(swap.id);
 
+        setCanClose(false); // unsafe: LN payment to Boltz in flight
         setProgressMsg('Paying Lightning invoice...');
         await payInvoiceForWallet(sourceId, swap.invoice);
 
+        // Safe from here — once Boltz has the LN payment + locks on-chain,
+        // swapRecoveryService can finish the claim on next app launch.
+        setCanClose(true);
         setProgressMsg(
           'Waiting for on-chain confirmation...\nThis may take ~10-60 minutes. You can close this window — progress will appear in your transaction history.',
         );
         const lockup = await boltzService.waitForLockup(swap.id, 900000);
 
+        setCanClose(false); // unsafe: building & broadcasting the claim tx
         setProgressMsg('Claiming on-chain funds...');
         await boltzService.claimSwap(swap, lockup, address);
+        setCanClose(true);
 
         await SecureStore.deleteItemAsync(`boltz_swap_${swap.id}`);
         await swapRecoveryService.unregisterPendingSwap(swap.id);
@@ -418,12 +430,16 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
           }),
         );
 
+        setCanClose(false); // unsafe: signing + broadcasting the on-chain lockup
         setProgressMsg('Broadcasting on-chain transaction...');
         console.log(
           `[Transfer] Sending ${swap.expectedAmount} sats on-chain to Boltz address ${swap.address}`,
         );
         await onchainService.sendTransaction(sourceId, swap.address, swap.expectedAmount);
 
+        // Safe: lockup is broadcast; Boltz will pay the LN invoice and we can
+        // follow up via status polling or user reopening the app.
+        setCanClose(true);
         setProgressMsg(
           'Waiting for Boltz to pay Lightning invoice...\nThis may take ~10-60 minutes. You can close this window — progress will appear in your transaction history.',
         );
@@ -474,9 +490,11 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         // Clean up persisted swap state on success
         await SecureStore.deleteItemAsync(`submarine_swap_${swap.id}`);
       } else if (transferType === 'onchain-to-onchain') {
+        setCanClose(false); // unsafe: signing + broadcasting on-chain tx
         setProgressMsg('Sending on-chain transaction...');
         const address = await onchainService.getNextReceiveAddress(destId);
         await onchainService.sendTransaction(sourceId, address, currentSats);
+        setCanClose(true);
       }
 
       setProgressMsg('Refreshing wallets...');
@@ -578,8 +596,15 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
               <ActivityIndicator size="small" color={colors.brandPink} />
               <Text style={styles.progressText}>{progressMsg}</Text>
             </View>
-            <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-              <Text style={styles.closeButtonText}>Close</Text>
+            <TouchableOpacity
+              style={[styles.closeButton, !canClose && styles.closeButtonDisabled]}
+              onPress={onClose}
+              disabled={!canClose}
+              accessibilityLabel={canClose ? 'Close' : 'Please wait — do not close'}
+            >
+              <Text style={[styles.closeButtonText, !canClose && styles.closeButtonTextDisabled]}>
+                {canClose ? 'Close' : 'Please wait…'}
+              </Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -993,6 +1018,13 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 16,
     fontWeight: '700',
+  },
+  closeButtonDisabled: {
+    backgroundColor: colors.textSupplementary,
+    opacity: 0.5,
+  },
+  closeButtonTextDisabled: {
+    color: colors.white,
   },
   cancelButton: {
     backgroundColor: colors.white,

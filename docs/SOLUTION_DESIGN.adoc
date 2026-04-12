@@ -106,6 +106,7 @@ Uses https://docs.boltz.exchange[Boltz Exchange] v2 API for trustless cross-chai
    - Witness: `<schnorr_sig_64bytes> <preimage> <claim_script> <control_block>`
    - Uses SIGHASH_DEFAULT (0x00) — 64-byte signature, no sighash byte appended
    - Script lengths encoded with Bitcoin CompactSize varint
+   - Internal key: **MuSig2 key-aggregation** (BIP-327) of Boltz's `refundPublicKey` and our `claimPublicKey` — see "Taproot internal key derivation" below
 10. Broadcast claim tx via BDK Electrum
 11. Clean up persisted swap state on success
 
@@ -131,6 +132,30 @@ Uses https://docs.boltz.exchange[Boltz Exchange] v2 API for trustless cross-chai
    - Internal key: Boltz's `claimPublicKey`
    - Merkle sibling: `claimLeafHash`
 3. Broadcast refund tx via BDK Electrum
+
+==== Taproot Internal Key Derivation (MuSig2)
+
+Boltz v2 swaps use a Taproot output whose internal key is a **MuSig2 key-aggregation** (BIP-327) of two keys: Boltz's pubkey and ours. The exact order matters — Boltz's docs state **"Boltz's public key always coming first"**:
+
+[cols="1,1,1", options="header"]
+|===
+| Swap type | Boltz's role | `keyAggregate` order
+
+| Reverse swap (LN → on-chain) | Refunder | `[refundPublicKey, claimPublicKey]` (our claim key is ours)
+| Submarine swap (on-chain → LN) | Claimer | `[claimPublicKey, refundPublicKey]` (our refund key is ours)
+|===
+
+Keys must be **33-byte compressed** (not x-only) for `keyAggregate`. The aggregate is then used as the internal key when computing `TapTweak(aggPubkey ‖ merkleRoot)` and building the control block. Merkle root is `TapBranch(sorted(claimLeafHash, refundLeafHash))` per BIP-341.
+
+We use `@scure/btc-signer`'s `keyAggregate` + `keyAggExport` from `musig2.js` (MIT-licensed). Boltz's own `boltz-core` uses the same library internally but is AGPL-3.0, so we depend on `@scure/btc-signer` directly.
+
+Diagnostic cross-check: computing `p2tr(internalKey, [claimLeaf, refundLeaf], undefined, /*allowUnknownOutputs*/ true)` from `@scure/btc-signer` and comparing `.script` to the on-chain lockup scriptPubKey confirms the derivation is correct. See `TROUBLESHOOTING.adoc` for the witness-hash-mismatch symptom and debugging procedure.
+
+References:
+
+* https://api.docs.boltz.exchange/claiming-swaps.html[Boltz — Claims & Refunds]
+* https://bips.dev/327/[BIP-327 — MuSig2]
+* https://bips.dev/341/[BIP-341 — Taproot]
 
 ==== Status Monitoring
 
