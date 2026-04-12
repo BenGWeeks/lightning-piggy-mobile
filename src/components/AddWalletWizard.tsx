@@ -2,7 +2,6 @@ import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   Alert,
@@ -469,7 +468,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
               Enter your 12 or 24 word seed phrase. Numbers, colons, and extra whitespace will be
               stripped automatically.
             </Text>
-            <TextInput
+            <BottomSheetTextInput
               style={[styles.nwcInput, { minHeight: 100 }]}
               placeholder="word1 word2 word3 ..."
               placeholderTextColor={colors.textSupplementary}

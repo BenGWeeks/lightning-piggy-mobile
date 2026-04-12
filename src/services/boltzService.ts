@@ -47,7 +47,7 @@ export interface ReverseSwapResult {
   /** On-chain amount Boltz will lock (after their fees) */
   onchainAmount: number;
   timeoutBlockHeight: number;
-  /** Hex-encoded lockup address */
+  /** Lockup Bitcoin address (base58/bech32 string) — not hex */
   lockupAddress: string;
   /** Boltz's refund public key (hex) */
   refundPublicKey: string;

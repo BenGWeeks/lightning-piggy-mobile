@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { colors } from '../styles/theme';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet } from '../contexts/WalletContext';
+import TransactionDetailSheet, { TransactionDetailData } from './TransactionDetailSheet';
 
 interface Transaction {
   type: string;
@@ -11,6 +12,8 @@ interface Transaction {
   created_at?: number | null;
   settled_at?: number | null;
   blockHeight?: number | null;
+  txid?: string;
+  swapId?: string;
 }
 
 interface Props {
@@ -22,6 +25,7 @@ const INITIAL_COUNT = 20;
 const TransactionList: React.FC<Props> = ({ transactions }) => {
   const { btcPrice, currency } = useWallet();
   const [showAll, setShowAll] = useState(false);
+  const [detail, setDetail] = useState<TransactionDetailData | null>(null);
 
   // Reset when transaction list changes (wallet swipe)
   React.useEffect(() => setShowAll(false), [transactions]);
@@ -67,7 +71,12 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
         const fiatStr = satsToFiatString(amountSats, btcPrice, currency);
 
         return (
-          <View key={index} style={[styles.item, isPending && styles.itemPending]}>
+          <TouchableOpacity
+            key={index}
+            style={[styles.item, isPending && styles.itemPending]}
+            onPress={() => setDetail(item as TransactionDetailData)}
+            accessibilityLabel={`Open details for ${label}`}
+          >
             <View style={styles.itemLeft}>
               <Text style={[styles.itemIcon, isPending && styles.pendingText]}>
                 {isIncoming ? '↓' : '↑'}
@@ -96,7 +105,7 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
                 <Text style={[styles.itemFiat, isPending && styles.pendingText]}>{fiatStr}</Text>
               ) : null}
             </View>
-          </View>
+          </TouchableOpacity>
         );
       })}
       {hasMore && !showAll && (
@@ -104,6 +113,11 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
           <Text style={styles.showMoreText}>Show all {transactions.length} transactions</Text>
         </TouchableOpacity>
       )}
+      <TransactionDetailSheet
+        visible={detail !== null}
+        tx={detail}
+        onClose={() => setDetail(null)}
+      />
     </View>
   );
 };

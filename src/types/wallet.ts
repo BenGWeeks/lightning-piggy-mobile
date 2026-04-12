@@ -28,7 +28,11 @@ export interface WalletMetadata {
   lightningAddress: string | null;
   /** On-chain wallets only */
   onchainImportMethod?: OnchainImportMethod;
-  /** On-chain wallets: optional Electrum/API server override */
+  /** On-chain wallets: reserved metadata field for a future per-wallet
+   *  Electrum/API server override. Not currently consulted by
+   *  `onchainService` — it reads the global `getElectrumServer()` only.
+   *  Keep writing the field if the UI collects it, but don't rely on it
+   *  having any effect today. */
   electrumServer?: string;
 }
 

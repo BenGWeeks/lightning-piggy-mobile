@@ -29,19 +29,19 @@ echo "=== Setup: Add Watch-Only Wallet ==="
 maestro test -e MAESTRO_XPUB="$MAESTRO_XPUB3" -e WALLET_NAME="Watch Wallet 1" tests/e2e/test-add-onchain-wallet.yaml
 
 echo ""
-echo "=== Test: Transfer LN → LN (5 sats) ==="
+echo "=== Test: Transfer LN → LN (7 sats) ==="
 maestro test tests/e2e/test-transfer-ln-to-ln.yaml
 
 echo ""
-echo "=== Test: Transfer LN → On-chain (10,000 sats via Boltz) ==="
+echo "=== Test: Transfer LN → On-chain (26,000 sats via Boltz) ==="
 maestro test tests/e2e/test-transfer-ln-to-onchain.yaml
 
 echo ""
-echo "=== Test: Transfer On-chain → LN (10,000 sats via Boltz) ==="
+echo "=== Test: Transfer On-chain → LN (26,000 sats via Boltz) ==="
 maestro test tests/e2e/test-transfer-onchain-to-ln.yaml
 
 echo ""
-echo "=== Test: Transfer On-chain → On-chain (5,000 sats) ==="
+echo "=== Test: Transfer On-chain → On-chain (26,000 sats) ==="
 maestro test tests/e2e/test-transfer-onchain-to-onchain.yaml
 
 echo ""

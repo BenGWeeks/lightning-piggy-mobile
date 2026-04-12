@@ -304,17 +304,28 @@ export async function getInfo(walletId: string): Promise<{ alias: string; lud16?
 }
 
 export async function listTransactions(walletId: string): Promise<any[]> {
-  const provider = await ensureConnected(walletId);
+  let provider = await ensureConnected(walletId);
   if (!provider) return [];
-  // Retry once on timeout — LNbits relay can be slow to respond
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // Retry up to 3 times. The LNbits Nostrclient relay has a sporadic
+  // transport race where the first request after startup (or after a
+  // period of inactivity) is silently dropped — the server never logs
+  // it, the client hits the NWC SDK's ~60s reply timeout. Retrying with
+  // a relay reconnect between attempts usually clears it on attempt 2.
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const result = await provider.listTransactions({});
       return result.transactions || [];
     } catch (error) {
-      console.warn(`listTransactions attempt ${attempt + 1} error for ${walletId}:`, error);
-      if (attempt === 0) {
-        await new Promise((r) => setTimeout(r, 1000));
+      const msg = error instanceof Error ? error.message : String(error);
+      console.warn(`listTransactions attempt ${attempt}/${maxAttempts} for ${walletId}:`, msg);
+      if (attempt < maxAttempts) {
+        // Reconnect the relay before retrying — a stale subscription
+        // is the most common cause of the drop.
+        try {
+          provider = await reconnect(walletId);
+        } catch {}
+        await new Promise((r) => setTimeout(r, 1500));
       }
     }
   }

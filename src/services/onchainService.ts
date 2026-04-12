@@ -63,7 +63,7 @@ export interface OnchainTransaction {
   timestamp: number | null;
 }
 
-/** Map a BDK transaction to our OnchainTransaction type and sort by timestamp (newest first). */
+/** Map a BDK transaction to our OnchainTransaction type and sort: pending (no timestamp) first, then confirmed in newest-first order. */
 function mapAndSortTransactions(txList: any[]): OnchainTransaction[] {
   return txList
     .map((tx) => {
