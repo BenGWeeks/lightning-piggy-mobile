@@ -73,24 +73,36 @@ const HomeScreen: React.FC = () => {
     navigation,
   ]);
 
+  // Hold the latest wallets + context callbacks in refs so fetchTransactions
+  // and fetchData can read up-to-date values without taking `wallets` or the
+  // callbacks as dependencies. Without refs we'd either re-run the fetch
+  // callback on every wallet state change (triggering fetch loops via the
+  // effect below) or capture stale values (and mis-route NWC vs on-chain).
+  const walletsRef = useRef(wallets);
+  const refreshActiveBalanceRef = useRef(refreshActiveBalance);
+  const fetchTransactionsForWalletRef = useRef(fetchTransactionsForWallet);
+  useEffect(() => {
+    walletsRef.current = wallets;
+    refreshActiveBalanceRef.current = refreshActiveBalance;
+    fetchTransactionsForWalletRef.current = fetchTransactionsForWallet;
+  }, [wallets, refreshActiveBalance, fetchTransactionsForWallet]);
+
   const fetchTransactions = useCallback(async () => {
     if (!activeWalletId) return;
-    await fetchTransactionsForWallet(activeWalletId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    await fetchTransactionsForWalletRef.current(activeWalletId);
   }, [activeWalletId]);
 
   const fetchData = useCallback(async () => {
     // For on-chain wallets, fetchTransactions already does syncAndRefresh
     // which updates both balance and transactions in a single sync.
     // Only call refreshActiveBalance separately for NWC wallets.
-    const wallet = wallets.find((w) => w.id === activeWalletId);
+    const wallet = walletsRef.current.find((w) => w.id === activeWalletId);
     if (wallet?.walletType === 'onchain') {
       await fetchTransactions();
     } else {
-      await Promise.all([refreshActiveBalance(), fetchTransactions()]);
+      await Promise.all([refreshActiveBalanceRef.current(), fetchTransactions()]);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeWalletId]);
+  }, [activeWalletId, fetchTransactions]);
 
   const isWalletAvailable =
     activeWallet?.walletType === 'onchain' ? true : (activeWallet?.isConnected ?? false);

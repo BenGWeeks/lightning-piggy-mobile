@@ -697,7 +697,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                   {sourceWallets.map((w) => (
                     <TouchableOpacity
                       key={w.id}
-                      testID={`transfer-source-${w.alias.replace(/\s+/g, '-').toLowerCase()}`}
+                      testID={`transfer-source-${w.id}`}
                       style={[styles.dropdownItem, sourceId === w.id && styles.dropdownItemActive]}
                       onPress={() => {
                         setSourceId(w.id);
@@ -748,7 +748,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                   {destWallets.map((w) => (
                     <TouchableOpacity
                       key={w.id}
-                      testID={`transfer-dest-${w.alias.replace(/\s+/g, '-').toLowerCase()}`}
+                      testID={`transfer-dest-${w.id}`}
                       style={[styles.dropdownItem, destId === w.id && styles.dropdownItemActive]}
                       onPress={() => {
                         setDestId(w.id);

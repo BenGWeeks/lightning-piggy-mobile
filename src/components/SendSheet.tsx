@@ -213,17 +213,31 @@ const SendSheet: React.FC<Props> = ({
     if (input.toLowerCase().startsWith('lightning:')) {
       input = input.substring(10);
     }
-    // Parse BIP-21 bitcoin: URI — extract address and optional amount
+    // Parse BIP-21 bitcoin: URI — extract address and optional amount.
+    // Avoid floating-point: convert the decimal string directly to sats via
+    // integer math. `parseFloat("0.00012345") * 1e8` rounds unpredictably on
+    // some values; parsing as digits preserves exact sat precision.
     if (input.toLowerCase().startsWith('bitcoin:')) {
       const withoutScheme = input.substring(8);
       const qIndex = withoutScheme.indexOf('?');
       if (qIndex >= 0) {
         const params = new URLSearchParams(withoutScheme.substring(qIndex + 1));
-        const amountBtc = parseFloat(params.get('amount') ?? '');
-        if (amountBtc > 0 && amountBtc <= 21_000_000) {
-          bip21Amount = Math.round(amountBtc * 100_000_000);
-        } else if (amountBtc > 21_000_000) {
-          console.warn('BIP-21 amount exceeds Bitcoin max supply, ignoring');
+        const raw = (params.get('amount') ?? '').trim();
+        if (/^\d+(\.\d{0,8})?$/.test(raw)) {
+          const [wholePart, fracPart = ''] = raw.split('.');
+          const fracPadded = (fracPart + '00000000').slice(0, 8);
+          try {
+            const sats = BigInt(wholePart) * 100_000_000n + BigInt(fracPadded);
+            if (sats > 0n && sats <= 2_100_000_000_000_000n) {
+              bip21Amount = Number(sats); // safe: well within Number.MAX_SAFE_INTEGER
+            } else if (sats > 2_100_000_000_000_000n) {
+              console.warn('BIP-21 amount exceeds Bitcoin max supply, ignoring');
+            }
+          } catch {
+            console.warn('BIP-21 amount parse failed, ignoring:', raw);
+          }
+        } else if (raw) {
+          console.warn('BIP-21 amount malformed, ignoring:', raw);
         }
         input = withoutScheme.substring(0, qIndex);
       } else {

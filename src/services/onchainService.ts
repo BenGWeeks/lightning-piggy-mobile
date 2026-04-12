@@ -364,6 +364,16 @@ export function disconnectElectrum(): void {
 }
 
 /**
+ * Drop the in-memory BDK wallet for `walletId` without touching storage.
+ * Call this when the backing descriptor changes (e.g. mnemonic re-import)
+ * so the next on-chain call rebuilds the wallet from the new secret
+ * rather than signing with a stale cached key.
+ */
+export function invalidateWalletCache(walletId: string): void {
+  bdkWallets.delete(walletId);
+}
+
+/**
  * Broadcast a raw transaction hex via the configured Electrum server.
  * Uses BDK's blockchain.broadcast which handles the Electrum protocol.
  */

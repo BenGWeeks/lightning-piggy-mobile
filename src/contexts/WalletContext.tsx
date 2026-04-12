@@ -280,16 +280,24 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   }, [currency, fetchPrice]);
 
-  // NWC connection status: check WebSocket state every 30 seconds
-  // and reconnect if dropped (prevents idle timeout disconnections)
+  // NWC connection status: check WebSocket state every 30 seconds and
+  // reconnect if dropped (prevents idle timeout disconnections).
+  //
+  // The wallets array churns constantly (balance polls, tx refreshes) so
+  // depending on it means the 30s interval gets torn down and re-created
+  // on nearly every state update — missed/duplicated checks, extra churn.
+  // Hold the latest wallets in a ref and let the interval read from it.
   const connectionCheckInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const walletsRef = useRef(wallets);
+  useEffect(() => {
+    walletsRef.current = wallets;
+  }, [wallets]);
   useEffect(() => {
     connectionCheckInterval.current = setInterval(async () => {
-      for (const w of wallets.filter((ww) => ww.walletType === 'nwc')) {
+      for (const w of walletsRef.current.filter((ww) => ww.walletType === 'nwc')) {
         const connected = nwcService.isWalletConnected(w.id);
         if (connected !== w.isConnected) {
           if (!connected) {
-            // Try to reconnect
             try {
               const nwcUrl = await walletStorage.getNwcUrl(w.id);
               if (nwcUrl) {
@@ -308,7 +316,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => {
       if (connectionCheckInterval.current) clearInterval(connectionCheckInterval.current);
     };
-  }, [wallets, updateWalletInState]);
+  }, [updateWalletInState]);
 
   const addNwcWallet = useCallback(
     async (nwcUrl: string, alias: string, theme: CardTheme) => {
