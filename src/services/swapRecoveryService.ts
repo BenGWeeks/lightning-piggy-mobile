@@ -68,28 +68,49 @@ interface PersistedReverseSwap {
  */
 const SWAP_INDEX_KEY = 'boltz_swap_index';
 
+// Serialise read-modify-write of the swap index so two concurrent callers
+// (e.g. two swaps created back-to-back) cannot clobber each other's entries.
+// A dropped entry would leave a stranded swap that swapRecoveryService never
+// retries, so Boltz auto-refunds at timeout and the user loses the funds.
+// Each call chains onto `indexMutex`; failures are caught inside each op so
+// one bad write doesn't poison the chain for subsequent callers.
+let indexMutex: Promise<void> = Promise.resolve();
+
+function withIndexLock<T>(op: () => Promise<T>): Promise<T> {
+  const run = indexMutex.then(op, op);
+  indexMutex = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
 export async function registerPendingSwap(swapId: string): Promise<void> {
-  try {
-    const existing = await SecureStore.getItemAsync(SWAP_INDEX_KEY);
-    const ids = existing ? (JSON.parse(existing) as string[]) : [];
-    if (!ids.includes(swapId)) {
-      ids.push(swapId);
-      await SecureStore.setItemAsync(SWAP_INDEX_KEY, JSON.stringify(ids));
+  return withIndexLock(async () => {
+    try {
+      const existing = await SecureStore.getItemAsync(SWAP_INDEX_KEY);
+      const ids = existing ? (JSON.parse(existing) as string[]) : [];
+      if (!ids.includes(swapId)) {
+        ids.push(swapId);
+        await SecureStore.setItemAsync(SWAP_INDEX_KEY, JSON.stringify(ids));
+      }
+    } catch (e) {
+      console.warn('[SwapRecovery] Failed to register swap:', e);
     }
-  } catch (e) {
-    console.warn('[SwapRecovery] Failed to register swap:', e);
-  }
+  });
 }
 
 export async function unregisterPendingSwap(swapId: string): Promise<void> {
-  try {
-    const existing = await SecureStore.getItemAsync(SWAP_INDEX_KEY);
-    if (!existing) return;
-    const ids = (JSON.parse(existing) as string[]).filter((id) => id !== swapId);
-    await SecureStore.setItemAsync(SWAP_INDEX_KEY, JSON.stringify(ids));
-  } catch (e) {
-    console.warn('[SwapRecovery] Failed to unregister swap:', e);
-  }
+  return withIndexLock(async () => {
+    try {
+      const existing = await SecureStore.getItemAsync(SWAP_INDEX_KEY);
+      if (!existing) return;
+      const ids = (JSON.parse(existing) as string[]).filter((id) => id !== swapId);
+      await SecureStore.setItemAsync(SWAP_INDEX_KEY, JSON.stringify(ids));
+    } catch (e) {
+      console.warn('[SwapRecovery] Failed to unregister swap:', e);
+    }
+  });
 }
 
 /**

@@ -595,8 +595,26 @@ export async function refundSwap(
     Buffer.concat([Buffer.from([claimLeafVersion]), compactSize(claimScript.length), claimScript]),
   );
 
-  // Internal key: x-only Boltz claim public key (they are the internal key for submarine swaps)
-  const internalKey = claimPubKey.length === 33 ? claimPubKey.subarray(1) : claimPubKey;
+  // Boltz v2 Taproot internal key is the MuSig2 aggregate of Boltz's pubkey
+  // and the user's pubkey, with "Boltz's public key always coming first".
+  // For submarine swaps Boltz is the claimer, so the claim key is passed
+  // first, then the user's refund pubkey. Mirrors claimSwap() for reverse
+  // swaps (where Boltz is the refunder and the order is inverted).
+  // See https://api.docs.boltz.exchange/claiming-swaps.html
+  const refundPubKeyCompressed = Buffer.from(
+    ecc.pointFromScalar(refundPrivKey, true) as Uint8Array,
+  );
+  const claimPubKeyCompressed =
+    claimPubKey.length === 33
+      ? claimPubKey
+      : Buffer.from(
+          ecc.xOnlyPointAddTweak(new Uint8Array(claimPubKey), new Uint8Array(32))!.xOnlyPubkey,
+        );
+  const aggCtx = keyAggregate([
+    new Uint8Array(claimPubKeyCompressed),
+    new Uint8Array(refundPubKeyCompressed),
+  ]);
+  const internalKey = Buffer.from(keyAggExport(aggCtx));
 
   // Merkle root (sorted)
   const merkleRoot =
