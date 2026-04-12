@@ -121,6 +121,19 @@ async function getBlockchain(): Promise<Blockchain> {
   return blockchain;
 }
 
+/**
+ * Heuristic check for a Bitcoin mainnet on-chain address (P2PKH, P2SH,
+ * native SegWit v0, Taproot). Doesn't verify checksum — that's done by
+ * BDK when the descriptor is built. Used to branch between xpub import
+ * and single-address import in getBdkWallet.
+ */
+function looksLikeBitcoinAddress(s: string): boolean {
+  const trimmed = s.trim();
+  return (
+    /^bc1[qp][a-z0-9]{6,87}$/.test(trimmed) || /^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$/.test(trimmed)
+  );
+}
+
 async function getBdkWallet(walletId: string): Promise<Wallet> {
   const cached = bdkWallets.get(walletId);
   if (cached) return cached;
@@ -141,12 +154,26 @@ async function getBdkWallet(walletId: string): Promise<Wallet> {
       Network.Bitcoin,
     );
   } else {
-    const rawXpub = await getXpub(walletId);
-    if (!rawXpub) throw new Error(`No xpub or mnemonic found for wallet ${walletId}`);
-    const xpub = toXpub(rawXpub);
-    if (__DEV__) console.log('[BDK] Creating watch-only wallet from xpub');
-    descriptor = await new Descriptor().create(`wpkh(${xpub}/0/*)`, Network.Bitcoin);
-    changeDescriptor = await new Descriptor().create(`wpkh(${xpub}/1/*)`, Network.Bitcoin);
+    const raw = await getXpub(walletId);
+    if (!raw) throw new Error(`No xpub, mnemonic, or address found for wallet ${walletId}`);
+    const trimmed = raw.trim();
+
+    if (looksLikeBitcoinAddress(trimmed)) {
+      // Single-address watch-only wallet. Use BDK's `addr()` descriptor
+      // for both external and change so the wallet tracks just this one
+      // UTXO set. We can never send from it (no keys), and
+      // `getNextReceiveAddress` always returns the same address — that's
+      // the whole point for this mode.
+      if (__DEV__) console.log('[BDK] Creating watch-only wallet from single address');
+      const addrDescriptor = `addr(${trimmed})`;
+      descriptor = await new Descriptor().create(addrDescriptor, Network.Bitcoin);
+      changeDescriptor = await new Descriptor().create(addrDescriptor, Network.Bitcoin);
+    } else {
+      const xpub = toXpub(trimmed);
+      if (__DEV__) console.log('[BDK] Creating watch-only wallet from xpub');
+      descriptor = await new Descriptor().create(`wpkh(${xpub}/0/*)`, Network.Bitcoin);
+      changeDescriptor = await new Descriptor().create(`wpkh(${xpub}/1/*)`, Network.Bitcoin);
+    }
   }
 
   const dbConfig = await new DatabaseConfig().memory();
@@ -200,10 +227,27 @@ export async function estimateOnchainFee(): Promise<{
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+/**
+ * Validate a watch-only import — either an extended public key (xpub/ypub/
+ * zpub) or a single Bitcoin mainnet on-chain address (bech32m Taproot,
+ * native SegWit, or legacy). Returns `null` if valid, a user-friendly
+ * error string otherwise.
+ */
+export function validateOnchainImport(input: string): string | null {
+  const trimmed = input.trim();
+  if (looksLikeBitcoinAddress(trimmed)) {
+    // Address looks syntactically plausible. BDK will reject a bad
+    // checksum when the descriptor is built; surfacing a pre-check error
+    // here would duplicate that without adding value.
+    return null;
+  }
+  return validateXpub(trimmed);
+}
+
 export function validateXpub(extPubKey: string): string | null {
   const trimmed = extPubKey.trim();
   if (!/^[xyzXYZ]pub[A-Za-z0-9]{100,112}$/.test(trimmed)) {
-    return 'Invalid extended public key. Must start with xpub, ypub, or zpub.';
+    return 'Invalid extended public key or on-chain address.';
   }
   // Decode with bs58check so we validate both the base58 charset and the
   // checksum. A typo-ridden xpub that passes the shape regex would otherwise

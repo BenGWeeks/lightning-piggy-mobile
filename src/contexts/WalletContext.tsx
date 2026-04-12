@@ -382,7 +382,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       }
 
-      const validationError = onchainService.validateXpub(trimmedXpub);
+      const validationError = onchainService.validateOnchainImport(trimmedXpub);
       if (validationError) {
         return { success: false, error: validationError };
       }

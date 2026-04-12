@@ -24,7 +24,7 @@ import { CardTheme, WalletType } from '../types/wallet';
 import { themeList } from '../themes/cardThemes';
 import { MiniWalletCard } from './WalletCard';
 import { validateNwcUrl } from '../services/nwcService';
-import { validateXpub } from '../services/onchainService';
+import { validateOnchainImport } from '../services/onchainService';
 import { LightningIcon, ChainIcon } from './icons/ArrowIcons';
 
 interface Props {
@@ -125,7 +125,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
 
   // --- Step: xpub ---
   const handleXpubNext = () => {
-    const err = validateXpub(xpub.trim());
+    const err = validateOnchainImport(xpub.trim());
     if (err) {
       setError(err);
       return;
@@ -313,7 +313,8 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
               <View style={styles.typeCardText}>
                 <Text style={styles.typeCardTitle}>Bitcoin (On-chain)</Text>
                 <Text style={styles.typeCardDesc}>
-                  Import a watch-only wallet using an extended public key (xpub)
+                  Import a watch-only wallet via an extended public key (xpub/ypub/zpub) or a single
+                  Bitcoin address
                 </Text>
               </View>
             </TouchableOpacity>
@@ -417,12 +418,12 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
             ) : (
               <>
                 <Text style={styles.description}>
-                  Paste or scan your extended public key (xpub, ypub, or zpub) to add a watch-only
-                  wallet.
+                  Paste or scan an extended public key (xpub, ypub, or zpub) to track a whole HD
+                  wallet, or a single Bitcoin address (bc1…, 1…, 3…) to watch just that one.
                 </Text>
                 <BottomSheetTextInput
                   style={styles.nwcInput}
-                  placeholder="xpub6..."
+                  placeholder="xpub6… or bc1q…"
                   placeholderTextColor={colors.textSupplementary}
                   value={xpub}
                   onChangeText={(text) => {
@@ -433,7 +434,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                   autoCapitalize="none"
                   autoCorrect={false}
                   testID="xpub-input"
-                  accessibilityLabel="Extended public key input"
+                  accessibilityLabel="Extended public key or address input"
                 />
                 <TouchableOpacity style={styles.secondaryButton} onPress={handleScan}>
                   <Text style={styles.secondaryButtonText}>Scan QR Code</Text>
