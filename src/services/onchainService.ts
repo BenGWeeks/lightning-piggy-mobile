@@ -342,6 +342,11 @@ export async function broadcastRawTx(txHex: string): Promise<void> {
     throw new Error('Invalid transaction hex: must be a non-empty even-length hex string');
   }
   const { Transaction } = await import('bdk-rn');
+  // Force a fresh Electrum connection. A stale/dropped socket can cause
+  // broadcast() to fail in a way that masks the real error as a RN
+  // DevSettings "Cannot read property 'reload' of undefined" crash. Matches
+  // the pattern used in sendTransaction().
+  blockchain = null;
   const chain = await getBlockchain();
   const bytes: number[] = [];
   for (let i = 0; i < txHex.length; i += 2) {
