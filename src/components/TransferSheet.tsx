@@ -20,6 +20,7 @@ import {
   BottomSheetScrollView,
 } from '@gorhom/bottom-sheet';
 import * as SecureStore from 'expo-secure-store';
+import Toast from 'react-native-toast-message';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
@@ -57,9 +58,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [inputUnit, setInputUnit] = useState<InputUnit>('sats');
   const [sending, setSending] = useState(false);
   const [progressMsg, setProgressMsg] = useState<string | null>(null);
-  // true while in a phase where closing is safe (recovery/pending UX picks
-  // things up). false during in-flight crypto steps that must complete.
-  const [canClose, setCanClose] = useState(true);
+  // true once the foreground work is done and the background task has the
+  // swap — the sheet becomes a "done, safe to close" confirmation state.
+  const [handedOff, setHandedOff] = useState(false);
   const [feeEstimate, setFeeEstimate] = useState<string | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
@@ -334,7 +335,6 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     }
 
     setSending(true);
-    setCanClose(true); // safe: nothing committed yet
     setProgressMsg('Preparing transfer...');
     console.log(
       `[Transfer] Starting ${transferType}: ${currentSats} sats from ${source.alias} to ${dest.alias}`,
@@ -365,18 +365,18 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       if (transferType === 'ln-to-ln') {
         setProgressMsg('Creating invoice...');
         const invoice = await makeInvoiceForWallet(destId, currentSats, 'Transfer');
-        setCanClose(false); // unsafe: Lightning payment in flight
         setProgressMsg('Sending payment...');
         await payInvoiceForWallet(sourceId, invoice);
-        setCanClose(true);
       } else if (transferType === 'ln-to-onchain') {
-        // Full Boltz reverse swap: LN → on-chain
+        // Full Boltz reverse swap: LN → on-chain.
+        // Foreground: create swap, persist, dispatch LN payment, dismiss sheet.
+        // Background: wait for on-chain lockup, build & broadcast claim tx.
         setProgressMsg('Creating Boltz swap...');
         const address = await onchainService.getNextReceiveAddress(destId);
         const swap = await boltzService.createReverseSwap(address, currentSats);
 
         // Persist full swap state so the claim can be recovered if the
-        // app crashes or pay_invoice times out before we reach claimSwap.
+        // app crashes, is force-stopped, or the background task dies.
         await SecureStore.setItemAsync(
           `boltz_swap_${swap.id}`,
           JSON.stringify({
@@ -391,25 +391,62 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         );
         await swapRecoveryService.registerPendingSwap(swap.id);
 
-        setCanClose(false); // unsafe: LN payment to Boltz in flight
-        setProgressMsg('Paying Lightning invoice...');
-        await payInvoiceForWallet(sourceId, swap.invoice);
+        // Kick off the Lightning payment + claim in the background so the
+        // user can dismiss the sheet immediately. The swap is persisted, so
+        // swapRecoveryService is the safety net if this task dies.
+        const amount = currentSats;
+        (async () => {
+          try {
+            await payInvoiceForWallet(sourceId, swap.invoice);
+            Toast.show({
+              type: 'info',
+              text1: 'Lightning payment sent',
+              text2: `Waiting for Boltz to lock ${amount.toLocaleString()} sats on-chain…`,
+              position: 'top',
+              visibilityTime: 5000,
+            });
+            const lockup = await boltzService.waitForLockup(swap.id, 900000);
+            const claimed = await boltzService.claimSwap(swap, lockup, address);
+            Toast.show({
+              type: 'success',
+              text1: 'Swap complete',
+              text2: `${amount.toLocaleString()} sats sent on-chain. Claim tx ${claimed.slice(0, 10)}…`,
+              position: 'top',
+              visibilityTime: 10000,
+            });
+            await SecureStore.deleteItemAsync(`boltz_swap_${swap.id}`);
+            await swapRecoveryService.unregisterPendingSwap(swap.id);
+            try {
+              await Promise.all([
+                refreshBalanceForWallet(sourceId),
+                refreshBalanceForWallet(destId),
+                fetchTransactionsForWallet(sourceId),
+                fetchTransactionsForWallet(destId),
+              ]);
+            } catch {}
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            console.warn('[Transfer] Background reverse swap failed:', msg);
+            Toast.show({
+              type: 'error',
+              text1: 'Swap in progress',
+              text2:
+                'Background step hit an error — recovery will retry on next app launch. Funds are safe.',
+              position: 'top',
+              visibilityTime: 10000,
+            });
+          }
+        })();
 
-        // Safe from here — once Boltz has the LN payment + locks on-chain,
-        // swapRecoveryService can finish the claim on next app launch.
-        setCanClose(true);
+        // Show a terminal "underway" state with the Close button active so
+        // the user can dismiss when they're ready. The background task runs
+        // independently and will surface completion via toasts.
         setProgressMsg(
-          'Waiting for on-chain confirmation...\nThis may take ~10-60 minutes. You can close this window — progress will appear in your transaction history.',
+          'Swap underway — Lightning payment is being sent and Boltz will lock on-chain funds next.\n\n' +
+            'Safe to close — you\'ll get a notification when the swap completes. ' +
+            'Progress also appears in your transaction history.',
         );
-        const lockup = await boltzService.waitForLockup(swap.id, 900000);
-
-        setCanClose(false); // unsafe: building & broadcasting the claim tx
-        setProgressMsg('Claiming on-chain funds...');
-        await boltzService.claimSwap(swap, lockup, address);
-        setCanClose(true);
-
-        await SecureStore.deleteItemAsync(`boltz_swap_${swap.id}`);
-        await swapRecoveryService.unregisterPendingSwap(swap.id);
+        return;
       } else if (transferType === 'onchain-to-ln') {
         setProgressMsg('Creating Boltz swap...');
         const invoice = await makeInvoiceForWallet(destId, currentSats, 'Transfer');
@@ -430,71 +467,101 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
           }),
         );
 
-        setCanClose(false); // unsafe: signing + broadcasting the on-chain lockup
+        // Foreground: broadcast the on-chain tx (the user's action).
+        // Background: wait for Boltz to pay the LN invoice, handle refund path.
         setProgressMsg('Broadcasting on-chain transaction...');
         console.log(
           `[Transfer] Sending ${swap.expectedAmount} sats on-chain to Boltz address ${swap.address}`,
         );
         await onchainService.sendTransaction(sourceId, swap.address, swap.expectedAmount);
-
-        // Safe: lockup is broadcast; Boltz will pay the LN invoice and we can
-        // follow up via status polling or user reopening the app.
-        setCanClose(true);
-        setProgressMsg(
-          'Waiting for Boltz to pay Lightning invoice...\nThis may take ~10-60 minutes. You can close this window — progress will appear in your transaction history.',
-        );
-        console.log('[Transfer] On-chain tx broadcast, waiting for Boltz to pay LN invoice...');
-
-        try {
-          await boltzService.waitForSubmarineSwapComplete(swap.id, 900000);
-        } catch (swapError) {
-          // Check if this is a refundable failure
-          const msg = swapError instanceof Error ? swapError.message : '';
-          if (
-            msg.includes('swap.expired') ||
-            msg.includes('invoice.failedToPay') ||
-            msg.includes('transaction.lockupFailed')
-          ) {
-            // Attempt refund
-            const lockup = await boltzService.getSubmarineSwapLockup(swap.id);
-            if (lockup) {
-              const destAddr = await onchainService.getNextReceiveAddress(sourceId);
-              Alert.alert(
-                'Swap Failed — Refund Available',
-                `The swap failed (${msg}). Your on-chain funds can be refunded after block ${swap.timeoutBlockHeight}.`,
-                [
-                  {
-                    text: 'Refund Now',
-                    onPress: async () => {
-                      try {
-                        await boltzService.refundSwap(swap, lockup, destAddr);
-                        await SecureStore.deleteItemAsync(`submarine_swap_${swap.id}`);
-                        Alert.alert('Refund Sent', 'Your refund transaction has been broadcast.');
-                      } catch (refundErr) {
-                        Alert.alert(
-                          'Refund Failed',
-                          refundErr instanceof Error ? refundErr.message : 'Refund failed',
-                        );
-                      }
+        const submarineAmount = swap.expectedAmount;
+        (async () => {
+          try {
+            await boltzService.waitForSubmarineSwapComplete(swap.id, 900000);
+            Toast.show({
+              type: 'success',
+              text1: 'Swap complete',
+              text2: `${submarineAmount.toLocaleString()} sats delivered via Lightning.`,
+              position: 'top',
+              visibilityTime: 10000,
+            });
+            await SecureStore.deleteItemAsync(`submarine_swap_${swap.id}`);
+            try {
+              await Promise.all([
+                refreshBalanceForWallet(sourceId),
+                refreshBalanceForWallet(destId),
+                fetchTransactionsForWallet(sourceId),
+                fetchTransactionsForWallet(destId),
+              ]);
+            } catch {}
+          } catch (swapError) {
+            const msg = swapError instanceof Error ? swapError.message : '';
+            console.warn('[Transfer] Background submarine swap failed:', msg);
+            if (
+              msg.includes('swap.expired') ||
+              msg.includes('invoice.failedToPay') ||
+              msg.includes('transaction.lockupFailed')
+            ) {
+              const lockup = await boltzService.getSubmarineSwapLockup(swap.id);
+              if (lockup) {
+                const destAddr = await onchainService.getNextReceiveAddress(sourceId);
+                Alert.alert(
+                  'Swap Failed — Refund Available',
+                  `The swap failed (${msg}). Your on-chain funds can be refunded after block ${swap.timeoutBlockHeight}.`,
+                  [
+                    {
+                      text: 'Refund Now',
+                      onPress: async () => {
+                        try {
+                          await boltzService.refundSwap(swap, lockup, destAddr);
+                          await SecureStore.deleteItemAsync(`submarine_swap_${swap.id}`);
+                          Toast.show({
+                            type: 'success',
+                            text1: 'Refund sent',
+                            text2: 'Your refund transaction has been broadcast.',
+                            position: 'top',
+                            visibilityTime: 8000,
+                          });
+                        } catch (refundErr) {
+                          Toast.show({
+                            type: 'error',
+                            text1: 'Refund failed',
+                            text2:
+                              refundErr instanceof Error ? refundErr.message : 'Refund failed',
+                            position: 'top',
+                            visibilityTime: 10000,
+                          });
+                        }
+                      },
                     },
-                  },
-                  { text: 'Later', style: 'cancel' },
-                ],
-              );
+                    { text: 'Later', style: 'cancel' },
+                  ],
+                );
+              }
+            } else {
+              Toast.show({
+                type: 'error',
+                text1: 'Swap failed',
+                text2: msg.slice(0, 140),
+                position: 'top',
+                visibilityTime: 10000,
+              });
             }
-            throw swapError;
           }
-          throw swapError;
-        }
+        })();
 
-        // Clean up persisted swap state on success
-        await SecureStore.deleteItemAsync(`submarine_swap_${swap.id}`);
+        // Terminal "underway" state — user closes when ready. Background
+        // task will toast on completion/failure.
+        setProgressMsg(
+          'Swap underway — on-chain transaction broadcast. Boltz will pay the Lightning invoice next.\n\n' +
+            'Safe to close — you\'ll get a notification when the swap completes. ' +
+            'Progress also appears in your transaction history.',
+        );
+        return;
       } else if (transferType === 'onchain-to-onchain') {
-        setCanClose(false); // unsafe: signing + broadcasting on-chain tx
         setProgressMsg('Sending on-chain transaction...');
         const address = await onchainService.getNextReceiveAddress(destId);
         await onchainService.sendTransaction(sourceId, address, currentSats);
-        setCanClose(true);
       }
 
       setProgressMsg('Refreshing wallets...');
@@ -511,12 +578,12 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         console.warn('Post-transfer refresh failed — pull to refresh');
       }
 
+      // Only ln-to-ln and onchain-to-onchain reach here — Boltz paths return
+      // early after handing off to the background task.
       const settleMsg =
-        transferType === 'ln-to-onchain' || transferType === 'onchain-to-onchain'
+        transferType === 'onchain-to-onchain'
           ? `${currentSats.toLocaleString()} sats sent. On-chain funds will arrive after confirmation (~10-60 min).`
-          : transferType === 'onchain-to-ln'
-            ? `${currentSats.toLocaleString()} sats sent via Boltz swap.`
-            : `${currentSats.toLocaleString()} sats transferred.`;
+          : `${currentSats.toLocaleString()} sats transferred.`;
 
       Alert.alert('Transfer Complete', settleMsg, [{ text: 'OK', onPress: onClose }]);
     } catch (error) {
@@ -600,14 +667,11 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
               <Text style={styles.progressText}>{progressMsg}</Text>
             </View>
             <TouchableOpacity
-              style={[styles.closeButton, !canClose && styles.closeButtonDisabled]}
+              style={styles.closeButton}
               onPress={onClose}
-              disabled={!canClose}
-              accessibilityLabel={canClose ? 'Close' : 'Please wait — do not close'}
+              accessibilityLabel="Close"
             >
-              <Text style={[styles.closeButtonText, !canClose && styles.closeButtonTextDisabled]}>
-                {canClose ? 'Close' : 'Please wait…'}
-              </Text>
+              <Text style={styles.closeButtonText}>Close</Text>
             </TouchableOpacity>
           </View>
         ) : (
