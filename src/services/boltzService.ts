@@ -22,7 +22,7 @@
 import * as ecc from '@bitcoinerlab/secp256k1';
 import BIP32Factory from 'bip32';
 import * as bitcoin from 'bitcoinjs-lib';
-import { keyAggregate, keyAggExport, sortKeys } from '@scure/btc-signer/musig2.js';
+import { keyAggregate, keyAggExport } from '@scure/btc-signer/musig2.js';
 
 const bip32 = BIP32Factory(ecc);
 const BOLTZ_API = 'https://api.boltz.exchange/v2';
@@ -448,36 +448,15 @@ export async function claimSwap(
     refundPubKey.length === 33
       ? refundPubKey
       : Buffer.from(ecc.xOnlyPointAddTweak(new Uint8Array(refundPubKey), new Uint8Array(32))!.xOnlyPubkey);
-  // BIP-327 / MuSig2 key aggregation is commutative only when keys are
-  // pre-sorted lexicographically (KeySort). Both sides must agree on order.
-  // Try sorted first; we'll log both in debug.
-  const sortedPubKeys = sortKeys([
-    new Uint8Array(claimPubKeyCompressed),
+  // Boltz v2 MuSig2 key aggregation: "Boltz's public key always coming first".
+  // For reverse swaps Boltz is the refunder, so refund key is passed first,
+  // then claim key (the user's). Confirmed against chain via p2tr diagnostic.
+  // See https://api.docs.boltz.exchange/claiming-swaps.html
+  const aggCtx = keyAggregate([
     new Uint8Array(refundPubKeyCompressed),
+    new Uint8Array(claimPubKeyCompressed),
   ]);
-  const aggCtxSorted = keyAggregate(sortedPubKeys);
-  const internalKey = Buffer.from(keyAggExport(aggCtxSorted));
-
-  // Diagnostic: also compute unsorted in both orders to compare against chain.
-  const aggCR = Buffer.from(
-    keyAggExport(
-      keyAggregate([
-        new Uint8Array(claimPubKeyCompressed),
-        new Uint8Array(refundPubKeyCompressed),
-      ]),
-    ),
-  );
-  const aggRC = Buffer.from(
-    keyAggExport(
-      keyAggregate([
-        new Uint8Array(refundPubKeyCompressed),
-        new Uint8Array(claimPubKeyCompressed),
-      ]),
-    ),
-  );
-  console.log(
-    `[Boltz] keyAgg variants — sorted=${Buffer.from(internalKey).toString('hex')} claim_refund=${aggCR.toString('hex')} refund_claim=${aggRC.toString('hex')}`,
-  );
+  const internalKey = Buffer.from(keyAggExport(aggCtx));
 
   // Compute the Taproot tweak to determine output key parity (BIP-341)
   // Merkle root: sort and hash the two leaf hashes
@@ -494,28 +473,6 @@ export async function claimSwap(
   if (!tweakedKey) throw new Error('Failed to compute tweaked key');
   const parityBit = tweakedKey.parity;
 
-  // Debug — compare computed tweaked key with actual lockup output key so we
-  // can diagnose witness hash mismatches. Convert every value to a plain hex
-  // string via Uint8Array to sidestep Buffer-vs-Uint8Array type quirks.
-  const toHex = (v: unknown): string => {
-    try {
-      const u = v instanceof Uint8Array ? v : new Uint8Array(v as ArrayBuffer);
-      return Array.from(u, (b) => b.toString(16).padStart(2, '0')).join('');
-    } catch {
-      return '<not-bytes>';
-    }
-  };
-  const outputScript = bitcoin.address.toOutputScript(swap.lockupAddress);
-  console.log(
-    `[Boltz] Taproot debug — refundPubKeyRaw=${toHex(refundPubKey)} ` +
-      `internalKey=${toHex(internalKey)} ` +
-      `claimLeafHash=${toHex(claimLeafHash)} ` +
-      `refundLeafHash=${toHex(refundLeafHash)} ` +
-      `merkleRoot=${toHex(merkleRoot)} ` +
-      `computedTweaked=${toHex(tweakedKey.xOnlyPubkey)} ` +
-      `outputScript=${toHex(outputScript)} ` +
-      `parity=${parityBit}`,
-  );
 
   // Control block: <leaf_version | parity> <internal_key> <merkle_sibling>
   const controlBlock = Buffer.concat([
