@@ -146,7 +146,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       setFeeEstimate('~0 sats \u00B7 Instant (Lightning)');
     } else if (transferType === 'ln-to-onchain' && cachedBoltzFees) {
       const fee = boltzService.calculateSwapFee(currentSats, cachedBoltzFees);
-      setFeeEstimate(`~${fee.toLocaleString()} sats \u00B7 ~10-60 min (on-chain)`);
+      setFeeEstimate(`~${fee.toLocaleString()} sats \u00B7 ~10-60 min`);
     } else if (transferType === 'onchain-to-ln' && cachedBoltzFees) {
       const fee = boltzService.calculateSwapFee(currentSats, cachedBoltzFees);
       setFeeEstimate(`~${fee.toLocaleString()} sats \u00B7 ~10-60 min`);
@@ -154,7 +154,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       onchainService
         .estimateOnchainFee()
         .then((fees) => {
-          setFeeEstimate(`~${fees.medium.toLocaleString()} sats \u00B7 ~10-60 min (on-chain)`);
+          setFeeEstimate(`~${fees.medium.toLocaleString()} sats \u00B7 ~10-60 min`);
         })
         .catch(() => {
           setFeeEstimate('Fee estimate unavailable');
@@ -544,7 +544,10 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
 
   if (!visible) return null;
 
-  const canTransfer = sourceId && destId && currentSats > 0 && transferType !== null;
+  const isBoltzTransfer = transferType === 'ln-to-onchain' || transferType === 'onchain-to-ln';
+  const belowBoltzMin = isBoltzTransfer && currentSats > 0 && currentSats < boltzService.BOLTZ_MIN_SATS;
+  const canTransfer =
+    sourceId && destId && currentSats > 0 && transferType !== null && !belowBoltzMin;
 
   const renderWalletLabel = (w: WalletState) => {
     const balanceStr = w.balance !== null ? ` · ${w.balance.toLocaleString()} sats` : '';
@@ -780,6 +783,14 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
               </View>
             )}
 
+            {/* Boltz minimum amount warning */}
+            {belowBoltzMin && (
+              <Text style={styles.warningText}>
+                Boltz swaps require a minimum of{' '}
+                {boltzService.BOLTZ_MIN_SATS.toLocaleString()} sats.
+              </Text>
+            )}
+
             {/* Watch-only warning */}
             {source?.walletType === 'onchain' && source?.onchainImportMethod !== 'mnemonic' && (
               <Text style={styles.warningText}>
@@ -949,9 +960,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   boltzLogo: {
-    width: 28,
-    height: 28,
-    borderRadius: 6,
+    width: 75,
+    height: 75,
+    borderRadius: 12,
   },
   feeText: {
     fontSize: 13,
