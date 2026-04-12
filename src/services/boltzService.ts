@@ -441,13 +441,13 @@ export async function claimSwap(
   // pubkey (ours) and the refund pubkey (theirs) — BIP-327. It is NOT just
   // the refund pubkey. Both inputs must be 33-byte compressed pubkeys.
   // See: https://docs.boltz.exchange and @scure/btc-signer musig2.
-  const claimPubKeyCompressed = Buffer.from(
-    ecc.pointFromScalar(claimPrivKey, true) as Uint8Array,
-  );
+  const claimPubKeyCompressed = Buffer.from(ecc.pointFromScalar(claimPrivKey, true) as Uint8Array);
   const refundPubKeyCompressed =
     refundPubKey.length === 33
       ? refundPubKey
-      : Buffer.from(ecc.xOnlyPointAddTweak(new Uint8Array(refundPubKey), new Uint8Array(32))!.xOnlyPubkey);
+      : Buffer.from(
+          ecc.xOnlyPointAddTweak(new Uint8Array(refundPubKey), new Uint8Array(32))!.xOnlyPubkey,
+        );
   // Boltz v2 MuSig2 key aggregation: "Boltz's public key always coming first".
   // For reverse swaps Boltz is the refunder, so refund key is passed first,
   // then claim key (the user's). Confirmed against chain via p2tr diagnostic.
@@ -472,7 +472,6 @@ export async function claimSwap(
   const tweakedKey = ecc.xOnlyPointAddTweak(new Uint8Array(internalKey), new Uint8Array(tweak));
   if (!tweakedKey) throw new Error('Failed to compute tweaked key');
   const parityBit = tweakedKey.parity;
-
 
   // Control block: <leaf_version | parity> <internal_key> <merkle_sibling>
   const controlBlock = Buffer.concat([

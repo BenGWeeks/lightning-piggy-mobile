@@ -443,7 +443,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         // independently and will surface completion via toasts.
         setProgressMsg(
           'Swap underway — Lightning payment is being sent and Boltz will lock on-chain funds next.\n\n' +
-            'Safe to close — you\'ll get a notification when the swap completes. ' +
+            "Safe to close — you'll get a notification when the swap completes. " +
             'Progress also appears in your transaction history.',
         );
         return;
@@ -526,8 +526,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                           Toast.show({
                             type: 'error',
                             text1: 'Refund failed',
-                            text2:
-                              refundErr instanceof Error ? refundErr.message : 'Refund failed',
+                            text2: refundErr instanceof Error ? refundErr.message : 'Refund failed',
                             position: 'top',
                             visibilityTime: 10000,
                           });
@@ -554,7 +553,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         // task will toast on completion/failure.
         setProgressMsg(
           'Swap underway — on-chain transaction broadcast. Boltz will pay the Lightning invoice next.\n\n' +
-            'Safe to close — you\'ll get a notification when the swap completes. ' +
+            "Safe to close — you'll get a notification when the swap completes. " +
             'Progress also appears in your transaction history.',
         );
         return;
@@ -612,7 +611,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   if (!visible) return null;
 
   const isBoltzTransfer = transferType === 'ln-to-onchain' || transferType === 'onchain-to-ln';
-  const belowBoltzMin = isBoltzTransfer && currentSats > 0 && currentSats < boltzService.BOLTZ_MIN_SATS;
+  const belowBoltzMin =
+    isBoltzTransfer && currentSats > 0 && currentSats < boltzService.BOLTZ_MIN_SATS;
   const canTransfer =
     sourceId && destId && currentSats > 0 && transferType !== null && !belowBoltzMin;
 
@@ -850,8 +850,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             {/* Boltz minimum amount warning */}
             {belowBoltzMin && (
               <Text style={styles.warningText}>
-                Boltz swaps require a minimum of{' '}
-                {boltzService.BOLTZ_MIN_SATS.toLocaleString()} sats.
+                Boltz swaps require a minimum of {boltzService.BOLTZ_MIN_SATS.toLocaleString()}{' '}
+                sats.
               </Text>
             )}
 
