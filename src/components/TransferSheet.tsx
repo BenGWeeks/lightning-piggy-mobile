@@ -572,8 +572,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
               <ActivityIndicator size="small" color={colors.brandPink} />
               <Text style={styles.progressText}>{progressMsg}</Text>
             </View>
-            <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
-              <Text style={styles.cancelButtonText}>Cancel</Text>
+            <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+              <Text style={styles.closeButtonText}>Close</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -973,6 +973,20 @@ const styles = StyleSheet.create({
     gap: 20,
     marginTop: 8,
     justifyContent: 'center',
+  },
+  closeButton: {
+    backgroundColor: colors.brandPink,
+    height: 48,
+    paddingHorizontal: 40,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  closeButtonText: {
+    color: colors.white,
+    fontSize: 16,
+    fontWeight: '700',
   },
   cancelButton: {
     backgroundColor: colors.white,

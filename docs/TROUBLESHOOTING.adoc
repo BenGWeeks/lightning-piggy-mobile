@@ -77,7 +77,12 @@
 1. `cat scripts/fix_lnbits_inflight.py \| ssh black-panther "cat > /tmp/fix.py"` +
 2. `ssh black-panther "docker cp /tmp/fix.py lnbits-family:/tmp/ && docker exec lnbits-family python3 /tmp/fix.py"` +
 3. `ssh black-panther "docker restart lnbits-family"` +
-The patch adds exponential backoff (0.5s → 30s) to `check_pending_payments()` in `lnbits/core/services/payments.py` for payments that remain pending. Must be re-applied after LNbits upgrades. See https://github.com/lnbits/lnbits/issues/3917[lnbits/lnbits#3917].
+The patch modifies `get_payment_status()` in `lnbits/wallets/lndrest.py` to `continue` on IN_FLIGHT status instead of returning immediately, keeping the LND TrackPaymentV2 stream open until the payment resolves. Also adds a 300s stream timeout. Must be re-applied after LNbits upgrades. See https://github.com/lnbits/lnbits/issues/3917[lnbits/lnbits#3917], PR https://github.com/lnbits/lnbits/pull/3918[lnbits/lnbits#3918].
+
+| "Cannot read property 'reload' of undefined" on BDK send
+| This error is NOT from BDK — it's from React Native's `DevSettings` module. The actual error (Electrum connection failure) is swallowed, and RN's error handler tries to call `NativeDevSettings.reload()` which is null in Expo dev-client builds. +
+*Fix:* `onchainService.ts` now forces a fresh Electrum connection (`blockchain = null`) before every `sendTransaction()` call. This avoids stale cached connections that cause the underlying Electrum error. The "reload" symptom disappears because the Electrum call succeeds. +
+*Diagnosis:* Add `[BDK]` console.log statements before/after each step (sync, broadcast) to identify which step fails. The "reload" error masks the real cause.
 
 | Electrum connection drops with "keepalive ping failed" / "close connect"
 | The `electrum-client` library has an internal keepalive ping that can fail with `close connect`, followed by a reconnect crash: `Cannot read property 'client' of undefined`. This happens when `react-native-tcp-socket`'s TLS connection is interrupted (network change, sleep, etc.). +
