@@ -84,28 +84,24 @@ The patch modifies `get_payment_status()` in `lnbits/wallets/lndrest.py` to `con
 *Fix:* `onchainService.ts` now forces a fresh Electrum connection (`blockchain = null`) before every `sendTransaction()` call. This avoids stale cached connections that cause the underlying Electrum error. The "reload" symptom disappears because the Electrum call succeeds. +
 *Diagnosis:* Add `[BDK]` console.log statements before/after each step (sync, broadcast) to identify which step fails. The "reload" error masks the real cause.
 
-| Boltz reverse swaps (LN → on-chain) fail with `pay_invoice` timeout for amounts ≤ 250,000 sats
-| When requesting a reverse submarine swap via `POST /v2/swap/reverse`, Boltz selects the Lightning node that issues the invoice based on amount:
+| Boltz reverse swaps (LN → on-chain) occasionally fail with `pay_invoice` timeout
+| Boltz Exchange dynamically selects which LND node issues reverse swap invoices based on amount. Observed on 2026-04-12:
 
-* **≤ 250,000 sats**: invoice issued by "Boltz Mini" (pubkey `03e9c515b1e48c0e3bff9af8af1fce15d9b3f1ebb51e0311b1f80e820ba4cabb18`)
+* **≤ 250,000 sats**: invoice issued by "Boltz Mini" (pubkey `03e9c515b1e48c0e3bff9af8af1fce15d9b3f1ebb51e0311b1f80e820ba4cabb18`, 17 public channels, 4.18 BTC capacity)
 * **≥ 250,001 sats**: invoice issued by the main Boltz LND node (pubkey `026165850492521f4ac8abd9bd8088123446d126f648ca35e60f88177dc149ceb2`)
 
-Boltz Mini has **no publicly announced channels** (invisible in Lightning gossip, confirmed on Amboss) and Boltz does **not include routing hints** (`r` field) in the invoice. This makes payment to Boltz Mini impossible via public routing — `lncli queryroutes` returns "unable to find a path to destination" even through well-connected peers like ACINQ. +
+Boltz Mini IS publicly routable, but initial swap attempts failed because LND's route pathfinding defaulted to `nicehash-ln1 → kappa → Boltz Mini` which had a stuck HTLC problem at kappa. After opening a direct channel to the main Boltz node, LND's graph eventually learned the `Boltz → Boltz Mini` path and routing works. +
 
-*Confirmed by testing (2026-04-12):* 5× probes at each boundary:
+*Mitigations:*
 
-[source]
-----
-250,000 sats → Boltz Mini (5/5 probes)
-250,001 sats → Main Boltz
-251,000–500,000 sats → Main Boltz
-----
+* Open a direct channel to the main Boltz node — gives LND a reliable path to Boltz Mini (Boltz → Boltz Mini)
+* Penalise the problematic intermediate node in mission control: `lncli importmc --failure --force <problem_node> <dest> $(date +%s) <amt_msat>`
+* Wait for gossip to propagate new channel info (can take minutes)
+* For persistent failures at a specific amount, retry — Boltz node selection may rotate
 
-*Workaround:* Enforce a 250,001 sat minimum for LN → on-chain transfers in the UI until Boltz registers our `referralId: 'lightning-piggy'` to pin swaps to their main LND node. +
+*Boltz response:* Node selection is dynamic and not exposed in the API. Any assigned Boltz node should be routable. Failures indicate a local routing/topology issue, not a Boltz-side routing hint problem. +
 
-*Boltz backend source references:* `lib/swap/NodeSwitch.ts` (`getReverseSwapCandidates`) — amount-threshold logic. `referralId` bindings in `ReferralRepository`. +
-
-*Status:* Awaiting response from Boltz support.
+*Status:* Working after direct channel to main Boltz established.
 
 | Electrum connection drops with "keepalive ping failed" / "close connect"
 | The `electrum-client` library has an internal keepalive ping that can fail with `close connect`, followed by a reconnect crash: `Cannot read property 'client' of undefined`. This happens when `react-native-tcp-socket`'s TLS connection is interrupted (network change, sleep, etc.). +
