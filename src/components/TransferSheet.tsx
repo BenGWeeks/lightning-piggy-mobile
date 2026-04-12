@@ -20,6 +20,7 @@ import {
   BottomSheetScrollView,
 } from '@gorhom/bottom-sheet';
 import * as SecureStore from 'expo-secure-store';
+import * as swapRecoveryService from '../services/swapRecoveryService';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
 import { satsToFiat, satsToFiatString } from '../services/fiatService';
@@ -368,7 +369,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         const address = await onchainService.getNextReceiveAddress(destId);
         const swap = await boltzService.createReverseSwap(address, currentSats);
 
-        // Persist swap state to SecureStore for crash recovery (TODO #38)
+        // Persist full swap state so the claim can be recovered if the
+        // app crashes or pay_invoice times out before we reach claimSwap.
         await SecureStore.setItemAsync(
           `boltz_swap_${swap.id}`,
           JSON.stringify({
@@ -377,8 +379,11 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             claimPrivateKey: swap.claimPrivateKey,
             lockupAddress: swap.lockupAddress,
             destinationAddress: address,
+            refundPublicKey: swap.refundPublicKey,
+            swapTree: swap.swapTree,
           }),
         );
+        await swapRecoveryService.registerPendingSwap(swap.id);
 
         setProgressMsg('Paying Lightning invoice...');
         await payInvoiceForWallet(sourceId, swap.invoice);
@@ -392,6 +397,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         await boltzService.claimSwap(swap, lockup, address);
 
         await SecureStore.deleteItemAsync(`boltz_swap_${swap.id}`);
+        await swapRecoveryService.unregisterPendingSwap(swap.id);
       } else if (transferType === 'onchain-to-ln') {
         setProgressMsg('Creating Boltz swap...');
         const invoice = await makeInvoiceForWallet(destId, currentSats, 'Transfer');

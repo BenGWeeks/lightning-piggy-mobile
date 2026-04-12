@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nwcService from '../services/nwcService';
+import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
 import { CURRENCIES, FiatCurrency, getBtcPrice } from '../services/fiatService';
@@ -256,6 +257,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             console.warn(`Failed to connect wallet ${wallet.alias} (${wallet.id}):`, error);
           }
         }
+
+        // Attempt to recover any pending Boltz swaps (e.g. reverse swap
+        // claims that were interrupted by pay_invoice timeout or app crash).
+        // Runs in background so it doesn't block UI.
+        swapRecoveryService.recoverPendingSwaps().catch((e) => {
+          console.warn('[SwapRecovery] Background recovery failed:', e);
+        });
       } catch (error) {
         console.warn('Wallet startup failed:', error);
       } finally {

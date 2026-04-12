@@ -142,6 +142,31 @@ Swap status is monitored via **WebSocket subscription** to `wss://api.boltz.exch
 
 Falls back to HTTP polling (`GET /v2/swap/{id}` every 3s) if WebSocket fails. All production Boltz clients (Breez SDK, boltz-client) use WebSocket.
 
+==== Swap Recovery (`swapRecoveryService`)
+
+Reverse swaps involve three critical steps that must complete for funds to be recovered:
+
+1. Pay the Lightning invoice (via NWC `pay_invoice`)
+2. Wait for Boltz to lock funds on-chain (`waitForLockup`)
+3. Build & broadcast the claim transaction (`claimSwap`)
+
+If the app crashes, loses connection, or the `pay_invoice` NWC call times out (e.g. because the payment took longer than the ~60s NWC SDK timeout), the swap can be stranded — Boltz has received the LN payment and locked on-chain funds, but the user never claims them. After the CSV timeout, Boltz auto-refunds their locked funds, and the user loses the Lightning payment.
+
+**Recovery mechanism:**
+
+- When a reverse swap is created, full state is persisted to SecureStore under `boltz_swap_<id>`: `preimage`, `claimPrivateKey`, `lockupAddress`, `destinationAddress`, `refundPublicKey`, and `swapTree`.
+- A separate index key `boltz_swap_index` tracks active swap IDs (SecureStore has no listing API).
+- On app startup, `recoverPendingSwaps()` runs in the background:
+  1. Read the index, iterate over each swap ID.
+  2. Query `GET /v2/swap/{id}` for current status.
+  3. If `transaction.mempool` or `transaction.confirmed`, call `claimSwap` to broadcast the claim tx.
+  4. If terminal success/failure, clean up the persisted state and remove from index.
+- After successful claim (or on original swap completion), `unregisterPendingSwap()` removes the swap from tracking.
+
+This makes reverse swaps **crash-safe** — if anything interrupts the foreground swap flow (app kill, network drop, NWC timeout), the claim is retried on next app launch.
+
+**Note**: older persisted swaps (created before v1 of the recovery service) lack `swapTree` and `refundPublicKey`. These cannot be auto-recovered and their funds will be refunded to Boltz after the CSV timeout.
+
 ==== Boltz v2 Swap Statuses
 
 [cols="1,1,2", options="header"]
