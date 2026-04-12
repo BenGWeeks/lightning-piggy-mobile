@@ -84,6 +84,29 @@ The patch modifies `get_payment_status()` in `lnbits/wallets/lndrest.py` to `con
 *Fix:* `onchainService.ts` now forces a fresh Electrum connection (`blockchain = null`) before every `sendTransaction()` call. This avoids stale cached connections that cause the underlying Electrum error. The "reload" symptom disappears because the Electrum call succeeds. +
 *Diagnosis:* Add `[BDK]` console.log statements before/after each step (sync, broadcast) to identify which step fails. The "reload" error masks the real cause.
 
+| Boltz reverse swaps (LN → on-chain) fail with `pay_invoice` timeout for amounts ≤ 250,000 sats
+| When requesting a reverse submarine swap via `POST /v2/swap/reverse`, Boltz selects the Lightning node that issues the invoice based on amount:
+
+* **≤ 250,000 sats**: invoice issued by "Boltz Mini" (pubkey `03e9c515b1e48c0e3bff9af8af1fce15d9b3f1ebb51e0311b1f80e820ba4cabb18`)
+* **≥ 250,001 sats**: invoice issued by the main Boltz LND node (pubkey `026165850492521f4ac8abd9bd8088123446d126f648ca35e60f88177dc149ceb2`)
+
+Boltz Mini has **no publicly announced channels** (invisible in Lightning gossip, confirmed on Amboss) and Boltz does **not include routing hints** (`r` field) in the invoice. This makes payment to Boltz Mini impossible via public routing — `lncli queryroutes` returns "unable to find a path to destination" even through well-connected peers like ACINQ. +
+
+*Confirmed by testing (2026-04-12):* 5× probes at each boundary:
+
+[source]
+----
+250,000 sats → Boltz Mini (5/5 probes)
+250,001 sats → Main Boltz
+251,000–500,000 sats → Main Boltz
+----
+
+*Workaround:* Enforce a 250,001 sat minimum for LN → on-chain transfers in the UI until Boltz registers our `referralId: 'lightning-piggy'` to pin swaps to their main LND node. +
+
+*Boltz backend source references:* `lib/swap/NodeSwitch.ts` (`getReverseSwapCandidates`) — amount-threshold logic. `referralId` bindings in `ReferralRepository`. +
+
+*Status:* Awaiting response from Boltz support.
+
 | Electrum connection drops with "keepalive ping failed" / "close connect"
 | The `electrum-client` library has an internal keepalive ping that can fail with `close connect`, followed by a reconnect crash: `Cannot read property 'client' of undefined`. This happens when `react-native-tcp-socket`'s TLS connection is interrupted (network change, sleep, etc.). +
 *Fix:* `onchainService.ts` sets `electrumConnected = false` on error, so the next call creates a fresh connection. The `onError` handler catches socket-level errors. If persistent, force-restart the app.
