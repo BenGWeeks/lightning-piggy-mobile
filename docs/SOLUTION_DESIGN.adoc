@@ -232,7 +232,8 @@ We use **script-path** for both claims and refunds because MuSig2 is not availab
 
 | https://github.com/bitcoinjs/bitcoinjs-lib[`bitcoinjs-lib`] | Taproot transaction construction, address validation
 | https://github.com/bitcoinerlab/secp256k1[`@bitcoinerlab/secp256k1`] | Schnorr signing (BIP-340)
-| https://github.com/nicoll-douglas/react-native-tcp-socket[`react-native-tcp-socket`] | TCP/SSL sockets for Electrum
+| https://github.com/paulmillr/scure-btc-signer[`@scure/btc-signer`] | MuSig2 key aggregation (BIP-327) for Boltz Taproot internal keys
+| https://github.com/BenGWeeks/bdk-rn[`bdk-rn`] | On-chain balance, tx sync, Electrum client, UTXO + tx broadcast (native Rust via FFI). Replaces prior `electrum-client` + `react-native-tcp-socket` approach.
 |===
 
 === Electrum Server Integration
@@ -240,7 +241,7 @@ We use **script-path** for both claims and refunds because MuSig2 is not availab
 On-chain balance and transaction lookups use the Electrum protocol via BDK's native Rust implementation. BDK handles the Electrum connection, address scanning, UTXO tracking, and transaction parsing internally — `onchainService.ts` just calls `wallet.sync(blockchain)`.
 
 - **User-configurable** — default is `electrum.blockstream.info:50002` (SSL), users can set their own in Account settings (host:port + SSL toggle)
-- **Incremental sync** — BDK only fetches changes since the last sync (no full re-scan)
+- **Incremental sync (current session only)** — BDK fetches changes since the last sync within the current JS session. We use `DatabaseConfig().memory()` so sync progress does not persist across app restarts; the first sync after launch is a full chain scan. Switching to a persistent database config is a future improvement.
 - **Native performance** — Electrum communication runs in Rust, not in JS TCP sockets
 - **Correct amounts** — BDK tracks `received` and `sent` per transaction using UTXO analysis
 

@@ -106,9 +106,9 @@ Boltz Mini IS publicly routable, but initial swap attempts failed because LND's 
 
 *Status:* Working after direct channel to main Boltz established.
 
-| Electrum connection drops with "keepalive ping failed" / "close connect"
-| The `electrum-client` library has an internal keepalive ping that can fail with `close connect`, followed by a reconnect crash: `Cannot read property 'client' of undefined`. This happens when `react-native-tcp-socket`'s TLS connection is interrupted (network change, sleep, etc.). +
-*Fix:* `onchainService.ts` sets `electrumConnected = false` on error, so the next call creates a fresh connection. The `onError` handler catches socket-level errors. If persistent, force-restart the app.
+| Electrum connection drops or broadcast fails silently
+| On-chain sync and broadcast use BDK (`bdk-rn`) now — the old `electrum-client` / `react-native-tcp-socket` stack is gone. Stale Electrum sockets can still manifest as confusing errors like "Cannot read property 'reload' of undefined" (a React Native DevSettings crash that masks the underlying BDK error). +
+*Fix:* `onchainService.broadcastRawTx` and `sendTransaction` force `blockchain = null` before each operation to open a fresh connection; `disconnectElectrum()` is called when the user changes Electrum server in Account settings. If errors persist, force-restart the app.
 
 | NIP-20 OK fix lost after LNbits upgrade or container recreate
 | The Nostrclient extension bundled with the LNbits Docker image does not include our NIP-20 OK fix (PR https://github.com/lnbits/nostrclient/pull/68[lnbits/nostrclient#68]). Without it, NWC clients using `@getalby/sdk` timeout waiting for OK responses after publishing events. +
@@ -119,7 +119,7 @@ Boltz Mini IS publicly routable, but initial swap attempts failed because LND's 
 4. Verify: `ssh black-panther "docker exec lnbits-family grep 'NIP-01: OK' /app/lnbits/extensions/nostrclient/router.py"` +
 The fix script (`apply_nip20_fix.py`) patches `router.py` to send `["OK", event_id, true, ""]` after publishing EVENT messages, and `["OK", event_id, false, "error: no relay connections"]` when no relays are connected.
 
-| On-chain transactions slow to load
-| Each on-chain transaction requires an Electrum `blockchain.scripthash.get_history` call per address (20 addresses), then a `blockchain.transaction.get` call per unique transaction to parse amounts, plus `blockchain.block.get_header` per unique block height for timestamps. For wallets with many transactions (e.g. the BIP-84 test vector zpub with 100+ txs), this can take 10-30 seconds. +
-*Mitigations:* In-memory transaction cache per wallet ID (shows cached data instantly on wallet swipe). Future: persist cache to AsyncStorage, only fetch new transactions since last known block height.
+| On-chain transactions slow to load on first launch
+| Balance and tx history come from BDK's `wallet.sync(chain)`. BDK is configured with an in-memory database (`DatabaseConfig().memory()`), so sync state does not persist across app restarts — the first sync after launch rescans from scratch and can take 10–30 seconds on busy wallets. +
+*Mitigations:* WalletContext caches transactions per wallet ID and writes them to AsyncStorage, so the UI renders cached data instantly on wallet swipe while the background sync runs. *Future:* switch BDK to a persistent database config so only the delta is fetched across launches.
 |===
