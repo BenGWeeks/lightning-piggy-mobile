@@ -115,7 +115,13 @@ export async function getBalance(walletId: string): Promise<number | null> {
   const provider = await ensureConnected(walletId);
   if (!provider) return null;
   try {
-    const b = await provider.getBalance();
+    // Retry twice on slow relays so a single timeout doesn't show the
+    // wallet as "Disconnected" / flash a null balance.
+    const b = await withRetry(() => provider.getBalance(), {
+      label: `getBalance(${walletId})`,
+      attempts: 2,
+      delayMs: 1500,
+    });
     return b.balance;
   } catch (error) {
     console.warn(`getBalance error for ${walletId}:`, error);
@@ -218,11 +224,30 @@ export async function payInvoice(walletId: string, bolt11: string): Promise<{ pr
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     if (msg.includes('failed to publish')) {
-      // Relay connection likely dropped. Reconnect and retry once.
-      // This is safe because 'failed to publish' means the request
-      // never reached the wallet — the payment was NOT sent.
-      if (__DEV__) console.log('[NWC] Publish failed, reconnecting relay and retrying...');
+      // 'failed to publish' from nostr-tools usually means the event never
+      // reached the wallet — but if the relay accepted then dropped the
+      // ack, a blind retry would send a second NIP-47 request for the
+      // same invoice and some wallets may pay twice. Always look up the
+      // invoice first; only retry the payment if it isn't already settled
+      // or in flight.
+      if (__DEV__)
+        console.log(
+          '[NWC] Publish failed, checking invoice status before retry to avoid double-pay...',
+        );
       provider = await reconnect(walletId);
+      const paymentHash = extractPaymentHash(bolt11);
+      if (paymentHash) {
+        try {
+          const lookup = await provider.lookupInvoice({ payment_hash: paymentHash });
+          if (lookup?.preimage) {
+            console.log('[NWC] Invoice already paid — returning existing preimage');
+            return { preimage: lookup.preimage };
+          }
+        } catch {
+          // lookup failed — fall through to retry. The wallet would refuse
+          // duplicate payment for the same payment_hash anyway.
+        }
+      }
       const result = await provider.sendPayment(bolt11);
       return { preimage: result.preimage };
     }

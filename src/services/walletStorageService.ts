@@ -12,6 +12,17 @@ const ONBOARDING_KEY = 'onboarding_complete';
 /** Default Electrum server for on-chain balance/tx lookups (Blockstream, SSL) */
 export const DEFAULT_ELECTRUM_SERVER = 'electrum.blockstream.info:50002:s';
 
+/**
+ * SecureStore options for credentials (mnemonics, xpubs, NWC URLs).
+ * `AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY` ensures keychain items are never
+ * included in iCloud backups, are only readable after the first unlock
+ * following a reboot, and cannot be migrated to a new device. Safer
+ * default than the bare SecureStore defaults.
+ */
+const SECURE_OPTIONS: SecureStore.SecureStoreOptions = {
+  keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
+};
+
 export async function getWalletList(): Promise<WalletMetadata[]> {
   const json = await AsyncStorage.getItem(WALLET_LIST_KEY);
   if (!json) return [];
@@ -29,7 +40,7 @@ export async function saveWalletList(wallets: WalletMetadata[]): Promise<void> {
 // --- NWC ---
 
 export async function saveNwcUrl(walletId: string, url: string): Promise<void> {
-  await SecureStore.setItemAsync(`${NWC_URL_PREFIX}${walletId}`, url);
+  await SecureStore.setItemAsync(`${NWC_URL_PREFIX}${walletId}`, url, SECURE_OPTIONS);
 }
 
 export async function getNwcUrl(walletId: string): Promise<string | null> {
@@ -43,7 +54,7 @@ export async function deleteNwcUrl(walletId: string): Promise<void> {
 // --- On-chain (xpub) ---
 
 export async function saveXpub(walletId: string, xpub: string): Promise<void> {
-  await SecureStore.setItemAsync(`${ONCHAIN_XPUB_PREFIX}${walletId}`, xpub);
+  await SecureStore.setItemAsync(`${ONCHAIN_XPUB_PREFIX}${walletId}`, xpub, SECURE_OPTIONS);
 }
 
 export async function getXpub(walletId: string): Promise<string | null> {
@@ -59,7 +70,7 @@ export async function deleteXpub(walletId: string): Promise<void> {
 const ONCHAIN_MNEMONIC_PREFIX = 'onchain_mnemonic_';
 
 export async function saveMnemonic(walletId: string, mnemonic: string): Promise<void> {
-  await SecureStore.setItemAsync(`${ONCHAIN_MNEMONIC_PREFIX}${walletId}`, mnemonic);
+  await SecureStore.setItemAsync(`${ONCHAIN_MNEMONIC_PREFIX}${walletId}`, mnemonic, SECURE_OPTIONS);
 }
 
 export async function getMnemonic(walletId: string): Promise<string | null> {
@@ -109,7 +120,11 @@ export function generateWalletId(): string {
  * Idempotent — safe to call on every startup.
  */
 export async function migrateLegacy(): Promise<void> {
-  // 1. Legacy single-wallet → multi-wallet migration
+  // 1. Legacy single-wallet → multi-wallet migration.
+  // Order: write the new wallet list + persist the NWC URL first, then delete
+  // the legacy key. If a crash interrupts the migration, the legacy key is
+  // still present and the next startup retries from scratch. Deleting first
+  // could permanently lose the user's NWC URL on a partial write.
   const legacyUrl = await SecureStore.getItemAsync(LEGACY_NWC_KEY);
   if (legacyUrl) {
     const existingList = await getWalletList();
@@ -126,8 +141,17 @@ export async function migrateLegacy(): Promise<void> {
       await saveNwcUrl(id, legacyUrl);
       await saveWalletList([wallet]);
       await setOnboarded();
+      // Only after the new records are durably written do we drop the
+      // legacy key. If this delete fails, next startup sees existingList
+      // non-empty and skips re-migration — we just clean up the orphan key.
+      await SecureStore.deleteItemAsync(LEGACY_NWC_KEY);
+    } else {
+      // List is already populated — legacy key is a stale leftover. Safe
+      // to delete: its data has already been migrated (or the user added
+      // new wallets after). Not deleting would mean migrateLegacy re-reads
+      // it forever but never acts on it; cleaning up is better.
+      await SecureStore.deleteItemAsync(LEGACY_NWC_KEY);
     }
-    await SecureStore.deleteItemAsync(LEGACY_NWC_KEY);
   }
 
   // 2. Backfill walletType for wallets that predate on-chain support

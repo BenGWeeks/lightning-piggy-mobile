@@ -261,6 +261,16 @@ async function waitForSwapStatus(
 ): Promise<any> {
   return new Promise((resolve, reject) => {
     let settled = false;
+    // `fellBack` guards against onerror + onclose both starting a poller
+    // (which happens on every WebSocket error — onerror fires, then onclose
+    // fires a moment later). Track elapsed time properly from `start` so the
+    // fallback poller gets the correct remaining window; previously we used
+    // `timeoutMs - (Date.now() % timeoutMs)` which is wall-clock modulo and
+    // bore no relation to actual elapsed time, making the fallback either
+    // exit early or run far too long.
+    let fellBack = false;
+    const start = Date.now();
+    const remaining = () => Math.max(0, timeoutMs - (Date.now() - start));
     const timer = setTimeout(() => {
       settled = true;
       reject(new Error(`Timeout waiting for swap ${swapId} after ${timeoutMs / 1000}s`));
@@ -271,6 +281,25 @@ async function waitForSwapStatus(
       try {
         ws?.close();
       } catch {}
+    };
+
+    const fallbackToPoll = (ws?: WebSocket) => {
+      if (settled || fellBack) return;
+      fellBack = true;
+      cleanup(ws);
+      pollSwapStatus(swapId, isTerminal, remaining())
+        .then((data) => {
+          if (!settled) {
+            settled = true;
+            resolve(data);
+          }
+        })
+        .catch((err) => {
+          if (!settled) {
+            settled = true;
+            reject(err);
+          }
+        });
     };
 
     // Try WebSocket first
@@ -301,27 +330,19 @@ async function waitForSwapStatus(
       };
 
       ws.onerror = () => {
-        if (!settled && !wsConnected) {
+        if (!wsConnected) {
           console.warn('[Boltz] WebSocket failed, falling back to polling');
-          cleanup(ws);
-          // Fall back to polling
-          pollSwapStatus(swapId, isTerminal, timeoutMs - (Date.now() % timeoutMs))
-            .then(resolve)
-            .catch(reject);
+          fallbackToPoll(ws);
         }
       };
 
       ws.onclose = () => {
-        if (!settled) {
-          console.warn('[Boltz] WebSocket closed, falling back to polling');
-          pollSwapStatus(swapId, isTerminal, timeoutMs - (Date.now() % timeoutMs))
-            .then(resolve)
-            .catch(reject);
-        }
+        console.warn('[Boltz] WebSocket closed, falling back to polling');
+        fallbackToPoll(ws);
       };
     } catch {
       // WebSocket constructor failed — fall back to polling
-      pollSwapStatus(swapId, isTerminal, timeoutMs).then(resolve).catch(reject);
+      fallbackToPoll();
     }
   });
 }

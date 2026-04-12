@@ -33,7 +33,9 @@ function byteToHex(b: number): string {
 
 function toXpub(extPubKey: string): string {
   const trimmed = extPubKey.trim();
-  if (trimmed.startsWith('xpub')) return trimmed;
+  // Case-insensitive check so pasted/scanned XPUB… variants don't fall
+  // through to bs58check.decode and throw on the first uppercase char.
+  if (trimmed.slice(0, 4).toLowerCase() === 'xpub') return trimmed;
 
   const decoded = bs58check.decode(trimmed);
   const versionHex =
@@ -110,7 +112,11 @@ async function getBlockchain(): Promise<Blockchain> {
     retry: 3,
     timeout: 10,
     stopGap: 20,
-    validateDomain: false,
+    // Verify the TLS certificate hostname matches the server. The BDK
+    // default is false — leaving it off allows a network attacker to MITM
+    // balance reads and silently drop/alter broadcast calls. We require
+    // hostname verification on all Electrum SSL connections.
+    validateDomain: true,
   });
   return blockchain;
 }
@@ -199,6 +205,25 @@ export function validateXpub(extPubKey: string): string | null {
   if (!/^[xyzXYZ]pub[A-Za-z0-9]{100,112}$/.test(trimmed)) {
     return 'Invalid extended public key. Must start with xpub, ypub, or zpub.';
   }
+  // Decode with bs58check so we validate both the base58 charset and the
+  // checksum. A typo-ridden xpub that passes the shape regex would otherwise
+  // throw later from toXpub() / Descriptor.create with a confusing native
+  // error; catch it here and return a user-friendly message.
+  try {
+    const decoded = bs58check.decode(trimmed);
+    // Must be 78 bytes: 4 version + 1 depth + 4 fingerprint + 4 child + 32 chain + 33 key.
+    if (decoded.length !== 78) {
+      return 'Invalid extended public key (wrong length after decode).';
+    }
+    const versionHex =
+      byteToHex(decoded[0]) + byteToHex(decoded[1]) + byteToHex(decoded[2]) + byteToHex(decoded[3]);
+    const isXpub = versionHex === '0488b21e';
+    if (!isXpub && versionHex !== YPUB_HEX && versionHex !== ZPUB_HEX) {
+      return 'Unsupported extended public key version (expected xpub/ypub/zpub).';
+    }
+  } catch {
+    return 'Invalid extended public key (checksum or encoding error).';
+  }
   return null;
 }
 
@@ -218,9 +243,11 @@ export async function getCurrentReceiveAddress(walletId: string): Promise<string
  * Sync once and return both balance and transactions.
  * Avoids double Electrum sync when fetching both.
  */
-export async function syncAndRefresh(
-  walletId: string,
-): Promise<{ balance: number | null; transactions: OnchainTransaction[] }> {
+export async function syncAndRefresh(walletId: string): Promise<{
+  balance: number | null;
+  transactions: OnchainTransaction[];
+  ok: boolean;
+}> {
   try {
     const wallet = await getBdkWallet(walletId);
     const chain = await getBlockchain();
@@ -229,11 +256,14 @@ export async function syncAndRefresh(
     const bal = await wallet.getBalance();
     const txList = await wallet.listTransactions(false);
 
-    return { balance: bal.total, transactions: mapAndSortTransactions(txList) };
+    return { balance: bal.total, transactions: mapAndSortTransactions(txList), ok: true };
   } catch (e) {
+    // Return ok: false so callers can choose to keep their cached state
+    // rather than overwriting it with empty values on transient Electrum
+    // failures (the UI would otherwise flash to "No transactions").
     console.warn('onchainService.syncAndRefresh failed:', e);
     blockchain = null;
-    return { balance: null, transactions: [] };
+    return { balance: null, transactions: [], ok: false };
   }
 }
 
