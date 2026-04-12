@@ -290,8 +290,18 @@ export async function sendTransaction(
   const { TxBuilder, Address } = await import('bdk-rn');
 
   const wallet = await getBdkWallet(walletId);
-  const chain = await getBlockchain();
-  await wallet.sync(chain);
+
+  // Retry with fresh Electrum connection if the cached one is stale
+  let chain: Awaited<ReturnType<typeof getBlockchain>>;
+  try {
+    chain = await getBlockchain();
+    await wallet.sync(chain);
+  } catch (e) {
+    console.warn('sendTransaction: sync failed, reconnecting Electrum:', e);
+    blockchain = null;
+    chain = await getBlockchain();
+    await wallet.sync(chain);
+  }
 
   const address = await new Address().create(toAddress);
   const script = await address.scriptPubKey();
@@ -303,7 +313,15 @@ export async function sendTransaction(
   const result = await txBuilder.finish(wallet);
   const signedPsbt = await wallet.sign(result.psbt);
   const tx = await signedPsbt.extractTx();
-  await chain.broadcast(tx);
+
+  try {
+    await chain.broadcast(tx);
+  } catch (e) {
+    console.warn('sendTransaction: broadcast failed, reconnecting:', e);
+    blockchain = null;
+    chain = await getBlockchain();
+    await chain.broadcast(tx);
+  }
 
   return await signedPsbt.txid();
 }
