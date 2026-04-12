@@ -40,10 +40,49 @@
 | A digital signature scheme (https://bips.dev/340/[BIP-340]) used by Bitcoin Taproot. Produces 64-byte signatures (vs 72 for ECDSA), enables key and signature aggregation (MuSig2), and improves on-chain privacy.
 
 | Taproot
-| A Bitcoin upgrade (https://bips.dev/341/[BIP-341]) that enables more complex smart contracts with better privacy. Uses Schnorr signatures and Merkleized Abstract Syntax Trees (MAST) for script-path spending.
+| A Bitcoin upgrade (https://bips.dev/341/[BIP-341]) that enables more complex smart contracts with better privacy. Uses Schnorr signatures and Merkleized Abstract Syntax Trees (MAST) for script-path spending. Addresses are encoded with bech32m and start with `bc1p...`. Boltz uses Taproot for swap lockup addresses — spending requires either cooperative MuSig2 (key-path) or revealing a leaf script plus control block (script-path).
+
+| bech32m
+| The address encoding (https://bips.dev/350/[BIP-350]) used for Taproot (`bc1p...`) outputs, a successor to bech32 (`bc1q...` for segwit v0). Parsing bech32m into an output script requires an ECC library because Taproot keys must be validated as on-curve x-only points — in bitcoinjs-lib this means calling `initEccLib()` before `address.toOutputScript()`.
+
+| P2TR
+| Pay-to-Taproot — the Taproot output script type (BIP-341). Witness version 1, 32-byte x-only public key. Can be spent via key-path (single Schnorr sig) or script-path (MAST branch + control block).
 
 | Submarine Swap
 | An atomic swap between Lightning and on-chain Bitcoin. "Submarine" (on-chain → Lightning) sends on-chain BTC and receives Lightning. "Reverse submarine" (Lightning → on-chain) pays a Lightning invoice and receives on-chain BTC.
+
+| Swap-in
+| Colloquial term for a submarine swap: moving funds *into* the Lightning Network from on-chain. The user broadcasts an on-chain tx to a lockup address; Boltz pays the user's Lightning invoice once the lockup is confirmed (or 0-conf if policy allows).
+
+| Swap-out
+| Colloquial term for a reverse submarine swap: moving funds *out of* the Lightning Network to on-chain. The user pays Boltz's Lightning invoice; Boltz broadcasts an on-chain tx to a lockup the user can claim with the invoice's preimage.
+
+| Lockup Transaction
+| The on-chain transaction that funds a swap's Taproot output. In a swap-in, the user broadcasts it; in a swap-out, Boltz broadcasts it. The output is spendable either by the counterparty's claim path (with preimage) or refundable by the funder after a timeout.
+
+| Lockup Address
+| The Taproot (`bc1p...`) address generated for a swap. Its script encodes both a claim path (hash-lock via preimage) and a refund path (time-lock via `nLockTime`).
+
+| Claim Transaction
+| The transaction that spends a swap's lockup output via the script-path claim leaf, revealing the preimage. In a swap-out the user builds and broadcasts this; in a swap-in Boltz does.
+
+| Refund Transaction
+| The transaction that spends a swap's lockup output via the script-path refund leaf after the timeout block height is reached. Used when a swap fails (e.g. counterparty never paid). Sets `nLockTime` and uses a non-final input sequence.
+
+| Preimage
+| A 32-byte random value whose SHA-256 hash locks an HTLC or swap claim path. Revealing the preimage proves payment and releases the funds. In Lightning, the payer learns the preimage when the payee settles the invoice.
+
+| Key-path Spend
+| Spending a Taproot output using a single Schnorr signature against the tweaked output key. No script is revealed on-chain, maximising privacy. For Boltz swaps this requires cooperative MuSig2 between user and Boltz.
+
+| Script-path Spend
+| Spending a Taproot output by revealing one leaf of the MAST (a script), its witness arguments, and a control block proving the leaf is in the committed tree. Less private but non-cooperative. Our claim and refund transactions use this path.
+
+| Control Block
+| The witness element in a Taproot script-path spend that proves a leaf belongs to the committed MAST. Contains the leaf version, the internal x-only public key, and the Merkle path (sibling hashes) to the tree root.
+
+| Tapleaf
+| A single script in a Taproot MAST. Hashed with `TapLeaf/<version><compactsize><script>` (BIP-341). Boltz swaps use two leaves: the claim leaf (preimage + signature) and the refund leaf (signature + time-lock).
 
 | xpub / ypub / zpub
 | Extended public keys for HD (hierarchical deterministic) wallets. `xpub` = BIP-44 (legacy), `ypub` = BIP-49 (wrapped segwit), `zpub` = BIP-84 (native segwit). All contain the same key data with different version byte prefixes.
@@ -110,6 +149,14 @@
 | https://github.com/paulmillr/noble-curves[`@noble/curves`]
 | paulmillr
 | Audited elliptic curve cryptography — secp256k1 Schnorr signatures (BIP-340)
+
+| https://github.com/paulmillr/scure-btc-signer[`@scure/btc-signer`]
+| paulmillr / scure
+| Audited Bitcoin signer utilities — MuSig2 (BIP-327) key aggregation for Boltz Taproot internal keys. MIT-licensed; Boltz's own `boltz-core` uses the same library under the hood but is AGPL-3.0, so we depend on this directly.
+
+| https://github.com/a-konst/react-native-toast-message[`react-native-toast-message`]
+| a-konst
+| Toast notifications — used to surface swap recovery progress/failure at the top of the screen
 
 | https://github.com/paulmillr/noble-hashes[`@noble/hashes`]
 | paulmillr

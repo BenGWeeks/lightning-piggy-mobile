@@ -8,7 +8,43 @@
  */
 
 import * as SecureStore from 'expo-secure-store';
+import * as bitcoin from 'bitcoinjs-lib';
+import * as ecc from '@bitcoinerlab/secp256k1';
+import Toast from 'react-native-toast-message';
 import * as boltzService from './boltzService';
+
+// Required for bitcoinjs-lib to derive output scripts from taproot (bech32m)
+// addresses — lockup addresses are taproot, so without this toOutputScript
+// throws "No ECC Library provided".
+bitcoin.initEccLib(ecc);
+
+/**
+ * Boltz v2 /swap/{id} returns only transaction.id + transaction.hex — not
+ * vout/onchainAmount. Parse the raw tx to find the output that matches our
+ * lockup address.
+ */
+function extractLockupFromTxHex(
+  txHex: string,
+  lockupAddress: string,
+): { vout: number; amount: number } | null {
+  try {
+    const tx = bitcoin.Transaction.fromHex(txHex);
+    const expectedScript = bitcoin.address.toOutputScript(lockupAddress);
+    for (let i = 0; i < tx.outs.length; i++) {
+      const script = tx.outs[i].script;
+      if (
+        script.length === expectedScript.length &&
+        script.every((b, j) => b === expectedScript[j])
+      ) {
+        return { vout: i, amount: Number(tx.outs[i].value) };
+      }
+    }
+    return null;
+  } catch (e) {
+    console.warn('[SwapRecovery] Failed to parse lockup tx hex:', e);
+    return null;
+  }
+}
 
 const BOLTZ_API = 'https://api.boltz.exchange/v2';
 
@@ -68,13 +104,29 @@ export async function recoverPendingSwaps(): Promise<void> {
     const index = await SecureStore.getItemAsync(SWAP_INDEX_KEY);
     if (!index) return;
     const ids = JSON.parse(index) as string[];
+    if (ids.length === 0) return;
     console.log(`[SwapRecovery] Checking ${ids.length} pending swap(s)`);
+    Toast.show({
+      type: 'info',
+      text1: 'Checking pending swaps',
+      text2: `${ids.length} swap${ids.length === 1 ? '' : 's'} to verify…`,
+      position: 'top',
+      visibilityTime: 8000,
+    });
 
     for (const swapId of ids) {
       try {
         await recoverSwap(swapId);
       } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
         console.warn(`[SwapRecovery] Failed to recover swap ${swapId}:`, e);
+        Toast.show({
+          type: 'error',
+          text1: 'Swap recovery failed',
+          text2: msg,
+          position: 'top',
+          visibilityTime: 10000,
+        });
       }
     }
   } catch (e) {
@@ -140,12 +192,21 @@ async function recoverSwap(swapId: string): Promise<void> {
     }
 
     const txId = data.transaction?.id;
-    const vout = data.transaction?.index;
-    const amount = data.onchainAmount;
-    if (!txId || !Number.isInteger(vout) || !amount) {
-      console.warn(`[SwapRecovery] Swap ${swapId} missing lockup details`);
+    const txHex = data.transaction?.hex;
+    if (!txId || !txHex) {
+      console.warn(`[SwapRecovery] Swap ${swapId} missing lockup tx id/hex`);
       return;
     }
+    // v2 API doesn't include vout/onchainAmount in /swap/{id}. Derive them
+    // from the raw lockup tx by matching our lockup address.
+    const lockup = extractLockupFromTxHex(txHex, swap.lockupAddress);
+    if (!lockup) {
+      console.warn(
+        `[SwapRecovery] Swap ${swapId} — could not find lockup output matching ${swap.lockupAddress}`,
+      );
+      return;
+    }
+    const { vout, amount } = lockup;
 
     console.log(`[SwapRecovery] Claiming swap ${swapId}...`);
     const reverseSwap: boltzService.ReverseSwapResult = {
@@ -160,8 +221,22 @@ async function recoverSwap(swapId: string): Promise<void> {
       claimPrivateKey: swap.claimPrivateKey,
     };
 
+    Toast.show({
+      type: 'info',
+      text1: 'Claiming swap',
+      text2: `Broadcasting claim for ${amount.toLocaleString()} sats…`,
+      position: 'top',
+      visibilityTime: 8000,
+    });
     await boltzService.claimSwap(reverseSwap, { txId, vout, amount }, swap.destinationAddress);
     console.log(`[SwapRecovery] Swap ${swapId} claimed successfully`);
+    Toast.show({
+      type: 'success',
+      text1: 'Swap recovered',
+      text2: `${amount.toLocaleString()} sats claimed to your on-chain wallet`,
+      position: 'top',
+      visibilityTime: 10000,
+    });
 
     await SecureStore.deleteItemAsync(`boltz_swap_${swapId}`);
     await unregisterPendingSwap(swapId);
