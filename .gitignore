@@ -56,3 +56,4 @@ modules/*/android/build/
 
 # Build artifacts
 *.apk
+.claude/

@@ -12,7 +12,7 @@ interface WalletCarouselProps {
   activeWalletId: string | null;
   btcPrice: number | null;
   currency: FiatCurrency;
-  onWalletChange: (walletId: string) => void;
+  onWalletChange: (walletId: string | null) => void;
   onAddWallet: () => void;
   onSettingsPress: (walletId: string) => void;
 }
@@ -46,6 +46,8 @@ const WalletCarousel: React.FC<WalletCarouselProps> = ({
       const item = viewableItems[0].item as CarouselItem;
       if (item.type === 'wallet') {
         onWalletChange(item.wallet.id);
+      } else {
+        onWalletChange(null);
       }
     },
     [onWalletChange],

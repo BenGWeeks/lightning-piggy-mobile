@@ -1,0 +1,65 @@
+appId: com.anonymous.lightningpiggyapp
+name: Wallet Swipe Speed Test
+---
+# Tests that swiping between wallets updates transactions quickly.
+# Requires at least 1 NWC wallet + 1 on-chain wallet.
+# Run: maestro test tests/e2e/test-swipe-speed.yaml
+
+# Wait for app to be ready and wallets to connect
+- waitForAnimationToEnd:
+    timeout: 30000
+
+# Wait for initial wallet to show Connected and load transactions
+- extendedWaitUntil:
+    visible:
+      text: 'Connected'
+    timeout: 30000
+
+# Wait for transactions to load (first load may take time)
+- extendedWaitUntil:
+    visible:
+      text: '.*sats'
+    timeout: 30000
+
+# === First swipe: move to next wallet ===
+- swipe:
+    start: 85%, 30%
+    end: 15%, 30%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Wait for transactions to appear (first load of this wallet)
+- extendedWaitUntil:
+    visible:
+      text: '.*sats'
+    timeout: 15000
+
+# === Swipe back to first wallet ===
+# This should be FAST — transactions are cached in WalletContext
+- swipe:
+    start: 15%, 30%
+    end: 85%, 30%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Cached transactions should appear within 2 seconds
+- extendedWaitUntil:
+    visible:
+      text: '.*sats'
+    timeout: 2000
+
+# === Swipe forward again — also cached ===
+- swipe:
+    start: 85%, 30%
+    end: 15%, 30%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Should be instant from cache
+- extendedWaitUntil:
+    visible:
+      text: '.*sats'
+    timeout: 2000

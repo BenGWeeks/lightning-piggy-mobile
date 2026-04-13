@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   View,
@@ -21,6 +21,8 @@ import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
 import { CURRENCIES } from '../services/fiatService';
+import { getElectrumServer, setElectrumServer } from '../services/walletStorageService';
+import { disconnectElectrum } from '../services/onchainService';
 import CopyIcon from '../components/icons/CopyIcon';
 import NostrLoginSheet from '../components/NostrLoginSheet';
 import EditProfileSheet from '../components/EditProfileSheet';
@@ -61,11 +63,58 @@ const AccountScreen: React.FC = () => {
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [qrSheetOpen, setQrSheetOpen] = useState(false);
   const [qrDefaultMode, setQrDefaultMode] = useState<'npub' | 'lightning'>('npub');
+  const [electrumHostPort, setElectrumHostPort] = useState('electrum.blockstream.info:50002');
+  const [electrumSSL, setElectrumSSL] = useState(true);
+  const [devMode, setDevMode] = useState(false);
+  const versionTapCount = useRef(0);
+  const versionTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     setNameInput(userName);
   }, [userName]);
+
+  useEffect(() => {
+    AsyncStorage.getItem('dev_mode').then((v) => setDevMode(v === 'true'));
+  }, []);
+
+  const handleVersionTap = () => {
+    versionTapCount.current += 1;
+    if (versionTapTimer.current) clearTimeout(versionTapTimer.current);
+    if (versionTapCount.current >= 3) {
+      versionTapCount.current = 0;
+      const newMode = !devMode;
+      setDevMode(newMode);
+      AsyncStorage.setItem('dev_mode', newMode ? 'true' : 'false');
+      Alert.alert(
+        newMode ? 'Developer Mode Enabled' : 'Developer Mode Disabled',
+        newMode
+          ? 'Hot wallet options are now available in Add Wallet.'
+          : 'Hot wallet options hidden.',
+      );
+    } else {
+      versionTapTimer.current = setTimeout(() => {
+        versionTapCount.current = 0;
+      }, 1000);
+    }
+  };
+
+  useEffect(() => {
+    getElectrumServer().then((server) => {
+      const parts = server.split(':');
+      const protocol = parts.pop(); // 's' or 't'
+      setElectrumHostPort(parts.join(':'));
+      setElectrumSSL(protocol === 's');
+    });
+  }, []);
+
+  const handleElectrumSave = async () => {
+    const hostPort = electrumHostPort.trim() || 'electrum.blockstream.info:50002';
+    setElectrumHostPort(hostPort);
+    const value = `${hostPort}:${electrumSSL ? 's' : 't'}`;
+    await setElectrumServer(value);
+    disconnectElectrum(); // Force reconnect to new server on next sync
+  };
 
   useEffect(() => {
     setLnAddressInput(lightningAddress || '');
@@ -146,7 +195,9 @@ const AccountScreen: React.FC = () => {
     }
   };
 
-  const connectedCount = wallets.filter((w) => w.isConnected).length;
+  const connectedCount = wallets.filter((w) =>
+    w.walletType === 'onchain' ? w.balance !== null : w.isConnected,
+  ).length;
   const truncatedNpub = profile?.npub
     ? `${profile.npub.slice(0, 16)}...${profile.npub.slice(-8)}`
     : '';
@@ -283,6 +334,42 @@ const AccountScreen: React.FC = () => {
           ))}
         </View>
 
+        {/* Electrum Server */}
+        {wallets.some((w) => w.walletType === 'onchain') && (
+          <>
+            <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Electrum Server</Text>
+            <TextInput
+              style={styles.textInput}
+              value={electrumHostPort}
+              onChangeText={setElectrumHostPort}
+              placeholder="electrum.blockstream.info:50002"
+              placeholderTextColor={colors.textSupplementary}
+              autoCapitalize="none"
+              autoCorrect={false}
+              onBlur={handleElectrumSave}
+              testID="electrum-server-input"
+              accessibilityLabel="Electrum server"
+            />
+            <View style={styles.sslRow}>
+              <Text style={styles.sslLabel}>Use SSL</Text>
+              <TouchableOpacity
+                style={[styles.sslToggle, electrumSSL && styles.sslToggleActive]}
+                onPress={() => {
+                  setElectrumSSL(!electrumSSL);
+                  // Auto-save when toggling
+                  const hostPort = electrumHostPort.trim() || 'electrum.blockstream.info:50002';
+                  setElectrumServer(`${hostPort}:${!electrumSSL ? 's' : 't'}`);
+                  disconnectElectrum();
+                }}
+                testID="electrum-ssl-toggle"
+                accessibilityLabel="Use SSL"
+              >
+                <View style={[styles.sslToggleThumb, electrumSSL && styles.sslToggleThumbActive]} />
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+
         {/* Wallets summary */}
         <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Wallets</Text>
         <View style={styles.card}>
@@ -296,10 +383,22 @@ const AccountScreen: React.FC = () => {
               <View
                 style={[
                   styles.statusDot,
-                  { backgroundColor: w.isConnected ? colors.green : colors.red },
+                  {
+                    backgroundColor:
+                      w.walletType === 'onchain'
+                        ? w.balance !== null
+                          ? colors.green
+                          : colors.red
+                        : w.isConnected
+                          ? colors.green
+                          : colors.red,
+                  },
                 ]}
               />
-              <Text style={styles.walletName}>{w.alias}</Text>
+              <Text style={styles.walletName}>
+                {w.alias}
+                {w.walletType === 'onchain' ? ' (on-chain)' : ''}
+              </Text>
               {w.balance !== null && (
                 <Text style={styles.walletBalance}>{w.balance.toLocaleString()} sats</Text>
               )}
@@ -340,6 +439,14 @@ const AccountScreen: React.FC = () => {
         {/* Save button */}
         <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
           <Text style={styles.saveButtonText}>Save</Text>
+        </TouchableOpacity>
+
+        {/* Version — triple-tap to toggle developer mode */}
+        <TouchableOpacity onPress={handleVersionTap} activeOpacity={1}>
+          <Text style={styles.versionText} testID="version-text">
+            v{require('../../package.json').version}
+            {devMode ? ' (dev)' : ''}
+          </Text>
         </TouchableOpacity>
       </ScrollView>
 
@@ -524,6 +631,43 @@ const styles = StyleSheet.create({
     color: colors.textBody,
     fontWeight: '600',
   },
+  fieldHint: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  sslRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+    paddingHorizontal: 4,
+  },
+  sslLabel: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  sslToggle: {
+    width: 48,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+  sslToggleActive: {
+    backgroundColor: '#4CAF50',
+  },
+  sslToggleThumb: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.white,
+  },
+  sslToggleThumbActive: {
+    alignSelf: 'flex-end',
+  },
   lnAddressRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -610,6 +754,13 @@ const styles = StyleSheet.create({
     color: colors.brandPink,
     fontSize: 16,
     fontWeight: '700',
+  },
+  versionText: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 12,
+    textAlign: 'center',
+    paddingTop: 24,
+    paddingBottom: 0,
   },
 });
 

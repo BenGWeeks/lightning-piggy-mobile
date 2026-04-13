@@ -36,6 +36,12 @@ export function satsToFiat(sats: number, btcPrice: number): number {
 }
 
 export function formatFiat(amount: number, currency: FiatCurrency): string {
+  if (amount > 0 && amount < 0.01) {
+    const symbol = (0)
+      .toLocaleString(undefined, { style: 'currency', currency })
+      .replace(/[\d.,\s]/g, '');
+    return `< ${symbol}0.01`;
+  }
   return amount.toLocaleString(undefined, {
     style: 'currency',
     currency,
