@@ -4,8 +4,11 @@
 |===
 | Problem | Solution
 
+| Boltz reverse swap claim broadcast fails with "mandatory-script-verify-flag-failed (Witness program hash mismatch)"
+| The Taproot internal key for Boltz v2 swaps is a MuSig2 aggregate of Boltz's key and the user's key — in a specific order. Per Boltz docs, **"Boltz's public key always coming first"**: for reverse swaps that means `keyAggregate([refundPubKey, claimPubKey])` (Boltz's refund key first, user's claim key second; **not sorted, not the other way round, not just refundPubKey alone**). Keys must be 33-byte compressed, aggregated via `@scure/btc-signer`'s `keyAggregate` + `keyAggExport`, then used as the x-only internal key when computing the Taproot tweak. See `boltzService.ts` `claimSwap()` and the Boltz docs at https://api.docs.boltz.exchange/claiming-swaps.html. Confirmed against the chain by computing `p2tr(internalKey, [claimLeaf, refundLeaf], undefined, true)` from `@scure/btc-signer` and matching its `.script` to the on-chain lockup scriptPubKey.
+
 | Bottom sheet doesn't slide up when keyboard opens on Android
-| Use `BottomSheetTextInput` from `@gorhom/bottom-sheet` instead of React Native's `TextInput` inside bottom sheets. The library needs its own input component to detect keyboard events. Also set `keyboardBehavior="interactive"` and `android_keyboardInputMode="adjustResize"` on the `BottomSheetModal`, and ensure `android:windowSoftInputMode="adjustResize"` in AndroidManifest (via `plugins/withAdjustNothing.js`).
+| All of these are required: (1) Use `BottomSheetTextInput` from `@gorhom/bottom-sheet` instead of React Native's `TextInput`. (2) Use `BottomSheetScrollView` (not `BottomSheetView`) as the content wrapper. (3) Set `keyboardBehavior="interactive"`, `keyboardBlurBehavior="restore"`, and `android_keyboardInputMode="adjustResize"` on the `BottomSheetModal`. (4) Ensure `android:windowSoftInputMode="adjustResize"` in AndroidManifest (via `plugins/withAdjustResize.js`). (5) Add a `Keyboard.addListener` to track keyboard height and set dynamic `paddingBottom` on the `contentContainerStyle` (e.g. `paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40`). (6) Do NOT wrap content in `TouchableWithoutFeedback` with `Keyboard.dismiss` — this interferes with the sheet's keyboard handling. See `NostrLoginSheet.tsx` as the reference implementation.
 
 | Maestro can't find elements behind a modal Alert dialog
 | Dismiss the alert first (e.g. tap "KEEP CURRENT" or "Cancel") before asserting visibility of elements underneath.
@@ -30,4 +33,93 @@
 
 | Claude Code warns "image exceeds the dimension limit for many-image requests (2000px)"
 | Screenshots captured with `adb exec-out screencap -p` can exceed 2000px on high-DPI devices. Before sending to Claude, resize: `adb exec-out screencap -p > /tmp/screen.png && convert /tmp/screen.png -resize 1200x1200\> /tmp/screen_small.png`. Or run `/compact` to clear old images from context, or start a new conversation.
+
+| Maestro `inputText` doesn't update React state in `BottomSheetTextInput`
+| `BottomSheetTextInput` from `@gorhom/bottom-sheet` doesn't always trigger `onChangeText` when Maestro uses `inputText`. The text appears visually in the input but the React state stays empty, causing validation to fail. **Do not** replace with regular `TextInput` — the bottom sheet needs its own input to adjust when the keyboard opens. Workarounds: (1) Use Maestro's clipboard paste approach, (2) tap the input field first to ensure focus before typing, (3) accept intermittent flakiness — the first test run in a session usually works.
+
+| Maestro carousel swipes trigger notification shade or leave the app
+| Horizontal swipes at the top of the screen (y < 25%) can pull down the notification shade or swipe away the app. Use `y: 30%` or higher for carousel swipes. The wallet carousel sits at roughly 15-25% from the top, so swipe at `start: 85%, 30%` / `end: 15%, 30%` to target it safely.
+
+| `tiny-secp256k1` fails to resolve in React Native (WASM not supported)
+| Hermes doesn't support WebAssembly. Use `@bitcoinerlab/secp256k1` (pure JS) instead. This is the same approach used by BlueWallet. See `metro.config.js` for the custom resolver needed for `@noble/curves` ESM exports.
+
+| Metro can't resolve `@noble/curves/secp256k1` or `@noble/hashes/sha2`
+| These packages use ESM `exports` maps with `.js` extensions that Metro doesn't handle by default. Add a custom resolver in `metro.config.js` that appends `.js` to `@noble/*` subpath imports. Also add `'cjs'` to `resolver.sourceExts` for `bitcoinjs-lib`'s CommonJS entry point.
+
+| `Buffer.equals is not a function` in React Native
+| The `buffer` npm polyfill doesn't implement all Node.js Buffer methods. Use `Uint8Array` operations or hex string comparison instead of `Buffer.equals()`, `Buffer.copy()`, etc.
+
+| `Invalid network version` when importing zpub or ypub
+| `bip32.fromBase58()` only recognises `xpub` version bytes by default. Convert zpub/ypub to xpub by swapping the 4-byte version prefix (see `toXpub()` in `onchainService.ts`). The key data is identical across all three formats.
+
+| Maestro `clearState` wipes all app data (wallets, Nostr login, settings)
+| `clearState` deletes AsyncStorage and SecureStore. Only use it when you want a truly fresh install. For tests that need existing wallets, use `launchApp` without `clearState`.
+
+| NWC "failed to publish: All promises were rejected"
+| The LNbits Nostrclient relay proxy does not send NIP-20 OK responses after receiving EVENT messages (see https://github.com/lnbits/nostrclient/issues/52[lnbits/nostrclient#52]). The `@getalby/sdk` uses `nostr-tools` `SimplePool.publish()` which waits for an OK response from the relay — when none comes, it times out (4.4s) and rejects with `AggregateError`. +
+*Fix:* `nwcService.ts` monkey-patches the relay pool's `publish` method to resolve immediately (fire-and-forget) since the NWC response comes back via the subscription, not the OK acknowledgement. This patch is applied during `connect()`.
+
+| NWC "reply timeout" after publish succeeds
+| The NWC request event was published to the relay but the wallet's response didn't arrive within the SDK's reply timeout (~10s). This can happen when the LNbits NWC extension is slow to process requests, or the relay is slow to forward the response event. +
+*Workaround:* The `withRetry` helper retries with exponential backoff (2s, 4s, 8s). If persistent, check the LNbits NWC extension is running and the Nostrclient relay has active upstream relay connections (green status indicators in the Nostrclient admin).
+
+| NWC relay intermittently drops WebSocket connections
+| The `@getalby/sdk` opens a WebSocket to the NWC relay during `enable()`. If the connection drops (idle timeout, network change), all subsequent requests fail with "failed to publish". +
+*Fix:* `nwcService.ts` detects publish failures and automatically reconnects by creating a fresh `NostrWebLNProvider` with the stored NWC URL. The reconnect logic is in `getBalance()`, `payInvoice()`, and `listTransactions()`.
+
+| App shows "Unable to load script" on physical device
+| The device can't reach Metro bundler. Run `adb reverse tcp:8081 tcp:8081` to forward the port from the device to the host machine. Then tap RELOAD (R, R) on the device.
+
+| Black screen after reload / app launch (eventually loads)
+| The NWC wallet connection retries block the loading spinner. Each wallet attempts `getBalance()` with 3 retries and exponential backoff (2s, 4s, 8s) = ~14s per wallet. With 2 NWC wallets, startup can take ~30 seconds before the UI renders. The wallet is marked "Connected" after `enable()` succeeds (not after `getBalance()`), but the loading state (`isLoading`) waits for all wallets to finish connecting. +
+*Workaround:* Force restart the app and wait ~30-40 seconds. If persistent, check the LNbits NWC relay is running.
+
+| LNbits "Payment in flight" log spam blocks NWC processing
+| A Lightning payment stuck in `IN_FLIGHT` status causes LNbits to poll LND at ~16 checks/second with no backoff, producing 50,000+ log lines/hour and starving the asyncio event loop. NWC, Nostrclient, and all WebSocket-based extensions stop responding while the HTTP UI continues working. +
+*Fix:* Apply the exponential backoff patch: +
+1. `cat scripts/fix_lnbits_inflight.py \| ssh black-panther "cat > /tmp/fix.py"` +
+2. `ssh black-panther "docker cp /tmp/fix.py lnbits-family:/tmp/ && docker exec lnbits-family python3 /tmp/fix.py"` +
+3. `ssh black-panther "docker restart lnbits-family"` +
+The patch modifies `get_payment_status()` in `lnbits/wallets/lndrest.py` to `continue` on IN_FLIGHT status instead of returning immediately, keeping the LND TrackPaymentV2 stream open until the payment resolves. Also adds a 300s stream timeout. Must be re-applied after LNbits upgrades. See https://github.com/lnbits/lnbits/issues/3917[lnbits/lnbits#3917], PR https://github.com/lnbits/lnbits/pull/3918[lnbits/lnbits#3918].
+
+| "Cannot read property 'reload' of undefined" on BDK send
+| This error is NOT from BDK — it's from React Native's `DevSettings` module. The actual error (Electrum connection failure) is swallowed, and RN's error handler tries to call `NativeDevSettings.reload()` which is null in Expo dev-client builds. +
+*Fix:* `onchainService.ts` now forces a fresh Electrum connection (`blockchain = null`) before every `sendTransaction()` call. This avoids stale cached connections that cause the underlying Electrum error. The "reload" symptom disappears because the Electrum call succeeds. +
+*Diagnosis:* Add `[BDK]` console.log statements before/after each step (sync, broadcast) to identify which step fails. The "reload" error masks the real cause.
+
+| Boltz reverse swaps (LN → on-chain) occasionally fail with `pay_invoice` timeout
+| Boltz Exchange dynamically selects which LND node issues reverse swap invoices based on amount. Observed on 2026-04-12:
+
+* **≤ 250,000 sats**: invoice issued by "Boltz Mini" (pubkey `03e9c515b1e48c0e3bff9af8af1fce15d9b3f1ebb51e0311b1f80e820ba4cabb18`, 17 public channels, 4.18 BTC capacity)
+* **≥ 250,001 sats**: invoice issued by the main Boltz LND node (pubkey `026165850492521f4ac8abd9bd8088123446d126f648ca35e60f88177dc149ceb2`)
+
+Boltz Mini IS publicly routable, but initial swap attempts failed because LND's route pathfinding defaulted to `nicehash-ln1 → kappa → Boltz Mini` which had a stuck HTLC problem at kappa. After opening a direct channel to the main Boltz node, LND's graph eventually learned the `Boltz → Boltz Mini` path and routing works. +
+
+*Mitigations:*
+
+* Open a direct channel to the main Boltz node — gives LND a reliable path to Boltz Mini (Boltz → Boltz Mini)
+* Penalise the problematic intermediate node in mission control: `lncli importmc --failure --force <problem_node> <dest> $(date +%s) <amt_msat>`
+* Wait for gossip to propagate new channel info (can take minutes)
+* For persistent failures at a specific amount, retry — Boltz node selection may rotate
+
+*Boltz response:* Node selection is dynamic and not exposed in the API. Any assigned Boltz node should be routable. Failures indicate a local routing/topology issue, not a Boltz-side routing hint problem. +
+
+*Status:* Working after direct channel to main Boltz established.
+
+| Electrum connection drops or broadcast fails silently
+| On-chain sync and broadcast use BDK (`bdk-rn`) now — the old `electrum-client` / `react-native-tcp-socket` stack is gone. Stale Electrum sockets can still manifest as confusing errors like "Cannot read property 'reload' of undefined" (a React Native DevSettings crash that masks the underlying BDK error). +
+*Fix:* `onchainService.broadcastRawTx` and `sendTransaction` force `blockchain = null` before each operation to open a fresh connection; `disconnectElectrum()` is called when the user changes Electrum server in Account settings. If errors persist, force-restart the app.
+
+| NIP-20 OK fix lost after LNbits upgrade or container recreate
+| The Nostrclient extension bundled with the LNbits Docker image does not include our NIP-20 OK fix (PR https://github.com/lnbits/nostrclient/pull/68[lnbits/nostrclient#68]). Without it, NWC clients using `@getalby/sdk` timeout waiting for OK responses after publishing events. +
+*To re-apply the fix after upgrading LNbits:* +
+1. Copy the fix script into the container: `cat apply_nip20_fix.py \| ssh black-panther "cat > /tmp/apply_nip20_fix.py"` +
+2. Run inside container: `ssh black-panther "docker cp /tmp/apply_nip20_fix.py lnbits-family:/tmp/ && docker exec lnbits-family python3 /tmp/apply_nip20_fix.py"` +
+3. Restart: `ssh black-panther "docker restart lnbits-family"` +
+4. Verify: `ssh black-panther "docker exec lnbits-family grep 'NIP-01: OK' /app/lnbits/extensions/nostrclient/router.py"` +
+The fix script (`apply_nip20_fix.py`) patches `router.py` to send `["OK", event_id, true, ""]` after publishing EVENT messages, and `["OK", event_id, false, "error: no relay connections"]` when no relays are connected.
+
+| On-chain transactions slow to load on first launch
+| Balance and tx history come from BDK's `wallet.sync(chain)`. BDK is configured with an in-memory database (`DatabaseConfig().memory()`), so sync state does not persist across app restarts — the first sync after launch rescans from scratch and can take 10–30 seconds on busy wallets. +
+*Mitigations:* WalletContext caches transactions per wallet ID and writes them to AsyncStorage, so the UI renders cached data instantly on wallet swipe while the background sync runs. *Future:* switch BDK to a persistent database config so only the delta is fetched across launches.
 |===

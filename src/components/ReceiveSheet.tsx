@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  StyleSheet,
   Share,
   TextInput,
   ActivityIndicator,
@@ -22,8 +21,11 @@ import CopyIcon from './icons/CopyIcon';
 import ShareIcon from './icons/ShareIcon';
 import * as Clipboard from 'expo-clipboard';
 import { useWallet } from '../contexts/WalletContext';
+import { walletLabel } from '../types/wallet';
 import { colors } from '../styles/theme';
+import { receiveSheetStyles as styles } from '../styles/ReceiveSheet.styles';
 import { satsToFiatString, satsToFiat } from '../services/fiatService';
+// On-chain address fetching is done via WalletContext.getReceiveAddress
 
 interface Props {
   visible: boolean;
@@ -43,6 +45,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
     btcPrice,
     currency,
     lightningAddress,
+    getReceiveAddress,
   } = useWallet();
   const [capturedWalletId, setCapturedWalletId] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -53,6 +56,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [satsValue, setSatsValue] = useState('');
   const [fiatValue, setFiatValue] = useState('');
   const [inputUnit, setInputUnit] = useState<InputUnit>('sats');
+  const [onchainAddress, setOnchainAddress] = useState<string | null>(null);
   const intervalId = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevBalance = useRef<number | null>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -70,7 +74,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
     () => wallets.find((w) => w.id === selectedWalletId) ?? null,
     [wallets, selectedWalletId],
   );
-  const walletName = selectedWallet?.alias ?? 'Wallet';
+  const walletName = selectedWallet ? walletLabel(selectedWallet) : 'Wallet';
   const balance = selectedWallet?.balance ?? null;
 
   const generateInvoice = useCallback(
@@ -98,6 +102,8 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
     [makeInvoiceForWallet, refreshBalanceForWallet, capturedWalletId],
   );
 
+  const isOnchainWallet = selectedWallet?.walletType === 'onchain';
+
   // Open/close the sheet — intentionally depends only on `visible`.
   // `balance` and `lightningAddress` are read for initialisation, not as reactive triggers.
   useEffect(() => {
@@ -105,12 +111,25 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
       setCapturedWalletId(activeWalletId);
       setDropdownOpen(false);
       prevBalance.current = balance;
-      setMode(lightningAddress ? 'address' : 'amount');
+      setOnchainAddress(null);
       setSatsValue('');
       setFiatValue('');
       setInvoice('');
       setPaymentReceived(false);
       setInputUnit('sats');
+
+      if (activeWallet?.walletType === 'onchain' && activeWalletId) {
+        // On-chain wallet: fetch a receive address, default to address mode
+        setMode('address');
+        getReceiveAddress(activeWalletId)
+          .then((addr) => setOnchainAddress(addr))
+          .catch(() => {
+            console.warn('Failed to fetch on-chain address');
+          });
+      } else {
+        setMode(lightningAddress ? 'address' : 'amount');
+      }
+
       bottomSheetRef.current?.present();
     } else {
       bottomSheetRef.current?.dismiss();
@@ -134,6 +153,30 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
     });
     return () => handler.remove();
   }, [visible, onClose]);
+
+  // Reset state when wallet is changed via dropdown
+  useEffect(() => {
+    if (!visible || !capturedWalletId) return;
+    setOnchainAddress(null);
+    setInvoice('');
+    setPaymentReceived(false);
+    setSatsValue('');
+    setFiatValue('');
+    prevBalance.current = selectedWallet?.balance ?? null;
+    if (intervalId.current) {
+      clearInterval(intervalId.current);
+      intervalId.current = null;
+    }
+    if (selectedWallet?.walletType === 'onchain') {
+      setMode('address');
+      getReceiveAddress(capturedWalletId)
+        .then((addr) => setOnchainAddress(addr))
+        .catch(() => {});
+    } else {
+      setMode(lightningAddress ? 'address' : 'amount');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [capturedWalletId]);
 
   // Detect payment by watching balance changes
   useEffect(() => {
@@ -186,7 +229,21 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   };
 
   const currentSats = parseInt(satsValue) || 0;
-  const copyValue = mode === 'address' ? lightningAddress || '' : invoice;
+
+  // BIP-21 URI for on-chain: optionally include amount
+  const onchainUri = onchainAddress
+    ? mode === 'amount' && currentSats > 0
+      ? `bitcoin:${onchainAddress}?amount=${(currentSats / 100_000_000).toFixed(8)}`
+      : `bitcoin:${onchainAddress}`
+    : '';
+
+  const copyValue = isOnchainWallet
+    ? mode === 'amount' && currentSats > 0
+      ? onchainUri
+      : onchainAddress || ''
+    : mode === 'address'
+      ? lightningAddress || ''
+      : invoice;
 
   const handleCopy = async () => {
     if (copyValue) await Clipboard.setStringAsync(copyValue);
@@ -195,9 +252,12 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   const handleShare = async () => {
     if (copyValue) {
       try {
-        await Share.share({
-          message: mode === 'address' ? `lightning:${lightningAddress}` : `lightning:${invoice}`,
-        });
+        const shareMsg = isOnchainWallet
+          ? onchainUri
+          : mode === 'address'
+            ? `lightning:${lightningAddress}`
+            : `lightning:${invoice}`;
+        await Share.share({ message: shareMsg });
       } catch {}
     }
   };
@@ -234,7 +294,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
             <Text style={styles.title}>Receive</Text>
 
             {/* Wallet selector */}
-            {wallets.filter((w) => w.isConnected).length > 1 ? (
+            {wallets.filter((w) => w.isConnected || w.walletType === 'onchain').length > 1 ? (
               <View style={styles.walletDropdownRow}>
                 <Text style={styles.walletLabel}>To:</Text>
                 <View style={styles.walletDropdownWrapper}>
@@ -248,7 +308,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
                   {dropdownOpen && (
                     <View style={styles.walletDropdownMenu}>
                       {wallets
-                        .filter((w) => w.isConnected)
+                        .filter((w) => w.isConnected || w.walletType === 'onchain')
                         .map((w) => (
                           <TouchableOpacity
                             key={w.id}
@@ -267,7 +327,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
                                 capturedWalletId === w.id && styles.walletDropdownItemTextActive,
                               ]}
                             >
-                              {w.alias}
+                              {walletLabel(w)}
                             </Text>
                           </TouchableOpacity>
                         ))}
@@ -279,8 +339,8 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
               <Text style={styles.walletLabel}>To: {walletName}</Text>
             )}
 
-            {/* Mode tabs */}
-            {lightningAddress ? (
+            {/* Mode tabs — show for on-chain wallets and NWC wallets with lightning address */}
+            {isOnchainWallet || lightningAddress ? (
               <View style={styles.tabRow}>
                 <TouchableOpacity
                   style={[styles.tab, mode === 'address' && styles.tabActive]}
@@ -353,12 +413,23 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
 
             {/* QR Code */}
             <View style={styles.qrContainer}>
-              {mode === 'address' && lightningAddress ? (
+              {isOnchainWallet && onchainAddress && (mode === 'address' || currentSats > 0) ? (
+                <View>
+                  <QRCode value={onchainUri} size={200} />
+                  {paymentReceived && (
+                    <View style={styles.checkmark}>
+                      <Text style={styles.checkmarkText}>{'\u2713'}</Text>
+                    </View>
+                  )}
+                </View>
+              ) : isOnchainWallet && mode === 'amount' && currentSats === 0 ? (
+                <Text style={styles.noInvoice}>Enter an amount to generate QR code</Text>
+              ) : mode === 'address' && lightningAddress ? (
                 <View>
                   <QRCode value={`lightning:${lightningAddress}`} size={200} />
                   {paymentReceived && (
                     <View style={styles.checkmark}>
-                      <Text style={styles.checkmarkText}>✓</Text>
+                      <Text style={styles.checkmarkText}>{'\u2713'}</Text>
                     </View>
                   )}
                 </View>
@@ -383,7 +454,23 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
             </View>
 
             <Text style={styles.qrLabel}>
-              {mode === 'address' ? lightningAddress : 'Lightning invoice'}
+              {isOnchainWallet && onchainAddress && !(mode === 'amount' && currentSats > 0) ? (
+                <>
+                  <Text style={styles.addressHighlight}>{onchainAddress.slice(0, 6)}</Text>
+                  {onchainAddress.slice(6, -6)}
+                  <Text style={styles.addressHighlight}>{onchainAddress.slice(-6)}</Text>
+                </>
+              ) : isOnchainWallet ? (
+                mode === 'amount' && currentSats > 0 ? (
+                  `${currentSats.toLocaleString()} sats`
+                ) : (
+                  'Loading address...'
+                )
+              ) : mode === 'address' ? (
+                lightningAddress
+              ) : (
+                'Lightning invoice'
+              )}
             </Text>
             {mode === 'amount' && invoice ? (
               <Text style={styles.invoiceText} numberOfLines={2}>
@@ -407,229 +494,5 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
     </BottomSheetModal>
   );
 };
-
-const styles = StyleSheet.create({
-  sheetBackground: {
-    backgroundColor: colors.background,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-  },
-  handleIndicator: {
-    backgroundColor: colors.divider,
-    width: 40,
-  },
-  content: {
-    flex: 1,
-  },
-  innerContent: {
-    padding: 20,
-    paddingBottom: 40,
-    alignItems: 'center',
-    gap: 12,
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.textHeader,
-  },
-  tabRow: {
-    flexDirection: 'row',
-    backgroundColor: colors.divider,
-    borderRadius: 10,
-    padding: 3,
-  },
-  tab: {
-    paddingHorizontal: 24,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  tabActive: {
-    backgroundColor: colors.white,
-  },
-  tabText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textSupplementary,
-  },
-  tabTextActive: {
-    color: colors.brandPink,
-  },
-  amountSection: {
-    alignItems: 'center',
-    gap: 4,
-  },
-  amountRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  amountInput: {
-    backgroundColor: colors.white,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    width: 100,
-    fontSize: 16,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  unitButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: colors.divider,
-  },
-  unitButtonActive: {
-    backgroundColor: colors.brandPink,
-  },
-  unitButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.textSupplementary,
-  },
-  unitButtonTextActive: {
-    color: colors.white,
-  },
-  convertedAmount: {
-    fontSize: 13,
-    color: colors.textSupplementary,
-    fontWeight: '500',
-    minHeight: 18,
-  },
-  qrContainer: {
-    width: 220,
-    height: 220,
-    borderRadius: 24,
-    backgroundColor: colors.white,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.background,
-  },
-  checkmark: {
-    position: 'absolute',
-    top: -20,
-    right: -20,
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: colors.green,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  checkmarkText: {
-    color: colors.white,
-    fontSize: 28,
-    fontWeight: '700',
-  },
-  noInvoice: {
-    color: colors.textSupplementary,
-    fontSize: 14,
-    textAlign: 'center',
-    padding: 20,
-  },
-  qrLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textBody,
-  },
-  invoiceText: {
-    color: colors.textSupplementary,
-    fontSize: 11,
-    textAlign: 'center',
-    paddingHorizontal: 20,
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    gap: 20,
-  },
-  actionButton: {
-    backgroundColor: colors.white,
-    height: 52,
-    paddingHorizontal: 30,
-    borderRadius: 12,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  actionButtonText: {
-    color: colors.brandPink,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  walletDropdownRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  walletDropdownWrapper: {
-    position: 'relative',
-    zIndex: 10,
-  },
-  walletDropdown: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.white,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    gap: 8,
-    borderWidth: 1,
-    borderColor: colors.divider,
-  },
-  walletDropdownText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textBody,
-  },
-  walletDropdownArrow: {
-    fontSize: 10,
-    color: colors.textSupplementary,
-  },
-  walletDropdownMenu: {
-    position: 'absolute',
-    top: '100%',
-    left: 0,
-    right: 0,
-    marginTop: 4,
-    backgroundColor: colors.white,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.divider,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 8,
-    overflow: 'hidden',
-    minWidth: 160,
-  },
-  walletDropdownItem: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  walletDropdownItemActive: {
-    backgroundColor: colors.brandPink,
-  },
-  walletDropdownItemText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textBody,
-  },
-  walletDropdownItemTextActive: {
-    color: colors.white,
-  },
-  walletLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.textSupplementary,
-  },
-});
 
 export default ReceiveSheet;

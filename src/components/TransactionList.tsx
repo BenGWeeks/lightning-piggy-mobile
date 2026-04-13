@@ -1,23 +1,34 @@
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { colors } from '../styles/theme';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet } from '../contexts/WalletContext';
+import TransactionDetailSheet, { TransactionDetailData } from './TransactionDetailSheet';
 
 interface Transaction {
   type: string;
   amount: number;
   description?: string;
-  created_at?: number;
-  settled_at?: number;
+  created_at?: number | null;
+  settled_at?: number | null;
+  blockHeight?: number | null;
+  txid?: string;
+  swapId?: string;
 }
 
 interface Props {
   transactions: Transaction[];
 }
 
+const INITIAL_COUNT = 20;
+
 const TransactionList: React.FC<Props> = ({ transactions }) => {
   const { btcPrice, currency } = useWallet();
+  const [showAll, setShowAll] = useState(false);
+  const [detail, setDetail] = useState<TransactionDetailData | null>(null);
+
+  // Reset when transaction list changes (wallet swipe)
+  React.useEffect(() => setShowAll(false), [transactions]);
 
   if (transactions.length === 0) {
     return (
@@ -27,36 +38,86 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
     );
   }
 
+  // Sort: pending (no timestamp) first, then newest first
+  const sorted = [...transactions].sort((a, b) => {
+    const aTime = a.settled_at || a.created_at;
+    const bTime = b.settled_at || b.created_at;
+    if (!aTime && !bTime) return 0;
+    if (!aTime) return -1;
+    if (!bTime) return 1;
+    return bTime - aTime;
+  });
+  const visibleTransactions = showAll ? sorted : sorted.slice(0, INITIAL_COUNT);
+  const hasMore = transactions.length > INITIAL_COUNT;
+
   return (
     <View style={styles.list}>
-      {transactions.map((item, index) => {
+      {visibleTransactions.map((item, index) => {
         const isIncoming = item.type === 'incoming';
         const amountSats = Math.abs(item.amount);
         const date = item.settled_at || item.created_at;
-        const dateStr = date ? new Date(date * 1000).toLocaleDateString() : '';
+        const isPending = !date && !item.blockHeight;
+        const dateStr = date
+          ? new Date(date * 1000).toLocaleString(undefined, {
+              dateStyle: 'short',
+              timeStyle: 'short',
+            })
+          : item.blockHeight
+            ? `Block ${item.blockHeight.toLocaleString()}`
+            : '';
+        const label = isPending
+          ? 'Pending'
+          : item.description || (isIncoming ? 'Received' : 'Sent');
         const fiatStr = satsToFiatString(amountSats, btcPrice, currency);
 
         return (
-          <View key={index} style={styles.item}>
+          <TouchableOpacity
+            key={index}
+            style={[styles.item, isPending && styles.itemPending]}
+            onPress={() => setDetail(item as TransactionDetailData)}
+            accessibilityLabel={`Open details for ${label}`}
+          >
             <View style={styles.itemLeft}>
-              <Text style={styles.itemIcon}>{isIncoming ? '↓' : '↑'}</Text>
+              <Text style={[styles.itemIcon, isPending && styles.pendingText]}>
+                {isIncoming ? '↓' : '↑'}
+              </Text>
               <View style={styles.itemDescriptionContainer}>
-                <Text style={styles.itemDescription} numberOfLines={1}>
-                  {item.description || (isIncoming ? 'Received' : 'Sent')}
+                <Text
+                  style={[styles.itemDescription, isPending && styles.pendingText]}
+                  numberOfLines={1}
+                >
+                  {label}
                 </Text>
                 <Text style={styles.itemDate}>{dateStr}</Text>
               </View>
             </View>
             <View style={styles.itemRight}>
-              <Text style={[styles.itemAmount, isIncoming ? styles.incoming : styles.outgoing]}>
+              <Text
+                style={[
+                  styles.itemAmount,
+                  isPending ? styles.pendingText : isIncoming ? styles.incoming : styles.outgoing,
+                ]}
+              >
                 {isIncoming ? '+' : '-'}
                 {amountSats.toLocaleString()} sats
               </Text>
-              {fiatStr ? <Text style={styles.itemFiat}>{fiatStr}</Text> : null}
+              {fiatStr ? (
+                <Text style={[styles.itemFiat, isPending && styles.pendingText]}>{fiatStr}</Text>
+              ) : null}
             </View>
-          </View>
+          </TouchableOpacity>
         );
       })}
+      {hasMore && !showAll && (
+        <TouchableOpacity style={styles.showMore} onPress={() => setShowAll(true)}>
+          <Text style={styles.showMoreText}>Show all {transactions.length} transactions</Text>
+        </TouchableOpacity>
+      )}
+      <TransactionDetailSheet
+        visible={detail !== null}
+        tx={detail}
+        onClose={() => setDetail(null)}
+      />
     </View>
   );
 };
@@ -118,11 +179,26 @@ const styles = StyleSheet.create({
     color: colors.textSupplementary,
     marginTop: 2,
   },
+  showMore: {
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  showMoreText: {
+    color: colors.brandPink,
+    fontSize: 14,
+    fontWeight: '600',
+  },
   incoming: {
     color: colors.green,
   },
   outgoing: {
     color: colors.red,
+  },
+  itemPending: {
+    opacity: 0.5,
+  },
+  pendingText: {
+    color: colors.textSupplementary,
   },
 });
 

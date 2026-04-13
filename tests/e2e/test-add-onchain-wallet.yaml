@@ -1,0 +1,111 @@
+appId: com.anonymous.lightningpiggyapp
+name: Add On-chain Wallet Test
+---
+# Tests importing an on-chain Bitcoin wallet via xpub/zpub
+# Run: source .env && maestro test -e MAESTRO_XPUB="$MAESTRO_XPUB1" -e WALLET_NAME="Watch Wallet 1" tests/e2e/test-add-onchain-wallet.yaml
+
+# Wait for app to be ready
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 40000
+
+# Ensure we're on Home
+- tapOn:
+    id: 'tab-home'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Swipe carousel right until Add Wallet card is visible
+- scrollUntilVisible:
+    element:
+      id: 'add-wallet-card'
+    direction: RIGHT
+    timeout: 20000
+    speed: 40
+
+# Tap the Add Wallet card
+- tapOn:
+    id: 'add-wallet-card'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Scroll down to reveal Bitcoin option if needed
+- swipe:
+    start: 50%, 80%
+    end: 50%, 50%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Select Bitcoin (On-chain) wallet type
+- tapOn:
+    id: 'wallet-type-onchain'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Enter the xpub/zpub key
+- tapOn:
+    id: 'xpub-input'
+- tapOn:
+    id: 'xpub-input'
+- eraseText:
+    charactersToErase: 500
+- inputText: ${MAESTRO_XPUB}
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Tap Next to proceed to alias step
+- tapOn:
+    text: 'Next'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Enter wallet alias
+- tapOn:
+    id: 'wallet-alias-input'
+- tapOn:
+    id: 'wallet-alias-input'
+- eraseText:
+    charactersToErase: 100
+- inputText: ${WALLET_NAME}
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Tap Next to proceed to theme step
+- tapOn:
+    text: 'Next'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Scroll down to reveal Add Wallet button
+- swipe:
+    start: 50%, 80%
+    end: 50%, 30%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+- swipe:
+    start: 50%, 80%
+    end: 50%, 30%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Tap Add Wallet button
+- tapOn:
+    id: 'wizard-connect-button'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Verify the on-chain wallet card is visible with "On-chain" label
+- extendedWaitUntil:
+    visible:
+      text: 'On-chain'
+    timeout: 30000
+
+# Verify the wallet alias appears
+- assertVisible:
+    text: ${WALLET_NAME}
