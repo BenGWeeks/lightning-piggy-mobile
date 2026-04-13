@@ -11,9 +11,11 @@ import {
   KeyboardAvoidingView,
   Platform,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import Svg, { Rect, Path as SvgPath } from 'react-native-svg';
 import * as Clipboard from 'expo-clipboard';
+import * as nip19 from 'nostr-tools/nip19';
 import { useNavigation } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,7 +29,15 @@ import CopyIcon from '../components/icons/CopyIcon';
 import NostrLoginSheet from '../components/NostrLoginSheet';
 import EditProfileSheet from '../components/EditProfileSheet';
 import QrSheet from '../components/QrSheet';
+import SendSheet from '../components/SendSheet';
+import FeedbackSheet from '../components/FeedbackSheet';
+import { fetchProfile, DEFAULT_RELAYS } from '../services/nostrService';
+import type { NostrProfile } from '../types/nostr';
 import type { MainTabParamList } from '../navigation/types';
+
+// Lightning Piggy team npub — update this if the team key changes
+const TEAM_NPUB = 'npub1y2qcaseaspuwvjtyk4suswdhgselydc42ttlt0t2kzhnykne7s5swvaffq';
+const TEAM_PROFILE_CACHE_KEY = 'team_profile_cache';
 
 const QrIcon: React.FC<{ size?: number; color?: string }> = ({ size = 20, color = '#FFFFFF' }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -56,19 +66,54 @@ const AccountScreen: React.FC = () => {
     setLightningAddress,
     wallets,
   } = useWallet();
-  const { isLoggedIn, profile, logout } = useNostr();
+  const { isLoggedIn, profile, logout, sendDirectMessage, signerType } = useNostr();
   const [nameInput, setNameInput] = useState(userName);
   const [lnAddressInput, setLnAddressInput] = useState(lightningAddress || '');
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [qrSheetOpen, setQrSheetOpen] = useState(false);
   const [qrDefaultMode, setQrDefaultMode] = useState<'npub' | 'lightning'>('npub');
+  const [teamProfile, setTeamProfile] = useState<NostrProfile | null>(null);
+  const [teamProfileLoading, setTeamProfileLoading] = useState(true);
+  const [zapSheetOpen, setZapSheetOpen] = useState(false);
+  const [feedbackSheetOpen, setFeedbackSheetOpen] = useState(false);
   const [electrumHostPort, setElectrumHostPort] = useState('electrum.blockstream.info:50002');
   const [electrumSSL, setElectrumSSL] = useState(true);
   const [devMode, setDevMode] = useState(false);
   const versionTapCount = useRef(0);
   const versionTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<ScrollView>(null);
+
+  // Fetch Lightning Piggy team profile
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const decoded = nip19.decode(TEAM_NPUB);
+        if (decoded.type !== 'npub') return;
+        const cached = await AsyncStorage.getItem(TEAM_PROFILE_CACHE_KEY);
+        if (cached) {
+          const parsed = JSON.parse(cached) as NostrProfile;
+          if (!cancelled) {
+            setTeamProfile(parsed);
+            setTeamProfileLoading(false);
+          }
+        }
+        const fetched = await fetchProfile(decoded.data, DEFAULT_RELAYS);
+        if (!cancelled && fetched) {
+          setTeamProfile(fetched);
+          await AsyncStorage.setItem(TEAM_PROFILE_CACHE_KEY, JSON.stringify(fetched));
+        }
+      } catch (error) {
+        console.warn('Failed to fetch team profile:', error);
+      } finally {
+        if (!cancelled) setTeamProfileLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     setNameInput(userName);
@@ -441,6 +486,62 @@ const AccountScreen: React.FC = () => {
           <Text style={styles.saveButtonText}>Save</Text>
         </TouchableOpacity>
 
+        {/* Lightning Piggy Team */}
+        <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Support Lightning Piggy</Text>
+        <View style={styles.teamCard}>
+          {teamProfileLoading ? (
+            <ActivityIndicator size="small" color={colors.brandPink} style={{ padding: 20 }} />
+          ) : teamProfile ? (
+            <>
+              {teamProfile.banner && (
+                <Image
+                  source={{ uri: teamProfile.banner }}
+                  style={styles.teamBanner}
+                  resizeMode="cover"
+                />
+              )}
+              <View style={styles.teamRow}>
+                {teamProfile.picture ? (
+                  <Image source={{ uri: teamProfile.picture }} style={styles.teamPicture} />
+                ) : (
+                  <View style={styles.teamPicturePlaceholder} />
+                )}
+                <View style={styles.teamInfo}>
+                  <Text style={styles.teamName}>
+                    {teamProfile.displayName || teamProfile.name || 'Lightning Piggy'}
+                  </Text>
+                  {teamProfile.about && (
+                    <Text style={styles.teamAbout} numberOfLines={2}>
+                      {teamProfile.about}
+                    </Text>
+                  )}
+                </View>
+              </View>
+              <View style={styles.teamButtonRow}>
+                {teamProfile.lud16 && (
+                  <TouchableOpacity
+                    style={styles.zapButton}
+                    onPress={() => setZapSheetOpen(true)}
+                    accessibilityLabel="Zap Lightning Piggy"
+                    testID="zap-team-button"
+                  >
+                    <Text style={styles.zapButtonText}>{'\u26A1'} Zap the Team</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={styles.feedbackButton}
+                  onPress={() => setFeedbackSheetOpen(true)}
+                  accessibilityLabel="Send Feedback"
+                  testID="feedback-button"
+                >
+                  <Text style={styles.feedbackButtonText}>Send Feedback</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : (
+            <Text style={styles.teamFallbackText}>Could not load team profile</Text>
+          )}
+        </View>
         {/* Version — triple-tap to toggle developer mode */}
         <TouchableOpacity onPress={handleVersionTap} activeOpacity={1}>
           <Text style={styles.versionText} testID="version-text">
@@ -461,6 +562,36 @@ const AccountScreen: React.FC = () => {
           defaultMode={qrDefaultMode}
         />
       )}
+      {teamProfile?.lud16 && (
+        <SendSheet
+          visible={zapSheetOpen}
+          onClose={() => setZapSheetOpen(false)}
+          initialAddress={teamProfile.lud16}
+          initialPicture={teamProfile.picture || undefined}
+          recipientPubkey={teamProfile.pubkey}
+        />
+      )}
+      <FeedbackSheet
+        visible={feedbackSheetOpen}
+        onClose={() => setFeedbackSheetOpen(false)}
+        onSend={async (msg) => {
+          try {
+            const decoded = nip19.decode(TEAM_NPUB);
+            if (decoded.type !== 'npub') {
+              return { success: false, error: 'Invalid team npub' };
+            }
+            return sendDirectMessage(decoded.data, msg);
+          } catch (error) {
+            return {
+              success: false,
+              error: error instanceof Error ? error.message : 'Invalid team npub',
+            };
+          }
+        }}
+        isLoggedIn={isLoggedIn}
+        signerType={signerType}
+        onLoginPress={() => setLoginSheetOpen(true)}
+      />
     </KeyboardAvoidingView>
   );
 };
@@ -754,6 +885,85 @@ const styles = StyleSheet.create({
     color: colors.brandPink,
     fontSize: 16,
     fontWeight: '700',
+  },
+  // Team profile card styles
+  teamCard: {
+    backgroundColor: colors.white,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  teamBanner: {
+    width: '100%',
+    height: 80,
+  },
+  teamRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    gap: 12,
+  },
+  teamPicture: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 2,
+    borderColor: colors.divider,
+  },
+  teamPicturePlaceholder: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.background,
+  },
+  teamInfo: {
+    flex: 1,
+  },
+  teamName: {
+    color: colors.textHeader,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  teamAbout: {
+    color: colors.textSupplementary,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  teamButtonRow: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    gap: 8,
+  },
+  zapButton: {
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: colors.brandPink,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  zapButtonText: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  feedbackButton: {
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: colors.white,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: colors.brandPink,
+  },
+  feedbackButtonText: {
+    color: colors.brandPink,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  teamFallbackText: {
+    color: colors.textSupplementary,
+    fontSize: 14,
+    padding: 20,
+    textAlign: 'center',
   },
   versionText: {
     color: 'rgba(255,255,255,0.6)',
