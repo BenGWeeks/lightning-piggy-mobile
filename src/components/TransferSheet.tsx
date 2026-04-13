@@ -257,6 +257,12 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const handleTransfer = async () => {
     if (!sourceId || !destId || !source || !dest || currentSats <= 0) return;
 
+    // Local flag shadowing the `handedOff` state — React setState is async,
+    // so setHandedOff(true) before return doesn't update the `handedOff`
+    // closure by the time the `finally` block runs. A plain let survives
+    // the same scope and is visible in finally.
+    let didHandOff = false;
+
     // Warn if doing a cross-chain swap when a same-chain wallet has funds
     if (transferType === 'onchain-to-ln') {
       const altLnWallet =
@@ -448,6 +454,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             "Safe to close — you'll get a notification when the swap completes. " +
             'Progress also appears in your transaction history.',
         );
+        didHandOff = true;
         setHandedOff(true);
         return;
       } else if (transferType === 'onchain-to-ln') {
@@ -559,6 +566,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             "Safe to close — you'll get a notification when the swap completes. " +
             'Progress also appears in your transaction history.',
         );
+        didHandOff = true;
         setHandedOff(true);
         return;
       } else if (transferType === 'onchain-to-onchain') {
@@ -612,7 +620,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       // themselves via the Close button (see dismissal effect below). For
       // synchronous transfers (LN→LN, on-chain→on-chain) and errors, clear
       // state normally.
-      if (!handedOff) {
+      if (!didHandOff) {
         setSending(false);
         setProgressMsg(null);
       }
