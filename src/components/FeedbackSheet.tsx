@@ -98,7 +98,11 @@ const FeedbackSheet: React.FC<Props> = ({
     [],
   );
 
-  const canSend = isLoggedIn && signerType === 'nsec' && message.trim().length > 0 && !sending;
+  const canSend =
+    isLoggedIn &&
+    (signerType === 'nsec' || signerType === 'amber') &&
+    message.trim().length > 0 &&
+    !sending;
 
   return (
     <BottomSheetModal
@@ -130,12 +134,6 @@ const FeedbackSheet: React.FC<Props> = ({
             >
               <Text style={styles.loginButtonText}>Connect Nostr</Text>
             </TouchableOpacity>
-          </View>
-        ) : signerType !== 'nsec' ? (
-          <View style={styles.loginPrompt}>
-            <Text style={styles.loginText}>
-              Encrypted DMs require nsec login. Amber signing is not yet supported for DMs.
-            </Text>
           </View>
         ) : (
           <>

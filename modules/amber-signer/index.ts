@@ -30,6 +30,28 @@ export async function signEvent(
   return AmberSigner.signEvent(eventJson, eventId, currentUser);
 }
 
+export async function nip04Encrypt(
+  plaintext: string,
+  pubkey: string,
+  currentUser: string,
+): Promise<{ result: string }> {
+  if (!AmberSigner) {
+    throw new Error('Amber is only supported on Android');
+  }
+  return AmberSigner.nip04Encrypt(plaintext, pubkey, currentUser);
+}
+
+export async function nip04Decrypt(
+  ciphertext: string,
+  pubkey: string,
+  currentUser: string,
+): Promise<{ result: string }> {
+  if (!AmberSigner) {
+    throw new Error('Amber is only supported on Android');
+  }
+  return AmberSigner.nip04Decrypt(ciphertext, pubkey, currentUser);
+}
+
 export async function isInstalled(): Promise<boolean> {
   if (!AmberSigner) return false;
   return AmberSigner.isInstalled();
