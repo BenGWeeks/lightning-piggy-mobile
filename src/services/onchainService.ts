@@ -14,6 +14,9 @@ import {
   DatabaseConfig,
   DescriptorSecretKey,
   Mnemonic,
+  Transaction,
+  TxBuilder,
+  Address,
 } from 'bdk-rn';
 import { Network, AddressIndex, KeychainKind } from 'bdk-rn/lib/lib/enums';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -351,7 +354,11 @@ export async function sendTransaction(
   amountSats: number,
   feeRate: number = 2,
 ): Promise<string> {
+  console.log(
+    `[BDK] sendTransaction enter walletId=${walletId} to=${toAddress} sats=${amountSats}`,
+  );
   const watchOnly = await isWatchOnly(walletId);
+  console.log(`[BDK] sendTransaction isWatchOnly=${watchOnly}`);
   if (watchOnly) {
     throw new Error('Cannot send from a watch-only wallet — no signing key available');
   }
@@ -361,9 +368,8 @@ export async function sendTransaction(
     );
   }
 
-  const { TxBuilder, Address } = await import('bdk-rn');
-
   const wallet = await getBdkWallet(walletId);
+  console.log('[BDK] sendTransaction getBdkWallet complete');
 
   // Always create a fresh Electrum connection for sends to avoid stale state
   console.log('[BDK] sendTransaction: creating fresh Electrum connection');
@@ -373,15 +379,20 @@ export async function sendTransaction(
   await wallet.sync(chain);
   console.log('[BDK] sendTransaction: sync complete');
 
+  console.log('[BDK] sendTransaction parsing address');
   const address = await new Address().create(toAddress);
   const script = await address.scriptPubKey();
 
+  console.log('[BDK] sendTransaction building tx');
   let txBuilder = await new TxBuilder().create();
   txBuilder = await txBuilder.addRecipient(script, amountSats);
   txBuilder = await txBuilder.feeRate(feeRate);
 
+  console.log('[BDK] sendTransaction finishing');
   const result = await txBuilder.finish(wallet);
+  console.log('[BDK] sendTransaction signing');
   const signedPsbt = await wallet.sign(result.psbt);
+  console.log('[BDK] sendTransaction extracting');
   const tx = await signedPsbt.extractTx();
 
   try {
@@ -425,7 +436,6 @@ export async function broadcastRawTx(txHex: string): Promise<void> {
   if (!txHex || txHex.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(txHex)) {
     throw new Error('Invalid transaction hex: must be a non-empty even-length hex string');
   }
-  const { Transaction } = await import('bdk-rn');
   // Force a fresh Electrum connection. A stale/dropped socket can cause
   // broadcast() to fail in a way that masks the real error as a RN
   // DevSettings "Cannot read property 'reload' of undefined" crash. Matches
