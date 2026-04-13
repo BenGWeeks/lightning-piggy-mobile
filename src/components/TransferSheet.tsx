@@ -201,6 +201,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       setFiatValue('');
       setInputUnit('sats');
       setSending(false);
+      setHandedOff(false);
+      setProgressMsg(null);
       setFeeEstimate(null);
       setSourceDropdownOpen(false);
       setDestDropdownOpen(false);
@@ -446,6 +448,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             "Safe to close — you'll get a notification when the swap completes. " +
             'Progress also appears in your transaction history.',
         );
+        setHandedOff(true);
         return;
       } else if (transferType === 'onchain-to-ln') {
         setProgressMsg('Creating Boltz swap...');
@@ -556,6 +559,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             "Safe to close — you'll get a notification when the swap completes. " +
             'Progress also appears in your transaction history.',
         );
+        setHandedOff(true);
         return;
       } else if (transferType === 'onchain-to-onchain') {
         setProgressMsg('Sending on-chain transaction...');
@@ -602,8 +606,16 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         Alert.alert('Transfer Failed', message);
       }
     } finally {
-      setSending(false);
-      setProgressMsg(null);
+      // When a Boltz swap has been handed off to a background IIFE we leave
+      // the "Swap underway — safe to close" message visible so the user gets
+      // explicit confirmation the transfer is in flight. They close the sheet
+      // themselves via the Close button (see dismissal effect below). For
+      // synchronous transfers (LN→LN, on-chain→on-chain) and errors, clear
+      // state normally.
+      if (!handedOff) {
+        setSending(false);
+        setProgressMsg(null);
+      }
     }
   };
 
