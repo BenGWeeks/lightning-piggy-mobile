@@ -59,3 +59,5 @@ modules/*/android/build/
 
 # Generated documentation
 docs/*.pdf
+
+.claude/

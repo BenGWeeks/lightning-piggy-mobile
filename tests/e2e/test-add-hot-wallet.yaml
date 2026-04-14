@@ -1,0 +1,104 @@
+appId: com.anonymous.lightningpiggyapp
+name: Add Hot Wallet Test
+---
+# Imports a hot wallet via mnemonic seed phrase.
+# Pre-requisite: Developer mode must be enabled (triple-tap version in Account settings).
+# Run: source .env && maestro test -e MAESTRO_MNEMONIC="$MAESTRO_MNEMONIC1" -e WALLET_NAME="Hot Wallet 1" tests/e2e/test-add-hot-wallet.yaml
+
+# Wait for app to be ready
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 40000
+
+# Ensure we're on Home
+- tapOn:
+    id: 'tab-home'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Swipe carousel right until Add Wallet card is visible
+- scrollUntilVisible:
+    element:
+      id: 'add-wallet-card'
+    direction: RIGHT
+    timeout: 20000
+    speed: 40
+
+# Tap Add Wallet
+- tapOn:
+    id: 'add-wallet-card'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Scroll down to see the mnemonic option
+- swipe:
+    start: 50%, 80%
+    end: 50%, 50%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Select "Import Seed Phrase (Beta)" — requires dev mode enabled
+- tapOn:
+    id: 'wallet-type-mnemonic'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Enter the mnemonic
+- tapOn:
+    id: 'mnemonic-input'
+- tapOn:
+    id: 'mnemonic-input'
+- eraseText:
+    charactersToErase: 500
+- inputText: ${MAESTRO_MNEMONIC}
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Tap Next
+- tapOn:
+    text: 'Next'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Enter wallet alias
+- tapOn:
+    id: 'wallet-alias-input'
+- tapOn:
+    id: 'wallet-alias-input'
+- eraseText:
+    charactersToErase: 100
+- inputText: ${WALLET_NAME}
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Tap Next to theme step
+- tapOn:
+    text: 'Next'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Scroll to Add Wallet button and tap
+- swipe:
+    start: 50%, 80%
+    end: 50%, 40%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+- tapOn:
+    id: 'wizard-connect-button'
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# Verify the wallet was added and shows Connected
+- extendedWaitUntil:
+    visible:
+      text: 'Connected'
+    timeout: 30000
+
+# Verify the wallet alias appears
+- assertVisible:
+    text: ${WALLET_NAME}

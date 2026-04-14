@@ -6,6 +6,7 @@ import {
   type VerifiedEvent,
 } from 'nostr-tools/pure';
 import * as nip19 from 'nostr-tools/nip19';
+import * as nip04 from 'nostr-tools/nip04';
 import type { NostrProfile, NostrContact, RelayConfig } from '../types/nostr';
 
 const pool = new SimplePool();
@@ -333,6 +334,20 @@ export function createProfileEvent(profileData: {
     created_at: Math.floor(Date.now() / 1000),
     tags: [],
     content: JSON.stringify(cleaned),
+  };
+}
+
+export async function createDirectMessageEvent(
+  secretKey: Uint8Array,
+  recipientPubkey: string,
+  plaintext: string,
+): Promise<{ kind: number; created_at: number; tags: string[][]; content: string }> {
+  const encrypted = await nip04.encrypt(secretKey, recipientPubkey, plaintext);
+  return {
+    kind: 4,
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [['p', recipientPubkey]],
+    content: encrypted,
   };
 }
 
