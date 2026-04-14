@@ -110,28 +110,22 @@ NOTE: The existing individual developer account can remain separate. The organis
 
 TestFlight is Apple's beta testing platform. EAS integrates directly with it.
 
-==== Quick Deploy
+==== Build and submit
 
-Expo provides a streamlined command that builds and submits to TestFlight in one step:
-
-[source,bash]
-----
-# Build and submit to TestFlight (interactive — handles signing and API keys)
-npx testflight
-----
-
-This command walks through Apple ID sign-in, two-factor auth, certificate creation, and App Store Connect API key setup.
-
-==== Manual Steps
+Use EAS to build the iOS app and submit it to TestFlight:
 
 [source,bash]
 ----
 # 1. Build a production iOS archive
 eas build --platform ios --profile production
 
-# 2. Submit the build to TestFlight
+# 2. Submit the latest iOS build to TestFlight
 eas submit --platform ios
 ----
+
+These commands walk through Apple ID sign-in, two-factor auth, certificate creation, and App Store Connect API key setup as needed.
+
+NOTE: Expo also ships an experimental `npx testflight` shortcut that chains build + submit in one interactive flow. Useful for first-run exploration; the canonical `eas build` / `eas submit` split above is what CI and repeat flows should use.
 
 After submission, the build appears in App Store Connect under the TestFlight tab. Add internal testers (up to 100) or create external test groups (up to 10,000 testers).
 

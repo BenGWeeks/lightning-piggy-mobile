@@ -8,9 +8,9 @@ This guide covers setting up the Lightning Piggy development environment from sc
 |===
 | Tool | Purpose | Install
 
-| **Node.js** (v20+)
-| JavaScript runtime
-| `nvm install 20`
+| **Node.js** (v22.13+)
+| JavaScript runtime. The repo pins an exact version via `.nvmrc` and enforces `engines.node` in `package.json` with `engine-strict` in `.npmrc`.
+| `nvm install && nvm use` (reads `.nvmrc`)
 
 | **npm**
 | Package manager

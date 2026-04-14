@@ -7,7 +7,7 @@ Lightning Piggy — A Lightning Wallet for Kids
 :sectanchors:
 :sectnums!:
 :chapter-signifier:
-:source-highlighter: highlight.js
+:source-highlighter: rouge
 :icons: font
 :imagesdir: images
 :pdf-theme: lightning-piggy
