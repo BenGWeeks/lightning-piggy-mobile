@@ -65,6 +65,24 @@ APP_VARIANT=development npx expo run:android
 npx expo run:android
 ----
 
+=== Tag-based release workflow
+
+The preferred way to cut a release is to tag `main` — `.github/workflows/release.yml` handles the rest. Pushing a `v*` tag triggers EAS build + auto-submit; a manual run via *Actions → Release → Run workflow* lets you override the target platform.
+
+[source,bash]
+----
+# 1. Bump the version in app.config.ts (and commit) if you want a new user-facing version.
+# 2. Tag and push.
+git tag v1.0.0
+git push --tags
+----
+
+Required GitHub secret: **`EXPO_TOKEN`** — generate at https://expo.dev/accounts/bengweeks/settings/access-tokens and add it under *Settings → Secrets and variables → Actions*.
+
+All other credentials (iOS ASC API key, Apple distribution cert, future Google Play service account) live on the EAS server (uploaded once via `eas credentials`), so the workflow itself never handles a `.p8` or a service account JSON.
+
+Default platform is `ios`; switch to `all` (or add the Android secrets) once the Google Play account exists.
+
 === EAS Cloud Builds
 
 [source,bash]
