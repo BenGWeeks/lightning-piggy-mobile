@@ -1,0 +1,238 @@
+= Deployment
+
+This project builds with https://expo.dev/eas[EAS Build] (Expo Application Services).
+EAS compiles signed Android APKs / AABs and iOS IPAs on Expo's servers and returns
+a download URL per build.
+
+Build profiles live in `eas.json`:
+
+[cols="1,3", options="header"]
+|===
+| Profile | Purpose
+
+| `development`
+| Dev-client APK; requires Metro running on your machine. For day-to-day coding.
+
+| `preview`
+| Standalone internal-distribution APK (Android) and ad-hoc IPA (iOS). Shareable
+with a small group of testers without the App Store / Play Store.
+
+| `production`
+| App-bundle (AAB) / store-signed IPA. Intended for Play Store / App Store / TestFlight.
+|===
+
+== Prerequisites
+
+* Node on the pinned version — `nvm use` picks it up from `.nvmrc`.
+* Signed into EAS: `npx eas-cli whoami`. If not, `npx eas-cli login`.
+* For iOS builds: an active **Apple Developer Program** membership ($99/yr)
+  and the Apple ID with 2FA enabled.
+* For production Android: a Google Play Console developer account ($25 one-time).
+
+== Quick reference — build commands
+
+[source,bash]
+----
+# Both platforms, preview profile (internal distribution)
+npx eas-cli build --profile preview --platform all
+
+# Single platform
+npx eas-cli build --profile preview --platform android
+npx eas-cli build --profile preview --platform ios
+
+# Production
+npx eas-cli build --profile production --platform all
+----
+
+Watch progress at https://expo.dev/accounts/bengweeks/projects/lightning-piggy-app/builds.
+
+== Android — internal distribution (APK sideload)
+
+The simplest route. Anyone with the install URL can install the APK.
+
+. Run `npx eas-cli build --profile preview --platform android`.
+. When it finishes, share the build's URL (e.g.
+  `https://expo.dev/accounts/bengweeks/projects/lightning-piggy-app/builds/<id>`)
+  — or the direct APK download.
+. The tester opens the link in Chrome, downloads the APK, and taps it.
+. First-time installers must enable **Settings → Apps → Special app access →
+  Install unknown apps → Chrome (or Files) → Allow**. One-time per device.
+
+No UDID, no registration. Android 7+ is fine.
+
+== iOS — ad-hoc internal distribution
+
+Ad-hoc IPAs only install on devices whose UDID is registered in the build's
+provisioning profile. Each new tester requires a UDID registration and either a
+rebuild or a re-sign.
+
+=== 1. Share a device-registration link (run once per batch of testers)
+
+[source,bash]
+----
+npx eas-cli device:create
+----
+
+Pick **"Website"** — EAS prints a reusable registration URL and QR code. Share
+that URL with every tester. They each:
+
+. Open the URL in **Safari** on their iPhone.
+. Tap **Download Profile**.
+. **Settings → General → VPN & Device Management → Lightning Piggy profile →
+  Install**.
+
+Their UDID is then reported back to your Apple team automatically. You do not
+need to collect anything from them.
+
+=== 2. Verify registrations
+
+[source,bash]
+----
+npx eas-cli device:list
+# optionally rename for clarity:
+npx eas-cli device:rename
+----
+
+=== 3. Include the new devices in the build
+
+Fastest — **resign** the existing build (no recompile, ~1 min):
+
+[source,bash]
+----
+npx eas-cli build:resign
+# select the most recent finished iOS build
+----
+
+Or rebuild from source (~15 min):
+
+[source,bash]
+----
+npx eas-cli build --profile preview --platform ios
+----
+
+=== 4. Share the install URL
+
+Send the new build's install URL to every tester. They open it in Safari and
+tap **Install**; the app appears on their home screen.
+
+=== Limits
+
+* 100 registered devices per Apple product category (iPhone, iPad, etc.) per
+  membership year. Unregistered devices at the end of the membership year can
+  be removed to free slots.
+* Ad-hoc provisioning profiles expire after 1 year — need to rebuild/re-sign
+  before expiry.
+
+== iOS — TestFlight (recommended past ~5 testers)
+
+TestFlight avoids the per-device UDID dance entirely. Invite anyone by email;
+they install via Apple's TestFlight app. Up to 10 000 external testers.
+
+=== One-time setup
+
+. Create an app record in https://appstoreconnect.apple.com[App Store Connect]
+  with the same bundle identifier used by the production build profile.
+. Ensure the `production` profile in `eas.json` has
+  `"distribution": "store"` for iOS (default if unset).
+
+=== Upload and invite
+
+[source,bash]
+----
+npx eas-cli build --profile production --platform ios
+npx eas-cli submit --profile production --platform ios --latest
+----
+
+In App Store Connect → TestFlight, add testers by email (internal testers —
+same Apple team — need no review; external testers require a one-time Beta
+App Review, typically < 24h).
+
+Builds expire 90 days after upload.
+
+== Android — Play Store internal testing
+
+The Play equivalent of TestFlight.
+
+. Create an app in https://play.google.com/console[Google Play Console]
+  ($25 one-time fee).
+. Upload the production AAB:
++
+[source,bash]
+----
+npx eas-cli build --profile production --platform android
+npx eas-cli submit --profile production --platform android --latest
+----
+. In Play Console → Testing → **Internal testing**, create an email list and
+  an opt-in URL. Share the opt-in URL with testers; they accept, then install
+  from the Play Store.
+
+No APK sideload, no file sharing.
+
+== Over-the-air (OTA) JS updates with EAS Update
+
+Once a native build is installed, JS-only changes can ship without a rebuild
+via https://docs.expo.dev/eas-update/introduction[EAS Update]. Typical flow:
+
+[source,bash]
+----
+npx eas-cli update --branch preview --message "fix wallet swipe"
+----
+
+Testers get the update on next launch. Native changes (new libraries,
+permissions, plugins) still require a new build.
+
+== Future publishing under a "Lightning Piggy" organisation
+
+The project is currently built under:
+
+* **Apple Team:** BENJAMIN GRAHAM WEEKS (individual)
+* **Expo owner:** `bengweeks`
+
+To publish publicly under a *Lightning Piggy* brand you have two routes:
+
+. **Stay individual for now** — publish under the personal Apple account, then
+  use Apple's App Transfer flow later to move the listing to a Lightning Piggy
+  org account once that org (UK Ltd + D-U-N-S + enrolled Apple Developer Program)
+  exists.
+. **Form the entity up front** — register Lightning Piggy Ltd (Companies House,
+  ~£12), apply for a D-U-N-S number (free, few weeks), enrol a separate Apple
+  Developer Program account for the org ($99/yr, independent of the individual
+  account), and build under that team from day one.
+
+A trading name / DBA alone is not accepted by Apple for Organization
+enrolment — Apple requires a distinct legal entity.
+
+Google Play organisation enrolment is a one-time $25 regardless of entity
+type.
+
+No Apple fee waiver applies for general open-source projects; only registered
+501(c)(3)-equivalents, accredited educational institutions, and government
+entities qualify.
+
+== Troubleshooting
+
+[cols="1,2", options="header"]
+|===
+| Problem | Fix
+
+| iOS install page says *"Unable to install"*
+| The device's UDID isn't in the provisioning profile. Run `npx eas-cli
+device:list` to confirm — if missing, send the tester a fresh
+`device:create` link, then re-sign / rebuild.
+
+| Android install blocked by *"For your security..."*
+| Enable **Install unknown apps** for Chrome / Files in device settings.
+One-time per device per installer app.
+
+| `EAS_NO_VCS=1` warning during build
+| EAS uses git to package the project. Make sure the change you want built
+is committed, or accept that uncommitted files won't ship.
+
+| 2FA code rejected during iOS build
+| Apple's 2FA codes expire within ~30 s. Re-enter the newest code from your
+phone.
+
+| Build stuck in queue
+| Free-tier queue can be slow at peak times. Check
+https://status.expo.dev and the **Usage** page for remaining minutes.
+|===
