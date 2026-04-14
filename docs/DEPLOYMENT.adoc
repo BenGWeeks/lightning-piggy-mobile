@@ -74,7 +74,7 @@ The preferred way to cut a release is to tag `main` — `.github/workflows/relea
 # 1. Bump the version in app.config.ts (and commit) if you want a new user-facing version.
 # 2. Tag and push.
 git tag v1.0.0
-git push --tags
+git push origin v1.0.0   # push this specific tag — avoid `--tags`, which fires every local tag
 ----
 
 Required GitHub secret: **`EXPO_TOKEN`** — generate at https://expo.dev/accounts/bengweeks/settings/access-tokens and add it under *Settings → Secrets and variables → Actions*.
