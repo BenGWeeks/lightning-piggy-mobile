@@ -9,25 +9,29 @@ config.resolver.sourceExts = [...(config.resolver.sourceExts || []), 'cjs'];
 // maps with .js extensions that Metro can't resolve by default.
 // We rewrite the module name to include .js and delegate to the original resolver.
 const originalResolveRequest = config.resolver.resolveRequest;
-config.resolver.resolveRequest = (context, moduleName, platform) => {
-  // Handle @noble/curves/* and @noble/hashes/* imports without .js extension
-  // e.g. '@noble/curves/secp256k1' → '@noble/curves/secp256k1.js'
-  const nobleMatch = moduleName.match(/^(@noble\/(curves|hashes)\/.+)$/);
-  if (nobleMatch && !moduleName.endsWith('.js')) {
-    const rewritten = moduleName + '.js';
-    // Use the original resolver (not context.resolveRequest) to avoid
-    // recursion through this custom resolver.
-    if (originalResolveRequest) {
-      return originalResolveRequest(context, rewritten, platform);
-    }
-    return context.resolveRequest(context, rewritten, platform);
-  }
-
-  // Fall through to default resolution
+const resolveWith = (context, moduleName, platform) => {
   if (originalResolveRequest) {
     return originalResolveRequest(context, moduleName, platform);
   }
   return context.resolveRequest(context, moduleName, platform);
+};
+
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  const nobleMatch = moduleName.match(/^@noble\/(curves|hashes)\/.+$/);
+  if (nobleMatch) {
+    if (!moduleName.endsWith('.js')) {
+      return resolveWith(context, moduleName + '.js', platform);
+    }
+    // v1.x exports map lists subpaths without .js (e.g. "./crypto") while
+    // consumers import "./crypto.js" — try the stripped form first, fall back.
+    try {
+      return resolveWith(context, moduleName.slice(0, -3), platform);
+    } catch (_) {
+      return resolveWith(context, moduleName, platform);
+    }
+  }
+
+  return resolveWith(context, moduleName, platform);
 };
 
 module.exports = config;
