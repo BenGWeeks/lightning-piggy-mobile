@@ -1,4 +1,4 @@
-appId: com.anonymous.lightningpiggyapp
+appId: com.lightningpiggy.app
 name: Enable Developer Mode Test
 ---
 # Enables developer mode by triple-tapping the version number in Account settings.

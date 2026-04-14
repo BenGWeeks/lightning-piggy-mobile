@@ -1,4 +1,4 @@
-appId: com.anonymous.lightningpiggyapp
+appId: com.lightningpiggy.app
 name: Wallet Swipe Speed Test
 ---
 # Tests that swiping between wallets updates transactions quickly.
