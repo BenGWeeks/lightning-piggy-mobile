@@ -76,9 +76,8 @@ Releases are cut by publishing a **GitHub Release** (which creates the tag serve
 
 ==== Cutting a release
 
-. Bump the `version` in `app.config.ts` (and optionally `ios.buildNumber` / `android.versionCode`) on `main`, then merge.
 . Go to https://github.com/BenGWeeks/lightning-piggy-mobile/releases → *Draft a new release*.
-. Choose a tag like `v1.0.1` (create on publish) targeted at `main`.
+. Choose a tag like `v1.0.1` (create on publish) targeted at `main`. **The tag is the source of truth for the user-visible version** — the workflow strips the leading `v` and sets `version` in `app.config.ts` (which becomes iOS `CFBundleShortVersionString` and Android `versionName`). Pre-release suffixes (e.g. `v1.0.0-rc1`) are stripped to keep the store-facing version a strict `X.Y.Z`.
 . Write release notes, click *Publish release*.
 . Watch *Actions → Release*. When it finishes, the Release page has the APK and PDF attached; TestFlight has the iOS build.
 
