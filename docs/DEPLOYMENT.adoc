@@ -12,18 +12,18 @@ Lightning Piggy supports three build variants, each with distinct identifiers so
 
 | **Development**
 | Lightning Piggy (Dev)
-| `com.bengweeks.lightningpiggy.dev`
-| `com.anonymous.lightningpiggyapp.dev`
+| `com.lightningpiggy.app.dev`
+| `com.lightningpiggy.app.dev`
 
 | **Preview**
 | Lightning Piggy (Preview)
-| `com.bengweeks.lightningpiggy.preview`
-| `com.anonymous.lightningpiggyapp.preview`
+| `com.lightningpiggy.app.preview`
+| `com.lightningpiggy.app.preview`
 
 | **Production**
 | Lightning Piggy
-| `com.bengweeks.lightningpiggy`
-| `com.anonymous.lightningpiggyapp`
+| `com.lightningpiggy.app`
+| `com.lightningpiggy.app`
 
 |===
 
@@ -110,22 +110,59 @@ NOTE: The existing individual developer account can remain separate. The organis
 
 TestFlight is Apple's beta testing platform. EAS integrates directly with it.
 
-==== Build and submit
+==== One-time setup
 
-Use EAS to build the iOS app and submit it to TestFlight:
+. **Create an App Store Connect API key** at https://appstoreconnect.apple.com/access/integrations/api → *Team Keys* → *+*. Name: `EAS Submit`, Access: *App Manager*. Download the `.p8` file (only shown once) and note the Key ID and Issuer ID.
+. **Create the App Store Connect app record** at https://appstoreconnect.apple.com/apps → *+* → *New App*. Pick `com.lightningpiggy.app` from the Bundle ID dropdown (EAS auto-registers it on first iOS build, so build once before creating the record). After creation, open the app → *App Information* and copy the numeric **Apple ID** — this is the `ascAppId`.
+. **Wire credentials into `eas.json`** — keep the `.p8` file *outside the repo* and reference the path. Do not commit the `.p8`.
++
+[source,json]
+----
+"submit": {
+  "production": {
+    "ios": {
+      "ascApiKeyPath": "/absolute/path/to/AuthKey_XXXXXXXXXX.p8",
+      "ascApiKeyId": "XXXXXXXXXX",
+      "ascApiKeyIssuerId": "00000000-0000-0000-0000-000000000000",
+      "ascAppId": "0000000000"
+    }
+  }
+}
+----
+
+==== Build and submit
 
 [source,bash]
 ----
-# 1. Build a production iOS archive
+# 1. Build a production iOS archive (cloud or local — see "Local builds" below)
 eas build --platform ios --profile production
 
 # 2. Submit the latest iOS build to TestFlight
-eas submit --platform ios
+eas submit --platform ios --latest
 ----
 
-These commands walk through Apple ID sign-in, two-factor auth, certificate creation, and App Store Connect API key setup as needed.
+With `ascApiKey*` + `ascAppId` populated in `eas.json`, the submit is headless — no Apple ID sign-in, no 2FA, no Keychain prompt. Uploads in 1–3 minutes; Apple then processes the build for 5–10 minutes before it becomes installable.
 
-NOTE: Expo also ships an experimental `npx testflight` shortcut that chains build + submit in one interactive flow. Useful for first-run exploration; the canonical `eas build` / `eas submit` split above is what CI and repeat flows should use.
+CAUTION: The App Store Connect *app-record creation* step still requires interactive Apple ID login (API keys cannot create new apps). Do the one-time record creation in the browser, not via EAS, and you avoid the Apple ID flow entirely afterwards.
+
+==== Local build on macOS (skip the EAS queue)
+
+The free-tier EAS build queue can be slow (60–180 min). A local build on a macOS machine is usually 10–20 minutes. Requires Xcode, Homebrew CocoaPods, and Fastlane installed; EAS-CLI handles the rest.
+
+[source,bash]
+----
+# One-time prerequisites on the Mac
+brew install cocoapods fastlane
+npm install -g eas-cli eas-cli-local-build-plugin
+
+# Build locally
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+eas build --platform ios --profile production --local \
+  --output /tmp/lightning-piggy.ipa
+
+# Then submit the IPA (uses ASC API key from eas.json)
+eas submit --platform ios --path /tmp/lightning-piggy.ipa
+----
 
 After submission, the build appears in App Store Connect under the TestFlight tab. Add internal testers (up to 100) or create external test groups (up to 10,000 testers).
 
