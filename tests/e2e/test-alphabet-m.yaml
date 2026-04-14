@@ -1,4 +1,4 @@
-appId: ${APP_ID:-com.anonymous.lightningpiggyapp}
+appId: ${APP_ID:-com.lightningpiggy.app}
 name: Alphabet Navigation Test
 ---
 # Assumes app is already running via `npm start` + `adb reverse tcp:8081 tcp:8081`

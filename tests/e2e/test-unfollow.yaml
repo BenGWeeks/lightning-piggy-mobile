@@ -1,4 +1,4 @@
-appId: ${APP_ID:-com.anonymous.lightningpiggyapp}
+appId: ${APP_ID:-com.lightningpiggy.app}
 name: Unfollow Contact Test
 ---
 # Tests unfollowing a contact via the contact profile sheet

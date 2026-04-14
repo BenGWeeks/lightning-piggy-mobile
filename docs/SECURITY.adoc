@@ -1,0 +1,145 @@
+== Security
+
+This section documents how Lightning Piggy handles sensitive data, credential storage, and security boundaries.
+
+=== Credential Storage
+
+The app uses two storage mechanisms with different security levels:
+
+==== SecureStore (Encrypted)
+
+`expo-secure-store` provides encrypted storage backed by the iOS Keychain and Android EncryptedSharedPreferences. All sensitive credentials are stored here.
+
+[cols="2,3,1", options="header"]
+|===
+| Key | Contents | Source
+
+| `nwc_url_{walletId}`
+| NWC connection URL containing the wallet's relay, secret, and pubkey. One entry per wallet.
+| `walletStorageService.ts`
+
+| `nostr_nsec`
+| Nostr private key (nsec) for users who sign in with a private key directly.
+| `NostrContext.tsx`
+
+| `nostr_pubkey`
+| Nostr public key. Stored for both nsec and Amber sign-in methods.
+| `NostrContext.tsx`
+
+| `nostr_signer_type`
+| Either `"nsec"` or `"amber"` — indicates which signing method is active.
+| `NostrContext.tsx`
+
+|===
+
+**Legacy key:** `nwc_connection_url` was used in the single-wallet version. The migration in `walletStorageService.ts` moves this to the `nwc_url_{id}` format and deletes the legacy key.
+
+==== AsyncStorage (Unencrypted)
+
+`@react-native-async-storage/async-storage` stores non-sensitive data:
+
+[cols="2,3", options="header"]
+|===
+| Key | Contents
+
+| `wallet_list`
+| JSON array of wallet metadata (id, alias, theme, order, lightning address). No secrets.
+
+| `onboarding_complete`
+| Boolean flag — `"true"` after the user completes onboarding.
+
+| `user_display_name`
+| The user's chosen display name.
+
+| `user_fiat_currency`
+| Selected fiat currency code for balance display.
+
+| `lightning_address`
+| The user's lightning address for receiving payments.
+
+| `nostr_contacts_{pubkey}`
+| Cached Nostr contact list with 24-hour TTL. Contains only public data (pubkeys, profile metadata).
+
+|===
+
+=== NWC URL Security
+
+NWC (Nostr Wallet Connect) URLs contain the wallet's secret key and relay information. The app handles these carefully:
+
+* **Storage**: NWC URLs are always stored in SecureStore, never AsyncStorage.
+* **Validation**: `nwcService.validateNwcUrl()` checks URL format, required parameters (`secret`, `relay`), and relay URL validity before saving.
+* **Display**: NWC URLs are never displayed in full in the UI.
+* **Deletion**: When a wallet is removed, its NWC URL is explicitly deleted from SecureStore via `deleteNwcUrl()`.
+
+=== Nostr Key Management
+
+==== nsec (Direct Private Key)
+
+When a user signs in with an nsec:
+
+1. The nsec is decoded and validated via `nostr-tools/nip19`
+2. The private key is stored in SecureStore (`nostr_nsec`)
+3. All event signing is done locally using `nostr-tools/pure.finalizeEvent()`
+4. The nsec never leaves the device
+
+==== Amber Signer (Android)
+
+When a user signs in with Amber:
+
+1. Only the public key is stored in the app (in SecureStore as `nostr_pubkey`)
+2. The private key remains exclusively in the Amber app
+3. Event signing is delegated to Amber via NIP-55 intents
+4. Each signing request requires explicit user approval in Amber
+
+The Amber approach provides stronger key isolation — the private key never enters Lightning Piggy's process space.
+
+=== Account Creation
+
+New Nostr identities are generated locally:
+
+1. `nostr-tools/pure.generateSecretKey()` creates a cryptographically random keypair
+2. The nsec is stored in SecureStore
+3. A safety tip is displayed: "You don't need to use your real name or photo for your profile"
+4. The user is shown their nsec with a copy button and backup warning
+
+=== Logout and Cleanup
+
+On logout, all Nostr credentials are explicitly deleted from SecureStore:
+
+[source,typescript]
+----
+await SecureStore.deleteItemAsync('nostr_nsec');
+await SecureStore.deleteItemAsync('nostr_pubkey');
+await SecureStore.deleteItemAsync('nostr_signer_type');
+----
+
+Cached contact data in AsyncStorage is also cleared.
+
+=== Input Validation
+
+[cols="1,3", options="header"]
+|===
+| Input | Validation
+
+| NWC URL
+| URL format check, required `secret` and `relay` parameters, relay URL scheme validation (`wss://`)
+
+| nsec
+| Bech32 decoding via `nostr-tools/nip19.decode()`, must produce a valid private key
+
+| npub
+| Bech32 decoding, must produce a valid 32-byte public key
+
+| Lightning address
+| Must contain `@` and resolve via LNURL-pay (LUD-16)
+
+| Payment amounts
+| Validated against LNURL-pay `minSendable` / `maxSendable` bounds
+
+|===
+
+=== Network Security
+
+* All relay connections use `wss://` (WebSocket Secure)
+* Image uploads to nostr.build use HTTPS
+* LNURL-pay callbacks use HTTPS
