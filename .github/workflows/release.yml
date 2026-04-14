@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform(s) to release
+        type: choice
+        default: ios
+        options: [ios, android, all]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  EAS_CLI_VERSION: '18.6.0'
+
+jobs:
+  release:
+    name: Build & submit via EAS
+    runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    steps:
+      - name: Verify EXPO_TOKEN is set
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error title=Missing EXPO_TOKEN::Set EXPO_TOKEN under Settings → Secrets and variables → Actions. Generate at https://expo.dev/accounts/bengweeks/settings/access-tokens."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Quality gates
+        run: |
+          npm run typecheck
+          npm run lint
+          npm run format:check
+
+      - name: Resolve platform
+        id: platform
+        run: |
+          echo "value=${{ github.event.inputs.platform || 'ios' }}" >> "$GITHUB_OUTPUT"
+
+      - name: EAS build + auto-submit
+        run: |
+          npx -p eas-cli@${{ env.EAS_CLI_VERSION }} eas build \
+            --profile production \
+            --platform ${{ steps.platform.outputs.value }} \
+            --non-interactive \
+            --auto-submit
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Release $GITHUB_REF_NAME"
+            echo ""
+            echo "Platform: \`${{ steps.platform.outputs.value }}\`"
+            echo "Builds dashboard: https://expo.dev/accounts/bengweeks/projects/lightning-piggy-app/builds"
+            echo "Submissions: https://expo.dev/accounts/bengweeks/projects/lightning-piggy-app/submissions"
+          } >> "$GITHUB_STEP_SUMMARY"
