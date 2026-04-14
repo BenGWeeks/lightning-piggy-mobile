@@ -28,6 +28,14 @@
 | Metro not connecting to device over USB
 | Run `adb reverse tcp:8081 tcp:8081` for USB port forwarding before launching the app.
 
+| React Native DevTools fails on Linux with `chrome-sandbox ... mode 4755`
+| Pressing `j` in Metro launches React Native DevTools (a bundled Chromium). On Ubuntu 24.04+, unprivileged user namespaces are disabled, so the SUID sandbox helper must be root-owned with mode 4755. The binary ships inside `~/.cache/dotslash/...` with the wrong permissions. +
+*Fix:* copy the **full `chrome-sandbox` path printed in the error** (do not construct it by hand) and run: +
+1. `sudo chown root:root <full_path_to_chrome_sandbox>` +
+2. `sudo chmod 4755 <full_path_to_chrome_sandbox>` +
+Example path format: `~/.cache/dotslash/cb/<hash>/React Native DevTools-linux-x64/chrome-sandbox`. +
+*Caveats:* this marks a cached binary as setuid-root, which is security-sensitive — apply only to the exact path from the error, never to other files. The hash segment changes when DevTools updates or the dotslash cache is cleared, so the fix must be re-applied against the new path. This does not cause a blank screen on the device — DevTools is a host-side debugger only.
+
 | App shows black screen or "Unable to load script" after force-stop
 | The Metro bundler connection can break when force-stopping the app. Fix: (1) Kill Metro with `pkill -f "expo start"`, (2) restart with `npm start` (or `npx expo start --clear` to also clear cache), (3) run `adb reverse tcp:8081 tcp:8081` again, (4) relaunch the app. If still black, do a full rebuild with `npx expo run:android`.
 
