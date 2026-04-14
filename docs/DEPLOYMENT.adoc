@@ -24,7 +24,7 @@ with a small group of testers without the App Store / Play Store.
 == Prerequisites
 
 * Node on the pinned version — `nvm use` picks it up from `.nvmrc`.
-* Signed into EAS: `npx eas-cli whoami`. If not, `npx eas-cli login`.
+* Signed into EAS: `npx -p eas-cli eas whoami`. If not, `npx -p eas-cli eas login`.
 * For iOS builds: an active **Apple Developer Program** membership ($99/yr)
   and the Apple ID with 2FA enabled.
 * For production Android: a Google Play Console developer account ($25 one-time).
@@ -34,14 +34,14 @@ with a small group of testers without the App Store / Play Store.
 [source,bash]
 ----
 # Both platforms, preview profile (internal distribution)
-npx eas-cli build --profile preview --platform all
+npx -p eas-cli eas build --profile preview --platform all
 
 # Single platform
-npx eas-cli build --profile preview --platform android
-npx eas-cli build --profile preview --platform ios
+npx -p eas-cli eas build --profile preview --platform android
+npx -p eas-cli eas build --profile preview --platform ios
 
 # Production
-npx eas-cli build --profile production --platform all
+npx -p eas-cli eas build --profile production --platform all
 ----
 
 Watch progress at https://expo.dev/accounts/bengweeks/projects/lightning-piggy-app/builds.
@@ -50,7 +50,7 @@ Watch progress at https://expo.dev/accounts/bengweeks/projects/lightning-piggy-a
 
 The simplest route. Anyone with the install URL can install the APK.
 
-. Run `npx eas-cli build --profile preview --platform android`.
+. Run `npx -p eas-cli eas build --profile preview --platform android`.
 . When it finishes, share the build's URL (e.g.
   `https://expo.dev/accounts/bengweeks/projects/lightning-piggy-app/builds/<id>`)
   — or the direct APK download.
@@ -70,7 +70,7 @@ rebuild or a re-sign.
 
 [source,bash]
 ----
-npx eas-cli device:create
+npx -p eas-cli eas device:create
 ----
 
 Pick **"Website"** — EAS prints a reusable registration URL and QR code. Share
@@ -88,9 +88,9 @@ need to collect anything from them.
 
 [source,bash]
 ----
-npx eas-cli device:list
+npx -p eas-cli eas device:list
 # optionally rename for clarity:
-npx eas-cli device:rename
+npx -p eas-cli eas device:rename
 ----
 
 === 3. Include the new devices in the build
@@ -99,7 +99,7 @@ Fastest — **resign** the existing build (no recompile, ~1 min):
 
 [source,bash]
 ----
-npx eas-cli build:resign
+npx -p eas-cli eas build:resign
 # select the most recent finished iOS build
 ----
 
@@ -107,7 +107,7 @@ Or rebuild from source (~15 min):
 
 [source,bash]
 ----
-npx eas-cli build --profile preview --platform ios
+npx -p eas-cli eas build --profile preview --platform ios
 ----
 
 === 4. Share the install URL
@@ -139,8 +139,8 @@ they install via Apple's TestFlight app. Up to 10 000 external testers.
 
 [source,bash]
 ----
-npx eas-cli build --profile production --platform ios
-npx eas-cli submit --profile production --platform ios --latest
+npx -p eas-cli eas build --profile production --platform ios
+npx -p eas-cli eas submit --profile production --platform ios --latest
 ----
 
 In App Store Connect → TestFlight, add testers by email (internal testers —
@@ -159,8 +159,8 @@ The Play equivalent of TestFlight.
 +
 [source,bash]
 ----
-npx eas-cli build --profile production --platform android
-npx eas-cli submit --profile production --platform android --latest
+npx -p eas-cli eas build --profile production --platform android
+npx -p eas-cli eas submit --profile production --platform android --latest
 ----
 . In Play Console → Testing → **Internal testing**, create an email list and
   an opt-in URL. Share the opt-in URL with testers; they accept, then install
@@ -175,7 +175,7 @@ via https://docs.expo.dev/eas-update/introduction[EAS Update]. Typical flow:
 
 [source,bash]
 ----
-npx eas-cli update --branch preview --message "fix wallet swipe"
+npx -p eas-cli eas update --branch preview --message "fix wallet swipe"
 ----
 
 Testers get the update on next launch. Native changes (new libraries,
@@ -216,9 +216,7 @@ entities qualify.
 | Problem | Fix
 
 | iOS install page says *"Unable to install"*
-| The device's UDID isn't in the provisioning profile. Run `npx eas-cli
-device:list` to confirm — if missing, send the tester a fresh
-`device:create` link, then re-sign / rebuild.
+| The device's UDID isn't in the provisioning profile. Run `npx -p eas-cli eas device:list` to confirm — if missing, send the tester a fresh `device:create` link, then re-sign / rebuild.
 
 | Android install blocked by *"For your security..."*
 | Enable **Install unknown apps** for Chrome / Files in device settings.
