@@ -578,6 +578,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             settled_at: tx.timestamp,
             created_at: tx.timestamp,
             blockHeight: tx.blockHeight,
+            txid: tx.txid,
           }));
         } else {
           const raw = await nwcService.listTransactions(walletId);
@@ -587,6 +588,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             description: tx.description,
             settled_at: tx.settled_at,
             created_at: tx.created_at,
+            paymentHash: tx.payment_hash,
+            preimage: tx.preimage,
+            invoice: tx.invoice,
+            // NWC reports fees in msats; surface as sats for display.
+            feesSats:
+              typeof tx.fees_paid === 'number' ? Math.round(tx.fees_paid / 1000) : undefined,
           }));
         }
         updateWalletInState(walletId, { transactions: txs });

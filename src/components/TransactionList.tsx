@@ -14,6 +14,10 @@ interface Transaction {
   blockHeight?: number | null;
   txid?: string;
   swapId?: string;
+  paymentHash?: string;
+  preimage?: string;
+  invoice?: string;
+  feesSats?: number;
 }
 
 interface Props {

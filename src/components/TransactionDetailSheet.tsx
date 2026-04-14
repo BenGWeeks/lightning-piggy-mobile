@@ -7,12 +7,19 @@ import {
   BottomSheetBackdropProps,
 } from '@gorhom/bottom-sheet';
 import * as SecureStore from 'expo-secure-store';
+import * as Clipboard from 'expo-clipboard';
 import Toast from 'react-native-toast-message';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet } from '../contexts/WalletContext';
+import { useNostr } from '../contexts/NostrContext';
 import * as boltzService from '../services/boltzService';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import { transactionDetailSheetStyles as styles } from '../styles/TransactionDetailSheet.styles';
+import FeedbackSheet from './FeedbackSheet';
+import { createDmSender } from '../utils/nostrDm';
+
+/** Boltz support npub — DMs sent here reach the Boltz team. */
+const BOLTZ_SUPPORT_NPUB = 'npub1psm37hke2pmxzdzraqe3cjmqs28dv77da74pdx8mtn5a0vegtlas9q8970';
 
 export interface TransactionDetailData {
   /** Display values the caller already has */
@@ -22,8 +29,13 @@ export interface TransactionDetailData {
   created_at?: number | null;
   settled_at?: number | null;
   blockHeight?: number | null;
-  /** On-chain only */
+  /** On-chain tx id (also set for Boltz claim txs) */
   txid?: string;
+  /** Lightning-only detail fields */
+  paymentHash?: string;
+  preimage?: string;
+  invoice?: string;
+  feesSats?: number;
   /** Optional — if set, we can surface Boltz swap state */
   swapId?: string;
 }
@@ -52,9 +64,11 @@ const BOLTZ_API = 'https://api.boltz.exchange/v2';
  */
 const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
   const { btcPrice, currency } = useWallet();
+  const { isLoggedIn, signerType, sendDirectMessage } = useNostr();
   const sheetRef = useRef<BottomSheetModal>(null);
   const [swap, setSwap] = useState<BoltzSwapView | null>(null);
   const [retrying, setRetrying] = useState(false);
+  const [supportSheetOpen, setSupportSheetOpen] = useState(false);
 
   useEffect(() => {
     if (visible) sheetRef.current?.present();
@@ -145,6 +159,16 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
     }
   }, []);
 
+  const copyValue = useCallback(async (label: string, value: string) => {
+    await Clipboard.setStringAsync(value);
+    Toast.show({
+      type: 'info',
+      text1: `${label} copied`,
+      position: 'top',
+      visibilityTime: 2000,
+    });
+  }, []);
+
   const renderBackdrop = useCallback(
     (p: BottomSheetBackdropProps) => (
       <BottomSheetBackdrop {...p} appearsOnIndex={0} disappearsOnIndex={-1} pressBehavior="close" />
@@ -170,6 +194,23 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
   const fiat = satsToFiatString(amount, btcPrice, currency);
   const dateTs = tx.settled_at || tx.created_at;
   const dateStr = dateTs ? new Date(dateTs * 1000).toLocaleString() : null;
+
+  const hasSwapContext = !!(swap || tx.swapId);
+  const boltzInitialMessage = (() => {
+    const lines: string[] = ['Hi Boltz support,', ''];
+    lines.push('I need help with a swap:');
+    if (tx.swapId) lines.push(`• Swap ID: ${tx.swapId}`);
+    if (swap?.status) lines.push(`• Status: ${swap.status}`);
+    if (swap?.lockupTxId) lines.push(`• Lockup tx: ${swap.lockupTxId}`);
+    if (tx.txid) lines.push(`• Claim / on-chain tx: ${tx.txid}`);
+    if (tx.paymentHash) lines.push(`• Payment hash: ${tx.paymentHash}`);
+    lines.push(`• Direction: ${isIncoming ? 'received' : 'sent'}`);
+    lines.push(`• Amount: ${amount.toLocaleString()} sats`);
+    if (dateStr) lines.push(`• Time: ${dateStr}`);
+    lines.push('', 'Details:');
+    lines.push('(describe the issue)');
+    return lines.join('\n');
+  })();
 
   return (
     <BottomSheetModal
@@ -215,22 +256,76 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
           </View>
         ) : null}
 
-        {tx.txid ? (
+        {typeof tx.feesSats === 'number' && tx.feesSats > 0 ? (
           <View style={styles.row}>
+            <Text style={styles.rowLabel}>Fee</Text>
+            <Text style={styles.rowValue}>{tx.feesSats.toLocaleString()} sats</Text>
+          </View>
+        ) : null}
+
+        {tx.txid ? (
+          <TouchableOpacity
+            style={styles.row}
+            onPress={() => copyValue('On-chain tx', tx.txid!)}
+            accessibilityLabel="Copy on-chain tx id"
+          >
             <Text style={styles.rowLabel}>On-chain tx</Text>
             <Text style={[styles.rowValue, styles.rowValueMono]} numberOfLines={1}>
               {tx.txid}
             </Text>
-          </View>
+          </TouchableOpacity>
         ) : null}
 
         {swap?.lockupTxId ? (
-          <View style={styles.row}>
+          <TouchableOpacity
+            style={styles.row}
+            onPress={() => copyValue('Lockup tx', swap.lockupTxId!)}
+            accessibilityLabel="Copy lockup tx id"
+          >
             <Text style={styles.rowLabel}>Lockup tx</Text>
             <Text style={[styles.rowValue, styles.rowValueMono]} numberOfLines={1}>
               {swap.lockupTxId}
             </Text>
-          </View>
+          </TouchableOpacity>
+        ) : null}
+
+        {tx.paymentHash ? (
+          <TouchableOpacity
+            style={styles.row}
+            onPress={() => copyValue('Payment hash', tx.paymentHash!)}
+            accessibilityLabel="Copy payment hash"
+          >
+            <Text style={styles.rowLabel}>Payment hash</Text>
+            <Text style={[styles.rowValue, styles.rowValueMono]} numberOfLines={1}>
+              {tx.paymentHash}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {tx.preimage ? (
+          <TouchableOpacity
+            style={styles.row}
+            onPress={() => copyValue('Preimage', tx.preimage!)}
+            accessibilityLabel="Copy preimage"
+          >
+            <Text style={styles.rowLabel}>Preimage</Text>
+            <Text style={[styles.rowValue, styles.rowValueMono]} numberOfLines={1}>
+              {tx.preimage}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {tx.invoice ? (
+          <TouchableOpacity
+            style={styles.row}
+            onPress={() => copyValue('Invoice', tx.invoice!)}
+            accessibilityLabel="Copy invoice"
+          >
+            <Text style={styles.rowLabel}>Invoice</Text>
+            <Text style={[styles.rowValue, styles.rowValueMono]} numberOfLines={1}>
+              {tx.invoice}
+            </Text>
+          </TouchableOpacity>
         ) : null}
 
         <View style={styles.actions}>
@@ -266,8 +361,34 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
               from persisted swap state.
             </Text>
           ) : null}
+          {hasSwapContext ? (
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={() => setSupportSheetOpen(true)}
+              accessibilityLabel="Contact Boltz support"
+              testID="contact-boltz-support"
+            >
+              <Text style={styles.secondaryButtonText}>Contact Boltz support</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </BottomSheetView>
+      <FeedbackSheet
+        visible={supportSheetOpen}
+        onClose={() => setSupportSheetOpen(false)}
+        onSend={createDmSender(BOLTZ_SUPPORT_NPUB, sendDirectMessage)}
+        isLoggedIn={isLoggedIn}
+        signerType={signerType}
+        onLoginPress={() => {
+          /* parent-screen login flow not wired here; user can log in from Account */
+        }}
+        title="Contact Boltz support"
+        subtitle="Your message will be sent as an encrypted Nostr DM to the Boltz team."
+        initialMessage={boltzInitialMessage}
+        messagePrefix="[Boltz Support]"
+        successTitle="Message sent"
+        successMessage="Boltz support will reply via Nostr DM. Check your usual Nostr client for the response."
+      />
     </BottomSheetModal>
   );
 };

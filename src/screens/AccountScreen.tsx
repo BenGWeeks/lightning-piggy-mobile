@@ -31,6 +31,7 @@ import EditProfileSheet from '../components/EditProfileSheet';
 import QrSheet from '../components/QrSheet';
 import SendSheet from '../components/SendSheet';
 import FeedbackSheet from '../components/FeedbackSheet';
+import { createDmSender } from '../utils/nostrDm';
 import { fetchProfile, DEFAULT_RELAYS } from '../services/nostrService';
 import type { NostrProfile } from '../types/nostr';
 import type { MainTabParamList } from '../navigation/types';
@@ -574,20 +575,7 @@ const AccountScreen: React.FC = () => {
       <FeedbackSheet
         visible={feedbackSheetOpen}
         onClose={() => setFeedbackSheetOpen(false)}
-        onSend={async (msg) => {
-          try {
-            const decoded = nip19.decode(TEAM_NPUB);
-            if (decoded.type !== 'npub') {
-              return { success: false, error: 'Invalid team npub' };
-            }
-            return sendDirectMessage(decoded.data, msg);
-          } catch (error) {
-            return {
-              success: false,
-              error: error instanceof Error ? error.message : 'Invalid team npub',
-            };
-          }
-        }}
+        onSend={createDmSender(TEAM_NPUB, sendDirectMessage)}
         isLoggedIn={isLoggedIn}
         signerType={signerType}
         onLoginPress={() => setLoginSheetOpen(true)}

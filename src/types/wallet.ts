@@ -45,6 +45,14 @@ export interface WalletTransaction {
   created_at?: number | null;
   settled_at?: number | null;
   blockHeight?: number | null;
+  /** On-chain txid (also set for Boltz claim txs) */
+  txid?: string;
+  /** Lightning-only — detail fields surfaced in TransactionDetailSheet */
+  paymentHash?: string;
+  preimage?: string;
+  invoice?: string;
+  /** Fee paid for this tx, in sats */
+  feesSats?: number;
   /** Boltz swap details (if this transaction was part of a swap) */
   swapId?: string;
   swapType?: 'reverse' | 'submarine';
