@@ -65,23 +65,34 @@ APP_VARIANT=development npx expo run:android
 npx expo run:android
 ----
 
-=== Tag-based release workflow
+=== Release workflow
 
-The preferred way to cut a release is to tag `main` — `.github/workflows/release.yml` handles the rest. Pushing a `v*` tag triggers EAS build + auto-submit; a manual run via *Actions → Release → Run workflow* lets you override the target platform.
+Releases are cut by publishing a **GitHub Release** (which creates the tag server-side and fires `.github/workflows/release.yml`). The workflow:
 
-[source,bash]
-----
-# 1. Bump the version in app.config.ts (and commit) if you want a new user-facing version.
-# 2. Tag and push.
-git tag v1.0.0
-git push origin v1.0.0   # push this specific tag — avoid `--tags`, which fires every local tag
-----
+1. Runs quality gates (typecheck / lint / format-check).
+2. Kicks off EAS production builds for both platforms with `--auto-submit` (TestFlight for iOS, Play Internal once the Google Play account is wired up).
+3. Downloads the resulting Android APK and attaches it to the Release for sideloading.
+4. Regenerates `docs/TECHNICAL_SOLUTION_DOCUMENT.pdf` from the AsciiDoc sources and attaches that too.
 
-Required GitHub secret: **`EXPO_TOKEN`** — generate at https://expo.dev/accounts/bengweeks/settings/access-tokens and add it under *Settings → Secrets and variables → Actions*.
+==== Cutting a release
 
-All other credentials (iOS ASC API key, Apple distribution cert, future Google Play service account) live on the EAS server (uploaded once via `eas credentials`), so the workflow itself never handles a `.p8` or a service account JSON.
+. Bump the `version` in `app.config.ts` (and optionally `ios.buildNumber` / `android.versionCode`) on `main`, then merge.
+. Go to https://github.com/BenGWeeks/lightning-piggy-mobile/releases → *Draft a new release*.
+. Choose a tag like `v1.0.1` (create on publish) targeted at `main`.
+. Write release notes, click *Publish release*.
+. Watch *Actions → Release*. When it finishes, the Release page has the APK and PDF attached; TestFlight has the iOS build.
 
-Default platform is `ios`; switch to `all` (or add the Android secrets) once the Google Play account exists.
+The tag format is `v*` (SemVer). A pre-release tag like `v1.0.0-rc1` publishes as a pre-release via the GitHub UI; the workflow still runs.
+
+==== Manual re-run without re-tagging
+
+If a release run fails (EAS queue timeout, flaky network), re-run it via *Actions → Release → Run workflow* without creating a new tag. Platform can be overridden (ios / android / all) — useful for retrying just one platform.
+
+Manual runs skip the asset-attach steps (they need a Release to attach to); use them for rebuilds, not for the first cut.
+
+==== Secrets
+
+- **`EXPO_TOKEN`** — repo secret. Generate at https://expo.dev/accounts/bengweeks/settings/access-tokens and add under *Settings → Secrets and variables → Actions*. Everything else (iOS ASC API key, Apple distribution cert, future Google Play service account) lives on EAS's server via `eas credentials`, so the workflow never handles a `.p8` or service account JSON.
 
 === EAS Cloud Builds
 

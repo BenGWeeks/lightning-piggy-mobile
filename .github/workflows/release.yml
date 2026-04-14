@@ -1,33 +1,37 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  # Fire when a GitHub Release is published (UI: Releases → Draft a new release).
+  # The Release creates the tag server-side; no separate tag-push trigger needed.
+  release:
+    types: [published]
+  # Allow manual re-run without re-tagging (e.g. to retry a failed EAS build).
   workflow_dispatch:
     inputs:
       platform:
         description: Platform(s) to release
         type: choice
-        default: ios
+        default: all
         options: [ios, android, all]
 
 concurrency:
-  group: release
+  group: release-${{ github.event.release.tag_name || github.ref_name }}
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write   # needed to upload assets to the Release
 
 env:
   EAS_CLI_VERSION: '18.6.0'
 
 jobs:
-  release:
-    name: Build & submit via EAS
+  build-and-submit:
+    name: EAS build & submit
     runs-on: ubuntu-latest
     env:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    outputs:
+      platform: ${{ steps.platform.outputs.value }}
     steps:
       - name: Verify EXPO_TOKEN is set
         run: |
@@ -57,7 +61,7 @@ jobs:
       - name: Resolve platform
         id: platform
         run: |
-          echo "value=${{ github.event.inputs.platform || 'ios' }}" >> "$GITHUB_OUTPUT"
+          echo "value=${{ github.event.inputs.platform || 'all' }}" >> "$GITHUB_OUTPUT"
 
       - name: EAS build + auto-submit
         run: |
@@ -67,13 +71,95 @@ jobs:
             --non-interactive \
             --auto-submit
 
-      - name: Summary
-        if: always()
+  attach-android-apk:
+    name: Attach Android APK to Release
+    # Only runs on an actual Release event, not workflow_dispatch (no release to attach to).
+    if: github.event_name == 'release'
+    needs: build-and-submit
+    runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+
+      - name: Find the Android build
+        id: find
+        run: |
+          # Pick the most recent FINISHED Android production build (the one we just submitted).
+          url=$(npx -y -p eas-cli@${{ env.EAS_CLI_VERSION }} eas build:list \
+            --platform android --status finished --limit 1 --json \
+            --non-interactive | jq -r '.[0].artifacts.buildUrl')
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Download APK
+        run: |
+          mkdir -p dist
+          curl -sSL "${{ steps.find.outputs.url }}" -o "dist/lightning-piggy-${{ github.event.release.tag_name }}.apk"
+          ls -la dist/
+
+      - name: Upload APK to Release
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            dist/lightning-piggy-${{ github.event.release.tag_name }}.apk \
+            --repo "$GITHUB_REPOSITORY" --clobber
+
+  attach-technical-pdf:
+    name: Generate & attach Technical Solution PDF
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Install asciidoctor-pdf + rouge
+        run: |
+          gem install asciidoctor-pdf asciidoctor-diagram rouge
+
+      - name: Setup Node (for mermaid-cli)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+
+      - name: Install mermaid-cli + Chromium
+        run: |
+          npm install -g @mermaid-js/mermaid-cli
+          sudo apt-get update && sudo apt-get install -y chromium-browser
+          echo '{"args":["--no-sandbox","--disable-setuid-sandbox"]}' > /tmp/puppeteer-config.json
+
+      - name: Generate PDF
+        run: bash docs/generate-docs.sh
+
+      - name: Upload PDF to Release
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            docs/TECHNICAL_SOLUTION_DOCUMENT.pdf \
+            --repo "$GITHUB_REPOSITORY" --clobber
+
+  summary:
+    name: Summary
+    if: always()
+    needs: [build-and-submit, attach-android-apk, attach-technical-pdf]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write summary
         run: |
           {
-            echo "## Release $GITHUB_REF_NAME"
+            echo "## Release ${{ github.event.release.tag_name || github.ref_name }}"
             echo ""
-            echo "Platform: \`${{ steps.platform.outputs.value }}\`"
-            echo "Builds dashboard: https://expo.dev/accounts/bengweeks/projects/lightning-piggy-app/builds"
-            echo "Submissions: https://expo.dev/accounts/bengweeks/projects/lightning-piggy-app/submissions"
+            echo "- EAS builds: https://expo.dev/accounts/bengweeks/projects/lightning-piggy-app/builds"
+            echo "- Submissions: https://expo.dev/accounts/bengweeks/projects/lightning-piggy-app/submissions"
+            if [ "${{ github.event_name }}" = "release" ]; then
+              echo "- Release assets: ${{ github.event.release.html_url }}"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
