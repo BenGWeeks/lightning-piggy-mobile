@@ -11,7 +11,7 @@ on:
       platform:
         description: Platform(s) to release
         type: choice
-        default: all
+        default: ios   # flip to `all` once Google Play account + service account JSON are wired up via `eas credentials`
         options: [ios, android, all]
 
 concurrency:
@@ -30,6 +30,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    outputs:
+      platform: ${{ steps.platform.outputs.value }}
     steps:
       - name: Verify EXPO_TOKEN is set
         run: |
@@ -76,7 +78,9 @@ jobs:
       - name: Resolve platform
         id: platform
         run: |
-          echo "value=${{ github.event.inputs.platform || 'all' }}" >> "$GITHUB_OUTPUT"
+          # On Release events the input is empty, so fall back to ios-only until
+          # we wire up Google Play credentials. Switch to 'all' when ready.
+          echo "value=${{ github.event.inputs.platform || 'ios' }}" >> "$GITHUB_OUTPUT"
 
       - name: EAS build + auto-submit
         run: |
@@ -88,8 +92,9 @@ jobs:
 
   attach-android-apk:
     name: Attach Android APK to Release
-    # Only runs on an actual Release event, not workflow_dispatch (no release to attach to).
-    if: github.event_name == 'release'
+    # Only runs on an actual Release event (workflow_dispatch has no release to attach to)
+    # AND only when the build job actually built for Android.
+    if: github.event_name == 'release' && contains(fromJSON('["android","all"]'), needs.build-and-submit.outputs.platform)
     needs: build-and-submit
     runs-on: ubuntu-latest
     env:
