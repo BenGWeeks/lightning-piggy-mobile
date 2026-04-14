@@ -2,6 +2,9 @@
   "name": "lightning-piggy-app",
   "version": "1.0.0",
   "main": "index.ts",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "start": "expo start --dev-client",
     "android": "expo run:android",
