@@ -1,4 +1,4 @@
-appId: com.anonymous.lightningpiggyapp
+appId: com.lightningpiggy.app
 name: Transfer On-chain to On-chain Test
 ---
 # Tests transferring sats between two on-chain hot wallets (direct BDK send).

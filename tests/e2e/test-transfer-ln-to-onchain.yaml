@@ -1,4 +1,4 @@
-appId: com.anonymous.lightningpiggyapp
+appId: com.lightningpiggy.app
 name: Transfer LN to On-chain Test
 ---
 # Tests transferring sats from an NWC wallet to an on-chain wallet via Boltz reverse swap.

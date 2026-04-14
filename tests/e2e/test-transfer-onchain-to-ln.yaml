@@ -1,4 +1,4 @@
-appId: com.anonymous.lightningpiggyapp
+appId: com.lightningpiggy.app
 name: Transfer On-chain to LN Test
 ---
 # Tests transferring sats from an on-chain hot wallet to an NWC wallet via Boltz submarine swap.

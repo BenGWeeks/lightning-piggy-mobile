@@ -1,4 +1,4 @@
-appId: ${APP_ID:-com.anonymous.lightningpiggyapp}
+appId: ${APP_ID:-com.lightningpiggy.app}
 name: Edit Profile Test
 ---
 # Tests editing Nostr profile fields

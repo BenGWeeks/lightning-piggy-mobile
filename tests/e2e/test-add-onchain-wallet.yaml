@@ -1,4 +1,4 @@
-appId: com.anonymous.lightningpiggyapp
+appId: com.lightningpiggy.app
 name: Add On-chain Wallet Test
 ---
 # Tests importing an on-chain Bitcoin wallet via xpub/zpub

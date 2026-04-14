@@ -114,17 +114,21 @@ TestFlight is Apple's beta testing platform. EAS integrates directly with it.
 
 . **Create an App Store Connect API key** at https://appstoreconnect.apple.com/access/integrations/api → *Team Keys* → *+*. Name: `EAS Submit`, Access: *App Manager*. Download the `.p8` file (only shown once) and note the Key ID and Issuer ID.
 . **Create the App Store Connect app record** at https://appstoreconnect.apple.com/apps → *+* → *New App*. Pick `com.lightningpiggy.app` from the Bundle ID dropdown (EAS auto-registers it on first iOS build, so build once before creating the record). After creation, open the app → *App Information* and copy the numeric **Apple ID** — this is the `ascAppId`.
-. **Wire credentials into `eas.json`** — keep the `.p8` file *outside the repo* and reference the path. Do not commit the `.p8`.
+. **Wire credentials into `eas.json`** — keep the `.p8` file *outside the repo* and reference the path. Do not commit the `.p8`. Add the `submit` block below alongside the existing top-level `cli` / `build` blocks:
 +
 [source,json]
 ----
-"submit": {
-  "production": {
-    "ios": {
-      "ascApiKeyPath": "/absolute/path/to/AuthKey_XXXXXXXXXX.p8",
-      "ascApiKeyId": "XXXXXXXXXX",
-      "ascApiKeyIssuerId": "00000000-0000-0000-0000-000000000000",
-      "ascAppId": "0000000000"
+{
+  "cli": { "...": "..." },
+  "build": { "...": "..." },
+  "submit": {
+    "production": {
+      "ios": {
+        "ascApiKeyPath": "/absolute/path/to/AuthKey_XXXXXXXXXX.p8",
+        "ascApiKeyId": "XXXXXXXXXX",
+        "ascApiKeyIssuerId": "00000000-0000-0000-0000-000000000000",
+        "ascAppId": "0000000000"
+      }
     }
   }
 }
