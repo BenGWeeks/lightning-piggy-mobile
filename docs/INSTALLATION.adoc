@@ -1,0 +1,129 @@
+== Installation
+
+This guide covers setting up the Lightning Piggy development environment from scratch.
+
+=== Prerequisites
+
+[cols="1,2,2", options="header"]
+|===
+| Tool | Purpose | Install
+
+| **Node.js** (v22.13+)
+| JavaScript runtime. The repo pins an exact version via `.nvmrc` and enforces `engines.node` in `package.json` with `engine-strict` in `.npmrc`.
+| `nvm install && nvm use` (reads `.nvmrc`)
+
+| **npm**
+| Package manager
+| Bundled with Node.js
+
+| **Expo CLI**
+| Development server and tooling
+| `npx expo` (no global install needed)
+
+| **EAS CLI**
+| Cloud build and submission service
+| `npm install -g eas-cli`
+
+| **Android Studio**
+| Android SDK, emulator, and build tools
+| https://developer.android.com/studio
+
+| **ADB**
+| Android device communication
+| Bundled with Android Studio
+
+| **Xcode** (macOS only)
+| iOS SDK and build tools
+| Mac App Store
+
+|===
+
+=== Clone and Install
+
+[source,bash]
+----
+git clone https://github.com/BenGWeeks/lightning-piggy-mobile.git
+cd lightning-piggy-mobile
+npm install
+----
+
+=== Project Structure
+
+[source]
+----
+lightning-piggy-mobile/
+  ├── src/
+  │   ├── components/     # Reusable UI components (sheets, cards, lists)
+  │   ├── contexts/       # React contexts (WalletContext, NostrContext)
+  │   ├── data/           # Static data (course content, learn missions)
+  │   ├── navigation/     # App navigator and route types
+  │   ├── screens/        # Screen components (Home, Earn, Learn, Friends, Account)
+  │   ├── services/       # Business logic (NWC, Nostr, LNURL, contacts, fiat)
+  │   ├── styles/         # Screen-level stylesheets and theme constants
+  │   ├── themes/         # Wallet card theme configurations
+  │   ├── types/          # TypeScript type definitions
+  │   └── utils/          # Utility functions
+  ├── assets/             # Images, icons, splash screen
+  ├── plugins/            # Expo config plugins (native module configuration)
+  ├── tests/e2e/          # Maestro E2E test files
+  ├── docs/               # Project documentation (this document)
+  ├── app.config.ts       # Expo configuration (variants, permissions, plugins)
+  └── eas.json            # EAS build profiles
+----
+
+=== Running the Dev Server
+
+IMPORTANT: Always use `npm start` — the start script includes `--dev-client` which is required for custom native modules. Do not use `npx expo start` directly.
+
+[source,bash]
+----
+npm start
+----
+
+=== Building for Android
+
+Generate native directories and build the app:
+
+[source,bash]
+----
+# Build and install on connected device
+npx expo run:android
+----
+
+If the device is connected via USB, set up port forwarding so the app can connect to the Metro bundler:
+
+[source,bash]
+----
+# Forward Metro port over USB
+adb reverse tcp:8081 tcp:8081
+----
+
+=== Building for iOS (macOS only)
+
+[source,bash]
+----
+npx expo run:ios
+----
+
+=== Configuration Files
+
+[cols="1,3", options="header"]
+|===
+| File | Purpose
+
+| `app.config.ts`
+| Expo configuration — app name, bundle IDs, permissions, plugins, and variant-specific settings (development, preview, production)
+
+| `eas.json`
+| EAS build profiles — defines build configurations for each app variant
+
+| `plugins/withAdjustResize.js`
+| Expo config plugin that sets `android:windowSoftInputMode="adjustResize"` for keyboard handling in bottom sheets
+
+| `plugins/withAmberQueries.js`
+| Expo config plugin that adds Amber signer package to Android's `<queries>` manifest element for NIP-55 intent support
+
+| `tsconfig.json`
+| TypeScript configuration with strict mode
+
+|===
