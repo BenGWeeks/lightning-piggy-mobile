@@ -30,8 +30,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-    outputs:
-      platform: ${{ steps.platform.outputs.value }}
     steps:
       - name: Verify EXPO_TOKEN is set
         run: |
@@ -81,24 +79,44 @@ jobs:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
       GH_TOKEN: ${{ github.token }}
     steps:
+      - name: Checkout
+        # eas build:list resolves the project via app.config.ts / eas.json from the repo root.
+        uses: actions/checkout@v4
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '22.13.0'
 
-      - name: Find the Android build
+      - name: Resolve latest finished Android APK URL
         id: find
         run: |
           # Pick the most recent FINISHED Android production build (the one we just submitted).
+          # Filter by the git commit of the Release tag so we don't accidentally grab an
+          # unrelated older build.
           url=$(npx -y -p eas-cli@${{ env.EAS_CLI_VERSION }} eas build:list \
-            --platform android --status finished --limit 1 --json \
-            --non-interactive | jq -r '.[0].artifacts.buildUrl')
+            --platform android --status finished --limit 5 --json \
+            --non-interactive \
+            | jq -r --arg sha "${{ github.sha }}" \
+                '[.[] | select(.gitCommitHash == $sha)][0].artifacts.buildUrl // empty')
+          if [ -z "$url" ] || [ "$url" = "null" ]; then
+            echo "::error title=No Android build artifact::Could not find a finished Android build for commit ${{ github.sha }}. The EAS build may still be running, or failed."
+            exit 1
+          fi
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
       - name: Download APK
         run: |
           mkdir -p dist
-          curl -sSL "${{ steps.find.outputs.url }}" -o "dist/lightning-piggy-${{ github.event.release.tag_name }}.apk"
+          curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
+            "${{ steps.find.outputs.url }}" \
+            -o "dist/lightning-piggy-${{ github.event.release.tag_name }}.apk"
+          # Verify it's actually an APK (ZIP magic bytes), not an HTML error page.
+          file dist/*.apk | grep -qi 'zip\|android' || {
+            echo "::error title=APK download invalid::Downloaded file does not look like an APK."
+            file dist/*.apk
+            exit 1
+          }
           ls -la dist/
 
       - name: Upload APK to Release
@@ -125,17 +143,6 @@ jobs:
       - name: Install asciidoctor-pdf + rouge
         run: |
           gem install asciidoctor-pdf asciidoctor-diagram rouge
-
-      - name: Setup Node (for mermaid-cli)
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22.13.0'
-
-      - name: Install mermaid-cli + Chromium
-        run: |
-          npm install -g @mermaid-js/mermaid-cli
-          sudo apt-get update && sudo apt-get install -y chromium-browser
-          echo '{"args":["--no-sandbox","--disable-setuid-sandbox"]}' > /tmp/puppeteer-config.json
 
       - name: Generate PDF
         run: bash docs/generate-docs.sh

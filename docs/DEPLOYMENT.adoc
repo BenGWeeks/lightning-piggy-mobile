@@ -48,9 +48,9 @@ Build profiles are defined in `eas.json`:
 | For internal distribution to testers
 
 | `production`
-| Store
-| App Bundle (AAB)
-| For Google Play Store submission
+| Store (iOS) / Internal sideload (Android, today)
+| APK
+| Used by the release workflow. Outputs an APK for sideloading + Release attachment. **Switch to App Bundle (AAB)** once we enrol on Google Play, or split into a `production-aab` profile alongside.
 
 |===
 
