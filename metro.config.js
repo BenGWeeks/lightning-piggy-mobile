@@ -5,9 +5,13 @@ const config = getDefaultConfig(__dirname);
 // Add .cjs to source extensions so Metro can resolve bitcoinjs-lib's CJS entry
 config.resolver.sourceExts = [...(config.resolver.sourceExts || []), 'cjs'];
 
-// Custom resolver for @noble/curves and @noble/hashes which use ESM exports
-// maps with .js extensions that Metro can't resolve by default.
-// We rewrite the module name to include .js and delegate to the original resolver.
+// Custom resolver for @noble/curves and @noble/hashes. Their exports maps
+// differ across versions:
+//   - v2.x lists subpaths WITH .js (e.g. "./crypto.js"), but consumers often
+//     import without it — append .js so Metro can resolve.
+//   - v1.x lists subpaths WITHOUT .js (e.g. "./crypto"), but consumers import
+//     "./crypto.js" — strip the trailing .js first, fall back to the original
+//     form if the stripped form can't be resolved.
 const originalResolveRequest = config.resolver.resolveRequest;
 const resolveWith = (context, moduleName, platform) => {
   if (originalResolveRequest) {
@@ -16,17 +20,25 @@ const resolveWith = (context, moduleName, platform) => {
   return context.resolveRequest(context, moduleName, platform);
 };
 
+const isModuleNotFound = (err) => {
+  if (!err) return false;
+  // Metro throws a custom error; match by name/code/message to avoid
+  // swallowing unrelated resolver errors.
+  if (err.code === 'MODULE_NOT_FOUND') return true;
+  if (err.name === 'UnableToResolveError') return true;
+  return typeof err.message === 'string' && /unable to resolve/i.test(err.message);
+};
+
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   const nobleMatch = moduleName.match(/^@noble\/(curves|hashes)\/.+$/);
   if (nobleMatch) {
     if (!moduleName.endsWith('.js')) {
       return resolveWith(context, moduleName + '.js', platform);
     }
-    // v1.x exports map lists subpaths without .js (e.g. "./crypto") while
-    // consumers import "./crypto.js" — try the stripped form first, fall back.
     try {
       return resolveWith(context, moduleName.slice(0, -3), platform);
-    } catch (_) {
+    } catch (err) {
+      if (!isModuleNotFound(err)) throw err;
       return resolveWith(context, moduleName, platform);
     }
   }
