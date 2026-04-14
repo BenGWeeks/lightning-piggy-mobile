@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  StyleSheet,
   Alert,
   ActivityIndicator,
   BackHandler,
@@ -22,11 +21,15 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { useWallet } from '../contexts/WalletContext';
+import { walletLabel } from '../types/wallet';
 import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
+import { sendSheetStyles as styles } from '../styles/SendSheet.styles';
 import { satsToFiat, satsToFiatString } from '../services/fiatService';
 import { ChevronUp, ChevronDown } from 'lucide-react-native';
 import { resolveLightningAddress, fetchInvoice, LnurlPayParams } from '../services/lnurlService';
+import * as boltzService from '../services/boltzService';
+import * as onchainService from '../services/onchainService';
 
 interface Props {
   visible: boolean;
@@ -92,7 +95,6 @@ const SendSheet: React.FC<Props> = ({
     payInvoiceForWallet,
     refreshBalanceForWallet,
     activeWalletId,
-    activeWallet,
     wallets,
     btcPrice,
     currency,
@@ -116,11 +118,15 @@ const SendSheet: React.FC<Props> = ({
   const [memo, setMemo] = useState('');
   const [activePubkey, setActivePubkey] = useState(recipientPubkey);
   const [activePicture, setActivePicture] = useState(initialPicture);
+  const [isOnchainAddress, setIsOnchainAddress] = useState(false);
+  const [boltzFees, setBoltzFees] = useState<boltzService.SwapFees | null>(null);
+  const [loadingBoltzFees, setLoadingBoltzFees] = useState(false);
+  const [onchainFeeEstimate, setOnchainFeeEstimate] = useState<string | null>(null);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
 
   const snapPoints = useMemo(() => ['90%'], []);
 
-  const needsAmount = scanned && isLightningAddress(invoiceData || '');
+  const needsAmount = scanned && (isLightningAddress(invoiceData || '') || isOnchainAddress);
   const currentSats = parseInt(satsValue) || 0;
 
   const fiatToSats = (fiat: number): number => {
@@ -135,7 +141,7 @@ const SendSheet: React.FC<Props> = ({
   );
   const walletId = selectedWallet?.id ?? null;
   const walletBalance = selectedWallet?.balance ?? null;
-  const walletName = selectedWallet?.alias ?? 'Wallet';
+  const walletName = selectedWallet ? walletLabel(selectedWallet) : 'Wallet';
 
   useEffect(() => {
     if (visible) {
@@ -204,15 +210,86 @@ const SendSheet: React.FC<Props> = ({
 
   const processInput = (data: string) => {
     let input = data.trim();
+    let bip21Amount: number | null = null;
     if (input.toLowerCase().startsWith('lightning:')) {
       input = input.substring(10);
     }
+    // Parse BIP-21 bitcoin: URI — extract address and optional amount.
+    // Avoid floating-point: convert the decimal string directly to sats via
+    // integer math. `parseFloat("0.00012345") * 1e8` rounds unpredictably on
+    // some values; parsing as digits preserves exact sat precision.
+    if (input.toLowerCase().startsWith('bitcoin:')) {
+      const withoutScheme = input.substring(8);
+      const qIndex = withoutScheme.indexOf('?');
+      if (qIndex >= 0) {
+        const params = new URLSearchParams(withoutScheme.substring(qIndex + 1));
+        const raw = (params.get('amount') ?? '').trim();
+        if (/^\d+(\.\d{0,8})?$/.test(raw)) {
+          const [wholePart, fracPart = ''] = raw.split('.');
+          const fracPadded = (fracPart + '00000000').slice(0, 8);
+          try {
+            const sats = BigInt(wholePart) * 100_000_000n + BigInt(fracPadded);
+            if (sats > 0n && sats <= 2_100_000_000_000_000n) {
+              bip21Amount = Number(sats); // safe: well within Number.MAX_SAFE_INTEGER
+            } else if (sats > 2_100_000_000_000_000n) {
+              console.warn('BIP-21 amount exceeds Bitcoin max supply, ignoring');
+            }
+          } catch {
+            console.warn('BIP-21 amount parse failed, ignoring:', raw);
+          }
+        } else if (raw) {
+          console.warn('BIP-21 amount malformed, ignoring:', raw);
+        }
+        input = withoutScheme.substring(0, qIndex);
+      } else {
+        input = withoutScheme;
+      }
+    }
 
     if (isLightningAddress(input)) {
+      setIsOnchainAddress(false);
       setInvoiceData(input);
       setDecoded({ amountSats: null, description: `Pay to ${input}`, expiry: null });
       setScanned(true);
+    } else if (boltzService.isBitcoinAddress(input)) {
+      setIsOnchainAddress(true);
+      setInvoiceData(input);
+      setDecoded({ amountSats: null, description: `Send to on-chain address`, expiry: null });
+      setScanned(true);
+      // Pre-fill amount from BIP-21 URI if present
+      if (bip21Amount) {
+        setSatsValue(bip21Amount.toString());
+        if (btcPrice) {
+          setFiatValue(satsToFiat(bip21Amount, btcPrice).toFixed(2));
+        }
+      }
+      // Fetch fees (Boltz for LN wallets, miner fee for hot wallets)
+      setLoadingBoltzFees(true);
+      boltzService
+        .getSwapFees()
+        .then((fees) => {
+          setBoltzFees(fees);
+        })
+        .catch((err) => {
+          console.warn('Failed to fetch Boltz fees:', err);
+          setBoltzFees(null);
+        })
+        .finally(() => {
+          setLoadingBoltzFees(false);
+        });
+      // Fetch on-chain fee estimate for hot wallets
+      onchainService
+        .estimateOnchainFee()
+        .then((fees) => {
+          setOnchainFeeEstimate(
+            `~${fees.medium.toLocaleString()} sats miner fee \u00B7 ~10-60 min`,
+          );
+        })
+        .catch((err) => {
+          console.warn('Failed to estimate on-chain fee:', err);
+        });
     } else if (isValidInvoice(input)) {
+      setIsOnchainAddress(false);
       setInvoiceData(input);
       setDecoded(decodeInvoice(input));
       setScanned(true);
@@ -259,7 +336,26 @@ const SendSheet: React.FC<Props> = ({
     if (!invoiceData) return;
     setSending(true);
     try {
-      if (isLightningAddress(invoiceData)) {
+      if (isOnchainAddress) {
+        if (currentSats <= 0) {
+          Alert.alert('Error', 'Please enter an amount.');
+          setSending(false);
+          return;
+        }
+        if (
+          selectedWallet?.walletType === 'onchain' &&
+          selectedWallet?.onchainImportMethod === 'mnemonic'
+        ) {
+          // Direct on-chain send from hot wallet
+          await onchainService.sendTransaction(walletId!, invoiceData, currentSats);
+        } else {
+          // Boltz reverse swap: Lightning → on-chain
+          const swap = await boltzService.createReverseSwap(invoiceData, currentSats);
+          await payInvoiceForWallet(walletId!, swap.invoice);
+          const lockup = await boltzService.waitForLockup(swap.id, 120000);
+          await boltzService.claimSwap(swap, lockup, invoiceData);
+        }
+      } else if (isLightningAddress(invoiceData)) {
         if (!lnurlParams) {
           Alert.alert('Error', 'Lightning address not resolved yet. Please wait.');
           setSending(false);
@@ -325,6 +421,9 @@ const SendSheet: React.FC<Props> = ({
     setResolving(false);
     setActivePubkey(undefined);
     setActivePicture(undefined);
+    setIsOnchainAddress(false);
+    setBoltzFees(null);
+    setLoadingBoltzFees(false);
   };
 
   const handleSheetChange = useCallback(
@@ -343,7 +442,11 @@ const SendSheet: React.FC<Props> = ({
 
   if (!visible || !permission) return null;
 
-  const canSend = needsAmount ? lnurlParams && currentSats > 0 && !resolving : !!invoiceData;
+  const canSend = isOnchainAddress
+    ? currentSats > 0 && !loadingBoltzFees
+    : needsAmount
+      ? lnurlParams && currentSats > 0 && !resolving
+      : !!invoiceData;
 
   return (
     <BottomSheetModal
@@ -398,7 +501,7 @@ const SendSheet: React.FC<Props> = ({
                                 capturedWalletId === w.id && styles.walletDropdownItemTextActive,
                               ]}
                             >
-                              {w.alias}
+                              {walletLabel(w)}
                             </Text>
                           </TouchableOpacity>
                         ))}
@@ -458,7 +561,7 @@ const SendSheet: React.FC<Props> = ({
                 <View style={styles.pasteSection}>
                   <TextInput
                     style={styles.pasteInput}
-                    placeholder="Paste invoice or lightning address..."
+                    placeholder="Paste invoice, lightning or bitcoin address..."
                     placeholderTextColor={colors.textSupplementary}
                     value={pasteText}
                     onChangeText={setPasteText}
@@ -491,11 +594,11 @@ const SendSheet: React.FC<Props> = ({
                 ) : null}
 
                 {needsAmount ? (
-                  /* Lightning address: show amount input */
+                  /* Lightning address or on-chain: show amount input */
                   <View style={styles.amountSection}>
                     {resolving ? (
                       <ActivityIndicator size="small" color={colors.brandPink} />
-                    ) : lnurlParams ? (
+                    ) : lnurlParams || isOnchainAddress ? (
                       <>
                         <View style={styles.amountRow}>
                           <TextInput
@@ -550,10 +653,12 @@ const SendSheet: React.FC<Props> = ({
                               ? `${currentSats.toLocaleString()} sats`
                               : ''}
                         </Text>
-                        <Text style={styles.rangeText}>
-                          {lnurlParams.minSats.toLocaleString()} –{' '}
-                          {lnurlParams.maxSats.toLocaleString()} sats
-                        </Text>
+                        {lnurlParams ? (
+                          <Text style={styles.rangeText}>
+                            {lnurlParams.minSats.toLocaleString()} –{' '}
+                            {lnurlParams.maxSats.toLocaleString()} sats
+                          </Text>
+                        ) : null}
                       </>
                     ) : null}
                   </View>
@@ -573,11 +678,31 @@ const SendSheet: React.FC<Props> = ({
                   <Text style={styles.amountValue}>Amount not specified</Text>
                 )}
 
-                {isLightningAddress(invoiceData || '') ? (
+                {isOnchainAddress && invoiceData ? (
+                  <Text style={styles.detailAddress}>
+                    <Text style={styles.addressHighlight}>{invoiceData.slice(0, 6)}</Text>
+                    {invoiceData.slice(6, -6)}
+                    <Text style={styles.addressHighlight}>{invoiceData.slice(-6)}</Text>
+                  </Text>
+                ) : isLightningAddress(invoiceData || '') ? (
                   <Text style={styles.detailAddress}>{invoiceData}</Text>
                 ) : (
                   <Text style={styles.invoiceText} numberOfLines={3}>
                     {invoiceData}
+                  </Text>
+                )}
+
+                {/* Fee estimate for on-chain addresses */}
+                {isOnchainAddress && currentSats > 0 && (
+                  <Text style={styles.feeText}>
+                    {selectedWallet?.walletType === 'onchain' &&
+                    selectedWallet?.onchainImportMethod === 'mnemonic'
+                      ? (onchainFeeEstimate ?? 'Estimating fee...')
+                      : loadingBoltzFees
+                        ? 'Loading fees...'
+                        : boltzFees
+                          ? `Swap fee: ~${boltzService.calculateSwapFee(currentSats, boltzFees).toLocaleString()} sats \u00B7 ~10-60 min`
+                          : 'Fee estimate unavailable'}
                   </Text>
                 )}
 
@@ -637,353 +762,5 @@ const SendSheet: React.FC<Props> = ({
     </BottomSheetModal>
   );
 };
-
-const styles = StyleSheet.create({
-  sheetBackground: {
-    backgroundColor: colors.background,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-  },
-  handleIndicator: {
-    backgroundColor: colors.divider,
-    width: 40,
-  },
-  content: {
-    flex: 1,
-  },
-  innerContent: {
-    padding: 20,
-    paddingBottom: 40,
-    alignItems: 'center',
-    gap: 14,
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.textHeader,
-  },
-  tabRow: {
-    flexDirection: 'row',
-    backgroundColor: colors.divider,
-    borderRadius: 10,
-    padding: 3,
-  },
-  tab: {
-    paddingHorizontal: 24,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  tabActive: {
-    backgroundColor: colors.white,
-  },
-  tabText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textSupplementary,
-  },
-  tabTextActive: {
-    color: colors.brandPink,
-  },
-  cameraContainer: {
-    width: 240,
-    height: 240,
-    borderRadius: 24,
-    backgroundColor: colors.white,
-    overflow: 'hidden',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.background,
-  },
-  camera: {
-    width: '100%',
-    height: '100%',
-  },
-  permissionContainer: {
-    padding: 20,
-    alignItems: 'center',
-    gap: 12,
-  },
-  permissionText: {
-    color: colors.textBody,
-    fontSize: 14,
-    textAlign: 'center',
-  },
-  permissionButton: {
-    backgroundColor: colors.brandPink,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
-  permissionButtonText: {
-    color: colors.white,
-    fontWeight: '700',
-  },
-  pasteSection: {
-    width: '100%',
-    gap: 12,
-  },
-  pasteInput: {
-    backgroundColor: colors.white,
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 14,
-    color: colors.textBody,
-    minHeight: 100,
-    textAlignVertical: 'top',
-  },
-  pasteButtonRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  pasteButton: {
-    flex: 1,
-    backgroundColor: colors.divider,
-    height: 44,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  pasteButtonText: {
-    color: colors.textBody,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  goButton: {
-    backgroundColor: colors.brandPink,
-    height: 44,
-    paddingHorizontal: 24,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  goButtonDisabled: {
-    opacity: 0.5,
-  },
-  goButtonText: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  detailsCard: {
-    backgroundColor: colors.white,
-    borderRadius: 16,
-    padding: 20,
-    width: '100%',
-    alignItems: 'center',
-    gap: 12,
-  },
-  recipientPicture: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-  },
-  detailDescription: {
-    fontSize: 14,
-    color: colors.textBody,
-    textAlign: 'center',
-  },
-  amountSection: {
-    alignItems: 'center',
-    gap: 4,
-  },
-  amountRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  amountInput: {
-    backgroundColor: colors.background,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    width: 100,
-    fontSize: 16,
-    fontWeight: '700',
-    textAlign: 'center',
-    color: colors.textBody,
-  },
-  unitButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: colors.divider,
-  },
-  unitButtonActive: {
-    backgroundColor: colors.brandPink,
-  },
-  unitButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.textSupplementary,
-  },
-  unitButtonTextActive: {
-    color: colors.white,
-  },
-  convertedAmount: {
-    fontSize: 13,
-    color: colors.textSupplementary,
-    fontWeight: '500',
-    minHeight: 18,
-  },
-  rangeText: {
-    fontSize: 12,
-    color: colors.textSupplementary,
-  },
-  amountDisplay: {
-    alignItems: 'center',
-    gap: 4,
-  },
-  amountValue: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: colors.brandPink,
-  },
-  amountFiat: {
-    fontSize: 16,
-    color: colors.textSupplementary,
-    fontWeight: '600',
-  },
-  detailAddress: {
-    fontSize: 14,
-    color: colors.brandPink,
-    fontWeight: '600',
-  },
-  invoiceText: {
-    color: colors.textSupplementary,
-    fontSize: 11,
-    textAlign: 'center',
-  },
-  memoInput: {
-    backgroundColor: colors.background,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: colors.textBody,
-    width: '100%',
-  },
-  resetText: {
-    color: colors.brandPink,
-    fontSize: 13,
-    fontWeight: '600',
-    marginTop: 4,
-  },
-  balanceText: {
-    fontSize: 13,
-    color: colors.textSupplementary,
-    fontWeight: '600',
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    gap: 20,
-  },
-  cancelButton: {
-    backgroundColor: colors.white,
-    height: 52,
-    paddingHorizontal: 30,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  cancelButtonText: {
-    color: colors.brandPink,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  sendButton: {
-    backgroundColor: colors.white,
-    height: 52,
-    paddingHorizontal: 30,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  sendButtonDisabled: {
-    opacity: 0.5,
-  },
-  sendButtonText: {
-    color: colors.brandPink,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  walletDropdownRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  walletDropdownWrapper: {
-    position: 'relative',
-    zIndex: 10,
-  },
-  walletDropdown: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.white,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    gap: 8,
-    borderWidth: 1,
-    borderColor: colors.divider,
-  },
-  walletDropdownText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textBody,
-  },
-  walletDropdownArrow: {
-    fontSize: 10,
-    color: colors.textSupplementary,
-  },
-  walletDropdownMenu: {
-    position: 'absolute',
-    top: '100%',
-    left: 0,
-    right: 0,
-    marginTop: 4,
-    backgroundColor: colors.white,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.divider,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 8,
-    overflow: 'hidden',
-    minWidth: 160,
-  },
-  walletDropdownItem: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  walletDropdownItemActive: {
-    backgroundColor: colors.brandPink,
-  },
-  walletDropdownItemText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textBody,
-  },
-  walletDropdownItemTextActive: {
-    color: colors.white,
-  },
-  walletLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.textSupplementary,
-  },
-});
 
 export default SendSheet;

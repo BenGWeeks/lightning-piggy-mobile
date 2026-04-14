@@ -11,15 +11,15 @@ const getAppName = () => {
 };
 
 const getIosBundleId = () => {
-  if (IS_DEV) return 'com.bengweeks.lightningpiggy.dev';
-  if (IS_PREVIEW) return 'com.bengweeks.lightningpiggy.preview';
-  return 'com.bengweeks.lightningpiggy';
+  if (IS_DEV) return 'com.lightningpiggy.app.dev';
+  if (IS_PREVIEW) return 'com.lightningpiggy.app.preview';
+  return 'com.lightningpiggy.app';
 };
 
 const getAndroidPackage = () => {
-  if (IS_DEV) return 'com.anonymous.lightningpiggyapp.dev';
-  if (IS_PREVIEW) return 'com.anonymous.lightningpiggyapp.preview';
-  return 'com.anonymous.lightningpiggyapp';
+  if (IS_DEV) return 'com.lightningpiggy.app.dev';
+  if (IS_PREVIEW) return 'com.lightningpiggy.app.preview';
+  return 'com.lightningpiggy.app';
 };
 
 export default ({ config }: ConfigContext): ExpoConfig => ({

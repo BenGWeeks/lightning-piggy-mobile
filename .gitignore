@@ -56,3 +56,8 @@ modules/*/android/build/
 
 # Build artifacts
 *.apk
+
+# Generated documentation
+docs/*.pdf
+
+.claude/

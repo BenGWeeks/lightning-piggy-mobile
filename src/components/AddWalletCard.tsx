@@ -10,7 +10,13 @@ interface AddWalletCardProps {
 const AddWalletCard: React.FC<AddWalletCardProps> = ({ onPress }) => {
   return (
     <View style={styles.cardContainer}>
-      <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.7}>
+      <TouchableOpacity
+        style={styles.card}
+        onPress={onPress}
+        activeOpacity={0.7}
+        testID="add-wallet-card"
+        accessibilityLabel="Add Wallet"
+      >
         <Text style={styles.plusIcon}>+</Text>
         <Text style={styles.label}>Add Wallet</Text>
       </TouchableOpacity>

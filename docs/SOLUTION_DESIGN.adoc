@@ -1,4 +1,320 @@
-= Solution Design: Nostr Integration
+= Solution Design
+
+== On-Chain Wallet Support & Transfer (Issues #10, #11)
+
+=== Overview
+
+Adds on-chain Bitcoin wallet support (watch-only via xpub) alongside existing NWC Lightning wallets, plus a Transfer feature for moving funds between wallets and Boltz submarine swaps for Lightning-to-on-chain payments.
+
+=== Bitcoin Crypto Library Stack
+
+[cols="1,1,2", options="header"]
+|===
+| Package | Version | Purpose
+
+| https://github.com/BenGWeeks/bdk-rn[`bdk-rn`] | 0.30.0 (fork) | Bitcoin Development Kit for React Native — HD wallet, Electrum sync, balance, transactions, UTXO management. Native Rust via FFI. Forked from https://github.com/Peach2Peach/bdk-rn[Peach2Peach] with RN 0.83 compatibility fix (https://github.com/Peach2Peach/bdk-rn/pull/13[PR #13]).
+| https://github.com/bitcoinjs/bitcoinjs-lib[bitcoinjs-lib] | 7.x | Bitcoin transaction construction — used for Boltz claim transactions (Taproot script-path spend)
+| https://github.com/bitcoinerlab/secp256k1[`@bitcoinerlab/secp256k1`] | latest | Pure JS secp256k1 — Schnorr signing for Boltz claim transactions
+| https://github.com/paulmillr/noble-curves[`@noble/curves`] | 2.x | Audited elliptic curve cryptography (dependency of @bitcoinerlab/secp256k1)
+| https://github.com/paulmillr/noble-hashes[`@noble/hashes`] | 2.x | Audited hash functions (dependency of @noble/curves)
+| https://github.com/feross/buffer[`buffer`] | latest | Node.js Buffer polyfill for React Native
+|===
+
+**Why BDK?**
+
+Previously, on-chain wallet operations used manual Electrum JSON-RPC calls (`electrum-client` + `react-native-tcp-socket`) with `bitcoinjs-lib` for transaction parsing. This approach had multiple issues:
+
+- Fragile TCP/SSL connections that dropped under load
+- Manual raw transaction parsing to determine amounts (slow, unreliable)
+- Couldn't determine outgoing tx amounts without looking up each input's previous output
+- No timestamps without fetching block headers
+- Rate limiting / connection drops with many sequential requests
+
+BDK (same library used by https://peachbitcoin.com[Peach Bitcoin]) handles all of this natively in Rust via a single `wallet.sync()` call, providing correct balance, transaction history with amounts/directions/timestamps, and address derivation.
+
+**Metro configuration:** `@noble/curves` and `@noble/hashes` use ES module `exports` maps with `.js` extensions. A custom resolver in `metro.config.js` rewrites `@noble/*` subpath imports to include `.js` extensions, using the original resolver to avoid recursion.
+
+=== Architecture
+
+[source]
+----
+WalletContext.tsx
+  ├─ NWC wallets → nwcService.ts (existing)
+  └─ On-chain wallets → onchainService.ts (new)
+       └─ BDK (bdk-rn) — native Rust: xpub derivation, Electrum sync,
+          balance, transactions, UTXO management
+
+HomeScreen.tsx
+  ├─ [Receive] → ReceiveSheet (Lightning invoice OR Bitcoin address QR)
+  ├─ [Transfer] → TransferSheet (wallet-to-wallet)
+  └─ [Send] → SendSheet (Lightning invoice, address, OR Bitcoin address via Boltz)
+----
+
+=== Wallet Types
+
+[source,typescript]
+----
+type WalletType = 'nwc' | 'onchain';
+type OnchainImportMethod = 'xpub' | 'mnemonic' | 'generated';
+----
+
+On-chain wallets are currently watch-only (xpub import). The type system is designed for future mnemonic import and wallet generation.
+
+=== Key Files
+
+[cols="1,2", options="header"]
+|===
+| File | Purpose
+
+| `src/types/wallet.ts` | Wallet type discriminator (`nwc` / `onchain`), extensible import methods
+| `src/services/onchainService.ts` | Local BIP-84 address derivation, Electrum server balance/tx lookups
+| `src/services/boltzService.ts` | Boltz Exchange submarine swaps (Lightning → on-chain)
+| `src/services/walletStorageService.ts` | xpub secure storage, electrum server config, migration
+| `src/contexts/WalletContext.tsx` | Wallet-type-aware operations for both NWC and on-chain
+| `src/components/TransferSheet.tsx` | Wallet-to-wallet transfer bottom sheet
+| `src/components/AddWalletWizard.tsx` | Wallet type selection + xpub import (scan/paste)
+| `metro.config.js` | Enables package exports for @noble/curves ESM resolution
+| `src/polyfills.ts` | Buffer polyfill for bitcoinjs-lib
+|===
+
+=== Transfer Logic
+
+[cols="1,1,1", options="header"]
+|===
+| Source | Destination | Method
+
+| NWC Lightning | NWC Lightning | Generate invoice on dest, pay from source. Instant.
+| NWC Lightning | On-chain | Boltz reverse submarine swap (see below). ~10-60 min.
+| On-chain | Any | Not supported (watch-only) — future: enable with mnemonic import
+|===
+
+=== Boltz Reverse Submarine Swap (Lightning → On-chain)
+
+Uses https://docs.boltz.exchange[Boltz Exchange] v2 API for trustless cross-chain transfers. Verified against https://api.docs.boltz.exchange/lifecycle.html[Boltz v2 lifecycle docs] and reference implementations (boltz-core, Breez SDK).
+
+==== Reverse Swap: Lightning → On-chain (`claimSwap`)
+
+1. Generate random 32-byte preimage + SHA-256 hash
+2. Generate temporary secp256k1 claim keypair
+3. `POST /v2/swap/reverse` with `preimageHash`, `claimPublicKey`, `claimAddress`, `invoiceAmount`, `referralId`
+4. Boltz returns a Lightning invoice + swap tree (Taproot HTLC scripts)
+5. Persist swap state (preimage, claimPrivateKey, lockupAddress) to SecureStore
+6. Pay the Lightning invoice via NWC
+7. Subscribe to swap status via WebSocket (`wss://api.boltz.exchange/v2/ws`) with polling fallback
+8. Wait for `transaction.mempool` or `transaction.confirmed`
+9. Construct **script-path claim transaction** (Taproot spend):
+   - Witness: `<schnorr_sig_64bytes> <preimage> <claim_script> <control_block>`
+   - Uses SIGHASH_DEFAULT (0x00) — 64-byte signature, no sighash byte appended
+   - Script lengths encoded with Bitcoin CompactSize varint
+   - Internal key: **MuSig2 key-aggregation** (BIP-327) of Boltz's `refundPublicKey` and our `claimPublicKey` — see "Taproot internal key derivation" below
+10. Broadcast claim tx via BDK Electrum
+11. Clean up persisted swap state on success
+
+==== Submarine Swap: On-chain → Lightning (`refundSwap`)
+
+1. Generate LN invoice on destination NWC wallet
+2. Generate temporary secp256k1 refund keypair
+3. `POST /v2/swap/submarine` with `invoice`, `refundPublicKey`, `referralId`
+4. Boltz returns on-chain address + expected amount + swap tree + claimPublicKey
+5. Persist swap state (refundPrivateKey, claimPublicKey, swapTree, timeoutBlockHeight) to SecureStore
+6. Send BTC from hot wallet to Boltz address via BDK
+7. Subscribe to swap status via WebSocket with polling fallback
+8. Wait for `invoice.settled` or `transaction.claimed`
+9. Clean up persisted swap state on success
+
+**Refund recovery** — if swap fails (`swap.expired`, `invoice.failedToPay`, `transaction.lockupFailed`):
+
+1. Fetch lockup UTXO details via `GET /v2/swap/submarine/{id}/transaction`
+2. Construct **script-path refund transaction**:
+   - `nLockTime` = `timeoutBlockHeight` (refund only valid after timeout)
+   - Input sequence `0xFFFFFFFE` (enables nLockTime)
+   - Witness: `<schnorr_sig_64bytes> <refund_script> <control_block>` (no preimage needed)
+   - Internal key: Boltz's `claimPublicKey`
+   - Merkle sibling: `claimLeafHash`
+3. Broadcast refund tx via BDK Electrum
+
+==== Taproot Internal Key Derivation (MuSig2)
+
+Boltz v2 swaps use a Taproot output whose internal key is a **MuSig2 key-aggregation** (BIP-327) of two keys: Boltz's pubkey and ours. The exact order matters — Boltz's docs state **"Boltz's public key always coming first"**:
+
+[cols="1,1,1", options="header"]
+|===
+| Swap type | Boltz's role | `keyAggregate` order
+
+| Reverse swap (LN → on-chain) | Refunder | `[refundPublicKey, claimPublicKey]` (our claim key is ours)
+| Submarine swap (on-chain → LN) | Claimer | `[claimPublicKey, refundPublicKey]` (our refund key is ours)
+|===
+
+Keys must be **33-byte compressed** (not x-only) for `keyAggregate`. The aggregate is then used as the internal key when computing `TapTweak(aggPubkey ‖ merkleRoot)` and building the control block. Merkle root is `TapBranch(sorted(claimLeafHash, refundLeafHash))` per BIP-341.
+
+We use `@scure/btc-signer`'s `keyAggregate` + `keyAggExport` from `musig2.js` (MIT-licensed). Boltz's own `boltz-core` uses the same library internally but is AGPL-3.0, so we depend on `@scure/btc-signer` directly.
+
+Diagnostic cross-check: computing `p2tr(internalKey, [claimLeaf, refundLeaf], undefined, /*allowUnknownOutputs*/ true)` from `@scure/btc-signer` and comparing `.script` to the on-chain lockup scriptPubKey confirms the derivation is correct. See `TROUBLESHOOTING.adoc` for the witness-hash-mismatch symptom and debugging procedure.
+
+References:
+
+* https://api.docs.boltz.exchange/claiming-swaps.html[Boltz — Claims & Refunds]
+* https://bips.dev/327/[BIP-327 — MuSig2]
+* https://bips.dev/341/[BIP-341 — Taproot]
+
+==== Status Monitoring
+
+Swap status is monitored via **WebSocket subscription** to `wss://api.boltz.exchange/v2/ws`:
+
+```json
+{"op": "subscribe", "channel": "swap.update", "args": ["<swapId>"]}
+```
+
+Falls back to HTTP polling (`GET /v2/swap/{id}` every 3s) if WebSocket fails. All production Boltz clients (Breez SDK, boltz-client) use WebSocket.
+
+==== Swap Recovery (`swapRecoveryService`)
+
+Reverse swaps involve three critical steps that must complete for funds to be recovered:
+
+1. Pay the Lightning invoice (via NWC `pay_invoice`)
+2. Wait for Boltz to lock funds on-chain (`waitForLockup`)
+3. Build & broadcast the claim transaction (`claimSwap`)
+
+If the app crashes, loses connection, or the `pay_invoice` NWC call times out (e.g. because the payment took longer than the ~60s NWC SDK timeout), the swap can be stranded — Boltz has received the LN payment and locked on-chain funds, but the user never claims them. After the CSV timeout, Boltz auto-refunds their locked funds, and the user loses the Lightning payment.
+
+**Recovery mechanism:**
+
+- When a reverse swap is created, full state is persisted to SecureStore under `boltz_swap_<id>`: `preimage`, `claimPrivateKey`, `lockupAddress`, `destinationAddress`, `refundPublicKey`, and `swapTree`.
+- A separate index key `boltz_swap_index` tracks active swap IDs (SecureStore has no listing API).
+- On app startup, `recoverPendingSwaps()` runs in the background:
+  1. Read the index, iterate over each swap ID.
+  2. Query `GET /v2/swap/{id}` for current status.
+  3. If `transaction.mempool` or `transaction.confirmed`, call `claimSwap` to broadcast the claim tx.
+  4. If terminal success/failure, clean up the persisted state and remove from index.
+- After successful claim (or on original swap completion), `unregisterPendingSwap()` removes the swap from tracking.
+
+This makes reverse swaps **crash-safe** — if anything interrupts the foreground swap flow (app kill, network drop, NWC timeout), the claim is retried on next app launch.
+
+**Note**: older persisted swaps (created before v1 of the recovery service) lack `swapTree` and `refundPublicKey`. These cannot be auto-recovered and their funds will be refunded to Boltz after the CSV timeout.
+
+==== Boltz v2 Swap Statuses
+
+[cols="1,1,2", options="header"]
+|===
+| Status | Type | Meaning
+
+| `swap.created` | Both | Initial state
+| `transaction.mempool` | Both | On-chain tx in mempool
+| `transaction.confirmed` | Both | On-chain tx confirmed
+| `invoice.set` | Submarine | Invoice provided
+| `invoice.pending` | Submarine | LN payment in progress
+| `invoice.paid` | Submarine | LN invoice paid
+| `transaction.claim.pending` | Submarine | Boltz waiting for cooperative signature (MuSig2)
+| `transaction.claimed` | Submarine | Boltz claimed on-chain funds (success)
+| `invoice.settled` | Reverse | Client claimed with preimage (success)
+| `swap.expired` | Both | Timeout reached (failure)
+| `invoice.failedToPay` | Submarine | LN payment failed
+| `transaction.lockupFailed` | Submarine | Wrong amount sent
+| `transaction.refunded` | Both | Boltz refunded locked funds
+| `transaction.failed` | Reverse | Boltz failed to lock on-chain
+| `invoice.expired` | Reverse | Invoice expired
+|===
+
+==== Script-Path vs Cooperative Key-Path
+
+Boltz v2 Taproot swaps support two spending methods:
+
+- **Key-path (cooperative MuSig2):** Requires nonce exchange between client and Boltz. Smaller on-chain footprint (~30-50% fee savings), better privacy. Requires MuSig2 library.
+- **Script-path (non-cooperative):** Standard Schnorr signature + preimage/timelock. Works with pure JS crypto. Slightly larger witness but settles identically.
+
+We use **script-path** for both claims and refunds because MuSig2 is not available in our JS stack. This matches boltz-python and Breez Go client. Future: upgrade to cooperative key-path when MuSig2 support is available.
+
+==== Libraries
+
+[cols="1,2", options="header"]
+|===
+| Package | Purpose
+
+| https://github.com/bitcoinjs/bitcoinjs-lib[`bitcoinjs-lib`] | Taproot transaction construction, address validation
+| https://github.com/bitcoinerlab/secp256k1[`@bitcoinerlab/secp256k1`] | Schnorr signing (BIP-340)
+| https://github.com/paulmillr/scure-btc-signer[`@scure/btc-signer`] | MuSig2 key aggregation (BIP-327) for Boltz Taproot internal keys
+| https://github.com/BenGWeeks/bdk-rn[`bdk-rn`] | On-chain balance, tx sync, Electrum client, UTXO + tx broadcast (native Rust via FFI). Replaces prior `electrum-client` + `react-native-tcp-socket` approach.
+|===
+
+=== Electrum Server Integration
+
+On-chain balance and transaction lookups use the Electrum protocol via BDK's native Rust implementation. BDK handles the Electrum connection, address scanning, UTXO tracking, and transaction parsing internally — `onchainService.ts` just calls `wallet.sync(blockchain)`.
+
+- **User-configurable** — default is `electrum.blockstream.info:50002` (SSL), users can set their own in Account settings (host:port + SSL toggle)
+- **Incremental sync (current session only)** — BDK fetches changes since the last sync within the current JS session. We use `DatabaseConfig().memory()` so sync progress does not persist across app restarts; the first sync after launch is a full chain scan. Switching to a persistent database config is a future improvement.
+- **Native performance** — Electrum communication runs in Rust, not in JS TCP sockets
+- **Correct amounts** — BDK tracks `received` and `sent` per transaction using UTXO analysis
+
+**Electrum server format:** `host:port:protocol` where protocol is `s` (SSL) or `t` (TCP). Account settings shows host:port with a "Use SSL" toggle.
+
+**Transaction caching:** Transactions are stored per wallet in `WalletContext` and persisted to AsyncStorage. On startup, cached transactions display immediately (~40ms); BDK syncs fresh data in the background.
+
+=== NWC Relay Compatibility
+
+The LNbits Nostrclient relay proxy does not send NIP-01 OK responses after receiving EVENT messages (see https://github.com/lnbits/nostrclient/issues/52[lnbits/nostrclient#52]). This causes `nostr-tools` `SimplePool.publish()` to timeout, breaking all NWC operations.
+
+**Workaround in `nwcService.ts`:** The relay pool's `publish` method is monkey-patched during `connect()` to resolve immediately (fire-and-forget) instead of waiting for OK. The NWC response comes back via the subscription, not the OK acknowledgement.
+
+**Proper fix:** PR https://github.com/lnbits/nostrclient/pull/68[lnbits/nostrclient#68] adds NIP-01 OK and CLOSED responses to Nostrclient. Once merged, the monkey-patch can be removed.
+
+Additionally, `nwcService.ts` includes auto-reconnect logic: if a publish fails with "failed to publish" (relay disconnected), it creates a fresh `NostrWebLNProvider` and retries. The wallet is marked as "Connected" after `enable()` succeeds, not after `getBalance()`, so slow relay responses don't show the wallet as disconnected.
+
+=== Visual Differentiation
+
+- **NWC wallets**: Green/red status dot + NWC icon (tinted to theme) + "Connected"/"Disconnected"
+- **On-chain wallets**: Green/red status dot + chain icon (Lucide SVG) + "Connected"/"Disconnected". Green when BDK Electrum sync succeeds, red when connection failed.
+- Both wallet types show a Lucide settings cog icon in the top-right
+- Connection status polled every 30 seconds via `nwcService.isWalletConnected()` (checks actual WebSocket state)
+
+=== NWC Connection Reliability
+
+Multiple layers protect against NWC relay disconnections:
+
+1. **Proactive check**: `ensureConnected()` checks `client.connected` before every NWC operation — reconnects immediately if the WebSocket dropped
+2. **Connection polling**: Every 30 seconds, poll `isWalletConnected()` and update the wallet card status dot
+3. **Publish patch**: Monkey-patch the relay pool to not wait for NIP-20 OK responses (lnbits/nostrclient#52 workaround, can be removed once lnbits/nostrclient#68 is merged)
+
+=== Hot Wallet Support (Developer Mode)
+
+Hot wallet (mnemonic import) is available behind a **developer mode** toggle:
+
+- **Enable**: Triple-tap the version number at the bottom of Account settings
+- **Stored**: `dev_mode` flag in AsyncStorage (persists across sessions)
+- **Visual**: Version displays "(dev)" suffix when enabled
+
+**Mnemonic import flow:**
+
+1. User selects "Import Seed Phrase (Beta)" in Add Wallet wizard (dev mode only)
+2. Enters 12 or 24 word mnemonic — input normalised: strips numbers, colons, extra whitespace, lowercased
+3. Mnemonic validated via `bip39.validateMnemonic()`
+4. Stored in `expo-secure-store` (encrypted device storage) under `onchain_mnemonic_{walletId}`
+5. BDK creates a full signing wallet via `Descriptor.newBip84()` with `DescriptorSecretKey`
+
+**Sending from hot wallets:**
+
+- Send button enabled for hot wallets (disabled for watch-only xpub imports)
+- `onchainService.sendTransaction()` uses BDK's `TxBuilder` for UTXO selection + fee calculation, `wallet.sign()` for signing, and `blockchain.broadcast()` for broadcasting
+- All signing happens locally on-device — private keys never leave the device
+
+**Watch-only vs hot wallet detection:**
+
+- `onchainImportMethod` field in `WalletMetadata`: `'xpub'` (watch-only) or `'mnemonic'` (hot)
+- `onchainService.isWatchOnly()` checks if a mnemonic is stored for the wallet
+- HomeScreen Send button uses this to enable/disable
+
+=== Transaction Caching
+
+Transactions are owned by `WalletContext` (not local HomeScreen state):
+
+- Each `WalletState` has a `transactions: WalletTransaction[]` array
+- On startup, cached transactions loaded from AsyncStorage (`txs_{walletId}`) — renders in ~40ms
+- On wallet swipe, cached transactions display instantly from memory
+- Background refresh via `fetchTransactionsForWallet()` syncs with BDK/NWC
+- `TransactionList` renders first 20 transactions with "Show all N transactions" button to avoid render blocking (was causing 4+ second delay with 259 txs)
+
+'''
+
+= Nostr Integration
 
 == Overview
 

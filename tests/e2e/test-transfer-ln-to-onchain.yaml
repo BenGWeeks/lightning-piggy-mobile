@@ -1,0 +1,87 @@
+appId: com.lightningpiggy.app
+name: Transfer LN to On-chain Test
+---
+# Tests transferring sats from an NWC wallet to an on-chain wallet via Boltz reverse swap.
+# Requires: at least 1 connected NWC wallet + 1 on-chain wallet.
+# Run: maestro test tests/e2e/test-transfer-ln-to-onchain.yaml
+
+# Wait for app to be ready
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 40000
+
+# Ensure we're on Home tab
+- tapOn:
+    id: 'tab-home'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Swipe to first wallet and wait for Connected
+- repeat:
+    times: 10
+    commands:
+      - swipe:
+          start: 15%, 30%
+          end: 85%, 30%
+          duration: 300
+      - waitForAnimationToEnd:
+          timeout: 800
+- extendedWaitUntil:
+    visible:
+      text: 'Connected'
+    timeout: 30000
+
+# Tap Transfer button
+- tapOn:
+    id: 'btn-transfer'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Source defaults to Wallet 1 (lightning)
+# Change destination by tapping the dest dropdown
+- tapOn:
+    id: 'transfer-dest-dropdown'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Tap Hot Wallet 1 in the dropdown (use extendedWaitUntil to ensure dropdown renders)
+- extendedWaitUntil:
+    visible:
+      id: 'transfer-dest-hot-wallet-1'
+    timeout: 5000
+- tapOn:
+    id: 'transfer-dest-hot-wallet-1'
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Enter amount: 26000 sats
+- tapOn:
+    id: 'transfer-amount-input'
+- eraseText:
+    charactersToErase: 20
+- inputText: '26000'
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Verify on-chain fee info shown (Boltz swap fee)
+- assertVisible:
+    text: '.*on-chain.*'
+
+# Tap Transfer to execute the Boltz reverse swap
+- tapOn:
+    id: 'transfer-execute'
+
+# Wait for Boltz swap creation + LN payment + lockup + claim
+# This can take up to 2 minutes
+- extendedWaitUntil:
+    visible:
+      text: 'Transfer Complete'
+    timeout: 120000
+
+# Dismiss alert
+- tapOn:
+    text: 'OK'
+- waitForAnimationToEnd:
+    timeout: 3000
