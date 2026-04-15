@@ -204,7 +204,7 @@ Ad-hoc distribution installs a signed IPA onto a specific iPhone without going t
 
 * The tester is **under 13** (Apple blocks them from TestFlight's terms).
 * You want to install a build immediately without waiting for Apple's Beta App Review or TestFlight processing.
-* The build will only run on a small, known set of devices (ad-hoc profiles cap at 100 registered device UDIDs per Apple Developer year).
+* The build will only run on a small, known set of devices (ad-hoc profiles cap at 100 registered device UDIDs per product category — iPhone, iPad, etc. — per Apple Developer membership year).
 
 ==== How it works
 
@@ -276,7 +276,8 @@ Two install paths depending on whether the iPhone is near the Mac or near your L
 sudo apt install -y ideviceinstaller
 
 # For each install
-scp Bens-Mac-Mini.local:/tmp/lightning-piggy-preview.ipa /tmp/
+# Replace <user>@<mac-hostname> and the source path with the Mac + IPA you built on.
+scp <user>@<mac-hostname>:/tmp/lightning-piggy-preview.ipa /tmp/
 ideviceinstaller -i /tmp/lightning-piggy-preview.ipa
 ----
 

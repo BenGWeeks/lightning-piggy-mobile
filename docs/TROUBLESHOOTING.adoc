@@ -131,7 +131,7 @@ The fix script (`apply_nip20_fix.py`) patches `router.py` to send `["OK", event_
 | The Mac's login keychain is locked because there's no active GUI session — `fastlane` can't save the Apple ID password so it treats auth as failed, even when the password is correct. +
 *Fix:* unlock the keychain once per session before running EAS commands: +
 `security unlock-keychain ~/Library/Keychains/login.keychain-db` +
-(prompts for the Mac login password, not the Apple ID). Stays unlocked for ~5 min — enough time to clear Apple ID + 2FA + device selection.
+(prompts for the Mac login password, not the Apple ID). Stays unlocked per the machine's keychain auto-lock settings — typically long enough to clear Apple ID + 2FA + device selection.
 
 | `eas submit` fails with *"Invalid Export Compliance Code. The export compliance key value [] in the app's Info.plist doesn't match..."*
 | `ios.infoPlist.ITSAppUsesNonExemptEncryption: true` in `app.config.ts` tells App Store Connect to expect filed export-compliance documentation (a CCATS code). With no docs filed, uploads bounce. +
@@ -143,7 +143,7 @@ The fix script (`apply_nip20_fix.py`) patches `router.py` to send `["OK", event_
 
 | Local Android build fails with *"Failed to run Gradle Worker Daemon... build machine is extremely loaded"*
 | The Gradle JVM worker was OOM-killed. Gradle + Android tooling needs ~4–6 GB RAM; if the machine is close to swap exhaustion the worker's 120 s daemon-connect timeout fires and Gradle errors out. +
-*Fix:* check `free -h` and `ps axo pid,rss,comm --sort=-rss | head`. Close heavy processes (VMs like WinApps/QEMU can easily eat 8 GB, browsers another couple) and kill any leftover `java` processes from the failed build: `pkill -9 -f java`. Retry.
+*Fix:* check `free -h` and `ps axo pid,rss,comm --sort=-rss | head`. Close heavy processes (VMs like WinApps/QEMU can easily eat 8 GB, browsers another couple), then stop Gradle cleanly with `./gradlew --stop`. If stale build processes still linger, target them narrowly rather than every Java process on the box: `pkill -f 'GradleDaemon|org\.gradle\.|com\.android\.'`. Retry.
 
 | `eas build --local --auto-submit` fails with *"Auto-submits are not yet supported when building locally"*
 | `--auto-submit` only works on cloud builds. Split into two commands: `eas build --platform ios --profile production --local --output /tmp/app.ipa` then `eas submit --platform ios --path /tmp/app.ipa`.
