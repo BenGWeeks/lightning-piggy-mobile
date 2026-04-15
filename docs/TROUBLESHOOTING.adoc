@@ -127,6 +127,39 @@ Boltz Mini IS publicly routable, but initial swap attempts failed because LND's 
 4. Verify: `ssh black-panther "docker exec lnbits-family grep 'NIP-01: OK' /app/lnbits/extensions/nostrclient/router.py"` +
 The fix script (`apply_nip20_fix.py`) patches `router.py` to send `["OK", event_id, true, ""]` after publishing EVENT messages, and `["OK", event_id, false, "error: no relay connections"]` when no relays are connected.
 
+| `Security returned a non-successful error code: 36` during `eas build` or `eas submit` over SSH
+| The Mac's login keychain is locked because there's no active GUI session — `fastlane` can't save the Apple ID password so it treats auth as failed, even when the password is correct. +
+*Fix:* unlock the keychain once per session before running EAS commands: +
+`security unlock-keychain ~/Library/Keychains/login.keychain-db` +
+(prompts for the Mac login password, not the Apple ID). Stays unlocked for ~5 min — enough time to clear Apple ID + 2FA + device selection.
+
+| `eas submit` fails with *"Invalid Export Compliance Code. The export compliance key value [] in the app's Info.plist doesn't match..."*
+| `ios.infoPlist.ITSAppUsesNonExemptEncryption: true` in `app.config.ts` tells App Store Connect to expect filed export-compliance documentation (a CCATS code). With no docs filed, uploads bounce. +
+*Fix:* set `ITSAppUsesNonExemptEncryption: false`. The app only uses standard cryptography (secp256k1, SHA-256, BIP-32/39/84, AES/TLS via system libraries) — all under Apple's standard cryptocurrency-wallet exemptions, so no docs are required. Rebuild and re-submit.
+
+| EAS iOS build stuck in `NEW` status for hours (`queuePosition: null`)
+| Free-tier iOS build queue gets heavily backlogged during peak (the public dashboard at https://expo.dev/eas/build-status occasionally shows 2000+ builds queued, 5–6 h low-priority wait times). The build hasn't failed — EAS just hasn't assigned it a queue slot yet. +
+*Options:* (1) wait it out; (2) cancel with `npx -p eas-cli eas build:cancel <id>` and build locally (`--local` flag) instead; (3) upgrade to a paid plan for priority queue. Also check https://status.expo.dev for active incidents.
+
+| Local Android build fails with *"Failed to run Gradle Worker Daemon... build machine is extremely loaded"*
+| The Gradle JVM worker was OOM-killed. Gradle + Android tooling needs ~4–6 GB RAM; if the machine is close to swap exhaustion the worker's 120 s daemon-connect timeout fires and Gradle errors out. +
+*Fix:* check `free -h` and `ps axo pid,rss,comm --sort=-rss | head`. Close heavy processes (VMs like WinApps/QEMU can easily eat 8 GB, browsers another couple) and kill any leftover `java` processes from the failed build: `pkill -9 -f java`. Retry.
+
+| `eas build --local --auto-submit` fails with *"Auto-submits are not yet supported when building locally"*
+| `--auto-submit` only works on cloud builds. Split into two commands: `eas build --platform ios --profile production --local --output /tmp/app.ipa` then `eas submit --platform ios --path /tmp/app.ipa`.
+
+| `eas build` iOS errors with *"Failed to find Bundle ID item with identifier 'com.lightningpiggy.app.preview'"*
+| EAS auto-registers only the *production* bundle ID on first iOS build. The preview / dev variants need manual registration the first time they're built. +
+*Fix:* at https://developer.apple.com/account/resources/identifiers → *+* → App IDs → App → Explicit Bundle ID → `com.lightningpiggy.app.preview` (or `.dev`). Then re-run the build.
+
+| iOS build installs but the app won't launch — *"Developer Mode required"*
+| iOS 16+ requires Developer Mode to be explicitly enabled before sideloaded / ad-hoc / dev-signed apps will run. +
+*Fix on the iPhone:* tap the just-installed app icon once so iOS recognises a dev-signed app is present → *Settings → Privacy & Security → Developer Mode* → toggle on → Restart → after reboot, *"Turn On Developer Mode?"* dialog → passcode. The row doesn't appear in Settings until iOS detects a dev-signed app.
+
+| TestFlight tester dropped with *"You must be 13 years or older to use TestFlight Beta Testing"*
+| Apple's TestFlight Terms of Service require testers be 13+ (16+ in parts of the EU). The rule is TestFlight-wide, not just internal vs external. +
+*Workarounds:* (1) use **ad-hoc distribution** instead — no age check, see the DEPLOYMENT.adoc *iOS Distribution — Ad-hoc* section; (2) wait for public App Store release (no age restriction); (3) test on Android (no TestFlight equivalent, APK installs directly).
+
 | On-chain transactions slow to load on first launch
 | Balance and tx history come from BDK's `wallet.sync(chain)`. BDK is configured with an in-memory database (`DatabaseConfig().memory()`), so sync state does not persist across app restarts — the first sync after launch rescans from scratch and can take 10–30 seconds on busy wallets. +
 *Mitigations:* WalletContext caches transactions per wallet ID and writes them to AsyncStorage, so the UI renders cached data instantly on wallet swipe while the background sync runs. *Future:* switch BDK to a persistent database config so only the delta is fetched across launches.
