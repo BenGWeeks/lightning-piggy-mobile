@@ -163,4 +163,23 @@ The fix script (`apply_nip20_fix.py`) patches `router.py` to send `["OK", event_
 | On-chain transactions slow to load on first launch
 | Balance and tx history come from BDK's `wallet.sync(chain)`. BDK is configured with an in-memory database (`DatabaseConfig().memory()`), so sync state does not persist across app restarts — the first sync after launch rescans from scratch and can take 10–30 seconds on busy wallets. +
 *Mitigations:* WalletContext caches transactions per wallet ID and writes them to AsyncStorage, so the UI renders cached data instantly on wallet swipe while the background sync runs. *Future:* switch BDK to a persistent database config so only the delta is fetched across launches.
+
+| Android emulator "System UI isn't responding" / app stuck on splash
+| The AVD is thrashing on RAM. Symptoms in `adb logcat`: `kswapd0` burning 40%+ kernel CPU, `MemFree` under 100 MB, `system_server` over 100% CPU, Binder IPC failing with `No space left on device` (which is a RAM-pressure symptom, not disk). Default AVD RAM is 2 GB, which is insufficient for API 36 + Google Play + a React Native dev build. +
+*Fix:* bump the AVD RAM to 4 GB or more *and* the Dalvik heap to 1024 MB. Either via Android Studio → Device Manager → edit AVD → Advanced Settings → RAM + Heap, or by editing `~/.android/avd/<AVD_NAME>.avd/config.ini` to set `hw.ramSize=4096` and `vm.heapSize=1024`, then cold-boot the emulator with `-no-snapshot`. Validated: 2 GB / 512 MB heap crashes `system_server` / `PackageManagerService` during large APK installs; 4 GB / 1024 MB heap installs cleanly. +
+*Caveat:* a stray `sed -i` on `config.ini` can truncate the file to zero bytes on shutdown — prefer editing via Android Studio's UI, or back up `config.ini` before any scripted edit (`cp config.ini config.ini.bak`). If it does get wiped, `hardware-qemu.ini` in the same directory contains the last-used values and can be used to reconstruct it.
+
+| Emulator `adb install` hangs / `cmd: Can't find service: package`
+| Installing a 150 MB+ React Native dev APK OOMs `system_server` on an under-resourced AVD; `PackageManagerService` dies and every subsequent `adb install` / `pm list packages` / app launch fails until the guest OS reboots. +
+*Immediate recovery:* `adb reboot`, wait for `getprop sys.boot_completed` = 1, then `adb install -r android/app/build/outputs/apk/debug/app-debug.apk` — Expo's CLI install step is more fragile under memory pressure than raw `adb install`. +
+*Prevent:* bump AVD RAM + heap (see the "System UI isn't responding" entry above), and consider using a **Google APIs** (not Google Play) system image for dev — removes the Play Store + GMS daemons that consume ~300 MB RAM / 60% CPU.
+
+| React Native app crashes immediately with native SIGSEGV in `facebook::react::MountingCoordinator::pullTransaction`
+| The JS thread (`mqt_v_js`) segfaults in Fabric's mounting pipeline during the first render — the tombstone top frames are `MountingCoordinator::pullTransaction` → `FabricUIManagerBinding::schedulerDidFinishTransaction` → `ShadowTree::mount` → Hermes (`libhermesvm.so`) → `jsi::Function::call`. The process dies before any `console.log` appears. Confirmed via `adb pull /data/tombstones/tombstone_NN` followed by reading the backtrace. +
+*Root cause:* Expo SDK 55 `expo prebuild` defaults `newArchEnabled=true` in `android/gradle.properties`. The New Architecture (Fabric renderer + TurboModules) is not compatible with at least one component or native dep in this app — the shadow tree reaches an inconsistent state on first mount and the native commit null-derefs. +
+*Fix:* disable the New Architecture. `android/` is gitignored so editing `gradle.properties` directly works but gets clobbered by the next `expo prebuild`. Persistent fix: +
+1. `npx expo install expo-build-properties` +
+2. Add to the `plugins` array in `app.config.ts`: `['expo-build-properties', \{ android: \{ newArchEnabled: false }, ios: \{ newArchEnabled: false } }]` +
+3. `rm -rf android && APP_VARIANT=development npx expo run:android` +
+*Future work:* to re-enable New Architecture, bisect which component triggers the mount crash (common suspects: old versions of `react-native-screens`, `@gorhom/bottom-sheet`, or `react-native-reanimated` not yet Fabric-ready). Disable-by-default is the safer stance until bisected.
 |===
