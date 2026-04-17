@@ -14,6 +14,7 @@ import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
 import * as boltzService from '../services/boltzService';
 import * as swapRecoveryService from '../services/swapRecoveryService';
+import * as nwcService from '../services/nwcService';
 import { transactionDetailSheetStyles as styles } from '../styles/TransactionDetailSheet.styles';
 import FeedbackSheet from './FeedbackSheet';
 import { createDmSender } from '../utils/nostrDm';
@@ -63,17 +64,37 @@ const BOLTZ_API = 'https://api.boltz.exchange/v2';
  * on-chain but the claim hasn't landed yet.
  */
 const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
-  const { btcPrice, currency } = useWallet();
+  const { btcPrice, currency, activeWallet } = useWallet();
   const { isLoggedIn, signerType, sendDirectMessage } = useNostr();
   const sheetRef = useRef<BottomSheetModal>(null);
   const [swap, setSwap] = useState<BoltzSwapView | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [supportSheetOpen, setSupportSheetOpen] = useState(false);
+  // Filled in on open when the cached tx lacks preimage/invoice — some NWC
+  // backends (notably LNbits) omit those fields from list_transactions.
+  const [enrichment, setEnrichment] = useState<{ preimage?: string; invoice?: string }>({});
 
   useEffect(() => {
     if (visible) sheetRef.current?.present();
     else sheetRef.current?.dismiss();
   }, [visible]);
+
+  // On open, if this is a Lightning tx with a payment hash but we don't have
+  // the preimage/invoice cached, look them up via NWC.
+  useEffect(() => {
+    setEnrichment({});
+    if (!visible || !tx || !tx.paymentHash) return;
+    if (tx.preimage && tx.invoice) return;
+    if (!activeWallet || activeWallet.walletType === 'onchain') return;
+    let cancelled = false;
+    (async () => {
+      const result = await nwcService.lookupInvoice(activeWallet.id, tx.paymentHash!);
+      if (!cancelled && result) setEnrichment(result);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, tx, activeWallet]);
 
   // If the transaction's description hints at a Boltz swap (pending swap
   // rows are annotated with "Boltz swap in progress" by TransferSheet), or
@@ -194,15 +215,16 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
   const fiat = satsToFiatString(amount, btcPrice, currency);
   const dateTs = tx.settled_at || tx.created_at;
   const dateStr = dateTs ? new Date(dateTs * 1000).toLocaleString() : null;
+  const preimage = tx.preimage || enrichment.preimage;
+  const invoice = tx.invoice || enrichment.invoice;
 
-  const hasSwapContext = !!(swap || tx.swapId);
   const boltzInitialMessage = (() => {
     const lines: string[] = ['Hi Boltz support,', ''];
-    lines.push('I need help with a swap:');
+    lines.push('I have a question about this transaction:');
     if (tx.swapId) lines.push(`• Swap ID: ${tx.swapId}`);
-    if (swap?.status) lines.push(`• Status: ${swap.status}`);
+    if (swap?.status) lines.push(`• Swap status: ${swap.status}`);
     if (swap?.lockupTxId) lines.push(`• Lockup tx: ${swap.lockupTxId}`);
-    if (tx.txid) lines.push(`• Claim / on-chain tx: ${tx.txid}`);
+    if (tx.txid) lines.push(`• On-chain tx: ${tx.txid}`);
     if (tx.paymentHash) lines.push(`• Payment hash: ${tx.paymentHash}`);
     lines.push(`• Direction: ${isIncoming ? 'received' : 'sent'}`);
     lines.push(`• Amount: ${amount.toLocaleString()} sats`);
@@ -302,28 +324,28 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
           </TouchableOpacity>
         ) : null}
 
-        {tx.preimage ? (
+        {preimage ? (
           <TouchableOpacity
             style={styles.row}
-            onPress={() => copyValue('Preimage', tx.preimage!)}
+            onPress={() => copyValue('Preimage', preimage)}
             accessibilityLabel="Copy preimage"
           >
             <Text style={styles.rowLabel}>Preimage</Text>
             <Text style={[styles.rowValue, styles.rowValueMono]} numberOfLines={1}>
-              {tx.preimage}
+              {preimage}
             </Text>
           </TouchableOpacity>
         ) : null}
 
-        {tx.invoice ? (
+        {invoice ? (
           <TouchableOpacity
             style={styles.row}
-            onPress={() => copyValue('Invoice', tx.invoice!)}
+            onPress={() => copyValue('Invoice', invoice)}
             accessibilityLabel="Copy invoice"
           >
             <Text style={styles.rowLabel}>Invoice</Text>
             <Text style={[styles.rowValue, styles.rowValueMono]} numberOfLines={1}>
-              {tx.invoice}
+              {invoice}
             </Text>
           </TouchableOpacity>
         ) : null}
@@ -361,16 +383,14 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
               from persisted swap state.
             </Text>
           ) : null}
-          {hasSwapContext ? (
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => setSupportSheetOpen(true)}
-              accessibilityLabel="Contact Boltz support"
-              testID="contact-boltz-support"
-            >
-              <Text style={styles.secondaryButtonText}>Contact Boltz support</Text>
-            </TouchableOpacity>
-          ) : null}
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={() => setSupportSheetOpen(true)}
+            accessibilityLabel="Contact Boltz support"
+            testID="contact-boltz-support"
+          >
+            <Text style={styles.secondaryButtonText}>Contact Boltz support</Text>
+          </TouchableOpacity>
         </View>
       </BottomSheetView>
       <FeedbackSheet

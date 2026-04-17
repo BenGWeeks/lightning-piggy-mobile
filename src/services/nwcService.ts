@@ -332,6 +332,30 @@ export async function listTransactions(walletId: string): Promise<any[]> {
   return [];
 }
 
+/**
+ * Look up a single invoice by payment hash. Used by the transaction detail
+ * sheet to fill in preimage/bolt11 fields that LNbits (and some other NWC
+ * backends) omit from `list_transactions` responses.
+ * Returns null on failure; callers should treat null as "not available".
+ */
+export async function lookupInvoice(
+  walletId: string,
+  paymentHash: string,
+): Promise<{ preimage?: string; invoice?: string } | null> {
+  const provider = await ensureConnected(walletId);
+  if (!provider) return null;
+  try {
+    const result = await provider.lookupInvoice({ payment_hash: paymentHash });
+    return {
+      preimage: result?.preimage,
+      invoice: result?.invoice,
+    };
+  } catch (error) {
+    console.warn(`lookupInvoice failed for ${walletId}:`, error);
+    return null;
+  }
+}
+
 export function isWalletConnected(walletId: string): boolean {
   const provider = providers.get(walletId);
   if (!provider) return false;
