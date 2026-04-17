@@ -1,11 +1,18 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nwcService from '../services/nwcService';
+import * as nostrService from '../services/nostrService';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
 import { CURRENCIES, FiatCurrency, getBtcPrice } from '../services/fiatService';
-import { CardTheme, WalletMetadata, WalletState, WalletTransaction } from '../types/wallet';
+import {
+  CardTheme,
+  WalletMetadata,
+  WalletState,
+  WalletTransaction,
+  ZapSenderInfo,
+} from '../types/wallet';
 
 const USER_NAME_KEY = 'user_display_name';
 const CURRENCY_KEY = 'user_fiat_currency';
@@ -149,6 +156,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const updateWalletInState = useCallback((walletId: string, updates: Partial<WalletState>) => {
     setWallets((prev) => prev.map((w) => (w.id === walletId ? { ...w, ...updates } : w)));
   }, []);
+
+  // Forward-declared so `fetchTransactionsForWallet` can call into it without
+  // pulling the resolver's dependencies into its useCallback deps list.
+  const resolveZapSendersRef = useRef<((walletId: string) => Promise<void>) | null>(null);
 
   const addPendingTransaction = useCallback((walletId: string, tx: WalletTransaction) => {
     setWallets((prev) =>
@@ -613,24 +624,144 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           }));
         } else {
           const raw = await nwcService.listTransactions(walletId);
+          // Preserve any previously resolved zap sender info so a refresh
+          // doesn't re-trigger relay lookups for transactions we've already
+          // attributed.
+          const existing = wallets.find((w) => w.id === walletId)?.transactions ?? [];
+          const senderByHash = new Map<string, WalletTransaction['zapSender']>();
+          for (const prev of existing) {
+            if (prev.paymentHash && prev.zapSender !== undefined) {
+              senderByHash.set(prev.paymentHash, prev.zapSender);
+            }
+          }
           txs = raw.map((tx: any) => ({
             type: tx.type,
             amount: tx.amount,
             description: tx.description,
             settled_at: tx.settled_at,
             created_at: tx.created_at,
+            bolt11: tx.invoice,
+            paymentHash: tx.payment_hash,
+            zapSender: tx.payment_hash ? senderByHash.get(tx.payment_hash) : undefined,
           }));
         }
         updateWalletInState(walletId, { transactions: txs });
 
         // Persist to AsyncStorage for fast loading on next startup
         await AsyncStorage.setItem(`txs_${walletId}`, JSON.stringify(txs));
+
+        // Kick off background zap sender resolution for any incoming
+        // transactions that haven't been resolved yet.
+        resolveZapSendersRef
+          .current?.(walletId)
+          .catch((e) => console.warn(`resolveZapSenders failed for ${walletId}:`, e));
       } catch (error) {
         console.warn(`fetchTransactions failed for ${walletId}:`, error);
       }
     },
     [wallets, updateWalletInState],
   );
+
+  /**
+   * Walk the current transactions for `walletId` and, for each incoming tx
+   * that hasn't been attributed yet, try to find a NIP-57 zap receipt (kind
+   * 9735) that pairs with it and resolve the sender's Nostr profile.
+   *
+   * Runs in the background after every transaction list refresh. The result
+   * is attached to the in-memory + AsyncStorage-cached transaction so the UI
+   * updates without refetching relays on every render.
+   */
+  const resolveZapSendersForWallet = useCallback(async (walletId: string) => {
+    // Snapshot the pending list via a setter so we always read the latest
+    // transactions without having to thread a ref through this callback.
+    let pending: WalletTransaction[] = [];
+    setWallets((prev) => {
+      const current = prev.find((w) => w.id === walletId);
+      if (current) {
+        pending = current.transactions.filter(
+          (tx) => tx.type === 'incoming' && tx.bolt11 && tx.zapSender === undefined,
+        );
+      }
+      return prev;
+    });
+    if (pending.length === 0) return;
+
+    // Cap concurrent relay lookups so a long tx list doesn't flood the pool.
+    const concurrency = 3;
+    const results = new Map<string, ZapSenderInfo | null>();
+
+    for (let i = 0; i < pending.length; i += concurrency) {
+      const batch = pending.slice(i, i + concurrency);
+      await Promise.all(
+        batch.map(async (tx) => {
+          if (!tx.bolt11 || !tx.paymentHash) return;
+          try {
+            const receipt = await nostrService.fetchZapReceiptByBolt11(
+              tx.bolt11,
+              nostrService.DEFAULT_RELAYS,
+            );
+            if (!receipt) {
+              results.set(tx.paymentHash, null);
+              return;
+            }
+            const parsed = nostrService.parseZapReceipt(receipt);
+            if (!parsed) {
+              results.set(tx.paymentHash, null);
+              return;
+            }
+            let profile: ZapSenderInfo['profile'] = null;
+            if (parsed.senderPubkey) {
+              const p = await nostrService.fetchProfile(
+                parsed.senderPubkey,
+                nostrService.DEFAULT_RELAYS,
+              );
+              if (p) {
+                profile = {
+                  npub: p.npub,
+                  name: p.name,
+                  displayName: p.displayName,
+                  picture: p.picture,
+                  nip05: p.nip05,
+                };
+              }
+            }
+            results.set(tx.paymentHash, {
+              pubkey: parsed.senderPubkey,
+              profile,
+              comment: parsed.comment,
+              anonymous: parsed.anonymous,
+            });
+          } catch (e) {
+            if (__DEV__) console.warn('[Zap] resolve failed for tx:', e);
+          }
+        }),
+      );
+    }
+
+    if (results.size === 0) return;
+
+    // Merge results back into state + persist.
+    let nextTxs: WalletTransaction[] | null = null;
+    setWallets((prev) =>
+      prev.map((w) => {
+        if (w.id !== walletId) return w;
+        const updated = w.transactions.map((tx) =>
+          tx.paymentHash && results.has(tx.paymentHash)
+            ? { ...tx, zapSender: results.get(tx.paymentHash) ?? null }
+            : tx,
+        );
+        nextTxs = updated;
+        return { ...w, transactions: updated };
+      }),
+    );
+    if (nextTxs) {
+      AsyncStorage.setItem(`txs_${walletId}`, JSON.stringify(nextTxs)).catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
+    resolveZapSendersRef.current = resolveZapSendersForWallet;
+  }, [resolveZapSendersForWallet]);
 
   const completeOnboarding = useCallback(async () => {
     await walletStorage.setOnboarded();

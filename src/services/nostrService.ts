@@ -271,6 +271,62 @@ export async function publishSignedEvent(
   await Promise.any(pool.publish(relays, signedEvent as VerifiedEvent));
 }
 
+/**
+ * Parse a NIP-57 zap receipt (kind 9735) to extract the sender pubkey and the
+ * comment they typed when zapping. The receipt's `description` tag carries
+ * the stringified kind 9734 zap request event; the sender's pubkey is the
+ * `pubkey` field of that inner event, unless the zap request was marked
+ * anonymous via `['anon', ...]`.
+ */
+export function parseZapReceipt(event: { tags: string[][] }): {
+  senderPubkey: string | null;
+  comment: string;
+  anonymous: boolean;
+} | null {
+  const descTag = event.tags.find((t) => t[0] === 'description');
+  if (!descTag || !descTag[1]) return null;
+  try {
+    const zapRequest = JSON.parse(descTag[1]) as {
+      pubkey?: string;
+      content?: string;
+      tags?: string[][];
+    };
+    const anonymous = Array.isArray(zapRequest.tags)
+      ? zapRequest.tags.some((t) => t[0] === 'anon')
+      : false;
+    return {
+      senderPubkey: anonymous ? null : zapRequest.pubkey || null,
+      comment: typeof zapRequest.content === 'string' ? zapRequest.content : '',
+      anonymous,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch a NIP-57 zap receipt (kind 9735) for a given bolt11 invoice from the
+ * given relays. Returns null if no receipt has propagated yet.
+ */
+export async function fetchZapReceiptByBolt11(
+  bolt11: string,
+  relays: string[],
+): Promise<{ tags: string[][] } | null> {
+  if (!bolt11) return null;
+  const allRelays = [...new Set([...relays, ...DEFAULT_RELAYS])];
+  trackRelays(allRelays);
+  try {
+    const event = await withTimeout(
+      pool.get(allRelays, { kinds: [9735], '#bolt11': [bolt11] }),
+      10000,
+    );
+    return event ?? null;
+  } catch (error) {
+    if (__DEV__) console.warn('[Nostr] fetchZapReceiptByBolt11 failed:', error);
+    return null;
+  }
+}
+
 export function createZapRequestEvent(
   senderPubkey: string,
   recipientPubkey: string,

@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { Image } from 'expo-image';
 import { colors } from '../styles/theme';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet } from '../contexts/WalletContext';
 import TransactionDetailSheet, { TransactionDetailData } from './TransactionDetailSheet';
+import type { ZapSenderInfo } from '../types/wallet';
 
 interface Transaction {
   type: string;
@@ -14,10 +16,22 @@ interface Transaction {
   blockHeight?: number | null;
   txid?: string;
   swapId?: string;
+  bolt11?: string;
+  paymentHash?: string;
+  zapSender?: ZapSenderInfo | null;
 }
 
 interface Props {
   transactions: Transaction[];
+}
+
+function zapSenderLabel(sender: ZapSenderInfo): string {
+  if (sender.anonymous) return 'Anonymous';
+  const profile = sender.profile;
+  if (profile?.displayName) return profile.displayName;
+  if (profile?.name) return profile.name;
+  if (profile?.npub) return `${profile.npub.slice(0, 12)}…`;
+  return 'Nostr user';
 }
 
 const INITIAL_COUNT = 20;
@@ -65,10 +79,14 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
           : item.blockHeight
             ? `Block ${item.blockHeight.toLocaleString()}`
             : '';
+        const zapSender = isIncoming ? item.zapSender : undefined;
         const label = isPending
           ? 'Pending'
-          : item.description || (isIncoming ? 'Received' : 'Sent');
+          : zapSender
+            ? `Received from ${zapSenderLabel(zapSender)}`
+            : item.description || (isIncoming ? 'Received' : 'Sent');
         const fiatStr = satsToFiatString(amountSats, btcPrice, currency);
+        const senderAvatar = zapSender?.profile?.picture ?? null;
 
         return (
           <TouchableOpacity
@@ -78,9 +96,18 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
             accessibilityLabel={`Open details for ${label}`}
           >
             <View style={styles.itemLeft}>
-              <Text style={[styles.itemIcon, isPending && styles.pendingText]}>
-                {isIncoming ? '↓' : '↑'}
-              </Text>
+              {senderAvatar ? (
+                <Image
+                  source={{ uri: senderAvatar }}
+                  style={styles.itemAvatar}
+                  cachePolicy="disk"
+                  contentFit="cover"
+                />
+              ) : (
+                <Text style={[styles.itemIcon, isPending && styles.pendingText]}>
+                  {isIncoming ? '↓' : '↑'}
+                </Text>
+              )}
               <View style={styles.itemDescriptionContainer}>
                 <Text
                   style={[styles.itemDescription, isPending && styles.pendingText]}
@@ -153,6 +180,14 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
     color: colors.brandPink,
+    width: 32,
+    textAlign: 'center',
+  },
+  itemAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.background,
   },
   itemDescriptionContainer: {
     flex: 1,
