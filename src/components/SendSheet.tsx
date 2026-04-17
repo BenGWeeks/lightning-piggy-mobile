@@ -26,6 +26,7 @@ import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
 import { sendSheetStyles as styles } from '../styles/SendSheet.styles';
 import { satsToFiat, satsToFiatString } from '../services/fiatService';
+import { ChevronUp, ChevronDown } from 'lucide-react-native';
 import { resolveLightningAddress, fetchInvoice, LnurlPayParams } from '../services/lnurlService';
 import * as boltzService from '../services/boltzService';
 import * as onchainService from '../services/onchainService';
@@ -472,7 +473,11 @@ const SendSheet: React.FC<Props> = ({
                     onPress={() => setDropdownOpen(!dropdownOpen)}
                   >
                     <Text style={styles.walletDropdownText}>{walletName}</Text>
-                    <Text style={styles.walletDropdownArrow}>{dropdownOpen ? '▲' : '▼'}</Text>
+                    {dropdownOpen ? (
+                      <ChevronUp size={16} color={colors.white} />
+                    ) : (
+                      <ChevronDown size={16} color={colors.white} />
+                    )}
                   </TouchableOpacity>
                   {dropdownOpen && (
                     <View style={styles.walletDropdownMenu}>

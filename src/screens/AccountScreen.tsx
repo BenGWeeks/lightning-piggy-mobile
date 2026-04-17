@@ -23,6 +23,7 @@ import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
 import { CURRENCIES } from '../services/fiatService';
+import { Trash2, Eye, EyeOff, ChevronUp, ChevronDown, Zap } from 'lucide-react-native';
 import { getElectrumServer, setElectrumServer } from '../services/walletStorageService';
 import { disconnectElectrum } from '../services/onchainService';
 import CopyIcon from '../components/icons/CopyIcon';
@@ -65,6 +66,9 @@ const AccountScreen: React.FC = () => {
     lightningAddress,
     setLightningAddress,
     wallets,
+    removeWallet,
+    updateWalletSettings,
+    reorderWallet,
   } = useWallet();
   const { isLoggedIn, profile, logout, sendDirectMessage, signerType } = useNostr();
   const [nameInput, setNameInput] = useState(userName);
@@ -315,9 +319,10 @@ const AccountScreen: React.FC = () => {
             </View>
 
             {profile.lud16 && (
-              <Text style={styles.profileLn}>
-                {'\u26A1'} {profile.lud16}
-              </Text>
+              <View style={styles.profileLnRow}>
+                <Zap size={14} color={colors.white} />
+                <Text style={styles.profileLn}>{profile.lud16}</Text>
+              </View>
             )}
 
             <TouchableOpacity
@@ -423,7 +428,7 @@ const AccountScreen: React.FC = () => {
               ? 'No wallets connected. Add one from the Home screen.'
               : `${wallets.length} wallet${wallets.length !== 1 ? 's' : ''} (${connectedCount} connected)`}
           </Text>
-          {wallets.map((w) => (
+          {wallets.map((w, index) => (
             <View key={w.id} style={styles.walletRow}>
               <View
                 style={[
@@ -440,13 +445,66 @@ const AccountScreen: React.FC = () => {
                   },
                 ]}
               />
-              <Text style={styles.walletName}>
+              <Text style={styles.walletName} numberOfLines={1}>
                 {w.alias}
                 {w.walletType === 'onchain' ? ' (on-chain)' : ''}
               </Text>
-              {w.balance !== null && (
-                <Text style={styles.walletBalance}>{w.balance.toLocaleString()} sats</Text>
-              )}
+              <Text style={styles.walletBalance}>
+                {w.hideBalance
+                  ? '***'
+                  : w.balance !== null
+                    ? `${w.balance.toLocaleString()} sats`
+                    : '---'}
+              </Text>
+              <View style={styles.walletActions}>
+                <TouchableOpacity
+                  onPress={() => reorderWallet(w.id, 'up')}
+                  disabled={index === 0}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <ChevronUp size={18} color={colors.white} opacity={index === 0 ? 0.3 : 0.8} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => reorderWallet(w.id, 'down')}
+                  disabled={index === wallets.length - 1}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <ChevronDown
+                    size={18}
+                    color={colors.white}
+                    opacity={index === wallets.length - 1 ? 0.3 : 0.8}
+                  />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => updateWalletSettings(w.id, { hideBalance: !w.hideBalance })}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  {w.hideBalance ? (
+                    <EyeOff size={18} color={colors.white} opacity={0.8} />
+                  ) : (
+                    <Eye size={18} color={colors.white} opacity={0.8} />
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() =>
+                    Alert.alert(
+                      'Remove Wallet',
+                      `Remove "${w.alias}"? This will disconnect the wallet.`,
+                      [
+                        { text: 'Cancel', style: 'cancel' },
+                        {
+                          text: 'Remove',
+                          style: 'destructive',
+                          onPress: () => removeWallet(w.id),
+                        },
+                      ],
+                    )
+                  }
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Trash2 size={18} color={colors.white} opacity={0.8} />
+                </TouchableOpacity>
+              </View>
             </View>
           ))}
         </View>
@@ -697,11 +755,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
+  profileLnRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    gap: 4,
+  },
   profileLn: {
     color: colors.textBody,
     fontSize: 14,
-    paddingHorizontal: 16,
-    paddingBottom: 12,
   },
   editProfileButton: {
     margin: 16,
@@ -867,6 +930,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '400',
     opacity: 0.8,
+  },
+  walletActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   saveButton: {
     backgroundColor: colors.white,

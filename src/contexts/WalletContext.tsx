@@ -63,8 +63,14 @@ interface WalletContextType {
   removeWallet: (walletId: string) => Promise<void>;
   updateWalletSettings: (
     walletId: string,
-    settings: { alias?: string; theme?: CardTheme; lightningAddress?: string | null },
+    settings: {
+      alias?: string;
+      theme?: CardTheme;
+      hideBalance?: boolean;
+      lightningAddress?: string | null;
+    },
   ) => Promise<void>;
+  reorderWallet: (walletId: string, direction: 'up' | 'down') => Promise<void>;
   setActiveWallet: (walletId: string | null) => void;
   refreshActiveBalance: () => Promise<void>;
   completeOnboarding: () => Promise<void>;
@@ -513,7 +519,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const updateWalletSettings = useCallback(
     async (
       walletId: string,
-      settings: { alias?: string; theme?: CardTheme; lightningAddress?: string | null },
+      settings: {
+        alias?: string;
+        theme?: CardTheme;
+        hideBalance?: boolean;
+        lightningAddress?: string | null;
+      },
     ) => {
       // Update in-memory state
       setWallets((prev) => prev.map((w) => (w.id === walletId ? { ...w, ...settings } : w)));
@@ -525,6 +536,27 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     },
     [],
   );
+
+  const reorderWallet = useCallback(async (walletId: string, direction: 'up' | 'down') => {
+    let reorderedList: WalletMetadata[] | null = null;
+
+    setWallets((prev) => {
+      const sorted = [...prev].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      const idx = sorted.findIndex((w) => w.id === walletId);
+      if (idx < 0) return prev;
+      const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= sorted.length) return prev;
+      [sorted[idx], sorted[targetIdx]] = [sorted[targetIdx], sorted[idx]];
+      const result = sorted.map((w, i) => ({ ...w, order: i }));
+      reorderedList = result;
+      return result;
+    });
+
+    // Persist the same reordered list that was applied to state
+    if (reorderedList) {
+      await walletStorage.saveWalletList(reorderedList);
+    }
+  }, []);
 
   const setActiveWallet = useCallback((walletId: string | null) => {
     setActiveWalletId(walletId);
@@ -657,6 +689,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         addHotWallet,
         removeWallet,
         updateWalletSettings,
+        reorderWallet,
         setActiveWallet,
         refreshActiveBalance,
         completeOnboarding,

@@ -26,6 +26,8 @@ export interface WalletMetadata {
   walletType: WalletType;
   /** NWC wallets only */
   lightningAddress: string | null;
+  /** Hide balance figures across the UI for this wallet (Account list + WalletCard). */
+  hideBalance?: boolean;
   /** On-chain wallets only */
   onchainImportMethod?: OnchainImportMethod;
   /** On-chain wallets: reserved metadata field for a future per-wallet

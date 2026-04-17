@@ -12,6 +12,7 @@ import {
 import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
+import { Check } from 'lucide-react-native';
 import { CURRENCIES } from '../services/fiatService';
 import NostrLoginSheet from '../components/NostrLoginSheet';
 
@@ -74,10 +75,13 @@ const OnboardingScreen: React.FC = () => {
               ])
             }
           >
-            <Text style={styles.nostrConnectedText}>
-              {'\u2713'} Nostr connected
-              {profile?.name ? ` as ${profile.displayName || profile.name}` : ''}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Check size={16} color={colors.green} />
+              <Text style={styles.nostrConnectedText}>
+                Nostr connected
+                {profile?.name ? ` as ${profile.displayName || profile.name}` : ''}
+              </Text>
+            </View>
           </TouchableOpacity>
         ) : (
           <TouchableOpacity style={styles.nostrButton} onPress={() => setLoginSheetOpen(true)}>

@@ -8,6 +8,7 @@ import {
   getCourseCompletedCount,
   isCourseComplete,
 } from '../services/learnProgressService';
+import { Check } from 'lucide-react-native';
 import { styles } from '../styles/LearnScreen.styles';
 
 import { LearnNavigation } from '../navigation/types';
@@ -67,7 +68,7 @@ const LearnScreen: React.FC<Props> = ({ navigation }) => {
                 <Image source={course.image} style={styles.courseImage} resizeMode="cover" />
                 {allDone && (
                   <View style={styles.completeBadge}>
-                    <Text style={styles.completeBadgeText}>✓</Text>
+                    <Check size={16} color="#FFFFFF" />
                   </View>
                 )}
               </View>
