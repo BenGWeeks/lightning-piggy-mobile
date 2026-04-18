@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nwcService from '../services/nwcService';
 import * as nostrService from '../services/nostrService';
+import * as lnurlService from '../services/lnurlService';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
@@ -160,6 +161,27 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Forward-declared so `fetchTransactionsForWallet` can call into it without
   // pulling the resolver's dependencies into its useCallback deps list.
   const resolveZapSendersRef = useRef<((walletId: string) => Promise<void>) | null>(null);
+
+  // In-memory cache for `lightning_address -> LNURL server nostrPubkey`.
+  // NIP-57 zap receipts tag `#p` with the recipient pubkey *as advertised by
+  // the LNURL server* — which for self-hosted LNbits is usually the server's
+  // own Nostr identity, not the wallet owner's. Without resolving this we
+  // can't find receipts for the user's incoming zaps.
+  const lud16PubkeyCacheRef = useRef<Map<string, string | null>>(new Map());
+  const resolveLud16ToNostrPubkey = useCallback(async (lud16: string): Promise<string | null> => {
+    if (!lud16 || !lud16.includes('@')) return null;
+    const cache = lud16PubkeyCacheRef.current;
+    if (cache.has(lud16)) return cache.get(lud16) ?? null;
+    try {
+      const params = await lnurlService.resolveLightningAddress(lud16);
+      const pk = params.allowsNostr && params.nostrPubkey ? params.nostrPubkey : null;
+      cache.set(lud16, pk);
+      return pk;
+    } catch {
+      cache.set(lud16, null);
+      return null;
+    }
+  }, []);
 
   const addPendingTransaction = useCallback((walletId: string, tx: WalletTransaction) => {
     setWallets((prev) =>
@@ -671,97 +693,214 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
    * is attached to the in-memory + AsyncStorage-cached transaction so the UI
    * updates without refetching relays on every render.
    */
-  const resolveZapSendersForWallet = useCallback(async (walletId: string) => {
-    // Snapshot the pending list via a setter so we always read the latest
-    // transactions without having to thread a ref through this callback.
-    let pending: WalletTransaction[] = [];
-    setWallets((prev) => {
-      const current = prev.find((w) => w.id === walletId);
-      if (current) {
-        pending = current.transactions.filter(
-          (tx) => tx.type === 'incoming' && tx.bolt11 && tx.zapSender === undefined,
-        );
+  const resolveZapSendersForWallet = useCallback(
+    async (walletId: string) => {
+      const userPubkey = nostrService.getCurrentUserPubkey();
+      // Collect recipient pubkeys for the `#p` filter: the user's own Nostr
+      // pubkey plus every lightning-address LNURL server's `nostrPubkey`.
+      // Self-hosted LNbits typically tags receipts with the server's pubkey,
+      // not the user's.
+      const recipients: string[] = [];
+      if (userPubkey) recipients.push(userPubkey);
+      const lud16s = new Set<string>();
+      if (lightningAddress) lud16s.add(lightningAddress);
+      const currentWallet = walletsRef.current.find((w) => w.id === walletId);
+      if (currentWallet?.lightningAddress) lud16s.add(currentWallet.lightningAddress);
+      for (const lud16 of lud16s) {
+        const pk = await resolveLud16ToNostrPubkey(lud16);
+        if (pk) recipients.push(pk);
       }
-      return prev;
-    });
-    if (pending.length === 0) return;
+      if (recipients.length === 0) return;
 
-    // Cap concurrent relay lookups so a long tx list doesn't flood the pool.
-    const concurrency = 3;
-    const results = new Map<string, ZapSenderInfo | null>();
+      // Snapshot the pending list via a setter so we always read the latest
+      // transactions without having to thread a ref through this callback.
+      // We deliberately don't require `bolt11` — cached transactions from
+      // before the bolt11-capture change still deserve attribution, and we
+      // fall back to (amount, time) matching when bolt11 is missing.
+      let pending: { tx: WalletTransaction; idx: number }[] = [];
+      let walletAlias = '';
+      setWallets((prev) => {
+        const current = prev.find((w) => w.id === walletId);
+        if (current) {
+          walletAlias = current.alias;
+          pending = current.transactions
+            .map((tx, idx) => ({ tx, idx }))
+            .filter(({ tx }) => {
+              if (tx.type !== 'incoming') return false;
+              // Populated sender object → already attributed, skip.
+              if (tx.zapSender && typeof tx.zapSender === 'object') return false;
+              // `null` with bolt11 → definitive negative from a prior run;
+              // skip so a user with hundreds of non-zap incoming payments
+              // doesn't re-query ~500 receipts on every refresh.
+              if (tx.zapSender === null && tx.bolt11) return false;
+              return true;
+            });
+        }
+        return prev;
+      });
+      if (pending.length === 0) return;
 
-    for (let i = 0; i < pending.length; i += concurrency) {
-      const batch = pending.slice(i, i + concurrency);
-      await Promise.all(
-        batch.map(async (tx) => {
-          if (!tx.bolt11 || !tx.paymentHash) return;
+      // `#p` is universally indexed across relays; `#bolt11` is not (damus,
+      // primal and others reject it with `bad req: unindexed tag filter`).
+      // We also intentionally omit `since` — narrow filters have been seen
+      // to return empty from relays that happily serve the wider query.
+      const receipts = await nostrService.fetchZapReceiptsForRecipient(
+        recipients,
+        nostrService.DEFAULT_RELAYS,
+        { limit: 500 },
+      );
+      if (__DEV__)
+        console.log(
+          `[Zap/${walletAlias}] pending=${pending.length} recipients=${recipients.length} receipts=${receipts.length}`,
+        );
+      if (receipts.length === 0) return;
+
+      // Primary match: bolt11. Secondary: (amount_sats, created_at) with a
+      // 5-minute window, which handles cached txs that predate bolt11 capture.
+      type Receipt = (typeof receipts)[number];
+      const byBolt11 = new Map<string, Receipt>();
+      const byAmountTime: { amountSats: number; ts: number; receipt: Receipt }[] = [];
+      for (const r of receipts) {
+        const bolt11Tag = r.tags.find((t) => t[0] === 'bolt11');
+        if (bolt11Tag?.[1]) byBolt11.set(bolt11Tag[1], r);
+
+        // The zap request embedded in `description` carries the authoritative
+        // amount (msats) — fall back to it for the (amount, time) index.
+        const descTag = r.tags.find((t) => t[0] === 'description');
+        let amountSats: number | null = null;
+        if (descTag?.[1]) {
           try {
-            const receipt = await nostrService.fetchZapReceiptByBolt11(
-              tx.bolt11,
+            const zr = JSON.parse(descTag[1]) as { tags?: string[][] };
+            const amtTag = zr.tags?.find((t) => t[0] === 'amount');
+            if (amtTag?.[1]) {
+              const msats = parseInt(amtTag[1], 10);
+              if (Number.isFinite(msats)) amountSats = Math.round(msats / 1000);
+            }
+          } catch {}
+        }
+        if (amountSats != null) byAmountTime.push({ amountSats, ts: r.created_at, receipt: r });
+      }
+
+      const TIME_WINDOW_S = 5 * 60;
+      const findReceipt = (tx: WalletTransaction): Receipt | null => {
+        if (tx.bolt11) {
+          const hit = byBolt11.get(tx.bolt11);
+          if (hit) return hit;
+        }
+        const txTs = tx.settled_at ?? tx.created_at ?? null;
+        if (txTs == null) return null;
+        const txSats = Math.abs(tx.amount);
+        let best: { receipt: Receipt; dt: number } | null = null;
+        for (const entry of byAmountTime) {
+          if (entry.amountSats !== txSats) continue;
+          const dt = Math.abs(entry.ts - txTs);
+          if (dt > TIME_WINDOW_S) continue;
+          if (!best || dt < best.dt) best = { receipt: entry.receipt, dt };
+        }
+        return best?.receipt ?? null;
+      };
+
+      // The merge key has to work for cached txs without paymentHash, so we
+      // carry the index along and update by position.
+      const resultsByIdx = new Map<number, ZapSenderInfo | null>();
+      const profileCache = new Map<string, ZapSenderInfo['profile']>();
+
+      for (const { tx, idx } of pending) {
+        const receipt = findReceipt(tx);
+        if (!receipt) {
+          // Negative cache only when we had bolt11 to match with (definitive
+          // miss). Otherwise leave undefined so future refreshes retry once
+          // the tx has bolt11 / more receipts arrive.
+          if (tx.bolt11) resultsByIdx.set(idx, null);
+          continue;
+        }
+        const parsed = nostrService.parseZapReceipt(receipt);
+        if (!parsed) {
+          if (tx.bolt11) resultsByIdx.set(idx, null);
+          continue;
+        }
+        let profile: ZapSenderInfo['profile'] = null;
+        if (parsed.senderPubkey) {
+          if (profileCache.has(parsed.senderPubkey)) {
+            profile = profileCache.get(parsed.senderPubkey) ?? null;
+          } else {
+            const p = await nostrService.fetchProfile(
+              parsed.senderPubkey,
               nostrService.DEFAULT_RELAYS,
             );
-            if (!receipt) {
-              results.set(tx.paymentHash, null);
-              return;
-            }
-            const parsed = nostrService.parseZapReceipt(receipt);
-            if (!parsed) {
-              results.set(tx.paymentHash, null);
-              return;
-            }
-            let profile: ZapSenderInfo['profile'] = null;
-            if (parsed.senderPubkey) {
-              const p = await nostrService.fetchProfile(
-                parsed.senderPubkey,
-                nostrService.DEFAULT_RELAYS,
-              );
-              if (p) {
-                profile = {
+            profile = p
+              ? {
                   npub: p.npub,
                   name: p.name,
                   displayName: p.displayName,
                   picture: p.picture,
                   nip05: p.nip05,
-                };
-              }
-            }
-            results.set(tx.paymentHash, {
-              pubkey: parsed.senderPubkey,
-              profile,
-              comment: parsed.comment,
-              anonymous: parsed.anonymous,
-            });
-          } catch (e) {
-            if (__DEV__) console.warn('[Zap] resolve failed for tx:', e);
+                }
+              : null;
+            profileCache.set(parsed.senderPubkey, profile);
           }
+        }
+        resultsByIdx.set(idx, {
+          pubkey: parsed.senderPubkey,
+          profile,
+          comment: parsed.comment,
+          anonymous: parsed.anonymous,
+        });
+      }
+
+      if (__DEV__) {
+        const attributed = [...resultsByIdx.values()].filter((v) => v !== null).length;
+        console.log(
+          `[Zap/${walletAlias}] attributed ${attributed}/${pending.length} pending tx(s)`,
+        );
+      }
+      if (resultsByIdx.size === 0) return;
+
+      let nextTxs: WalletTransaction[] | null = null;
+      setWallets((prev) =>
+        prev.map((w) => {
+          if (w.id !== walletId) return w;
+          const updated = w.transactions.map((tx, i) =>
+            resultsByIdx.has(i) ? { ...tx, zapSender: resultsByIdx.get(i) ?? null } : tx,
+          );
+          nextTxs = updated;
+          return { ...w, transactions: updated };
         }),
       );
-    }
-
-    if (results.size === 0) return;
-
-    // Merge results back into state + persist.
-    let nextTxs: WalletTransaction[] | null = null;
-    setWallets((prev) =>
-      prev.map((w) => {
-        if (w.id !== walletId) return w;
-        const updated = w.transactions.map((tx) =>
-          tx.paymentHash && results.has(tx.paymentHash)
-            ? { ...tx, zapSender: results.get(tx.paymentHash) ?? null }
-            : tx,
-        );
-        nextTxs = updated;
-        return { ...w, transactions: updated };
-      }),
-    );
-    if (nextTxs) {
-      AsyncStorage.setItem(`txs_${walletId}`, JSON.stringify(nextTxs)).catch(() => {});
-    }
-  }, []);
+      if (nextTxs) {
+        AsyncStorage.setItem(`txs_${walletId}`, JSON.stringify(nextTxs)).catch(() => {});
+      }
+    },
+    [lightningAddress, resolveLud16ToNostrPubkey],
+  );
 
   useEffect(() => {
     resolveZapSendersRef.current = resolveZapSendersForWallet;
   }, [resolveZapSendersForWallet]);
+
+  // When the user's Nostr pubkey becomes available (via NostrContext
+  // auto-login), run zap attribution against every wallet's cached txs.
+  // This matters because `list_transactions` can be flaky on some NWC
+  // relays — we shouldn't make sender attribution depend on a successful
+  // refresh having happened first.
+  useEffect(() => {
+    const run = async () => {
+      const pk = nostrService.getCurrentUserPubkey();
+      if (!pk) return;
+      // Serialize across wallets. Running concurrent querySync calls over
+      // the same nostr-tools pool races on shared subscriptions — one
+      // request often comes back empty — so resolve one wallet at a time.
+      for (const w of walletsRef.current) {
+        try {
+          await resolveZapSendersRef.current?.(w.id);
+        } catch (e) {
+          console.warn(`resolveZapSenders (on-pubkey) failed for ${w.id}:`, e);
+        }
+      }
+    };
+    run();
+    return nostrService.onCurrentUserPubkeyChange(run);
+  }, []);
 
   const completeOnboarding = useCallback(async () => {
     await walletStorage.setOnboarded();

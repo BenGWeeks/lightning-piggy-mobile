@@ -11,6 +11,31 @@ import type { NostrProfile, NostrContact, RelayConfig } from '../types/nostr';
 
 const pool = new SimplePool();
 
+// Shared pubkey of the currently logged-in Nostr user. Kept as module state
+// because `WalletProvider` wraps `NostrProvider` in the tree, so the wallet
+// layer can't read `NostrContext` via React hooks — but it needs the
+// recipient pubkey to query zap receipts via the `#p` filter.
+let _currentUserPubkey: string | null = null;
+const _pubkeyListeners = new Set<(pubkey: string | null) => void>();
+export function setCurrentUserPubkey(pubkey: string | null): void {
+  if (_currentUserPubkey === pubkey) return;
+  _currentUserPubkey = pubkey;
+  _pubkeyListeners.forEach((fn) => {
+    try {
+      fn(pubkey);
+    } catch (e) {
+      if (__DEV__) console.warn('[Nostr] pubkey listener threw:', e);
+    }
+  });
+}
+export function getCurrentUserPubkey(): string | null {
+  return _currentUserPubkey;
+}
+export function onCurrentUserPubkeyChange(fn: (pubkey: string | null) => void): () => void {
+  _pubkeyListeners.add(fn);
+  return () => _pubkeyListeners.delete(fn);
+}
+
 export const DEFAULT_RELAYS = [
   'wss://relay.damus.io',
   'wss://relay.nostr.band',
@@ -305,25 +330,40 @@ export function parseZapReceipt(event: { tags: string[][] }): {
 }
 
 /**
- * Fetch a NIP-57 zap receipt (kind 9735) for a given bolt11 invoice from the
- * given relays. Returns null if no receipt has propagated yet.
+ * Fetch NIP-57 zap receipts (kind 9735) addressed to `recipientPubkey`.
+ *
+ * We can't use `#bolt11` here — damus, primal and most mainstream relays
+ * reject tag filters they haven't indexed (they respond with
+ * `NOTICE: bad req: unindexed tag filter`). `#p` is always indexed, so we
+ * fetch a bounded slice of receipts for the wallet owner and let the caller
+ * match individual bolt11 invoices locally against the returned events.
  */
-export async function fetchZapReceiptByBolt11(
-  bolt11: string,
+export async function fetchZapReceiptsForRecipient(
+  recipientPubkeys: string | string[],
   relays: string[],
-): Promise<{ tags: string[][] } | null> {
-  if (!bolt11) return null;
+  options: { limit?: number; since?: number } = {},
+): Promise<{ tags: string[][]; created_at: number; id: string }[]> {
+  const pubkeys = Array.isArray(recipientPubkeys) ? recipientPubkeys : [recipientPubkeys];
+  const dedupedPubkeys = [...new Set(pubkeys.filter(Boolean))];
+  if (dedupedPubkeys.length === 0) return [];
   const allRelays = [...new Set([...relays, ...DEFAULT_RELAYS])];
   trackRelays(allRelays);
+  const filter: { kinds: number[]; '#p': string[]; limit?: number; since?: number } = {
+    kinds: [9735],
+    '#p': dedupedPubkeys,
+    limit: options.limit ?? 500,
+  };
+  if (options.since) filter.since = options.since;
   try {
-    const event = await withTimeout(
-      pool.get(allRelays, { kinds: [9735], '#bolt11': [bolt11] }),
-      10000,
-    );
-    return event ?? null;
+    const events = await withTimeout(pool.querySync(allRelays, filter), 15000);
+    if (!events) return [];
+    // Dedupe by event id — multiple relays typically return the same receipt.
+    const byId = new Map<string, { tags: string[][]; created_at: number; id: string }>();
+    for (const e of events) byId.set(e.id, e);
+    return Array.from(byId.values());
   } catch (error) {
-    if (__DEV__) console.warn('[Nostr] fetchZapReceiptByBolt11 failed:', error);
-    return null;
+    if (__DEV__) console.warn('[Nostr] fetchZapReceiptsForRecipient failed:', error);
+    return [];
   }
 }
 

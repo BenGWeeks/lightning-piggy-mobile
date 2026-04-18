@@ -69,6 +69,13 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [signerType, setSignerType] = useState<SignerType | null>(null);
   const [pubkey, setPubkey] = useState<string | null>(null);
 
+  // Publish the logged-in pubkey through the nostrService module so
+  // non-React consumers (e.g. WalletContext's zap sender resolver) can
+  // read it without introducing a circular provider dependency.
+  useEffect(() => {
+    nostrService.setCurrentUserPubkey(pubkey);
+  }, [pubkey]);
+
   const getReadRelays = useCallback((): string[] => {
     const readRelays = relays.filter((r) => r.read).map((r) => r.url);
     return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
