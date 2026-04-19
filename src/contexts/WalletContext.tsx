@@ -916,7 +916,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
       mergeResolverResults(walletId, resultsByIdx);
     },
-    [lightningAddress, resolveLud16ToNostrPubkey],
+    [lightningAddress, resolveLud16ToNostrPubkey, mergeResolverResults],
   );
 
   useEffect(() => {
