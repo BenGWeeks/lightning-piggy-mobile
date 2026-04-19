@@ -228,10 +228,21 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return;
     }
 
-    // Fetch only what we don't have when cache is fresh; fetch all when
-    // cache is stale so we refresh profile data at least once per TTL.
+    // When the cache is fresh, the "missing" contacts are the ones who had
+    // no kind-0 response last time we asked. Re-querying on every cold
+    // start costs 3s for contacts that probably just never published a
+    // profile. Wait until the TTL expires before retrying them.
+    if (cacheFresh) {
+      if (__DEV__)
+        console.log(
+          `[Nostr] fetchProfiles: skipped (cache fresh, ${missingFromCache.length} unknown profiles will retry after TTL)`,
+        );
+      return;
+    }
+
+    // Cache stale — refresh all contacts' profiles.
     const contactPubkeys = fetchedContacts.map((c) => c.pubkey);
-    const pubkeysToFetch = cacheFresh ? missingFromCache : contactPubkeys;
+    const pubkeysToFetch = contactPubkeys;
     const t1 = Date.now();
     const profileMap = await nostrService.fetchProfiles(pubkeysToFetch, relayUrls, (partial) => {
       // Update UI incrementally as each batch of profiles arrives
