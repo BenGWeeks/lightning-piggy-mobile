@@ -197,28 +197,27 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
             </View>
 
             <View style={styles.rightCol}>
-              <View style={styles.amountRow}>
+              <View style={styles.amountsColumn}>
                 <Text
                   style={[
                     styles.amount,
                     isPending ? styles.pendingText : isIncoming ? styles.incoming : styles.outgoing,
                   ]}
                 >
-                  {amountSats.toLocaleString()}
+                  {amountSats.toLocaleString()} sats
                 </Text>
-                <Text
-                  style={[
-                    styles.arrow,
-                    isPending ? styles.pendingText : isIncoming ? styles.incoming : styles.outgoing,
-                  ]}
-                >
-                  {isIncoming ? '↓' : '↑'}
-                </Text>
+                {fiatStr ? (
+                  <Text style={[styles.fiat, isPending && styles.pendingText]}>{fiatStr}</Text>
+                ) : null}
               </View>
-              <Text style={styles.unit}>sats</Text>
-              {fiatStr ? (
-                <Text style={[styles.fiat, isPending && styles.pendingText]}>{fiatStr}</Text>
-              ) : null}
+              <Text
+                style={[
+                  styles.arrow,
+                  isPending ? styles.pendingText : isIncoming ? styles.incoming : styles.outgoing,
+                ]}
+              >
+                {isIncoming ? '↓' : '↑'}
+              </Text>
             </View>
           </TouchableOpacity>
         );
@@ -315,25 +314,20 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   rightCol: {
-    alignItems: 'flex-end',
-  },
-  amountRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 2,
+    gap: 8,
+  },
+  amountsColumn: {
+    alignItems: 'flex-end',
   },
   amount: {
     fontSize: 15,
     fontWeight: '700',
   },
   arrow: {
-    fontSize: 14,
+    fontSize: 22,
     fontWeight: '700',
-  },
-  unit: {
-    fontSize: 11,
-    color: colors.textSupplementary,
-    marginTop: 1,
   },
   fiat: {
     fontSize: 11,
