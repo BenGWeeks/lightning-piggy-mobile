@@ -15,7 +15,7 @@ import * as boltzService from '../services/boltzService';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import { transactionDetailSheetStyles as styles } from '../styles/TransactionDetailSheet.styles';
 import ContactProfileSheet from './ContactProfileSheet';
-import type { ZapSenderInfo } from '../types/wallet';
+import type { ZapCounterpartyInfo } from '../types/wallet';
 import { colors } from '../styles/theme';
 
 export interface TransactionDetailData {
@@ -31,10 +31,10 @@ export interface TransactionDetailData {
   /** Optional — if set, we can surface Boltz swap state */
   swapId?: string;
   /** Resolved Nostr sender info for incoming zaps. */
-  zapSender?: ZapSenderInfo | null;
+  zapCounterparty?: ZapCounterpartyInfo | null;
 }
 
-function zapSenderName(sender: ZapSenderInfo): string {
+function zapCounterpartyName(sender: ZapCounterpartyInfo): string {
   if (sender.anonymous) return 'Anonymous';
   const p = sender.profile;
   return p?.displayName || p?.name || 'Nostr user';
@@ -184,17 +184,17 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
   const dateTs = tx.settled_at || tx.created_at;
   const dateStr = dateTs ? new Date(dateTs * 1000).toLocaleString() : null;
 
-  const zapSender = isIncoming ? (tx.zapSender ?? null) : null;
-  const senderNpubDisplay = zapSender?.profile?.npub
-    ? `${zapSender.profile.npub.slice(0, 14)}…${zapSender.profile.npub.slice(-6)}`
+  const zapCounterparty = tx.zapCounterparty ?? null;
+  const counterpartyNpubDisplay = zapCounterparty?.profile?.npub
+    ? `${zapCounterparty.profile.npub.slice(0, 14)}…${zapCounterparty.profile.npub.slice(-6)}`
     : null;
-  const senderContact =
-    zapSender && !zapSender.anonymous && zapSender.pubkey
+  const counterpartyContact =
+    zapCounterparty && !zapCounterparty.anonymous && zapCounterparty.pubkey
       ? {
-          pubkey: zapSender.pubkey,
-          name: zapSenderName(zapSender),
-          picture: zapSender.profile?.picture ?? null,
-          nip05: zapSender.profile?.nip05 ?? null,
+          pubkey: zapCounterparty.pubkey,
+          name: zapCounterpartyName(zapCounterparty),
+          picture: zapCounterparty.profile?.picture ?? null,
+          nip05: zapCounterparty.profile?.nip05 ?? null,
           lightningAddress: null,
           source: 'nostr' as const,
         }
@@ -231,17 +231,18 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
             ) : null}
           </View>
 
-          {zapSender ? (
+          {zapCounterparty ? (
             <>
+              <Text style={styles.senderLabel}>{isIncoming ? 'Sender' : 'Recipient'}</Text>
               <TouchableOpacity
                 style={styles.senderCard}
-                onPress={() => senderContact && setSenderProfileOpen(true)}
-                disabled={!senderContact}
-                accessibilityLabel={`Sender ${zapSenderName(zapSender)}`}
+                onPress={() => counterpartyContact && setSenderProfileOpen(true)}
+                disabled={!counterpartyContact}
+                accessibilityLabel={`${isIncoming ? 'Sender' : 'Recipient'} ${zapCounterpartyName(zapCounterparty)}`}
               >
-                {zapSender.profile?.picture ? (
+                {zapCounterparty.profile?.picture ? (
                   <Image
-                    source={{ uri: zapSender.profile.picture }}
+                    source={{ uri: zapCounterparty.profile.picture }}
                     style={styles.senderAvatar}
                     cachePolicy="disk"
                     contentFit="cover"
@@ -249,23 +250,23 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
                 ) : (
                   <View style={styles.senderAvatarPlaceholder}>
                     <Text style={{ fontSize: 22, color: colors.textSupplementary }}>
-                      {zapSender.anonymous ? '?' : '⚡'}
+                      {zapCounterparty.anonymous ? '?' : '⚡'}
                     </Text>
                   </View>
                 )}
                 <View style={styles.senderTextCol}>
                   <Text style={styles.senderName} numberOfLines={1}>
-                    {zapSenderName(zapSender)}
+                    {zapCounterpartyName(zapCounterparty)}
                   </Text>
-                  {senderNpubDisplay ? (
+                  {counterpartyNpubDisplay ? (
                     <Text style={styles.senderNpub} numberOfLines={1}>
-                      {senderNpubDisplay}
+                      {counterpartyNpubDisplay}
                     </Text>
                   ) : null}
                 </View>
               </TouchableOpacity>
-              {zapSender.comment ? (
-                <Text style={styles.senderComment}>{zapSender.comment}</Text>
+              {zapCounterparty.comment ? (
+                <Text style={styles.senderComment}>{zapCounterparty.comment}</Text>
               ) : null}
             </>
           ) : null}
@@ -338,11 +339,11 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
           </View>
         </BottomSheetView>
       </BottomSheetModal>
-      {senderContact ? (
+      {counterpartyContact ? (
         <ContactProfileSheet
           visible={senderProfileOpen}
           onClose={() => setSenderProfileOpen(false)}
-          contact={senderContact}
+          contact={counterpartyContact}
         />
       ) : null}
     </>

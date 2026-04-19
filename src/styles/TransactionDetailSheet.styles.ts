@@ -118,6 +118,14 @@ export const transactionDetailSheetStyles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 4,
   },
+  senderLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textSupplementary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: -4,
+  },
   senderCard: {
     flexDirection: 'row',
     alignItems: 'center',

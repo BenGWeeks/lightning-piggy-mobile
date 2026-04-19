@@ -40,11 +40,16 @@ export interface WalletMetadata {
 
 export type TransactionType = 'incoming' | 'outgoing';
 
-/** Nostr sender identity resolved from a NIP-57 zap receipt. */
-export interface ZapSenderInfo {
-  /** Sender's hex pubkey, or null if the zap was sent anonymously. */
+/**
+ * The "other party" of a NIP-57 zap transaction — the sender for an
+ * incoming zap, the recipient for an outgoing one. Same shape for both
+ * directions so the UI can render symmetrically with just a preposition
+ * flip ("Received from …" vs "Sent to …").
+ */
+export interface ZapCounterpartyInfo {
+  /** Counterparty's hex pubkey, or null if an anonymous incoming zap. */
   pubkey: string | null;
-  /** Resolved kind-0 profile for the sender (null until fetched / not found). */
+  /** Resolved kind-0 profile (null until fetched / not found). */
   profile: {
     npub: string;
     name: string | null;
@@ -52,7 +57,7 @@ export interface ZapSenderInfo {
     picture: string | null;
     nip05: string | null;
   } | null;
-  /** Zap comment from the kind 9734 content field, if the sender typed one. */
+  /** Zap comment from the kind-9734 content field, if any. */
   comment: string;
   /** True when the zap request was marked anonymous (NIP-57 anon tag). */
   anonymous: boolean;
@@ -69,9 +74,9 @@ export interface WalletTransaction {
   bolt11?: string;
   /** Payment hash from the lightning invoice (hex). */
   paymentHash?: string;
-  /** Resolved Nostr sender info for incoming zaps. `undefined` = not yet
-   *  resolved; `null` = we tried and nothing was found. */
-  zapSender?: ZapSenderInfo | null;
+  /** Resolved counterparty info for Nostr-aware zaps.
+   *  `undefined` = not yet resolved; `null` = we tried and nothing was found. */
+  zapCounterparty?: ZapCounterpartyInfo | null;
   /** Boltz swap details (if this transaction was part of a swap) */
   swapId?: string;
   swapType?: 'reverse' | 'submarine';

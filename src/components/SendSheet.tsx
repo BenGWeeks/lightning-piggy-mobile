@@ -30,6 +30,8 @@ import { ChevronUp, ChevronDown } from 'lucide-react-native';
 import { resolveLightningAddress, fetchInvoice, LnurlPayParams } from '../services/lnurlService';
 import * as boltzService from '../services/boltzService';
 import * as onchainService from '../services/onchainService';
+import { npubEncode } from '../services/nostrService';
+import { recordOutgoing as recordOutgoingCounterparty } from '../services/zapCounterpartyStorage';
 
 interface Props {
   visible: boolean;
@@ -99,7 +101,7 @@ const SendSheet: React.FC<Props> = ({
     btcPrice,
     currency,
   } = useWallet();
-  const { signZapRequest } = useNostr();
+  const { signZapRequest, contacts } = useNostr();
   const [capturedWalletId, setCapturedWalletId] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
@@ -394,6 +396,38 @@ const SendSheet: React.FC<Props> = ({
 
         const bolt11 = await fetchInvoice(lnurlParams.callback, currentSats, invoiceOptions);
         await payInvoiceForWallet(walletId!, bolt11);
+
+        // If this was a NIP-57 zap, persist the recipient we just paid so
+        // the transaction list can render "Sent to [Name]" on refresh.
+        // The public zap receipt identifies us as sender, not the person
+        // we paid — we're the only party that actually knows who got it.
+        if (invoiceOptions.nostr && activePubkey) {
+          try {
+            const decoded = bolt11Decode(bolt11);
+            const hashSection = decoded.sections?.find(
+              (s: { name: string }) => s.name === 'payment_hash',
+            ) as { value?: string } | undefined;
+            const paymentHash = hashSection?.value;
+            if (paymentHash) {
+              const contact = contacts.find((c) => c.pubkey === activePubkey);
+              const p = contact?.profile ?? null;
+              await recordOutgoingCounterparty(paymentHash, {
+                pubkey: activePubkey,
+                profile: {
+                  npub: npubEncode(activePubkey),
+                  name: p?.name ?? null,
+                  displayName: p?.displayName ?? null,
+                  picture: p?.picture ?? activePicture ?? null,
+                  nip05: p?.nip05 ?? null,
+                },
+                comment: memo,
+                anonymous: false,
+              });
+            }
+          } catch {
+            // Non-fatal — attribution is a nice-to-have, not a payment invariant.
+          }
+        }
       } else {
         await payInvoiceForWallet(walletId!, invoiceData);
       }

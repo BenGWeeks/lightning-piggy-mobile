@@ -5,7 +5,7 @@ import { colors } from '../styles/theme';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet } from '../contexts/WalletContext';
 import TransactionDetailSheet, { TransactionDetailData } from './TransactionDetailSheet';
-import type { ZapSenderInfo } from '../types/wallet';
+import type { ZapCounterpartyInfo } from '../types/wallet';
 
 interface Transaction {
   type: string;
@@ -18,14 +18,14 @@ interface Transaction {
   swapId?: string;
   bolt11?: string;
   paymentHash?: string;
-  zapSender?: ZapSenderInfo | null;
+  zapCounterparty?: ZapCounterpartyInfo | null;
 }
 
 interface Props {
   transactions: Transaction[];
 }
 
-function zapSenderLabel(sender: ZapSenderInfo): string {
+function zapCounterpartyLabel(sender: ZapCounterpartyInfo): string {
   if (sender.anonymous) return 'Anonymous';
   const profile = sender.profile;
   if (profile?.displayName) return profile.displayName;
@@ -79,14 +79,14 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
           : item.blockHeight
             ? `Block ${item.blockHeight.toLocaleString()}`
             : '';
-        const zapSender = isIncoming ? item.zapSender : undefined;
+        const zapCounterparty = item.zapCounterparty ?? undefined;
         const label = isPending
           ? 'Pending'
-          : zapSender
-            ? `Received from ${zapSenderLabel(zapSender)}`
+          : zapCounterparty
+            ? `${isIncoming ? 'Received from' : 'Sent to'} ${zapCounterpartyLabel(zapCounterparty)}`
             : item.description || (isIncoming ? 'Received' : 'Sent');
         const fiatStr = satsToFiatString(amountSats, btcPrice, currency);
-        const senderAvatar = zapSender?.profile?.picture ?? null;
+        const counterpartyAvatar = zapCounterparty?.profile?.picture ?? null;
 
         return (
           <TouchableOpacity
@@ -96,9 +96,9 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
             accessibilityLabel={`Open details for ${label}`}
           >
             <View style={styles.itemLeft}>
-              {senderAvatar ? (
+              {counterpartyAvatar ? (
                 <Image
-                  source={{ uri: senderAvatar }}
+                  source={{ uri: counterpartyAvatar }}
                   style={styles.itemAvatar}
                   cachePolicy="disk"
                   contentFit="cover"

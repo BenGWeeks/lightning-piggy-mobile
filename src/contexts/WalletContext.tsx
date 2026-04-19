@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nwcService from '../services/nwcService';
 import * as nostrService from '../services/nostrService';
 import * as lnurlService from '../services/lnurlService';
+import * as zapCounterpartyStorage from '../services/zapCounterpartyStorage';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
@@ -12,7 +13,7 @@ import {
   WalletMetadata,
   WalletState,
   WalletTransaction,
-  ZapSenderInfo,
+  ZapCounterpartyInfo,
 } from '../types/wallet';
 
 const USER_NAME_KEY = 'user_display_name';
@@ -650,10 +651,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           // doesn't re-trigger relay lookups for transactions we've already
           // attributed.
           const existing = wallets.find((w) => w.id === walletId)?.transactions ?? [];
-          const senderByHash = new Map<string, WalletTransaction['zapSender']>();
+          const counterpartyByHash = new Map<string, WalletTransaction['zapCounterparty']>();
           for (const prev of existing) {
-            if (prev.paymentHash && prev.zapSender !== undefined) {
-              senderByHash.set(prev.paymentHash, prev.zapSender);
+            if (prev.paymentHash && prev.zapCounterparty !== undefined) {
+              counterpartyByHash.set(prev.paymentHash, prev.zapCounterparty);
             }
           }
           txs = raw.map((tx: any) => ({
@@ -664,7 +665,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             created_at: tx.created_at,
             bolt11: tx.invoice,
             paymentHash: tx.payment_hash,
-            zapSender: tx.payment_hash ? senderByHash.get(tx.payment_hash) : undefined,
+            zapCounterparty: tx.payment_hash ? counterpartyByHash.get(tx.payment_hash) : undefined,
           }));
         }
         updateWalletInState(walletId, { transactions: txs });
@@ -693,6 +694,27 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
    * is attached to the in-memory + AsyncStorage-cached transaction so the UI
    * updates without refetching relays on every render.
    */
+  const mergeResolverResults = useCallback(
+    (walletId: string, resultsByIdx: Map<number, ZapCounterpartyInfo | null>) => {
+      if (resultsByIdx.size === 0) return;
+      let nextTxs: WalletTransaction[] | null = null;
+      setWallets((prev) =>
+        prev.map((w) => {
+          if (w.id !== walletId) return w;
+          const updated = w.transactions.map((tx, i) =>
+            resultsByIdx.has(i) ? { ...tx, zapCounterparty: resultsByIdx.get(i) ?? null } : tx,
+          );
+          nextTxs = updated;
+          return { ...w, transactions: updated };
+        }),
+      );
+      if (nextTxs) {
+        AsyncStorage.setItem(`txs_${walletId}`, JSON.stringify(nextTxs)).catch(() => {});
+      }
+    },
+    [],
+  );
+
   const resolveZapSendersForWallet = useCallback(
     async (walletId: string) => {
       const userPubkey = nostrService.getCurrentUserPubkey();
@@ -726,13 +748,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           pending = current.transactions
             .map((tx, idx) => ({ tx, idx }))
             .filter(({ tx }) => {
-              if (tx.type !== 'incoming') return false;
-              // Populated sender object → already attributed, skip.
-              if (tx.zapSender && typeof tx.zapSender === 'object') return false;
+              // Populated counterparty → already attributed, skip.
+              if (tx.zapCounterparty && typeof tx.zapCounterparty === 'object') return false;
               // `null` with bolt11 → definitive negative from a prior run;
-              // skip so a user with hundreds of non-zap incoming payments
-              // doesn't re-query ~500 receipts on every refresh.
-              if (tx.zapSender === null && tx.bolt11) return false;
+              // skip so a user with hundreds of non-zap payments doesn't
+              // re-query / re-scan on every refresh.
+              if (tx.zapCounterparty === null && tx.bolt11) return false;
               return true;
             });
         }
@@ -740,6 +761,45 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       if (pending.length === 0) return;
 
+      const incomingPending = pending.filter(({ tx }) => tx.type === 'incoming');
+      const outgoingPending = pending.filter(({ tx }) => tx.type === 'outgoing');
+
+      // Accumulator — index-based so we can merge cached txs that lack
+      // paymentHash; outgoing attribution still keys off paymentHash inside.
+      const resultsByIdx = new Map<number, ZapCounterpartyInfo | null>();
+
+      // ─── Outgoing: look up from local storage (populated by SendSheet) ───
+      if (outgoingPending.length > 0) {
+        const hashes = outgoingPending
+          .map(({ tx }) => tx.paymentHash)
+          .filter((h): h is string => !!h);
+        const byHash = await zapCounterpartyStorage.getMany(hashes);
+        for (const { tx, idx } of outgoingPending) {
+          if (!tx.paymentHash) continue;
+          const info = byHash.get(tx.paymentHash);
+          if (info) {
+            resultsByIdx.set(idx, info);
+          } else if (tx.bolt11) {
+            // Definitive miss — we're the only party who could have
+            // recorded it at send time. No point retrying.
+            resultsByIdx.set(idx, null);
+          }
+        }
+      }
+
+      if (incomingPending.length === 0) {
+        // Nothing to fetch from relays — commit the outgoing results and bail.
+        if (__DEV__ && resultsByIdx.size > 0) {
+          const attributed = [...resultsByIdx.values()].filter((v) => v !== null).length;
+          console.log(
+            `[Zap/${walletAlias}] outgoing-only: attributed ${attributed}/${outgoingPending.length}`,
+          );
+        }
+        mergeResolverResults(walletId, resultsByIdx);
+        return;
+      }
+
+      // ─── Incoming: fetch receipts from relays and match ────────────────
       // `#p` is universally indexed across relays; `#bolt11` is not (damus,
       // primal and others reject it with `bad req: unindexed tag filter`).
       // We also intentionally omit `since` — narrow filters have been seen
@@ -751,9 +811,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       );
       if (__DEV__)
         console.log(
-          `[Zap/${walletAlias}] pending=${pending.length} recipients=${recipients.length} receipts=${receipts.length}`,
+          `[Zap/${walletAlias}] incoming=${incomingPending.length} outgoing=${outgoingPending.length} recipients=${recipients.length} receipts=${receipts.length}`,
         );
-      if (receipts.length === 0) return;
+      if (receipts.length === 0) {
+        mergeResolverResults(walletId, resultsByIdx);
+        return;
+      }
 
       // Primary match: bolt11. Secondary: (amount_sats, created_at) with a
       // 5-minute window, which handles cached txs that predate bolt11 capture.
@@ -800,12 +863,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return best?.receipt ?? null;
       };
 
-      // The merge key has to work for cached txs without paymentHash, so we
-      // carry the index along and update by position.
-      const resultsByIdx = new Map<number, ZapSenderInfo | null>();
-      const profileCache = new Map<string, ZapSenderInfo['profile']>();
+      const profileCache = new Map<string, ZapCounterpartyInfo['profile']>();
 
-      for (const { tx, idx } of pending) {
+      for (const { tx, idx } of incomingPending) {
         const receipt = findReceipt(tx);
         if (!receipt) {
           // Negative cache only when we had bolt11 to match with (definitive
@@ -819,7 +879,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           if (tx.bolt11) resultsByIdx.set(idx, null);
           continue;
         }
-        let profile: ZapSenderInfo['profile'] = null;
+        let profile: ZapCounterpartyInfo['profile'] = null;
         if (parsed.senderPubkey) {
           if (profileCache.has(parsed.senderPubkey)) {
             profile = profileCache.get(parsed.senderPubkey) ?? null;
@@ -854,22 +914,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           `[Zap/${walletAlias}] attributed ${attributed}/${pending.length} pending tx(s)`,
         );
       }
-      if (resultsByIdx.size === 0) return;
-
-      let nextTxs: WalletTransaction[] | null = null;
-      setWallets((prev) =>
-        prev.map((w) => {
-          if (w.id !== walletId) return w;
-          const updated = w.transactions.map((tx, i) =>
-            resultsByIdx.has(i) ? { ...tx, zapSender: resultsByIdx.get(i) ?? null } : tx,
-          );
-          nextTxs = updated;
-          return { ...w, transactions: updated };
-        }),
-      );
-      if (nextTxs) {
-        AsyncStorage.setItem(`txs_${walletId}`, JSON.stringify(nextTxs)).catch(() => {});
-      }
+      mergeResolverResults(walletId, resultsByIdx);
     },
     [lightningAddress, resolveLud16ToNostrPubkey],
   );
