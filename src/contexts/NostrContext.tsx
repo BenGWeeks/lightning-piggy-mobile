@@ -21,6 +21,11 @@ const SIGNER_TYPE_KEY = 'nostr_signer_type';
 const CONTACTS_CACHE_KEY = 'nostr_contacts_cache';
 const PROFILES_CACHE_KEY = 'nostr_profiles_cache';
 const CACHE_TIMESTAMP_KEY = 'nostr_cache_timestamp';
+const CONTACTS_TIMESTAMP_KEY = 'nostr_contacts_timestamp';
+const OWN_PROFILE_CACHE_KEY = 'nostr_own_profile_cache';
+const OWN_PROFILE_TIMESTAMP_KEY = 'nostr_own_profile_timestamp';
+const RELAY_LIST_CACHE_KEY = 'nostr_relay_list_cache';
+const RELAY_LIST_TIMESTAMP_KEY = 'nostr_relay_list_timestamp';
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 interface NostrContextType {
@@ -76,10 +81,28 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const loadProfile = useCallback(async (pk: string, relayUrls: string[]) => {
     const t0 = Date.now();
+    // Cache-fresh fast path: hydrate UI from cache and skip the relay RTT.
+    try {
+      const [cachedJson, tsStr] = await Promise.all([
+        AsyncStorage.getItem(OWN_PROFILE_CACHE_KEY),
+        AsyncStorage.getItem(OWN_PROFILE_TIMESTAMP_KEY),
+      ]);
+      if (cachedJson && tsStr && Date.now() - parseInt(tsStr, 10) < CACHE_MAX_AGE_MS) {
+        setProfile(JSON.parse(cachedJson) as NostrProfile);
+        if (__DEV__) console.log(`[Nostr] fetchProfile: skipped (cache fresh)`);
+        return;
+      }
+    } catch {
+      // ignore — fall through to the network fetch
+    }
     const fetchedProfile = await nostrService.fetchProfile(pk, relayUrls);
     if (__DEV__) console.log(`[Nostr] fetchProfile: ${Date.now() - t0}ms`);
     if (fetchedProfile) {
       setProfile(fetchedProfile);
+      InteractionManager.runAfterInteractions(() => {
+        AsyncStorage.setItem(OWN_PROFILE_CACHE_KEY, JSON.stringify(fetchedProfile)).catch(() => {});
+        AsyncStorage.setItem(OWN_PROFILE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+      });
     }
   }, []);
 
@@ -126,11 +149,41 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const loadContacts = useCallback(async (pk: string, relayUrls: string[]) => {
     const t0 = Date.now();
-    const fetchedContacts = await nostrService.fetchContactList(pk, relayUrls);
-    if (__DEV__)
-      console.log(
-        `[Nostr] fetchContactList: ${Date.now() - t0}ms, ${fetchedContacts.length} contacts`,
-      );
+
+    // Read the contact-list cache + its timestamp up front. If it's fresh,
+    // skip the kind-3 relay fetch entirely — saves a ~3s RTT.
+    let cachedContacts: NostrContact[] | null = null;
+    let contactsAgeMs = Infinity;
+    try {
+      const [contactsJson, ctsStr] = await Promise.all([
+        AsyncStorage.getItem(CONTACTS_CACHE_KEY),
+        AsyncStorage.getItem(CONTACTS_TIMESTAMP_KEY),
+      ]);
+      if (contactsJson) cachedContacts = JSON.parse(contactsJson);
+      if (ctsStr) contactsAgeMs = Date.now() - parseInt(ctsStr, 10);
+    } catch {
+      // ignore — fall through to relay fetch below
+    }
+    const contactsCacheFresh = contactsAgeMs < CACHE_MAX_AGE_MS;
+
+    let fetchedContacts: NostrContact[];
+    if (contactsCacheFresh && cachedContacts) {
+      fetchedContacts = cachedContacts;
+      if (__DEV__)
+        console.log(
+          `[Nostr] fetchContactList: skipped (cache fresh @ ${Math.round(contactsAgeMs / 1000)}s old, ${fetchedContacts.length} contacts)`,
+        );
+    } else {
+      fetchedContacts = await nostrService.fetchContactList(pk, relayUrls);
+      if (__DEV__)
+        console.log(
+          `[Nostr] fetchContactList: ${Date.now() - t0}ms, ${fetchedContacts.length} contacts`,
+        );
+      InteractionManager.runAfterInteractions(() => {
+        AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(fetchedContacts)).catch(() => {});
+        AsyncStorage.setItem(CONTACTS_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+      });
+    }
 
     // Read the existing profile cache + its timestamp up front so we can
     // (a) merge cached profiles into the freshly-fetched contact list for
@@ -158,11 +211,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         })),
       ),
     );
-
-    // Cache the contact list (deferred to not block UI)
-    InteractionManager.runAfterInteractions(() => {
-      AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(fetchedContacts)).catch(() => {});
-    });
 
     if (fetchedContacts.length === 0) return;
 
@@ -217,10 +265,31 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const loadRelays = useCallback(async (pk: string): Promise<string[]> => {
     const t0 = Date.now();
+    // Cache-fresh fast path — NIP-65 relay lists rarely change, so serve
+    // from cache when under the TTL and skip the ~3s relay round trip.
+    try {
+      const [cachedJson, tsStr] = await Promise.all([
+        AsyncStorage.getItem(RELAY_LIST_CACHE_KEY),
+        AsyncStorage.getItem(RELAY_LIST_TIMESTAMP_KEY),
+      ]);
+      if (cachedJson && tsStr && Date.now() - parseInt(tsStr, 10) < CACHE_MAX_AGE_MS) {
+        const cached = JSON.parse(cachedJson) as RelayConfig[];
+        setRelays(cached);
+        if (__DEV__) console.log(`[Nostr] fetchRelayList: skipped (cache fresh)`);
+        const readRelays = cached.filter((r) => r.read).map((r) => r.url);
+        return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
+      }
+    } catch {
+      // ignore — fall through to the network fetch
+    }
     const relayList = await nostrService.fetchRelayList(pk, nostrService.DEFAULT_RELAYS);
     if (__DEV__)
       console.log(`[Nostr] fetchRelayList: ${Date.now() - t0}ms, ${relayList.length} relays`);
     setRelays(relayList);
+    InteractionManager.runAfterInteractions(() => {
+      AsyncStorage.setItem(RELAY_LIST_CACHE_KEY, JSON.stringify(relayList)).catch(() => {});
+      AsyncStorage.setItem(RELAY_LIST_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+    });
     const readRelays = relayList.filter((r) => r.read).map((r) => r.url);
     return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
   }, []);
@@ -372,7 +441,16 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     await SecureStore.deleteItemAsync(NSEC_KEY);
     await SecureStore.deleteItemAsync(PUBKEY_KEY);
     await SecureStore.deleteItemAsync(SIGNER_TYPE_KEY);
-    await AsyncStorage.multiRemove([CONTACTS_CACHE_KEY, PROFILES_CACHE_KEY, CACHE_TIMESTAMP_KEY]);
+    await AsyncStorage.multiRemove([
+      CONTACTS_CACHE_KEY,
+      CONTACTS_TIMESTAMP_KEY,
+      PROFILES_CACHE_KEY,
+      CACHE_TIMESTAMP_KEY,
+      OWN_PROFILE_CACHE_KEY,
+      OWN_PROFILE_TIMESTAMP_KEY,
+      RELAY_LIST_CACHE_KEY,
+      RELAY_LIST_TIMESTAMP_KEY,
+    ]);
 
     setPubkey(null);
     setProfile(null);
