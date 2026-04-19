@@ -96,6 +96,7 @@ const SendSheet: React.FC<Props> = ({
   const {
     payInvoiceForWallet,
     refreshBalanceForWallet,
+    fetchTransactionsForWallet,
     activeWalletId,
     wallets,
     btcPrice,
@@ -438,7 +439,14 @@ const SendSheet: React.FC<Props> = ({
       } else {
         await payInvoiceForWallet(walletId!, invoiceData);
       }
-      if (walletId) await refreshBalanceForWallet(walletId);
+      if (walletId) {
+        // Refresh both balance and tx list so the user sees the send
+        // appear without having to pull-to-refresh manually. The tx
+        // list refresh also re-runs the zap-sender resolver, which
+        // picks up the counterparty entry we just wrote.
+        await refreshBalanceForWallet(walletId);
+        fetchTransactionsForWallet(walletId).catch(() => {});
+      }
       Alert.alert('Payment Sent', 'Your payment was sent successfully!', [
         { text: 'OK', onPress: onClose },
       ]);
