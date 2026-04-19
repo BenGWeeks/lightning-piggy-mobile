@@ -768,20 +768,85 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // paymentHash; outgoing attribution still keys off paymentHash inside.
       const resultsByIdx = new Map<number, ZapCounterpartyInfo | null>();
 
-      // ─── Outgoing: look up from local storage (populated by SendSheet) ───
+      // Combine app defaults with the user's configured NIP-65 read
+      // relays so we hit the relays their contacts actually publish to.
+      const queryRelays = [
+        ...new Set([...nostrService.DEFAULT_RELAYS, ...nostrService.getCurrentUserReadRelays()]),
+      ];
+
+      // ─── Outgoing ──────────────────────────────────────────────────────
+      // Primary: local storage populated by SendSheet at pay-time (fast,
+      // always works on the device that sent).
+      // Fallback: receipts where the LNURL server tagged `#P: [userPubkey]`
+      // — cross-device path for zaps sent from another device, only works
+      // when the server includes the optional uppercase-P tag.
       if (outgoingPending.length > 0) {
         const hashes = outgoingPending
           .map(({ tx }) => tx.paymentHash)
           .filter((h): h is string => !!h);
         const byHash = await zapCounterpartyStorage.getMany(hashes);
+        if (__DEV__)
+          console.log(
+            `[Zap/${walletAlias}] outgoing lookup: hashes=${hashes.length} local_hits=${byHash.size}`,
+          );
+
+        const unmatched = outgoingPending.filter(
+          ({ tx }) => tx.paymentHash && !byHash.has(tx.paymentHash),
+        );
+
+        if (userPubkey && unmatched.length > 0) {
+          const sentReceipts = await nostrService.fetchZapReceiptsForSender(
+            userPubkey,
+            queryRelays,
+            { limit: 500 },
+          );
+          if (__DEV__)
+            console.log(
+              `[Zap/${walletAlias}] outgoing relay fallback: receipts=${sentReceipts.length}`,
+            );
+          const byBolt11Outgoing = new Map<string, (typeof sentReceipts)[number]>();
+          for (const r of sentReceipts) {
+            const b = r.tags.find((t) => t[0] === 'bolt11')?.[1];
+            if (b) byBolt11Outgoing.set(b, r);
+          }
+          for (const { tx, idx } of unmatched) {
+            if (!tx.bolt11) continue;
+            const r = byBolt11Outgoing.get(tx.bolt11);
+            if (!r) continue;
+            // The receipt's `p` tag carries the recipient pubkey. We
+            // fetch their profile lazily; anon zaps skip the profile.
+            const recipientPubkey = r.tags.find((t) => t[0] === 'p')?.[1] ?? null;
+            const commentTag = nostrService.parseZapReceipt(r);
+            let profile: ZapCounterpartyInfo['profile'] = null;
+            if (recipientPubkey) {
+              const p = await nostrService.fetchProfile(recipientPubkey, queryRelays);
+              if (p) {
+                profile = {
+                  npub: p.npub,
+                  name: p.name,
+                  displayName: p.displayName,
+                  picture: p.picture,
+                  nip05: p.nip05,
+                };
+              }
+            }
+            byHash.set(tx.paymentHash!, {
+              pubkey: recipientPubkey,
+              profile,
+              comment: commentTag?.comment ?? '',
+              anonymous: commentTag?.anonymous ?? false,
+            });
+          }
+        }
+
         for (const { tx, idx } of outgoingPending) {
           if (!tx.paymentHash) continue;
           const info = byHash.get(tx.paymentHash);
           if (info) {
             resultsByIdx.set(idx, info);
           } else if (tx.bolt11) {
-            // Definitive miss — we're the only party who could have
-            // recorded it at send time. No point retrying.
+            // Tried both paths and nothing matched — negative-cache so we
+            // don't redo the work on every refresh.
             resultsByIdx.set(idx, null);
           }
         }
@@ -804,11 +869,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // primal and others reject it with `bad req: unindexed tag filter`).
       // We also intentionally omit `since` — narrow filters have been seen
       // to return empty from relays that happily serve the wider query.
-      const receipts = await nostrService.fetchZapReceiptsForRecipient(
-        recipients,
-        nostrService.DEFAULT_RELAYS,
-        { limit: 500 },
-      );
+      const receipts = await nostrService.fetchZapReceiptsForRecipient(recipients, queryRelays, {
+        limit: 500,
+      });
       if (__DEV__)
         console.log(
           `[Zap/${walletAlias}] incoming=${incomingPending.length} outgoing=${outgoingPending.length} recipients=${recipients.length} receipts=${receipts.length}`,
@@ -884,10 +947,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           if (profileCache.has(parsed.senderPubkey)) {
             profile = profileCache.get(parsed.senderPubkey) ?? null;
           } else {
-            const p = await nostrService.fetchProfile(
-              parsed.senderPubkey,
-              nostrService.DEFAULT_RELAYS,
-            );
+            const p = await nostrService.fetchProfile(parsed.senderPubkey, queryRelays);
             profile = p
               ? {
                   npub: p.npub,

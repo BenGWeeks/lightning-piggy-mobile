@@ -11,11 +11,14 @@ import type { NostrProfile, NostrContact, RelayConfig } from '../types/nostr';
 
 const pool = new SimplePool();
 
-// Shared pubkey of the currently logged-in Nostr user. Kept as module state
-// because `WalletProvider` wraps `NostrProvider` in the tree, so the wallet
-// layer can't read `NostrContext` via React hooks — but it needs the
-// recipient pubkey to query zap receipts via the `#p` filter.
+// Shared pubkey + read relays of the currently logged-in Nostr user.
+// Kept as module state because `WalletProvider` wraps `NostrProvider` in
+// the tree, so the wallet layer can't read `NostrContext` via React hooks
+// — but it needs the recipient pubkey (for the `#p` zap-receipt filter)
+// and the user's configured read relays (so queries also hit the relays
+// that actually carry their zap history).
 let _currentUserPubkey: string | null = null;
+let _currentUserReadRelays: string[] = [];
 const _pubkeyListeners = new Set<(pubkey: string | null) => void>();
 export function setCurrentUserPubkey(pubkey: string | null): void {
   if (_currentUserPubkey === pubkey) return;
@@ -30,6 +33,12 @@ export function setCurrentUserPubkey(pubkey: string | null): void {
 }
 export function getCurrentUserPubkey(): string | null {
   return _currentUserPubkey;
+}
+export function setCurrentUserReadRelays(relays: string[]): void {
+  _currentUserReadRelays = [...relays];
+}
+export function getCurrentUserReadRelays(): string[] {
+  return _currentUserReadRelays;
 }
 export function onCurrentUserPubkeyChange(fn: (pubkey: string | null) => void): () => void {
   _pubkeyListeners.add(fn);
@@ -343,26 +352,56 @@ export async function fetchZapReceiptsForRecipient(
   relays: string[],
   options: { limit?: number; since?: number } = {},
 ): Promise<{ tags: string[][]; created_at: number; id: string }[]> {
-  const pubkeys = Array.isArray(recipientPubkeys) ? recipientPubkeys : [recipientPubkeys];
-  const dedupedPubkeys = [...new Set(pubkeys.filter(Boolean))];
-  if (dedupedPubkeys.length === 0) return [];
+  return fetchZapReceiptsByTag('#p', recipientPubkeys, relays, options);
+}
+
+/**
+ * Fetch kind-9735 zap receipts where the SENDER pubkey matches one of
+ * the given pubkeys (via the optional uppercase `P` tag per NIP-57).
+ *
+ * Used for cross-device attribution of outgoing zaps: when a zap was
+ * sent from a different device, local storage has no entry for it. If
+ * the recipient's LNURL server included `['P', <sender_pubkey>]` in
+ * the receipt we can still resolve the recipient by querying relays.
+ *
+ * Servers MAY omit the `P` tag (NIP-57 marks it optional), so this is
+ * a best-effort fallback, not a replacement for the local-storage path.
+ */
+export async function fetchZapReceiptsForSender(
+  senderPubkeys: string | string[],
+  relays: string[],
+  options: { limit?: number; since?: number } = {},
+): Promise<{ tags: string[][]; created_at: number; id: string }[]> {
+  return fetchZapReceiptsByTag('#P', senderPubkeys, relays, options);
+}
+
+async function fetchZapReceiptsByTag(
+  tag: '#p' | '#P',
+  pubkeys: string | string[],
+  relays: string[],
+  options: { limit?: number; since?: number } = {},
+): Promise<{ tags: string[][]; created_at: number; id: string }[]> {
+  const arr = Array.isArray(pubkeys) ? pubkeys : [pubkeys];
+  const deduped = [...new Set(arr.filter(Boolean))];
+  if (deduped.length === 0) return [];
   const allRelays = [...new Set([...relays, ...DEFAULT_RELAYS])];
   trackRelays(allRelays);
-  const filter: { kinds: number[]; '#p': string[]; limit?: number; since?: number } = {
+  const baseFilter = {
     kinds: [9735],
-    '#p': dedupedPubkeys,
     limit: options.limit ?? 500,
+    ...(options.since ? { since: options.since } : {}),
   };
-  if (options.since) filter.since = options.since;
+  // The `tag` parameter is a literal '#p' or '#P' — cast to the nostr-tools
+  // filter type which expects `#<letter>` index signatures.
+  const filter = { ...baseFilter, [tag]: deduped } as Parameters<typeof pool.querySync>[1];
   try {
     const events = await withTimeout(pool.querySync(allRelays, filter), 15000);
     if (!events) return [];
-    // Dedupe by event id — multiple relays typically return the same receipt.
     const byId = new Map<string, { tags: string[][]; created_at: number; id: string }>();
     for (const e of events) byId.set(e.id, e);
     return Array.from(byId.values());
   } catch (error) {
-    if (__DEV__) console.warn('[Nostr] fetchZapReceiptsForRecipient failed:', error);
+    if (__DEV__) console.warn(`[Nostr] fetchZapReceiptsByTag ${tag} failed:`, error);
     return [];
   }
 }
