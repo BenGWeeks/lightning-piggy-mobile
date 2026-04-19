@@ -408,6 +408,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       return { success: true };
     },
+    // Deliberately depend on wallets.length (not wallets) — the callback only
+    // cares about the count for duplicate checks. Adding wallets would bust
+    // the callback on every tx refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [wallets.length, activeWalletId],
   );
 
@@ -463,6 +467,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       return { success: true };
     },
+    // Same reasoning as addWallet — depend on the count, not the array.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [wallets.length, activeWalletId],
   );
 
@@ -657,12 +663,21 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               counterpartyByHash.set(prev.paymentHash, prev.zapCounterparty);
             }
           }
-          txs = raw.map((tx: any) => ({
+          type NwcTx = {
+            type: 'incoming' | 'outgoing';
+            amount: number;
+            description?: string | null;
+            settled_at?: number | null;
+            created_at?: number | null;
+            invoice?: string;
+            payment_hash?: string;
+          };
+          txs = (raw as NwcTx[]).map((tx) => ({
             type: tx.type,
             amount: tx.amount,
-            description: tx.description,
-            settled_at: tx.settled_at,
-            created_at: tx.created_at,
+            description: tx.description ?? undefined,
+            settled_at: tx.settled_at ?? undefined,
+            created_at: tx.created_at ?? undefined,
             bolt11: tx.invoice,
             paymentHash: tx.payment_hash,
             zapCounterparty: tx.payment_hash ? counterpartyByHash.get(tx.payment_hash) : undefined,
@@ -801,7 +816,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             const b = r.tags.find((t) => t[0] === 'bolt11')?.[1];
             if (b) byBolt11Outgoing.set(b, r);
           }
-          for (const { tx, idx } of unmatched) {
+          for (const { tx } of unmatched) {
             if (!tx.bolt11) continue;
             const r = byBolt11Outgoing.get(tx.bolt11);
             if (!r) continue;

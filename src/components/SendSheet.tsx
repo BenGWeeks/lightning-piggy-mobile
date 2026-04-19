@@ -448,8 +448,25 @@ const SendSheet: React.FC<Props> = ({
         // appear without having to pull-to-refresh manually. The tx
         // list refresh also re-runs the zap-sender resolver, which
         // picks up the counterparty entry we just wrote.
+        //
+        // Small delay before the tx-list refresh: LNbits records the
+        // outgoing payment asynchronously after pay_invoice returns, so
+        // an immediate list_transactions call can miss the new tx and
+        // the resolver then runs on a stale list (pending=0, silent).
+        // We also refetch a second time in case the first call raced.
         await refreshBalanceForWallet(walletId);
-        fetchTransactionsForWallet(walletId).catch(() => {});
+        const capturedWalletId = walletId;
+        (async () => {
+          try {
+            await new Promise((r) => setTimeout(r, 600));
+            await fetchTransactionsForWallet(capturedWalletId);
+            await new Promise((r) => setTimeout(r, 1500));
+            await fetchTransactionsForWallet(capturedWalletId);
+          } catch {
+            // Refresh failures are non-fatal — a manual pull-to-refresh
+            // or the next natural refresh will pick the tx up.
+          }
+        })();
       }
       Alert.alert('Payment Sent', 'Your payment was sent successfully!', [
         { text: 'OK', onPress: onClose },
