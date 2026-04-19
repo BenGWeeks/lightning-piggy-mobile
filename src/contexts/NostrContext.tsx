@@ -123,14 +123,17 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const loadContactsFromCache = useCallback(async () => {
     try {
       const t0 = Date.now();
-      const [contactsJson, profilesJson, timestampStr] = await Promise.all([
+      // Contacts freshness is gated by CONTACTS_TIMESTAMP_KEY (the
+      // contact-list's own write time), not the profiles timestamp. They
+      // get separate keys so a successful contact refresh isn't blocked
+      // by an unrelated profiles cache entry.
+      const [contactsJson, profilesJson, contactsTsStr] = await Promise.all([
         AsyncStorage.getItem(CONTACTS_CACHE_KEY),
         AsyncStorage.getItem(PROFILES_CACHE_KEY),
-        AsyncStorage.getItem(CACHE_TIMESTAMP_KEY),
+        AsyncStorage.getItem(CONTACTS_TIMESTAMP_KEY),
       ]);
-      // Skip stale cache (older than 24h)
-      if (timestampStr && Date.now() - parseInt(timestampStr, 10) > CACHE_MAX_AGE_MS) {
-        if (__DEV__) console.log('[Nostr] cache expired, skipping');
+      if (contactsTsStr && Date.now() - parseInt(contactsTsStr, 10) > CACHE_MAX_AGE_MS) {
+        if (__DEV__) console.log('[Nostr] contacts cache expired, skipping');
         return false;
       }
       if (contactsJson) {
@@ -349,20 +352,32 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         // Load cached contacts immediately (no network, <100ms)
         await loadContactsFromCache();
 
-        // Defer relay fetches until after animations/rendering complete, and
-        // fire the three independent refreshes in parallel rather than
-        // waterfalling them (previously ~12s sequential; ~3s parallel).
-        // `loadRelays` is used purely for informing Settings — the other
-        // two can safely use DEFAULT_RELAYS without waiting for it.
-        InteractionManager.runAfterInteractions(() => {
-          const defaults = nostrService.DEFAULT_RELAYS;
+        // Defer relay fetches until after animations/rendering complete.
+        // Seed the working relay set from the cached NIP-65 relay list so
+        // `loadProfile` / `loadContacts` hit the relays the user actually
+        // publishes to — not `DEFAULT_RELAYS`, which might miss their
+        // kind-0/kind-3 entirely. Only falls back to DEFAULT_RELAYS on
+        // the very first login (before any relay cache exists).
+        InteractionManager.runAfterInteractions(async () => {
+          let workingRelays: string[] = nostrService.DEFAULT_RELAYS;
+          try {
+            const cachedJson = await AsyncStorage.getItem(RELAY_LIST_CACHE_KEY);
+            if (cachedJson) {
+              const cached = JSON.parse(cachedJson) as RelayConfig[];
+              const readRelays = cached.filter((r) => r.read).map((r) => r.url);
+              if (readRelays.length > 0) workingRelays = readRelays;
+            }
+          } catch {
+            // Cache read failure → DEFAULT_RELAYS fallback, same as first login.
+          }
+
           const t0 = Date.now();
           Promise.all([
             loadRelays(pk!).catch((e) => console.warn('[Nostr] relay refresh failed:', e)),
-            loadProfile(pk!, defaults).catch((e) =>
+            loadProfile(pk!, workingRelays).catch((e) =>
               console.warn('[Nostr] profile refresh failed:', e),
             ),
-            loadContacts(pk!, defaults).catch((e) =>
+            loadContacts(pk!, workingRelays).catch((e) =>
               console.warn('[Nostr] contact refresh failed:', e),
             ),
           ]).then(() => {

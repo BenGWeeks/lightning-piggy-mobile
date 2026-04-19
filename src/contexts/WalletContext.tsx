@@ -258,6 +258,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // RTT, so serial init of N wallets was ~5N seconds. For typical
         // installs (1-3 wallets) the relays handle concurrent connects
         // fine; state updates are individual so per-wallet races are safe.
+        //
+        // Exception: the global lightning-address is a single-writer field
+        // racy under parallel connects — previously it was deterministic
+        // because connects were sequential. Claim it once here so the first
+        // wallet to resolve an address wins, and later wallets leave it
+        // alone.
+        let lightningAddressClaimed = Boolean(savedAddress);
         await Promise.all(
           walletList.map(async (wallet) => {
             try {
@@ -294,9 +301,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                   ),
                 );
 
-                if ((lud16 || info?.lud16) && !savedAddress) {
+                if ((lud16 || info?.lud16) && !lightningAddressClaimed) {
                   const addr = lud16 || info?.lud16 || null;
                   if (addr) {
+                    // Claim synchronously before any await so the next
+                    // wallet in the Promise.all sees `lightningAddressClaimed`
+                    // as true and skips overwriting.
+                    lightningAddressClaimed = true;
                     setLightningAddressState(addr);
                     await AsyncStorage.setItem(LIGHTNING_ADDRESS_KEY, addr);
                   }
