@@ -170,16 +170,21 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // can't find receipts for the user's incoming zaps.
   const lud16PubkeyCacheRef = useRef<Map<string, string | null>>(new Map());
   const resolveLud16ToNostrPubkey = useCallback(async (lud16: string): Promise<string | null> => {
-    if (!lud16 || !lud16.includes('@')) return null;
+    // Lightning addresses are effectively case-insensitive and often carry
+    // incidental whitespace (copy/paste). Normalize before cache lookup
+    // and resolution so `Alice@Foo.com` and `alice@foo.com` don't round-
+    // trip twice.
+    const normalized = lud16.trim().toLowerCase();
+    if (!normalized || !normalized.includes('@')) return null;
     const cache = lud16PubkeyCacheRef.current;
-    if (cache.has(lud16)) return cache.get(lud16) ?? null;
+    if (cache.has(normalized)) return cache.get(normalized) ?? null;
     try {
-      const params = await lnurlService.resolveLightningAddress(lud16);
+      const params = await lnurlService.resolveLightningAddress(normalized);
       const pk = params.allowsNostr && params.nostrPubkey ? params.nostrPubkey : null;
-      cache.set(lud16, pk);
+      cache.set(normalized, pk);
       return pk;
     } catch {
-      cache.set(lud16, null);
+      cache.set(normalized, null);
       return null;
     }
   }, []);
@@ -933,7 +938,17 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return best?.receipt ?? null;
       };
 
-      const profileCache = new Map<string, ZapCounterpartyInfo['profile']>();
+      // First pass: parse every receipt + collect the unique sender
+      // pubkeys so we can batch-fetch their profiles in one relay round
+      // trip instead of a serial per-tx `fetchProfile`.
+      type ParsedEntry = {
+        idx: number;
+        senderPubkey: string | null;
+        comment: string;
+        anonymous: boolean;
+      };
+      const parsedEntries: ParsedEntry[] = [];
+      const pubkeysToFetch = new Set<string>();
 
       for (const { tx, idx } of incomingPending) {
         const receipt = findReceipt(tx);
@@ -949,29 +964,39 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           if (tx.bolt11) resultsByIdx.set(idx, null);
           continue;
         }
-        let profile: ZapCounterpartyInfo['profile'] = null;
-        if (parsed.senderPubkey) {
-          if (profileCache.has(parsed.senderPubkey)) {
-            profile = profileCache.get(parsed.senderPubkey) ?? null;
-          } else {
-            const p = await nostrService.fetchProfile(parsed.senderPubkey, queryRelays);
-            profile = p
-              ? {
-                  npub: p.npub,
-                  name: p.name,
-                  displayName: p.displayName,
-                  picture: p.picture,
-                  nip05: p.nip05,
-                }
-              : null;
-            profileCache.set(parsed.senderPubkey, profile);
-          }
-        }
-        resultsByIdx.set(idx, {
-          pubkey: parsed.senderPubkey,
-          profile,
+        parsedEntries.push({
+          idx,
+          senderPubkey: parsed.senderPubkey,
           comment: parsed.comment,
           anonymous: parsed.anonymous,
+        });
+        if (parsed.senderPubkey && !parsed.anonymous) pubkeysToFetch.add(parsed.senderPubkey);
+      }
+
+      // Batch profile fetch. Returns a Map keyed by pubkey.
+      const profileMap =
+        pubkeysToFetch.size > 0
+          ? await nostrService.fetchProfiles([...pubkeysToFetch], queryRelays)
+          : undefined;
+
+      const toCounterpartyProfile = (pk: string): ZapCounterpartyInfo['profile'] => {
+        const p = profileMap?.get(pk);
+        if (!p) return null;
+        return {
+          npub: p.npub,
+          name: p.name,
+          displayName: p.displayName,
+          picture: p.picture,
+          nip05: p.nip05,
+        };
+      };
+
+      for (const entry of parsedEntries) {
+        resultsByIdx.set(entry.idx, {
+          pubkey: entry.senderPubkey,
+          profile: entry.senderPubkey ? toCounterpartyProfile(entry.senderPubkey) : null,
+          comment: entry.comment,
+          anonymous: entry.anonymous,
         });
       }
 

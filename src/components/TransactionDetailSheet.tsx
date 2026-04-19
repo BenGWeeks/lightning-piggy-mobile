@@ -29,7 +29,7 @@ export interface TransactionDetailData {
   txid?: string;
   /** Optional — if set, we can surface Boltz swap state */
   swapId?: string;
-  /** Resolved Nostr sender info for incoming zaps. */
+  /** Resolved Nostr counterparty info for zaps (incoming sender or outgoing recipient). */
   zapCounterparty?: ZapCounterpartyInfo | null;
 }
 

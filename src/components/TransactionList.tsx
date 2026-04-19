@@ -34,7 +34,7 @@ function zapCounterpartyLabel(cp: ZapCounterpartyInfo): string {
   return 'Nostr user';
 }
 
-/** Parse URL-shaped descriptions into `{ display, subtitle }` so a row like
+/** Parse URL-shaped descriptions into `{ primary, subtitle }` so a row like
  * "https://memestore.satmo-dev.xyz - Order #4497" renders with the domain
  * prominent and the full URL/memo below, matching Primal's treatment. */
 function splitDescription(desc: string): { primary: string; subtitle: string | null } {
@@ -74,9 +74,19 @@ function formatTime(ts: number): string {
 
 const INITIAL_COUNT = 20;
 
-type ItemRow = { kind: 'tx'; tx: Transaction };
-type HeaderRow = { kind: 'header'; label: string };
+type ItemRow = { kind: 'tx'; tx: Transaction; key: string };
+type HeaderRow = { kind: 'header'; label: string; key: string };
 type Row = ItemRow | HeaderRow;
+
+/** Build a deterministic key for a transaction row. Prefers settled-payment
+ * identifiers, falling back to on-chain txid, then bolt11, then a composite
+ * of the stable shape fields so pending rows still get distinct keys. */
+function txKey(tx: Transaction, fallbackIndex: number): string {
+  if (tx.paymentHash) return `ph:${tx.paymentHash}`;
+  if (tx.txid) return `tx:${tx.txid}`;
+  if (tx.bolt11) return `b11:${tx.bolt11}`;
+  return `fb:${tx.type}:${tx.created_at ?? tx.settled_at ?? 'pending'}:${tx.amount}:${fallbackIndex}`;
+}
 
 const TransactionList: React.FC<Props> = ({ transactions }) => {
   const { btcPrice, currency } = useWallet();
@@ -109,25 +119,26 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
   // timestamp) get a "Pending" header so they still group visually.
   const rows: Row[] = [];
   let currentDayKey: string | null = null;
-  for (const tx of visibleTransactions) {
+  visibleTransactions.forEach((tx, fallbackIndex) => {
     const ts = tx.settled_at || tx.created_at;
     const dayKey = ts ? new Date(ts * 1000).toDateString() : '__pending__';
     if (dayKey !== currentDayKey) {
       rows.push({
         kind: 'header',
         label: ts ? formatDayHeader(ts) : 'Pending',
+        key: `h:${dayKey}`,
       });
       currentDayKey = dayKey;
     }
-    rows.push({ kind: 'tx', tx });
-  }
+    rows.push({ kind: 'tx', tx, key: txKey(tx, fallbackIndex) });
+  });
 
   return (
     <View style={styles.list}>
-      {rows.map((row, index) => {
+      {rows.map((row) => {
         if (row.kind === 'header') {
           return (
-            <Text key={`h-${index}`} style={styles.dayHeader}>
+            <Text key={row.key} style={styles.dayHeader}>
               {row.label}
             </Text>
           );
@@ -162,7 +173,7 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
 
         return (
           <TouchableOpacity
-            key={`t-${index}`}
+            key={row.key}
             style={[styles.item, isPending && styles.itemPending]}
             onPress={() => setDetail(item as TransactionDetailData)}
             accessibilityLabel={`Open details for ${primary}`}
