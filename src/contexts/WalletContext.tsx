@@ -215,54 +215,59 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           setActiveWalletId(walletStates[0].id);
         }
 
-        // Connect wallets sequentially to avoid overwhelming the relay
-        for (const wallet of walletList) {
-          try {
-            if (wallet.walletType === 'onchain') {
-              const bal = await onchainService.getBalance(wallet.id);
-              setWallets((prev) =>
-                prev.map((w) =>
-                  w.id === wallet.id ? { ...w, isConnected: false, balance: bal } : w,
-                ),
-              );
-              continue;
-            }
+        // Connect wallets in parallel — each NWC handshake is ~5s of relay
+        // RTT, so serial init of N wallets was ~5N seconds. For typical
+        // installs (1-3 wallets) the relays handle concurrent connects
+        // fine; state updates are individual so per-wallet races are safe.
+        await Promise.all(
+          walletList.map(async (wallet) => {
+            try {
+              if (wallet.walletType === 'onchain') {
+                const bal = await onchainService.getBalance(wallet.id);
+                setWallets((prev) =>
+                  prev.map((w) =>
+                    w.id === wallet.id ? { ...w, isConnected: false, balance: bal } : w,
+                  ),
+                );
+                return;
+              }
 
-            // NWC wallet: connect via Nostr
-            const nwcUrl = await walletStorage.getNwcUrl(wallet.id);
-            if (!nwcUrl) continue;
+              // NWC wallet: connect via Nostr
+              const nwcUrl = await walletStorage.getNwcUrl(wallet.id);
+              if (!nwcUrl) return;
 
-            const result = await nwcService.connect(wallet.id, nwcUrl);
-            if (result.success) {
-              const info = await nwcService.getInfo(wallet.id);
-              const lud16 = parseNwcLud16(nwcUrl);
+              const result = await nwcService.connect(wallet.id, nwcUrl);
+              if (result.success) {
+                const info = await nwcService.getInfo(wallet.id);
+                const lud16 = parseNwcLud16(nwcUrl);
 
-              setWallets((prev) =>
-                prev.map((w) =>
-                  w.id === wallet.id
-                    ? {
-                        ...w,
-                        isConnected: true,
-                        balance: result.balance ?? null,
-                        walletAlias: info?.alias || null,
-                        lightningAddress: lud16 || info?.lud16 || w.lightningAddress,
-                      }
-                    : w,
-                ),
-              );
+                setWallets((prev) =>
+                  prev.map((w) =>
+                    w.id === wallet.id
+                      ? {
+                          ...w,
+                          isConnected: true,
+                          balance: result.balance ?? null,
+                          walletAlias: info?.alias || null,
+                          lightningAddress: lud16 || info?.lud16 || w.lightningAddress,
+                        }
+                      : w,
+                  ),
+                );
 
-              if ((lud16 || info?.lud16) && !savedAddress) {
-                const addr = lud16 || info?.lud16 || null;
-                if (addr) {
-                  setLightningAddressState(addr);
-                  await AsyncStorage.setItem(LIGHTNING_ADDRESS_KEY, addr);
+                if ((lud16 || info?.lud16) && !savedAddress) {
+                  const addr = lud16 || info?.lud16 || null;
+                  if (addr) {
+                    setLightningAddressState(addr);
+                    await AsyncStorage.setItem(LIGHTNING_ADDRESS_KEY, addr);
+                  }
                 }
               }
+            } catch (error) {
+              console.warn(`Failed to connect wallet ${wallet.alias} (${wallet.id}):`, error);
             }
-          } catch (error) {
-            console.warn(`Failed to connect wallet ${wallet.alias} (${wallet.id}):`, error);
-          }
-        }
+          }),
+        );
 
         // Attempt to recover any pending Boltz swaps (e.g. reverse swap
         // claims that were interrupted by pay_invoice timeout or app crash).
