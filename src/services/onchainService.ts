@@ -25,6 +25,39 @@ import { getXpub, getMnemonic, getElectrumServer } from './walletStorageService'
 
 const ADDRESS_INDEX_PREFIX = 'onchain_addr_index_';
 
+const ESPLORA_TIMEOUT_MS = 8000;
+
+async function fetchJsonWithTimeout<T>(url: string, timeoutMs: number): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText} for ${url}`);
+    return (await res.json()) as T;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Resolve the Esplora REST base URL from the user's configured Electrum
+ * server, so single-address syncs use the same provider as the rest of the
+ * wallet. Both Blockstream and mempool.space publish an Esplora-compatible
+ * REST API alongside their Electrum service. Custom Electrum hosts with no
+ * known Esplora counterpart throw so the user knows to pick a supported
+ * server rather than silently routing their address to a third party.
+ */
+async function getEsploraBase(): Promise<string> {
+  const electrum = await getElectrumServer();
+  const host = electrum.split(':')[0].toLowerCase();
+  if (host.includes('blockstream.info')) return 'https://blockstream.info/api';
+  if (host.includes('mempool.space')) return 'https://mempool.space/api';
+  throw new Error(
+    `No Esplora REST endpoint known for Electrum host "${host}". ` +
+      `Set the Electrum server to electrum.blockstream.info or a mempool.space host.`,
+  );
+}
+
 // ─── xpub conversion ─────────────────────────────────────────────────────────
 
 const YPUB_HEX = '049d7cb2';
@@ -274,13 +307,103 @@ export function validateXpub(extPubKey: string): string | null {
   return null;
 }
 
+/**
+ * If the wallet was imported as a single on-chain address, return it;
+ * otherwise null. Used to branch single-address wallets onto a
+ * BDK-independent path (see `syncSingleAddressViaEsplora`).
+ */
+async function getSingleAddress(walletId: string): Promise<string | null> {
+  const raw = await getXpub(walletId);
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  return looksLikeBitcoinAddress(trimmed) ? trimmed : null;
+}
+
+/**
+ * Fetch balance + tx history for a single address via an Esplora REST API
+ * (Blockstream or mempool.space — whichever host the user has configured
+ * their Electrum server with). We bypass BDK for single-address wallets
+ * because BDK's `addr(...)` descriptor path has brittle behaviour with
+ * bech32 addresses in bdk-rn 0.30 (issue #86: wallet stays Disconnected
+ * with a null balance). A single address is trivially queryable over HTTP
+ * — no descriptor, no sync loop, no Electrum TLS to manage — and
+ * single-address imports are watch-only so we never need the sign /
+ * derive features BDK provides.
+ */
+async function syncSingleAddressViaEsplora(address: string): Promise<{
+  balance: number;
+  transactions: OnchainTransaction[];
+}> {
+  const base = await getEsploraBase();
+  const encoded = encodeURIComponent(address);
+
+  // Balance is critical — fail the refresh if this hangs or errors.
+  const addrData = await fetchJsonWithTimeout<{
+    chain_stats: { funded_txo_sum: number; spent_txo_sum: number };
+    mempool_stats: { funded_txo_sum: number; spent_txo_sum: number };
+  }>(`${base}/address/${encoded}`, ESPLORA_TIMEOUT_MS);
+  const confirmed = addrData.chain_stats.funded_txo_sum - addrData.chain_stats.spent_txo_sum;
+  const mempool = addrData.mempool_stats.funded_txo_sum - addrData.mempool_stats.spent_txo_sum;
+  const balance = confirmed + mempool;
+
+  // Tx history is best-effort — a slow /txs must never block the balance
+  // we already have. Note: Esplora's /address/:addr/txs returns only the
+  // most recent ~25 txs; for watch-only imports this is acceptable,
+  // pagination via /txs/chain/:last_seen_txid is a future enhancement.
+  let txsData: {
+    txid: string;
+    status: { confirmed: boolean; block_time?: number; block_height?: number };
+    vin: { prevout?: { scriptpubkey_address?: string; value?: number } }[];
+    vout: { scriptpubkey_address?: string; value: number }[];
+  }[] = [];
+  try {
+    txsData = await fetchJsonWithTimeout(`${base}/address/${encoded}/txs`, ESPLORA_TIMEOUT_MS);
+  } catch (error) {
+    console.warn(`Esplora /txs fetch failed for ${address}`, error);
+  }
+  const transactions: OnchainTransaction[] = txsData
+    .map((tx) => {
+      const sent = tx.vin
+        .filter((v) => v.prevout?.scriptpubkey_address === address)
+        .reduce((s, v) => s + (v.prevout?.value ?? 0), 0);
+      const received = tx.vout
+        .filter((v) => v.scriptpubkey_address === address)
+        .reduce((s, v) => s + v.value, 0);
+      const net = received - sent;
+      return {
+        txid: tx.txid,
+        type: (net >= 0 ? 'incoming' : 'outgoing') as 'incoming' | 'outgoing',
+        amount: Math.abs(net),
+        confirmed: tx.status.confirmed,
+        blockHeight: tx.status.block_height ?? null,
+        timestamp: tx.status.block_time ?? null,
+      };
+    })
+    .sort((a, b) => {
+      if (a.timestamp === null && b.timestamp === null) return 0;
+      if (a.timestamp === null) return -1;
+      if (b.timestamp === null) return 1;
+      return b.timestamp - a.timestamp;
+    });
+
+  return { balance, transactions };
+}
+
 export async function getNextReceiveAddress(walletId: string): Promise<string> {
+  // Single-address wallets have no key material, so there's no "next"
+  // address to derive — always return the configured one.
+  const single = await getSingleAddress(walletId);
+  if (single) return single;
+
   const wallet = await getBdkWallet(walletId);
   const info = await wallet.getAddress(AddressIndex.New);
   return await info.address.asString();
 }
 
 export async function getCurrentReceiveAddress(walletId: string): Promise<string> {
+  const single = await getSingleAddress(walletId);
+  if (single) return single;
+
   const wallet = await getBdkWallet(walletId);
   const info = await wallet.getAddress(AddressIndex.LastUnused);
   return await info.address.asString();
@@ -296,6 +419,12 @@ export async function syncAndRefresh(walletId: string): Promise<{
   ok: boolean;
 }> {
   try {
+    const single = await getSingleAddress(walletId);
+    if (single) {
+      const result = await syncSingleAddressViaEsplora(single);
+      return { balance: result.balance, transactions: result.transactions, ok: true };
+    }
+
     const wallet = await getBdkWallet(walletId);
     const chain = await getBlockchain();
     await wallet.sync(chain);
@@ -321,6 +450,12 @@ export async function getBalance(walletId: string): Promise<number | null> {
 
 export async function getTransactions(walletId: string): Promise<OnchainTransaction[]> {
   try {
+    const single = await getSingleAddress(walletId);
+    if (single) {
+      const result = await syncSingleAddressViaEsplora(single);
+      return result.transactions;
+    }
+
     const wallet = await getBdkWallet(walletId);
     const chain = await getBlockchain();
     await wallet.sync(chain);
