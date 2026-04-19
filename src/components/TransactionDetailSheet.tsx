@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, Linking, ActivityIndicator } from 'react-native';
+import { Image } from 'expo-image';
 import {
   BottomSheetModal,
   BottomSheetView,
@@ -10,9 +11,11 @@ import * as SecureStore from 'expo-secure-store';
 import Toast from 'react-native-toast-message';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet } from '../contexts/WalletContext';
-import * as boltzService from '../services/boltzService';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import { transactionDetailSheetStyles as styles } from '../styles/TransactionDetailSheet.styles';
+import ContactProfileSheet from './ContactProfileSheet';
+import type { ZapCounterpartyInfo } from '../types/wallet';
+import { colors } from '../styles/theme';
 
 export interface TransactionDetailData {
   /** Display values the caller already has */
@@ -26,6 +29,14 @@ export interface TransactionDetailData {
   txid?: string;
   /** Optional — if set, we can surface Boltz swap state */
   swapId?: string;
+  /** Resolved Nostr counterparty info for zaps (incoming sender or outgoing recipient). */
+  zapCounterparty?: ZapCounterpartyInfo | null;
+}
+
+function zapCounterpartyName(sender: ZapCounterpartyInfo): string {
+  if (sender.anonymous) return 'Anonymous';
+  const p = sender.profile;
+  return p?.displayName || p?.name || 'Nostr user';
 }
 
 interface Props {
@@ -55,6 +66,7 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
   const sheetRef = useRef<BottomSheetModal>(null);
   const [swap, setSwap] = useState<BoltzSwapView | null>(null);
   const [retrying, setRetrying] = useState(false);
+  const [senderProfileOpen, setSenderProfileOpen] = useState(false);
 
   useEffect(() => {
     if (visible) sheetRef.current?.present();
@@ -171,104 +183,169 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
   const dateTs = tx.settled_at || tx.created_at;
   const dateStr = dateTs ? new Date(dateTs * 1000).toLocaleString() : null;
 
+  const zapCounterparty = tx.zapCounterparty ?? null;
+  const counterpartyNpubDisplay = zapCounterparty?.profile?.npub
+    ? `${zapCounterparty.profile.npub.slice(0, 14)}…${zapCounterparty.profile.npub.slice(-6)}`
+    : null;
+  const counterpartyContact =
+    zapCounterparty && !zapCounterparty.anonymous && zapCounterparty.pubkey
+      ? {
+          pubkey: zapCounterparty.pubkey,
+          name: zapCounterpartyName(zapCounterparty),
+          picture: zapCounterparty.profile?.picture ?? null,
+          nip05: zapCounterparty.profile?.nip05 ?? null,
+          lightningAddress: null,
+          source: 'nostr' as const,
+        }
+      : null;
+
   return (
-    <BottomSheetModal
-      ref={sheetRef}
-      snapPoints={['70%']}
-      enablePanDownToClose
-      onDismiss={onClose}
-      backdropComponent={renderBackdrop}
-      backgroundStyle={styles.sheetBackground}
-      handleIndicatorStyle={styles.handleIndicator}
-    >
-      <BottomSheetView style={styles.content}>
-        <View style={styles.header}>
-          <Text
-            style={[
-              styles.headerAmount,
-              isIncoming ? styles.amountIncoming : styles.amountOutgoing,
-            ]}
-          >
-            {isIncoming ? '+' : '-'}
-            {amount.toLocaleString()} sats
-          </Text>
-          {fiat ? <Text style={styles.headerFiat}>{fiat}</Text> : null}
-          {tx.description ? <Text style={styles.headerLabel}>{tx.description}</Text> : null}
-          {statusBadge ? (
-            <View style={[styles.badge, statusBadge.style]}>
-              <Text style={styles.badgeText}>{statusBadge.text}</Text>
+    <>
+      <BottomSheetModal
+        ref={sheetRef}
+        snapPoints={['70%']}
+        enablePanDownToClose
+        onDismiss={onClose}
+        backdropComponent={renderBackdrop}
+        backgroundStyle={styles.sheetBackground}
+        handleIndicatorStyle={styles.handleIndicator}
+      >
+        <BottomSheetView style={styles.content}>
+          <View style={styles.header}>
+            <Text
+              style={[
+                styles.headerAmount,
+                isIncoming ? styles.amountIncoming : styles.amountOutgoing,
+              ]}
+            >
+              {isIncoming ? '+' : '-'}
+              {amount.toLocaleString()} sats
+            </Text>
+            {fiat ? <Text style={styles.headerFiat}>{fiat}</Text> : null}
+            {tx.description ? <Text style={styles.headerLabel}>{tx.description}</Text> : null}
+            {statusBadge ? (
+              <View style={[styles.badge, statusBadge.style]}>
+                <Text style={styles.badgeText}>{statusBadge.text}</Text>
+              </View>
+            ) : null}
+          </View>
+
+          {zapCounterparty ? (
+            <>
+              <Text style={styles.senderLabel}>{isIncoming ? 'Sender' : 'Recipient'}</Text>
+              <TouchableOpacity
+                style={styles.senderCard}
+                onPress={() => counterpartyContact && setSenderProfileOpen(true)}
+                disabled={!counterpartyContact}
+                accessibilityLabel={`${isIncoming ? 'Sender' : 'Recipient'} ${zapCounterpartyName(zapCounterparty)}`}
+              >
+                {zapCounterparty.profile?.picture ? (
+                  <Image
+                    source={{ uri: zapCounterparty.profile.picture }}
+                    style={styles.senderAvatar}
+                    cachePolicy="disk"
+                    contentFit="cover"
+                  />
+                ) : (
+                  <View style={styles.senderAvatarPlaceholder}>
+                    <Text style={{ fontSize: 22, color: colors.textSupplementary }}>
+                      {zapCounterparty.anonymous ? '?' : '⚡'}
+                    </Text>
+                  </View>
+                )}
+                <View style={styles.senderTextCol}>
+                  <Text style={styles.senderName} numberOfLines={1}>
+                    {zapCounterpartyName(zapCounterparty)}
+                  </Text>
+                  {counterpartyNpubDisplay ? (
+                    <Text style={styles.senderNpub} numberOfLines={1}>
+                      {counterpartyNpubDisplay}
+                    </Text>
+                  ) : null}
+                </View>
+              </TouchableOpacity>
+              {zapCounterparty.comment ? (
+                <Text style={styles.senderComment}>{zapCounterparty.comment}</Text>
+              ) : null}
+            </>
+          ) : null}
+
+          {dateStr ? (
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>Date</Text>
+              <Text style={styles.rowValue}>{dateStr}</Text>
             </View>
           ) : null}
-        </View>
 
-        {dateStr ? (
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>Date</Text>
-            <Text style={styles.rowValue}>{dateStr}</Text>
-          </View>
-        ) : null}
-
-        {tx.blockHeight ? (
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>Block</Text>
-            <Text style={styles.rowValue}>{tx.blockHeight.toLocaleString()}</Text>
-          </View>
-        ) : null}
-
-        {tx.txid ? (
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>On-chain tx</Text>
-            <Text style={[styles.rowValue, styles.rowValueMono]} numberOfLines={1}>
-              {tx.txid}
-            </Text>
-          </View>
-        ) : null}
-
-        {swap?.lockupTxId ? (
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>Lockup tx</Text>
-            <Text style={[styles.rowValue, styles.rowValueMono]} numberOfLines={1}>
-              {swap.lockupTxId}
-            </Text>
-          </View>
-        ) : null}
-
-        <View style={styles.actions}>
-          {swap?.claimable ? (
-            <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={handleRetryClaim}
-              disabled={retrying}
-              accessibilityLabel="Retry claim"
-            >
-              {retrying ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.primaryButtonText}>Retry claim</Text>
-              )}
-            </TouchableOpacity>
+          {tx.blockHeight ? (
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>Block</Text>
+              <Text style={styles.rowValue}>{tx.blockHeight.toLocaleString()}</Text>
+            </View>
           ) : null}
-          {tx.txid || swap?.lockupTxId ? (
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => {
-                const id = tx.txid || swap?.lockupTxId;
-                if (id) Linking.openURL(`https://mempool.space/tx/${id}`);
-              }}
-              accessibilityLabel="View on mempool.space"
-            >
-              <Text style={styles.secondaryButtonText}>View on mempool.space</Text>
-            </TouchableOpacity>
+
+          {tx.txid ? (
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>On-chain tx</Text>
+              <Text style={[styles.rowValue, styles.rowValueMono]} numberOfLines={1}>
+                {tx.txid}
+              </Text>
+            </View>
           ) : null}
-          {swap?.claimable ? (
-            <Text style={styles.info}>
-              Retry re-runs the swap recovery service, which will re-broadcast the claim transaction
-              from persisted swap state.
-            </Text>
+
+          {swap?.lockupTxId ? (
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>Lockup tx</Text>
+              <Text style={[styles.rowValue, styles.rowValueMono]} numberOfLines={1}>
+                {swap.lockupTxId}
+              </Text>
+            </View>
           ) : null}
-        </View>
-      </BottomSheetView>
-    </BottomSheetModal>
+
+          <View style={styles.actions}>
+            {swap?.claimable ? (
+              <TouchableOpacity
+                style={styles.primaryButton}
+                onPress={handleRetryClaim}
+                disabled={retrying}
+                accessibilityLabel="Retry claim"
+              >
+                {retrying ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.primaryButtonText}>Retry claim</Text>
+                )}
+              </TouchableOpacity>
+            ) : null}
+            {tx.txid || swap?.lockupTxId ? (
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={() => {
+                  const id = tx.txid || swap?.lockupTxId;
+                  if (id) Linking.openURL(`https://mempool.space/tx/${id}`);
+                }}
+                accessibilityLabel="View on mempool.space"
+              >
+                <Text style={styles.secondaryButtonText}>View on mempool.space</Text>
+              </TouchableOpacity>
+            ) : null}
+            {swap?.claimable ? (
+              <Text style={styles.info}>
+                Retry re-runs the swap recovery service, which will re-broadcast the claim
+                transaction from persisted swap state.
+              </Text>
+            ) : null}
+          </View>
+        </BottomSheetView>
+      </BottomSheetModal>
+      {counterpartyContact ? (
+        <ContactProfileSheet
+          visible={senderProfileOpen}
+          onClose={() => setSenderProfileOpen(false)}
+          contact={counterpartyContact}
+        />
+      ) : null}
+    </>
   );
 };
 
