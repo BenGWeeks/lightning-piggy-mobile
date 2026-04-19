@@ -397,6 +397,11 @@ const SendSheet: React.FC<Props> = ({
         const bolt11 = await fetchInvoice(lnurlParams.callback, currentSats, invoiceOptions);
         await payInvoiceForWallet(walletId!, bolt11);
 
+        if (__DEV__)
+          console.log(
+            `[Zap-send] paid ${currentSats} sats · allowsNostr=${!!lnurlParams.allowsNostr} activePubkey=${activePubkey ? activePubkey.slice(0, 8) + '…' : 'none'} hasZapRequest=${!!invoiceOptions.nostr}`,
+          );
+
         // If this was a NIP-57 zap, persist the recipient we just paid so
         // the transaction list can render "Sent to [Name]" on refresh.
         // The public zap receipt identifies us as sender, not the person
@@ -423,9 +428,11 @@ const SendSheet: React.FC<Props> = ({
                 comment: memo,
                 anonymous: false,
               });
+              if (__DEV__)
+                console.log(`[Zap-send] stored counterparty for ph=${paymentHash.slice(0, 12)}…`);
             }
-          } catch {
-            // Non-fatal — attribution is a nice-to-have, not a payment invariant.
+          } catch (e) {
+            if (__DEV__) console.warn('[Zap-send] store failed:', e);
           }
         }
       } else {
