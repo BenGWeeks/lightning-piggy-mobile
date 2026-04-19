@@ -131,43 +131,88 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       console.log(
         `[Nostr] fetchContactList: ${Date.now() - t0}ms, ${fetchedContacts.length} contacts`,
       );
-    startTransition(() => setContacts(fetchedContacts));
+
+    // Read the existing profile cache + its timestamp up front so we can
+    // (a) merge cached profiles into the freshly-fetched contact list for
+    // immediate display and (b) decide whether to skip the expensive
+    // fetchProfiles batch.
+    let cachedProfileMap: Record<string, NostrProfile> = {};
+    let cacheAgeMs = Infinity;
+    try {
+      const [profilesJson, tsJson] = await Promise.all([
+        AsyncStorage.getItem(PROFILES_CACHE_KEY),
+        AsyncStorage.getItem(CACHE_TIMESTAMP_KEY),
+      ]);
+      if (profilesJson) cachedProfileMap = JSON.parse(profilesJson);
+      if (tsJson) cacheAgeMs = Date.now() - parseInt(tsJson, 10);
+    } catch {
+      // Ignore cache read failures — we'll do a full fetch below.
+    }
+    const cacheFresh = cacheAgeMs < CACHE_MAX_AGE_MS;
+
+    startTransition(() =>
+      setContacts(
+        fetchedContacts.map((c) => ({
+          ...c,
+          profile: cachedProfileMap[c.pubkey] ?? c.profile,
+        })),
+      ),
+    );
 
     // Cache the contact list (deferred to not block UI)
     InteractionManager.runAfterInteractions(() => {
       AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(fetchedContacts)).catch(() => {});
     });
 
-    // Fetch profiles in background with incremental UI updates
-    if (fetchedContacts.length > 0) {
-      const contactPubkeys = fetchedContacts.map((c) => c.pubkey);
-      const t1 = Date.now();
-      const profileMap = await nostrService.fetchProfiles(contactPubkeys, relayUrls, (partial) => {
-        // Update UI incrementally as each batch of profiles arrives
-        startTransition(() =>
-          setContacts((prev) =>
-            prev.map((c) => ({
-              ...c,
-              profile: partial.get(c.pubkey) ?? c.profile,
-            })),
-          ),
-        );
-      });
+    if (fetchedContacts.length === 0) return;
+
+    const missingFromCache = fetchedContacts
+      .map((c) => c.pubkey)
+      .filter((pk) => !cachedProfileMap[pk]);
+
+    // Fast path: cache is fresh *and* covers every current contact. Avatars
+    // are already hydrated from cache above, so skip the 30-40s batch.
+    if (cacheFresh && missingFromCache.length === 0) {
       if (__DEV__)
         console.log(
-          `[Nostr] fetchProfiles: ${Date.now() - t1}ms, ${profileMap.size}/${contactPubkeys.length} profiles loaded`,
+          `[Nostr] fetchProfiles: skipped (cache fresh @ ${Math.round(cacheAgeMs / 1000)}s old, all ${fetchedContacts.length} contacts cached)`,
         );
-
-      // Cache profiles (deferred to not block UI)
-      InteractionManager.runAfterInteractions(() => {
-        const profileObj: Record<string, NostrProfile> = {};
-        profileMap.forEach((v, k) => {
-          profileObj[k] = v;
-        });
-        AsyncStorage.setItem(PROFILES_CACHE_KEY, JSON.stringify(profileObj)).catch(() => {});
-        AsyncStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
-      });
+      return;
     }
+
+    // Fetch only what we don't have when cache is fresh; fetch all when
+    // cache is stale so we refresh profile data at least once per TTL.
+    const contactPubkeys = fetchedContacts.map((c) => c.pubkey);
+    const pubkeysToFetch = cacheFresh ? missingFromCache : contactPubkeys;
+    const t1 = Date.now();
+    const profileMap = await nostrService.fetchProfiles(pubkeysToFetch, relayUrls, (partial) => {
+      // Update UI incrementally as each batch of profiles arrives
+      startTransition(() =>
+        setContacts((prev) =>
+          prev.map((c) => ({
+            ...c,
+            profile: partial.get(c.pubkey) ?? c.profile,
+          })),
+        ),
+      );
+    });
+    if (__DEV__)
+      console.log(
+        `[Nostr] fetchProfiles: ${Date.now() - t1}ms, ${profileMap.size}/${pubkeysToFetch.length} profiles loaded${
+          cacheFresh ? ` (${contactPubkeys.length - pubkeysToFetch.length} served from cache)` : ''
+        }`,
+      );
+
+    // Merge new profiles on top of existing cache so we don't lose
+    // previously-known profiles for contacts we didn't refetch.
+    InteractionManager.runAfterInteractions(() => {
+      const merged: Record<string, NostrProfile> = { ...cachedProfileMap };
+      profileMap.forEach((v, k) => {
+        merged[k] = v;
+      });
+      AsyncStorage.setItem(PROFILES_CACHE_KEY, JSON.stringify(merged)).catch(() => {});
+      AsyncStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+    });
   }, []);
 
   const loadRelays = useCallback(async (pk: string): Promise<string[]> => {
