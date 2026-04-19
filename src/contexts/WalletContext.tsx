@@ -785,10 +785,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           .map(({ tx }) => tx.paymentHash)
           .filter((h): h is string => !!h);
         const byHash = await zapCounterpartyStorage.getMany(hashes);
-        if (__DEV__)
-          console.log(
-            `[Zap/${walletAlias}] outgoing lookup: hashes=${hashes.length} local_hits=${byHash.size}`,
-          );
 
         const unmatched = outgoingPending.filter(
           ({ tx }) => tx.paymentHash && !byHash.has(tx.paymentHash),
@@ -800,10 +796,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             queryRelays,
             { limit: 500 },
           );
-          if (__DEV__)
-            console.log(
-              `[Zap/${walletAlias}] outgoing relay fallback: receipts=${sentReceipts.length}`,
-            );
           const byBolt11Outgoing = new Map<string, (typeof sentReceipts)[number]>();
           for (const r of sentReceipts) {
             const b = r.tags.find((t) => t[0] === 'bolt11')?.[1];
