@@ -255,18 +255,25 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         // Load cached contacts immediately (no network, <100ms)
         await loadContactsFromCache();
 
-        // Defer relay fetches until after animations/rendering complete
-        InteractionManager.runAfterInteractions(async () => {
-          try {
-            const readRelays = await loadRelays(pk!);
-            await loadProfile(pk!, readRelays);
-            // Refresh contacts from relays in background
-            loadContacts(pk!, readRelays).catch((e) =>
-              console.warn('Background contact refresh failed:', e),
-            );
-          } catch (error) {
-            console.warn('Nostr background refresh failed:', error);
-          }
+        // Defer relay fetches until after animations/rendering complete, and
+        // fire the three independent refreshes in parallel rather than
+        // waterfalling them (previously ~12s sequential; ~3s parallel).
+        // `loadRelays` is used purely for informing Settings — the other
+        // two can safely use DEFAULT_RELAYS without waiting for it.
+        InteractionManager.runAfterInteractions(() => {
+          const defaults = nostrService.DEFAULT_RELAYS;
+          const t0 = Date.now();
+          Promise.all([
+            loadRelays(pk!).catch((e) => console.warn('[Nostr] relay refresh failed:', e)),
+            loadProfile(pk!, defaults).catch((e) =>
+              console.warn('[Nostr] profile refresh failed:', e),
+            ),
+            loadContacts(pk!, defaults).catch((e) =>
+              console.warn('[Nostr] contact refresh failed:', e),
+            ),
+          ]).then(() => {
+            if (__DEV__) console.log(`[Nostr] parallel refresh complete in ${Date.now() - t0}ms`);
+          });
         });
       } catch (error) {
         console.warn('Nostr auto-login failed:', error);
