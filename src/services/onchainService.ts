@@ -274,13 +274,103 @@ export function validateXpub(extPubKey: string): string | null {
   return null;
 }
 
+/**
+ * If the wallet was imported as a single on-chain address, return it;
+ * otherwise null. Used to branch single-address wallets onto a
+ * BDK-independent path (see `syncSingleAddressViaMempool`).
+ */
+async function getSingleAddress(walletId: string): Promise<string | null> {
+  const raw = await getXpub(walletId);
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  return looksLikeBitcoinAddress(trimmed) ? trimmed : null;
+}
+
+/**
+ * Fetch balance + tx history for a single address via mempool.space's
+ * REST API. We bypass BDK for single-address wallets because BDK's
+ * `addr(...)` descriptor path has brittle behaviour with bech32
+ * addresses in bdk-rn 0.30 (issue #86: wallet stays Disconnected with
+ * a null balance). A single address is trivially queryable over HTTP
+ * — no descriptor, no sync loop, no Electrum TLS to manage — and
+ * single-address imports are watch-only so we never need the sign /
+ * derive features BDK provides.
+ */
+async function syncSingleAddressViaMempool(address: string): Promise<{
+  balance: number;
+  transactions: OnchainTransaction[];
+}> {
+  const base = 'https://mempool.space/api';
+  const [addrRes, txsRes] = await Promise.all([
+    fetch(`${base}/address/${encodeURIComponent(address)}`),
+    fetch(`${base}/address/${encodeURIComponent(address)}/txs`),
+  ]);
+  if (!addrRes.ok) {
+    throw new Error(`mempool.space address lookup failed: ${addrRes.status}`);
+  }
+  const addrData = (await addrRes.json()) as {
+    chain_stats: { funded_txo_sum: number; spent_txo_sum: number };
+    mempool_stats: { funded_txo_sum: number; spent_txo_sum: number };
+  };
+  const confirmed = addrData.chain_stats.funded_txo_sum - addrData.chain_stats.spent_txo_sum;
+  const mempool = addrData.mempool_stats.funded_txo_sum - addrData.mempool_stats.spent_txo_sum;
+  const balance = confirmed + mempool;
+
+  // Transactions — best-effort, we still return balance even if /txs fails.
+  let txsData: {
+    txid: string;
+    status: { confirmed: boolean; block_time?: number; block_height?: number };
+    vin: { prevout?: { scriptpubkey_address?: string; value?: number } }[];
+    vout: { scriptpubkey_address?: string; value: number }[];
+  }[] = [];
+  if (txsRes.ok) {
+    try {
+      txsData = await txsRes.json();
+    } catch {}
+  }
+  const transactions: OnchainTransaction[] = txsData
+    .map((tx) => {
+      const sent = tx.vin
+        .filter((v) => v.prevout?.scriptpubkey_address === address)
+        .reduce((s, v) => s + (v.prevout?.value ?? 0), 0);
+      const received = tx.vout
+        .filter((v) => v.scriptpubkey_address === address)
+        .reduce((s, v) => s + v.value, 0);
+      const net = received - sent;
+      return {
+        txid: tx.txid,
+        type: (net >= 0 ? 'incoming' : 'outgoing') as 'incoming' | 'outgoing',
+        amount: Math.abs(net),
+        confirmed: tx.status.confirmed,
+        blockHeight: tx.status.block_height ?? null,
+        timestamp: tx.status.block_time ?? null,
+      };
+    })
+    .sort((a, b) => {
+      if (a.timestamp === null && b.timestamp === null) return 0;
+      if (a.timestamp === null) return -1;
+      if (b.timestamp === null) return 1;
+      return b.timestamp - a.timestamp;
+    });
+
+  return { balance, transactions };
+}
+
 export async function getNextReceiveAddress(walletId: string): Promise<string> {
+  // Single-address wallets have no key material, so there's no "next"
+  // address to derive — always return the configured one.
+  const single = await getSingleAddress(walletId);
+  if (single) return single;
+
   const wallet = await getBdkWallet(walletId);
   const info = await wallet.getAddress(AddressIndex.New);
   return await info.address.asString();
 }
 
 export async function getCurrentReceiveAddress(walletId: string): Promise<string> {
+  const single = await getSingleAddress(walletId);
+  if (single) return single;
+
   const wallet = await getBdkWallet(walletId);
   const info = await wallet.getAddress(AddressIndex.LastUnused);
   return await info.address.asString();
@@ -296,6 +386,12 @@ export async function syncAndRefresh(walletId: string): Promise<{
   ok: boolean;
 }> {
   try {
+    const single = await getSingleAddress(walletId);
+    if (single) {
+      const result = await syncSingleAddressViaMempool(single);
+      return { balance: result.balance, transactions: result.transactions, ok: true };
+    }
+
     const wallet = await getBdkWallet(walletId);
     const chain = await getBlockchain();
     await wallet.sync(chain);
@@ -321,6 +417,12 @@ export async function getBalance(walletId: string): Promise<number | null> {
 
 export async function getTransactions(walletId: string): Promise<OnchainTransaction[]> {
   try {
+    const single = await getSingleAddress(walletId);
+    if (single) {
+      const result = await syncSingleAddressViaMempool(single);
+      return result.transactions;
+    }
+
     const wallet = await getBdkWallet(walletId);
     const chain = await getBlockchain();
     await wallet.sync(chain);
