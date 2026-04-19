@@ -25,6 +25,20 @@ import { getXpub, getMnemonic, getElectrumServer } from './walletStorageService'
 
 const ADDRESS_INDEX_PREFIX = 'onchain_addr_index_';
 
+const MEMPOOL_TIMEOUT_MS = 8000;
+
+async function fetchJsonWithTimeout<T>(url: string, timeoutMs: number): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText} for ${url}`);
+    return (await res.json()) as T;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ─── xpub conversion ─────────────────────────────────────────────────────────
 
 const YPUB_HEX = '049d7cb2';
@@ -301,32 +315,31 @@ async function syncSingleAddressViaMempool(address: string): Promise<{
   transactions: OnchainTransaction[];
 }> {
   const base = 'https://mempool.space/api';
-  const [addrRes, txsRes] = await Promise.all([
-    fetch(`${base}/address/${encodeURIComponent(address)}`),
-    fetch(`${base}/address/${encodeURIComponent(address)}/txs`),
-  ]);
-  if (!addrRes.ok) {
-    throw new Error(`mempool.space address lookup failed: ${addrRes.status}`);
-  }
-  const addrData = (await addrRes.json()) as {
+  const encoded = encodeURIComponent(address);
+
+  // Balance is critical — fail the refresh if this hangs or errors.
+  const addrData = await fetchJsonWithTimeout<{
     chain_stats: { funded_txo_sum: number; spent_txo_sum: number };
     mempool_stats: { funded_txo_sum: number; spent_txo_sum: number };
-  };
+  }>(`${base}/address/${encoded}`, MEMPOOL_TIMEOUT_MS);
   const confirmed = addrData.chain_stats.funded_txo_sum - addrData.chain_stats.spent_txo_sum;
   const mempool = addrData.mempool_stats.funded_txo_sum - addrData.mempool_stats.spent_txo_sum;
   const balance = confirmed + mempool;
 
-  // Transactions — best-effort, we still return balance even if /txs fails.
+  // Tx history is best-effort — a slow /txs must never block the balance
+  // we already have. Note: mempool.space's /address/:addr/txs returns only
+  // the most recent ~25 txs; for watch-only imports this is acceptable,
+  // pagination via /txs/chain/:last_seen_txid is a future enhancement.
   let txsData: {
     txid: string;
     status: { confirmed: boolean; block_time?: number; block_height?: number };
     vin: { prevout?: { scriptpubkey_address?: string; value?: number } }[];
     vout: { scriptpubkey_address?: string; value: number }[];
   }[] = [];
-  if (txsRes.ok) {
-    try {
-      txsData = await txsRes.json();
-    } catch {}
+  try {
+    txsData = await fetchJsonWithTimeout(`${base}/address/${encoded}/txs`, MEMPOOL_TIMEOUT_MS);
+  } catch (error) {
+    console.warn(`mempool.space /txs fetch failed for ${address}`, error);
   }
   const transactions: OnchainTransaction[] = txsData
     .map((tx) => {
