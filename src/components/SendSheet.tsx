@@ -162,6 +162,10 @@ const SendSheet: React.FC<Props> = ({
       setLnurlParams(null);
       setResolving(false);
       setMemo('');
+      // Sheet is kept mounted across opens, so useState(prop) init doesn't re-fire.
+      // Re-apply recipient props or Friends-tab zap keeps stale activePubkey → no 9734.
+      setActivePubkey(recipientPubkey);
+      setActivePicture(initialPicture);
       bottomSheetRef.current?.present();
       if (initialAddress) {
         // Use setTimeout to process after state reset
