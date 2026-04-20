@@ -61,6 +61,11 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   // true once the foreground work is done and the background task has the
   // swap — the sheet becomes a "done, safe to close" confirmation state.
   const [handedOff, setHandedOff] = useState(false);
+  // Set when the background reverse-swap task errors (usually an NWC relay
+  // timeout leaving the LN payment state unknown). Drives the "Retry now"
+  // button + the updated progress message in the progress view.
+  const [backgroundError, setBackgroundError] = useState<string | null>(null);
+  const [retryingRecovery, setRetryingRecovery] = useState(false);
   const [feeEstimate, setFeeEstimate] = useState<string | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
@@ -435,11 +440,21 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             console.warn('[Transfer] Background reverse swap failed:', msg);
+            // Surface the error on the sheet itself — the previous version
+            // only showed a toast and left the progress message stuck on
+            // "Swap underway" forever. Users need an in-sheet signal so they
+            // can act without having to catch a transient toast.
+            setBackgroundError(msg);
+            setProgressMsg(
+              'Background step failed — the LN payment reply may have been dropped ' +
+                'by the relay. Your funds are safe; tap "Retry now" to re-check ' +
+                'and broadcast the claim. Otherwise the app will retry automatically on next launch.',
+            );
             Toast.show({
               type: 'error',
               text1: 'Swap in progress',
               text2:
-                'Background step hit an error — recovery will retry on next app launch. Funds are safe.',
+                'Background step hit an error — tap "Retry now" in the sheet or relaunch the app. Funds are safe.',
               position: 'top',
               visibilityTime: 10000,
             });
@@ -696,9 +711,50 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
               </Text>
             )}
             <View style={styles.progressContainer}>
-              <ActivityIndicator size="small" color={colors.brandPink} />
+              {!backgroundError && <ActivityIndicator size="small" color={colors.brandPink} />}
               <Text style={styles.progressText}>{progressMsg}</Text>
             </View>
+            {backgroundError && (
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={async () => {
+                  setRetryingRecovery(true);
+                  try {
+                    await swapRecoveryService.recoverPendingSwaps();
+                    Toast.show({
+                      type: 'info',
+                      text1: 'Retry kicked off',
+                      text2: 'Any claimable swaps are being re-broadcast.',
+                      position: 'top',
+                      visibilityTime: 6000,
+                    });
+                    setBackgroundError(null);
+                    setProgressMsg(
+                      'Recovery retried — check transaction history for the final status.',
+                    );
+                  } catch (err) {
+                    const m = err instanceof Error ? err.message : String(err);
+                    Toast.show({
+                      type: 'error',
+                      text1: 'Retry failed',
+                      text2: m,
+                      position: 'top',
+                      visibilityTime: 8000,
+                    });
+                  } finally {
+                    setRetryingRecovery(false);
+                  }
+                }}
+                disabled={retryingRecovery}
+                accessibilityLabel="Retry swap recovery"
+              >
+                {retryingRecovery ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.closeButtonText}>Retry now</Text>
+                )}
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={styles.closeButton}
               onPress={onClose}
