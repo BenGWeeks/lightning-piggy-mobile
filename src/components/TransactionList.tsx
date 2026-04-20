@@ -80,11 +80,13 @@ type Row = ItemRow | HeaderRow;
 
 /** Build a deterministic key for a transaction row. Prefers settled-payment
  * identifiers, falling back to on-chain txid, then bolt11, then a composite
- * of the stable shape fields so pending rows still get distinct keys. */
+ * of the stable shape fields so pending rows still get distinct keys.
+ * Self-payments produce two entries with the same paymentHash / bolt11
+ * (incoming + outgoing leg), so always include `tx.type` to disambiguate. */
 function txKey(tx: Transaction, fallbackIndex: number): string {
-  if (tx.paymentHash) return `ph:${tx.paymentHash}`;
-  if (tx.txid) return `tx:${tx.txid}`;
-  if (tx.bolt11) return `b11:${tx.bolt11}`;
+  if (tx.paymentHash) return `ph:${tx.type}:${tx.paymentHash}`;
+  if (tx.txid) return `tx:${tx.type}:${tx.txid}`;
+  if (tx.bolt11) return `b11:${tx.type}:${tx.bolt11}`;
   return `fb:${tx.type}:${tx.created_at ?? tx.settled_at ?? 'pending'}:${tx.amount}:${fallbackIndex}`;
 }
 
