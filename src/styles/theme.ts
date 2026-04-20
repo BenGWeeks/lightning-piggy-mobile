@@ -16,5 +16,7 @@ export const colors = {
   bitcoinOrange: '#F7931A',
   bitcoinOrangeLight: '#FFF1E0',
   boltzNavy: '#232742',
-  boltzYellow: '#FFC107',
+  // Shared zap colour for Lightning + Boltz badges — Boltz's brand yellow
+  // doubles nicely against the Lightning Piggy pink.
+  zapYellow: '#FFC107',
 };

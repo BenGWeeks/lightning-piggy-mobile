@@ -89,12 +89,6 @@ export const transactionDetailSheetStyles = StyleSheet.create({
     gap: 6,
     flexShrink: 1,
   },
-  boltzLogo: {
-    width: 60,
-    height: 60,
-    borderRadius: 12,
-    marginBottom: 8,
-  },
   headerIcon: {
     marginBottom: 8,
   },

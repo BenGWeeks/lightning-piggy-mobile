@@ -258,19 +258,14 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
     return { style: styles.badgeConfirmed, text: 'Confirmed' };
   }, [tx, swap]);
 
-  if (!tx) return null;
+  const effectiveSwapId = tx?.swapId || resolvedSwapId || null;
 
-  const isIncoming = tx.type === 'incoming';
-  const amount = Math.abs(tx.amount);
-  const fiat = satsToFiatString(amount, btcPrice, currency);
-  const dateTs = tx.settled_at || tx.created_at;
-  const dateStr = dateTs ? formatFriendlyDateTime(dateTs) : null;
-  const preimage = tx.preimage || enrichment.preimage;
-  const invoice = tx.invoice || enrichment.invoice;
-
-  const effectiveSwapId = tx.swapId || resolvedSwapId || null;
-
-  const boltzInitialMessage = (() => {
+  const boltzInitialMessage = useMemo(() => {
+    if (!tx) return '';
+    const isIncoming = tx.type === 'incoming';
+    const amount = Math.abs(tx.amount);
+    const dateTs = tx.settled_at || tx.created_at;
+    const dateStr = dateTs ? formatFriendlyDateTime(dateTs) : null;
     const lines: string[] = ['Hi Boltz support,', ''];
     lines.push('I have a question about this transaction:');
     if (effectiveSwapId) lines.push(`• Swap ID: ${effectiveSwapId}`);
@@ -284,7 +279,17 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
     lines.push('', 'Details:');
     lines.push('(describe the issue)');
     return lines.join('\n');
-  })();
+  }, [tx, effectiveSwapId, swap]);
+
+  if (!tx) return null;
+
+  const isIncoming = tx.type === 'incoming';
+  const amount = Math.abs(tx.amount);
+  const fiat = satsToFiatString(amount, btcPrice, currency);
+  const dateTs = tx.settled_at || tx.created_at;
+  const dateStr = dateTs ? formatFriendlyDateTime(dateTs) : null;
+  const preimage = tx.preimage || enrichment.preimage;
+  const invoice = tx.invoice || enrichment.invoice;
 
   const zapCounterparty = tx.zapCounterparty ?? null;
   const counterpartyNpubDisplay = zapCounterparty?.profile?.npub

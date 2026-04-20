@@ -7,27 +7,10 @@ import { useWallet } from '../contexts/WalletContext';
 import TransactionDetailSheet, { TransactionDetailData } from './TransactionDetailSheet';
 import TransactionTypeIcon from './TransactionTypeIcon';
 import { getTxCategory } from '../utils/txCategory';
-import type { ZapCounterpartyInfo } from '../types/wallet';
-
-interface Transaction {
-  type: string;
-  amount: number;
-  description?: string;
-  created_at?: number | null;
-  settled_at?: number | null;
-  blockHeight?: number | null;
-  txid?: string;
-  swapId?: string;
-  paymentHash?: string;
-  preimage?: string;
-  invoice?: string;
-  feesSats?: number;
-  bolt11?: string;
-  zapCounterparty?: ZapCounterpartyInfo | null;
-}
+import type { WalletTransaction, ZapCounterpartyInfo } from '../types/wallet';
 
 interface Props {
-  transactions: Transaction[];
+  transactions: WalletTransaction[];
 }
 
 function zapCounterpartyLabel(cp: ZapCounterpartyInfo): string {
@@ -79,7 +62,7 @@ function formatTime(ts: number): string {
 
 const INITIAL_COUNT = 20;
 
-type ItemRow = { kind: 'tx'; tx: Transaction; key: string };
+type ItemRow = { kind: 'tx'; tx: WalletTransaction; key: string };
 type HeaderRow = { kind: 'header'; label: string; key: string };
 type Row = ItemRow | HeaderRow;
 
@@ -88,7 +71,7 @@ type Row = ItemRow | HeaderRow;
  * of the stable shape fields so pending rows still get distinct keys.
  * Self-payments produce two entries with the same paymentHash / bolt11
  * (incoming + outgoing leg), so always include `tx.type` to disambiguate. */
-function txKey(tx: Transaction, fallbackIndex: number): string {
+function txKey(tx: WalletTransaction, fallbackIndex: number): string {
   if (tx.paymentHash) return `ph:${tx.type}:${tx.paymentHash}`;
   if (tx.txid) return `tx:${tx.type}:${tx.txid}`;
   if (tx.bolt11) return `b11:${tx.type}:${tx.bolt11}`;
