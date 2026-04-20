@@ -16,7 +16,8 @@ export const LIGHTNING_PIGGY_TEAM_NPUB =
   'npub1y2qcaseaspuwvjtyk4suswdhgselydc42ttlt0t2kzhnykne7s5swvaffq';
 
 /** Boltz support — receives DMs from the transaction detail sheet for swap
- *  transactions. TODO: verify this is the canonical Boltz support npub. */
+ *  transactions. Verified against Boltz's public Nostr profile on damus.io
+ *  and nostr.com (`Boltz - Non-Custodial Bitcoin Bridge`). */
 export const BOLTZ_SUPPORT_NPUB =
   'npub1psm37hke2pmxzdzraqe3cjmqs28dv77da74pdx8mtn5a0vegtlas9q8970';
 
