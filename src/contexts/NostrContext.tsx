@@ -28,6 +28,31 @@ const RELAY_LIST_CACHE_KEY = 'nostr_relay_list_cache';
 const RELAY_LIST_TIMESTAMP_KEY = 'nostr_relay_list_timestamp';
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+/**
+ * Read a JSON-serialised cache value and its timestamp in a single
+ * `multiGet` call. Returns the parsed value (or null if missing / corrupt)
+ * and the cache age in ms (Infinity when no timestamp exists yet).
+ */
+async function readCachedWithTtl<T>(
+  dataKey: string,
+  tsKey: string,
+): Promise<{ value: T | null; ageMs: number }> {
+  try {
+    const pairs = await AsyncStorage.multiGet([dataKey, tsKey]);
+    let dataStr: string | null = null;
+    let tsStr: string | null = null;
+    for (const [k, v] of pairs) {
+      if (k === dataKey) dataStr = v;
+      else if (k === tsKey) tsStr = v;
+    }
+    const value = dataStr ? (JSON.parse(dataStr) as T) : null;
+    const ageMs = tsStr ? Date.now() - parseInt(tsStr, 10) : Infinity;
+    return { value, ageMs };
+  } catch {
+    return { value: null, ageMs: Infinity };
+  }
+}
+
 interface NostrContextType {
   isLoggedIn: boolean;
   isLoggingIn: boolean;
@@ -96,18 +121,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const loadProfile = useCallback(async (pk: string, relayUrls: string[]) => {
     const t0 = Date.now();
     // Cache-fresh fast path: hydrate UI from cache and skip the relay RTT.
-    try {
-      const [cachedJson, tsStr] = await Promise.all([
-        AsyncStorage.getItem(OWN_PROFILE_CACHE_KEY),
-        AsyncStorage.getItem(OWN_PROFILE_TIMESTAMP_KEY),
-      ]);
-      if (cachedJson && tsStr && Date.now() - parseInt(tsStr, 10) < CACHE_MAX_AGE_MS) {
-        setProfile(JSON.parse(cachedJson) as NostrProfile);
-        if (__DEV__) console.log(`[Nostr] fetchProfile: skipped (cache fresh)`);
-        return;
-      }
-    } catch {
-      // ignore — fall through to the network fetch
+    const { value: cached, ageMs } = await readCachedWithTtl<NostrProfile>(
+      OWN_PROFILE_CACHE_KEY,
+      OWN_PROFILE_TIMESTAMP_KEY,
+    );
+    if (cached && ageMs < CACHE_MAX_AGE_MS) {
+      setProfile(cached);
+      if (__DEV__) console.log(`[Nostr] fetchProfile: skipped (cache fresh)`);
+      return;
     }
     const fetchedProfile = await nostrService.fetchProfile(pk, relayUrls);
     if (__DEV__) console.log(`[Nostr] fetchProfile: ${Date.now() - t0}ms`);
@@ -123,15 +144,24 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const loadContactsFromCache = useCallback(async () => {
     try {
       const t0 = Date.now();
-      // Contacts freshness is gated by CONTACTS_TIMESTAMP_KEY (the
-      // contact-list's own write time), not the profiles timestamp. They
-      // get separate keys so a successful contact refresh isn't blocked
-      // by an unrelated profiles cache entry.
-      const [contactsJson, profilesJson, contactsTsStr] = await Promise.all([
-        AsyncStorage.getItem(CONTACTS_CACHE_KEY),
-        AsyncStorage.getItem(PROFILES_CACHE_KEY),
-        AsyncStorage.getItem(CONTACTS_TIMESTAMP_KEY),
+      // One multiGet round-trip for all three caches. Contacts freshness
+      // is gated by CONTACTS_TIMESTAMP_KEY (the contact-list's own write
+      // time), not the profiles timestamp — they get separate keys so a
+      // successful contact refresh isn't blocked by an unrelated profiles
+      // cache entry.
+      const pairs = await AsyncStorage.multiGet([
+        CONTACTS_CACHE_KEY,
+        PROFILES_CACHE_KEY,
+        CONTACTS_TIMESTAMP_KEY,
       ]);
+      let contactsJson: string | null = null;
+      let profilesJson: string | null = null;
+      let contactsTsStr: string | null = null;
+      for (const [k, v] of pairs) {
+        if (k === CONTACTS_CACHE_KEY) contactsJson = v;
+        else if (k === PROFILES_CACHE_KEY) profilesJson = v;
+        else if (k === CONTACTS_TIMESTAMP_KEY) contactsTsStr = v;
+      }
       if (contactsTsStr && Date.now() - parseInt(contactsTsStr, 10) > CACHE_MAX_AGE_MS) {
         if (__DEV__) console.log('[Nostr] contacts cache expired, skipping');
         return false;
@@ -167,20 +197,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const loadContacts = useCallback(async (pk: string, relayUrls: string[]) => {
     const t0 = Date.now();
 
-    // Read the contact-list cache + its timestamp up front. If it's fresh,
-    // skip the kind-3 relay fetch entirely — saves a ~3s RTT.
-    let cachedContacts: NostrContact[] | null = null;
-    let contactsAgeMs = Infinity;
-    try {
-      const [contactsJson, ctsStr] = await Promise.all([
-        AsyncStorage.getItem(CONTACTS_CACHE_KEY),
-        AsyncStorage.getItem(CONTACTS_TIMESTAMP_KEY),
-      ]);
-      if (contactsJson) cachedContacts = JSON.parse(contactsJson);
-      if (ctsStr) contactsAgeMs = Date.now() - parseInt(ctsStr, 10);
-    } catch {
-      // ignore — fall through to relay fetch below
-    }
+    // Read the contact-list cache + its timestamp. If fresh, skip the
+    // kind-3 relay fetch entirely — saves a ~3s RTT.
+    const { value: cachedContacts, ageMs: contactsAgeMs } = await readCachedWithTtl<NostrContact[]>(
+      CONTACTS_CACHE_KEY,
+      CONTACTS_TIMESTAMP_KEY,
+    );
     const contactsCacheFresh = contactsAgeMs < CACHE_MAX_AGE_MS;
 
     let fetchedContacts: NostrContact[];
@@ -202,22 +224,13 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       });
     }
 
-    // Read the existing profile cache + its timestamp up front so we can
-    // (a) merge cached profiles into the freshly-fetched contact list for
-    // immediate display and (b) decide whether to skip the expensive
-    // fetchProfiles batch.
-    let cachedProfileMap: Record<string, NostrProfile> = {};
-    let cacheAgeMs = Infinity;
-    try {
-      const [profilesJson, tsJson] = await Promise.all([
-        AsyncStorage.getItem(PROFILES_CACHE_KEY),
-        AsyncStorage.getItem(CACHE_TIMESTAMP_KEY),
-      ]);
-      if (profilesJson) cachedProfileMap = JSON.parse(profilesJson);
-      if (tsJson) cacheAgeMs = Date.now() - parseInt(tsJson, 10);
-    } catch {
-      // Ignore cache read failures — we'll do a full fetch below.
-    }
+    // Read the profile cache + timestamp so we can (a) merge cached
+    // profiles into the freshly-fetched contact list for immediate display
+    // and (b) decide whether to skip the expensive fetchProfiles batch.
+    const { value: cachedProfileMapOrNull, ageMs: cacheAgeMs } = await readCachedWithTtl<
+      Record<string, NostrProfile>
+    >(PROFILES_CACHE_KEY, CACHE_TIMESTAMP_KEY);
+    const cachedProfileMap = cachedProfileMapOrNull ?? {};
     const cacheFresh = cacheAgeMs < CACHE_MAX_AGE_MS;
 
     startTransition(() =>
@@ -257,9 +270,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return;
     }
 
-    // Cache stale — refresh all contacts' profiles.
-    const contactPubkeys = fetchedContacts.map((c) => c.pubkey);
-    const pubkeysToFetch = contactPubkeys;
+    // Cache stale — refresh all contacts' profiles. (When cacheFresh is
+    // true we've already returned via one of the two fast paths above, so
+    // the dropped "X served from cache" suffix would always be 0.)
+    const pubkeysToFetch = fetchedContacts.map((c) => c.pubkey);
     const t1 = Date.now();
     const profileMap = await nostrService.fetchProfiles(pubkeysToFetch, relayUrls, (partial) => {
       // Update UI incrementally as each batch of profiles arrives
@@ -274,9 +288,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
     if (__DEV__)
       console.log(
-        `[Nostr] fetchProfiles: ${Date.now() - t1}ms, ${profileMap.size}/${pubkeysToFetch.length} profiles loaded${
-          cacheFresh ? ` (${contactPubkeys.length - pubkeysToFetch.length} served from cache)` : ''
-        }`,
+        `[Nostr] fetchProfiles: ${Date.now() - t1}ms, ${profileMap.size}/${pubkeysToFetch.length} profiles loaded`,
       );
 
     // Merge new profiles on top of existing cache so we don't lose
@@ -295,20 +307,15 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const t0 = Date.now();
     // Cache-fresh fast path — NIP-65 relay lists rarely change, so serve
     // from cache when under the TTL and skip the ~3s relay round trip.
-    try {
-      const [cachedJson, tsStr] = await Promise.all([
-        AsyncStorage.getItem(RELAY_LIST_CACHE_KEY),
-        AsyncStorage.getItem(RELAY_LIST_TIMESTAMP_KEY),
-      ]);
-      if (cachedJson && tsStr && Date.now() - parseInt(tsStr, 10) < CACHE_MAX_AGE_MS) {
-        const cached = JSON.parse(cachedJson) as RelayConfig[];
-        setRelays(cached);
-        if (__DEV__) console.log(`[Nostr] fetchRelayList: skipped (cache fresh)`);
-        const readRelays = cached.filter((r) => r.read).map((r) => r.url);
-        return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
-      }
-    } catch {
-      // ignore — fall through to the network fetch
+    const { value: cached, ageMs } = await readCachedWithTtl<RelayConfig[]>(
+      RELAY_LIST_CACHE_KEY,
+      RELAY_LIST_TIMESTAMP_KEY,
+    );
+    if (cached && ageMs < CACHE_MAX_AGE_MS) {
+      setRelays(cached);
+      if (__DEV__) console.log(`[Nostr] fetchRelayList: skipped (cache fresh)`);
+      const readRelays = cached.filter((r) => r.read).map((r) => r.url);
+      return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
     }
     const relayList = await nostrService.fetchRelayList(pk, nostrService.DEFAULT_RELAYS);
     if (__DEV__)
@@ -360,15 +367,15 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         // the very first login (before any relay cache exists).
         InteractionManager.runAfterInteractions(async () => {
           let workingRelays: string[] = nostrService.DEFAULT_RELAYS;
-          try {
-            const cachedJson = await AsyncStorage.getItem(RELAY_LIST_CACHE_KEY);
-            if (cachedJson) {
-              const cached = JSON.parse(cachedJson) as RelayConfig[];
-              const readRelays = cached.filter((r) => r.read).map((r) => r.url);
-              if (readRelays.length > 0) workingRelays = readRelays;
-            }
-          } catch {
-            // Cache read failure → DEFAULT_RELAYS fallback, same as first login.
+          // Ignore the timestamp here — even a stale cached relay list is
+          // better than DEFAULT_RELAYS for reaching user-only relays.
+          const { value: cachedRelays } = await readCachedWithTtl<RelayConfig[]>(
+            RELAY_LIST_CACHE_KEY,
+            RELAY_LIST_TIMESTAMP_KEY,
+          );
+          if (cachedRelays) {
+            const readRelays = cachedRelays.filter((r) => r.read).map((r) => r.url);
+            if (readRelays.length > 0) workingRelays = readRelays;
           }
 
           const t0 = Date.now();
