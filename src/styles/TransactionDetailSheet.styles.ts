@@ -81,7 +81,19 @@ export const transactionDetailSheetStyles = StyleSheet.create({
   },
   rowValueMono: {
     fontFamily: 'monospace',
-    fontSize: 11,
+    fontSize: 12,
+  },
+  rowValueWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 1,
+  },
+  boltzLogo: {
+    width: 60,
+    height: 60,
+    borderRadius: 12,
+    marginBottom: 8,
   },
   actions: {
     flexDirection: 'column',
