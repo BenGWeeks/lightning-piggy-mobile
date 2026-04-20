@@ -202,9 +202,7 @@ const ConversationScreen: React.FC = () => {
       );
     }
     return (
-      <View
-        style={[styles.zapRow, item.fromMe ? styles.zapRowRight : styles.zapRowLeft]}
-      >
+      <View style={[styles.zapRow, item.fromMe ? styles.zapRowRight : styles.zapRowLeft]}>
         <TouchableOpacity
           activeOpacity={0.8}
           onPress={() => setDetailTx(item.tx)}
@@ -222,9 +220,7 @@ const ConversationScreen: React.FC = () => {
           </View>
           <View style={styles.zapCardBody}>
             <View style={styles.zapCardHeaderRow}>
-              <Text
-                style={[styles.zapCardLabel, item.fromMe && styles.zapCardLabelMe]}
-              >
+              <Text style={[styles.zapCardLabel, item.fromMe && styles.zapCardLabelMe]}>
                 {item.fromMe ? 'Zap sent' : 'Zap received'}
               </Text>
               <Text style={[styles.zapCardTime, item.fromMe && styles.zapCardTimeMe]}>
