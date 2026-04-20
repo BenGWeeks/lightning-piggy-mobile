@@ -538,6 +538,7 @@ const SendSheet: React.FC<Props> = ({
       backdropComponent={renderBackdrop}
       handleIndicatorStyle={styles.handleIndicator}
       backgroundStyle={styles.sheetBackground}
+      stackBehavior="push"
     >
       <BottomSheetView style={styles.content}>
         <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>

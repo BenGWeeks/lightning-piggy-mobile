@@ -18,11 +18,15 @@ import * as nwcService from '../services/nwcService';
 import { transactionDetailSheetStyles as styles } from '../styles/TransactionDetailSheet.styles';
 import FeedbackSheet from './FeedbackSheet';
 import NostrLoginSheet from './NostrLoginSheet';
+import SendSheet from './SendSheet';
 import { createDmSender } from '../utils/nostrDm';
 import { truncateMiddle, formatFriendlyDateTime } from '../utils/format';
 import { getTxCategory } from '../utils/txCategory';
 import TransactionTypeIcon from './TransactionTypeIcon';
 import ContactProfileSheet from './ContactProfileSheet';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../navigation/types';
 import type { ZapCounterpartyInfo } from '../types/wallet';
 import { colors } from '../styles/theme';
 import { BOLTZ_SUPPORT_NPUB, dmRecipient } from '../constants/npubs';
@@ -89,7 +93,8 @@ const CopyRow: React.FC<{
 
 const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
   const { btcPrice, currency, activeWallet } = useWallet();
-  const { isLoggedIn, signerType, sendDirectMessage } = useNostr();
+  const { isLoggedIn, signerType, sendDirectMessage, contacts } = useNostr();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const sheetRef = useRef<BottomSheetModal>(null);
   const [swap, setSwap] = useState<BoltzSwapView | null>(null);
   const [resolvedSwapId, setResolvedSwapId] = useState<string | null>(null);
@@ -97,6 +102,7 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
   const [supportSheetOpen, setSupportSheetOpen] = useState(false);
   const [senderProfileOpen, setSenderProfileOpen] = useState(false);
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
+  const [sendSheetOpen, setSendSheetOpen] = useState(false);
   // Some NWC backends (notably LNbits) omit preimage/invoice from
   // list_transactions; fill them in via lookupInvoice when the sheet opens.
   const [enrichment, setEnrichment] = useState<{ preimage?: string; invoice?: string }>({});
@@ -131,7 +137,6 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
       if (/send to btc|send to bitcoin/i.test(tx.description)) return true;
       if (/receive from btc|receive from bitcoin/i.test(tx.description)) return true;
     }
-    if (!tx.settled_at && !tx.blockHeight) return true;
     return false;
   }, [tx]);
 
@@ -275,14 +280,22 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
   const counterpartyNpubDisplay = zapCounterparty?.profile?.npub
     ? `${zapCounterparty.profile.npub.slice(0, 14)}…${zapCounterparty.profile.npub.slice(-6)}`
     : null;
+  // NIP-57 receipts carry name / picture / nip05 but not the banner or
+  // the lud16 lightning address — fall back to the kind-0 profile cached
+  // from the contact list so the sheet shown from Transactions matches
+  // the richer one shown from Friends.
+  const counterpartyCachedProfile = zapCounterparty?.pubkey
+    ? (contacts.find((c) => c.pubkey === zapCounterparty.pubkey)?.profile ?? null)
+    : null;
   const counterpartyContact =
     zapCounterparty && !zapCounterparty.anonymous && zapCounterparty.pubkey
       ? {
           pubkey: zapCounterparty.pubkey,
           name: zapCounterpartyName(zapCounterparty),
-          picture: zapCounterparty.profile?.picture ?? null,
-          nip05: zapCounterparty.profile?.nip05 ?? null,
-          lightningAddress: null,
+          picture: zapCounterparty.profile?.picture ?? counterpartyCachedProfile?.picture ?? null,
+          banner: counterpartyCachedProfile?.banner ?? null,
+          nip05: zapCounterparty.profile?.nip05 ?? counterpartyCachedProfile?.nip05 ?? null,
+          lightningAddress: counterpartyCachedProfile?.lud16 ?? null,
           source: 'nostr' as const,
         }
       : null;
@@ -329,6 +342,7 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
                 onPress={() => counterpartyContact && setSenderProfileOpen(true)}
                 disabled={!counterpartyContact}
                 accessibilityLabel={`${isIncoming ? 'Sender' : 'Recipient'} ${zapCounterpartyName(zapCounterparty)}`}
+                testID="tx-detail-sender-card"
               >
                 {zapCounterparty.profile?.picture ? (
                   <Image
@@ -454,6 +468,34 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
           visible={senderProfileOpen}
           onClose={() => setSenderProfileOpen(false)}
           contact={counterpartyContact}
+          onMessage={() => {
+            setSenderProfileOpen(false);
+            onClose();
+            navigation.navigate('Conversation', {
+              pubkey: counterpartyContact.pubkey!,
+              name: counterpartyContact.name,
+              picture: counterpartyContact.picture,
+              lightningAddress: counterpartyContact.lightningAddress,
+            });
+          }}
+          onZap={
+            counterpartyContact.lightningAddress
+              ? () => {
+                  setSenderProfileOpen(false);
+                  setSendSheetOpen(true);
+                }
+              : undefined
+          }
+        />
+      ) : null}
+      {counterpartyContact ? (
+        <SendSheet
+          visible={sendSheetOpen}
+          onClose={() => setSendSheetOpen(false)}
+          initialAddress={counterpartyContact.lightningAddress ?? undefined}
+          initialPicture={counterpartyContact.picture ?? undefined}
+          recipientPubkey={counterpartyContact.pubkey ?? undefined}
+          recipientName={counterpartyContact.name}
         />
       ) : null}
       <FeedbackSheet
