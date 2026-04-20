@@ -332,12 +332,8 @@ export async function listTransactions(walletId: string): Promise<any[]> {
   return [];
 }
 
-/**
- * Look up a single invoice by payment hash. Used by the transaction detail
- * sheet to fill in preimage/bolt11 fields that LNbits (and some other NWC
- * backends) omit from `list_transactions` responses.
- * Returns null on failure; callers should treat null as "not available".
- */
+// LNbits (and some other NWC backends) omit preimage/invoice from
+// list_transactions; this fills them in. Returns null on failure.
 export async function lookupInvoice(
   walletId: string,
   paymentHash: string,

@@ -29,23 +29,19 @@ import { BOLTZ_SUPPORT_NPUB, dmRecipient } from '../constants/npubs';
 import { Copy } from 'lucide-react-native';
 
 export interface TransactionDetailData {
-  /** Display values the caller already has */
   type: 'incoming' | 'outgoing' | string;
   amount: number;
   description?: string;
   created_at?: number | null;
   settled_at?: number | null;
   blockHeight?: number | null;
-  /** On-chain tx id (also set for Boltz claim txs) */
+  /** Also set for Boltz claim txs, not just plain on-chain. */
   txid?: string;
-  /** Lightning-only detail fields */
   paymentHash?: string;
   preimage?: string;
   invoice?: string;
   feesSats?: number;
-  /** Optional — if set, we can surface Boltz swap state */
   swapId?: string;
-  /** Resolved Nostr counterparty info for zaps (incoming sender or outgoing recipient). */
   zapCounterparty?: ZapCounterpartyInfo | null;
 }
 
@@ -91,12 +87,6 @@ const CopyRow: React.FC<{
   </TouchableOpacity>
 );
 
-/**
- * Bottom sheet showing the detail for a single transaction. For rows that
- * are part of a Boltz swap we detect the paired swapId via persisted
- * state and expose a "Retry claim" button when the swap has locked funds
- * on-chain but the claim hasn't landed yet.
- */
 const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
   const { btcPrice, currency, activeWallet } = useWallet();
   const { isLoggedIn, signerType, sendDirectMessage } = useNostr();
@@ -107,8 +97,8 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
   const [supportSheetOpen, setSupportSheetOpen] = useState(false);
   const [senderProfileOpen, setSenderProfileOpen] = useState(false);
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
-  // Filled in on open when the cached tx lacks preimage/invoice — some NWC
-  // backends (notably LNbits) omit those fields from list_transactions.
+  // Some NWC backends (notably LNbits) omit preimage/invoice from
+  // list_transactions; fill them in via lookupInvoice when the sheet opens.
   const [enrichment, setEnrichment] = useState<{ preimage?: string; invoice?: string }>({});
 
   useEffect(() => {
@@ -116,8 +106,6 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
     else sheetRef.current?.dismiss();
   }, [visible]);
 
-  // On open, if this is a Lightning tx with a payment hash but we don't have
-  // the preimage/invoice cached, look them up via NWC.
   useEffect(() => {
     setEnrichment({});
     if (!visible || !tx || !tx.paymentHash) return;
@@ -133,11 +121,8 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
     };
   }, [visible, tx, activeWallet]);
 
-  // Detection for Boltz swap transactions. The explicit `tx.swapId` wins;
-  // otherwise we recognise a swap by its invoice memo (Boltz submarine
-  // swaps are memo'd "Send to BTC address", reverse swaps "Receive from
-  // BTC address"), the legacy "Boltz swap in progress" pending marker, or
-  // — lacking any of that — any pending LN tx that could be mid-swap.
+  // Match Boltz-minted invoice memos ("Send to BTC address" /
+  // "Receive from BTC address") — settled swaps don't carry tx.swapId.
   const isBoltzSwap = useMemo(() => {
     if (!tx) return false;
     if (tx.swapId) return true;
@@ -146,13 +131,10 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
       if (/send to btc|send to bitcoin/i.test(tx.description)) return true;
       if (/receive from btc|receive from bitcoin/i.test(tx.description)) return true;
     }
-    if (!tx.settled_at && !tx.blockHeight) return true; // pending — could be a swap
+    if (!tx.settled_at && !tx.blockHeight) return true;
     return false;
   }, [tx]);
 
-  // If this transaction is (or could be) a Boltz swap, try to resolve the
-  // paired swap from SecureStore + Boltz status for the Retry claim flow
-  // and to include the Swap ID in the support DM.
   useEffect(() => {
     let cancelled = false;
     const resolve = async () => {
@@ -160,8 +142,6 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
       setResolvedSwapId(null);
       if (!tx || !isBoltzSwap) return;
 
-      // Find a persisted swap we can pair with. Prefer explicit swapId;
-      // otherwise walk the persisted index and pick the most recent.
       let swapId: string | undefined = tx.swapId;
       if (!swapId) {
         try {
@@ -409,9 +389,7 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
             </TouchableOpacity>
           ) : null}
 
-          {tx.txid ? (
-            <CopyRow label="On-chain tx" value={tx.txid} onCopy={copyValue} />
-          ) : null}
+          {tx.txid ? <CopyRow label="On-chain tx" value={tx.txid} onCopy={copyValue} /> : null}
 
           {swap?.lockupTxId ? (
             <CopyRow label="Lockup tx" value={swap.lockupTxId} onCopy={copyValue} />
@@ -492,10 +470,7 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
         successTitle="Message sent"
         successMessage="Boltz support will reply via Nostr DM. Check your usual Nostr client for the response."
       />
-      <NostrLoginSheet
-        visible={loginSheetOpen}
-        onClose={() => setLoginSheetOpen(false)}
-      />
+      <NostrLoginSheet visible={loginSheetOpen} onClose={() => setLoginSheetOpen(false)} />
     </>
   );
 };

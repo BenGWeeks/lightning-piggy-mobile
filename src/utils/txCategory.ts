@@ -7,12 +7,8 @@ interface TxLike {
   txid?: string;
 }
 
-/**
- * Classify a transaction for icon + badging purposes. Boltz wins over
- * on-chain because swap txs carry a txid on the on-chain leg but should
- * still render as Boltz. On-chain wins over Lightning when a blockHeight
- * or txid is set.
- */
+// Boltz wins over on-chain: swap claim txs carry a txid but should still
+// render as Boltz.
 export function getTxCategory(tx: TxLike): TxCategory {
   if (tx.swapId) return 'boltz';
   const desc = tx.description ?? '';

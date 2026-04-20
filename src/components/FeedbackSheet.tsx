@@ -52,13 +52,9 @@ const FeedbackSheet: React.FC<Props> = ({
   const snapPoints = useMemo(() => ['55%'], []);
   const [message, setMessage] = useState(initialMessage);
   const [sending, setSending] = useState(false);
-  // Ref tracks whether the sheet is currently open, so we only reset
-  // `message` on the hidden→visible transition. Without this, async
-  // `initialMessage` updates (e.g. swap-status enrichment) would stomp
-  // the user's in-progress edits.
+  // Reset `message` only on hidden→visible transitions so async
+  // `initialMessage` updates don't stomp the user's in-progress edits.
   const wasVisibleRef = useRef(false);
-  // Keep the latest `initialMessage` readable at open-time without
-  // making it a useEffect dependency.
   const initialMessageRef = useRef(initialMessage);
   initialMessageRef.current = initialMessage;
 
