@@ -70,6 +70,11 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   const scrollRef = useRef<any>(null);
+  // Monotonically bumped every time the sheet opens or closes. Detached async
+  // work (background swap IIFE, Retry handler) captures the value at start and
+  // skips component-state setters if it has changed — otherwise a late callback
+  // from a previous transfer can leak error/progress state into a new one.
+  const sessionRef = useRef(0);
   const snapPoints = useMemo(() => ['85%'], []);
 
   const currentSats = parseInt(satsValue) || 0;
@@ -208,11 +213,15 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       setSending(false);
       setHandedOff(false);
       setProgressMsg(null);
+      setBackgroundError(null);
+      setRetryingRecovery(false);
       setFeeEstimate(null);
       setSourceDropdownOpen(false);
       setDestDropdownOpen(false);
+      sessionRef.current += 1;
       bottomSheetRef.current?.present();
     } else {
+      sessionRef.current += 1;
       bottomSheetRef.current?.dismiss();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -408,6 +417,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         // user can dismiss the sheet immediately. The swap is persisted, so
         // swapRecoveryService is the safety net if this task dies.
         const amount = currentSats;
+        const iifeSession = sessionRef.current;
         (async () => {
           try {
             await payInvoiceForWallet(sourceId, swap.invoice);
@@ -443,13 +453,17 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             // Surface the error on the sheet itself — the previous version
             // only showed a toast and left the progress message stuck on
             // "Swap underway" forever. Users need an in-sheet signal so they
-            // can act without having to catch a transient toast.
-            setBackgroundError(msg);
-            setProgressMsg(
-              'Background step failed — the LN payment reply may have been dropped ' +
-                'by the relay. Your funds are safe; tap "Retry now" to re-check ' +
-                'and broadcast the claim. Otherwise the app will retry automatically on next launch.',
-            );
+            // can act without having to catch a transient toast. Guarded by
+            // the session token so a late failure from a previous transfer
+            // cannot paint error state onto a new one.
+            if (sessionRef.current === iifeSession) {
+              setBackgroundError(msg);
+              setProgressMsg(
+                'Background step failed — the LN payment reply may have been dropped ' +
+                  'by the relay. Your funds are safe; tap "Retry now" to re-check ' +
+                  'and broadcast the claim. Otherwise the app will retry automatically on next launch.',
+              );
+            }
             Toast.show({
               type: 'error',
               text1: 'Swap in progress',
@@ -718,6 +732,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
               <TouchableOpacity
                 style={styles.closeButton}
                 onPress={async () => {
+                  const retrySession = sessionRef.current;
                   setRetryingRecovery(true);
                   try {
                     await swapRecoveryService.recoverPendingSwaps();
@@ -728,10 +743,12 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                       position: 'top',
                       visibilityTime: 6000,
                     });
-                    setBackgroundError(null);
-                    setProgressMsg(
-                      'Recovery retried — check transaction history for the final status.',
-                    );
+                    if (sessionRef.current === retrySession) {
+                      setBackgroundError(null);
+                      setProgressMsg(
+                        'Recovery retried — check transaction history for the final status.',
+                      );
+                    }
                   } catch (err) {
                     const m = err instanceof Error ? err.message : String(err);
                     Toast.show({
@@ -742,7 +759,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                       visibilityTime: 8000,
                     });
                   } finally {
-                    setRetryingRecovery(false);
+                    if (sessionRef.current === retrySession) {
+                      setRetryingRecovery(false);
+                    }
                   }
                 }}
                 disabled={retryingRecovery}
