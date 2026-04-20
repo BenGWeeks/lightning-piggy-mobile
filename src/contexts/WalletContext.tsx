@@ -792,12 +792,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           pending = current.transactions
             .map((tx, idx) => ({ tx, idx }))
             .filter(({ tx }) => {
-              // Populated counterparty → already attributed, skip.
               if (tx.zapCounterparty && typeof tx.zapCounterparty === 'object') return false;
-              // `null` with bolt11 → definitive negative from a prior run;
-              // skip so a user with hundreds of non-zap payments doesn't
-              // re-query / re-scan on every refresh.
-              if (tx.zapCounterparty === null && tx.bolt11) return false;
+              // Incoming null is a definitive relay-sweep miss — skip to
+              // avoid re-scanning hundreds of non-zap receipts each refresh.
+              // Outgoing null means only that an earlier run didn't find a
+              // local storage entry — retry, since the entry may have been
+              // written after that run (race) or on another device later.
+              if (tx.zapCounterparty === null && tx.bolt11 && tx.type === 'incoming') return false;
               return true;
             });
         }
@@ -880,11 +881,18 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           const info = byHash.get(tx.paymentHash);
           if (info) {
             resultsByIdx.set(idx, info);
-          } else if (tx.bolt11) {
-            // Tried both paths and nothing matched — negative-cache so we
-            // don't redo the work on every refresh.
-            resultsByIdx.set(idx, null);
           }
+          // No negative-cache for outgoing: the local storage entry is the
+          // only source of truth, and a miss may just mean the record was
+          // written after this resolver run. Let the next refresh retry.
+        }
+        if (__DEV__) {
+          const storageHits = outgoingPending.filter(
+            ({ tx }) => tx.paymentHash && byHash.has(tx.paymentHash),
+          ).length;
+          console.log(
+            `[Zap/${walletAlias}] outgoing: storage hit ${storageHits}/${outgoingPending.length}`,
+          );
         }
       }
 
