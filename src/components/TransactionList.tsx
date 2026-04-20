@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { Image } from 'expo-image';
 import { colors } from '../styles/theme';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet } from '../contexts/WalletContext';
 import TransactionDetailSheet, { TransactionDetailData } from './TransactionDetailSheet';
+import type { ZapCounterpartyInfo } from '../types/wallet';
 
 interface Transaction {
   type: string;
@@ -18,20 +20,84 @@ interface Transaction {
   preimage?: string;
   invoice?: string;
   feesSats?: number;
+  bolt11?: string;
+  zapCounterparty?: ZapCounterpartyInfo | null;
 }
 
 interface Props {
   transactions: Transaction[];
 }
 
+function zapCounterpartyLabel(cp: ZapCounterpartyInfo): string {
+  if (cp.anonymous) return 'Anonymous';
+  const profile = cp.profile;
+  if (profile?.displayName) return profile.displayName;
+  if (profile?.name) return profile.name;
+  if (profile?.npub) return `${profile.npub.slice(0, 12)}…`;
+  return 'Nostr user';
+}
+
+/** Parse URL-shaped descriptions into `{ primary, subtitle }` so a row like
+ * "https://memestore.satmo-dev.xyz - Order #4497" renders with the domain
+ * prominent and the full URL/memo below, matching Primal's treatment. */
+function splitDescription(desc: string): { primary: string; subtitle: string | null } {
+  const trimmed = desc.trim();
+  const urlMatch = trimmed.match(/^(https?:\/\/)([^\s/]+)(.*)$/i);
+  if (urlMatch) {
+    const [, , host, rest] = urlMatch;
+    return { primary: host, subtitle: rest.replace(/^\s*-\s*/, '').trim() || null };
+  }
+  return { primary: trimmed, subtitle: null };
+}
+
+function formatDayHeader(ts: number): string {
+  const date = new Date(ts * 1000);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+  if (sameDay(date, today)) return 'Today';
+  if (sameDay(date, yesterday)) return 'Yesterday';
+  return date.toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function formatTime(ts: number): string {
+  return new Date(ts * 1000).toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 const INITIAL_COUNT = 20;
+
+type ItemRow = { kind: 'tx'; tx: Transaction; key: string };
+type HeaderRow = { kind: 'header'; label: string; key: string };
+type Row = ItemRow | HeaderRow;
+
+/** Build a deterministic key for a transaction row. Prefers settled-payment
+ * identifiers, falling back to on-chain txid, then bolt11, then a composite
+ * of the stable shape fields so pending rows still get distinct keys.
+ * Self-payments produce two entries with the same paymentHash / bolt11
+ * (incoming + outgoing leg), so always include `tx.type` to disambiguate. */
+function txKey(tx: Transaction, fallbackIndex: number): string {
+  if (tx.paymentHash) return `ph:${tx.type}:${tx.paymentHash}`;
+  if (tx.txid) return `tx:${tx.type}:${tx.txid}`;
+  if (tx.bolt11) return `b11:${tx.type}:${tx.bolt11}`;
+  return `fb:${tx.type}:${tx.created_at ?? tx.settled_at ?? 'pending'}:${tx.amount}:${fallbackIndex}`;
+}
 
 const TransactionList: React.FC<Props> = ({ transactions }) => {
   const { btcPrice, currency } = useWallet();
   const [showAll, setShowAll] = useState(false);
   const [detail, setDetail] = useState<TransactionDetailData | null>(null);
 
-  // Reset when transaction list changes (wallet swipe)
   React.useEffect(() => setShowAll(false), [transactions]);
 
   if (transactions.length === 0) {
@@ -42,7 +108,7 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
     );
   }
 
-  // Sort: pending (no timestamp) first, then newest first
+  // Sort: pending (no timestamp) first, then newest first.
   const sorted = [...transactions].sort((a, b) => {
     const aTime = a.settled_at || a.created_at;
     const bTime = b.settled_at || b.created_at;
@@ -54,60 +120,120 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
   const visibleTransactions = showAll ? sorted : sorted.slice(0, INITIAL_COUNT);
   const hasMore = transactions.length > INITIAL_COUNT;
 
+  // Flatten into a mixed list of day headers + rows. Pending entries (no
+  // timestamp) get a "Pending" header so they still group visually.
+  const rows: Row[] = [];
+  let currentDayKey: string | null = null;
+  visibleTransactions.forEach((tx, fallbackIndex) => {
+    const ts = tx.settled_at || tx.created_at;
+    const dayKey = ts ? new Date(ts * 1000).toDateString() : '__pending__';
+    if (dayKey !== currentDayKey) {
+      rows.push({
+        kind: 'header',
+        label: ts ? formatDayHeader(ts) : 'Pending',
+        key: `h:${dayKey}`,
+      });
+      currentDayKey = dayKey;
+    }
+    rows.push({ kind: 'tx', tx, key: txKey(tx, fallbackIndex) });
+  });
+
   return (
     <View style={styles.list}>
-      {visibleTransactions.map((item, index) => {
+      {rows.map((row) => {
+        if (row.kind === 'header') {
+          return (
+            <Text key={row.key} style={styles.dayHeader}>
+              {row.label}
+            </Text>
+          );
+        }
+        const item = row.tx;
         const isIncoming = item.type === 'incoming';
         const amountSats = Math.abs(item.amount);
-        const date = item.settled_at || item.created_at;
-        const isPending = !date && !item.blockHeight;
-        const dateStr = date
-          ? new Date(date * 1000).toLocaleString(undefined, {
-              dateStyle: 'short',
-              timeStyle: 'short',
-            })
-          : item.blockHeight
-            ? `Block ${item.blockHeight.toLocaleString()}`
-            : '';
-        const label = isPending
-          ? 'Pending'
-          : item.description || (isIncoming ? 'Received' : 'Sent');
+        const ts = item.settled_at || item.created_at;
+        const isPending = !ts && !item.blockHeight;
+        const zapCp = item.zapCounterparty ?? undefined;
+
+        // Primary label: counterparty name if attributed; else URL host or
+        // raw description; else "Received" / "Sent".
+        let primary: string;
+        let subtitle: string | null = null;
+        if (isPending) {
+          primary = 'Pending';
+        } else if (zapCp) {
+          primary = zapCounterpartyLabel(zapCp);
+          subtitle = zapCp.comment?.trim() || null;
+        } else if (item.description) {
+          const split = splitDescription(item.description);
+          primary = split.primary;
+          subtitle = split.subtitle;
+        } else {
+          primary = isIncoming ? 'Received' : 'Sent';
+        }
+
+        const timeStr = ts ? formatTime(ts) : '';
+        const counterpartyAvatar = zapCp?.profile?.picture ?? null;
         const fiatStr = satsToFiatString(amountSats, btcPrice, currency);
 
         return (
           <TouchableOpacity
-            key={index}
+            key={row.key}
             style={[styles.item, isPending && styles.itemPending]}
             onPress={() => setDetail(item as TransactionDetailData)}
-            accessibilityLabel={`Open details for ${label}`}
+            accessibilityLabel={`Open details for ${primary}`}
           >
-            <View style={styles.itemLeft}>
-              <Text style={[styles.itemIcon, isPending && styles.pendingText]}>
-                {isIncoming ? '↓' : '↑'}
-              </Text>
-              <View style={styles.itemDescriptionContainer}>
-                <Text
-                  style={[styles.itemDescription, isPending && styles.pendingText]}
-                  numberOfLines={1}
-                >
-                  {label}
-                </Text>
-                <Text style={styles.itemDate}>{dateStr}</Text>
-              </View>
+            <View style={styles.avatarWrap}>
+              {counterpartyAvatar ? (
+                <Image
+                  source={{ uri: counterpartyAvatar }}
+                  style={styles.avatar}
+                  cachePolicy="disk"
+                  contentFit="cover"
+                />
+              ) : (
+                <View style={styles.avatarPlaceholder}>
+                  <Text style={styles.avatarPlaceholderIcon}>⚡</Text>
+                </View>
+              )}
             </View>
-            <View style={styles.itemRight}>
+
+            <View style={styles.centerCol}>
+              <View style={styles.centerLine}>
+                <Text style={[styles.primary, isPending && styles.pendingText]} numberOfLines={1}>
+                  {primary}
+                </Text>
+                {timeStr ? <Text style={styles.time}> | {timeStr}</Text> : null}
+              </View>
+              {subtitle ? (
+                <Text style={styles.subtitle} numberOfLines={1}>
+                  {subtitle}
+                </Text>
+              ) : null}
+            </View>
+
+            <View style={styles.rightCol}>
+              <View style={styles.amountsColumn}>
+                <Text
+                  style={[
+                    styles.amount,
+                    isPending ? styles.pendingText : isIncoming ? styles.incoming : styles.outgoing,
+                  ]}
+                >
+                  {amountSats.toLocaleString()} sats
+                </Text>
+                {fiatStr ? (
+                  <Text style={[styles.fiat, isPending && styles.pendingText]}>{fiatStr}</Text>
+                ) : null}
+              </View>
               <Text
                 style={[
-                  styles.itemAmount,
+                  styles.arrow,
                   isPending ? styles.pendingText : isIncoming ? styles.incoming : styles.outgoing,
                 ]}
               >
-                {isIncoming ? '+' : '-'}
-                {amountSats.toLocaleString()} sats
+                {isIncoming ? '↓' : '↑'}
               </Text>
-              {fiatStr ? (
-                <Text style={[styles.itemFiat, isPending && styles.pendingText]}>{fiatStr}</Text>
-              ) : null}
             </View>
           </TouchableOpacity>
         );
@@ -126,6 +252,8 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
   );
 };
 
+const AVATAR_SIZE = 40;
+
 const styles = StyleSheet.create({
   list: {
     flex: 1,
@@ -138,50 +266,89 @@ const styles = StyleSheet.create({
     color: colors.textSupplementary,
     fontSize: 16,
   },
+  dayHeader: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textSupplementary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 6,
+  },
   item: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 10,
     paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.divider,
-  },
-  itemLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: 12,
-    flex: 1,
   },
-  itemIcon: {
+  avatarWrap: {
+    width: AVATAR_SIZE,
+    height: AVATAR_SIZE,
+  },
+  avatar: {
+    width: AVATAR_SIZE,
+    height: AVATAR_SIZE,
+    borderRadius: AVATAR_SIZE / 2,
+    backgroundColor: colors.background,
+  },
+  avatarPlaceholder: {
+    width: AVATAR_SIZE,
+    height: AVATAR_SIZE,
+    borderRadius: AVATAR_SIZE / 2,
+    backgroundColor: colors.brandPinkLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarPlaceholderIcon: {
     fontSize: 20,
-    fontWeight: '700',
     color: colors.brandPink,
   },
-  itemDescriptionContainer: {
+  centerCol: {
     flex: 1,
+    minWidth: 0,
   },
-  itemDescription: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textBody,
+  centerLine: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
   },
-  itemDate: {
+  primary: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.textHeader,
+    flexShrink: 1,
+  },
+  time: {
+    fontSize: 12,
+    color: colors.textSupplementary,
+    marginLeft: 4,
+  },
+  subtitle: {
     fontSize: 12,
     color: colors.textSupplementary,
     marginTop: 2,
   },
-  itemRight: {
+  rightCol: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  amountsColumn: {
     alignItems: 'flex-end',
   },
-  itemAmount: {
-    fontSize: 14,
+  amount: {
+    fontSize: 15,
     fontWeight: '700',
   },
-  itemFiat: {
-    fontSize: 12,
+  arrow: {
+    fontSize: 22,
+    fontWeight: '700',
+  },
+  fiat: {
+    fontSize: 11,
     color: colors.textSupplementary,
-    marginTop: 2,
+    marginTop: 1,
   },
   showMore: {
     paddingVertical: 16,

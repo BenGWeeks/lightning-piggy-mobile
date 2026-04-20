@@ -11,6 +11,40 @@ import type { NostrProfile, NostrContact, RelayConfig } from '../types/nostr';
 
 const pool = new SimplePool();
 
+// Shared pubkey + read relays of the currently logged-in Nostr user.
+// Kept as module state because `WalletProvider` wraps `NostrProvider` in
+// the tree, so the wallet layer can't read `NostrContext` via React hooks
+// — but it needs the recipient pubkey (for the `#p` zap-receipt filter)
+// and the user's configured read relays (so queries also hit the relays
+// that actually carry their zap history).
+let _currentUserPubkey: string | null = null;
+let _currentUserReadRelays: string[] = [];
+const _pubkeyListeners = new Set<(pubkey: string | null) => void>();
+export function setCurrentUserPubkey(pubkey: string | null): void {
+  if (_currentUserPubkey === pubkey) return;
+  _currentUserPubkey = pubkey;
+  _pubkeyListeners.forEach((fn) => {
+    try {
+      fn(pubkey);
+    } catch (e) {
+      if (__DEV__) console.warn('[Nostr] pubkey listener threw:', e);
+    }
+  });
+}
+export function getCurrentUserPubkey(): string | null {
+  return _currentUserPubkey;
+}
+export function setCurrentUserReadRelays(relays: string[]): void {
+  _currentUserReadRelays = [...relays];
+}
+export function getCurrentUserReadRelays(): string[] {
+  return _currentUserReadRelays;
+}
+export function onCurrentUserPubkeyChange(fn: (pubkey: string | null) => void): () => void {
+  _pubkeyListeners.add(fn);
+  return () => _pubkeyListeners.delete(fn);
+}
+
 export const DEFAULT_RELAYS = [
   'wss://relay.damus.io',
   'wss://relay.nostr.band',
@@ -269,6 +303,107 @@ export async function publishSignedEvent(
 ): Promise<void> {
   trackRelays(relays);
   await Promise.any(pool.publish(relays, signedEvent as VerifiedEvent));
+}
+
+/**
+ * Parse a NIP-57 zap receipt (kind 9735) to extract the sender pubkey and the
+ * comment they typed when zapping. The receipt's `description` tag carries
+ * the stringified kind 9734 zap request event; the sender's pubkey is the
+ * `pubkey` field of that inner event, unless the zap request was marked
+ * anonymous via `['anon', ...]`.
+ */
+export function parseZapReceipt(event: { tags: string[][] }): {
+  senderPubkey: string | null;
+  comment: string;
+  anonymous: boolean;
+} | null {
+  const descTag = event.tags.find((t) => t[0] === 'description');
+  if (!descTag || !descTag[1]) return null;
+  try {
+    const zapRequest = JSON.parse(descTag[1]) as {
+      pubkey?: string;
+      content?: string;
+      tags?: string[][];
+    };
+    const anonymous = Array.isArray(zapRequest.tags)
+      ? zapRequest.tags.some((t) => t[0] === 'anon')
+      : false;
+    return {
+      senderPubkey: anonymous ? null : zapRequest.pubkey || null,
+      comment: typeof zapRequest.content === 'string' ? zapRequest.content : '',
+      anonymous,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch NIP-57 zap receipts (kind 9735) addressed to `recipientPubkey`.
+ *
+ * We can't use `#bolt11` here — damus, primal and most mainstream relays
+ * reject tag filters they haven't indexed (they respond with
+ * `NOTICE: bad req: unindexed tag filter`). `#p` is always indexed, so we
+ * fetch a bounded slice of receipts for the wallet owner and let the caller
+ * match individual bolt11 invoices locally against the returned events.
+ */
+export async function fetchZapReceiptsForRecipient(
+  recipientPubkeys: string | string[],
+  relays: string[],
+  options: { limit?: number; since?: number } = {},
+): Promise<{ tags: string[][]; created_at: number; id: string }[]> {
+  return fetchZapReceiptsByTag('#p', recipientPubkeys, relays, options);
+}
+
+/**
+ * Fetch kind-9735 zap receipts where the SENDER pubkey matches one of
+ * the given pubkeys (via the optional uppercase `P` tag per NIP-57).
+ *
+ * Used for cross-device attribution of outgoing zaps: when a zap was
+ * sent from a different device, local storage has no entry for it. If
+ * the recipient's LNURL server included `['P', <sender_pubkey>]` in
+ * the receipt we can still resolve the recipient by querying relays.
+ *
+ * Servers MAY omit the `P` tag (NIP-57 marks it optional), so this is
+ * a best-effort fallback, not a replacement for the local-storage path.
+ */
+export async function fetchZapReceiptsForSender(
+  senderPubkeys: string | string[],
+  relays: string[],
+  options: { limit?: number; since?: number } = {},
+): Promise<{ tags: string[][]; created_at: number; id: string }[]> {
+  return fetchZapReceiptsByTag('#P', senderPubkeys, relays, options);
+}
+
+async function fetchZapReceiptsByTag(
+  tag: '#p' | '#P',
+  pubkeys: string | string[],
+  relays: string[],
+  options: { limit?: number; since?: number } = {},
+): Promise<{ tags: string[][]; created_at: number; id: string }[]> {
+  const arr = Array.isArray(pubkeys) ? pubkeys : [pubkeys];
+  const deduped = [...new Set(arr.filter(Boolean))];
+  if (deduped.length === 0) return [];
+  const allRelays = [...new Set([...relays, ...DEFAULT_RELAYS])];
+  trackRelays(allRelays);
+  const baseFilter = {
+    kinds: [9735],
+    limit: options.limit ?? 500,
+    ...(options.since ? { since: options.since } : {}),
+  };
+  // The `tag` parameter is a literal '#p' or '#P' — cast to the nostr-tools
+  // filter type which expects `#<letter>` index signatures.
+  const filter = { ...baseFilter, [tag]: deduped } as Parameters<typeof pool.querySync>[1];
+  try {
+    const events = await withTimeout(pool.querySync(allRelays, filter), 15000);
+    if (!events) return [];
+    const byId = new Map<string, { tags: string[][]; created_at: number; id: string }>();
+    for (const e of events) byId.set(e.id, e);
+    return Array.from(byId.values());
+  } catch (error) {
+    if (__DEV__) console.warn(`[Nostr] fetchZapReceiptsByTag ${tag} failed:`, error);
+    return [];
+  }
 }
 
 export function createZapRequestEvent(

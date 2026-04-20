@@ -40,7 +40,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     supportsTablet: true,
     bundleIdentifier: getIosBundleId(),
     infoPlist: {
-      ITSAppUsesNonExemptEncryption: true,
+      // The app uses only standard cryptography (secp256k1, SHA-256, BIP-32/39/84,
+      // and AES/TLS via system libraries). All of that falls under Apple's
+      // export-compliance exemptions for cryptocurrency wallets, so we don't need
+      // to file separate export-compliance documentation. See
+      // https://developer.apple.com/documentation/security/complying_with_encryption_export_regulations
+      ITSAppUsesNonExemptEncryption: false,
     },
   },
   plugins: [

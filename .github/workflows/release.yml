@@ -1,0 +1,194 @@
+name: Release
+
+on:
+  # Fire when a GitHub Release is published (UI: Releases → Draft a new release).
+  # The Release creates the tag server-side; no separate tag-push trigger needed.
+  release:
+    types: [published]
+  # Allow manual re-run without re-tagging (e.g. to retry a failed EAS build).
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform(s) to release
+        type: choice
+        default: ios   # flip to `all` once Google Play account + service account JSON are wired up via `eas credentials`
+        options: [ios, android, all]
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # needed to upload assets to the Release
+
+env:
+  EAS_CLI_VERSION: '18.6.0'
+
+jobs:
+  build-and-submit:
+    name: EAS build & submit
+    runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    outputs:
+      platform: ${{ steps.platform.outputs.value }}
+    steps:
+      - name: Verify EXPO_TOKEN is set
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error title=Missing EXPO_TOKEN::Set EXPO_TOKEN under Settings → Secrets and variables → Actions. Generate at https://expo.dev/accounts/bengweeks/settings/access-tokens."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set user-visible version from Release tag
+        # Triggered Releases set tag_name (e.g. "v1.0.1"). Strip the leading "v"
+        # and write into app.config.ts so iOS CFBundleShortVersionString and
+        # Android versionName both pick it up. Build numbers (CFBundleVersion /
+        # versionCode) come from EAS via appVersionSource: remote + autoIncrement.
+        if: github.event_name == 'release'
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="${TAG#v}"
+          # Strip any pre-release suffix (e.g. 1.0.0-rc1 → 1.0.0); store-side
+          # versions must be strict X.Y.Z. Keep the original tag in the commit
+          # history / Release page for traceability.
+          VERSION="${VERSION%%-*}"
+          echo "Setting version to $VERSION (from tag $TAG)"
+          sed -i "s/version: '[^']*'/version: '$VERSION'/" app.config.ts
+          git diff app.config.ts
+
+      - name: Quality gates
+        run: |
+          npm run typecheck
+          npm run lint
+          npm run format:check
+
+      - name: Resolve platform
+        id: platform
+        run: |
+          # On Release events the input is empty, so fall back to ios-only until
+          # we wire up Google Play credentials. Switch to 'all' when ready.
+          echo "value=${{ github.event.inputs.platform || 'ios' }}" >> "$GITHUB_OUTPUT"
+
+      - name: EAS build + auto-submit
+        run: |
+          npx -p eas-cli@${{ env.EAS_CLI_VERSION }} eas build \
+            --profile production \
+            --platform ${{ steps.platform.outputs.value }} \
+            --non-interactive \
+            --auto-submit
+
+  attach-android-apk:
+    name: Attach Android APK to Release
+    # Only runs on an actual Release event (workflow_dispatch has no release to attach to)
+    # AND only when the build job actually built for Android.
+    if: github.event_name == 'release' && contains(fromJSON('["android","all"]'), needs.build-and-submit.outputs.platform)
+    needs: build-and-submit
+    runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        # eas build:list resolves the project via app.config.ts / eas.json from the repo root.
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+
+      - name: Resolve latest finished Android APK URL
+        id: find
+        run: |
+          # Pick the most recent FINISHED Android production build (the one we just submitted).
+          # Filter by the git commit of the Release tag so we don't accidentally grab an
+          # unrelated older build.
+          url=$(npx -y -p eas-cli@${{ env.EAS_CLI_VERSION }} eas build:list \
+            --platform android --status finished --limit 5 --json \
+            --non-interactive \
+            | jq -r --arg sha "${{ github.sha }}" \
+                '[.[] | select(.gitCommitHash == $sha)][0].artifacts.buildUrl // empty')
+          if [ -z "$url" ] || [ "$url" = "null" ]; then
+            echo "::error title=No Android build artifact::Could not find a finished Android build for commit ${{ github.sha }}. The EAS build may still be running, or failed."
+            exit 1
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Download APK
+        run: |
+          mkdir -p dist
+          curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
+            "${{ steps.find.outputs.url }}" \
+            -o "dist/lightning-piggy-${{ github.event.release.tag_name }}.apk"
+          # Verify it's actually an APK (ZIP magic bytes), not an HTML error page.
+          file dist/*.apk | grep -qi 'zip\|android' || {
+            echo "::error title=APK download invalid::Downloaded file does not look like an APK."
+            file dist/*.apk
+            exit 1
+          }
+          ls -la dist/
+
+      - name: Upload APK to Release
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            dist/lightning-piggy-${{ github.event.release.tag_name }}.apk \
+            --repo "$GITHUB_REPOSITORY" --clobber
+
+  attach-technical-pdf:
+    name: Generate & attach Technical Solution PDF
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Install asciidoctor-pdf + rouge
+        run: |
+          gem install asciidoctor-pdf asciidoctor-diagram rouge
+
+      - name: Generate PDF
+        run: bash docs/generate-docs.sh
+
+      - name: Upload PDF to Release
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            docs/TECHNICAL_SOLUTION_DOCUMENT.pdf \
+            --repo "$GITHUB_REPOSITORY" --clobber
+
+  summary:
+    name: Summary
+    if: always()
+    needs: [build-and-submit, attach-android-apk, attach-technical-pdf]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write summary
+        run: |
+          {
+            echo "## Release ${{ github.event.release.tag_name || github.ref_name }}"
+            echo ""
+            echo "- EAS builds: https://expo.dev/accounts/bengweeks/projects/lightning-piggy-app/builds"
+            echo "- Submissions: https://expo.dev/accounts/bengweeks/projects/lightning-piggy-app/submissions"
+            if [ "${{ github.event_name }}" = "release" ]; then
+              echo "- Release assets: ${{ github.event.release.html_url }}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

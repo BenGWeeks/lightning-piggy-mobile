@@ -21,7 +21,37 @@ const SIGNER_TYPE_KEY = 'nostr_signer_type';
 const CONTACTS_CACHE_KEY = 'nostr_contacts_cache';
 const PROFILES_CACHE_KEY = 'nostr_profiles_cache';
 const CACHE_TIMESTAMP_KEY = 'nostr_cache_timestamp';
+const CONTACTS_TIMESTAMP_KEY = 'nostr_contacts_timestamp';
+const OWN_PROFILE_CACHE_KEY = 'nostr_own_profile_cache';
+const OWN_PROFILE_TIMESTAMP_KEY = 'nostr_own_profile_timestamp';
+const RELAY_LIST_CACHE_KEY = 'nostr_relay_list_cache';
+const RELAY_LIST_TIMESTAMP_KEY = 'nostr_relay_list_timestamp';
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+/**
+ * Read a JSON-serialised cache value and its timestamp in a single
+ * `multiGet` call. Returns the parsed value (or null if missing / corrupt)
+ * and the cache age in ms (Infinity when no timestamp exists yet).
+ */
+async function readCachedWithTtl<T>(
+  dataKey: string,
+  tsKey: string,
+): Promise<{ value: T | null; ageMs: number }> {
+  try {
+    const pairs = await AsyncStorage.multiGet([dataKey, tsKey]);
+    let dataStr: string | null = null;
+    let tsStr: string | null = null;
+    for (const [k, v] of pairs) {
+      if (k === dataKey) dataStr = v;
+      else if (k === tsKey) tsStr = v;
+    }
+    const value = dataStr ? (JSON.parse(dataStr) as T) : null;
+    const ageMs = tsStr ? Date.now() - parseInt(tsStr, 10) : Infinity;
+    return { value, ageMs };
+  } catch {
+    return { value: null, ageMs: Infinity };
+  }
+}
 
 interface NostrContextType {
   isLoggedIn: boolean;
@@ -69,6 +99,20 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [signerType, setSignerType] = useState<SignerType | null>(null);
   const [pubkey, setPubkey] = useState<string | null>(null);
 
+  // Publish the logged-in pubkey through the nostrService module so
+  // non-React consumers (e.g. WalletContext's zap sender resolver) can
+  // read it without introducing a circular provider dependency.
+  useEffect(() => {
+    nostrService.setCurrentUserPubkey(pubkey);
+  }, [pubkey]);
+
+  useEffect(() => {
+    // Publish read relays so zap-receipt queries from WalletContext hit
+    // the user's configured relays in addition to the app-level defaults.
+    const read = relays.filter((r) => r.read).map((r) => r.url);
+    nostrService.setCurrentUserReadRelays(read);
+  }, [relays]);
+
   const getReadRelays = useCallback((): string[] => {
     const readRelays = relays.filter((r) => r.read).map((r) => r.url);
     return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
@@ -76,24 +120,50 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const loadProfile = useCallback(async (pk: string, relayUrls: string[]) => {
     const t0 = Date.now();
+    // Cache-fresh fast path: hydrate UI from cache and skip the relay RTT.
+    const { value: cached, ageMs } = await readCachedWithTtl<NostrProfile>(
+      OWN_PROFILE_CACHE_KEY,
+      OWN_PROFILE_TIMESTAMP_KEY,
+    );
+    if (cached && ageMs < CACHE_MAX_AGE_MS) {
+      setProfile(cached);
+      if (__DEV__) console.log(`[Nostr] fetchProfile: skipped (cache fresh)`);
+      return;
+    }
     const fetchedProfile = await nostrService.fetchProfile(pk, relayUrls);
     if (__DEV__) console.log(`[Nostr] fetchProfile: ${Date.now() - t0}ms`);
     if (fetchedProfile) {
       setProfile(fetchedProfile);
+      InteractionManager.runAfterInteractions(() => {
+        AsyncStorage.setItem(OWN_PROFILE_CACHE_KEY, JSON.stringify(fetchedProfile)).catch(() => {});
+        AsyncStorage.setItem(OWN_PROFILE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+      });
     }
   }, []);
 
   const loadContactsFromCache = useCallback(async () => {
     try {
       const t0 = Date.now();
-      const [contactsJson, profilesJson, timestampStr] = await Promise.all([
-        AsyncStorage.getItem(CONTACTS_CACHE_KEY),
-        AsyncStorage.getItem(PROFILES_CACHE_KEY),
-        AsyncStorage.getItem(CACHE_TIMESTAMP_KEY),
+      // One multiGet round-trip for all three caches. Contacts freshness
+      // is gated by CONTACTS_TIMESTAMP_KEY (the contact-list's own write
+      // time), not the profiles timestamp — they get separate keys so a
+      // successful contact refresh isn't blocked by an unrelated profiles
+      // cache entry.
+      const pairs = await AsyncStorage.multiGet([
+        CONTACTS_CACHE_KEY,
+        PROFILES_CACHE_KEY,
+        CONTACTS_TIMESTAMP_KEY,
       ]);
-      // Skip stale cache (older than 24h)
-      if (timestampStr && Date.now() - parseInt(timestampStr, 10) > CACHE_MAX_AGE_MS) {
-        if (__DEV__) console.log('[Nostr] cache expired, skipping');
+      let contactsJson: string | null = null;
+      let profilesJson: string | null = null;
+      let contactsTsStr: string | null = null;
+      for (const [k, v] of pairs) {
+        if (k === CONTACTS_CACHE_KEY) contactsJson = v;
+        else if (k === PROFILES_CACHE_KEY) profilesJson = v;
+        else if (k === CONTACTS_TIMESTAMP_KEY) contactsTsStr = v;
+      }
+      if (contactsTsStr && Date.now() - parseInt(contactsTsStr, 10) > CACHE_MAX_AGE_MS) {
+        if (__DEV__) console.log('[Nostr] contacts cache expired, skipping');
         return false;
       }
       if (contactsJson) {
@@ -126,56 +196,132 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const loadContacts = useCallback(async (pk: string, relayUrls: string[]) => {
     const t0 = Date.now();
-    const fetchedContacts = await nostrService.fetchContactList(pk, relayUrls);
-    if (__DEV__)
-      console.log(
-        `[Nostr] fetchContactList: ${Date.now() - t0}ms, ${fetchedContacts.length} contacts`,
-      );
-    startTransition(() => setContacts(fetchedContacts));
 
-    // Cache the contact list (deferred to not block UI)
-    InteractionManager.runAfterInteractions(() => {
-      AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(fetchedContacts)).catch(() => {});
-    });
+    // Read the contact-list cache AND profile cache concurrently — both
+    // are independent AsyncStorage round-trips, and the profile cache is
+    // also used for merging into whichever contact list we end up with.
+    const [
+      { value: cachedContacts, ageMs: contactsAgeMs },
+      { value: cachedProfileMapOrNull, ageMs: cacheAgeMs },
+    ] = await Promise.all([
+      readCachedWithTtl<NostrContact[]>(CONTACTS_CACHE_KEY, CONTACTS_TIMESTAMP_KEY),
+      readCachedWithTtl<Record<string, NostrProfile>>(PROFILES_CACHE_KEY, CACHE_TIMESTAMP_KEY),
+    ]);
+    const cachedProfileMap = cachedProfileMapOrNull ?? {};
+    const contactsCacheFresh = contactsAgeMs < CACHE_MAX_AGE_MS;
+    const cacheFresh = cacheAgeMs < CACHE_MAX_AGE_MS;
 
-    // Fetch profiles in background with incremental UI updates
-    if (fetchedContacts.length > 0) {
-      const contactPubkeys = fetchedContacts.map((c) => c.pubkey);
-      const t1 = Date.now();
-      const profileMap = await nostrService.fetchProfiles(contactPubkeys, relayUrls, (partial) => {
-        // Update UI incrementally as each batch of profiles arrives
-        startTransition(() =>
-          setContacts((prev) =>
-            prev.map((c) => ({
-              ...c,
-              profile: partial.get(c.pubkey) ?? c.profile,
-            })),
-          ),
-        );
-      });
+    let fetchedContacts: NostrContact[];
+    if (contactsCacheFresh && cachedContacts) {
+      fetchedContacts = cachedContacts;
       if (__DEV__)
         console.log(
-          `[Nostr] fetchProfiles: ${Date.now() - t1}ms, ${profileMap.size}/${contactPubkeys.length} profiles loaded`,
+          `[Nostr] fetchContactList: skipped (cache fresh @ ${Math.round(contactsAgeMs / 1000)}s old, ${fetchedContacts.length} contacts)`,
         );
-
-      // Cache profiles (deferred to not block UI)
+    } else {
+      fetchedContacts = await nostrService.fetchContactList(pk, relayUrls);
+      if (__DEV__)
+        console.log(
+          `[Nostr] fetchContactList: ${Date.now() - t0}ms, ${fetchedContacts.length} contacts`,
+        );
       InteractionManager.runAfterInteractions(() => {
-        const profileObj: Record<string, NostrProfile> = {};
-        profileMap.forEach((v, k) => {
-          profileObj[k] = v;
-        });
-        AsyncStorage.setItem(PROFILES_CACHE_KEY, JSON.stringify(profileObj)).catch(() => {});
-        AsyncStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+        AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(fetchedContacts)).catch(() => {});
+        AsyncStorage.setItem(CONTACTS_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
       });
     }
+
+    startTransition(() =>
+      setContacts(
+        fetchedContacts.map((c) => ({
+          ...c,
+          profile: cachedProfileMap[c.pubkey] ?? c.profile,
+        })),
+      ),
+    );
+
+    if (fetchedContacts.length === 0) return;
+
+    const missingFromCache = fetchedContacts
+      .map((c) => c.pubkey)
+      .filter((pk) => !cachedProfileMap[pk]);
+
+    // Fast path: cache is fresh *and* covers every current contact. Avatars
+    // are already hydrated from cache above, so skip the 30-40s batch.
+    if (cacheFresh && missingFromCache.length === 0) {
+      if (__DEV__)
+        console.log(
+          `[Nostr] fetchProfiles: skipped (cache fresh @ ${Math.round(cacheAgeMs / 1000)}s old, all ${fetchedContacts.length} contacts cached)`,
+        );
+      return;
+    }
+
+    // When the cache is fresh, the "missing" contacts are the ones who had
+    // no kind-0 response last time we asked. Re-querying on every cold
+    // start costs 3s for contacts that probably just never published a
+    // profile. Wait until the TTL expires before retrying them.
+    if (cacheFresh) {
+      if (__DEV__)
+        console.log(
+          `[Nostr] fetchProfiles: skipped (cache fresh, ${missingFromCache.length} unknown profiles will retry after TTL)`,
+        );
+      return;
+    }
+
+    // Cache stale — refresh all contacts' profiles. (When cacheFresh is
+    // true we've already returned via one of the two fast paths above, so
+    // the dropped "X served from cache" suffix would always be 0.)
+    const pubkeysToFetch = fetchedContacts.map((c) => c.pubkey);
+    const t1 = Date.now();
+    const profileMap = await nostrService.fetchProfiles(pubkeysToFetch, relayUrls, (partial) => {
+      // Update UI incrementally as each batch of profiles arrives
+      startTransition(() =>
+        setContacts((prev) =>
+          prev.map((c) => ({
+            ...c,
+            profile: partial.get(c.pubkey) ?? c.profile,
+          })),
+        ),
+      );
+    });
+    if (__DEV__)
+      console.log(
+        `[Nostr] fetchProfiles: ${Date.now() - t1}ms, ${profileMap.size}/${pubkeysToFetch.length} profiles loaded`,
+      );
+
+    // Merge new profiles on top of existing cache so we don't lose
+    // previously-known profiles for contacts we didn't refetch.
+    InteractionManager.runAfterInteractions(() => {
+      const merged: Record<string, NostrProfile> = { ...cachedProfileMap };
+      profileMap.forEach((v, k) => {
+        merged[k] = v;
+      });
+      AsyncStorage.setItem(PROFILES_CACHE_KEY, JSON.stringify(merged)).catch(() => {});
+      AsyncStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+    });
   }, []);
 
   const loadRelays = useCallback(async (pk: string): Promise<string[]> => {
     const t0 = Date.now();
+    // Cache-fresh fast path — NIP-65 relay lists rarely change, so serve
+    // from cache when under the TTL and skip the ~3s relay round trip.
+    const { value: cached, ageMs } = await readCachedWithTtl<RelayConfig[]>(
+      RELAY_LIST_CACHE_KEY,
+      RELAY_LIST_TIMESTAMP_KEY,
+    );
+    if (cached && ageMs < CACHE_MAX_AGE_MS) {
+      setRelays(cached);
+      if (__DEV__) console.log(`[Nostr] fetchRelayList: skipped (cache fresh)`);
+      const readRelays = cached.filter((r) => r.read).map((r) => r.url);
+      return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
+    }
     const relayList = await nostrService.fetchRelayList(pk, nostrService.DEFAULT_RELAYS);
     if (__DEV__)
       console.log(`[Nostr] fetchRelayList: ${Date.now() - t0}ms, ${relayList.length} relays`);
     setRelays(relayList);
+    InteractionManager.runAfterInteractions(() => {
+      AsyncStorage.setItem(RELAY_LIST_CACHE_KEY, JSON.stringify(relayList)).catch(() => {});
+      AsyncStorage.setItem(RELAY_LIST_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+    });
     const readRelays = relayList.filter((r) => r.read).map((r) => r.url);
     return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
   }, []);
@@ -210,18 +356,37 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         // Load cached contacts immediately (no network, <100ms)
         await loadContactsFromCache();
 
-        // Defer relay fetches until after animations/rendering complete
+        // Defer relay fetches until after animations/rendering complete.
+        // Seed the working relay set from the cached NIP-65 relay list so
+        // `loadProfile` / `loadContacts` hit the relays the user actually
+        // publishes to — not `DEFAULT_RELAYS`, which might miss their
+        // kind-0/kind-3 entirely. Only falls back to DEFAULT_RELAYS on
+        // the very first login (before any relay cache exists).
         InteractionManager.runAfterInteractions(async () => {
-          try {
-            const readRelays = await loadRelays(pk!);
-            await loadProfile(pk!, readRelays);
-            // Refresh contacts from relays in background
-            loadContacts(pk!, readRelays).catch((e) =>
-              console.warn('Background contact refresh failed:', e),
-            );
-          } catch (error) {
-            console.warn('Nostr background refresh failed:', error);
+          let workingRelays: string[] = nostrService.DEFAULT_RELAYS;
+          // Ignore the timestamp here — even a stale cached relay list is
+          // better than DEFAULT_RELAYS for reaching user-only relays.
+          const { value: cachedRelays } = await readCachedWithTtl<RelayConfig[]>(
+            RELAY_LIST_CACHE_KEY,
+            RELAY_LIST_TIMESTAMP_KEY,
+          );
+          if (cachedRelays) {
+            const readRelays = cachedRelays.filter((r) => r.read).map((r) => r.url);
+            if (readRelays.length > 0) workingRelays = readRelays;
           }
+
+          const t0 = Date.now();
+          Promise.all([
+            loadRelays(pk!).catch((e) => console.warn('[Nostr] relay refresh failed:', e)),
+            loadProfile(pk!, workingRelays).catch((e) =>
+              console.warn('[Nostr] profile refresh failed:', e),
+            ),
+            loadContacts(pk!, workingRelays).catch((e) =>
+              console.warn('[Nostr] contact refresh failed:', e),
+            ),
+          ]).then(() => {
+            if (__DEV__) console.log(`[Nostr] parallel refresh complete in ${Date.now() - t0}ms`);
+          });
         });
       } catch (error) {
         console.warn('Nostr auto-login failed:', error);
@@ -320,7 +485,16 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     await SecureStore.deleteItemAsync(NSEC_KEY);
     await SecureStore.deleteItemAsync(PUBKEY_KEY);
     await SecureStore.deleteItemAsync(SIGNER_TYPE_KEY);
-    await AsyncStorage.multiRemove([CONTACTS_CACHE_KEY, PROFILES_CACHE_KEY, CACHE_TIMESTAMP_KEY]);
+    await AsyncStorage.multiRemove([
+      CONTACTS_CACHE_KEY,
+      CONTACTS_TIMESTAMP_KEY,
+      PROFILES_CACHE_KEY,
+      CACHE_TIMESTAMP_KEY,
+      OWN_PROFILE_CACHE_KEY,
+      OWN_PROFILE_TIMESTAMP_KEY,
+      RELAY_LIST_CACHE_KEY,
+      RELAY_LIST_TIMESTAMP_KEY,
+    ]);
 
     setPubkey(null);
     setProfile(null);

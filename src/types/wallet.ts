@@ -26,6 +26,8 @@ export interface WalletMetadata {
   walletType: WalletType;
   /** NWC wallets only */
   lightningAddress: string | null;
+  /** Hide balance figures across the UI for this wallet (Account list + WalletCard). */
+  hideBalance?: boolean;
   /** On-chain wallets only */
   onchainImportMethod?: OnchainImportMethod;
   /** On-chain wallets: reserved metadata field for a future per-wallet
@@ -37,6 +39,29 @@ export interface WalletMetadata {
 }
 
 export type TransactionType = 'incoming' | 'outgoing';
+
+/**
+ * The "other party" of a NIP-57 zap transaction — the sender for an
+ * incoming zap, the recipient for an outgoing one. Same shape for both
+ * directions so the UI can render symmetrically with just a preposition
+ * flip ("Received from …" vs "Sent to …").
+ */
+export interface ZapCounterpartyInfo {
+  /** Counterparty's hex pubkey, or null if an anonymous incoming zap. */
+  pubkey: string | null;
+  /** Resolved kind-0 profile (null until fetched / not found). */
+  profile: {
+    npub: string;
+    name: string | null;
+    displayName: string | null;
+    picture: string | null;
+    nip05: string | null;
+  } | null;
+  /** Zap comment from the kind-9734 content field, if any. */
+  comment: string;
+  /** True when the zap request was marked anonymous (NIP-57 anon tag). */
+  anonymous: boolean;
+}
 
 export interface WalletTransaction {
   type: TransactionType;
@@ -51,8 +76,13 @@ export interface WalletTransaction {
   paymentHash?: string;
   preimage?: string;
   invoice?: string;
+  /** Bolt11 invoice — needed to look up the paired zap receipt. */
+  bolt11?: string;
   /** Fee paid for this tx, in sats */
   feesSats?: number;
+  /** Resolved counterparty info for Nostr-aware zaps.
+   *  `undefined` = not yet resolved; `null` = we tried and nothing was found. */
+  zapCounterparty?: ZapCounterpartyInfo | null;
   /** Boltz swap details (if this transaction was part of a swap) */
   swapId?: string;
   swapType?: 'reverse' | 'submarine';

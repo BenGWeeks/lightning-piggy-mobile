@@ -26,9 +26,12 @@ import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
 import { sendSheetStyles as styles } from '../styles/SendSheet.styles';
 import { satsToFiat, satsToFiatString } from '../services/fiatService';
+import { ChevronUp, ChevronDown } from 'lucide-react-native';
 import { resolveLightningAddress, fetchInvoice, LnurlPayParams } from '../services/lnurlService';
 import * as boltzService from '../services/boltzService';
 import * as onchainService from '../services/onchainService';
+import { npubEncode } from '../services/nostrService';
+import { recordOutgoing as recordOutgoingCounterparty } from '../services/zapCounterpartyStorage';
 
 interface Props {
   visible: boolean;
@@ -93,12 +96,13 @@ const SendSheet: React.FC<Props> = ({
   const {
     payInvoiceForWallet,
     refreshBalanceForWallet,
+    fetchTransactionsForWallet,
     activeWalletId,
     wallets,
     btcPrice,
     currency,
   } = useWallet();
-  const { signZapRequest } = useNostr();
+  const { signZapRequest, contacts } = useNostr();
   const [capturedWalletId, setCapturedWalletId] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
@@ -158,6 +162,10 @@ const SendSheet: React.FC<Props> = ({
       setLnurlParams(null);
       setResolving(false);
       setMemo('');
+      // Sheet is kept mounted across opens, so useState(prop) init doesn't re-fire.
+      // Re-apply recipient props or Friends-tab zap keeps stale activePubkey → no 9734.
+      setActivePubkey(recipientPubkey);
+      setActivePicture(initialPicture);
       bottomSheetRef.current?.present();
       if (initialAddress) {
         // Use setTimeout to process after state reset
@@ -393,10 +401,73 @@ const SendSheet: React.FC<Props> = ({
 
         const bolt11 = await fetchInvoice(lnurlParams.callback, currentSats, invoiceOptions);
         await payInvoiceForWallet(walletId!, bolt11);
+
+        if (__DEV__)
+          console.log(
+            `[Zap-send] paid ${currentSats} sats · allowsNostr=${!!lnurlParams.allowsNostr} activePubkey=${activePubkey ? activePubkey.slice(0, 8) + '…' : 'none'} hasZapRequest=${!!invoiceOptions.nostr}`,
+          );
+
+        // If this was a NIP-57 zap, persist the recipient we just paid so
+        // the transaction list can render "Sent to [Name]" on refresh.
+        // The public zap receipt identifies us as sender, not the person
+        // we paid — we're the only party that actually knows who got it.
+        if (invoiceOptions.nostr && activePubkey) {
+          try {
+            const decoded = bolt11Decode(bolt11);
+            const hashSection = decoded.sections?.find(
+              (s: { name: string }) => s.name === 'payment_hash',
+            ) as { value?: string } | undefined;
+            const paymentHash = hashSection?.value;
+            if (paymentHash) {
+              const contact = contacts.find((c) => c.pubkey === activePubkey);
+              const p = contact?.profile ?? null;
+              await recordOutgoingCounterparty(paymentHash, {
+                pubkey: activePubkey,
+                profile: {
+                  npub: npubEncode(activePubkey),
+                  name: p?.name ?? null,
+                  displayName: p?.displayName ?? null,
+                  picture: p?.picture ?? activePicture ?? null,
+                  nip05: p?.nip05 ?? null,
+                },
+                comment: memo,
+                anonymous: false,
+              });
+              if (__DEV__)
+                console.log(`[Zap-send] stored counterparty for ph=${paymentHash.slice(0, 12)}…`);
+            }
+          } catch (e) {
+            if (__DEV__) console.warn('[Zap-send] store failed:', e);
+          }
+        }
       } else {
         await payInvoiceForWallet(walletId!, invoiceData);
       }
-      if (walletId) await refreshBalanceForWallet(walletId);
+      if (walletId) {
+        // Refresh both balance and tx list so the user sees the send
+        // appear without having to pull-to-refresh manually. The tx
+        // list refresh also re-runs the zap-sender resolver, which
+        // picks up the counterparty entry we just wrote.
+        //
+        // Small delay before the tx-list refresh: LNbits records the
+        // outgoing payment asynchronously after pay_invoice returns, so
+        // an immediate list_transactions call can miss the new tx and
+        // the resolver then runs on a stale list (pending=0, silent).
+        // We also refetch a second time in case the first call raced.
+        await refreshBalanceForWallet(walletId);
+        const capturedWalletId = walletId;
+        (async () => {
+          try {
+            await new Promise((r) => setTimeout(r, 600));
+            await fetchTransactionsForWallet(capturedWalletId);
+            await new Promise((r) => setTimeout(r, 1500));
+            await fetchTransactionsForWallet(capturedWalletId);
+          } catch {
+            // Refresh failures are non-fatal — a manual pull-to-refresh
+            // or the next natural refresh will pick the tx up.
+          }
+        })();
+      }
       Alert.alert('Payment Sent', 'Your payment was sent successfully!', [
         { text: 'OK', onPress: onClose },
       ]);
@@ -472,7 +543,11 @@ const SendSheet: React.FC<Props> = ({
                     onPress={() => setDropdownOpen(!dropdownOpen)}
                   >
                     <Text style={styles.walletDropdownText}>{walletName}</Text>
-                    <Text style={styles.walletDropdownArrow}>{dropdownOpen ? '▲' : '▼'}</Text>
+                    {dropdownOpen ? (
+                      <ChevronUp size={16} color={colors.white} />
+                    ) : (
+                      <ChevronDown size={16} color={colors.white} />
+                    )}
                   </TouchableOpacity>
                   {dropdownOpen && (
                     <View style={styles.walletDropdownMenu}>

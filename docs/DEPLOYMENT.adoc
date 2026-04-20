@@ -48,9 +48,9 @@ Build profiles are defined in `eas.json`:
 | For internal distribution to testers
 
 | `production`
-| Store
-| App Bundle (AAB)
-| For Google Play Store submission
+| Store (iOS) / Internal sideload (Android, today)
+| APK
+| Used by the release workflow. Outputs an APK for sideloading + Release attachment. **Switch to App Bundle (AAB)** once we enrol on Google Play, or split into a `production-aab` profile alongside.
 
 |===
 
@@ -64,6 +64,34 @@ APP_VARIANT=development npx expo run:android
 # Production-like build
 npx expo run:android
 ----
+
+=== Release workflow
+
+Releases are cut by publishing a **GitHub Release** (which creates the tag server-side and fires `.github/workflows/release.yml`). The workflow:
+
+1. Runs quality gates (typecheck / lint / format-check).
+2. Kicks off EAS production builds for both platforms with `--auto-submit` (TestFlight for iOS, Play Internal once the Google Play account is wired up).
+3. Downloads the resulting Android APK and attaches it to the Release for sideloading.
+4. Regenerates `docs/TECHNICAL_SOLUTION_DOCUMENT.pdf` from the AsciiDoc sources and attaches that too.
+
+==== Cutting a release
+
+. Go to https://github.com/BenGWeeks/lightning-piggy-mobile/releases → *Draft a new release*.
+. Choose a tag like `v1.0.1` (create on publish) targeted at `main`. **The tag is the source of truth for the user-visible version** — the workflow strips the leading `v` and sets `version` in `app.config.ts` (which becomes iOS `CFBundleShortVersionString` and Android `versionName`). Pre-release suffixes (e.g. `v1.0.0-rc1`) are stripped to keep the store-facing version a strict `X.Y.Z`.
+. Write release notes, click *Publish release*.
+. Watch *Actions → Release*. When it finishes, the Release page has the APK and PDF attached; TestFlight has the iOS build.
+
+The tag format is `v*` (SemVer). A pre-release tag like `v1.0.0-rc1` publishes as a pre-release via the GitHub UI; the workflow still runs.
+
+==== Manual re-run without re-tagging
+
+If a release run fails (EAS queue timeout, flaky network), re-run it via *Actions → Release → Run workflow* without creating a new tag. Platform can be overridden (ios / android / all) — useful for retrying just one platform.
+
+Manual runs skip the asset-attach steps (they need a Release to attach to); use them for rebuilds, not for the first cut.
+
+==== Secrets
+
+- **`EXPO_TOKEN`** — repo secret. Generate at https://expo.dev/accounts/bengweeks/settings/access-tokens and add under *Settings → Secrets and variables → Actions*. Everything else (iOS ASC API key, Apple distribution cert, future Google Play service account) lives on EAS's server via `eas credentials`, so the workflow never handles a `.p8` or service account JSON.
 
 === EAS Cloud Builds
 
@@ -169,6 +197,104 @@ eas submit --platform ios --path /tmp/lightning-piggy.ipa
 ----
 
 After submission, the build appears in App Store Connect under the TestFlight tab. Add internal testers (up to 100) or create external test groups (up to 10,000 testers).
+
+=== iOS Distribution — Ad-hoc (sideload)
+
+Ad-hoc distribution installs a signed IPA onto a specific iPhone without going through TestFlight or the App Store. Use it when:
+
+* The tester is **under 13** (Apple blocks them from TestFlight's terms).
+* You want to install a build immediately without waiting for Apple's Beta App Review or TestFlight processing.
+* The build will only run on a small, known set of devices (ad-hoc profiles cap at 100 registered device UDIDs per product category — iPhone, iPad, etc. — per Apple Developer membership year).
+
+==== How it works
+
+* EAS builds an IPA signed with an **ad-hoc provisioning profile** that has specific **device UDIDs** baked in at signing time.
+* The IPA only installs on iPhones whose UDID is in that profile. Every new tester requires re-signing (or a fresh rebuild) after their UDID is registered.
+* Unlike TestFlight, there's no age check — this is an Apple-sanctioned developer distribution channel, not a consumer beta programme.
+
+==== One-time Apple Developer Portal setup
+
+. Register the preview bundle ID at https://developer.apple.com/account/resources/identifiers[developer.apple.com/account/resources/identifiers]:
++
+* **Identifier type:** App IDs → App
+* **Description:** `Lightning Piggy Preview`
+* **Bundle ID (Explicit):** `com.lightningpiggy.app.preview`
+* Leave capabilities at defaults.
++
+(The production bundle ID gets auto-registered by EAS on the first iOS build, but the preview variant needs manual registration because the ad-hoc build path doesn't auto-create it.)
+
+. Register each tester's device UDID once via `eas device:create`:
++
+[source,bash]
+----
+npx -p eas-cli eas device:create
+----
++
+This produces a single reusable URL. Send it to every tester — they open it in Safari on their iPhone, tap *Download Profile*, then *Settings → General → VPN & Device Management* → install the profile. Their UDID is then reported back to your Apple team automatically.
+
+. Verify all UDIDs landed:
++
+[source,bash]
+----
+npx -p eas-cli eas device:list
+----
+
+==== Build the ad-hoc IPA
+
+Local build on macOS (recommended — skips the EAS queue):
+
+[source,bash]
+----
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+eas build --platform ios --profile preview --local \
+  --output /tmp/lightning-piggy-preview.ipa
+----
+
+Expected prompts on first run per bundle ID:
+
+* *"Log in to your Apple Developer account?"* → **Yes** (API keys cannot manage ad-hoc provisioning profiles — this needs full Developer Portal scope, Apple ID + 2FA).
+* *"Reuse this distribution certificate?"* → **Yes**.
+* *"Generate a new Apple Provisioning Profile?"* → **Yes**.
+* *"Select devices for the ad hoc build"* → select all registered UDIDs.
+
+If the Mac login keychain is locked (common when running over SSH without an active GUI session) you'll see *"Security returned a non-successful error code: 36"*. Unlock first:
+
+[source,bash]
+----
+security unlock-keychain ~/Library/Keychains/login.keychain-db
+----
+
+==== Install the IPA
+
+Two install paths depending on whether the iPhone is near the Mac or near your Linux box.
+
+**Option A — push over USB from Linux** (requires `libimobiledevice` / `ideviceinstaller`):
+
+[source,bash]
+----
+# One-time on Linux
+sudo apt install -y ideviceinstaller
+
+# For each install
+# Replace <user>@<mac-hostname> and the source path with the Mac + IPA you built on.
+scp <user>@<mac-hostname>:/tmp/lightning-piggy-preview.ipa /tmp/
+ideviceinstaller -i /tmp/lightning-piggy-preview.ipa
+----
+
+On the iPhone:
+
+* The first time, iOS prompts *"Trust this computer?"* → **Trust**, enter passcode.
+* On iOS 16+, Developer Mode must be enabled before sideloaded apps will launch. *Settings → Privacy & Security → Developer Mode → toggle on → Restart*. If the row isn't visible, tap the freshly installed app icon once to trigger iOS to reveal it.
+* First launch of the installed app: iOS shows *"Untrusted Developer"*. Go to *Settings → General → VPN & Device Management*, tap the developer profile, *Trust*.
+
+**Option B — EAS install URL via Safari** (works over cellular / WiFi, no USB):
+
+Local builds don't upload to EAS automatically; to get a shareable install URL, either use the EAS cloud build path (`eas build --platform ios --profile preview` without `--local`) or host the IPA plus an install manifest plist yourself (GitHub Release attachments require the `itms-services://` install URL to point at a plist you generate). Cloud build is simpler unless the queue is heavily backlogged.
+
+==== Limits
+
+* Ad-hoc provisioning profiles expire **1 year** after generation — rebuild or `eas build:resign` before expiry.
+* **100 registered devices per Apple product category** (iPhone, iPad, etc.) per membership year. You can remove unregistered devices at year-end to free slots.
 
 === Android Distribution — Google Play Internal Testing
 

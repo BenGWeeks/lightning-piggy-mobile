@@ -41,6 +41,7 @@ const CardContent: React.FC<{
   isConnected?: boolean;
   walletType?: 'nwc' | 'onchain';
   walletAlias?: string | null;
+  hideBalance?: boolean;
   onSettingsPress?: () => void;
   showDetails?: boolean;
   isWatchOnly?: boolean;
@@ -53,6 +54,7 @@ const CardContent: React.FC<{
   isConnected,
   walletType = 'nwc',
   walletAlias,
+  hideBalance,
   onSettingsPress,
   showDetails = true,
   isWatchOnly = false,
@@ -151,9 +153,9 @@ const CardContent: React.FC<{
               {alias}
             </Text>
             <Text style={[styles.balance, { color: theme.textColor }]}>
-              {balance !== null ? `${balance!.toLocaleString()} sats` : '---'}
+              {hideBalance ? '***' : balance !== null ? `${balance!.toLocaleString()} sats` : '---'}
             </Text>
-            {balance !== null && btcPrice !== null && currency && (
+            {!hideBalance && balance !== null && btcPrice !== null && currency && (
               <Text style={[styles.fiatBalance, { color: theme.textColor }]}>
                 {satsToFiatString(balance!, btcPrice!, currency)}
               </Text>
@@ -222,6 +224,7 @@ const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onS
         isConnected={wallet.isConnected}
         walletType={wallet.walletType}
         walletAlias={wallet.walletAlias}
+        hideBalance={wallet.hideBalance}
         onSettingsPress={onSettingsPress}
         isWatchOnly={wallet.walletType === 'onchain' && wallet.onchainImportMethod !== 'mnemonic'}
       />
