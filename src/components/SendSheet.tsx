@@ -39,6 +39,7 @@ interface Props {
   initialAddress?: string;
   initialPicture?: string;
   recipientPubkey?: string;
+  recipientName?: string;
 }
 
 type InputMode = 'scan' | 'paste';
@@ -92,6 +93,7 @@ const SendSheet: React.FC<Props> = ({
   initialAddress,
   initialPicture,
   recipientPubkey,
+  recipientName,
 }) => {
   const {
     payInvoiceForWallet,
@@ -196,10 +198,15 @@ const SendSheet: React.FC<Props> = ({
         const params = await resolveLightningAddress(invoiceData);
         if (!cancelled) {
           setLnurlParams(params);
-          setDecoded((prev) => ({
-            ...prev!,
-            description: params.description || prev?.description || null,
-          }));
+          // When the caller supplied a recipient name (zap from a friend
+          // surface), keep the friendly `Pay to <Name>` label — don't let
+          // the LNURL server's generic metadata ("sats for foo@bar") win.
+          if (!recipientName) {
+            setDecoded((prev) => ({
+              ...prev!,
+              description: params.description || prev?.description || null,
+            }));
+          }
         }
       } catch (error) {
         if (!cancelled) {
@@ -213,7 +220,7 @@ const SendSheet: React.FC<Props> = ({
     return () => {
       cancelled = true;
     };
-  }, [scanned, invoiceData]);
+  }, [scanned, invoiceData, recipientName]);
 
   const processInput = (data: string) => {
     let input = data.trim();
@@ -256,7 +263,11 @@ const SendSheet: React.FC<Props> = ({
     if (isLightningAddress(input)) {
       setIsOnchainAddress(false);
       setInvoiceData(input);
-      setDecoded({ amountSats: null, description: `Pay to ${input}`, expiry: null });
+      setDecoded({
+        amountSats: null,
+        description: `Pay to ${recipientName ?? input}`,
+        expiry: null,
+      });
       setScanned(true);
     } else if (boltzService.isBitcoinAddress(input)) {
       setIsOnchainAddress(true);

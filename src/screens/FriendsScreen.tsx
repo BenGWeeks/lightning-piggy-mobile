@@ -569,6 +569,21 @@ const FriendsScreen: React.FC = () => {
               }
             : undefined
         }
+        onMessage={
+          selectedContact?.pubkey
+            ? () => {
+                const c = selectedContact;
+                setProfileSheetVisible(false);
+                setSelectedContact(null);
+                navigation.navigate('Conversation', {
+                  pubkey: c.pubkey!,
+                  name: c.name,
+                  picture: c.picture,
+                  lightningAddress: c.lightningAddress,
+                });
+              }
+            : undefined
+        }
         onSetLightningAddress={
           selectedContact?.source === 'contacts'
             ? async (address: string) => {
@@ -600,6 +615,7 @@ const FriendsScreen: React.FC = () => {
         initialAddress={zapTarget?.lightningAddress ?? undefined}
         initialPicture={zapTarget?.picture ?? undefined}
         recipientPubkey={zapTarget?.pubkey ?? undefined}
+        recipientName={zapTarget?.name ?? undefined}
       />
     </View>
   );
