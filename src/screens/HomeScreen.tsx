@@ -272,6 +272,7 @@ const HomeScreen: React.FC = () => {
           setSendToAddress(undefined);
           setSendToPicture(undefined);
           setSendToPubkey(undefined);
+          setSendToName(undefined);
         }}
         initialAddress={sendToAddress}
         initialPicture={sendToPicture}

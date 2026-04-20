@@ -175,7 +175,6 @@ const ContactProfileSheet: React.FC<Props> = ({
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}
       handleComponent={() => null}
-      stackBehavior="push"
     >
       <BottomSheetView style={styles.content}>
         {/* Banner with handle overlay */}

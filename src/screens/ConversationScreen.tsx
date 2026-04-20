@@ -24,7 +24,9 @@ import ZapIcon from '../components/icons/ZapIcon';
 import SendSheet from '../components/SendSheet';
 import TransactionDetailSheet, {
   TransactionDetailData,
+  CounterpartyContact,
 } from '../components/TransactionDetailSheet';
+import ContactProfileSheet from '../components/ContactProfileSheet';
 import type { RootStackParamList } from '../navigation/types';
 
 type ConversationRoute = RouteProp<RootStackParamList, 'Conversation'>;
@@ -82,6 +84,7 @@ const ConversationScreen: React.FC = () => {
   const [sendSheetOpen, setSendSheetOpen] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
   const [detailTx, setDetailTx] = useState<TransactionDetailData | null>(null);
+  const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
   const listRef = useRef<FlatList<Item>>(null);
 
   const zapItems = useMemo<Item[]>(() => {
@@ -96,7 +99,7 @@ const ConversationScreen: React.FC = () => {
           kind: 'zap',
           id: `zap-${tx.paymentHash ?? tx.bolt11 ?? when}-${tx.type}`,
           fromMe: tx.type === 'outgoing',
-          amountSats: tx.amount,
+          amountSats: Math.abs(tx.amount),
           comment: cp.comment ?? '',
           createdAt: when,
           tx,
@@ -395,6 +398,37 @@ const ConversationScreen: React.FC = () => {
         visible={detailTx !== null}
         tx={detailTx}
         onClose={() => setDetailTx(null)}
+        onCounterpartyPress={(contact) => {
+          setDetailTx(null);
+          setProfileContact(contact);
+        }}
+      />
+      <ContactProfileSheet
+        visible={profileContact !== null}
+        onClose={() => setProfileContact(null)}
+        contact={profileContact}
+        onMessage={
+          profileContact && profileContact.pubkey !== pubkey
+            ? () => {
+                const c = profileContact;
+                setProfileContact(null);
+                navigation.replace('Conversation', {
+                  pubkey: c.pubkey,
+                  name: c.name,
+                  picture: c.picture,
+                  lightningAddress: c.lightningAddress,
+                });
+              }
+            : undefined
+        }
+        onZap={
+          profileContact?.lightningAddress
+            ? () => {
+                setProfileContact(null);
+                setSendSheetOpen(true);
+              }
+            : undefined
+        }
       />
     </View>
   );

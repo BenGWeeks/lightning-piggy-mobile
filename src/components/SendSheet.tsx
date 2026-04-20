@@ -198,10 +198,11 @@ const SendSheet: React.FC<Props> = ({
         const params = await resolveLightningAddress(invoiceData);
         if (!cancelled) {
           setLnurlParams(params);
-          // When the caller supplied a recipient name (zap from a friend
-          // surface), keep the friendly `Pay to <Name>` label — don't let
-          // the LNURL server's generic metadata ("sats for foo@bar") win.
-          if (!recipientName) {
+          // When we're still pointed at a named friend (activePubkey +
+          // recipientName both set), keep the friendly `Pay to <Name>`
+          // label. After "Scan / paste different invoice" clears
+          // activePubkey, let the LNURL server's metadata win again.
+          if (!(activePubkey && recipientName)) {
             setDecoded((prev) => ({
               ...prev!,
               description: params.description || prev?.description || null,
@@ -220,7 +221,7 @@ const SendSheet: React.FC<Props> = ({
     return () => {
       cancelled = true;
     };
-  }, [scanned, invoiceData, recipientName]);
+  }, [scanned, invoiceData, recipientName, activePubkey]);
 
   const processInput = (data: string) => {
     let input = data.trim();
@@ -263,9 +264,13 @@ const SendSheet: React.FC<Props> = ({
     if (isLightningAddress(input)) {
       setIsOnchainAddress(false);
       setInvoiceData(input);
+      // Only use the caller-supplied friend name while we're still
+      // pointed at that friend (activePubkey set). After "Scan / paste
+      // different invoice" clears activePubkey, the next scanned address
+      // may be a stranger — fall back to the raw input string.
       setDecoded({
         amountSats: null,
-        description: `Pay to ${recipientName ?? input}`,
+        description: `Pay to ${activePubkey && recipientName ? recipientName : input}`,
         expiry: null,
       });
       setScanned(true);
@@ -538,7 +543,6 @@ const SendSheet: React.FC<Props> = ({
       backdropComponent={renderBackdrop}
       handleIndicatorStyle={styles.handleIndicator}
       backgroundStyle={styles.sheetBackground}
-      stackBehavior="push"
     >
       <BottomSheetView style={styles.content}>
         <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
