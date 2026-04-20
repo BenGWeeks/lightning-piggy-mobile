@@ -52,4 +52,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default TransactionTypeIcon;
+export default React.memo(TransactionTypeIcon);

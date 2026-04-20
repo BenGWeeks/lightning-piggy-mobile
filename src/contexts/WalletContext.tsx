@@ -26,6 +26,11 @@ const LIGHTNING_ADDRESS_KEY = 'lightning_address';
 const OUTGOING_RECEIPT_FETCH_TTL_MS = 5 * 60 * 1000;
 const lastOutgoingReceiptFetch = new Map<string, number>();
 
+// Short-circuit the resolver when nothing has changed since the last run:
+// the same set of pending paymentHashes AND no new storage writes since.
+type ResolverFingerprint = { pendingHash: string; storageVersion: number };
+const lastResolverFingerprint = new Map<string, ResolverFingerprint>();
+
 function parseNwcLud16(nwcUrl: string | null): string | null {
   if (!nwcUrl) return null;
   try {
@@ -811,6 +816,20 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return prev;
       });
       if (pending.length === 0) return;
+
+      // Fingerprint-based short-circuit: if the same pending set was
+      // already attempted at the same storage version, nothing has
+      // changed since the last run — skip the work and the re-render.
+      const pendingHash = pending
+        .map(({ tx, idx }) => `${idx}:${tx.paymentHash ?? tx.bolt11 ?? tx.created_at ?? ''}`)
+        .join('|');
+      const storageVersion = zapCounterpartyStorage.getWriteVersion();
+      const last = lastResolverFingerprint.get(walletId);
+      if (last && last.pendingHash === pendingHash && last.storageVersion === storageVersion) {
+        if (__DEV__) console.log(`[Zap/${walletAlias}] skip: fingerprint unchanged`);
+        return;
+      }
+      lastResolverFingerprint.set(walletId, { pendingHash, storageVersion });
 
       const incomingPending = pending.filter(({ tx }) => tx.type === 'incoming');
       const outgoingPending = pending.filter(({ tx }) => tx.type === 'outgoing');
