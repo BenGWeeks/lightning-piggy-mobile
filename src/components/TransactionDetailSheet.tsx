@@ -129,21 +129,32 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
     };
   }, [visible, tx, activeWallet]);
 
-  // If the transaction's description hints at a Boltz swap (pending swap
-  // rows are annotated with "Boltz swap in progress" by TransferSheet), or
-  // the caller passed an explicit swapId, try to resolve the paired swap
-  // from SecureStore + Boltz status.
+  // Detection for Boltz swap transactions. The explicit `tx.swapId` wins;
+  // otherwise we recognise a swap by its invoice memo (Boltz submarine
+  // swaps are memo'd "Send to BTC address", reverse swaps "Receive from
+  // BTC address"), the legacy "Boltz swap in progress" pending marker, or
+  // — lacking any of that — any pending LN tx that could be mid-swap.
+  const isBoltzSwap = useMemo(() => {
+    if (!tx) return false;
+    if (tx.swapId) return true;
+    if (tx.description) {
+      if (/boltz swap/i.test(tx.description)) return true;
+      if (/send to btc|send to bitcoin/i.test(tx.description)) return true;
+      if (/receive from btc|receive from bitcoin/i.test(tx.description)) return true;
+    }
+    if (!tx.settled_at && !tx.blockHeight) return true; // pending — could be a swap
+    return false;
+  }, [tx]);
+
+  // If this transaction is (or could be) a Boltz swap, try to resolve the
+  // paired swap from SecureStore + Boltz status for the Retry claim flow
+  // and to include the Swap ID in the support DM.
   useEffect(() => {
     let cancelled = false;
     const resolve = async () => {
       setSwap(null);
       setResolvedSwapId(null);
-      if (!tx) return;
-      const looksLikeSwap =
-        !!tx.swapId ||
-        (tx.description && /boltz swap/i.test(tx.description)) ||
-        (!tx.settled_at && !tx.blockHeight); // any pending could be a swap
-      if (!looksLikeSwap) return;
+      if (!tx || !isBoltzSwap) return;
 
       // Find a persisted swap we can pair with. Prefer explicit swapId;
       // otherwise walk the persisted index and pick the most recent.
@@ -189,7 +200,7 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
     return () => {
       cancelled = true;
     };
-  }, [tx]);
+  }, [tx, isBoltzSwap]);
 
   const handleRetryClaim = useCallback(async () => {
     setRetrying(true);
@@ -300,7 +311,7 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
       >
         <BottomSheetView style={styles.content}>
           <View style={styles.header}>
-            {effectiveSwapId ? (
+            {isBoltzSwap ? (
               <Image
                 source={require('../../assets/images/boltz-logo.png')}
                 style={styles.boltzLogo}
@@ -429,7 +440,7 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
                 <Text style={styles.secondaryButtonText}>View on mempool.space</Text>
               </TouchableOpacity>
             ) : null}
-            {effectiveSwapId ? (
+            {isBoltzSwap ? (
               <TouchableOpacity
                 style={styles.secondaryButton}
                 onPress={() => setSupportSheetOpen(true)}
