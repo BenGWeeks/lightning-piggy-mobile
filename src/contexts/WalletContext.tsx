@@ -20,6 +20,12 @@ const USER_NAME_KEY = 'user_display_name';
 const CURRENCY_KEY = 'user_fiat_currency';
 const LIGHTNING_ADDRESS_KEY = 'lightning_address';
 
+// The #P-tagged outgoing zap-receipt relay fetch is expensive (500-event
+// filter). With local-storage attribution being the common path, this
+// rate limit keeps unmatched-outgoing refreshes from hammering relays.
+const OUTGOING_RECEIPT_FETCH_TTL_MS = 5 * 60 * 1000;
+const lastOutgoingReceiptFetch = new Map<string, number>();
+
 function parseNwcLud16(nwcUrl: string | null): string | null {
   if (!nwcUrl) return null;
   try {
@@ -835,7 +841,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           ({ tx }) => tx.paymentHash && !byHash.has(tx.paymentHash),
         );
 
-        if (userPubkey && unmatched.length > 0) {
+        const lastFetch = lastOutgoingReceiptFetch.get(walletId) ?? 0;
+        const fetchAllowed = Date.now() - lastFetch > OUTGOING_RECEIPT_FETCH_TTL_MS;
+        if (userPubkey && unmatched.length > 0 && fetchAllowed) {
+          lastOutgoingReceiptFetch.set(walletId, Date.now());
           const sentReceipts = await nostrService.fetchZapReceiptsForSender(
             userPubkey,
             queryRelays,
