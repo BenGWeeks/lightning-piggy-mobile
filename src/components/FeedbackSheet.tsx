@@ -26,6 +26,12 @@ interface Props {
   isLoggedIn: boolean;
   signerType: SignerType | null;
   onLoginPress: () => void;
+  title?: string;
+  subtitle?: string;
+  initialMessage?: string;
+  messagePrefix?: string;
+  successTitle?: string;
+  successMessage?: string;
 }
 
 const FeedbackSheet: React.FC<Props> = ({
@@ -35,20 +41,32 @@ const FeedbackSheet: React.FC<Props> = ({
   isLoggedIn,
   signerType,
   onLoginPress,
+  title = 'Send Feedback',
+  subtitle = 'Your message will be sent as an encrypted Nostr DM to the Lightning Piggy team.',
+  initialMessage = '',
+  messagePrefix = '[Feedback]',
+  successTitle = 'Feedback Sent',
+  successMessage = 'Thank you for your feedback!',
 }) => {
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['55%'], []);
-  const [message, setMessage] = useState('');
+  const [message, setMessage] = useState(initialMessage);
   const [sending, setSending] = useState(false);
+  // Reset `message` only on hidden→visible transitions so async
+  // `initialMessage` updates don't stomp the user's in-progress edits.
+  const wasVisibleRef = useRef(false);
+  const initialMessageRef = useRef(initialMessage);
+  initialMessageRef.current = initialMessage;
 
   useEffect(() => {
-    if (visible) {
-      setMessage('');
+    if (visible && !wasVisibleRef.current) {
+      setMessage(initialMessageRef.current);
       setSending(false);
       sheetRef.current?.present();
-    } else {
+    } else if (!visible && wasVisibleRef.current) {
       sheetRef.current?.dismiss();
     }
+    wasVisibleRef.current = visible;
   }, [visible]);
 
   useEffect(() => {
@@ -67,13 +85,11 @@ const FeedbackSheet: React.FC<Props> = ({
     setSending(true);
     try {
       const deviceInfo = `${Platform.OS} ${Platform.Version}`;
-      const fullMessage = `[Feedback] ${trimmed}\n\n---\nDevice: ${deviceInfo}`;
+      const fullMessage = `${messagePrefix} ${trimmed}\n\n---\nDevice: ${deviceInfo}`;
 
       const result = await onSend(fullMessage);
       if (result.success) {
-        Alert.alert('Feedback Sent', 'Thank you for your feedback!', [
-          { text: 'OK', onPress: onClose },
-        ]);
+        Alert.alert(successTitle, successMessage, [{ text: 'OK', onPress: onClose }]);
       } else {
         Alert.alert('Error', result.error || 'Failed to send feedback.');
       }
@@ -115,10 +131,8 @@ const FeedbackSheet: React.FC<Props> = ({
       backgroundStyle={styles.sheetBackground}
     >
       <BottomSheetView style={styles.content}>
-        <Text style={styles.title}>Send Feedback</Text>
-        <Text style={styles.subtitle}>
-          Your message will be sent as an encrypted Nostr DM to the Lightning Piggy team.
-        </Text>
+        <Text style={styles.title}>{title}</Text>
+        <Text style={styles.subtitle}>{subtitle}</Text>
 
         {!isLoggedIn ? (
           <View style={styles.loginPrompt}>

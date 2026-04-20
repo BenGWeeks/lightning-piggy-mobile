@@ -8,28 +8,40 @@ import {
   BottomSheetBackdropProps,
 } from '@gorhom/bottom-sheet';
 import * as SecureStore from 'expo-secure-store';
+import * as Clipboard from 'expo-clipboard';
 import Toast from 'react-native-toast-message';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet } from '../contexts/WalletContext';
+import { useNostr } from '../contexts/NostrContext';
 import * as swapRecoveryService from '../services/swapRecoveryService';
+import * as nwcService from '../services/nwcService';
 import { transactionDetailSheetStyles as styles } from '../styles/TransactionDetailSheet.styles';
+import FeedbackSheet from './FeedbackSheet';
+import NostrLoginSheet from './NostrLoginSheet';
+import { createDmSender } from '../utils/nostrDm';
+import { truncateMiddle, formatFriendlyDateTime } from '../utils/format';
+import { getTxCategory } from '../utils/txCategory';
+import TransactionTypeIcon from './TransactionTypeIcon';
 import ContactProfileSheet from './ContactProfileSheet';
 import type { ZapCounterpartyInfo } from '../types/wallet';
 import { colors } from '../styles/theme';
+import { BOLTZ_SUPPORT_NPUB, dmRecipient } from '../constants/npubs';
+import { Copy } from 'lucide-react-native';
 
 export interface TransactionDetailData {
-  /** Display values the caller already has */
   type: 'incoming' | 'outgoing' | string;
   amount: number;
   description?: string;
   created_at?: number | null;
   settled_at?: number | null;
   blockHeight?: number | null;
-  /** On-chain only */
+  /** Also set for Boltz claim txs, not just plain on-chain. */
   txid?: string;
-  /** Optional — if set, we can surface Boltz swap state */
+  paymentHash?: string;
+  preimage?: string;
+  invoice?: string;
+  feesSats?: number;
   swapId?: string;
-  /** Resolved Nostr counterparty info for zaps (incoming sender or outgoing recipient). */
   zapCounterparty?: ZapCounterpartyInfo | null;
 }
 
@@ -55,41 +67,81 @@ type BoltzSwapView = {
 
 const BOLTZ_API = 'https://api.boltz.exchange/v2';
 
-/**
- * Bottom sheet showing the detail for a single transaction. For rows that
- * are part of a Boltz swap we detect the paired swapId via persisted
- * state and expose a "Retry claim" button when the swap has locked funds
- * on-chain but the claim hasn't landed yet.
- */
+const CopyRow: React.FC<{
+  label: string;
+  value: string;
+  onCopy: (label: string, value: string) => void;
+}> = ({ label, value, onCopy }) => (
+  <TouchableOpacity
+    style={styles.row}
+    onPress={() => onCopy(label, value)}
+    accessibilityLabel={`Copy ${label.toLowerCase()}`}
+  >
+    <Text style={styles.rowLabel}>{label}</Text>
+    <View style={styles.rowValueWrap}>
+      <Text style={[styles.rowValue, styles.rowValueMono]} numberOfLines={1}>
+        {truncateMiddle(value)}
+      </Text>
+      <Copy size={14} color={colors.textSupplementary} />
+    </View>
+  </TouchableOpacity>
+);
+
 const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
-  const { btcPrice, currency } = useWallet();
+  const { btcPrice, currency, activeWallet } = useWallet();
+  const { isLoggedIn, signerType, sendDirectMessage } = useNostr();
   const sheetRef = useRef<BottomSheetModal>(null);
   const [swap, setSwap] = useState<BoltzSwapView | null>(null);
+  const [resolvedSwapId, setResolvedSwapId] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
+  const [supportSheetOpen, setSupportSheetOpen] = useState(false);
   const [senderProfileOpen, setSenderProfileOpen] = useState(false);
+  const [loginSheetOpen, setLoginSheetOpen] = useState(false);
+  // Some NWC backends (notably LNbits) omit preimage/invoice from
+  // list_transactions; fill them in via lookupInvoice when the sheet opens.
+  const [enrichment, setEnrichment] = useState<{ preimage?: string; invoice?: string }>({});
 
   useEffect(() => {
     if (visible) sheetRef.current?.present();
     else sheetRef.current?.dismiss();
   }, [visible]);
 
-  // If the transaction's description hints at a Boltz swap (pending swap
-  // rows are annotated with "Boltz swap in progress" by TransferSheet), or
-  // the caller passed an explicit swapId, try to resolve the paired swap
-  // from SecureStore + Boltz status.
+  useEffect(() => {
+    setEnrichment({});
+    if (!visible || !tx || !tx.paymentHash) return;
+    if (tx.preimage && tx.invoice) return;
+    if (!activeWallet || activeWallet.walletType === 'onchain') return;
+    let cancelled = false;
+    (async () => {
+      const result = await nwcService.lookupInvoice(activeWallet.id, tx.paymentHash!);
+      if (!cancelled && result) setEnrichment(result);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, tx, activeWallet]);
+
+  // Match Boltz-minted invoice memos ("Send to BTC address" /
+  // "Receive from BTC address") — settled swaps don't carry tx.swapId.
+  const isBoltzSwap = useMemo(() => {
+    if (!tx) return false;
+    if (tx.swapId) return true;
+    if (tx.description) {
+      if (/boltz swap/i.test(tx.description)) return true;
+      if (/send to btc|send to bitcoin/i.test(tx.description)) return true;
+      if (/receive from btc|receive from bitcoin/i.test(tx.description)) return true;
+    }
+    if (!tx.settled_at && !tx.blockHeight) return true;
+    return false;
+  }, [tx]);
+
   useEffect(() => {
     let cancelled = false;
     const resolve = async () => {
       setSwap(null);
-      if (!tx) return;
-      const looksLikeSwap =
-        !!tx.swapId ||
-        (tx.description && /boltz swap/i.test(tx.description)) ||
-        (!tx.settled_at && !tx.blockHeight); // any pending could be a swap
-      if (!looksLikeSwap) return;
+      setResolvedSwapId(null);
+      if (!tx || !isBoltzSwap) return;
 
-      // Find a persisted swap we can pair with. Prefer explicit swapId;
-      // otherwise walk the persisted index and pick the most recent.
       let swapId: string | undefined = tx.swapId;
       if (!swapId) {
         try {
@@ -101,6 +153,7 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
         } catch {}
       }
       if (!swapId || cancelled) return;
+      setResolvedSwapId(swapId);
 
       try {
         const res = await fetch(`${BOLTZ_API}/swap/${swapId}`);
@@ -131,7 +184,7 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
     return () => {
       cancelled = true;
     };
-  }, [tx]);
+  }, [tx, isBoltzSwap]);
 
   const handleRetryClaim = useCallback(async () => {
     setRetrying(true);
@@ -157,6 +210,16 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
     }
   }, []);
 
+  const copyValue = useCallback(async (label: string, value: string) => {
+    await Clipboard.setStringAsync(value);
+    Toast.show({
+      type: 'info',
+      text1: `${label} copied`,
+      position: 'top',
+      visibilityTime: 2000,
+    });
+  }, []);
+
   const renderBackdrop = useCallback(
     (p: BottomSheetBackdropProps) => (
       <BottomSheetBackdrop {...p} appearsOnIndex={0} disappearsOnIndex={-1} pressBehavior="close" />
@@ -175,13 +238,38 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
     return { style: styles.badgeConfirmed, text: 'Confirmed' };
   }, [tx, swap]);
 
+  const effectiveSwapId = tx?.swapId || resolvedSwapId || null;
+
+  const boltzInitialMessage = useMemo(() => {
+    if (!tx) return '';
+    const isIncoming = tx.type === 'incoming';
+    const amount = Math.abs(tx.amount);
+    const dateTs = tx.settled_at || tx.created_at;
+    const dateStr = dateTs ? formatFriendlyDateTime(dateTs) : null;
+    const lines: string[] = ['Hi Boltz support,', ''];
+    lines.push('I have a question about this transaction:');
+    if (effectiveSwapId) lines.push(`• Swap ID: ${effectiveSwapId}`);
+    if (swap?.status) lines.push(`• Swap status: ${swap.status}`);
+    if (swap?.lockupTxId) lines.push(`• Lockup tx: ${swap.lockupTxId}`);
+    if (tx.txid) lines.push(`• On-chain tx: ${tx.txid}`);
+    if (tx.paymentHash) lines.push(`• Payment hash: ${tx.paymentHash}`);
+    lines.push(`• Direction: ${isIncoming ? 'received' : 'sent'}`);
+    lines.push(`• Amount: ${amount.toLocaleString()} sats`);
+    if (dateStr) lines.push(`• Time: ${dateStr}`);
+    lines.push('', 'Details:');
+    lines.push('(describe the issue)');
+    return lines.join('\n');
+  }, [tx, effectiveSwapId, swap]);
+
   if (!tx) return null;
 
   const isIncoming = tx.type === 'incoming';
   const amount = Math.abs(tx.amount);
   const fiat = satsToFiatString(amount, btcPrice, currency);
   const dateTs = tx.settled_at || tx.created_at;
-  const dateStr = dateTs ? new Date(dateTs * 1000).toLocaleString() : null;
+  const dateStr = dateTs ? formatFriendlyDateTime(dateTs) : null;
+  const preimage = tx.preimage || enrichment.preimage;
+  const invoice = tx.invoice || enrichment.invoice;
 
   const zapCounterparty = tx.zapCounterparty ?? null;
   const counterpartyNpubDisplay = zapCounterparty?.profile?.npub
@@ -212,6 +300,9 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
       >
         <BottomSheetView style={styles.content}>
           <View style={styles.header}>
+            <View style={styles.headerIcon}>
+              <TransactionTypeIcon category={getTxCategory(tx)} size={56} />
+            </View>
             <Text
               style={[
                 styles.headerAmount,
@@ -284,23 +375,33 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
             </View>
           ) : null}
 
-          {tx.txid ? (
-            <View style={styles.row}>
-              <Text style={styles.rowLabel}>On-chain tx</Text>
-              <Text style={[styles.rowValue, styles.rowValueMono]} numberOfLines={1}>
-                {tx.txid}
-              </Text>
-            </View>
+          {typeof tx.feesSats === 'number' && tx.feesSats > 0 ? (
+            <TouchableOpacity
+              style={styles.row}
+              onPress={() => copyValue('Fee', `${tx.feesSats} sats`)}
+              accessibilityLabel="Copy fee"
+            >
+              <Text style={styles.rowLabel}>Fee</Text>
+              <View style={styles.rowValueWrap}>
+                <Text style={styles.rowValue}>{tx.feesSats.toLocaleString()} sats</Text>
+                <Copy size={14} color={colors.textSupplementary} />
+              </View>
+            </TouchableOpacity>
           ) : null}
 
+          {tx.txid ? <CopyRow label="On-chain tx" value={tx.txid} onCopy={copyValue} /> : null}
+
           {swap?.lockupTxId ? (
-            <View style={styles.row}>
-              <Text style={styles.rowLabel}>Lockup tx</Text>
-              <Text style={[styles.rowValue, styles.rowValueMono]} numberOfLines={1}>
-                {swap.lockupTxId}
-              </Text>
-            </View>
+            <CopyRow label="Lockup tx" value={swap.lockupTxId} onCopy={copyValue} />
           ) : null}
+
+          {tx.paymentHash ? (
+            <CopyRow label="Payment hash" value={tx.paymentHash} onCopy={copyValue} />
+          ) : null}
+
+          {preimage ? <CopyRow label="Preimage" value={preimage} onCopy={copyValue} /> : null}
+
+          {invoice ? <CopyRow label="Invoice" value={invoice} onCopy={copyValue} /> : null}
 
           <View style={styles.actions}>
             {swap?.claimable ? (
@@ -329,6 +430,16 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
                 <Text style={styles.secondaryButtonText}>View on mempool.space</Text>
               </TouchableOpacity>
             ) : null}
+            {isBoltzSwap ? (
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={() => setSupportSheetOpen(true)}
+                accessibilityLabel="Contact Boltz support"
+                testID="contact-boltz-support"
+              >
+                <Text style={styles.secondaryButtonText}>Contact Boltz support</Text>
+              </TouchableOpacity>
+            ) : null}
             {swap?.claimable ? (
               <Text style={styles.info}>
                 Retry re-runs the swap recovery service, which will re-broadcast the claim
@@ -345,6 +456,21 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
           contact={counterpartyContact}
         />
       ) : null}
+      <FeedbackSheet
+        visible={supportSheetOpen}
+        onClose={() => setSupportSheetOpen(false)}
+        onSend={createDmSender(dmRecipient(BOLTZ_SUPPORT_NPUB), sendDirectMessage)}
+        isLoggedIn={isLoggedIn}
+        signerType={signerType}
+        onLoginPress={() => setLoginSheetOpen(true)}
+        title="Contact Boltz support"
+        subtitle="Your message will be sent as an encrypted Nostr DM to the Boltz team."
+        initialMessage={boltzInitialMessage}
+        messagePrefix="[Boltz Support]"
+        successTitle="Message sent"
+        successMessage="Boltz support will reply via Nostr DM. Check your usual Nostr client for the response."
+      />
+      <NostrLoginSheet visible={loginSheetOpen} onClose={() => setLoginSheetOpen(false)} />
     </>
   );
 };
