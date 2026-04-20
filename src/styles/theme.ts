@@ -12,4 +12,9 @@ export const colors = {
   greenDark: '#2E7D32',
   red: '#F44336',
   courseTeal: '#109AB8',
+  // Transaction-type badge palette.
+  bitcoinOrange: '#F7931A',
+  bitcoinOrangeLight: '#FFF1E0',
+  boltzNavy: '#232742',
+  boltzYellow: '#FFC107',
 };

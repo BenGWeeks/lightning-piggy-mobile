@@ -5,6 +5,8 @@ import { colors } from '../styles/theme';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet } from '../contexts/WalletContext';
 import TransactionDetailSheet, { TransactionDetailData } from './TransactionDetailSheet';
+import TransactionTypeIcon from './TransactionTypeIcon';
+import { getTxCategory } from '../utils/txCategory';
 import type { ZapCounterpartyInfo } from '../types/wallet';
 
 interface Transaction {
@@ -192,9 +194,7 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
                   contentFit="cover"
                 />
               ) : (
-                <View style={styles.avatarPlaceholder}>
-                  <Text style={styles.avatarPlaceholderIcon}>⚡</Text>
-                </View>
+                <TransactionTypeIcon category={getTxCategory(item)} size={AVATAR_SIZE} />
               )}
             </View>
 

@@ -95,6 +95,9 @@ export const transactionDetailSheetStyles = StyleSheet.create({
     borderRadius: 12,
     marginBottom: 8,
   },
+  headerIcon: {
+    marginBottom: 8,
+  },
   actions: {
     flexDirection: 'column',
     gap: 10,

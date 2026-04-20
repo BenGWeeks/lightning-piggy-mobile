@@ -19,6 +19,8 @@ import { transactionDetailSheetStyles as styles } from '../styles/TransactionDet
 import FeedbackSheet from './FeedbackSheet';
 import { createDmSender } from '../utils/nostrDm';
 import { truncateMiddle, formatFriendlyDateTime } from '../utils/format';
+import { getTxCategory } from '../utils/txCategory';
+import TransactionTypeIcon from './TransactionTypeIcon';
 import ContactProfileSheet from './ContactProfileSheet';
 import type { ZapCounterpartyInfo } from '../types/wallet';
 import { colors } from '../styles/theme';
@@ -311,13 +313,9 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
       >
         <BottomSheetView style={styles.content}>
           <View style={styles.header}>
-            {isBoltzSwap ? (
-              <Image
-                source={require('../../assets/images/boltz-logo.png')}
-                style={styles.boltzLogo}
-                contentFit="contain"
-              />
-            ) : null}
+            <View style={styles.headerIcon}>
+              <TransactionTypeIcon category={getTxCategory(tx)} size={56} />
+            </View>
             <Text
               style={[
                 styles.headerAmount,
