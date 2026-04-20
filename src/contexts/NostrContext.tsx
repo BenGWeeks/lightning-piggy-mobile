@@ -197,13 +197,19 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const loadContacts = useCallback(async (pk: string, relayUrls: string[]) => {
     const t0 = Date.now();
 
-    // Read the contact-list cache + its timestamp. If fresh, skip the
-    // kind-3 relay fetch entirely — saves a ~3s RTT.
-    const { value: cachedContacts, ageMs: contactsAgeMs } = await readCachedWithTtl<NostrContact[]>(
-      CONTACTS_CACHE_KEY,
-      CONTACTS_TIMESTAMP_KEY,
-    );
+    // Read the contact-list cache AND profile cache concurrently — both
+    // are independent AsyncStorage round-trips, and the profile cache is
+    // also used for merging into whichever contact list we end up with.
+    const [
+      { value: cachedContacts, ageMs: contactsAgeMs },
+      { value: cachedProfileMapOrNull, ageMs: cacheAgeMs },
+    ] = await Promise.all([
+      readCachedWithTtl<NostrContact[]>(CONTACTS_CACHE_KEY, CONTACTS_TIMESTAMP_KEY),
+      readCachedWithTtl<Record<string, NostrProfile>>(PROFILES_CACHE_KEY, CACHE_TIMESTAMP_KEY),
+    ]);
+    const cachedProfileMap = cachedProfileMapOrNull ?? {};
     const contactsCacheFresh = contactsAgeMs < CACHE_MAX_AGE_MS;
+    const cacheFresh = cacheAgeMs < CACHE_MAX_AGE_MS;
 
     let fetchedContacts: NostrContact[];
     if (contactsCacheFresh && cachedContacts) {
@@ -223,15 +229,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         AsyncStorage.setItem(CONTACTS_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
       });
     }
-
-    // Read the profile cache + timestamp so we can (a) merge cached
-    // profiles into the freshly-fetched contact list for immediate display
-    // and (b) decide whether to skip the expensive fetchProfiles batch.
-    const { value: cachedProfileMapOrNull, ageMs: cacheAgeMs } = await readCachedWithTtl<
-      Record<string, NostrProfile>
-    >(PROFILES_CACHE_KEY, CACHE_TIMESTAMP_KEY);
-    const cachedProfileMap = cachedProfileMapOrNull ?? {};
-    const cacheFresh = cacheAgeMs < CACHE_MAX_AGE_MS;
 
     startTransition(() =>
       setContacts(
