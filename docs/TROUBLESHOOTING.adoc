@@ -42,6 +42,10 @@ Example path format: `~/.cache/dotslash/cb/<hash>/React Native DevTools-linux-x6
 | Claude Code warns "image exceeds the dimension limit for many-image requests (2000px)"
 | Screenshots captured with `adb exec-out screencap -p` can exceed 2000px on high-DPI devices. Before sending to Claude, resize: `adb exec-out screencap -p > /tmp/screen.png && convert /tmp/screen.png -resize 1200x1200\> /tmp/screen_small.png`. Or run `/compact` to clear old images from context, or start a new conversation.
 
+| Characters dropped / visually deleted while typing into a `TextInput` inside a `@gorhom/bottom-sheet` modal
+| Plain React Native `TextInput` loses keystrokes when placed inside `BottomSheetView` / `BottomSheetModal` — the sheet container is animated by `react-native-reanimated` and can re-render while the IME is mid-composition, dropping characters. The symptom looks like the input "friendly deletes" letters you just typed. +
+*Fix:* use `BottomSheetTextInput` from `@gorhom/bottom-sheet` (not `TextInput` from `react-native`) for every input inside a bottom-sheet subtree. It hooks into the sheet's keyboard + animation context and keeps keystrokes intact. All sheets in this repo (FeedbackSheet, TransferSheet, AddWalletWizard, EditProfileSheet, AddFriendSheet, NostrLoginSheet, and — as of #96 — SendSheet) follow this pattern. If you add a new sheet, grep `BottomSheetTextInput` for the canonical import site.
+
 | Maestro `inputText` doesn't update React state in `BottomSheetTextInput`
 | `BottomSheetTextInput` from `@gorhom/bottom-sheet` doesn't always trigger `onChangeText` when Maestro uses `inputText`. The text appears visually in the input but the React state stays empty, causing validation to fail. **Do not** replace with regular `TextInput` — the bottom sheet needs its own input to adjust when the keyboard opens. Workarounds: (1) Use Maestro's clipboard paste approach, (2) tap the input field first to ensure focus before typing, (3) accept intermittent flakiness — the first test run in a session usually works.
 

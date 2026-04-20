@@ -6,7 +6,6 @@ import {
   Alert,
   ActivityIndicator,
   BackHandler,
-  TextInput,
   Keyboard,
   TouchableWithoutFeedback,
   Image,
@@ -15,6 +14,7 @@ import {
   BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
+  BottomSheetTextInput,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -645,7 +645,7 @@ const SendSheet: React.FC<Props> = ({
                 </View>
               ) : (
                 <View style={styles.pasteSection}>
-                  <TextInput
+                  <BottomSheetTextInput
                     style={styles.pasteInput}
                     placeholder="Paste invoice, lightning or bitcoin address..."
                     placeholderTextColor={colors.textSupplementary}
@@ -687,7 +687,7 @@ const SendSheet: React.FC<Props> = ({
                     ) : lnurlParams || isOnchainAddress ? (
                       <>
                         <View style={styles.amountRow}>
-                          <TextInput
+                          <BottomSheetTextInput
                             style={styles.amountInput}
                             value={inputUnit === 'sats' ? satsValue : fiatValue}
                             onChangeText={
@@ -794,7 +794,7 @@ const SendSheet: React.FC<Props> = ({
 
                 {/* Memo / comment field for Lightning address payments */}
                 {needsAmount && (
-                  <TextInput
+                  <BottomSheetTextInput
                     style={styles.memoInput}
                     placeholder={activePubkey ? 'Zap message (optional)' : 'Comment (optional)'}
                     placeholderTextColor={colors.textSupplementary}

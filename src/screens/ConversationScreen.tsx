@@ -14,13 +14,13 @@ import {
   StyleSheet,
 } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
+import { Zap, Send } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
-import ZapIcon from '../components/icons/ZapIcon';
 import SendSheet from '../components/SendSheet';
 import TransactionDetailSheet, {
   TransactionDetailData,
@@ -219,7 +219,11 @@ const ConversationScreen: React.FC = () => {
               item.fromMe ? styles.zapCardIconBadgeMe : styles.zapCardIconBadgeThem,
             ]}
           >
-            <ZapIcon size={18} color={item.fromMe ? colors.brandPink : colors.white} />
+            <Zap
+              size={18}
+              color={item.fromMe ? colors.brandPink : colors.white}
+              fill={item.fromMe ? colors.brandPink : colors.white}
+            />
           </View>
           <View style={styles.zapCardBody}>
             <View style={styles.zapCardHeaderRow}>
@@ -296,7 +300,7 @@ const ConversationScreen: React.FC = () => {
             accessibilityLabel="Send zap"
             testID="conversation-zap"
           >
-            <ZapIcon size={20} color={colors.white} />
+            <Zap size={20} color={colors.white} fill={colors.white} />
           </TouchableOpacity>
         ) : null}
       </View>
@@ -352,7 +356,7 @@ const ConversationScreen: React.FC = () => {
               accessibilityLabel="Send zap"
               testID="conversation-composer-zap"
             >
-              <ZapIcon size={22} color={colors.white} />
+              <Zap size={22} color={colors.white} fill={colors.white} />
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
@@ -368,15 +372,7 @@ const ConversationScreen: React.FC = () => {
               {sending ? (
                 <ActivityIndicator color={colors.white} />
               ) : (
-                <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-                  <Path
-                    d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"
-                    stroke={colors.white}
-                    strokeWidth={2}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </Svg>
+                <Send size={20} color={colors.white} />
               )}
             </TouchableOpacity>
           )}

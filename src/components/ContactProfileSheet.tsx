@@ -17,7 +17,7 @@ import {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import Svg, { Circle, Path } from 'react-native-svg';
-import ZapIcon from './icons/ZapIcon';
+import { Zap } from 'lucide-react-native';
 import CopyIcon from './icons/CopyIcon';
 import * as Clipboard from 'expo-clipboard';
 import { npubEncode } from '../services/nostrService';
@@ -326,7 +326,7 @@ const ContactProfileSheet: React.FC<Props> = ({
           )}
           {contact.lightningAddress && onZap && (
             <TouchableOpacity style={styles.zapButton} onPress={onZap}>
-              <ZapIcon size={20} color={colors.white} />
+              <Zap size={20} color={colors.white} fill={colors.white} />
               <Text style={styles.zapButtonText}>Zap</Text>
             </TouchableOpacity>
           )}
