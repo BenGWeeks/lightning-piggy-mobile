@@ -314,7 +314,12 @@ export async function listTransactions(walletId: string): Promise<any[]> {
   const maxAttempts = 3;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const result = await provider.listTransactions({});
+      // LNbits's NWC provider defaults to `limit: 10` (see
+      // extensions/nwcprovider/tasks.py::_on_list_transactions), so an empty
+      // request only returns the 10 most recent payments. 50 is a balance
+      // between showing real history and keeping the fetch + follow-up zap
+      // resolver fast; bumping higher (100+) made first-load noticeably slow.
+      const result = await provider.listTransactions({ limit: 50 });
       return result.transactions || [];
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
