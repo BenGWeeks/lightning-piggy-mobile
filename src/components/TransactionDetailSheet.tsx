@@ -17,6 +17,7 @@ import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as nwcService from '../services/nwcService';
 import { transactionDetailSheetStyles as styles } from '../styles/TransactionDetailSheet.styles';
 import FeedbackSheet from './FeedbackSheet';
+import NostrLoginSheet from './NostrLoginSheet';
 import { createDmSender } from '../utils/nostrDm';
 import { truncateMiddle, formatFriendlyDateTime } from '../utils/format';
 import { getTxCategory } from '../utils/txCategory';
@@ -105,6 +106,7 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
   const [retrying, setRetrying] = useState(false);
   const [supportSheetOpen, setSupportSheetOpen] = useState(false);
   const [senderProfileOpen, setSenderProfileOpen] = useState(false);
+  const [loginSheetOpen, setLoginSheetOpen] = useState(false);
   // Filled in on open when the cached tx lacks preimage/invoice — some NWC
   // backends (notably LNbits) omit those fields from list_transactions.
   const [enrichment, setEnrichment] = useState<{ preimage?: string; invoice?: string }>({});
@@ -389,10 +391,17 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
           ) : null}
 
           {typeof tx.feesSats === 'number' && tx.feesSats > 0 ? (
-            <View style={styles.row}>
+            <TouchableOpacity
+              style={styles.row}
+              onPress={() => copyValue('Fee', `${tx.feesSats} sats`)}
+              accessibilityLabel="Copy fee"
+            >
               <Text style={styles.rowLabel}>Fee</Text>
-              <Text style={styles.rowValue}>{tx.feesSats.toLocaleString()} sats</Text>
-            </View>
+              <View style={styles.rowValueWrap}>
+                <Text style={styles.rowValue}>{tx.feesSats.toLocaleString()} sats</Text>
+                <Copy size={14} color={colors.textSupplementary} />
+              </View>
+            </TouchableOpacity>
           ) : null}
 
           {tx.txid ? (
@@ -470,15 +479,17 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
         onSend={createDmSender(dmRecipient(BOLTZ_SUPPORT_NPUB), sendDirectMessage)}
         isLoggedIn={isLoggedIn}
         signerType={signerType}
-        onLoginPress={() => {
-          /* parent-screen login flow not wired here; user can log in from Account */
-        }}
+        onLoginPress={() => setLoginSheetOpen(true)}
         title="Contact Boltz support"
         subtitle="Your message will be sent as an encrypted Nostr DM to the Boltz team."
         initialMessage={boltzInitialMessage}
         messagePrefix="[Boltz Support]"
         successTitle="Message sent"
         successMessage="Boltz support will reply via Nostr DM. Check your usual Nostr client for the response."
+      />
+      <NostrLoginSheet
+        visible={loginSheetOpen}
+        onClose={() => setLoginSheetOpen(false)}
       />
     </>
   );

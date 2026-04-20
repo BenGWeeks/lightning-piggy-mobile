@@ -4,25 +4,18 @@ type DmSendResult = { success: boolean; error?: string };
 type SendDirectMessage = (recipientPubkey: string, message: string) => Promise<DmSendResult>;
 
 /**
- * Build an onSend callback that decodes an npub once and delegates to
- * `sendDirectMessage`. Shape matches `FeedbackSheet`'s `onSend` prop so it
- * can be dropped in directly.
+ * Build an onSend callback that decodes an npub once at factory time and
+ * delegates to `sendDirectMessage` for each send. Shape matches
+ * `FeedbackSheet`'s `onSend` prop so it can be dropped in directly.
+ *
+ * Throws synchronously if `npub` is malformed — callers pass compile-time
+ * constants, so a bad value is a programmer error, not a runtime condition.
  */
 export function createDmSender(npub: string, sendDirectMessage: SendDirectMessage) {
-  return async (message: string): Promise<DmSendResult> => {
-    let hex: string;
-    try {
-      const decoded = nip19.decode(npub);
-      if (decoded.type !== 'npub') {
-        return { success: false, error: 'Recipient is not a valid npub' };
-      }
-      hex = decoded.data;
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to decode recipient npub',
-      };
-    }
-    return sendDirectMessage(hex, message);
-  };
+  const decoded = nip19.decode(npub);
+  if (decoded.type !== 'npub') {
+    throw new Error(`createDmSender: expected npub, got ${decoded.type}`);
+  }
+  const hex = decoded.data;
+  return (message: string): Promise<DmSendResult> => sendDirectMessage(hex, message);
 }
