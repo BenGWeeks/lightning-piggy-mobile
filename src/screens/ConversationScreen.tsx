@@ -28,6 +28,7 @@ import * as nwcService from '../services/nwcService';
 import { colors } from '../styles/theme';
 import SendSheet from '../components/SendSheet';
 import AttachSheet from '../components/AttachSheet';
+import GifPickerSheet from '../components/GifPickerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
 import TransactionDetailSheet, {
   TransactionDetailData,
@@ -52,6 +53,7 @@ import {
   buildProfileRelayHints,
   DEFAULT_RELAYS,
 } from '../services/nostrService';
+import { extractGifUrl, isConfigured as isGifConfigured, Gif } from '../services/giphyService';
 import type { NostrProfile } from '../types/nostr';
 import type { RootStackParamList } from '../navigation/types';
 
@@ -80,6 +82,13 @@ type Item =
       id: string;
       fromMe: boolean;
       location: SharedLocation;
+      createdAt: number;
+    }
+  | {
+      kind: 'gif';
+      id: string;
+      fromMe: boolean;
+      url: string;
       createdAt: number;
     };
 
@@ -210,6 +219,7 @@ const ConversationScreen: React.FC = () => {
   const [attachSheetOpen, setAttachSheetOpen] = useState(false);
   const [invoiceSheetOpen, setInvoiceSheetOpen] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
+  const [gifPickerOpen, setGifPickerOpen] = useState(false);
   const [sharingLocation, setSharingLocation] = useState(false);
   // Payment hashes of outgoing invoices the active NWC wallet reports paid.
   const [paidHashes, setPaidHashes] = useState<Set<string>>(() => new Set());
@@ -239,6 +249,16 @@ const ConversationScreen: React.FC = () => {
 
   const items = useMemo<Item[]>(() => {
     const msgItems: Item[] = messages.map((m) => {
+      const gifUrl = extractGifUrl(m.text);
+      if (gifUrl) {
+        return {
+          kind: 'gif',
+          id: `dm-${m.id}`,
+          fromMe: m.fromMe,
+          url: gifUrl,
+          createdAt: m.createdAt,
+        };
+      }
       const loc = parseGeoMessage(m.text);
       if (loc) {
         return {
@@ -597,6 +617,29 @@ const ConversationScreen: React.FC = () => {
     [pubkey, sendDirectMessage, contacts, relays],
   );
 
+  const handleSendGif = useCallback(
+    async (gif: Gif) => {
+      setGifPickerOpen(false);
+      setAttachSheetOpen(false);
+      const payload = gif.url;
+      const result = await sendDirectMessage(pubkey, payload);
+      if (!result.success) {
+        Alert.alert('Send failed', result.error ?? 'Could not send GIF.');
+        return;
+      }
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `local-${Date.now()}`,
+          fromMe: true,
+          text: payload,
+          createdAt: Math.floor(Date.now() / 1000),
+        },
+      ]);
+    },
+    [pubkey, sendDirectMessage],
+  );
+
   const openLocation = useCallback((loc: SharedLocation) => {
     const url = buildOsmViewUrl(loc);
     Linking.openURL(url).catch(() => {
@@ -806,6 +849,31 @@ const ConversationScreen: React.FC = () => {
                 {item.text}
               </Text>
               <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
+                {formatTime(item.createdAt)}
+              </Text>
+            </View>
+          </View>
+        );
+      }
+      if (item.kind === 'gif') {
+        return (
+          <View
+            style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
+          >
+            <View
+              style={[styles.gifCard, item.fromMe ? styles.gifCardMe : styles.gifCardThem]}
+              accessibilityLabel={item.fromMe ? 'GIF sent' : 'GIF received'}
+              testID={`conversation-gif-${item.id}`}
+            >
+              <ExpoImage
+                source={{ uri: item.url }}
+                style={styles.gifImage}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                transition={150}
+                accessibilityIgnoresInvertColors
+              />
+              <Text style={[styles.gifTime, item.fromMe && styles.gifTimeMe]}>
                 {formatTime(item.createdAt)}
               </Text>
             </View>
@@ -1070,6 +1138,23 @@ const ConversationScreen: React.FC = () => {
           // to ~15 % of screen height.
           setContactPickerOpen(true);
         }}
+        onSendGif={
+          isGifConfigured()
+            ? () => {
+                // Same stack-without-dismiss pattern as FriendPickerSheet
+                // above — GifPickerSheet opens over the AttachSheet.
+                setGifPickerOpen(true);
+              }
+            : undefined
+        }
+      />
+      <GifPickerSheet
+        visible={gifPickerOpen}
+        onClose={() => {
+          setGifPickerOpen(false);
+          setAttachSheetOpen(false);
+        }}
+        onSelect={handleSendGif}
       />
       <FriendPickerSheet
         visible={contactPickerOpen}
@@ -1566,6 +1651,38 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.background,
+  },
+  gifCard: {
+    maxWidth: '75%',
+    minWidth: 180,
+    borderRadius: 14,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  gifCardMe: {
+    backgroundColor: colors.brandPink,
+  },
+  gifCardThem: {
+    backgroundColor: colors.white,
+  },
+  gifImage: {
+    width: 220,
+    height: 220,
+    backgroundColor: colors.background,
+  },
+  gifTime: {
+    fontSize: 10,
+    color: colors.textSupplementary,
+    alignSelf: 'flex-end',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  gifTimeMe: {
+    color: 'rgba(255,255,255,0.85)',
   },
   locationCard: {
     maxWidth: '85%',
