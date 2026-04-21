@@ -15,21 +15,13 @@ import { useNavigation, CompositeNavigationProp } from '@react-navigation/native
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr } from '../contexts/NostrContext';
-import { useWallet } from '../contexts/WalletContext';
 import ProfileIcon from '../components/ProfileIcon';
 import ContactListItem from '../components/ContactListItem';
-import ConversationRow from '../components/ConversationRow';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import AddFriendSheet from '../components/AddFriendSheet';
 import SendSheet from '../components/SendSheet';
 import AlphabetBar from '../components/AlphabetBar';
-import FriendPickerSheet, { type PickedFriend } from '../components/FriendPickerSheet';
 import { fetchPhoneContacts, PhoneContact, setLightningAddress } from '../services/contactsService';
-import {
-  buildConversationSummaries,
-  conversationPreview,
-  type ConversationSummary,
-} from '../utils/conversationSummaries';
 import { styles } from '../styles/FriendsScreen.styles';
 import type { MainTabParamList, RootStackParamList } from '../navigation/types';
 
@@ -38,7 +30,6 @@ type FriendsNavigation = CompositeNavigationProp<
   NativeStackNavigationProp<RootStackParamList>
 >;
 
-type Mode = 'chats' | 'contacts';
 type Filter = 'all' | 'nostr' | 'contacts';
 
 interface ListItem {
@@ -56,8 +47,6 @@ const FriendsScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<FriendsNavigation>();
   const { isLoggedIn, profile, contacts, refreshContacts, addContact } = useNostr();
-  const { wallets } = useWallet();
-  const [mode, setMode] = useState<Mode>('chats');
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
   const [searchExpanded, setSearchExpanded] = useState(false);
@@ -67,7 +56,6 @@ const FriendsScreen: React.FC = () => {
   const [selectedContact, setSelectedContact] = useState<ListItem | null>(null);
   const [profileSheetVisible, setProfileSheetVisible] = useState(false);
   const [addFriendVisible, setAddFriendVisible] = useState(false);
-  const [pickerVisible, setPickerVisible] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
   const [zapTarget, setZapTarget] = useState<ListItem | null>(null);
   const [currentLetter, setCurrentLetter] = useState<string | null>(null);
@@ -162,21 +150,6 @@ const FriendsScreen: React.FC = () => {
     return result;
   }, [contacts, phoneContacts, filter, search]);
 
-  const conversationSummaries = useMemo(
-    () => buildConversationSummaries(wallets, contacts),
-    [wallets, contacts],
-  );
-
-  const filteredSummaries = useMemo(() => {
-    if (!search.trim()) return conversationSummaries;
-    const lower = search.toLowerCase();
-    return conversationSummaries.filter(
-      (s) =>
-        s.name.toLowerCase().includes(lower) ||
-        conversationPreview(s).toLowerCase().includes(lower),
-    );
-  }, [conversationSummaries, search]);
-
   const flatListRef = useRef<FlashListRef<ListItem>>(null);
 
   const availableLetters = useMemo(() => {
@@ -256,57 +229,6 @@ const FriendsScreen: React.FC = () => {
     setProfileSheetVisible(true);
   }, []);
 
-  const handleConversationPress = useCallback(
-    (summary: ConversationSummary) => {
-      const contact = summary.pubkey
-        ? contacts.find((c) => c.pubkey === summary.pubkey)
-        : undefined;
-      const picture = summary.picture ?? contact?.profile?.picture ?? null;
-      const lightningAddress = summary.lightningAddress ?? contact?.profile?.lud16 ?? null;
-      if (summary.pubkey) {
-        navigation.navigate('Conversation', {
-          pubkey: summary.pubkey,
-          name: summary.name,
-          picture,
-          lightningAddress,
-        });
-        return;
-      }
-      // Anonymous zap: no pubkey to thread against. Surface what we have via
-      // the profile sheet so the user can at least see the zap metadata.
-      const item: ListItem = {
-        id: `conv-${summary.id}`,
-        name: summary.name,
-        picture,
-        banner: null,
-        nip05: summary.nip05,
-        lightningAddress,
-        pubkey: null,
-        source: 'nostr',
-      };
-      setSelectedContact(item);
-      setProfileSheetVisible(true);
-    },
-    [contacts, navigation],
-  );
-
-  const handleStartConversation = useCallback(() => {
-    setPickerVisible(true);
-  }, []);
-
-  const handlePickerSelect = useCallback(
-    (friend: PickedFriend) => {
-      setPickerVisible(false);
-      navigation.navigate('Conversation', {
-        pubkey: friend.pubkey,
-        name: friend.name,
-        picture: friend.picture,
-        lightningAddress: friend.lightningAddress,
-      });
-    },
-    [navigation],
-  );
-
   const handleAddFriend = useCallback(
     async (npubOrHex: string) => {
       const result = await addContact(npubOrHex);
@@ -318,7 +240,7 @@ const FriendsScreen: React.FC = () => {
     [addContact],
   );
 
-  const renderContactItem = useCallback(
+  const renderItem = useCallback(
     ({ item }: { item: ListItem }) => (
       <ContactListItem
         name={item.name}
@@ -331,22 +253,10 @@ const FriendsScreen: React.FC = () => {
     [handleZap, handleContactPress],
   );
 
-  const renderConversationItem = useCallback(
-    ({ item }: { item: ConversationSummary }) => (
-      <ConversationRow summary={item} onPress={() => handleConversationPress(item)} />
-    ),
-    [handleConversationPress],
-  );
-
-  const modes: { key: Mode; label: string }[] = [
-    { key: 'chats', label: 'Chats' },
-    { key: 'contacts', label: 'Contacts' },
-  ];
-
   const filters: { key: Filter; label: string }[] = [
     { key: 'all', label: 'All' },
     { key: 'nostr', label: 'Nostr' },
-    { key: 'contacts', label: 'Phone' },
+    { key: 'contacts', label: 'Contacts' },
   ];
 
   return (
@@ -377,7 +287,7 @@ const FriendsScreen: React.FC = () => {
           />
         </View>
 
-        {/* Primary mode toggle + search + add */}
+        {/* Filter chips + search toggle */}
         <View style={styles.chipRow}>
           {searchExpanded ? (
             <View style={styles.searchRow}>
@@ -423,18 +333,14 @@ const FriendsScreen: React.FC = () => {
             </View>
           ) : (
             <>
-              {modes.map((m) => (
+              {filters.map((f) => (
                 <TouchableOpacity
-                  key={m.key}
-                  style={[styles.chip, mode === m.key && styles.chipActive]}
-                  onPress={() => setMode(m.key)}
-                  accessibilityRole="tab"
-                  accessibilityLabel={`${m.label} tab`}
-                  accessibilityState={{ selected: mode === m.key }}
-                  testID={`mode-${m.key}`}
+                  key={f.key}
+                  style={[styles.chip, filter === f.key && styles.chipActive]}
+                  onPress={() => setFilter(f.key)}
                 >
-                  <Text style={[styles.chipText, mode === m.key && styles.chipTextActive]}>
-                    {m.label}
+                  <Text style={[styles.chipText, filter === f.key && styles.chipTextActive]}>
+                    {f.label}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -457,7 +363,7 @@ const FriendsScreen: React.FC = () => {
                   />
                 </Svg>
               </TouchableOpacity>
-              {isLoggedIn && mode === 'contacts' && (
+              {isLoggedIn && (
                 <TouchableOpacity
                   style={styles.addButton}
                   onPress={() => setAddFriendVisible(true)}
@@ -484,69 +390,10 @@ const FriendsScreen: React.FC = () => {
             </>
           )}
         </View>
-
-        {/* Secondary filter row — only in Contacts mode. */}
-        {!searchExpanded && mode === 'contacts' && (
-          <View style={styles.subChipRow}>
-            {filters.map((f) => (
-              <TouchableOpacity
-                key={f.key}
-                style={[styles.subChip, filter === f.key && styles.subChipActive]}
-                onPress={() => setFilter(f.key)}
-                accessibilityRole="tab"
-                accessibilityLabel={`${f.label} filter`}
-                accessibilityState={{ selected: filter === f.key }}
-                testID={`filter-${f.key}`}
-              >
-                <Text style={[styles.subChipText, filter === f.key && styles.subChipTextActive]}>
-                  {f.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
       </View>
 
       <View style={styles.content}>
-        {mode === 'chats' ? (
-          <>
-            <FlashList
-              data={filteredSummaries}
-              keyExtractor={(item) => item.id}
-              renderItem={renderConversationItem}
-              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
-              ListEmptyComponent={
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptyTitle}>
-                    {search ? 'No matches' : 'No conversations yet'}
-                  </Text>
-                  <Text style={styles.emptySubtitle}>
-                    {search
-                      ? 'Try a different search term.'
-                      : 'Zap a friend or tap + to start one.'}
-                  </Text>
-                </View>
-              }
-              contentContainerStyle={styles.listContent}
-            />
-            <TouchableOpacity
-              style={[styles.fab, { bottom: 24 + insets.bottom }]}
-              onPress={handleStartConversation}
-              accessibilityLabel="Start new conversation"
-              testID="start-conversation-button"
-              activeOpacity={0.85}
-            >
-              <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
-                <Path
-                  d="M12 5v14M5 12h14"
-                  stroke={'#FFFFFF'}
-                  strokeWidth={2.5}
-                  strokeLinecap="round"
-                />
-              </Svg>
-            </TouchableOpacity>
-          </>
-        ) : !isLoggedIn && filter !== 'contacts' ? (
+        {!isLoggedIn && filter !== 'contacts' ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>Connect Nostr</Text>
             <Text style={styles.emptySubtitle}>
@@ -573,7 +420,7 @@ const FriendsScreen: React.FC = () => {
                 ref={flatListRef}
                 data={combinedList}
                 keyExtractor={(item) => item.id}
-                renderItem={renderContactItem}
+                renderItem={renderItem}
                 refreshControl={
                   <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
                 }
@@ -643,13 +490,6 @@ const FriendsScreen: React.FC = () => {
         visible={addFriendVisible}
         onClose={() => setAddFriendVisible(false)}
         onAdd={handleAddFriend}
-      />
-
-      <FriendPickerSheet
-        visible={pickerVisible}
-        onClose={() => setPickerVisible(false)}
-        onSelect={handlePickerSelect}
-        title="Start a conversation"
       />
 
       <SendSheet

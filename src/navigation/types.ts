@@ -7,7 +7,7 @@ export type MainTabParamList = {
   Home:
     | { sendToAddress?: string; sendToName?: string; sendToPicture?: string; sendToPubkey?: string }
     | undefined;
-  Earn: undefined;
+  Messages: undefined;
   Learn: undefined;
   Friends: undefined;
   Account: undefined;
