@@ -1,0 +1,15 @@
+appId: com.lightningpiggy.app.dev
+name: Dismiss any open modal dialogs
+---
+# Best-effort dismissal of stacked modal dialogs so subsequent flows have a
+# clean UI. Tap whichever of the common dialog buttons happens to be
+# visible — all optional so we don't fail when there's nothing to close.
+
+- tapOn: { text: 'CANCEL', optional: true }
+- waitForAnimationToEnd: { timeout: 1500 }
+- tapOn: { text: 'KEEP CURRENT', optional: true }
+- waitForAnimationToEnd: { timeout: 1500 }
+- tapOn: { text: 'UPDATE', optional: true }
+- waitForAnimationToEnd: { timeout: 1500 }
+- tapOn: { text: 'OK', optional: true }
+- waitForAnimationToEnd: { timeout: 1500 }

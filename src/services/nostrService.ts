@@ -486,6 +486,71 @@ export async function createDirectMessageEvent(
   };
 }
 
+export interface RawDmEvent {
+  id: string;
+  pubkey: string;
+  created_at: number;
+  tags: string[][];
+  content: string;
+}
+
+/**
+ * Fetch NIP-4 encrypted DMs (kind 4) exchanged between `myPubkey` and
+ * `otherPubkey`, in either direction. Returns raw events — decryption
+ * happens in the context layer where the signer (nsec / Amber) lives.
+ *
+ * Uses two parallel filters: messages authored by me tagged to the other,
+ * and messages authored by the other tagged to me. Most relays index
+ * `#p`, so this pair covers both conversation halves.
+ */
+export async function fetchDirectMessageEvents(
+  myPubkey: string,
+  otherPubkey: string,
+  relays: string[],
+  options: { limit?: number } = {},
+): Promise<RawDmEvent[]> {
+  const allRelays = [...new Set([...relays, ...DEFAULT_RELAYS])];
+  trackRelays(allRelays);
+  const limit = options.limit ?? 200;
+  try {
+    const [fromMe, toMe] = await Promise.all([
+      withTimeout(
+        pool.querySync(allRelays, {
+          kinds: [4],
+          authors: [myPubkey],
+          '#p': [otherPubkey],
+          limit,
+        }),
+        15000,
+      ),
+      withTimeout(
+        pool.querySync(allRelays, {
+          kinds: [4],
+          authors: [otherPubkey],
+          '#p': [myPubkey],
+          limit,
+        }),
+        15000,
+      ),
+    ]);
+    const byId = new Map<string, RawDmEvent>();
+    for (const ev of fromMe ?? []) byId.set(ev.id, ev as RawDmEvent);
+    for (const ev of toMe ?? []) byId.set(ev.id, ev as RawDmEvent);
+    return Array.from(byId.values());
+  } catch (error) {
+    if (__DEV__) console.warn('[Nostr] fetchDirectMessageEvents failed:', error);
+    return [];
+  }
+}
+
+export async function decryptNip04WithSecret(
+  secretKey: Uint8Array,
+  otherPubkey: string,
+  ciphertext: string,
+): Promise<string> {
+  return nip04.decrypt(secretKey, otherPubkey, ciphertext);
+}
+
 export function generateKeypair(): { secretKey: Uint8Array; pubkey: string; nsec: string } {
   const secretKey = generateSecretKey();
   const pubkey = getPublicKey(secretKey);
