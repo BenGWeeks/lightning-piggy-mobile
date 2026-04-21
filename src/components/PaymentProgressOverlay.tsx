@@ -373,20 +373,32 @@ export default function PaymentProgressOverlay({
       onRequestClose={state === 'sending' ? undefined : onDismiss}
     >
       <View style={styles.root}>
-        {/* Bubbles live behind the card on the send flow. */}
-        {!isReceive ? (
-          <View style={StyleSheet.absoluteFill} pointerEvents="none">
-            {bubbleSpecs.map((spec) => (
-              <Bubble
-                key={spec.index}
-                spec={spec}
-                colorProgress={colorProgress}
-                screenWidth={width}
-                screenHeight={height}
-              />
-            ))}
-          </View>
-        ) : null}
+        {/* Particle layer renders BEHIND the card — later siblings stack
+         *  above earlier ones in RN, so this block must come first.
+         *  Send = pink bubbles rising; Receive = radial confetti burst
+         *  from card centre, so pieces appear to launch out from behind
+         *  the card and fly past its edges. */}
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          {isReceive
+            ? confettiSpecs.map((spec) => (
+                <Confetti
+                  key={spec.index}
+                  spec={spec}
+                  armed={confettiArmed}
+                  originX={width / 2}
+                  originY={height / 2}
+                />
+              ))
+            : bubbleSpecs.map((spec) => (
+                <Bubble
+                  key={spec.index}
+                  spec={spec}
+                  colorProgress={colorProgress}
+                  screenWidth={width}
+                  screenHeight={height}
+                />
+              ))}
+        </View>
 
         <Animated.View style={[styles.card, cardAnimatedStyle]}>
           {state === 'sending' && (
@@ -420,23 +432,6 @@ export default function PaymentProgressOverlay({
             </TouchableOpacity>
           ) : null}
         </Animated.View>
-
-        {/* Confetti sits on top of the card so pieces visibly burst past
-         *  the card edges as they fly radially outward. Origin = screen
-         *  centre, which matches the card's visual centre. */}
-        {isReceive ? (
-          <View style={StyleSheet.absoluteFill} pointerEvents="none">
-            {confettiSpecs.map((spec) => (
-              <Confetti
-                key={spec.index}
-                spec={spec}
-                armed={confettiArmed}
-                originX={width / 2}
-                originY={height / 2}
-              />
-            ))}
-          </View>
-        ) : null}
       </View>
     </Modal>
   );
