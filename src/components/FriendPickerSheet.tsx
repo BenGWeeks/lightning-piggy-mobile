@@ -1,5 +1,13 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, BackHandler } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  BackHandler,
+  Keyboard,
+  Platform,
+} from 'react-native';
 import { Image } from 'expo-image';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { X } from 'lucide-react-native';
@@ -63,6 +71,11 @@ const FriendPickerSheet: React.FC<Props> = ({
   const { contacts } = useNostr();
   const [search, setSearch] = useState('');
   const [currentLetter, setCurrentLetter] = useState<string | null>(null);
+  // Canonical bottom-sheet + keyboard pattern from TROUBLESHOOTING.adoc
+  // (see NostrLoginSheet.tsx): track keyboard height and pad the list's
+  // contentContainerStyle dynamically. Without it, the list content
+  // hides behind the keyboard or the sheet appears to collapse.
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   // Drive the expensive filter off a deferred copy of `search`. Android's
   // IME can drop characters if the synchronous work triggered by each
   // keystroke (re-sorting the list + re-rendering every FlatList row)
@@ -87,6 +100,19 @@ const FriendPickerSheet: React.FC<Props> = ({
     });
     return () => sub.remove();
   }, [visible, onClose]);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   const friends = useMemo<PickedFriend[]>(() => {
     const list: PickedFriend[] = contacts.map((c) => ({
@@ -244,7 +270,10 @@ const FriendPickerSheet: React.FC<Props> = ({
             data={friends}
             keyExtractor={(f: PickedFriend) => f.pubkey}
             renderItem={renderItem}
-            contentContainerStyle={styles.listContent}
+            contentContainerStyle={[
+              styles.listContent,
+              { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
+            ]}
             keyboardShouldPersistTaps="handled"
             style={styles.list}
             ListEmptyComponent={
