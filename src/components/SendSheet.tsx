@@ -33,6 +33,7 @@ import * as boltzService from '../services/boltzService';
 import * as onchainService from '../services/onchainService';
 import { npubEncode } from '../services/nostrService';
 import { recordOutgoing as recordOutgoingCounterparty } from '../services/zapCounterpartyStorage';
+import PaymentProgressOverlay, { PaymentProgressState } from './PaymentProgressOverlay';
 
 interface Props {
   visible: boolean;
@@ -76,6 +77,25 @@ function decodeInvoice(bolt11: string): DecodedInvoice {
 
 function isLightningAddress(input: string): boolean {
   return input.includes('@') && !input.startsWith('lnbc') && !input.startsWith('lntb');
+}
+
+// Accept only digits — sats are whole integers. A hardware keyboard,
+// paste, or autocomplete can inject junk that the soft-keyboard's
+// `numeric` hint alone doesn't block.
+function sanitizeSatsInput(text: string): string {
+  return text.replace(/[^0-9]/g, '');
+}
+
+// Digits + a single decimal point, max two decimal places.
+function sanitizeFiatInput(text: string): string {
+  let cleaned = text.replace(/[^0-9.]/g, '');
+  const firstDot = cleaned.indexOf('.');
+  if (firstDot !== -1) {
+    cleaned = cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, '');
+    const [intPart, fracPart = ''] = cleaned.split('.');
+    cleaned = `${intPart}.${fracPart.slice(0, 2)}`;
+  }
+  return cleaned;
 }
 
 function isValidInvoice(data: string): boolean {
@@ -128,6 +148,8 @@ const SendSheet: React.FC<Props> = ({
   const [loadingBoltzFees, setLoadingBoltzFees] = useState(false);
   const [onchainFeeEstimate, setOnchainFeeEstimate] = useState<string | null>(null);
   const [step, setStep] = useState<Step>('main');
+  const [progressState, setProgressState] = useState<PaymentProgressState>('hidden');
+  const [progressError, setProgressError] = useState<string | undefined>(undefined);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
 
   const snapPoints = useMemo(() => ['90%'], []);
@@ -333,6 +355,8 @@ const SendSheet: React.FC<Props> = ({
   const handleSend = async () => {
     if (!invoiceData) return;
     setSending(true);
+    setProgressError(undefined);
+    setProgressState('sending');
     try {
       if (isOnchainAddress) {
         if (currentSats <= 0) {
@@ -485,16 +509,25 @@ const SendSheet: React.FC<Props> = ({
           }
         })();
       }
-      Alert.alert('Payment Sent', 'Your payment was sent successfully!', [
-        { text: 'OK', onPress: onClose },
-      ]);
+      setProgressState('success');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Payment failed';
-      Alert.alert('Payment Failed', message);
+      setProgressError(message);
+      setProgressState('error');
     } finally {
       setSending(false);
     }
   };
+
+  const handleOverlayDismiss = useCallback(() => {
+    // Dismissing the overlay after a successful payment also closes the
+    // parent sheet. On error we only dismiss the overlay so the user can
+    // retry from the filled-in form.
+    const wasSuccess = progressState === 'success';
+    setProgressState('hidden');
+    setProgressError(undefined);
+    if (wasSuccess) onClose();
+  }, [progressState, onClose]);
 
   const handleReset = () => {
     setInvoiceData(null);
@@ -547,310 +580,321 @@ const SendSheet: React.FC<Props> = ({
       : !!invoiceData;
 
   return (
-    <BottomSheetModal
-      ref={bottomSheetRef}
-      snapPoints={snapPoints}
-      onChange={handleSheetChange}
-      enablePanDownToClose
-      backdropComponent={renderBackdrop}
-      handleIndicatorStyle={styles.handleIndicator}
-      backgroundStyle={styles.sheetBackground}
-    >
-      <BottomSheetView style={styles.content}>
-        {step === 'amount' ? (
-          <AmountEntryScreen
-            initialSats={currentSats}
-            title="Enter amount"
-            subtitle={
-              isLightningAddress(invoiceData || '')
-                ? invoiceData || undefined
-                : isOnchainAddress
-                  ? 'On-chain payment'
-                  : undefined
-            }
-            minSats={amountMinSats}
-            maxSats={amountMaxSats}
-            confirmLabel="Done"
-            backLabel="Back"
-            onBack={() => setStep('main')}
-            onConfirm={(sats) => {
-              setSatsValue(String(sats));
-              setStep('main');
-            }}
-            useBottomSheetInput
-          />
-        ) : (
-          <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
-            <View style={styles.innerContent}>
-              <Text style={styles.title}>Send</Text>
+    <>
+      <BottomSheetModal
+        ref={bottomSheetRef}
+        snapPoints={snapPoints}
+        onChange={handleSheetChange}
+        enablePanDownToClose
+        backdropComponent={renderBackdrop}
+        handleIndicatorStyle={styles.handleIndicator}
+        backgroundStyle={styles.sheetBackground}
+      >
+        <BottomSheetView style={styles.content}>
+          {step === 'amount' ? (
+            <AmountEntryScreen
+              initialSats={currentSats}
+              title="Enter amount"
+              subtitle={
+                isLightningAddress(invoiceData || '')
+                  ? invoiceData || undefined
+                  : isOnchainAddress
+                    ? 'On-chain payment'
+                    : undefined
+              }
+              minSats={amountMinSats}
+              maxSats={amountMaxSats}
+              confirmLabel="Done"
+              backLabel="Back"
+              onBack={() => setStep('main')}
+              onConfirm={(sats) => {
+                setSatsValue(String(sats));
+                setStep('main');
+              }}
+              useBottomSheetInput
+            />
+          ) : (
+            <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+              <View style={styles.innerContent}>
+                <Text style={styles.title}>Send</Text>
 
-              {/* Wallet selector */}
-              {wallets.filter((w) => w.isConnected).length > 1 ? (
-                <View style={styles.walletDropdownRow}>
-                  <Text style={styles.walletLabel}>From:</Text>
-                  <View style={styles.walletDropdownWrapper}>
-                    <TouchableOpacity
-                      style={styles.walletDropdown}
-                      onPress={() => setDropdownOpen(!dropdownOpen)}
-                    >
-                      <Text style={styles.walletDropdownText}>{walletName}</Text>
-                      {dropdownOpen ? (
-                        <ChevronUp size={16} color={colors.white} />
-                      ) : (
-                        <ChevronDown size={16} color={colors.white} />
-                      )}
-                    </TouchableOpacity>
-                    {dropdownOpen && (
-                      <View style={styles.walletDropdownMenu}>
-                        {wallets
-                          .filter((w) => w.isConnected)
-                          .map((w) => (
-                            <TouchableOpacity
-                              key={w.id}
-                              style={[
-                                styles.walletDropdownItem,
-                                capturedWalletId === w.id && styles.walletDropdownItemActive,
-                              ]}
-                              onPress={() => {
-                                setCapturedWalletId(w.id);
-                                setDropdownOpen(false);
-                              }}
-                            >
-                              <Text
+                {/* Wallet selector */}
+                {wallets.filter((w) => w.isConnected).length > 1 ? (
+                  <View style={styles.walletDropdownRow}>
+                    <Text style={styles.walletLabel}>From:</Text>
+                    <View style={styles.walletDropdownWrapper}>
+                      <TouchableOpacity
+                        style={styles.walletDropdown}
+                        onPress={() => setDropdownOpen(!dropdownOpen)}
+                      >
+                        <Text style={styles.walletDropdownText}>{walletName}</Text>
+                        {dropdownOpen ? (
+                          <ChevronUp size={16} color={colors.white} />
+                        ) : (
+                          <ChevronDown size={16} color={colors.white} />
+                        )}
+                      </TouchableOpacity>
+                      {dropdownOpen && (
+                        <View style={styles.walletDropdownMenu}>
+                          {wallets
+                            .filter((w) => w.isConnected)
+                            .map((w) => (
+                              <TouchableOpacity
+                                key={w.id}
                                 style={[
-                                  styles.walletDropdownItemText,
-                                  capturedWalletId === w.id && styles.walletDropdownItemTextActive,
+                                  styles.walletDropdownItem,
+                                  capturedWalletId === w.id && styles.walletDropdownItemActive,
                                 ]}
+                                onPress={() => {
+                                  setCapturedWalletId(w.id);
+                                  setDropdownOpen(false);
+                                }}
                               >
-                                {walletLabel(w)}
-                              </Text>
-                            </TouchableOpacity>
-                          ))}
-                      </View>
-                    )}
-                  </View>
-                </View>
-              ) : (
-                <Text style={styles.walletLabel}>From: {walletName}</Text>
-              )}
-
-              {/* Mode tabs */}
-              {!scanned && (
-                <View style={styles.tabRow}>
-                  <TouchableOpacity
-                    style={[styles.tab, inputMode === 'scan' && styles.tabActive]}
-                    onPress={() => setInputMode('scan')}
-                  >
-                    <Text style={[styles.tabText, inputMode === 'scan' && styles.tabTextActive]}>
-                      Scan
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.tab, inputMode === 'paste' && styles.tabActive]}
-                    onPress={() => setInputMode('paste')}
-                  >
-                    <Text style={[styles.tabText, inputMode === 'paste' && styles.tabTextActive]}>
-                      Input
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {/* Scanner or paste input */}
-              {!scanned ? (
-                inputMode === 'scan' ? (
-                  <View style={styles.cameraContainer}>
-                    {!permission.granted ? (
-                      <View style={styles.permissionContainer}>
-                        <Text style={styles.permissionText}>
-                          Camera access needed to scan QR codes
-                        </Text>
-                        <TouchableOpacity
-                          style={styles.permissionButton}
-                          onPress={requestPermission}
-                        >
-                          <Text style={styles.permissionButtonText}>Grant Permission</Text>
-                        </TouchableOpacity>
-                      </View>
-                    ) : (
-                      <CameraView
-                        style={styles.camera}
-                        facing="back"
-                        barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-                        onBarcodeScanned={handleBarCodeScanned}
-                      />
-                    )}
+                                <Text
+                                  style={[
+                                    styles.walletDropdownItemText,
+                                    capturedWalletId === w.id &&
+                                      styles.walletDropdownItemTextActive,
+                                  ]}
+                                >
+                                  {walletLabel(w)}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                        </View>
+                      )}
+                    </View>
                   </View>
                 ) : (
-                  <View style={styles.pasteSection}>
-                    <BottomSheetTextInput
-                      style={styles.pasteInput}
-                      placeholder="Paste invoice, lightning or bitcoin address..."
-                      placeholderTextColor={colors.textSupplementary}
-                      value={pasteText}
-                      onChangeText={setPasteText}
-                      multiline
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                    />
-                    <View style={styles.pasteButtonRow}>
-                      <TouchableOpacity style={styles.pasteButton} onPress={handlePaste}>
-                        <Text style={styles.pasteButtonText}>Paste from clipboard</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.goButton, !pasteText.trim() && styles.goButtonDisabled]}
-                        onPress={handlePasteSubmit}
-                        disabled={!pasteText.trim()}
-                      >
-                        <Text style={styles.goButtonText}>Go</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                )
-              ) : (
-                /* Invoice/address detected - show details */
-                <View style={styles.detailsCard}>
-                  {activePicture && (
-                    <Image source={{ uri: activePicture }} style={styles.recipientPicture} />
-                  )}
-                  {decoded?.description ? (
-                    <Text style={styles.detailDescription}>{decoded.description}</Text>
-                  ) : null}
+                  <Text style={styles.walletLabel}>From: {walletName}</Text>
+                )}
 
-                  {needsAmount ? (
-                    /* Lightning address or on-chain: amount is entered on a dedicated step */
-                    <View style={styles.amountSection}>
-                      {resolving ? (
-                        <ActivityIndicator size="small" color={colors.brandPink} />
-                      ) : lnurlParams || isOnchainAddress ? (
-                        <TouchableOpacity
-                          style={styles.amountPickerRow}
-                          onPress={() => setStep('amount')}
-                          testID="send-amount-picker"
-                          accessibilityLabel="Enter amount"
-                        >
-                          {currentSats > 0 ? (
-                            <>
-                              <Text style={styles.amountPickerValue}>
-                                {currentSats.toLocaleString()} sats
-                              </Text>
-                              {btcPrice ? (
-                                <Text style={styles.amountPickerFiat}>
-                                  {satsToFiatString(currentSats, btcPrice, currency)}
-                                </Text>
-                              ) : null}
-                            </>
-                          ) : (
-                            <Text style={styles.amountPickerPlaceholder}>Enter amount</Text>
-                          )}
-                        </TouchableOpacity>
-                      ) : null}
-                      {lnurlParams ? (
-                        <Text style={styles.rangeText}>
-                          {lnurlParams.minSats.toLocaleString()} –{' '}
-                          {lnurlParams.maxSats.toLocaleString()} sats
-                        </Text>
-                      ) : null}
-                    </View>
-                  ) : decoded?.amountSats !== null && decoded?.amountSats !== undefined ? (
-                    /* Bolt11 with amount */
-                    <View style={styles.amountDisplay}>
-                      <Text style={styles.amountValue}>
-                        {decoded.amountSats.toLocaleString()} sats
+                {/* Mode tabs */}
+                {!scanned && (
+                  <View style={styles.tabRow}>
+                    <TouchableOpacity
+                      style={[styles.tab, inputMode === 'scan' && styles.tabActive]}
+                      onPress={() => setInputMode('scan')}
+                    >
+                      <Text style={[styles.tabText, inputMode === 'scan' && styles.tabTextActive]}>
+                        Scan
                       </Text>
-                      {btcPrice ? (
-                        <Text style={styles.amountFiat}>
-                          {satsToFiatString(decoded.amountSats, btcPrice, currency)}
-                        </Text>
-                      ) : null}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.tab, inputMode === 'paste' && styles.tabActive]}
+                      onPress={() => setInputMode('paste')}
+                    >
+                      <Text style={[styles.tabText, inputMode === 'paste' && styles.tabTextActive]}>
+                        Input
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {/* Scanner or paste input */}
+                {!scanned ? (
+                  inputMode === 'scan' ? (
+                    <View style={styles.cameraContainer}>
+                      {!permission.granted ? (
+                        <View style={styles.permissionContainer}>
+                          <Text style={styles.permissionText}>
+                            Camera access needed to scan QR codes
+                          </Text>
+                          <TouchableOpacity
+                            style={styles.permissionButton}
+                            onPress={requestPermission}
+                          >
+                            <Text style={styles.permissionButtonText}>Grant Permission</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : (
+                        <CameraView
+                          style={styles.camera}
+                          facing="back"
+                          barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+                          onBarcodeScanned={handleBarCodeScanned}
+                        />
+                      )}
                     </View>
                   ) : (
-                    <Text style={styles.amountValue}>Amount not specified</Text>
-                  )}
+                    <View style={styles.pasteSection}>
+                      <BottomSheetTextInput
+                        style={styles.pasteInput}
+                        placeholder="Paste invoice, lightning or bitcoin address..."
+                        placeholderTextColor={colors.textSupplementary}
+                        value={pasteText}
+                        onChangeText={setPasteText}
+                        multiline
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                      />
+                      <View style={styles.pasteButtonRow}>
+                        <TouchableOpacity style={styles.pasteButton} onPress={handlePaste}>
+                          <Text style={styles.pasteButtonText}>Paste from clipboard</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.goButton, !pasteText.trim() && styles.goButtonDisabled]}
+                          onPress={handlePasteSubmit}
+                          disabled={!pasteText.trim()}
+                        >
+                          <Text style={styles.goButtonText}>Go</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )
+                ) : (
+                  /* Invoice/address detected - show details */
+                  <View style={styles.detailsCard}>
+                    {activePicture && (
+                      <Image source={{ uri: activePicture }} style={styles.recipientPicture} />
+                    )}
+                    {decoded?.description ? (
+                      <Text style={styles.detailDescription}>{decoded.description}</Text>
+                    ) : null}
 
-                  {isOnchainAddress && invoiceData ? (
-                    <Text style={styles.detailAddress}>
-                      <Text style={styles.addressHighlight}>{invoiceData.slice(0, 6)}</Text>
-                      {invoiceData.slice(6, -6)}
-                      <Text style={styles.addressHighlight}>{invoiceData.slice(-6)}</Text>
-                    </Text>
-                  ) : isLightningAddress(invoiceData || '') ? (
-                    <Text style={styles.detailAddress}>{invoiceData}</Text>
-                  ) : (
-                    <Text style={styles.invoiceText} numberOfLines={3}>
-                      {invoiceData}
-                    </Text>
-                  )}
+                    {needsAmount ? (
+                      /* Lightning address or on-chain: amount is entered on a dedicated step */
+                      <View style={styles.amountSection}>
+                        {resolving ? (
+                          <ActivityIndicator size="small" color={colors.brandPink} />
+                        ) : lnurlParams || isOnchainAddress ? (
+                          <TouchableOpacity
+                            style={styles.amountPickerRow}
+                            onPress={() => setStep('amount')}
+                            testID="send-amount-picker"
+                            accessibilityLabel="Enter amount"
+                          >
+                            {currentSats > 0 ? (
+                              <>
+                                <Text style={styles.amountPickerValue}>
+                                  {currentSats.toLocaleString()} sats
+                                </Text>
+                                {btcPrice ? (
+                                  <Text style={styles.amountPickerFiat}>
+                                    {satsToFiatString(currentSats, btcPrice, currency)}
+                                  </Text>
+                                ) : null}
+                              </>
+                            ) : (
+                              <Text style={styles.amountPickerPlaceholder}>Enter amount</Text>
+                            )}
+                          </TouchableOpacity>
+                        ) : null}
+                        {lnurlParams ? (
+                          <Text style={styles.rangeText}>
+                            {lnurlParams.minSats.toLocaleString()} –{' '}
+                            {lnurlParams.maxSats.toLocaleString()} sats
+                          </Text>
+                        ) : null}
+                      </View>
+                    ) : decoded?.amountSats !== null && decoded?.amountSats !== undefined ? (
+                      /* Bolt11 with amount */
+                      <View style={styles.amountDisplay}>
+                        <Text style={styles.amountValue}>
+                          {decoded.amountSats.toLocaleString()} sats
+                        </Text>
+                        {btcPrice ? (
+                          <Text style={styles.amountFiat}>
+                            {satsToFiatString(decoded.amountSats, btcPrice, currency)}
+                          </Text>
+                        ) : null}
+                      </View>
+                    ) : (
+                      <Text style={styles.amountValue}>Amount not specified</Text>
+                    )}
 
-                  {/* Fee estimate for on-chain addresses */}
-                  {isOnchainAddress && currentSats > 0 && (
-                    <Text style={styles.feeText}>
-                      {selectedWallet?.walletType === 'onchain' &&
-                      selectedWallet?.onchainImportMethod === 'mnemonic'
-                        ? (onchainFeeEstimate ?? 'Estimating fee...')
-                        : loadingBoltzFees
-                          ? 'Loading fees...'
-                          : boltzFees
-                            ? `Swap fee: ~${boltzService.calculateSwapFee(currentSats, boltzFees).toLocaleString()} sats \u00B7 ~10-60 min`
-                            : 'Fee estimate unavailable'}
-                    </Text>
-                  )}
+                    {isOnchainAddress && invoiceData ? (
+                      <Text style={styles.detailAddress}>
+                        <Text style={styles.addressHighlight}>{invoiceData.slice(0, 6)}</Text>
+                        {invoiceData.slice(6, -6)}
+                        <Text style={styles.addressHighlight}>{invoiceData.slice(-6)}</Text>
+                      </Text>
+                    ) : isLightningAddress(invoiceData || '') ? (
+                      <Text style={styles.detailAddress}>{invoiceData}</Text>
+                    ) : (
+                      <Text style={styles.invoiceText} numberOfLines={3}>
+                        {invoiceData}
+                      </Text>
+                    )}
 
-                  {/* Memo / comment field for Lightning address payments */}
-                  {needsAmount && (
-                    <BottomSheetTextInput
-                      style={styles.memoInput}
-                      placeholder={activePubkey ? 'Zap message (optional)' : 'Comment (optional)'}
-                      placeholderTextColor={colors.textSupplementary}
-                      value={memo}
-                      onChangeText={setMemo}
-                      maxLength={lnurlParams?.commentAllowed || 150}
-                      autoCorrect
-                    />
-                  )}
+                    {/* Fee estimate for on-chain addresses */}
+                    {isOnchainAddress && currentSats > 0 && (
+                      <Text style={styles.feeText}>
+                        {selectedWallet?.walletType === 'onchain' &&
+                        selectedWallet?.onchainImportMethod === 'mnemonic'
+                          ? (onchainFeeEstimate ?? 'Estimating fee...')
+                          : loadingBoltzFees
+                            ? 'Loading fees...'
+                            : boltzFees
+                              ? `Swap fee: ~${boltzService.calculateSwapFee(currentSats, boltzFees).toLocaleString()} sats \u00B7 ~10-60 min`
+                              : 'Fee estimate unavailable'}
+                      </Text>
+                    )}
 
-                  <TouchableOpacity onPress={handleReset}>
-                    <Text style={styles.resetText}>Scan / paste different invoice</Text>
+                    {/* Memo / comment field for Lightning address payments */}
+                    {needsAmount && (
+                      <BottomSheetTextInput
+                        style={styles.memoInput}
+                        placeholder={activePubkey ? 'Zap message (optional)' : 'Comment (optional)'}
+                        placeholderTextColor={colors.textSupplementary}
+                        value={memo}
+                        onChangeText={setMemo}
+                        maxLength={lnurlParams?.commentAllowed || 150}
+                        autoCorrect
+                      />
+                    )}
+
+                    <TouchableOpacity onPress={handleReset}>
+                      <Text style={styles.resetText}>Scan / paste different invoice</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {/* Balance */}
+                {walletBalance !== null && btcPrice !== null && (
+                  <Text style={styles.balanceText}>
+                    Balance: {walletBalance.toLocaleString()} sats (
+                    {satsToFiatString(walletBalance, btcPrice, currency)})
+                  </Text>
+                )}
+
+                {/* Action buttons */}
+                <View style={styles.buttonRow}>
+                  <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={() => {
+                      handleReset();
+                      onClose();
+                    }}
+                  >
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.sendButton, (!canSend || sending) && styles.sendButtonDisabled]}
+                    onPress={handleSend}
+                    disabled={!canSend || sending}
+                  >
+                    {sending ? (
+                      <ActivityIndicator color={colors.brandPink} />
+                    ) : (
+                      <Text style={styles.sendButtonText}>Send</Text>
+                    )}
                   </TouchableOpacity>
                 </View>
-              )}
-
-              {/* Balance */}
-              {walletBalance !== null && btcPrice !== null && (
-                <Text style={styles.balanceText}>
-                  Balance: {walletBalance.toLocaleString()} sats (
-                  {satsToFiatString(walletBalance, btcPrice, currency)})
-                </Text>
-              )}
-
-              {/* Action buttons */}
-              <View style={styles.buttonRow}>
-                <TouchableOpacity
-                  style={styles.cancelButton}
-                  onPress={() => {
-                    handleReset();
-                    onClose();
-                  }}
-                >
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.sendButton, (!canSend || sending) && styles.sendButtonDisabled]}
-                  onPress={handleSend}
-                  disabled={!canSend || sending}
-                >
-                  {sending ? (
-                    <ActivityIndicator color={colors.brandPink} />
-                  ) : (
-                    <Text style={styles.sendButtonText}>Send</Text>
-                  )}
-                </TouchableOpacity>
               </View>
-            </View>
-          </TouchableWithoutFeedback>
-        )}
-      </BottomSheetView>
-    </BottomSheetModal>
+            </TouchableWithoutFeedback>
+          )}
+        </BottomSheetView>
+      </BottomSheetModal>
+      <PaymentProgressOverlay
+        state={progressState}
+        direction="send"
+        amountSats={currentSats || decoded?.amountSats || undefined}
+        recipientName={recipientName}
+        errorMessage={progressError}
+        onDismiss={handleOverlayDismiss}
+      />
+    </>
   );
 };
 
