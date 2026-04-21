@@ -39,7 +39,7 @@ interface Props {
 }
 
 const BUBBLE_COUNT = 140;
-const CONFETTI_COUNT = 90;
+const CONFETTI_COUNT = 135;
 // Screen should be packed with bubbles by ~5s. Quadratic stagger means
 // early bubbles are sparse and density ramps up rapidly toward the 5s mark.
 const FULL_DENSITY_MS = 5000;
