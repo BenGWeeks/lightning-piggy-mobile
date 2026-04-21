@@ -34,6 +34,7 @@ import TransactionDetailSheet, {
   CounterpartyContact,
 } from '../components/TransactionDetailSheet';
 import ContactProfileSheet from '../components/ContactProfileSheet';
+import FriendPickerSheet, { PickedFriend } from '../components/FriendPickerSheet';
 import {
   getCurrentLocation,
   formatGeoMessage,
@@ -44,6 +45,14 @@ import {
   USER_AGENT,
   SharedLocation,
 } from '../services/locationService';
+import {
+  decodeProfileReference,
+  fetchProfile,
+  nprofileEncode,
+  buildProfileRelayHints,
+  DEFAULT_RELAYS,
+} from '../services/nostrService';
+import type { NostrProfile } from '../types/nostr';
 import type { RootStackParamList } from '../navigation/types';
 
 type ConversationRoute = RouteProp<RootStackParamList, 'Conversation'>;
@@ -83,6 +92,11 @@ const INVOICE_REGEX = /\b(?:lightning:)?(ln(?:bc|tb|ts|bs)[0-9a-z]{50,})\b/i;
 // explicitly prefixes it with `lightning:`. Otherwise we'd turn every
 // shared email into a Pay button and guess wrong.
 const LN_ADDRESS_REGEX = /lightning:([a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,})\b/i;
+
+// NIP-21 nostr: URIs carrying a NIP-19 profile reference (npub or nprofile).
+// We only treat profile-kind references as contact shares here — note, nevent,
+// naddr etc. fall through to plain text rendering.
+const NOSTR_PROFILE_URI_REGEX = /nostr:(npub1[0-9a-z]+|nprofile1[0-9a-z]+)/i;
 
 interface DecodedInvoice {
   raw: string;
@@ -133,6 +147,18 @@ function extractLightningAddress(text: string): string | null {
   return match ? match[1] : null;
 }
 
+interface SharedContactRef {
+  pubkey: string;
+  relays: string[];
+}
+
+function extractSharedContact(text: string): SharedContactRef | null {
+  if (!text) return null;
+  const match = text.match(NOSTR_PROFILE_URI_REGEX);
+  if (!match) return null;
+  return decodeProfileReference(match[0]);
+}
+
 function formatTime(epochSeconds: number): string {
   const d = new Date(epochSeconds * 1000);
   const today = new Date();
@@ -162,7 +188,7 @@ const ConversationScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { pubkey, name, picture, lightningAddress } = route.params;
 
-  const { isLoggedIn, fetchConversation, sendDirectMessage } = useNostr();
+  const { isLoggedIn, fetchConversation, sendDirectMessage, contacts, relays } = useNostr();
   const { wallets, activeWalletId, activeWallet } = useWallet();
 
   const [messages, setMessages] = useState<
@@ -177,8 +203,13 @@ const ConversationScreen: React.FC = () => {
   const [avatarError, setAvatarError] = useState(false);
   const [detailTx, setDetailTx] = useState<TransactionDetailData | null>(null);
   const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
+  // Profiles resolved from `nostr:` contact references the other party
+  // has shared in this conversation. Keyed by hex pubkey; a `null` value
+  // means we tried and the kind-0 lookup came back empty.
+  const [sharedProfiles, setSharedProfiles] = useState<Record<string, NostrProfile | null>>({});
   const [attachSheetOpen, setAttachSheetOpen] = useState(false);
   const [invoiceSheetOpen, setInvoiceSheetOpen] = useState(false);
+  const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [sharingLocation, setSharingLocation] = useState(false);
   // Payment hashes of outgoing invoices the active NWC wallet reports paid.
   const [paidHashes, setPaidHashes] = useState<Set<string>>(() => new Set());
@@ -384,6 +415,56 @@ const ConversationScreen: React.FC = () => {
     };
   }, [activeWalletId, activeWallet?.walletType, outgoingOpenHashes]);
 
+  // Batch-fetch profiles for every `nostr:` profile reference that appears
+  // in the conversation. Relay hints from the nprofile (when present) are
+  // merged with the default set so we find the shared person's kind-0
+  // even if they publish on niche relays.
+  useEffect(() => {
+    const byPubkey = new Map<string, Set<string>>();
+    for (const m of messages) {
+      const ref = extractSharedContact(m.text);
+      if (!ref) continue;
+      if (ref.pubkey in sharedProfiles) continue;
+      const set = byPubkey.get(ref.pubkey) ?? new Set<string>();
+      for (const r of ref.relays) set.add(r);
+      byPubkey.set(ref.pubkey, set);
+    }
+    if (byPubkey.size === 0) return;
+    let cancelled = false;
+    (async () => {
+      const updates: Record<string, NostrProfile | null> = {};
+      await Promise.all(
+        [...byPubkey.entries()].map(async ([pk, relaySet]) => {
+          const relays = [...new Set([...DEFAULT_RELAYS, ...relaySet])];
+          try {
+            updates[pk] = await fetchProfile(pk, relays);
+          } catch {
+            updates[pk] = null;
+          }
+        }),
+      );
+      if (!cancelled) {
+        setSharedProfiles((prev) => ({ ...prev, ...updates }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [messages, sharedProfiles]);
+
+  const openSharedContact = useCallback((pk: string, profile: NostrProfile | null) => {
+    const name = profile?.displayName || profile?.name || `${pk.slice(0, 8)}…`;
+    setProfileContact({
+      pubkey: pk,
+      name,
+      picture: profile?.picture ?? null,
+      banner: profile?.banner ?? null,
+      nip05: profile?.nip05 ?? null,
+      lightningAddress: profile?.lud16 ?? null,
+      source: 'nostr',
+    });
+  }, []);
+
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -483,6 +564,39 @@ const ConversationScreen: React.FC = () => {
     }
   }, [sharingLocation, name, pubkey, sendDirectMessage]);
 
+  // Share another contact's Nostr profile into this conversation. Payload
+  // mirrors the ContactProfileSheet → "Share with friend" format: a
+  // human-readable first line plus a NIP-21 `nostr:nprofile…` URI that
+  // other Nostr clients (Damus, Amethyst, Primal, …) render as a
+  // clickable profile mention.
+  const handleShareContactPicked = useCallback(
+    async (friend: PickedFriend) => {
+      // Dismiss both sheets in reverse stack order (top first).
+      setContactPickerOpen(false);
+      setAttachSheetOpen(false);
+      const readRelays = relays.filter((r) => r.read).map((r) => r.url);
+      const relayHints = buildProfileRelayHints(friend.pubkey, contacts, readRelays);
+      const nprofile = nprofileEncode(friend.pubkey, relayHints);
+      const label = friend.name || 'a contact';
+      const payload = `Shared contact: ${label}\nnostr:${nprofile}`;
+      const result = await sendDirectMessage(pubkey, payload);
+      if (!result.success) {
+        Alert.alert('Share failed', result.error ?? 'Could not share contact.');
+        return;
+      }
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `local-${Date.now()}`,
+          fromMe: true,
+          text: payload,
+          createdAt: Math.floor(Date.now() / 1000),
+        },
+      ]);
+    },
+    [pubkey, sendDirectMessage, contacts, relays],
+  );
+
   const openLocation = useCallback((loc: SharedLocation) => {
     const url = buildOsmViewUrl(loc);
     Linking.openURL(url).catch(() => {
@@ -564,6 +678,78 @@ const ConversationScreen: React.FC = () => {
                   </TouchableOpacity>
                 )}
               </View>
+            </View>
+          );
+        }
+        const sharedContact = extractSharedContact(item.text);
+        if (sharedContact) {
+          const loaded = sharedContact.pubkey in sharedProfiles;
+          const prof = sharedProfiles[sharedContact.pubkey] ?? null;
+          const displayName =
+            prof?.displayName || prof?.name || `${sharedContact.pubkey.slice(0, 8)}…`;
+          return (
+            <View
+              style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
+            >
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => openSharedContact(sharedContact.pubkey, prof)}
+                style={[
+                  styles.contactCard,
+                  item.fromMe ? styles.contactCardMe : styles.contactCardThem,
+                ]}
+                accessibilityLabel={`Shared contact ${displayName}`}
+                testID={`conversation-contact-${item.id}`}
+              >
+                <View style={styles.contactHeaderRow}>
+                  <Text style={[styles.contactLabel, item.fromMe && styles.contactLabelMe]}>
+                    {item.fromMe ? 'Contact shared' : 'Contact'}
+                  </Text>
+                  <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
+                    {formatTime(item.createdAt)}
+                  </Text>
+                </View>
+                <View style={styles.contactBodyRow}>
+                  {prof?.picture ? (
+                    <Image source={{ uri: prof.picture }} style={styles.contactAvatar} />
+                  ) : (
+                    <View style={[styles.contactAvatar, styles.contactAvatarFallback]}>
+                      <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+                        <Circle cx="12" cy="8" r="4" fill={colors.textSupplementary} />
+                        <Path
+                          d="M4 20c0-3.314 3.582-6 8-6s8 2.686 8 6"
+                          stroke={colors.textSupplementary}
+                          strokeWidth={2}
+                          strokeLinecap="round"
+                        />
+                      </Svg>
+                    </View>
+                  )}
+                  <View style={styles.contactInfo}>
+                    <Text
+                      style={[styles.contactName, item.fromMe && styles.contactNameMe]}
+                      numberOfLines={1}
+                    >
+                      {loaded ? displayName : 'Loading…'}
+                    </Text>
+                    {prof?.lud16 ? (
+                      <Text
+                        style={[styles.contactLn, item.fromMe && styles.contactLnMe]}
+                        numberOfLines={1}
+                      >
+                        {prof.lud16}
+                      </Text>
+                    ) : prof?.nip05 ? (
+                      <Text
+                        style={[styles.contactLn, item.fromMe && styles.contactLnMe]}
+                        numberOfLines={1}
+                      >
+                        {prof.nip05}
+                      </Text>
+                    ) : null}
+                  </View>
+                </View>
+              </TouchableOpacity>
             </View>
           );
         }
@@ -726,7 +912,7 @@ const ConversationScreen: React.FC = () => {
         </View>
       );
     },
-    [openLocation, isInvoicePaid],
+    [openLocation, isInvoicePaid, sharedProfiles, openSharedContact],
   );
 
   const avatarNode =
@@ -873,6 +1059,30 @@ const ConversationScreen: React.FC = () => {
           setAttachSheetOpen(false);
           setInvoiceSheetOpen(true);
         }}
+        onShareContact={() => {
+          // Don't dismiss AttachSheet first — FriendPickerSheet has
+          // `stackBehavior="push"` and expects to layer *on top* of an
+          // already-presented parent. Dismissing AttachSheet + presenting
+          // FriendPickerSheet in the same render trips a gorhom race
+          // (see gorhom/react-native-bottom-sheet#1941) that leaves the
+          // child sheet at an invalid position when the keyboard opens —
+          // symptom we hit: the search-input focus collapsed the sheet
+          // to ~15 % of screen height.
+          setContactPickerOpen(true);
+        }}
+      />
+      <FriendPickerSheet
+        visible={contactPickerOpen}
+        onClose={() => {
+          // Closing the picker with no selection also closes the
+          // AttachSheet underneath — the user has navigated away from
+          // the attach flow, the parent is no longer relevant.
+          setContactPickerOpen(false);
+          setAttachSheetOpen(false);
+        }}
+        onSelect={handleShareContactPicked}
+        title={`Share a contact with ${name}`}
+        subtitle="They'll see it as a Nostr profile card they can open."
       />
       <ReceiveSheet
         visible={invoiceSheetOpen}
@@ -1242,6 +1452,79 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: colors.textSupplementary,
+  },
+  contactCard: {
+    maxWidth: '85%',
+    minWidth: 240,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    gap: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  contactCardMe: {
+    backgroundColor: colors.brandPink,
+    borderColor: colors.brandPink,
+  },
+  contactCardThem: {
+    backgroundColor: colors.white,
+    borderColor: colors.divider,
+  },
+  contactHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  contactLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textSupplementary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  contactLabelMe: {
+    color: 'rgba(255,255,255,0.85)',
+  },
+  contactBodyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  contactAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.background,
+  },
+  contactAvatarFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  contactInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  contactName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.textHeader,
+  },
+  contactNameMe: {
+    color: colors.white,
+  },
+  contactLn: {
+    fontSize: 13,
+    color: colors.textSupplementary,
+    marginTop: 2,
+  },
+  contactLnMe: {
+    color: 'rgba(255,255,255,0.9)',
   },
   composer: {
     flexDirection: 'row',
