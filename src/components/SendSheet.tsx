@@ -39,6 +39,7 @@ interface Props {
   initialAddress?: string;
   initialPicture?: string;
   recipientPubkey?: string;
+  recipientName?: string;
 }
 
 type InputMode = 'scan' | 'paste';
@@ -92,6 +93,7 @@ const SendSheet: React.FC<Props> = ({
   initialAddress,
   initialPicture,
   recipientPubkey,
+  recipientName,
 }) => {
   const {
     payInvoiceForWallet,
@@ -210,10 +212,16 @@ const SendSheet: React.FC<Props> = ({
         const params = await resolveLightningAddress(invoiceData);
         if (!cancelled) {
           setLnurlParams(params);
-          setDecoded((prev) => ({
-            ...prev!,
-            description: params.description || prev?.description || null,
-          }));
+          // When we're still pointed at a named friend (activePubkey +
+          // recipientName both set), keep the friendly `Pay to <Name>`
+          // label. After "Scan / paste different invoice" clears
+          // activePubkey, let the LNURL server's metadata win again.
+          if (!(activePubkey && recipientName)) {
+            setDecoded((prev) => ({
+              ...prev!,
+              description: params.description || prev?.description || null,
+            }));
+          }
         }
       } catch (error) {
         if (!cancelled) {
@@ -227,7 +235,7 @@ const SendSheet: React.FC<Props> = ({
     return () => {
       cancelled = true;
     };
-  }, [scanned, invoiceData]);
+  }, [scanned, invoiceData, recipientName, activePubkey]);
 
   const processInput = (data: string) => {
     let input = data.trim();
@@ -270,7 +278,15 @@ const SendSheet: React.FC<Props> = ({
     if (isLightningAddress(input)) {
       setIsOnchainAddress(false);
       setInvoiceData(input);
-      setDecoded({ amountSats: null, description: `Pay to ${input}`, expiry: null });
+      // Only use the caller-supplied friend name while we're still
+      // pointed at that friend (activePubkey set). After "Scan / paste
+      // different invoice" clears activePubkey, the next scanned address
+      // may be a stranger — fall back to the raw input string.
+      setDecoded({
+        amountSats: null,
+        description: `Pay to ${activePubkey && recipientName ? recipientName : input}`,
+        expiry: null,
+      });
       setScanned(true);
     } else if (boltzService.isBitcoinAddress(input)) {
       setIsOnchainAddress(true);

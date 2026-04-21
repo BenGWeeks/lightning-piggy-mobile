@@ -1,0 +1,18 @@
+appId: com.lightningpiggy.app.dev
+name: Dismiss Nostr profile-update alert
+---
+# The Nostr login flow pops a "Update from Nostr Profile?" alert when a
+# logged-in nsec matches a kind-0 with different name / lightning address
+# than the local settings. Maestro can't see UI behind a modal Alert, so
+# dismiss it first before running other flows.
+
+- tapOn:
+    text: 'KEEP CURRENT'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    text: 'UPDATE'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
