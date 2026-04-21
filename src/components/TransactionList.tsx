@@ -1,28 +1,24 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { colors } from '../styles/theme';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet } from '../contexts/WalletContext';
-import TransactionDetailSheet, { TransactionDetailData } from './TransactionDetailSheet';
-import type { ZapCounterpartyInfo } from '../types/wallet';
-
-interface Transaction {
-  type: string;
-  amount: number;
-  description?: string;
-  created_at?: number | null;
-  settled_at?: number | null;
-  blockHeight?: number | null;
-  txid?: string;
-  swapId?: string;
-  bolt11?: string;
-  paymentHash?: string;
-  zapCounterparty?: ZapCounterpartyInfo | null;
-}
+import TransactionDetailSheet, {
+  TransactionDetailData,
+  CounterpartyContact,
+} from './TransactionDetailSheet';
+import ContactProfileSheet from './ContactProfileSheet';
+import SendSheet from './SendSheet';
+import TransactionTypeIcon from './TransactionTypeIcon';
+import { getTxCategory } from '../utils/txCategory';
+import type { WalletTransaction, ZapCounterpartyInfo } from '../types/wallet';
+import type { RootStackParamList } from '../navigation/types';
 
 interface Props {
-  transactions: Transaction[];
+  transactions: WalletTransaction[];
 }
 
 function zapCounterpartyLabel(cp: ZapCounterpartyInfo): string {
@@ -74,7 +70,7 @@ function formatTime(ts: number): string {
 
 const INITIAL_COUNT = 20;
 
-type ItemRow = { kind: 'tx'; tx: Transaction; key: string };
+type ItemRow = { kind: 'tx'; tx: WalletTransaction; key: string };
 type HeaderRow = { kind: 'header'; label: string; key: string };
 type Row = ItemRow | HeaderRow;
 
@@ -83,7 +79,7 @@ type Row = ItemRow | HeaderRow;
  * of the stable shape fields so pending rows still get distinct keys.
  * Self-payments produce two entries with the same paymentHash / bolt11
  * (incoming + outgoing leg), so always include `tx.type` to disambiguate. */
-function txKey(tx: Transaction, fallbackIndex: number): string {
+function txKey(tx: WalletTransaction, fallbackIndex: number): string {
   if (tx.paymentHash) return `ph:${tx.type}:${tx.paymentHash}`;
   if (tx.txid) return `tx:${tx.type}:${tx.txid}`;
   if (tx.bolt11) return `b11:${tx.type}:${tx.bolt11}`;
@@ -92,8 +88,11 @@ function txKey(tx: Transaction, fallbackIndex: number): string {
 
 const TransactionList: React.FC<Props> = ({ transactions }) => {
   const { btcPrice, currency } = useWallet();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [showAll, setShowAll] = useState(false);
   const [detail, setDetail] = useState<TransactionDetailData | null>(null);
+  const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
+  const [zapContact, setZapContact] = useState<CounterpartyContact | null>(null);
 
   React.useEffect(() => setShowAll(false), [transactions]);
 
@@ -189,9 +188,7 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
                   contentFit="cover"
                 />
               ) : (
-                <View style={styles.avatarPlaceholder}>
-                  <Text style={styles.avatarPlaceholderIcon}>⚡</Text>
-                </View>
+                <TransactionTypeIcon category={getTxCategory(item)} size={AVATAR_SIZE} />
               )}
             </View>
 
@@ -244,6 +241,46 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
         visible={detail !== null}
         tx={detail}
         onClose={() => setDetail(null)}
+        onCounterpartyPress={(contact) => {
+          setDetail(null);
+          setProfileContact(contact);
+        }}
+      />
+      <ContactProfileSheet
+        visible={profileContact !== null}
+        onClose={() => setProfileContact(null)}
+        contact={profileContact}
+        onMessage={
+          profileContact
+            ? () => {
+                const c = profileContact;
+                setProfileContact(null);
+                navigation.navigate('Conversation', {
+                  pubkey: c.pubkey,
+                  name: c.name,
+                  picture: c.picture,
+                  lightningAddress: c.lightningAddress,
+                });
+              }
+            : undefined
+        }
+        onZap={
+          profileContact?.lightningAddress
+            ? () => {
+                const c = profileContact;
+                setProfileContact(null);
+                setZapContact(c);
+              }
+            : undefined
+        }
+      />
+      <SendSheet
+        visible={zapContact !== null}
+        onClose={() => setZapContact(null)}
+        initialAddress={zapContact?.lightningAddress ?? undefined}
+        initialPicture={zapContact?.picture ?? undefined}
+        recipientPubkey={zapContact?.pubkey ?? undefined}
+        recipientName={zapContact?.name ?? undefined}
       />
     </View>
   );

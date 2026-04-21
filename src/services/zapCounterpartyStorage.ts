@@ -28,6 +28,13 @@ type Entry = {
 type CacheShape = Record<string, Entry>;
 
 let memoryCache: CacheShape | null = null;
+// Bumps on every write so the resolver can short-circuit when neither the
+// pending tx set nor the storage state has changed.
+let writeVersion = 0;
+
+export function getWriteVersion(): number {
+  return writeVersion;
+}
 
 async function load(): Promise<CacheShape> {
   if (memoryCache) return memoryCache;
@@ -68,6 +75,7 @@ export async function recordOutgoing(
     for (const [k] of drop) delete cache[k];
   }
 
+  writeVersion++;
   await persist(cache);
 }
 
@@ -92,4 +100,5 @@ export async function getMany(paymentHashes: string[]): Promise<Map<string, ZapC
 /** Test-only: wipe the in-memory cache so reloads re-read from storage. */
 export function __resetForTests(): void {
   memoryCache = null;
+  writeVersion = 0;
 }

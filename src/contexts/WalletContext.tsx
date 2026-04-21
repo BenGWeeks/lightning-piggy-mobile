@@ -20,6 +20,17 @@ const USER_NAME_KEY = 'user_display_name';
 const CURRENCY_KEY = 'user_fiat_currency';
 const LIGHTNING_ADDRESS_KEY = 'lightning_address';
 
+// The #P-tagged outgoing zap-receipt relay fetch is expensive (500-event
+// filter). With local-storage attribution being the common path, this
+// rate limit keeps unmatched-outgoing refreshes from hammering relays.
+const OUTGOING_RECEIPT_FETCH_TTL_MS = 5 * 60 * 1000;
+const lastOutgoingReceiptFetch = new Map<string, number>();
+
+// Short-circuit the resolver when nothing has changed since the last run:
+// the same set of pending paymentHashes AND no new storage writes since.
+type ResolverFingerprint = { pendingHash: string; storageVersion: number };
+const lastResolverFingerprint = new Map<string, ResolverFingerprint>();
+
 function parseNwcLud16(nwcUrl: string | null): string | null {
   if (!nwcUrl) return null;
   try {
@@ -671,6 +682,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             settled_at: tx.timestamp,
             created_at: tx.timestamp,
             blockHeight: tx.blockHeight,
+            txid: tx.txid,
           }));
         } else {
           const raw = await nwcService.listTransactions(walletId);
@@ -692,6 +704,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             created_at?: number | null;
             invoice?: string;
             payment_hash?: string;
+            preimage?: string;
+            fees_paid?: number;
           };
           txs = (raw as NwcTx[]).map((tx) => ({
             type: tx.type,
@@ -700,7 +714,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             settled_at: tx.settled_at ?? undefined,
             created_at: tx.created_at ?? undefined,
             bolt11: tx.invoice,
+            invoice: tx.invoice,
             paymentHash: tx.payment_hash,
+            preimage: tx.preimage,
+            // NWC reports fees in msats; surface as sats for display.
+            feesSats:
+              typeof tx.fees_paid === 'number' ? Math.round(tx.fees_paid / 1000) : undefined,
             zapCounterparty: tx.payment_hash ? counterpartyByHash.get(tx.payment_hash) : undefined,
           }));
         }
@@ -784,18 +803,33 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           pending = current.transactions
             .map((tx, idx) => ({ tx, idx }))
             .filter(({ tx }) => {
-              // Populated counterparty → already attributed, skip.
               if (tx.zapCounterparty && typeof tx.zapCounterparty === 'object') return false;
-              // `null` with bolt11 → definitive negative from a prior run;
-              // skip so a user with hundreds of non-zap payments doesn't
-              // re-query / re-scan on every refresh.
-              if (tx.zapCounterparty === null && tx.bolt11) return false;
+              // Incoming null is a definitive relay-sweep miss — skip to
+              // avoid re-scanning hundreds of non-zap receipts each refresh.
+              // Outgoing null means only that an earlier run didn't find a
+              // local storage entry — retry, since the entry may have been
+              // written after that run (race) or on another device later.
+              if (tx.zapCounterparty === null && tx.bolt11 && tx.type === 'incoming') return false;
               return true;
             });
         }
         return prev;
       });
       if (pending.length === 0) return;
+
+      // Fingerprint-based short-circuit: if the same pending set was
+      // already attempted at the same storage version, nothing has
+      // changed since the last run — skip the work and the re-render.
+      const pendingHash = pending
+        .map(({ tx, idx }) => `${idx}:${tx.paymentHash ?? tx.bolt11 ?? tx.created_at ?? ''}`)
+        .join('|');
+      const storageVersion = zapCounterpartyStorage.getWriteVersion();
+      const last = lastResolverFingerprint.get(walletId);
+      if (last && last.pendingHash === pendingHash && last.storageVersion === storageVersion) {
+        if (__DEV__) console.log(`[Zap/${walletAlias}] skip: fingerprint unchanged`);
+        return;
+      }
+      lastResolverFingerprint.set(walletId, { pendingHash, storageVersion });
 
       const incomingPending = pending.filter(({ tx }) => tx.type === 'incoming');
       const outgoingPending = pending.filter(({ tx }) => tx.type === 'outgoing');
@@ -826,7 +860,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           ({ tx }) => tx.paymentHash && !byHash.has(tx.paymentHash),
         );
 
-        if (userPubkey && unmatched.length > 0) {
+        const lastFetch = lastOutgoingReceiptFetch.get(walletId) ?? 0;
+        const fetchAllowed = Date.now() - lastFetch > OUTGOING_RECEIPT_FETCH_TTL_MS;
+        if (userPubkey && unmatched.length > 0 && fetchAllowed) {
+          lastOutgoingReceiptFetch.set(walletId, Date.now());
           const sentReceipts = await nostrService.fetchZapReceiptsForSender(
             userPubkey,
             queryRelays,
@@ -872,11 +909,18 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           const info = byHash.get(tx.paymentHash);
           if (info) {
             resultsByIdx.set(idx, info);
-          } else if (tx.bolt11) {
-            // Tried both paths and nothing matched — negative-cache so we
-            // don't redo the work on every refresh.
-            resultsByIdx.set(idx, null);
           }
+          // No negative-cache for outgoing: the local storage entry is the
+          // only source of truth, and a miss may just mean the record was
+          // written after this resolver run. Let the next refresh retry.
+        }
+        if (__DEV__) {
+          const storageHits = outgoingPending.filter(
+            ({ tx }) => tx.paymentHash && byHash.has(tx.paymentHash),
+          ).length;
+          console.log(
+            `[Zap/${walletAlias}] outgoing: storage hit ${storageHits}/${outgoingPending.length}`,
+          );
         }
       }
 

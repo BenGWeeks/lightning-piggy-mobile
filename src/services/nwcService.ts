@@ -337,6 +337,26 @@ export async function listTransactions(walletId: string): Promise<any[]> {
   return [];
 }
 
+// LNbits (and some other NWC backends) omit preimage/invoice from
+// list_transactions; this fills them in. Returns null on failure.
+export async function lookupInvoice(
+  walletId: string,
+  paymentHash: string,
+): Promise<{ preimage?: string; invoice?: string } | null> {
+  const provider = await ensureConnected(walletId);
+  if (!provider) return null;
+  try {
+    const result = await provider.lookupInvoice({ payment_hash: paymentHash });
+    return {
+      preimage: result?.preimage,
+      invoice: result?.invoice,
+    };
+  } catch (error) {
+    console.warn(`lookupInvoice failed for ${walletId}:`, error);
+    return null;
+  }
+}
+
 export function isWalletConnected(walletId: string): boolean {
   const provider = providers.get(walletId);
   if (!provider) return false;

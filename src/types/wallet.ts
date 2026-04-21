@@ -70,14 +70,16 @@ export interface WalletTransaction {
   created_at?: number | null;
   settled_at?: number | null;
   blockHeight?: number | null;
+  /** Also set for Boltz claim txs, not just plain on-chain. */
+  txid?: string;
+  paymentHash?: string;
+  preimage?: string;
+  invoice?: string;
   /** Bolt11 invoice — needed to look up the paired zap receipt. */
   bolt11?: string;
-  /** Payment hash from the lightning invoice (hex). */
-  paymentHash?: string;
-  /** Resolved counterparty info for Nostr-aware zaps.
-   *  `undefined` = not yet resolved; `null` = we tried and nothing was found. */
+  feesSats?: number;
+  /** `undefined` = not yet resolved; `null` = tried and nothing found. */
   zapCounterparty?: ZapCounterpartyInfo | null;
-  /** Boltz swap details (if this transaction was part of a swap) */
   swapId?: string;
   swapType?: 'reverse' | 'submarine';
   claimTxId?: string;

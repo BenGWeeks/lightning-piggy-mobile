@@ -81,7 +81,16 @@ export const transactionDetailSheetStyles = StyleSheet.create({
   },
   rowValueMono: {
     fontFamily: 'monospace',
-    fontSize: 11,
+    fontSize: 12,
+  },
+  rowValueWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 1,
+  },
+  headerIcon: {
+    marginBottom: 8,
   },
   actions: {
     flexDirection: 'column',

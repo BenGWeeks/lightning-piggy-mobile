@@ -1,0 +1,68 @@
+appId: com.lightningpiggy.app.dev
+name: Add NWC wallet via clipboard paste
+---
+# Workaround for the BottomSheetTextInput + New Architecture bug where
+# Maestro's `inputText` (which uses `adb shell input text`) doesn't fire
+# onChangeText, so React state stays empty and URL validation fails.
+#
+# Prerequisite: seed the Android clipboard with the NWC URL before running.
+# On Linux/Wayland:
+#   source .env && echo -n "$MAESTRO_NWC1" | wl-copy
+# On Linux/X11:
+#   source .env && echo -n "$MAESTRO_NWC1" | xclip -selection clipboard
+# The Android emulator's host-clipboard sync (on by default in extended
+# controls) forwards this to the device clipboard.
+#
+# Run:
+#   source .env && echo -n "$MAESTRO_NWC1" | wl-copy && \
+#     maestro test -e WALLET_NAME='Test Wallet' tests/e2e/test-add-wallet-via-paste.yaml
+
+- waitForAnimationToEnd: { timeout: 4000 }
+
+- tapOn: { text: '+ Add a Wallet' }
+- waitForAnimationToEnd: { timeout: 2000 }
+
+- tapOn: { id: 'wallet-type-nwc' }
+- waitForAnimationToEnd: { timeout: 2000 }
+
+# Tap our in-app Paste button — reads clipboard via expo-clipboard,
+# sets nwcUrl via setState (does NOT go through the TextInput event path).
+- tapOn: { id: 'wizard-nwc-paste' }
+- waitForAnimationToEnd: { timeout: 1500 }
+
+- tapOn: { id: 'wizard-url-next' }
+- waitForAnimationToEnd: { timeout: 3000 }
+
+- extendedWaitUntil:
+    visible: { id: 'wallet-alias-input' }
+    timeout: 10000
+
+# Alias input — plain BottomSheetTextInput, inputText works here
+# (empirically) because focus is fresh and no extra keyboard-dismiss
+# wrapper sits on top. We re-tap to be safe.
+- tapOn: { id: 'wallet-alias-input' }
+- tapOn: { id: 'wallet-alias-input' }
+- eraseText: { charactersToErase: 100 }
+- inputText: ${WALLET_NAME}
+- pressKey: back
+- waitForAnimationToEnd: { timeout: 1500 }
+
+- tapOn: { text: 'Next' }
+- waitForAnimationToEnd: { timeout: 2000 }
+
+# Scroll to reveal Connect button on the theme step.
+- swipe:
+    start: 50%, 80%
+    end: 50%, 40%
+    duration: 300
+- waitForAnimationToEnd: { timeout: 1000 }
+
+- tapOn: { id: 'wizard-connect-button' }
+- waitForAnimationToEnd: { timeout: 15000 }
+
+- extendedWaitUntil:
+    visible: { text: 'Connected' }
+    timeout: 20000
+
+- assertVisible:
+    text: ${WALLET_NAME}
