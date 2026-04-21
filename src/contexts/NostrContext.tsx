@@ -26,7 +26,13 @@ const OWN_PROFILE_CACHE_KEY = 'nostr_own_profile_cache';
 const OWN_PROFILE_TIMESTAMP_KEY = 'nostr_own_profile_timestamp';
 const RELAY_LIST_CACHE_KEY = 'nostr_relay_list_cache';
 const RELAY_LIST_TIMESTAMP_KEY = 'nostr_relay_list_timestamp';
-const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours — for all-cached fast path
+// A contact whose kind-0 we couldn't resolve on the previous attempt is
+// retried much sooner than 24 h. The "miss" often reflects the user's
+// profile being on a relay we hadn't hit yet at that moment, not that
+// they've never published one — a shorter retry window turns a few of
+// those no-profile contacts into resolved ones within the hour.
+const MISSING_PROFILE_RETRY_MS = 60 * 60 * 1000; // 1 hour
 
 /**
  * Read a JSON-serialised cache value and its timestamp in a single
@@ -265,12 +271,15 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     // When the cache is fresh, the "missing" contacts are the ones who had
     // no kind-0 response last time we asked. Re-querying on every cold
-    // start costs 3s for contacts that probably just never published a
-    // profile. Wait until the TTL expires before retrying them.
-    if (cacheFresh) {
+    // start costs 3 s for contacts that probably just never published a
+    // profile — so we skip — but only for MISSING_PROFILE_RETRY_MS, much
+    // shorter than the 24 h fast-path TTL, so a transient relay miss
+    // resolves within the hour.
+    const missingRetryFresh = cacheAgeMs < MISSING_PROFILE_RETRY_MS;
+    if (missingRetryFresh) {
       if (__DEV__)
         console.log(
-          `[Nostr] fetchProfiles: skipped (cache fresh, ${missingFromCache.length} unknown profiles will retry after TTL)`,
+          `[Nostr] fetchProfiles: skipped (cache ${Math.round(cacheAgeMs / 1000)}s old, ${missingFromCache.length} unknown profiles will retry after ${Math.round(MISSING_PROFILE_RETRY_MS / 1000)}s)`,
         );
       return;
     }
@@ -743,8 +752,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (!/^[0-9a-f]{64}$/i.test(normalizedRecipientPubkey)) {
         return { success: false, error: 'Invalid public key format' };
       }
+      // Union the user's published write relays with DEFAULT_RELAYS. Publish
+      // uses Promise.any, so one responsive relay is enough — but a user
+      // whose NIP-65 list has a single entry (and no in-app UI to edit it)
+      // hits a single-point failure the moment that relay is slow.
       const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-      const targetRelays = writeRelays.length > 0 ? writeRelays : nostrService.DEFAULT_RELAYS;
+      const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
       try {
         if (signerType === 'nsec') {
           const nsec = await SecureStore.getItemAsync(NSEC_KEY);

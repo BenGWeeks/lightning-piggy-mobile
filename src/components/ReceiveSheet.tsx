@@ -36,12 +36,20 @@ import type { RootStackParamList } from '../navigation/types';
 interface Props {
   visible: boolean;
   onClose: () => void;
+  // When set, the sheet skips the friend-picker step and DMs the generated
+  // invoice (or lightning address) directly to this friend. Used when the
+  // sheet is opened from inside a conversation — the friend is implicit.
+  presetFriend?: PickedFriend;
+  // Fired after a successful DM send with the exact text that was sent.
+  // The conversation view uses this to append the outgoing message
+  // locally, since the Nostr subscription only sees inbound events.
+  onSent?: (payload: string) => void;
 }
 
 type Mode = 'address' | 'amount';
 type InputUnit = 'sats' | 'fiat';
 
-const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
+const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent }) => {
   const {
     makeInvoiceForWallet,
     refreshBalanceForWallet,
@@ -136,6 +144,10 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
           .catch(() => {
             console.warn('Failed to fetch on-chain address');
           });
+      } else if (presetFriend) {
+        // "Send invoice" entry point: the user wants a bolt11 for the
+        // conversation partner, so skip the address tab by default.
+        setMode('amount');
       } else {
         setMode(lightningAddress ? 'address' : 'amount');
       }
@@ -281,11 +293,6 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   const friendShareValue =
     !isOnchainWallet && mode === 'address' ? lightningAddress || '' : invoice || '';
 
-  const handleSendToFriend = useCallback(() => {
-    if (!friendShareValue) return;
-    setFriendPickerOpen(true);
-  }, [friendShareValue]);
-
   const handleFriendPicked = useCallback(
     async (friend: PickedFriend) => {
       if (!friendShareValue || sendingToFriend) return;
@@ -302,6 +309,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
         // without mis-classifying a regular email.
         const payload = mode === 'address' ? `lightning:${friendShareValue}` : friendShareValue;
         const result = await sendDirectMessage(friend.pubkey, payload);
+        if (result.success) onSent?.(payload);
         if (!result.success) {
           Toast.show({
             type: 'error',
@@ -321,21 +329,44 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
           visibilityTime: 2500,
         });
         // Close this sheet and drop the user into the conversation so they
-        // can see the message land and the friend's "Pay" response.
+        // can see the message land and the friend's "Pay" response. When
+        // opened from inside a conversation (presetFriend), we're already
+        // there — just close.
         onClose();
-        const contact = contacts.find((c) => c.pubkey === friend.pubkey);
-        navigation.navigate('Conversation', {
-          pubkey: friend.pubkey,
-          name: friend.name,
-          picture: friend.picture,
-          lightningAddress: contact?.profile?.lud16 ?? friend.lightningAddress,
-        });
+        if (!presetFriend) {
+          const contact = contacts.find((c) => c.pubkey === friend.pubkey);
+          navigation.navigate('Conversation', {
+            pubkey: friend.pubkey,
+            name: friend.name,
+            picture: friend.picture,
+            lightningAddress: contact?.profile?.lud16 ?? friend.lightningAddress,
+          });
+        }
       } finally {
         setSendingToFriend(false);
       }
     },
-    [friendShareValue, mode, sendingToFriend, sendDirectMessage, contacts, navigation, onClose],
+    [
+      friendShareValue,
+      mode,
+      sendingToFriend,
+      sendDirectMessage,
+      contacts,
+      navigation,
+      onClose,
+      presetFriend,
+      onSent,
+    ],
   );
+
+  const handleSendToFriend = useCallback(() => {
+    if (!friendShareValue) return;
+    if (presetFriend) {
+      handleFriendPicked(presetFriend);
+      return;
+    }
+    setFriendPickerOpen(true);
+  }, [friendShareValue, presetFriend, handleFriendPicked]);
 
   const handleSheetChange = useCallback(
     (index: number) => {
@@ -575,43 +606,71 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
               </Text>
             ) : null}
 
-            <View style={styles.buttonRow}>
-              <TouchableOpacity
-                style={[styles.actionButton, !copyValue && styles.actionButtonDisabled]}
-                onPress={handleCopy}
-                disabled={!copyValue}
-              >
-                <Copy size={20} color={colors.brandPink} />
-                <Text style={styles.actionButtonText}>Copy</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.actionButton, !copyValue && styles.actionButtonDisabled]}
-                onPress={handleShare}
-                disabled={!copyValue}
-              >
-                <Text style={styles.actionButtonText}>Share</Text>
-                <Share2 size={20} color={colors.brandPink} />
-              </TouchableOpacity>
-              {!isOnchainWallet ? (
+            {presetFriend ? (
+              <View style={styles.buttonRow}>
                 <Pressable
                   style={({ pressed }) => [
                     styles.actionButton,
+                    styles.actionButtonPrimary,
                     !friendShareValue && styles.actionButtonDisabled,
                     pressed && { opacity: 0.7 },
                   ]}
-                  onPress={() => {
-                    if (__DEV__) console.log('[ReceiveSheet] Friend Pressable FIRED');
-                    handleSendToFriend();
-                  }}
-                  disabled={!friendShareValue}
-                  accessibilityLabel="Send to a friend"
+                  onPress={handleSendToFriend}
+                  disabled={!friendShareValue || sendingToFriend}
+                  accessibilityLabel={`Send to ${presetFriend.name}`}
                   testID="receive-send-to-friend"
                 >
-                  <Text style={styles.actionButtonText}>Friend</Text>
-                  <Send size={20} color={colors.brandPink} />
+                  {sendingToFriend ? (
+                    <ActivityIndicator color={colors.white} />
+                  ) : (
+                    <>
+                      <Send size={20} color={colors.white} />
+                      <Text style={[styles.actionButtonText, styles.actionButtonTextPrimary]}>
+                        Send to {presetFriend.name}
+                      </Text>
+                    </>
+                  )}
                 </Pressable>
-              ) : null}
-            </View>
+              </View>
+            ) : (
+              <View style={styles.buttonRow}>
+                <TouchableOpacity
+                  style={[styles.actionButton, !copyValue && styles.actionButtonDisabled]}
+                  onPress={handleCopy}
+                  disabled={!copyValue}
+                >
+                  <Copy size={20} color={colors.brandPink} />
+                  <Text style={styles.actionButtonText}>Copy</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionButton, !copyValue && styles.actionButtonDisabled]}
+                  onPress={handleShare}
+                  disabled={!copyValue}
+                >
+                  <Text style={styles.actionButtonText}>Share</Text>
+                  <Share2 size={20} color={colors.brandPink} />
+                </TouchableOpacity>
+                {!isOnchainWallet ? (
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.actionButton,
+                      !friendShareValue && styles.actionButtonDisabled,
+                      pressed && { opacity: 0.7 },
+                    ]}
+                    onPress={() => {
+                      if (__DEV__) console.log('[ReceiveSheet] Friend Pressable FIRED');
+                      handleSendToFriend();
+                    }}
+                    disabled={!friendShareValue}
+                    accessibilityLabel="Send to a friend"
+                    testID="receive-send-to-friend"
+                  >
+                    <Text style={styles.actionButtonText}>Friend</Text>
+                    <Send size={20} color={colors.brandPink} />
+                  </Pressable>
+                ) : null}
+              </View>
+            )}
           </View>
         </BottomSheetView>
       </BottomSheetModal>
