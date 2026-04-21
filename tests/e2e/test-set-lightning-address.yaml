@@ -1,0 +1,13 @@
+appId: com.lightningpiggy.app.dev
+name: Set Lightning Address on Account
+---
+# Sets a lightning address so the Receive sheet has something to share in
+# Address mode — enough state to drive the Friend flow without adding a
+# full NWC wallet.
+
+- tapOn: { text: 'user@wallet.com', optional: true }
+- inputText: 'test@getalby.com'
+- hideKeyboard
+- waitForAnimationToEnd: { timeout: 1000 }
+- tapOn: { text: 'Save' }
+- waitForAnimationToEnd: { timeout: 3000 }

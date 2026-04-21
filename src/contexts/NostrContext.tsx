@@ -86,6 +86,14 @@ interface NostrContextType {
     recipientPubkey: string,
     plaintext: string,
   ) => Promise<{ success: boolean; error?: string }>;
+  fetchConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
+}
+
+export interface ConversationMessage {
+  id: string;
+  fromMe: boolean;
+  text: string;
+  createdAt: number;
 }
 
 const NostrContext = createContext<NostrContextType | undefined>(undefined);
@@ -781,6 +789,60 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [pubkey, isLoggedIn, signerType, relays],
   );
 
+  const fetchConversation = useCallback(
+    async (otherPubkey: string): Promise<ConversationMessage[]> => {
+      if (!pubkey || !isLoggedIn) return [];
+      const normalized = otherPubkey.trim().toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(normalized)) return [];
+
+      const readRelays = getReadRelays();
+      const events = await nostrService.fetchDirectMessageEvents(pubkey, normalized, readRelays);
+      if (events.length === 0) return [];
+
+      let cachedSecretKey: Uint8Array | null = null;
+      const getSecretKey = async (): Promise<Uint8Array | null> => {
+        if (cachedSecretKey) return cachedSecretKey;
+        const nsec = await SecureStore.getItemAsync(NSEC_KEY);
+        if (!nsec) return null;
+        cachedSecretKey = nostrService.decodeNsec(nsec).secretKey;
+        return cachedSecretKey;
+      };
+
+      const decrypted: ConversationMessage[] = [];
+      for (const ev of events) {
+        const fromMe = ev.pubkey === pubkey;
+        const counterparty = fromMe ? normalized : ev.pubkey;
+        try {
+          let plaintext: string | null = null;
+          if (signerType === 'nsec') {
+            const secretKey = await getSecretKey();
+            if (!secretKey) continue;
+            plaintext = await nostrService.decryptNip04WithSecret(
+              secretKey,
+              counterparty,
+              ev.content,
+            );
+          } else if (signerType === 'amber') {
+            plaintext = await amberService.requestNip04Decrypt(ev.content, counterparty, pubkey);
+          }
+          if (plaintext === null) continue;
+          decrypted.push({
+            id: ev.id,
+            fromMe,
+            text: plaintext,
+            createdAt: ev.created_at,
+          });
+        } catch (error) {
+          if (__DEV__) console.warn('[Nostr] decrypt DM failed:', error);
+        }
+      }
+
+      decrypted.sort((a, b) => a.createdAt - b.createdAt);
+      return decrypted;
+    },
+    [pubkey, isLoggedIn, signerType, getReadRelays],
+  );
+
   const contextValue = useMemo(
     () => ({
       isLoggedIn,
@@ -800,6 +862,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       unfollowContact,
       addContact,
       sendDirectMessage,
+      fetchConversation,
     }),
     [
       isLoggedIn,
@@ -819,6 +882,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       unfollowContact,
       addContact,
       sendDirectMessage,
+      fetchConversation,
     ],
   );
 

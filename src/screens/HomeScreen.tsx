@@ -49,6 +49,7 @@ const HomeScreen: React.FC = () => {
   const [sendToAddress, setSendToAddress] = useState<string | undefined>();
   const [sendToPicture, setSendToPicture] = useState<string | undefined>();
   const [sendToPubkey, setSendToPubkey] = useState<string | undefined>();
+  const [sendToName, setSendToName] = useState<string | undefined>();
   const [wizardOpen, setWizardOpen] = useState(false);
   const [settingsWalletId, setSettingsWalletId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -59,17 +60,20 @@ const HomeScreen: React.FC = () => {
       setSendToAddress(route.params.sendToAddress);
       setSendToPicture(route.params.sendToPicture);
       setSendToPubkey(route.params.sendToPubkey);
+      setSendToName(route.params.sendToName);
       setSendOpen(true);
       navigation.setParams({
         sendToAddress: undefined,
         sendToPicture: undefined,
         sendToPubkey: undefined,
+        sendToName: undefined,
       });
     }
   }, [
     route.params?.sendToAddress,
     route.params?.sendToPicture,
     route.params?.sendToPubkey,
+    route.params?.sendToName,
     navigation,
   ]);
 
@@ -268,10 +272,12 @@ const HomeScreen: React.FC = () => {
           setSendToAddress(undefined);
           setSendToPicture(undefined);
           setSendToPubkey(undefined);
+          setSendToName(undefined);
         }}
         initialAddress={sendToAddress}
         initialPicture={sendToPicture}
         recipientPubkey={sendToPubkey}
+        recipientName={sendToName}
       />
       <TransferSheet visible={transferOpen} onClose={() => setTransferOpen(false)} />
       <AddWalletWizard visible={wizardOpen} onClose={() => setWizardOpen(false)} />
