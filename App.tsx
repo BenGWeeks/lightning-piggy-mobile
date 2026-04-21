@@ -7,9 +7,10 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import Toast, { BaseToast, ErrorToast, InfoToast } from 'react-native-toast-message';
-import { WalletProvider } from './src/contexts/WalletContext';
+import { WalletProvider, useWallet } from './src/contexts/WalletContext';
 import { NostrProvider } from './src/contexts/NostrContext';
 import AppNavigator from './src/navigation/AppNavigator';
+import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
 
 // Render toasts with unlimited-line body so long error messages (e.g. Electrum
 // script-verify errors) aren't truncated. Height grows to fit content.
@@ -43,6 +44,22 @@ const toastConfig = {
   ),
 };
 
+// Renders the global incoming-payment celebration on top of the nav
+// stack. Lives inside the WalletProvider so it can subscribe to the
+// context's incoming-payment event bus, and above any screen so the
+// confetti pops no matter where the user is when a payment lands.
+function GlobalIncomingPaymentOverlay() {
+  const { lastIncomingPayment, clearLastIncomingPayment } = useWallet();
+  return (
+    <PaymentProgressOverlay
+      state={lastIncomingPayment ? 'success' : 'hidden'}
+      direction="receive"
+      amountSats={lastIncomingPayment?.amountSats}
+      onDismiss={clearLastIncomingPayment}
+    />
+  );
+}
+
 export default function App() {
   return (
     <GestureHandlerRootView style={styles.container}>
@@ -53,6 +70,7 @@ export default function App() {
             <AppNavigator />
           </BottomSheetModalProvider>
           <Toast topOffset={60} config={toastConfig} />
+          <GlobalIncomingPaymentOverlay />
         </NostrProvider>
       </WalletProvider>
     </GestureHandlerRootView>

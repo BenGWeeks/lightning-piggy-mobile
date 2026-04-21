@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nwcService from '../services/nwcService';
 import * as nostrService from '../services/nostrService';
@@ -14,7 +15,15 @@ import {
   WalletState,
   WalletTransaction,
   ZapCounterpartyInfo,
+  walletLabel,
 } from '../types/wallet';
+
+export interface IncomingPayment {
+  walletId: string;
+  amountSats: number;
+  walletAlias: string;
+  at: number;
+}
 
 const USER_NAME_KEY = 'user_display_name';
 const CURRENCY_KEY = 'user_fiat_currency';
@@ -111,6 +120,12 @@ interface WalletContextType {
   // On-chain actions
   getReceiveAddress: (walletId: string) => Promise<string>;
 
+  // Incoming payment event bus. Set whenever any connected wallet's
+  // balance goes UP; consumed by the app-root PaymentProgressOverlay
+  // so the celebration appears regardless of which screen is active.
+  lastIncomingPayment: IncomingPayment | null;
+  clearLastIncomingPayment: () => void;
+
   // Legacy compatibility
   isConnected: boolean;
   balance: number | null;
@@ -128,7 +143,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [currency, setCurrencyState] = useState<FiatCurrency>('USD');
   const [btcPrice, setBtcPrice] = useState<number | null>(null);
   const [lightningAddress, setLightningAddressState] = useState<string | null>(null);
+  const [lastIncomingPayment, setLastIncomingPayment] = useState<IncomingPayment | null>(null);
   const priceInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Per-wallet baseline balances. Used to decide whether a balance
+  // change is an incoming payment (increment) or the local consequence
+  // of a send / send-like flow (decrement). First observation of a
+  // wallet seeds its baseline silently — we don't fire for the initial
+  // balance we happen to observe.
+  const paymentBaselinesRef = useRef<Map<string, number>>(new Map());
 
   // Derived state
   const activeWallet = wallets.find((w) => w.id === activeWalletId) ?? null;
@@ -1168,6 +1190,89 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return onchainService.getNextReceiveAddress(walletId);
   }, []);
 
+  const clearLastIncomingPayment = useCallback(() => setLastIncomingPayment(null), []);
+
+  // Incoming-payment detector. Watches every wallet's balance: the first
+  // time we see a wallet, we record its balance silently as a baseline;
+  // any subsequent increase fires a `lastIncomingPayment` event that the
+  // app-root overlay consumes. Decreases simply re-baseline (a send is
+  // not a "received payment" event). Because this lives in the context,
+  // the overlay pops regardless of which screen the user is on when
+  // money lands — ReceiveSheet being open is no longer required.
+  useEffect(() => {
+    const baselines = paymentBaselinesRef.current;
+    for (const wallet of wallets) {
+      const bal = wallet.balance;
+      if (bal === null || bal === undefined) continue;
+      const prev = baselines.get(wallet.id);
+      if (prev === undefined) {
+        baselines.set(wallet.id, bal);
+        continue;
+      }
+      if (bal > prev) {
+        const delta = bal - prev;
+        baselines.set(wallet.id, bal);
+        setLastIncomingPayment({
+          walletId: wallet.id,
+          amountSats: delta,
+          walletAlias: walletLabel(wallet),
+          at: Date.now(),
+        });
+      } else if (bal < prev) {
+        // Outgoing payment or reorg adjustment — silently rebase.
+        baselines.set(wallet.id, bal);
+      }
+    }
+  }, [wallets]);
+
+  // Foreground polling for the active wallet. ReceiveSheet runs its own
+  // 1.5s poll while an invoice is pending (for fast detection); this
+  // slower 10s baseline covers the case where the user is *not* on the
+  // receive sheet — e.g. sitting on Home when someone pays their
+  // lightning address. On-chain wallets are skipped here; BDK sync is
+  // expensive and runs on its own cadence elsewhere.
+  // NOTE: background / app-closed delivery is a separate concern — OS
+  // push requires FCM/APNs + a backend, tracked in issue #45.
+  useEffect(() => {
+    if (!activeWalletId) return;
+    const wallet = wallets.find((w) => w.id === activeWalletId);
+    if (!wallet || wallet.walletType === 'onchain' || !wallet.isConnected) return;
+
+    let interval: ReturnType<typeof setInterval> | null = null;
+    const start = () => {
+      if (interval) return;
+      interval = setInterval(() => {
+        // Fire-and-forget: failures are non-fatal (next tick retries)
+        // and must not leak unhandled promise rejections.
+        nwcService
+          .getBalance(activeWalletId)
+          .then((b) => {
+            if (b !== null) updateWalletInState(activeWalletId, { balance: b });
+          })
+          .catch(() => {});
+      }, 10000);
+    };
+    const stop = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+    if (AppState.currentState === 'active') start();
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') start();
+      else stop();
+    });
+    return () => {
+      stop();
+      sub.remove();
+    };
+    // `wallets` is intentionally omitted so we don't thrash the
+    // interval on every balance tick — we only re-wire when the active
+    // wallet itself changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWalletId, updateWalletInState]);
+
   return (
     <WalletContext.Provider
       value={{
@@ -1201,6 +1306,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         fetchTransactionsForWallet,
         addPendingTransaction,
         getReceiveAddress,
+        lastIncomingPayment,
+        clearLastIncomingPayment,
         isConnected,
         balance,
         walletAlias,

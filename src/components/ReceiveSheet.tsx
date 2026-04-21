@@ -30,7 +30,6 @@ import { colors } from '../styles/theme';
 import { receiveSheetStyles as styles } from '../styles/ReceiveSheet.styles';
 import { satsToFiatString, satsToFiat } from '../services/fiatService';
 import FriendPickerSheet, { PickedFriend } from './FriendPickerSheet';
-import PaymentProgressOverlay, { PaymentProgressState } from './PaymentProgressOverlay';
 import type { RootStackParamList } from '../navigation/types';
 // On-chain address fetching is done via WalletContext.getReceiveAddress
 
@@ -74,8 +73,6 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
   const [onchainAddress, setOnchainAddress] = useState<string | null>(null);
   const [friendPickerOpen, setFriendPickerOpen] = useState(false);
   const [sendingToFriend, setSendingToFriend] = useState(false);
-  const [celebrateState, setCelebrateState] = useState<PaymentProgressState>('hidden');
-  const [celebrateAmount, setCelebrateAmount] = useState<number | undefined>(undefined);
   const intervalId = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevBalance = useRef<number | null>(null);
   // When true, the next observed balance is treated as the "pre-invoice"
@@ -228,14 +225,11 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [capturedWalletId]);
 
-  // Detect payment by watching balance changes. The first balance we
-  // observe after sheet-open / wallet-switch / invoice-regeneration is
-  // treated as the baseline — pending credits from prior invoices get
-  // absorbed here rather than firing a misattributed celebration. On
-  // fire we advance the baseline to the new balance so another incoming
-  // payment (second invoice in the same session) still registers, and
-  // we do NOT stop polling — the overlay stays up until the user taps OK
-  // but the detector continues to work if they dismiss and invoice again.
+  // The "paymentReceived" checkmark on the QR thumbnail is driven by
+  // any balance increment while the sheet is open. The actual
+  // celebration overlay (confetti + tick card) is now rendered at app
+  // root via WalletContext.lastIncomingPayment — that way it pops on
+  // any screen, for any wallet, not just while this sheet is visible.
   useEffect(() => {
     if (!visible || balance === null) return;
     if (needsBaseline.current) {
@@ -244,19 +238,10 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
       return;
     }
     if (prevBalance.current !== null && balance > prevBalance.current) {
-      const delta = balance - prevBalance.current;
       prevBalance.current = balance;
-      setCelebrateAmount(delta > 0 ? delta : undefined);
-      setCelebrateState('success');
       setPaymentReceived(true);
     }
   }, [balance, visible]);
-
-  const handleCelebrateDismiss = useCallback(() => {
-    setCelebrateState('hidden');
-    setCelebrateAmount(undefined);
-    onClose();
-  }, [onClose]);
 
   const scheduleInvoice = (sats: number) => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
@@ -722,12 +707,6 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
         onSelect={handleFriendPicked}
         title="Send invoice to a friend"
         subtitle="They'll get an encrypted Nostr DM with a Pay button."
-      />
-      <PaymentProgressOverlay
-        state={celebrateState}
-        direction="receive"
-        amountSats={celebrateAmount}
-        onDismiss={handleCelebrateDismiss}
       />
     </>
   );
