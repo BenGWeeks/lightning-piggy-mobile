@@ -1192,6 +1192,22 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const clearLastIncomingPayment = useCallback(() => setLastIncomingPayment(null), []);
 
+  // When an incoming payment is detected, also pull the latest
+  // transaction list for that wallet so the Home / Transactions screens
+  // show the new tx immediately — not on the user's next manual refresh.
+  // Separate effect so it reads `fetchTransactionsForWallet` after it's
+  // defined below without the closure-ordering dance.
+  useEffect(() => {
+    if (!lastIncomingPayment) return;
+    fetchTransactionsForWallet(lastIncomingPayment.walletId).catch(() => {
+      // Non-fatal: next organic refresh will pick the tx up.
+    });
+    // Intentionally only fire on `lastIncomingPayment` changes; the
+    // callback identity is stable enough across renders that adding it
+    // would double-fetch on unrelated renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastIncomingPayment]);
+
   // Incoming-payment detector. Watches every wallet's balance: the first
   // time we see a wallet, we record its balance silently as a baseline;
   // any subsequent increase fires a `lastIncomingPayment` event that the
