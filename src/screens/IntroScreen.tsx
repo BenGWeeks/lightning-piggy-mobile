@@ -40,14 +40,7 @@ const IntroScreen: React.FC<Props> = ({ navigation }) => {
     let cancelled = false;
     let holdTimer: ReturnType<typeof setTimeout> | null = null;
 
-    AccessibilityInfo.isReduceMotionEnabled().then((reduceMotion) => {
-      if (cancelled) return;
-
-      if (reduceMotion) {
-        advance(true);
-        return;
-      }
-
+    const runAnimatedPath = () => {
       Animated.parallel([
         Animated.timing(fadeAnim, {
           toValue: 1,
@@ -63,7 +56,21 @@ const IntroScreen: React.FC<Props> = ({ navigation }) => {
         if (!finished || cancelled) return;
         holdTimer = setTimeout(() => advance(false), HOLD_MS);
       });
-    });
+    };
+
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then((reduceMotion) => {
+        if (cancelled) return;
+        if (reduceMotion) {
+          advance(true);
+          return;
+        }
+        runAnimatedPath();
+      })
+      .catch(() => {
+        if (cancelled) return;
+        runAnimatedPath();
+      });
 
     return () => {
       cancelled = true;
@@ -74,7 +81,7 @@ const IntroScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <Pressable
       style={StyleSheet.absoluteFill}
-      onPress={() => advance(false)}
+      onPress={() => advance(true)}
       accessibilityRole="button"
       accessibilityLabel="Skip intro"
       testID="intro-screen"
