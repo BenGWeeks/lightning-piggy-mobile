@@ -735,15 +735,17 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           // freshly-sent zap would disappear from the conversation thread on
           // the very next refresh, then reappear a second or two later when
           // LNbits catches up. Only rows marked `optimistic` are preserved —
-          // we match by paymentHash so when LNbits returns the real tx the
-          // optimistic entry is dropped and replaced. (Using a flag, rather
-          // than "any row not in the server response", avoids regrowing
-          // older historical txs that fell off the listTransactions window.)
-          const returnedHashes = new Set(
-            txs.map((t) => t.paymentHash).filter((h): h is string => !!h),
+          // the matching uses `paymentHash + type` because a self-pay produces
+          // both an incoming and an outgoing leg with the same hash; keying on
+          // hash alone would drop our optimistic outgoing leg as soon as the
+          // incoming leg came back from the server. The `optimistic` flag also
+          // scopes preservation to newly-inserted rows, so older historical
+          // txs that fall off the listTransactions window aren't regrown.
+          const returnedKeys = new Set(
+            txs.filter((t) => !!t.paymentHash).map((t) => `${t.type}:${t.paymentHash}`),
           );
           const stillPending = existing.filter(
-            (t) => t.optimistic && t.paymentHash && !returnedHashes.has(t.paymentHash),
+            (t) => t.optimistic && t.paymentHash && !returnedKeys.has(`${t.type}:${t.paymentHash}`),
           );
           if (stillPending.length > 0) {
             txs = [...stillPending, ...txs].sort(

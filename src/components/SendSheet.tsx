@@ -461,9 +461,13 @@ const SendSheet: React.FC<Props> = ({
               // this attribution across refreshes.
               if (walletId) {
                 const nowSec = Math.floor(Date.now() / 1000);
+                // Convention throughout the app: amount is a POSITIVE magnitude
+                // and `type` alone carries direction (see TransferSheet's
+                // optimistic inserts, ConversationScreen's zapItems, and every
+                // TransactionDetail consumer — all read Math.abs(tx.amount)).
                 addPendingTransaction(walletId, {
                   type: 'outgoing',
-                  amount: -currentSats,
+                  amount: currentSats,
                   description: memo || undefined,
                   created_at: nowSec,
                   settled_at: nowSec,
