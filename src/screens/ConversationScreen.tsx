@@ -253,10 +253,13 @@ const ConversationScreen: React.FC = () => {
     load(true);
   }, [load]);
 
+  // Jump to the newest message on first content load. The list is
+  // `inverted`, so offset 0 is the visual bottom (data[0] = newest).
+  // A plain `scrollToEnd` would land on the oldest message.
   useEffect(() => {
     if (items.length === 0) return;
     const t = setTimeout(() => {
-      listRef.current?.scrollToEnd({ animated: false });
+      listRef.current?.scrollToOffset({ offset: 0, animated: false });
     }, 50);
     return () => clearTimeout(t);
   }, [items.length]);
@@ -277,6 +280,32 @@ const ConversationScreen: React.FC = () => {
     }
     return hashes;
   }, [messages, paidHashes]);
+
+  // Payment hashes known paid from our wallet's own transaction history.
+  // Covers both directions of the conversation:
+  //   - Invoice we sent, counterparty paid → appears as an *incoming* tx
+  //     on our wallet, carrying the invoice's payment_hash.
+  //   - Invoice we received, we paid → appears as an *outgoing* tx,
+  //     also carrying the same payment_hash.
+  // This avoids a per-invoice NWC lookupInvoice poll; the wallet tx list
+  // is already kept in sync and recomputes for free whenever it updates.
+  const paidFromWalletHashes = useMemo(() => {
+    const hashes = new Set<string>();
+    for (const w of wallets) {
+      for (const tx of w.transactions) {
+        if (tx.paymentHash) hashes.add(tx.paymentHash);
+      }
+    }
+    return hashes;
+  }, [wallets]);
+
+  // Unified paid set for rendering: NWC-polled settled outgoing invoices +
+  // anything our wallet's tx history has already recorded (either direction).
+  const allPaidHashes = useMemo(() => {
+    const merged = new Set(paidHashes);
+    paidFromWalletHashes.forEach((h) => merged.add(h));
+    return merged;
+  }, [paidHashes, paidFromWalletHashes]);
 
   // Poll NWC for the paid status of outgoing invoices. Lightning-only.
   // We assume the active wallet is the one that issued the invoice — not
@@ -410,7 +439,7 @@ const ConversationScreen: React.FC = () => {
         const invoice = extractInvoice(item.text);
         if (invoice) {
           const expired = invoice.expiresAt !== null && invoice.expiresAt * 1000 < Date.now();
-          const paid = invoice.paymentHash !== null && paidHashes.has(invoice.paymentHash);
+          const paid = invoice.paymentHash !== null && allPaidHashes.has(invoice.paymentHash);
           return (
             <View
               style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
@@ -442,21 +471,26 @@ const ConversationScreen: React.FC = () => {
                     {invoice.description}
                   </Text>
                 ) : null}
-                {paid ? (
-                  <Text
-                    style={[styles.invoicePaid, item.fromMe && styles.invoicePaidMe]}
-                  >
-                    Paid
-                  </Text>
-                ) : invoice.expiresAt !== null ? (
-                  <Text
-                    style={[styles.invoiceExpiry, item.fromMe && styles.invoiceExpiryMe]}
-                  >
-                    {expired
-                      ? 'Expired'
-                      : `Expires ${formatRelativeFuture(invoice.expiresAt * 1000)}`}
-                  </Text>
-                ) : null}
+                <View style={styles.invoiceTagRow}>
+                  {paid ? (
+                    <View style={[styles.invoiceTag, styles.invoiceTagPaid]}>
+                      <Text style={styles.invoiceTagPaidText}>Paid</Text>
+                    </View>
+                  ) : expired ? (
+                    <View style={[styles.invoiceTag, styles.invoiceTagExpired]}>
+                      <Text style={styles.invoiceTagExpiredText}>Expired</Text>
+                    </View>
+                  ) : item.fromMe ? (
+                    <View style={[styles.invoiceTag, styles.invoiceTagUnpaid]}>
+                      <Text style={styles.invoiceTagUnpaidText}>Unpaid</Text>
+                    </View>
+                  ) : null}
+                  {!paid && !expired && invoice.expiresAt !== null ? (
+                    <Text style={[styles.invoiceExpiry, item.fromMe && styles.invoiceExpiryMe]}>
+                      expires {formatRelativeFuture(invoice.expiresAt * 1000)}
+                    </Text>
+                  ) : null}
+                </View>
                 {item.fromMe ? null : paid || expired ? null : (
                   <TouchableOpacity
                     style={styles.invoicePayButton}
@@ -634,7 +668,7 @@ const ConversationScreen: React.FC = () => {
         </View>
       );
     },
-    [openLocation, paidHashes],
+    [openLocation, allPaidHashes],
   );
 
   const avatarNode =
@@ -1076,14 +1110,45 @@ const styles = StyleSheet.create({
   invoiceExpiryMe: {
     color: 'rgba(255,255,255,0.75)',
   },
-  invoicePaid: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#2e7d32',
-    marginTop: 4,
+  invoiceTagRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 6,
   },
-  invoicePaidMe: {
-    color: '#c8f2cc',
+  invoiceTag: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    alignSelf: 'flex-start',
+  },
+  invoiceTagPaid: {
+    backgroundColor: '#2e7d32',
+  },
+  invoiceTagPaidText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: 0.3,
+  },
+  invoiceTagUnpaid: {
+    backgroundColor: 'rgba(255,255,255,0.22)',
+  },
+  invoiceTagUnpaidText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: 0.3,
+  },
+  invoiceTagExpired: {
+    backgroundColor: 'rgba(0,0,0,0.32)',
+  },
+  invoiceTagExpiredText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: 0.3,
   },
   invoicePayButton: {
     marginTop: 8,
