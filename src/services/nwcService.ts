@@ -238,7 +238,7 @@ export async function payInvoice(walletId: string, bolt11: string): Promise<{ pr
       const paymentHash = extractPaymentHash(bolt11);
       if (paymentHash) {
         try {
-          const lookup = await provider.lookupInvoice({ payment_hash: paymentHash });
+          const lookup = await provider.lookupInvoice({ paymentHash });
           if (lookup?.preimage) {
             console.log('[NWC] Invoice already paid — returning existing preimage');
             return { preimage: lookup.preimage };
@@ -261,7 +261,7 @@ export async function payInvoice(walletId: string, bolt11: string): Promise<{ pr
       while (Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 5000));
         try {
-          const lookup = await provider.lookupInvoice({ payment_hash: paymentHash });
+          const lookup = await provider.lookupInvoice({ paymentHash });
           if (lookup?.preimage) {
             console.log('[NWC] Payment completed after timeout:', paymentHash);
             return { preimage: lookup.preimage };
@@ -339,17 +339,26 @@ export async function listTransactions(walletId: string): Promise<any[]> {
 
 // LNbits (and some other NWC backends) omit preimage/invoice from
 // list_transactions; this fills them in. Returns null on failure.
+// `paid` relies on `settled_at` (a non-zero timestamp when the invoice
+// was paid). `preimage` alone isn't a safe signal — some backends
+// pre-populate it or return a placeholder while unsettled.
 export async function lookupInvoice(
   walletId: string,
   paymentHash: string,
-): Promise<{ preimage?: string; invoice?: string } | null> {
+): Promise<{ preimage?: string; invoice?: string; paid: boolean } | null> {
   const provider = await ensureConnected(walletId);
   if (!provider) return null;
   try {
-    const result = await provider.lookupInvoice({ payment_hash: paymentHash });
+    const result = (await provider.lookupInvoice({ paymentHash })) as {
+      preimage?: string;
+      invoice?: string;
+      settled_at?: number;
+    };
+    const paid = Boolean(result?.settled_at && result.settled_at > 0);
     return {
       preimage: result?.preimage,
       invoice: result?.invoice,
+      paid,
     };
   } catch (error) {
     console.warn(`lookupInvoice failed for ${walletId}:`, error);

@@ -1,0 +1,67 @@
+appId: com.lightningpiggy.app.dev
+name: Share Location sheet opens from conversation composer
+---
+# Opens a conversation with FRIEND_NAME and verifies that the composer's
+# [+] attach button opens the AttachSheet and exposes the "Share location"
+# row. We don't drive the real GPS flow — permission prompts and OS dialogs
+# aren't portable across devices/emulators, so the test stops at the sheet.
+#
+# Prerequisites:
+#   - app installed, Metro running, dev mode enabled
+#   - Nostr logged in with FRIEND_NAME in the contact list
+#
+# Run with default friend (Isaac Weeks):
+#   maestro test tests/e2e/test-share-location-sheet.yaml
+# Override:
+#   maestro -e FRIEND_NAME="Isolabellart" -e FRIEND_LETTER="I" \
+#     test tests/e2e/test-share-location-sheet.yaml
+
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 40000
+
+# Jump to Friends tab and open a conversation
+- tapOn:
+    id: 'tab-friends'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    id: 'alphabet-${FRIEND_LETTER}'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- scrollUntilVisible:
+    element:
+      text: ${FRIEND_NAME}
+    direction: DOWN
+    timeout: 10000
+    speed: 40
+    visibilityPercentage: 60
+
+- tapOn: ${FRIEND_NAME}
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Composer is present
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-input'
+    timeout: 10000
+
+# Tap the [+] attach button — should open the AttachSheet
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+# Sheet exposes the "Share location" row
+- extendedWaitUntil:
+    visible:
+      id: 'attach-share-location'
+    timeout: 5000
+
+# Also verify the human-readable label exists for a11y
+- assertVisible:
+    text: 'Share location'
