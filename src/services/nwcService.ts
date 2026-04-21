@@ -339,3 +339,52 @@ export function isWalletConnected(walletId: string): boolean {
   const client = (provider as any).client;
   return client?.connected ?? false;
 }
+
+export type Nip47PaymentNotification = {
+  notification_type: 'payment_received' | 'payment_sent';
+  notification: {
+    type?: 'incoming' | 'outgoing';
+    invoice?: string;
+    description?: string;
+    preimage?: string;
+    payment_hash?: string;
+    amount?: number;
+    fees_paid?: number;
+    settled_at?: number;
+    created_at?: number;
+  };
+};
+
+/**
+ * Subscribe to NIP-47 notifications from the wallet (e.g. `payment_received`).
+ * The underlying relay subscription is the same websocket already opened by
+ * `connect()`, so this adds no new network overhead. Returns an unsubscribe
+ * function, or `null` if the wallet's relay/backend does not support
+ * notifications.
+ */
+export async function subscribeNotifications(
+  walletId: string,
+  onNotification: (n: Nip47PaymentNotification) => void,
+  types: Array<'payment_received' | 'payment_sent'> = ['payment_received'],
+): Promise<(() => void) | null> {
+  const provider = await ensureConnected(walletId);
+  if (!provider) return null;
+
+  const client = (provider as any).client;
+  if (!client || typeof client.subscribeNotifications !== 'function') {
+    if (__DEV__) console.log('[NWC] subscribeNotifications unsupported by this client');
+    return null;
+  }
+
+  try {
+    const result = await client.subscribeNotifications(onNotification, types);
+    // The SDK has returned either a bare function or `{ unsub }` across
+    // versions — accept both.
+    if (typeof result === 'function') return result as () => void;
+    if (result && typeof result.unsub === 'function') return result.unsub as () => void;
+    return null;
+  } catch (error) {
+    console.warn(`[NWC] subscribeNotifications failed for ${walletId}:`, error);
+    return null;
+  }
+}

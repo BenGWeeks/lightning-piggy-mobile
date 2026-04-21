@@ -163,4 +163,8 @@ The fix script (`apply_nip20_fix.py`) patches `router.py` to send `["OK", event_
 | On-chain transactions slow to load on first launch
 | Balance and tx history come from BDK's `wallet.sync(chain)`. BDK is configured with an in-memory database (`DatabaseConfig().memory()`), so sync state does not persist across app restarts — the first sync after launch rescans from scratch and can take 10–30 seconds on busy wallets. +
 *Mitigations:* WalletContext caches transactions per wallet ID and writes them to AsyncStorage, so the UI renders cached data instantly on wallet swipe while the background sync runs. *Future:* switch BDK to a persistent database config so only the delta is fetched across launches.
+
+| Payment notifications stop arriving after the app has been backgrounded for a while (incl. GrapheneOS)
+| Notifications are delivered over the NWC relay websocket (NIP-47 `payment_received` events) and posted via `expo-notifications` — no FCM / Google Play Services involved, which is why the feature works on GrapheneOS. The limitation: once Android suspends the JS runtime in the background, the websocket closes and no further notifications arrive until the app is reopened. Connection is re-established (and the NWC notification subscription re-armed) by the 30s `connectionCheckInterval` in `WalletContext.tsx` whenever the runtime is awake. +
+*Future:* add an Android foreground service (e.g. via `@notifee/react-native` or a custom Expo config plugin) to keep the relay socket alive 24/7. This adds a persistent status-bar notification but lets payments ring while the phone is idle.
 |===

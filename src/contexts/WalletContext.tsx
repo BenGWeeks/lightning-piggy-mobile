@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nwcService from '../services/nwcService';
+import * as notificationService from '../services/notificationService';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
@@ -154,6 +155,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     (async () => {
       try {
+        // Request notification permission + set up the Android channel
+        // early so subscriptions fired below can post notifications.
+        notificationService.init().catch((err) => {
+          console.warn('[Notifications] init failed:', err);
+        });
+
         // Load user preferences
         const savedName = await AsyncStorage.getItem(USER_NAME_KEY);
         if (savedName) setUserNameState(savedName);
@@ -245,6 +252,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 ),
               );
 
+              notificationService
+                .subscribeWallet(wallet.id, info?.alias || wallet.alias)
+                .catch((err) => console.warn('[Notifications] subscribe failed:', err));
+
               if ((lud16 || info?.lud16) && !savedAddress) {
                 const addr = lud16 || info?.lud16 || null;
                 if (addr) {
@@ -303,6 +314,15 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               if (nwcUrl) {
                 const result = await nwcService.connect(w.id, nwcUrl);
                 updateWalletInState(w.id, { isConnected: result.success });
+                if (result.success) {
+                  // Old subscription's unsub handle is tied to the closed
+                  // relay connection; re-subscribe on the fresh one.
+                  notificationService
+                    .subscribeWallet(w.id, w.walletAlias || w.alias)
+                    .catch((err) =>
+                      console.warn('[Notifications] re-subscribe failed:', err),
+                    );
+                }
               }
             } catch {
               updateWalletInState(w.id, { isConnected: false });
@@ -317,6 +337,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (connectionCheckInterval.current) clearInterval(connectionCheckInterval.current);
     };
   }, [updateWalletInState]);
+
+  // Clean up notification subscriptions when the provider unmounts.
+  useEffect(() => {
+    return () => {
+      notificationService.unsubscribeAll();
+    };
+  }, []);
 
   const addNwcWallet = useCallback(
     async (nwcUrl: string, alias: string, theme: CardTheme) => {
@@ -365,6 +392,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (!activeWalletId) {
         setActiveWalletId(id);
       }
+
+      notificationService
+        .subscribeWallet(id, info?.alias || alias)
+        .catch((err) => console.warn('[Notifications] subscribe failed:', err));
 
       return { success: true };
     },
@@ -491,6 +522,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         await walletStorage.deleteMnemonic(walletId);
         await onchainService.removeWallet(walletId);
       } else {
+        notificationService.unsubscribeWallet(walletId);
         nwcService.disconnect(walletId);
         await walletStorage.deleteNwcUrl(walletId);
       }

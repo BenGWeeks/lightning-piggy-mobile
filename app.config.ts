@@ -65,6 +65,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         contactsPermission: 'Allow Lightning Piggy to access your contacts to find friends.',
       },
     ],
+    [
+      'expo-notifications',
+      {
+        // Local-notification only — no Firebase / FCM required. Works on
+        // GrapheneOS and other de-Googled Android builds because the
+        // payment event is delivered over the existing NWC websocket and
+        // shown via the OS NotificationManager.
+        color: '#F3C340',
+      },
+    ],
   ],
   android: {
     adaptiveIcon: {
