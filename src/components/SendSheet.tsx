@@ -342,7 +342,6 @@ const SendSheet: React.FC<Props> = ({
   };
 
   const handleSuggestedAmount = (sats: number) => {
-    setInputUnit('sats');
     setSatsValue(sats.toString());
     if (btcPrice) {
       setFiatValue(satsToFiat(sats, btcPrice).toFixed(2));
