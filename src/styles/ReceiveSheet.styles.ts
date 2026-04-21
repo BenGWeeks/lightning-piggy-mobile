@@ -163,10 +163,16 @@ export const receiveSheetStyles = StyleSheet.create({
     elevation: 0,
     shadowOpacity: 0,
   },
+  actionButtonPrimary: {
+    backgroundColor: colors.brandPink,
+  },
   actionButtonText: {
     color: colors.brandPink,
     fontSize: 15,
     fontWeight: '700',
+  },
+  actionButtonTextPrimary: {
+    color: colors.white,
   },
   walletDropdownRow: {
     flexDirection: 'row',
