@@ -502,6 +502,17 @@ const SendSheet: React.FC<Props> = ({
 
   if (!visible || !permission) return null;
 
+  // On-chain sends from a hot on-chain wallet go direct; otherwise they
+  // hop through a Boltz reverse swap whose server-reported min/max must
+  // gate the amount step (not the LNURL range).
+  const onchainViaBoltz =
+    isOnchainAddress &&
+    !(
+      selectedWallet?.walletType === 'onchain' && selectedWallet?.onchainImportMethod === 'mnemonic'
+    );
+  const amountMinSats = onchainViaBoltz ? boltzFees?.minAmount : lnurlParams?.minSats;
+  const amountMaxSats = onchainViaBoltz ? boltzFees?.maxAmount : lnurlParams?.maxSats;
+
   const canSend = isOnchainAddress
     ? currentSats > 0 && !loadingBoltzFees
     : needsAmount
@@ -530,8 +541,8 @@ const SendSheet: React.FC<Props> = ({
                   ? 'On-chain payment'
                   : undefined
             }
-            minSats={lnurlParams?.minSats}
-            maxSats={lnurlParams?.maxSats}
+            minSats={amountMinSats}
+            maxSats={amountMaxSats}
             confirmLabel="Done"
             backLabel="Back"
             onBack={() => setStep('main')}

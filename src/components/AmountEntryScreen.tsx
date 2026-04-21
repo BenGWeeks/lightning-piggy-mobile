@@ -49,15 +49,23 @@ const AmountEntryScreen: React.FC<Props> = ({
     return '';
   });
 
-  // If btcPrice arrives after mount with a non-zero sats initial value,
-  // back-fill the fiat field so the secondary display is accurate.
+  // Keep the off-screen text in sync when btcPrice updates mid-entry.
+  // Without this, swapping after a price refresh can surface a stale
+  // converted number and round-trip back to a different sats value than
+  // the user originally typed.
   useEffect(() => {
     if (!btcPrice) return;
-    const sats = parseInt(satsText, 10) || 0;
-    if (sats > 0 && !fiatText) {
-      setFiatText(satsToFiat(sats, btcPrice).toFixed(2));
+    if (primaryUnit === 'sats') {
+      const sats = parseInt(satsText, 10) || 0;
+      setFiatText(sats > 0 ? satsToFiat(sats, btcPrice).toFixed(2) : '');
+    } else {
+      const fiat = parseFloat(fiatText) || 0;
+      const sats = fiatToSats(fiat, btcPrice);
+      setSatsText(sats > 0 ? String(sats) : '');
     }
-    // Only when btcPrice flips from null → number.
+    // Deliberately depend only on btcPrice — we don't want this to fire
+    // on every keystroke (the onChange handler already keeps the off-side
+    // in sync at typing time).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [btcPrice]);
 
@@ -91,6 +99,16 @@ const AmountEntryScreen: React.FC<Props> = ({
   };
 
   const swapPrimary = () => {
+    // Re-derive the target unit's text from the canonical sats value
+    // before flipping, otherwise a stale `fiatText` (or vice versa) can
+    // become the new primary and the confirmed sats will diverge from
+    // what the user originally typed.
+    const sats = currentSats;
+    if (primaryUnit === 'sats') {
+      setFiatText(btcPrice && sats > 0 ? satsToFiat(sats, btcPrice).toFixed(2) : '');
+    } else {
+      setSatsText(sats > 0 ? String(sats) : '');
+    }
     setPrimaryUnit((u) => (u === 'sats' ? 'fiat' : 'sats'));
   };
 
