@@ -657,7 +657,6 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
           <AmountEntryScreen
             initialSats={currentSats}
             title="Transfer amount"
-            subtitle={source && dest ? `${source.alias} → ${dest.alias}` : undefined}
             minSats={
               isBoltzTransfer
                 ? (cachedBoltzFees?.minAmount ?? boltzService.BOLTZ_MIN_SATS)
@@ -665,13 +664,11 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             }
             maxSats={isBoltzTransfer ? cachedBoltzFees?.maxAmount : undefined}
             confirmLabel="Done"
-            backLabel="Back"
             onBack={() => setStep('main')}
             onConfirm={(sats) => {
               setSatsValue(String(sats));
               setStep('main');
             }}
-            useBottomSheetInput
           />
         ) : (
           <>
