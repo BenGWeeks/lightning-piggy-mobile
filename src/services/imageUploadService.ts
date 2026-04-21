@@ -1,3 +1,6 @@
+import { getBlossomServer } from './walletStorageService';
+import { uploadToBlossom, BlossomSigner } from './blossomService';
+
 const NOSTR_BUILD_UPLOAD_URL = 'https://nostr.build/api/v2/upload/files';
 
 export async function uploadToNostrBuild(imageUri: string): Promise<string> {
@@ -33,4 +36,18 @@ export async function uploadToNostrBuild(imageUri: string): Promise<string> {
   }
 
   return urlTag[1];
+}
+
+/**
+ * Upload an image using the user's configured Blossom server when a signer is
+ * available, falling back to nostr.build otherwise. Callers that don't have a
+ * Nostr signer (e.g. not yet logged in) can pass `signer: null` to force the
+ * nostr.build path.
+ */
+export async function uploadImage(imageUri: string, signer: BlossomSigner | null): Promise<string> {
+  if (signer) {
+    const server = await getBlossomServer();
+    return uploadToBlossom(imageUri, server, signer);
+  }
+  return uploadToNostrBuild(imageUri);
 }

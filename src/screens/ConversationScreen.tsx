@@ -14,14 +14,16 @@ import {
   StyleSheet,
 } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { Zap, Send } from 'lucide-react-native';
+import { Zap, Send, ImagePlus } from 'lucide-react-native';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
+import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
+import { uploadImage } from '../services/imageUploadService';
 import SendSheet from '../components/SendSheet';
 import TransactionDetailSheet, {
   TransactionDetailData,
@@ -54,6 +56,16 @@ type Item =
 // Bolt11 invoices are self-identifying by their `lnXX` HRP, so detection
 // here matches them with or without the `lightning:` prefix.
 const INVOICE_REGEX = /\b(?:lightning:)?(ln(?:bc|tb|ts|bs)[0-9a-z]{50,})\b/i;
+
+// Image URLs we render inline in message bubbles. We only match trusted image
+// extensions so we don't accidentally fetch arbitrary URLs as images.
+const IMAGE_URL_REGEX = /(https?:\/\/\S+?\.(?:png|jpe?g|gif|webp|heic|heif))(?:\?\S*)?\b/i;
+
+function extractImageUrl(text: string): string | null {
+  if (!text) return null;
+  const match = text.match(IMAGE_URL_REGEX);
+  return match ? match[0] : null;
+}
 
 // Lightning addresses look like plain email addresses — `alice@example.com`
 // — so we only treat a message as a payable LN address when the sender
@@ -126,7 +138,7 @@ const ConversationScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { pubkey, name, picture, lightningAddress } = route.params;
 
-  const { isLoggedIn, fetchConversation, sendDirectMessage } = useNostr();
+  const { isLoggedIn, fetchConversation, sendDirectMessage, signEvent } = useNostr();
   const { wallets } = useWallet();
 
   const [messages, setMessages] = useState<
@@ -136,6 +148,7 @@ const ConversationScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [sendSheetOpen, setSendSheetOpen] = useState(false);
   const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState(false);
@@ -245,8 +258,71 @@ const ConversationScreen: React.FC = () => {
     setSendSheetOpen(true);
   }, [lightningAddress, name]);
 
+  const handlePickAndSendImage = useCallback(async () => {
+    if (!isLoggedIn || uploadingImage || sending) return;
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission needed', 'Allow photo library access to send images.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.8,
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+
+    setUploadingImage(true);
+    try {
+      const url = await uploadImage(result.assets[0].uri, signEvent);
+      const sendResult = await sendDirectMessage(pubkey, url);
+      if (!sendResult.success) {
+        Alert.alert('Send failed', sendResult.error ?? 'Could not send image.');
+        return;
+      }
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `local-${Date.now()}`,
+          fromMe: true,
+          text: url,
+          createdAt: Math.floor(Date.now() / 1000),
+        },
+      ]);
+    } catch (error) {
+      Alert.alert('Upload failed', error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setUploadingImage(false);
+    }
+  }, [isLoggedIn, uploadingImage, sending, signEvent, sendDirectMessage, pubkey]);
+
   const renderItem = useCallback(({ item }: { item: Item }) => {
     if (item.kind === 'message') {
+      const imageUrl = extractImageUrl(item.text);
+      if (imageUrl) {
+        return (
+          <View
+            style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
+          >
+            <View style={styles.imageBubble}>
+              <Image
+                source={{ uri: imageUrl }}
+                style={styles.imageBubbleImage}
+                resizeMode="cover"
+                accessibilityLabel="Shared image"
+              />
+              <Text
+                style={[
+                  styles.bubbleTime,
+                  styles.imageBubbleTime,
+                  item.fromMe && styles.bubbleTimeMe,
+                ]}
+              >
+                {formatTime(item.createdAt)}
+              </Text>
+            </View>
+          </View>
+        );
+      }
       const invoice = extractInvoice(item.text);
       if (invoice) {
         const expired = invoice.expiresAt !== null && invoice.expiresAt * 1000 < Date.now();
@@ -494,6 +570,22 @@ const ConversationScreen: React.FC = () => {
         )}
 
         <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+          <TouchableOpacity
+            style={[
+              styles.composerImageButton,
+              (!isLoggedIn || sending || uploadingImage) && styles.composerSendButtonDisabled,
+            ]}
+            onPress={handlePickAndSendImage}
+            disabled={!isLoggedIn || sending || uploadingImage}
+            accessibilityLabel="Send image"
+            testID="conversation-image"
+          >
+            {uploadingImage ? (
+              <ActivityIndicator color={colors.brandPink} />
+            ) : (
+              <ImagePlus size={22} color={colors.brandPink} />
+            )}
+          </TouchableOpacity>
           <TextInput
             style={styles.composerInput}
             placeholder="Message"
@@ -883,6 +975,33 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brandPink,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  composerImageButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.divider,
+  },
+  imageBubble: {
+    maxWidth: '80%',
+    padding: 4,
+    borderRadius: 16,
+    backgroundColor: colors.white,
+    overflow: 'hidden',
+  },
+  imageBubbleImage: {
+    width: 220,
+    height: 220,
+    borderRadius: 12,
+    backgroundColor: colors.background,
+  },
+  imageBubbleTime: {
+    paddingHorizontal: 6,
+    paddingBottom: 4,
   },
   loading: {
     flex: 1,

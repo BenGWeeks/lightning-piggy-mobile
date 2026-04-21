@@ -87,6 +87,22 @@ interface NostrContextType {
     plaintext: string,
   ) => Promise<{ success: boolean; error?: string }>;
   fetchConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
+  signEvent: (event: {
+    kind: number;
+    created_at: number;
+    tags: string[][];
+    content: string;
+  }) => Promise<SignedEvent | null>;
+}
+
+export interface SignedEvent {
+  id: string;
+  pubkey: string;
+  sig: string;
+  kind: number;
+  created_at: number;
+  tags: string[][];
+  content: string;
 }
 
 export interface ConversationMessage {
@@ -843,6 +859,38 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [pubkey, isLoggedIn, signerType, getReadRelays],
   );
 
+  const signEvent = useCallback(
+    async (event: {
+      kind: number;
+      created_at: number;
+      tags: string[][];
+      content: string;
+    }): Promise<SignedEvent | null> => {
+      if (!pubkey || !isLoggedIn) return null;
+      try {
+        if (signerType === 'nsec') {
+          const nsec = await SecureStore.getItemAsync(NSEC_KEY);
+          if (!nsec) return null;
+          const { secretKey } = nostrService.decodeNsec(nsec);
+          return nostrService.signEvent(event, secretKey) as SignedEvent;
+        } else if (signerType === 'amber') {
+          const { event: signedEventJson } = await amberService.requestEventSignature(
+            JSON.stringify(event),
+            '',
+            pubkey,
+          );
+          if (!signedEventJson) return null;
+          return JSON.parse(signedEventJson) as SignedEvent;
+        }
+        return null;
+      } catch (error) {
+        if (__DEV__) console.warn('[Nostr] signEvent failed:', error);
+        return null;
+      }
+    },
+    [pubkey, isLoggedIn, signerType],
+  );
+
   const contextValue = useMemo(
     () => ({
       isLoggedIn,
@@ -863,6 +911,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       addContact,
       sendDirectMessage,
       fetchConversation,
+      signEvent,
     }),
     [
       isLoggedIn,
@@ -883,6 +932,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       addContact,
       sendDirectMessage,
       fetchConversation,
+      signEvent,
     ],
   );
 
