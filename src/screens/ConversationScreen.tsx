@@ -4,6 +4,8 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  Pressable,
+  Modal,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -220,6 +222,7 @@ const ConversationScreen: React.FC = () => {
   const [invoiceSheetOpen, setInvoiceSheetOpen] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
+  const [fullscreenGifUrl, setFullscreenGifUrl] = useState<string | null>(null);
   const [sharingLocation, setSharingLocation] = useState(false);
   // Payment hashes of outgoing invoices the active NWC wallet reports paid.
   const [paidHashes, setPaidHashes] = useState<Set<string>>(() => new Set());
@@ -860,9 +863,14 @@ const ConversationScreen: React.FC = () => {
           <View
             style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
           >
-            <View
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => setFullscreenGifUrl(item.url)}
               style={[styles.gifCard, item.fromMe ? styles.gifCardMe : styles.gifCardThem]}
-              accessibilityLabel={item.fromMe ? 'GIF sent' : 'GIF received'}
+              accessibilityLabel={
+                item.fromMe ? 'GIF sent, tap to expand' : 'GIF received, tap to expand'
+              }
+              accessibilityRole="imagebutton"
               testID={`conversation-gif-${item.id}`}
             >
               <ExpoImage
@@ -876,7 +884,7 @@ const ConversationScreen: React.FC = () => {
               <Text style={[styles.gifTime, item.fromMe && styles.gifTimeMe]}>
                 {formatTime(item.createdAt)}
               </Text>
-            </View>
+            </TouchableOpacity>
           </View>
         );
       }
@@ -1156,6 +1164,29 @@ const ConversationScreen: React.FC = () => {
         }}
         onSelect={handleSendGif}
       />
+      <Modal
+        visible={fullscreenGifUrl !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setFullscreenGifUrl(null)}
+      >
+        <Pressable
+          style={styles.fullscreenBackdrop}
+          onPress={() => setFullscreenGifUrl(null)}
+          accessibilityLabel="Close full-screen GIF"
+          testID="conversation-gif-fullscreen"
+        >
+          {fullscreenGifUrl ? (
+            <ExpoImage
+              source={{ uri: fullscreenGifUrl }}
+              style={styles.fullscreenImage}
+              contentFit="contain"
+              cachePolicy="memory-disk"
+              accessibilityIgnoresInvertColors
+            />
+          ) : null}
+        </Pressable>
+      </Modal>
       <FriendPickerSheet
         visible={contactPickerOpen}
         onClose={() => {
@@ -1653,8 +1684,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   gifCard: {
-    maxWidth: '75%',
-    minWidth: 180,
+    // Match contact / location / invoice card width so GIF bubbles don't
+    // look oddly narrow next to the other attachment types.
+    maxWidth: '85%',
+    minWidth: 240,
     borderRadius: 14,
     overflow: 'hidden',
     shadowColor: '#000',
@@ -1670,9 +1703,24 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
   },
   gifImage: {
-    width: 220,
-    height: 220,
+    // Concrete width matches the contact/location cards' `minWidth: 240`
+    // so the GIF card sizes to the same visual footprint as the other
+    // attachment types (text-driven content would otherwise leave the
+    // gifCard stretched to its `maxWidth` while contact cards sit near
+    // their minWidth).
+    width: 240,
+    height: 240,
     backgroundColor: colors.background,
+  },
+  fullscreenBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fullscreenImage: {
+    width: '100%',
+    height: '100%',
   },
   gifTime: {
     fontSize: 10,
