@@ -78,6 +78,13 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
   const [celebrateAmount, setCelebrateAmount] = useState<number | undefined>(undefined);
   const intervalId = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevBalance = useRef<number | null>(null);
+  // When true, the next observed balance is treated as the "pre-invoice"
+  // baseline and is NOT fired as a received payment. Reset on sheet-open,
+  // wallet-switch, and each new invoice creation — so pending credits
+  // that settle between app-open and invoice-create get absorbed into
+  // the baseline instead of firing a bogus celebration attributed to
+  // the newly-created invoice.
+  const needsBaseline = useRef(true);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   const { sendDirectMessage, contacts } = useNostr();
@@ -111,13 +118,16 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
         if (!wId) return;
         const inv = await makeInvoiceForWallet(wId, sats, 'Lightning Piggy');
         setInvoice(inv);
+        // Re-baseline: any pending credit from a previous invoice must
+        // not fire a celebration attributed to the new one. The first
+        // balance we see after this poll starts becomes the baseline.
+        needsBaseline.current = true;
         // Poll every 1.5 s while the receive sheet is open. NWC
         // notifications (NIP-47) would eliminate the wait entirely, but
         // support is patchy across wallets (LNbits, Mutiny, Alby etc.),
-        // so a short active-poll remains the fallback. Battery cost is
-        // bounded — the interval is cleared as soon as the sheet closes
-        // or the balance increment is detected (see the paymentReceived
-        // handler further down).
+        // so a short active-poll remains the fallback. Polling continues
+        // after a celebration fires so subsequent receives still register
+        // (user could create a second invoice without closing the sheet).
         intervalId.current = setInterval(async () => {
           if (wId) await refreshBalanceForWallet(wId);
         }, 1500);
@@ -138,7 +148,12 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
     if (visible) {
       setCapturedWalletId(activeWalletId);
       setDropdownOpen(false);
-      prevBalance.current = balance;
+      // Baseline is set from the first observed balance (see effect
+      // below), not from the cached value here — the cache may be stale
+      // if the app has been backgrounded and a previous invoice settled
+      // while we weren't polling.
+      prevBalance.current = null;
+      needsBaseline.current = true;
       setOnchainAddress(null);
       setSatsValue('');
       setFiatValue('');
@@ -194,7 +209,10 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
     setPaymentReceived(false);
     setSatsValue('');
     setFiatValue('');
-    prevBalance.current = selectedWallet?.balance ?? null;
+    // Wallet switch clears the baseline; the next balance observed for
+    // the new wallet is treated as the pre-invoice starting point.
+    prevBalance.current = null;
+    needsBaseline.current = true;
     if (intervalId.current) {
       clearInterval(intervalId.current);
       intervalId.current = null;
@@ -210,22 +228,27 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [capturedWalletId]);
 
-  // Detect payment by watching balance changes
+  // Detect payment by watching balance changes. The first balance we
+  // observe after sheet-open / wallet-switch / invoice-regeneration is
+  // treated as the baseline — pending credits from prior invoices get
+  // absorbed here rather than firing a misattributed celebration. On
+  // fire we advance the baseline to the new balance so another incoming
+  // payment (second invoice in the same session) still registers, and
+  // we do NOT stop polling — the overlay stays up until the user taps OK
+  // but the detector continues to work if they dismiss and invoice again.
   useEffect(() => {
-    if (
-      visible &&
-      prevBalance.current !== null &&
-      balance !== null &&
-      balance > prevBalance.current
-    ) {
+    if (!visible || balance === null) return;
+    if (needsBaseline.current) {
+      prevBalance.current = balance;
+      needsBaseline.current = false;
+      return;
+    }
+    if (prevBalance.current !== null && balance > prevBalance.current) {
       const delta = balance - prevBalance.current;
+      prevBalance.current = balance;
       setCelebrateAmount(delta > 0 ? delta : undefined);
       setCelebrateState('success');
       setPaymentReceived(true);
-      if (intervalId.current) {
-        clearInterval(intervalId.current);
-        intervalId.current = null;
-      }
     }
   }, [balance, visible]);
 
