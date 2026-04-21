@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   Alert,
+  AppState,
   Image,
   Linking,
   StyleSheet,
@@ -253,68 +254,99 @@ const ConversationScreen: React.FC = () => {
     load(true);
   }, [load]);
 
-  // Jump to the newest message on first content load. The list is
+  // Jump to the newest message on first content load, and when the user is
+  // already near the bottom and a new message arrives. The list is
   // `inverted`, so offset 0 is the visual bottom (data[0] = newest).
-  // A plain `scrollToEnd` would land on the oldest message.
+  // We track whether the user is "near the bottom" in a ref updated by
+  // `onScroll` so a new message doesn't yank them back from an upward
+  // scroll they did deliberately.
+  const nearBottomRef = useRef(true);
+  const initialScrollDoneRef = useRef(false);
   useEffect(() => {
-    if (items.length === 0) return;
+    if (items.length === 0) {
+      initialScrollDoneRef.current = false;
+      return;
+    }
+    // Always perform the first scroll after items load, regardless of
+    // current scroll position — this is the "open at newest" behaviour.
+    const shouldScroll = !initialScrollDoneRef.current || nearBottomRef.current;
+    if (!shouldScroll) return;
     const t = setTimeout(() => {
-      listRef.current?.scrollToOffset({ offset: 0, animated: false });
+      listRef.current?.scrollToOffset({ offset: 0, animated: initialScrollDoneRef.current });
+      initialScrollDoneRef.current = true;
     }, 50);
     return () => clearTimeout(t);
   }, [items.length]);
 
   // Payment hashes of outgoing invoices that are plausibly still payable —
-  // not expired and not already known paid. Memoised so the polling effect
-  // doesn't re-run on every render.
+  // not expired, not already known paid, and (as a belt-and-braces cap)
+  // Payment hashes known paid from our wallet's own transaction history,
+  // split by direction so we don't mis-flag an invoice paid just because
+  // its payment_hash happens to appear on the wrong side of the ledger
+  // (e.g. a self-payment or a routed tx reusing the same hash).
+  //   - Outgoing invoice we sent, counterparty paid → match an *incoming*
+  //     wallet tx carrying the same payment_hash.
+  //   - Incoming invoice we received, we paid → match an *outgoing* wallet
+  //     tx carrying the same payment_hash.
+  // Wallet-tx sync keeps these fresh for free; no per-invoice NWC poll
+  // needed for either direction.
+  const { paidOutgoingHashes, paidIncomingHashes } = useMemo(() => {
+    const out = new Set<string>();
+    const inc = new Set<string>();
+    for (const w of wallets) {
+      for (const tx of w.transactions) {
+        if (!tx.paymentHash) continue;
+        if (tx.type === 'incoming') out.add(tx.paymentHash);
+        else if (tx.type === 'outgoing') inc.add(tx.paymentHash);
+      }
+    }
+    return { paidOutgoingHashes: out, paidIncomingHashes: inc };
+  }, [wallets]);
+
+  // Helper used in the render path — picks the appropriate set based on the
+  // invoice's direction, layered with the NWC-polled outgoing results.
+  const isInvoicePaid = useCallback(
+    (paymentHash: string, fromMe: boolean): boolean => {
+      if (fromMe) return paidOutgoingHashes.has(paymentHash) || paidHashes.has(paymentHash);
+      return paidIncomingHashes.has(paymentHash);
+    },
+    [paidOutgoingHashes, paidIncomingHashes, paidHashes],
+  );
+
+  // Payment hashes of outgoing invoices that are plausibly still payable —
+  // not expired, not already known paid, and (as a belt-and-braces cap)
+  // not older than 24 h even if they claimed no expiry. That cap keeps the
+  // polling loop from growing without bound across long-running sessions
+  // where old unpaid invoices accumulate in the DM history.
+  const POLL_MAX_AGE_MS = 24 * 60 * 60 * 1000;
   const outgoingOpenHashes = useMemo(() => {
     const now = Date.now();
+    const cutoff = now - POLL_MAX_AGE_MS;
     const hashes: string[] = [];
     for (const m of messages) {
       if (!m.fromMe) continue;
+      if (m.createdAt * 1000 < cutoff) continue;
       const inv = extractInvoice(m.text);
       if (!inv || !inv.paymentHash) continue;
+      if (paidOutgoingHashes.has(inv.paymentHash)) continue;
       if (paidHashes.has(inv.paymentHash)) continue;
       if (inv.expiresAt !== null && inv.expiresAt * 1000 < now) continue;
       hashes.push(inv.paymentHash);
     }
     return hashes;
-  }, [messages, paidHashes]);
-
-  // Payment hashes known paid from our wallet's own transaction history.
-  // Covers both directions of the conversation:
-  //   - Invoice we sent, counterparty paid → appears as an *incoming* tx
-  //     on our wallet, carrying the invoice's payment_hash.
-  //   - Invoice we received, we paid → appears as an *outgoing* tx,
-  //     also carrying the same payment_hash.
-  // This avoids a per-invoice NWC lookupInvoice poll; the wallet tx list
-  // is already kept in sync and recomputes for free whenever it updates.
-  const paidFromWalletHashes = useMemo(() => {
-    const hashes = new Set<string>();
-    for (const w of wallets) {
-      for (const tx of w.transactions) {
-        if (tx.paymentHash) hashes.add(tx.paymentHash);
-      }
-    }
-    return hashes;
-  }, [wallets]);
-
-  // Unified paid set for rendering: NWC-polled settled outgoing invoices +
-  // anything our wallet's tx history has already recorded (either direction).
-  const allPaidHashes = useMemo(() => {
-    const merged = new Set(paidHashes);
-    paidFromWalletHashes.forEach((h) => merged.add(h));
-    return merged;
-  }, [paidHashes, paidFromWalletHashes]);
+  }, [messages, paidOutgoingHashes, paidHashes]);
 
   // Poll NWC for the paid status of outgoing invoices. Lightning-only.
-  // We assume the active wallet is the one that issued the invoice — not
-  // strictly true if the user switched wallets mid-session, but the cost
-  // of a miss is that a paid invoice stays "unpaid" in the UI.
+  // Gated on `AppState === 'active'` so we don't burn battery or hammer
+  // the relay while the app is backgrounded. We assume the active wallet
+  // is the one that issued the invoice — not strictly true if the user
+  // switched wallets mid-session, but a miss just means the UI stays
+  // "unpaid" until the next wallet tx sync resolves it.
   useEffect(() => {
     if (!activeWalletId || activeWallet?.walletType === 'onchain') return;
     if (outgoingOpenHashes.length === 0) return;
     let cancelled = false;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
     const poll = async () => {
       for (const hash of outgoingOpenHashes) {
         if (cancelled) return;
@@ -330,11 +362,25 @@ const ConversationScreen: React.FC = () => {
         }
       }
     };
-    poll();
-    const id = setInterval(poll, 15_000);
+    const start = () => {
+      if (intervalId !== null) return;
+      poll();
+      intervalId = setInterval(poll, 15_000);
+    };
+    const stop = () => {
+      if (intervalId === null) return;
+      clearInterval(intervalId);
+      intervalId = null;
+    };
+    if (AppState.currentState === 'active') start();
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') start();
+      else stop();
+    });
     return () => {
       cancelled = true;
-      clearInterval(id);
+      stop();
+      sub.remove();
     };
   }, [activeWalletId, activeWallet?.walletType, outgoingOpenHashes]);
 
@@ -370,14 +416,6 @@ const ConversationScreen: React.FC = () => {
     }
   }, [draft, sending, sendDirectMessage, pubkey]);
 
-  const handleOpenZap = useCallback(() => {
-    if (!lightningAddress) {
-      Alert.alert('No Lightning address', `${name} does not have a Lightning address.`);
-      return;
-    }
-    setSendSheetOpen(true);
-  }, [lightningAddress, name]);
-
   const handleShareLocation = useCallback(async () => {
     if (sharingLocation) return;
     setAttachSheetOpen(false);
@@ -390,15 +428,29 @@ const ConversationScreen: React.FC = () => {
       }
       const loc = result.location;
       await new Promise<void>((resolve) => {
+        // `pressed` guards against `onDismiss` firing while a button's
+        // onPress is still awaiting `sendDirectMessage`. Without it, the
+        // outer Promise can resolve early, clear `sharingLocation`, and
+        // re-enable the Attach button mid-publish — a classic double-submit
+        // window we don't want.
+        let pressed = false;
         Alert.alert(
           `Share location with ${name}?`,
           `${formatCoordsForDisplay(loc)}\n\nYour message will be end-to-end encrypted. ${name} will see a map preview from OpenStreetMap.`,
           [
-            { text: 'Cancel', style: 'cancel', onPress: () => resolve() },
+            {
+              text: 'Cancel',
+              style: 'cancel',
+              onPress: () => {
+                pressed = true;
+                resolve();
+              },
+            },
             {
               text: 'Share',
               style: 'default',
               onPress: async () => {
+                pressed = true;
                 const text = formatGeoMessage(loc);
                 const sendResult = await sendDirectMessage(pubkey, text);
                 if (!sendResult.success) {
@@ -418,7 +470,12 @@ const ConversationScreen: React.FC = () => {
               },
             },
           ],
-          { cancelable: true, onDismiss: () => resolve() },
+          {
+            cancelable: true,
+            onDismiss: () => {
+              if (!pressed) resolve();
+            },
+          },
         );
       });
     } finally {
@@ -439,7 +496,8 @@ const ConversationScreen: React.FC = () => {
         const invoice = extractInvoice(item.text);
         if (invoice) {
           const expired = invoice.expiresAt !== null && invoice.expiresAt * 1000 < Date.now();
-          const paid = invoice.paymentHash !== null && allPaidHashes.has(invoice.paymentHash);
+          const paid =
+            invoice.paymentHash !== null && isInvoicePaid(invoice.paymentHash, item.fromMe);
           return (
             <View
               style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
@@ -668,7 +726,7 @@ const ConversationScreen: React.FC = () => {
         </View>
       );
     },
-    [openLocation, allPaidHashes],
+    [openLocation, isInvoicePaid],
   );
 
   const avatarNode =
@@ -745,6 +803,13 @@ const ConversationScreen: React.FC = () => {
               </View>
             }
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+            onScroll={(e) => {
+              // "Near bottom" in an inverted list = scroll offset ~0.
+              // 80 px gives enough slack that a brief finger rest still
+              // qualifies as "at bottom" for the auto-scroll effect.
+              nearBottomRef.current = e.nativeEvent.contentOffset.y < 80;
+            }}
+            scrollEventThrottle={100}
           />
         )}
 

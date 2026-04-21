@@ -1,4 +1,5 @@
 import * as Location from 'expo-location';
+import Constants from 'expo-constants';
 
 export interface SharedLocation {
   lat: number;
@@ -180,7 +181,16 @@ export function buildOsmViewUrl(loc: SharedLocation, zoom = 16): string {
 // and identify ourselves with a specific User-Agent — the caller is
 // responsible for passing `USER_AGENT` through `source.headers`.
 // See https://operations.osmfoundation.org/policies/tiles/
-export const USER_AGENT = 'LightningPiggyMobile/dev (+https://lightningpiggy.com)';
+//
+// The UA includes the app version so OSMF ops can correlate requests with
+// a specific release if one misbehaves. `expo-constants` reads version
+// from `app.config.ts` at build time and works in all environments
+// (dev, preview, production) without a separate native module.
+const APP_VERSION =
+  (Constants.expoConfig?.version as string | undefined) ??
+  (Constants.manifest?.version as string | undefined) ??
+  '0.0.0';
+export const USER_AGENT = `LightningPiggyMobile/${APP_VERSION} (+https://lightningpiggy.com)`;
 
 function lonToTileX(lon: number, z: number): number {
   return Math.floor(((lon + 180) / 360) * Math.pow(2, z));
@@ -201,9 +211,7 @@ export function buildStaticMapUrl(loc: SharedLocation, opts: { zoom?: number } =
 }
 
 export function formatCoordsForDisplay(loc: SharedLocation): string {
-  const lat = loc.lat.toFixed(4);
-  const lon = loc.lon.toFixed(4);
   const ns = loc.lat >= 0 ? 'N' : 'S';
   const ew = loc.lon >= 0 ? 'E' : 'W';
-  return `${Math.abs(Number(lat)).toFixed(4)}° ${ns}, ${Math.abs(Number(lon)).toFixed(4)}° ${ew}`;
+  return `${Math.abs(loc.lat).toFixed(4)}° ${ns}, ${Math.abs(loc.lon).toFixed(4)}° ${ew}`;
 }
