@@ -664,7 +664,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const fetchTransactionsForWallet = useCallback(
     async (walletId: string) => {
-      const wallet = wallets.find((w) => w.id === walletId);
+      // Read from walletsRef, not the closure's captured `wallets`: this
+      // callback is fired-and-forgotten by SendSheet after pay-success,
+      // so by the time the awaited setTimeout resolves, the closure's
+      // `wallets` snapshot is already stale and `find()` returns the old
+      // wallet — or undefined after a removal — and we silently bail.
+      // See #123.
+      const wallet = walletsRef.current.find((w) => w.id === walletId);
       if (!wallet) return;
 
       try {
@@ -688,8 +694,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           const raw = await nwcService.listTransactions(walletId);
           // Preserve any previously resolved zap sender info so a refresh
           // doesn't re-trigger relay lookups for transactions we've already
-          // attributed.
-          const existing = wallets.find((w) => w.id === walletId)?.transactions ?? [];
+          // attributed. Also preserves optimistic counterparty entries
+          // written at pay-time (see SendSheet) so the zap card doesn't
+          // flicker out when the LNbits refresh lands.
+          const existing = walletsRef.current.find((w) => w.id === walletId)?.transactions ?? [];
           const counterpartyByHash = new Map<string, WalletTransaction['zapCounterparty']>();
           for (const prev of existing) {
             if (prev.paymentHash && prev.zapCounterparty !== undefined) {
@@ -722,6 +730,26 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               typeof tx.fees_paid === 'number' ? Math.round(tx.fees_paid / 1000) : undefined,
             zapCounterparty: tx.payment_hash ? counterpartyByHash.get(tx.payment_hash) : undefined,
           }));
+          // Preserve optimistic rows that SendSheet inserted at pay-time but
+          // LNbits hasn't flushed into its own ledger yet. Without this the
+          // freshly-sent zap would disappear from the conversation thread on
+          // the very next refresh, then reappear a second or two later when
+          // LNbits catches up. Only rows marked `optimistic` are preserved —
+          // we match by paymentHash so when LNbits returns the real tx the
+          // optimistic entry is dropped and replaced. (Using a flag, rather
+          // than "any row not in the server response", avoids regrowing
+          // older historical txs that fell off the listTransactions window.)
+          const returnedHashes = new Set(
+            txs.map((t) => t.paymentHash).filter((h): h is string => !!h),
+          );
+          const stillPending = existing.filter(
+            (t) => t.optimistic && t.paymentHash && !returnedHashes.has(t.paymentHash),
+          );
+          if (stillPending.length > 0) {
+            txs = [...stillPending, ...txs].sort(
+              (a, b) => (b.settled_at ?? b.created_at ?? 0) - (a.settled_at ?? a.created_at ?? 0),
+            );
+          }
         }
         updateWalletInState(walletId, { transactions: txs });
 
@@ -737,7 +765,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         console.warn(`fetchTransactions failed for ${walletId}:`, error);
       }
     },
-    [wallets, updateWalletInState],
+    // `walletsRef` is stable, so we don't need `wallets` in the deps. Keeping
+    // the list short means callers that capture this function (e.g. SendSheet's
+    // post-pay refresh IIFE) hold onto a stable reference across renders.
+    [updateWalletInState],
   );
 
   /**
