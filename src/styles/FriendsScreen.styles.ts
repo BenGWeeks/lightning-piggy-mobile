@@ -32,11 +32,6 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  homeIcon: {
-    width: 20,
-    height: 20,
-    tintColor: colors.brandPink,
-  },
   title: {
     color: colors.white,
     fontSize: 28,

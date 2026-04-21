@@ -29,11 +29,6 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 10,
   },
-  homeIcon: {
-    width: 20,
-    height: 20,
-    tintColor: colors.brandPink,
-  },
   headerOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(236, 0, 140, 0.65)', // brandPink with 65% opacity

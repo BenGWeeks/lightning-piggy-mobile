@@ -8,7 +8,8 @@ import {
   getCourseCompletedCount,
   isCourseComplete,
 } from '../services/learnProgressService';
-import { Check } from 'lucide-react-native';
+import { Check, Home } from 'lucide-react-native';
+import { colors } from '../styles/theme';
 import { styles } from '../styles/LearnScreen.styles';
 
 import { LearnNavigation } from '../navigation/types';
@@ -40,11 +41,7 @@ const LearnScreen: React.FC<Props> = ({ navigation }) => {
           style={styles.homeButton}
           onPress={() => navigation.getParent()?.navigate('Home')}
         >
-          <Image
-            source={require('../../assets/images/Home.png')}
-            style={styles.homeIcon}
-            resizeMode="contain"
-          />
+          <Home size={20} color={colors.brandPink} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Learn</Text>
       </View>

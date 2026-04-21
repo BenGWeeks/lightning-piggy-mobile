@@ -11,7 +11,9 @@ import {
 } from 'react-native';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
+import { Home } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { colors } from '../styles/theme';
 import { useNavigation, CompositeNavigationProp } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -385,12 +387,10 @@ const FriendsScreen: React.FC = () => {
           <TouchableOpacity
             style={styles.homeButton}
             onPress={() => navigation.navigate('Home', {})}
+            accessibilityLabel="Go home"
+            testID="friends-home-button"
           >
-            <Image
-              source={require('../../assets/images/Home.png')}
-              style={styles.homeIcon}
-              resizeMode="contain"
-            />
+            <Home size={20} color={colors.brandPink} />
           </TouchableOpacity>
           <Text style={styles.title}>Friends</Text>
           <View style={{ flex: 1 }} />

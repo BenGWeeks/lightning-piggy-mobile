@@ -23,7 +23,7 @@ import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
 import { CURRENCIES } from '../services/fiatService';
-import { Trash2, Eye, EyeOff, ChevronUp, ChevronDown, Zap } from 'lucide-react-native';
+import { Trash2, Eye, EyeOff, ChevronUp, ChevronDown, Zap, Home } from 'lucide-react-native';
 import { getElectrumServer, setElectrumServer } from '../services/walletStorageService';
 import { disconnectElectrum } from '../services/onchainService';
 import CopyIcon from '../components/icons/CopyIcon';
@@ -273,11 +273,7 @@ const AccountScreen: React.FC = () => {
             accessibilityLabel="Go home"
             testID="account-home-button"
           >
-            <Image
-              source={require('../../assets/images/Home.png')}
-              style={styles.homeIcon}
-              resizeMode="contain"
-            />
+            <Home size={20} color={colors.brandPink} />
           </TouchableOpacity>
           <Text style={styles.title}>Account</Text>
         </View>
@@ -671,11 +667,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.9)',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  homeIcon: {
-    width: 20,
-    height: 20,
-    tintColor: colors.brandPink,
   },
   title: {
     color: colors.white,

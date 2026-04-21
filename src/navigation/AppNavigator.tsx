@@ -1,8 +1,9 @@
 import React from 'react';
-import { Image, StyleSheet, ActivityIndicator, View, Platform } from 'react-native';
+import { StyleSheet, ActivityIndicator, View, Platform } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { Home, PiggyBank, GraduationCap, Users } from 'lucide-react-native';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
 import { RootStackParamList, LearnStackParamList, MainTabParamList } from './types';
@@ -16,7 +17,6 @@ import CourseDetailScreen from '../screens/CourseDetailScreen';
 import MissionDetailScreen from '../screens/MissionDetailScreen';
 import AccountScreen from '../screens/AccountScreen';
 import FriendsScreen from '../screens/FriendsScreen';
-import FriendsIcon from '../components/icons/FriendsIcon';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -59,11 +59,8 @@ function HomeTabs() {
         options={{
           tabBarButtonTestID: 'tab-home',
           tabBarAccessibilityLabel: 'Home tab',
-          tabBarIcon: ({ focused }) => (
-            <Image
-              source={require('../../assets/images/Home.png')}
-              style={[styles.tabIcon, focused && styles.tabIconActive]}
-            />
+          tabBarIcon: ({ focused, color }) => (
+            <Home size={22} color={color} strokeWidth={focused ? 2.5 : 2} />
           ),
         }}
       />
@@ -73,11 +70,8 @@ function HomeTabs() {
         options={{
           tabBarButtonTestID: 'tab-earn',
           tabBarAccessibilityLabel: 'Earn tab',
-          tabBarIcon: ({ focused }) => (
-            <Image
-              source={require('../../assets/images/Earn.png')}
-              style={[styles.tabIcon, focused && styles.tabIconActive]}
-            />
+          tabBarIcon: ({ focused, color }) => (
+            <PiggyBank size={22} color={color} strokeWidth={focused ? 2.5 : 2} />
           ),
         }}
       />
@@ -87,11 +81,8 @@ function HomeTabs() {
         options={{
           tabBarButtonTestID: 'tab-learn',
           tabBarAccessibilityLabel: 'Learn tab',
-          tabBarIcon: ({ focused }) => (
-            <Image
-              source={require('../../assets/images/Learn.png')}
-              style={[styles.tabIcon, focused && styles.tabIconActive]}
-            />
+          tabBarIcon: ({ focused, color }) => (
+            <GraduationCap size={22} color={color} strokeWidth={focused ? 2.5 : 2} />
           ),
         }}
       />
@@ -101,8 +92,8 @@ function HomeTabs() {
         options={{
           tabBarButtonTestID: 'tab-friends',
           tabBarAccessibilityLabel: 'Friends tab',
-          tabBarIcon: ({ focused }) => (
-            <FriendsIcon size={22} color={focused ? colors.brandPink : colors.textSupplementary} />
+          tabBarIcon: ({ focused, color }) => (
+            <Users size={22} color={color} strokeWidth={focused ? 2.5 : 2} />
           ),
         }}
       />
@@ -164,15 +155,6 @@ export default function AppNavigator() {
 }
 
 const styles = StyleSheet.create({
-  tabIcon: {
-    width: 22,
-    height: 22,
-    resizeMode: 'contain' as const,
-    tintColor: colors.textSupplementary,
-  },
-  tabIconActive: {
-    tintColor: colors.brandPink,
-  },
   loadingContainer: {
     flex: 1,
     backgroundColor: colors.brandPink,
