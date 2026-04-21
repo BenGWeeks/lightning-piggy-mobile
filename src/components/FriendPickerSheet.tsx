@@ -218,6 +218,11 @@ const FriendPickerSheet: React.FC<Props> = ({
       android_keyboardInputMode="adjustResize"
       enableContentPanningGesture={false}
       enableOverDrag={false}
+      // v5 defaults `enableDynamicSizing` to true → sheet height tracks
+      // content height, which collapses to ~0 when Android `adjustResize`
+      // shrinks the window as the keyboard opens (gorhom#1602). Turning
+      // it off locks the sheet to its explicit snap point.
+      enableDynamicSizing={false}
       topInset={topInset}
       // Stack on top of the ReceiveSheet rather than dismissing it —
       // @gorhom's default "switch" makes the parent modal dismiss, which
