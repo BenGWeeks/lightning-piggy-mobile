@@ -449,7 +449,8 @@ const AccountScreen: React.FC = () => {
           accessibilityLabel="Blossom image server"
         />
         <Text style={styles.fieldHint}>
-          Used to host images you send in chats and set as your profile picture.
+          Hosts images you send in chats and set as your profile picture. Any Blossom
+          (BUD-01/BUD-02) server works — e.g. blossom.primal.net or nostr.build.
         </Text>
 
         {/* Wallets summary */}
