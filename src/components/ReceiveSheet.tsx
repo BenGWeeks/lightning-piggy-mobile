@@ -74,6 +74,10 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
   const [friendPickerOpen, setFriendPickerOpen] = useState(false);
   const [sendingToFriend, setSendingToFriend] = useState(false);
   const intervalId = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Timer that downshifts the poll cadence once the user has been
+  // actively waiting for a payment for a while. Avoids running a 1.5 s
+  // poll forever if the user leaves the sheet open and walks away.
+  const pollDownshiftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevBalance = useRef<number | null>(null);
   // When true, the next observed balance is treated as the "pre-invoice"
   // baseline and is NOT fired as a received payment. Reset on sheet-open,
@@ -119,15 +123,26 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
         // not fire a celebration attributed to the new one. The first
         // balance we see after this poll starts becomes the baseline.
         needsBaseline.current = true;
-        // Poll every 1.5 s while the receive sheet is open. NWC
-        // notifications (NIP-47) would eliminate the wait entirely, but
-        // support is patchy across wallets (LNbits, Mutiny, Alby etc.),
-        // so a short active-poll remains the fallback. Polling continues
-        // after a celebration fires so subsequent receives still register
-        // (user could create a second invoice without closing the sheet).
+        // Poll every 1.5 s for the first 3 minutes after invoice
+        // creation — that's the window the user is actively waiting for
+        // payment. After that, stop the aggressive poll: the global
+        // WalletContext poll (every 10 s while foreground) still catches
+        // payments that come in later, just a bit slower. Prevents
+        // forever-1.5 s battery/network drain if the user leaves the
+        // sheet open and walks away.
+        if (pollDownshiftTimer.current) clearTimeout(pollDownshiftTimer.current);
         intervalId.current = setInterval(async () => {
           if (wId) await refreshBalanceForWallet(wId);
         }, 1500);
+        pollDownshiftTimer.current = setTimeout(
+          () => {
+            if (intervalId.current) {
+              clearInterval(intervalId.current);
+              intervalId.current = null;
+            }
+          },
+          3 * 60 * 1000,
+        );
       } catch (error) {
         console.warn('Failed to create invoice:', error);
       } finally {
@@ -182,6 +197,10 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
       if (intervalId.current) {
         clearInterval(intervalId.current);
         intervalId.current = null;
+      }
+      if (pollDownshiftTimer.current) {
+        clearTimeout(pollDownshiftTimer.current);
+        pollDownshiftTimer.current = null;
       }
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
     };
