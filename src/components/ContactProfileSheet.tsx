@@ -17,8 +17,7 @@ import {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import Svg, { Circle, Path } from 'react-native-svg';
-import ZapIcon from './icons/ZapIcon';
-import CopyIcon from './icons/CopyIcon';
+import { Zap, Copy } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
 import { npubEncode } from '../services/nostrService';
 import { useNostr } from '../contexts/NostrContext';
@@ -39,6 +38,7 @@ interface Props {
   onClose: () => void;
   contact: ContactData | null;
   onZap?: () => void;
+  onMessage?: () => void;
   onSetLightningAddress?: (address: string) => void;
 }
 
@@ -47,6 +47,7 @@ const ContactProfileSheet: React.FC<Props> = ({
   onClose,
   contact,
   onZap,
+  onMessage,
   onSetLightningAddress,
 }) => {
   const sheetRef = useRef<BottomSheetModal>(null);
@@ -229,7 +230,7 @@ const ContactProfileSheet: React.FC<Props> = ({
         {npubDisplay && (
           <TouchableOpacity style={styles.npubRow} onPress={handleCopyNpub}>
             <Text style={styles.npubText}>{npubDisplay}</Text>
-            <CopyIcon size={20} color={colors.brandPink} />
+            <Copy size={20} color={colors.brandPink} />
           </TouchableOpacity>
         )}
 
@@ -303,9 +304,28 @@ const ContactProfileSheet: React.FC<Props> = ({
               </Text>
             </TouchableOpacity>
           )}
+          {contact.pubkey && onMessage && (
+            <TouchableOpacity
+              style={styles.messageButton}
+              onPress={onMessage}
+              accessibilityLabel="Message"
+              testID="contact-message-button"
+            >
+              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                <Path
+                  d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+                  stroke={colors.white}
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </Svg>
+              <Text style={styles.messageButtonText}>Message</Text>
+            </TouchableOpacity>
+          )}
           {contact.lightningAddress && onZap && (
             <TouchableOpacity style={styles.zapButton} onPress={onZap}>
-              <ZapIcon size={20} color={colors.white} />
+              <Zap size={20} color={colors.white} fill={colors.white} />
               <Text style={styles.zapButtonText}>Zap</Text>
             </TouchableOpacity>
           )}
@@ -462,23 +482,25 @@ const styles = StyleSheet.create({
   },
   actionRow: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 8,
     marginTop: 20,
-    paddingHorizontal: 24,
+    paddingHorizontal: 16,
   },
   followButton: {
-    paddingHorizontal: 24,
+    paddingHorizontal: 14,
     paddingVertical: 12,
     borderRadius: 10,
     borderWidth: 1.5,
     borderColor: colors.brandPink,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   followingButton: {
     backgroundColor: colors.brandPinkLight,
     borderColor: colors.brandPinkLight,
   },
   followButtonText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
     color: colors.brandPink,
   },
@@ -488,19 +510,35 @@ const styles = StyleSheet.create({
   zapButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 24,
+    justifyContent: 'center',
+    gap: 4,
+    paddingHorizontal: 14,
     paddingVertical: 12,
     borderRadius: 10,
     backgroundColor: colors.brandPink,
   },
   zapButtonText: {
-    fontSize: 15,
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.white,
+  },
+  messageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: colors.brandPink,
+  },
+  messageButtonText: {
+    fontSize: 14,
     fontWeight: '700',
     color: colors.white,
   },
   viewProfileButton: {
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     paddingVertical: 12,
     borderRadius: 10,
     borderWidth: 1.5,

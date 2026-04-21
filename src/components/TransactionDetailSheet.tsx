@@ -22,7 +22,6 @@ import { createDmSender } from '../utils/nostrDm';
 import { truncateMiddle, formatFriendlyDateTime } from '../utils/format';
 import { getTxCategory } from '../utils/txCategory';
 import TransactionTypeIcon from './TransactionTypeIcon';
-import ContactProfileSheet from './ContactProfileSheet';
 import type { ZapCounterpartyInfo } from '../types/wallet';
 import { colors } from '../styles/theme';
 import { BOLTZ_SUPPORT_NPUB, dmRecipient } from '../constants/npubs';
@@ -45,6 +44,16 @@ export interface TransactionDetailData {
   zapCounterparty?: ZapCounterpartyInfo | null;
 }
 
+export interface CounterpartyContact {
+  pubkey: string;
+  name: string;
+  picture: string | null;
+  banner: string | null;
+  nip05: string | null;
+  lightningAddress: string | null;
+  source: 'nostr';
+}
+
 function zapCounterpartyName(sender: ZapCounterpartyInfo): string {
   if (sender.anonymous) return 'Anonymous';
   const p = sender.profile;
@@ -55,6 +64,12 @@ interface Props {
   visible: boolean;
   tx: TransactionDetailData | null;
   onClose: () => void;
+  /** Raised when the user taps the sender/recipient card. The parent
+   *  should close this sheet and present its own ContactProfileSheet —
+   *  rendering the child sheet inside this one stacks a second modal on
+   *  top of an already-visible modal, which looks crowded and fights
+   *  @gorhom's modal dismissal semantics. */
+  onCounterpartyPress?: (contact: CounterpartyContact) => void;
 }
 
 type BoltzSwapView = {
@@ -87,15 +102,14 @@ const CopyRow: React.FC<{
   </TouchableOpacity>
 );
 
-const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
+const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose, onCounterpartyPress }) => {
   const { btcPrice, currency, activeWallet } = useWallet();
-  const { isLoggedIn, signerType, sendDirectMessage } = useNostr();
+  const { isLoggedIn, signerType, sendDirectMessage, contacts } = useNostr();
   const sheetRef = useRef<BottomSheetModal>(null);
   const [swap, setSwap] = useState<BoltzSwapView | null>(null);
   const [resolvedSwapId, setResolvedSwapId] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [supportSheetOpen, setSupportSheetOpen] = useState(false);
-  const [senderProfileOpen, setSenderProfileOpen] = useState(false);
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
   // Some NWC backends (notably LNbits) omit preimage/invoice from
   // list_transactions; fill them in via lookupInvoice when the sheet opens.
@@ -131,7 +145,6 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
       if (/send to btc|send to bitcoin/i.test(tx.description)) return true;
       if (/receive from btc|receive from bitcoin/i.test(tx.description)) return true;
     }
-    if (!tx.settled_at && !tx.blockHeight) return true;
     return false;
   }, [tx]);
 
@@ -275,14 +288,22 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
   const counterpartyNpubDisplay = zapCounterparty?.profile?.npub
     ? `${zapCounterparty.profile.npub.slice(0, 14)}…${zapCounterparty.profile.npub.slice(-6)}`
     : null;
-  const counterpartyContact =
+  // NIP-57 receipts carry name / picture / nip05 but not the banner or
+  // the lud16 lightning address — fall back to the kind-0 profile cached
+  // from the contact list so the sheet shown from Transactions matches
+  // the richer one shown from Friends.
+  const counterpartyCachedProfile = zapCounterparty?.pubkey
+    ? (contacts.find((c) => c.pubkey === zapCounterparty.pubkey)?.profile ?? null)
+    : null;
+  const counterpartyContact: CounterpartyContact | null =
     zapCounterparty && !zapCounterparty.anonymous && zapCounterparty.pubkey
       ? {
           pubkey: zapCounterparty.pubkey,
           name: zapCounterpartyName(zapCounterparty),
-          picture: zapCounterparty.profile?.picture ?? null,
-          nip05: zapCounterparty.profile?.nip05 ?? null,
-          lightningAddress: null,
+          picture: zapCounterparty.profile?.picture ?? counterpartyCachedProfile?.picture ?? null,
+          banner: counterpartyCachedProfile?.banner ?? null,
+          nip05: zapCounterparty.profile?.nip05 ?? counterpartyCachedProfile?.nip05 ?? null,
+          lightningAddress: counterpartyCachedProfile?.lud16 ?? null,
           source: 'nostr' as const,
         }
       : null;
@@ -326,9 +347,14 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
               <Text style={styles.senderLabel}>{isIncoming ? 'Sender' : 'Recipient'}</Text>
               <TouchableOpacity
                 style={styles.senderCard}
-                onPress={() => counterpartyContact && setSenderProfileOpen(true)}
-                disabled={!counterpartyContact}
+                onPress={() => {
+                  if (!counterpartyContact) return;
+                  onClose();
+                  onCounterpartyPress?.(counterpartyContact);
+                }}
+                disabled={!counterpartyContact || !onCounterpartyPress}
                 accessibilityLabel={`${isIncoming ? 'Sender' : 'Recipient'} ${zapCounterpartyName(zapCounterparty)}`}
+                testID="tx-detail-sender-card"
               >
                 {zapCounterparty.profile?.picture ? (
                   <Image
@@ -449,13 +475,6 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose }) => {
           </View>
         </BottomSheetView>
       </BottomSheetModal>
-      {counterpartyContact ? (
-        <ContactProfileSheet
-          visible={senderProfileOpen}
-          onClose={() => setSenderProfileOpen(false)}
-          contact={counterpartyContact}
-        />
-      ) : null}
       <FeedbackSheet
         visible={supportSheetOpen}
         onClose={() => setSupportSheetOpen(false)}

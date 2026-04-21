@@ -1,0 +1,24 @@
+appId: com.lightningpiggy.app.dev
+name: Accept Nostr profile (adopt lud16 + displayName)
+---
+# After logging in, the app offers to overwrite the locally-entered name
+# and lightning address with the Nostr profile's values. Accepting gives
+# us a lightning address (lud16) without needing to add a wallet first —
+# the Receive → Address flow then works end-to-end.
+
+# Trigger the login flow (which surfaces the profile-update alert)
+- tapOn: { id: 'tab-home', optional: true }
+- waitForAnimationToEnd: { timeout: 2000 }
+- tapOn: { id: 'profile-icon' }
+- waitForAnimationToEnd: { timeout: 3000 }
+
+# If the alert is showing from previous session, adopt the profile
+- tapOn: { text: 'UPDATE', optional: true }
+- waitForAnimationToEnd: { timeout: 2000 }
+
+# Scroll down to find the lightning address row to confirm it's set
+- swipe:
+    start: 50%, 70%
+    end: 50%, 30%
+    duration: 300
+- waitForAnimationToEnd: { timeout: 1000 }
