@@ -68,8 +68,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       'expo-location',
       {
-        locationAlwaysAndWhenInUsePermission:
-          'Allow Lightning Piggy to access your location so you can share it in a private message.',
         locationWhenInUsePermission:
           'Allow Lightning Piggy to access your location so you can share it in a private message.',
         isAndroidBackgroundLocationEnabled: false,

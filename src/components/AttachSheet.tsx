@@ -85,9 +85,7 @@ const AttachSheet: React.FC<Props> = ({
             </View>
             <View style={styles.rowText}>
               <Text style={styles.rowTitle}>Send zap</Text>
-              <Text style={styles.rowSubtitle}>
-                Pay sats to their lightning address.
-              </Text>
+              <Text style={styles.rowSubtitle}>Pay sats to their lightning address.</Text>
             </View>
           </TouchableOpacity>
         ) : null}
@@ -103,9 +101,7 @@ const AttachSheet: React.FC<Props> = ({
             </View>
             <View style={styles.rowText}>
               <Text style={styles.rowTitle}>Send invoice</Text>
-              <Text style={styles.rowSubtitle}>
-                Create a bolt11 invoice and DM it to them.
-              </Text>
+              <Text style={styles.rowSubtitle}>Create a bolt11 invoice and DM it to them.</Text>
             </View>
           </TouchableOpacity>
         ) : null}

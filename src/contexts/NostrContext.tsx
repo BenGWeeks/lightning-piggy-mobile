@@ -757,9 +757,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // whose NIP-65 list has a single entry (and no in-app UI to edit it)
       // hits a single-point failure the moment that relay is slow.
       const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-      const targetRelays = Array.from(
-        new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]),
-      );
+      const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
       try {
         if (signerType === 'nsec') {
           const nsec = await SecureStore.getItemAsync(NSEC_KEY);

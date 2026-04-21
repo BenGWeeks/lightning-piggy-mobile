@@ -812,7 +812,12 @@ const ConversationScreen: React.FC = () => {
       <ReceiveSheet
         visible={invoiceSheetOpen}
         onClose={() => setInvoiceSheetOpen(false)}
-        presetFriend={{ pubkey, name, picture: picture ?? null, lightningAddress: lightningAddress ?? null }}
+        presetFriend={{
+          pubkey,
+          name,
+          picture: picture ?? null,
+          lightningAddress: lightningAddress ?? null,
+        }}
         onSent={(payload) => {
           setMessages((prev) => [
             ...prev,

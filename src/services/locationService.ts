@@ -152,8 +152,19 @@ export function parseGeoMessage(text: string): SharedLocation | null {
   const lon = Number(m[2]);
   if (!isFinite(lat) || !isFinite(lon)) return null;
   if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+  // Guard the `u=` accuracy: a malicious / buggy sender could pass a very
+  // large value that Number() coerces to Infinity, or a negative / nonsense
+  // value. The 40 000 000 m ceiling is larger than Earth's circumference —
+  // anything past it is garbage, not a real uncertainty radius.
+  const ACCURACY_MAX_M = 40_000_000;
   const accRaw = m[3];
-  const accuracyMeters = accRaw !== undefined ? Math.round(Number(accRaw)) : null;
+  let accuracyMeters: number | null = null;
+  if (accRaw !== undefined) {
+    const n = Number(accRaw);
+    if (isFinite(n) && n >= 0 && n < ACCURACY_MAX_M) {
+      accuracyMeters = Math.round(n);
+    }
+  }
   return { lat, lon, accuracyMeters };
 }
 
