@@ -108,8 +108,11 @@ async function fetchGiphy(path: string, params: Record<string, string>): Promise
   }
   const qs = new URLSearchParams({
     api_key: key,
-    rating: 'g',
     ...params,
+    // `rating` is pinned AFTER the caller-supplied params so no caller
+    // can accidentally (or maliciously) loosen the safety filter by
+    // passing their own `rating` key.
+    rating: 'g',
   });
   const res = await fetch(`${GIPHY_BASE}${path}?${qs.toString()}`);
   if (!res.ok) {
@@ -143,7 +146,10 @@ export async function getTrending(limit = DEFAULT_LIMIT): Promise<Gif[]> {
 // get silently upgraded to an auto-playing image bubble — only GIFs we
 // recognise as coming from our own picker render inline.
 // `media\d*` covers `media.giphy.com`, `media0.giphy.com` … `media4.giphy.com`.
-const GIPHY_URL_REGEX = /\bhttps?:\/\/(?:i|media\d*)\.giphy\.com\/[^\s]+\.(?:gif|webp)\b/i;
+// Extension is restricted to `.gif` to match the DM payload contract the
+// picker emits (the `fixed_width` GIPHY format). If we ever start sending
+// animated WebP, both this regex and the send path need to agree.
+const GIPHY_URL_REGEX = /\bhttps?:\/\/(?:i|media\d*)\.giphy\.com\/[^\s]+\.gif\b/i;
 
 /**
  * If the DM body is just a GIPHY URL (with optional surrounding

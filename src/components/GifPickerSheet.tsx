@@ -9,7 +9,7 @@ import {
   Platform,
   ActivityIndicator,
   Linking,
-  Dimensions,
+  useWindowDimensions,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Search, X } from 'lucide-react-native';
@@ -46,26 +46,31 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   const configured = isConfigured();
+  const { width: windowWidth } = useWindowDimensions();
 
   // Derive tile width from the live window size so rotation and tablet
   // layouts keep a square-ish grid. The sheet is full-width inside a
   // 20 px horizontal padding and the tiles are separated by `GRID_GAP`.
   const tileWidth = useMemo(() => {
-    const w = Dimensions.get('window').width;
-    const inner = w - 20 * 2;
+    const inner = windowWidth - 20 * 2;
     const totalGap = GRID_GAP * (GRID_COLUMNS - 1);
     return Math.floor((inner - totalGap) / GRID_COLUMNS);
-  }, []);
+  }, [windowWidth]);
 
   useEffect(() => {
     if (visible) {
+      // Clear everything so the next open starts on a fresh trending
+      // fetch rather than briefly flashing the previous session's
+      // results while the new request is in flight.
       setSearch('');
+      setResults([]);
       setError(null);
+      setLoading(configured);
       sheetRef.current?.present();
     } else {
       sheetRef.current?.dismiss();
     }
-  }, [visible]);
+  }, [visible, configured]);
 
   useEffect(() => {
     if (!visible) return;
@@ -161,9 +166,15 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
       enablePanDownToClose
       keyboardBehavior="interactive"
       keyboardBlurBehavior="restore"
+      android_keyboardInputMode="adjustResize"
       backdropComponent={renderBackdrop}
       handleIndicatorStyle={styles.handleIndicator}
       backgroundStyle={styles.sheetBackground}
+      // Stack on top of the parent AttachSheet rather than dismissing
+      // it — @gorhom's default "switch" cascades a dismiss to the
+      // parent, whose early-return unmounts this modal mid-animation
+      // (same pattern as FriendPickerSheet).
+      stackBehavior="push"
     >
       <View style={styles.header}>
         <Text style={styles.title}>Send a GIF</Text>
