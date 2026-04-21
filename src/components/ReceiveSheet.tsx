@@ -376,6 +376,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
                     onChangeText={inputUnit === 'sats' ? handleSatsChange : handleFiatChange}
                     keyboardType={inputUnit === 'sats' ? 'numeric' : 'decimal-pad'}
                     placeholder={inputUnit === 'sats' ? '0' : '0.00'}
+                    selectTextOnFocus
                   />
                   <TouchableOpacity
                     style={[styles.unitButton, inputUnit === 'sats' && styles.unitButtonActive]}
