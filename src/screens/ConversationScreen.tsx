@@ -59,11 +59,14 @@ const INVOICE_REGEX = /\b(?:lightning:)?(ln(?:bc|tb|ts|bs)[0-9a-z]{50,})\b/i;
 
 // Image URLs we render inline in message bubbles. We only match trusted image
 // extensions so we don't accidentally fetch arbitrary URLs as images.
-const IMAGE_URL_REGEX = /(https?:\/\/\S+?\.(?:png|jpe?g|gif|webp|heic|heif))(?:\?\S*)?\b/i;
+const IMAGE_URL_REGEX = /^(https?:\/\/\S+?\.(?:png|jpe?g|gif|webp|heic|heif))(?:\?\S*)?$/i;
 
 function extractImageUrl(text: string): string | null {
   if (!text) return null;
-  const match = text.match(IMAGE_URL_REGEX);
+  // Only treat a message as an image when the entire body is the URL. This
+  // avoids silently dropping surrounding text like "check this https://…jpg".
+  const trimmed = text.trim();
+  const match = trimmed.match(IMAGE_URL_REGEX);
   return match ? match[0] : null;
 }
 
@@ -310,13 +313,10 @@ const ConversationScreen: React.FC = () => {
                 resizeMode="cover"
                 accessibilityLabel="Shared image"
               />
-              <Text
-                style={[
-                  styles.bubbleTime,
-                  styles.imageBubbleTime,
-                  item.fromMe && styles.bubbleTimeMe,
-                ]}
-              >
+              {/* Image bubble background is always white, so keep the default
+                  (darker) bubbleTime colour for both sides — bubbleTimeMe is
+                  near-white and would be illegible here. */}
+              <Text style={[styles.bubbleTime, styles.imageBubbleTime]}>
                 {formatTime(item.createdAt)}
               </Text>
             </View>
