@@ -100,6 +100,7 @@ const SendSheet: React.FC<Props> = ({
     payInvoiceForWallet,
     refreshBalanceForWallet,
     fetchTransactionsForWallet,
+    addPendingTransaction,
     activeWalletId,
     wallets,
     btcPrice,
@@ -411,7 +412,7 @@ const SendSheet: React.FC<Props> = ({
             if (paymentHash) {
               const contact = contacts.find((c) => c.pubkey === activePubkey);
               const p = contact?.profile ?? null;
-              await recordOutgoingCounterparty(paymentHash, {
+              const counterparty = {
                 pubkey: activePubkey,
                 profile: {
                   npub: npubEncode(activePubkey),
@@ -422,9 +423,35 @@ const SendSheet: React.FC<Props> = ({
                 },
                 comment: memo,
                 anonymous: false,
-              });
+              };
+              await recordOutgoingCounterparty(paymentHash, counterparty);
               if (__DEV__)
                 console.log(`[Zap-send] stored counterparty for ph=${paymentHash.slice(0, 12)}…`);
+              // Optimistic insert: surface the outgoing zap in ConversationScreen
+              // (and the transaction list) without waiting for LNbits to flush
+              // the tx and the next resolver pass. The subsequent
+              // fetchTransactionsForWallet refresh reconciles by paymentHash —
+              // see WalletContext's counterpartyByHash loop which preserves
+              // this attribution across refreshes.
+              if (walletId) {
+                const nowSec = Math.floor(Date.now() / 1000);
+                // Convention throughout the app: amount is a POSITIVE magnitude
+                // and `type` alone carries direction (see TransferSheet's
+                // optimistic inserts, ConversationScreen's zapItems, and every
+                // TransactionDetail consumer — all read Math.abs(tx.amount)).
+                addPendingTransaction(walletId, {
+                  type: 'outgoing',
+                  amount: currentSats,
+                  description: memo || undefined,
+                  created_at: nowSec,
+                  settled_at: nowSec,
+                  paymentHash,
+                  bolt11,
+                  invoice: bolt11,
+                  zapCounterparty: counterparty,
+                  optimistic: true,
+                });
+              }
             }
           } catch (e) {
             if (__DEV__) console.warn('[Zap-send] store failed:', e);
