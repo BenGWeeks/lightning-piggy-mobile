@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Zap, Send } from 'lucide-react-native';
+import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -50,6 +51,46 @@ type Item =
       tx: TransactionDetailData;
     };
 
+const INVOICE_REGEX = /\b(ln(?:bc|tb|ts|bs)[0-9a-z]{50,})\b/i;
+
+interface DecodedInvoice {
+  raw: string;
+  amountSats: number | null;
+  description: string | null;
+  /** Epoch seconds at which the invoice becomes invalid. `null` = unknown. */
+  expiresAt: number | null;
+}
+
+function extractInvoice(text: string): DecodedInvoice | null {
+  if (!text) return null;
+  const match = text.match(INVOICE_REGEX);
+  if (!match) return null;
+  const raw = match[1];
+  try {
+    const decoded = bolt11Decode(raw);
+    let amountSats: number | null = null;
+    let description: string | null = null;
+    let timestamp: number | null = null;
+    let expirySeconds: number | null = null;
+    for (const section of decoded.sections) {
+      if (section.name === 'amount') {
+        amountSats = Math.round(Number(section.value) / 1000);
+      } else if (section.name === 'description') {
+        description = section.value as string;
+      } else if (section.name === 'timestamp') {
+        timestamp = section.value as number;
+      } else if (section.name === 'expiry') {
+        expirySeconds = section.value as number;
+      }
+    }
+    const expiresAt =
+      timestamp !== null && expirySeconds !== null ? timestamp + expirySeconds : null;
+    return { raw, amountSats, description, expiresAt };
+  } catch {
+    return { raw, amountSats: null, description: null, expiresAt: null };
+  }
+}
+
 function formatTime(epochSeconds: number): string {
   const d = new Date(epochSeconds * 1000);
   const today = new Date();
@@ -82,6 +123,7 @@ const ConversationScreen: React.FC = () => {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [sendSheetOpen, setSendSheetOpen] = useState(false);
+  const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState(false);
   const [detailTx, setDetailTx] = useState<TransactionDetailData | null>(null);
   const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
@@ -191,6 +233,62 @@ const ConversationScreen: React.FC = () => {
 
   const renderItem = useCallback(({ item }: { item: Item }) => {
     if (item.kind === 'message') {
+      const invoice = extractInvoice(item.text);
+      if (invoice) {
+        const expired = invoice.expiresAt !== null && invoice.expiresAt * 1000 < Date.now();
+        return (
+          <View
+            style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
+          >
+            <View
+              style={[
+                styles.invoiceCard,
+                item.fromMe ? styles.invoiceCardMe : styles.invoiceCardThem,
+              ]}
+            >
+              <View style={styles.invoiceHeaderRow}>
+                <Text style={[styles.invoiceLabel, item.fromMe && styles.invoiceLabelMe]}>
+                  {item.fromMe ? 'Invoice sent' : 'Invoice'}
+                </Text>
+                <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
+                  {formatTime(item.createdAt)}
+                </Text>
+              </View>
+              <Text style={[styles.invoiceAmount, item.fromMe && styles.invoiceAmountMe]}>
+                {invoice.amountSats !== null
+                  ? `${invoice.amountSats.toLocaleString()} sats`
+                  : 'Any amount'}
+              </Text>
+              {invoice.description ? (
+                <Text
+                  style={[styles.invoiceMemo, item.fromMe && styles.invoiceMemoMe]}
+                  numberOfLines={2}
+                >
+                  {invoice.description}
+                </Text>
+              ) : null}
+              {item.fromMe ? null : expired ? (
+                <View style={[styles.invoicePayButton, styles.invoicePayButtonDisabled]}>
+                  <Text style={styles.invoicePayExpiredText}>Expired</Text>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.invoicePayButton}
+                  onPress={() => {
+                    setInvoiceToPay(invoice.raw);
+                    setSendSheetOpen(true);
+                  }}
+                  accessibilityLabel="Pay this invoice"
+                  testID={`conversation-pay-${item.id}`}
+                >
+                  <Zap size={16} color={colors.white} fill={colors.white} />
+                  <Text style={styles.invoicePayText}>Pay</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        );
+      }
       return (
         <View
           style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
@@ -383,12 +481,13 @@ const ConversationScreen: React.FC = () => {
         visible={sendSheetOpen}
         onClose={() => {
           setSendSheetOpen(false);
+          setInvoiceToPay(null);
           handleRefresh();
         }}
-        initialAddress={lightningAddress ?? undefined}
-        initialPicture={picture ?? undefined}
-        recipientPubkey={pubkey}
-        recipientName={name}
+        initialAddress={invoiceToPay ?? lightningAddress ?? undefined}
+        initialPicture={invoiceToPay ? undefined : (picture ?? undefined)}
+        recipientPubkey={invoiceToPay ? undefined : pubkey}
+        recipientName={invoiceToPay ? undefined : name}
       />
       <TransactionDetailSheet
         visible={detailTx !== null}
@@ -601,6 +700,84 @@ const styles = StyleSheet.create({
   },
   zapCardCommentMe: {
     color: colors.white,
+  },
+  invoiceCard: {
+    maxWidth: '85%',
+    minWidth: 240,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    gap: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  invoiceCardMe: {
+    backgroundColor: colors.brandPink,
+    borderColor: colors.brandPink,
+  },
+  invoiceCardThem: {
+    backgroundColor: colors.white,
+    borderColor: colors.zapYellow,
+  },
+  invoiceHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  invoiceLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textSupplementary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  invoiceLabelMe: {
+    color: 'rgba(255,255,255,0.85)',
+  },
+  invoiceAmount: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.textHeader,
+    marginTop: 2,
+  },
+  invoiceAmountMe: {
+    color: colors.white,
+  },
+  invoiceMemo: {
+    fontSize: 14,
+    color: colors.textBody,
+    marginTop: 2,
+  },
+  invoiceMemoMe: {
+    color: 'rgba(255,255,255,0.9)',
+  },
+  invoicePayButton: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: colors.brandPink,
+  },
+  invoicePayButtonDisabled: {
+    backgroundColor: colors.divider,
+  },
+  invoicePayText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.white,
+  },
+  invoicePayExpiredText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.textSupplementary,
   },
   composer: {
     flexDirection: 'row',

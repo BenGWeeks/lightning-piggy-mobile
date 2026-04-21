@@ -17,8 +17,7 @@ import {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { Zap } from 'lucide-react-native';
-import CopyIcon from './icons/CopyIcon';
+import { Zap, Copy } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
 import { npubEncode } from '../services/nostrService';
 import { useNostr } from '../contexts/NostrContext';
@@ -231,7 +230,7 @@ const ContactProfileSheet: React.FC<Props> = ({
         {npubDisplay && (
           <TouchableOpacity style={styles.npubRow} onPress={handleCopyNpub}>
             <Text style={styles.npubText}>{npubDisplay}</Text>
-            <CopyIcon size={20} color={colors.brandPink} />
+            <Copy size={20} color={colors.brandPink} />
           </TouchableOpacity>
         )}
 
