@@ -47,7 +47,18 @@ Example path format: `~/.cache/dotslash/cb/<hash>/React Native DevTools-linux-x6
 *Fix:* use `BottomSheetTextInput` from `@gorhom/bottom-sheet` (not `TextInput` from `react-native`) for every input inside a bottom-sheet subtree. It hooks into the sheet's keyboard + animation context and keeps keystrokes intact. All sheets in this repo (FeedbackSheet, TransferSheet, AddWalletWizard, EditProfileSheet, AddFriendSheet, NostrLoginSheet, and — as of #96 — SendSheet) follow this pattern. If you add a new sheet, grep `BottomSheetTextInput` for the canonical import site.
 
 | Maestro `inputText` doesn't update React state in `BottomSheetTextInput`
-| `BottomSheetTextInput` from `@gorhom/bottom-sheet` doesn't always trigger `onChangeText` when Maestro uses `inputText`. The text appears visually in the input but the React state stays empty, causing validation to fail. **Do not** replace with regular `TextInput` — the bottom sheet needs its own input to adjust when the keyboard opens. Workarounds: (1) Use Maestro's clipboard paste approach, (2) tap the input field first to ensure focus before typing, (3) accept intermittent flakiness — the first test run in a session usually works.
+| `BottomSheetTextInput` from `@gorhom/bottom-sheet` doesn't always trigger `onChangeText` when Maestro uses `inputText`. The text appears visually in the input but the React state stays empty, causing validation to fail. Under React Native's New Architecture (Fabric, default in SDK 55) the `testID` lands on the wrapper View rather than the native `EditText`, so the synthetic `adb shell input text` keystrokes don't advance the JS event path. **Do not** replace with regular `TextInput` — the bottom sheet needs its own input to adjust when the keyboard opens. +
+*Canonical workaround — clipboard paste:* expose an in-app "Paste" button next to the input that calls `Clipboard.getStringAsync()` (expo-clipboard) and sets state directly. From the Maestro host, seed the clipboard first — host→emulator clipboard sync forwards it to the device (confirmed working on Android 16 emulator with Android Studio's default clipboard-sharing setting):
+
+[source,bash]
+----
+source .env && echo -n "$MAESTRO_NWC1" | wl-copy   # Wayland
+# or
+echo -n "$MAESTRO_NWC1" | xclip -selection clipboard  # X11
+maestro test tests/e2e/test-add-wallet-via-paste.yaml
+----
+
+The Maestro flow then taps the Paste button (`id: 'wizard-nwc-paste'`) instead of using `inputText`, and state updates cleanly through the normal React setter path. See `AddWalletWizard.tsx` for the canonical implementation and `tests/e2e/test-add-wallet-via-paste.yaml` for the flow.
 
 | Maestro carousel swipes trigger notification shade or leave the app
 | Horizontal swipes at the top of the screen (y < 25%) can pull down the notification shade or swipe away the app. Use `y: 30%` or higher for carousel swipes. The wallet carousel sits at roughly 15-25% from the top, so swipe at `start: 85%, 30%` / `end: 15%, 30%` to target it safely.
@@ -181,9 +192,38 @@ The fix script (`apply_nip20_fix.py`) patches `router.py` to send `["OK", event_
 | React Native app crashes immediately with native SIGSEGV in `facebook::react::MountingCoordinator::pullTransaction`
 | The JS thread (`mqt_v_js`) segfaults in Fabric's mounting pipeline during the first render — the tombstone top frames are `MountingCoordinator::pullTransaction` → `FabricUIManagerBinding::schedulerDidFinishTransaction` → `ShadowTree::mount` → Hermes (`libhermesvm.so`) → `jsi::Function::call`. The process dies before any `console.log` appears. Confirmed via `adb pull /data/tombstones/tombstone_NN` followed by reading the backtrace. +
 *Root cause:* Expo SDK 55 `expo prebuild` defaults `newArchEnabled=true` in `android/gradle.properties`. The New Architecture (Fabric renderer + TurboModules) is not compatible with at least one component or native dep in this app — the shadow tree reaches an inconsistent state on first mount and the native commit null-derefs. +
-*Fix:* disable the New Architecture. `android/` is gitignored so editing `gradle.properties` directly works but gets clobbered by the next `expo prebuild`. Persistent fix: +
-1. `npx expo install expo-build-properties` +
-2. Add to the `plugins` array in `app.config.ts`: `['expo-build-properties', \{ android: \{ newArchEnabled: false }, ios: \{ newArchEnabled: false } }]` +
-3. `rm -rf android && APP_VARIANT=development npx expo run:android` +
+*Fix (outdated — see next entry for the current Expo SDK 55 story):* the old recipe was to add `expo-build-properties` plugin with `android.newArchEnabled: false`. That option was **removed** from `expo-build-properties` (per its CHANGELOG) and replaced with a top-level `newArchEnabled` key on the Expo config root. Setting either one on SDK 55 won't actually disable New Arch cleanly — see below. +
 *Future work:* to re-enable New Architecture, bisect which component triggers the mount crash (common suspects: old versions of `react-native-screens`, `@gorhom/bottom-sheet`, or `react-native-reanimated` not yet Fabric-ready). Disable-by-default is the safer stance until bisected.
+
+| Disabling `newArchEnabled` on Expo SDK 55 makes the app crash with `SoLoaderDSONotFoundError: couldn't find DSO to load: libreactnative.so`
+| The TROUBLESHOOTING entry above was written for an earlier SDK. On SDK 55, the toggle is a top-level `newArchEnabled` config key (the old `expo-build-properties.android.newArchEnabled` was removed per its CHANGELOG — see https://github.com/expo/expo/pull/41684). But disabling it exposes a template bug: `android/app/src/main/java/.../MainApplication.kt` unconditionally calls `DefaultNewArchitectureEntryPoint.releaseLevel = ...` and `loadReactNative(this)` — which requires `libreactnative.so` from the feature-flags native lib. With `newArchEnabled=false` that library isn't emitted, so the app crashes at `Application.onCreate()` before any JS runs. +
+*Workaround:* keep `newArchEnabled=true` and live with Fabric / Bridgeless for now. The Expo SDK 55 template doesn't ship the conditional around `DefaultNewArchitectureEntryPoint` that earlier templates had. Revisit when an upstream fix lands; until then, treat "can't disable New Arch" as a known limitation. +
+*Diagnosis tip:* a failed attempt produces this exact logcat trace: +
+  `FATAL EXCEPTION: main` → `SoLoaderDSONotFoundError: couldn't find DSO to load: libreactnative.so` → `ReactNativeFeatureFlagsCxxInterop.<clinit>` → `DefaultNewArchitectureEntryPoint.load` → `MainApplication.onCreate`.
+
+| `npx expo run:android --device emulator-5554` fails with `Could not find device with name`
+| `expo run:android --device <name>` expects the **AVD name** (e.g. `Medium_Phone_API_36.1`), not the adb serial (`emulator-5554`). Use `emulator -list-avds` to find the AVD name. Maestro, confusingly, accepts the adb serial via `--device emulator-5554` but not the AVD name. Rule of thumb: **expo CLI = AVD name; Maestro = adb serial**.
+
+| `expo run:android` installs the APK on the wrong device when multiple are attached
+| With a physical phone + emulator both connected, `expo run:android` with no `--device` flag picks the first — usually the physical phone. Output shows `Opening ... on Pixel_8` (your phone's device name). Fix: pass `--device Medium_Phone_API_36.1` (the emulator's AVD name). To check what's attached: `adb devices -l`. +
+*Related:* the resulting APK is also **built for that device's ABI** (arm64 for a Pixel, x86_64 for an emulator). If you built for a phone and then try to `adb install` that APK to the emulator, it'll install but crash at startup because the x86_64 libs aren't in it. Rebuild with the emulator target.
+
+| Metro port conflict with another Expo project on 8081
+| Running `npm start` for this project while another Expo project's Metro is already on port 8081 silently hijacks connections — the app loads the other project's bundle (or gets a red screen). +
+*Fix:* set `RCT_METRO_PORT=8082` to pick a different port, then `adb reverse tcp:8081 tcp:8082` (emulator's 8081 → host's 8082) so the APK's hardcoded 8081 request hits our Metro. Check active Metros with `ss -tlnp \| grep -E '8081\|8082'` — the CWD printed in `ps auxf` tells you which project each belongs to.
+
+| Red screen on app launch: `TurboModuleRegistry.getEnforcing('PlatformConstants') could not be found`
+| Stale Gradle / `android/app/build/` artifacts from toggling `newArchEnabled`. The native binary's TurboModule registry doesn't include `PlatformConstants` because a prior build was half-done. Symptom: red-screen before any user JS runs, showing `[runtime not ready]: Invariant Violation: TurboModuleRegistry.getEnforcing(...): 'PlatformConstants' could not be found`. +
+*Fix:* `rm -rf android/app/build android/build && APP_VARIANT=development npx expo run:android --device <AVD_NAME>`. A clean Gradle build re-links all TurboModule providers including core ones. A plain `--no-build-cache` doesn't always do it — the stale dir is the problem, not the cache.
+
+| `adb uninstall` wipes Nostr login + wallets + all app state
+| AsyncStorage (wallet URLs, theme prefs, cached contacts) and SecureStore (nsec) are both stored in the app's internal data dir, which Android deletes on `pm uninstall`. This happens whether you use `adb uninstall`, Android Settings → Uninstall, or anything that removes the package. +
+*Replace-install preserves data:* `adb install -r app-debug.apk` keeps the existing data dir and just swaps the APK. +
+*Fresh install wipes data:* `adb uninstall com.lightningpiggy.app.dev && adb install app-debug.apk` — the data is gone and you're back at the IntroScreen. +
+This also hits `expo run:android` flows if the APK signatures don't match between old and new (e.g. switching between dev-client builds and production builds with different signing keys) — Android refuses to replace-install across signing keys, so Expo falls back to uninstall + install, wiping data.
+
+| Bottom-sheet inner buttons work when tapped manually but Maestro `tapOn id:...` reports COMPLETED without firing `onPress`
+| Symptom: Maestro's `commands.json` confirms the target element was found at correct bounds with `clickable=true, enabled=true`, but the handler never runs (no `console.log` in Metro or logcat) and the UI doesn't change. Manual human taps on the same button work every time. +
+*Root cause:* a `TouchableWithoutFeedback onPress={Keyboard.dismiss}` wrapper around the sheet content swallows the UiAutomator accessibility click before it reaches the nested testID-bearing `TouchableOpacity`/`Pressable`. Real finger taps propagate through differently because they use the native touch pipeline, but UiAutomator / Maestro dispatches via accessibility events which the outer wrapper eats. +
+*Fix:* remove the `TouchableWithoutFeedback + Keyboard.dismiss` wrapper per rule (6) of the earlier "Bottom sheet doesn't slide up when keyboard opens" entry. The keyboard can still be dismissed via the hardware back key, the keyboard's own Done key, or by tapping any of the buttons (which close the sheet anyway). Confirmed on `ReceiveSheet.tsx` in the #96 / #106 debugging session — pulling the wrapper restored normal Maestro interaction.
 |===

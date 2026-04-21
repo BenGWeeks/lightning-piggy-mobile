@@ -51,7 +51,15 @@ type Item =
       tx: TransactionDetailData;
     };
 
-const INVOICE_REGEX = /\b(ln(?:bc|tb|ts|bs)[0-9a-z]{50,})\b/i;
+// Bolt11 invoices are self-identifying by their `lnXX` HRP, so detection
+// here matches them with or without the `lightning:` prefix.
+const INVOICE_REGEX = /\b(?:lightning:)?(ln(?:bc|tb|ts|bs)[0-9a-z]{50,})\b/i;
+
+// Lightning addresses look like plain email addresses — `alice@example.com`
+// — so we only treat a message as a payable LN address when the sender
+// explicitly prefixes it with `lightning:`. Otherwise we'd turn every
+// shared email into a Pay button and guess wrong.
+const LN_ADDRESS_REGEX = /lightning:([a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,})\b/i;
 
 interface DecodedInvoice {
   raw: string;
@@ -89,6 +97,12 @@ function extractInvoice(text: string): DecodedInvoice | null {
   } catch {
     return { raw, amountSats: null, description: null, expiresAt: null };
   }
+}
+
+function extractLightningAddress(text: string): string | null {
+  if (!text) return null;
+  const match = text.match(LN_ADDRESS_REGEX);
+  return match ? match[1] : null;
 }
 
 function formatTime(epochSeconds: number): string {
@@ -279,6 +293,50 @@ const ConversationScreen: React.FC = () => {
                     setSendSheetOpen(true);
                   }}
                   accessibilityLabel="Pay this invoice"
+                  testID={`conversation-pay-${item.id}`}
+                >
+                  <Zap size={16} color={colors.white} fill={colors.white} />
+                  <Text style={styles.invoicePayText}>Pay</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        );
+      }
+      const lnAddress = extractLightningAddress(item.text);
+      if (lnAddress) {
+        return (
+          <View
+            style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
+          >
+            <View
+              style={[
+                styles.invoiceCard,
+                item.fromMe ? styles.invoiceCardMe : styles.invoiceCardThem,
+              ]}
+            >
+              <View style={styles.invoiceHeaderRow}>
+                <Text style={[styles.invoiceLabel, item.fromMe && styles.invoiceLabelMe]}>
+                  {item.fromMe ? 'Address sent' : 'Lightning address'}
+                </Text>
+                <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
+                  {formatTime(item.createdAt)}
+                </Text>
+              </View>
+              <Text
+                style={[styles.invoiceMemo, item.fromMe && styles.invoiceMemoMe]}
+                numberOfLines={1}
+              >
+                {lnAddress}
+              </Text>
+              {item.fromMe ? null : (
+                <TouchableOpacity
+                  style={styles.invoicePayButton}
+                  onPress={() => {
+                    setInvoiceToPay(lnAddress);
+                    setSendSheetOpen(true);
+                  }}
+                  accessibilityLabel="Pay this lightning address"
                   testID={`conversation-pay-${item.id}`}
                 >
                   <Zap size={16} color={colors.white} fill={colors.white} />
@@ -485,9 +543,15 @@ const ConversationScreen: React.FC = () => {
           handleRefresh();
         }}
         initialAddress={invoiceToPay ?? lightningAddress ?? undefined}
-        initialPicture={invoiceToPay ? undefined : (picture ?? undefined)}
-        recipientPubkey={invoiceToPay ? undefined : pubkey}
-        recipientName={invoiceToPay ? undefined : name}
+        // Paying a bolt11 invoice encodes the recipient in the invoice
+        // itself, so clear the per-conversation recipient hints. Paying a
+        // lightning address (contains `@`, not `ln…`) keeps the hints so
+        // SendSheet's label reads `Pay to <name>`.
+        initialPicture={
+          invoiceToPay && !invoiceToPay.includes('@') ? undefined : (picture ?? undefined)
+        }
+        recipientPubkey={invoiceToPay && !invoiceToPay.includes('@') ? undefined : pubkey}
+        recipientName={invoiceToPay && !invoiceToPay.includes('@') ? undefined : name}
       />
       <TransactionDetailSheet
         visible={detailTx !== null}

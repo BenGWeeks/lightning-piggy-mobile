@@ -1,0 +1,118 @@
+appId: com.lightningpiggy.app.dev
+name: Send 21 sat Invoice to Friend
+---
+# Generates a 21 sat bolt11 invoice from Receive → Amount, sends it as an
+# encrypted Nostr DM to FRIEND_NAME, then verifies the outgoing invoice
+# card lands in that contact's conversation thread.
+#
+# Note: this test only verifies the SEND side (the "Invoice sent" card).
+# Verifying the "Pay" button requires a second Nostr identity receiving
+# the DM; that's not possible in a single app instance / single login.
+#
+# Prerequisites:
+#   - app installed, Metro running, dev mode enabled
+#   - at least one connected NWC wallet with a lightning address
+#   - Nostr logged in with FRIEND_NAME in the contact list
+#
+# Run with default friend (Isaac Weeks):
+#   maestro test tests/e2e/test-send-invoice-to-friend.yaml
+# Override:
+#   maestro -e FRIEND_NAME="Isolabellart" test tests/e2e/test-send-invoice-to-friend.yaml
+
+# Wait for the app to be ready
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 40000
+
+# Start on Home
+- tapOn:
+    id: 'tab-home'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Open Receive — wait for the sheet's Amount tab to exist rather than
+# generic "Receive" text, which matches the Home button too.
+- tapOn:
+    id: 'btn-receive'
+- extendedWaitUntil:
+    visible:
+      id: 'receive-tab-amount'
+    timeout: 10000
+
+# Switch to Amount tab
+- tapOn:
+    id: 'receive-tab-amount'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Enter 21 sats (selectTextOnFocus replaces any stale value)
+- tapOn:
+    id: 'receive-amount-input'
+- eraseText:
+    charactersToErase: 12
+- inputText: '21'
+- hideKeyboard
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Invoice takes ~800ms (debounce) + network for generation
+- extendedWaitUntil:
+    visible:
+      text: 'Lightning invoice'
+    timeout: 15000
+# Extra beat so any residual state churn settles before the Friend tap —
+# without this the onPress can silently drop under JS-thread pressure.
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Tap Friend — use testID. Tapping by text "Friend" matches the bottom
+# tab-bar's "Friends" via regex, which would hijack the flow.
+- tapOn:
+    id: 'receive-send-to-friend'
+- waitForAnimationToEnd:
+    timeout: 1500
+- extendedWaitUntil:
+    visible:
+      text: 'Send invoice to a friend'
+    timeout: 15000
+
+# NB: the search input is a BottomSheetTextInput, which under the New
+# Architecture does NOT receive Maestro's `inputText` keystrokes (the
+# testID lands on a wrapper View — same bug as the NWC URL input, see
+# TROUBLESHOOTING.adoc). Jump via the alphabet sidebar instead.
+- tapOn:
+    id: 'alphabet-${FRIEND_LETTER}'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+# The letter jump lands us at the first contact whose name starts with
+# FRIEND_LETTER. Scroll a short distance if the target isn't already in
+# view (the first "B" might be "Bart" not "Ben").
+- scrollUntilVisible:
+    element:
+      text: ${FRIEND_NAME}
+    direction: DOWN
+    timeout: 10000
+    speed: 40
+    visibilityPercentage: 60
+
+- tapOn: ${FRIEND_NAME}
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Success toast + auto-navigation to the conversation
+- extendedWaitUntil:
+    visible:
+      text: ${FRIEND_NAME}
+    timeout: 10000
+
+# Invoice card rendered in the thread — amount + "Invoice sent" label
+- extendedWaitUntil:
+    visible:
+      text: '21 sats'
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      text: 'Invoice sent'
+    timeout: 5000

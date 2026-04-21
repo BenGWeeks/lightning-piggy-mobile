@@ -1,17 +1,18 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, BackHandler } from 'react-native';
 import { Image } from 'expo-image';
 import Svg, { Circle, Path } from 'react-native-svg';
+import { X } from 'lucide-react-native';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
-  BottomSheetView,
   BottomSheetTextInput,
   BottomSheetFlatList,
 } from '@gorhom/bottom-sheet';
 import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
+import AlphabetBar from './AlphabetBar';
 
 export interface PickedFriend {
   pubkey: string;
@@ -19,6 +20,16 @@ export interface PickedFriend {
   picture: string | null;
   lightningAddress: string | null;
 }
+
+// Many Nostr contacts prepend emoji/flags/zaps, OR spell their name with
+// stylized Unicode variants (𝙰𝚂𝙲𝙾𝚃, ᴄʏʙᴇʀɢᴜʏ, 𝔼𝕣𝕪𝕟) that aren't in the
+// plain A-Z range. NFKD-normalize first so compatibility forms fold down
+// to their Latin base, then find the first A-Z.
+const firstAlpha = (name: string): string => {
+  const normalized = name.normalize('NFKD').toUpperCase();
+  const m = normalized.match(/[A-Z]/);
+  return m ? m[0] : '#';
+};
 
 interface Props {
   visible: boolean;
@@ -36,9 +47,28 @@ const FriendPickerSheet: React.FC<Props> = ({
   subtitle,
 }) => {
   const sheetRef = useRef<BottomSheetModal>(null);
+  // BottomSheetFlatList's ref exposes the wrapped FlatList's scrollToIndex
+  // (and other imperative helpers). Typing it precisely runs into @gorhom's
+  // generic constraints; any-ref keeps the call site clean.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const listRef = useRef<any>(null);
   const snapPoints = useMemo(() => ['75%'], []);
+  // Keep the drag handle clear of Android's notification-shade trigger
+  // zone (<48 DP from the top) while still letting the sheet grow past
+  // the 75% snap when `keyboardBehavior="interactive"` lifts it up to
+  // keep the focused input visible above the keyboard. 60 DP is above
+  // the notification threshold but leaves plenty of room for keyboard
+  // expansion (sheet can still reach ~94% of the screen).
+  const topInset = 60;
   const { contacts } = useNostr();
   const [search, setSearch] = useState('');
+  const [currentLetter, setCurrentLetter] = useState<string | null>(null);
+  // Drive the expensive filter off a deferred copy of `search`. Android's
+  // IME can drop characters if the synchronous work triggered by each
+  // keystroke (re-sorting the list + re-rendering every FlatList row)
+  // runs faster than composition updates. `useDeferredValue` keeps the
+  // input responsive and lets the list catch up when it can.
+  const deferredSearch = useDeferredValue(search);
 
   useEffect(() => {
     if (visible) {
@@ -68,15 +98,39 @@ const FriendPickerSheet: React.FC<Props> = ({
     // Contacts with no resolved name aren't useful here — they can't be
     // reliably identified by the user. Drop them from the picker.
     const named = list.filter((f) => f.name.length > 0);
-    named.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
-    const q = search.trim().toLowerCase();
+    // Sort by the first Latin letter (so "🇦🇷Marcel" sits with other Ms),
+    // then by raw name within the letter group. Keeps the alphabet bar's
+    // scrollToIndex accurate.
+    named.sort((a, b) => {
+      const la = firstAlpha(a.name);
+      const lb = firstAlpha(b.name);
+      if (la !== lb) return la.localeCompare(lb);
+      return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+    });
+    const q = deferredSearch.trim().toLowerCase();
     if (!q) return named;
     return named.filter(
       (f) =>
         f.name.toLowerCase().includes(q) ||
         (f.lightningAddress && f.lightningAddress.toLowerCase().includes(q)),
     );
-  }, [contacts, search]);
+  }, [contacts, deferredSearch]);
+
+  const availableLetters = useMemo(() => {
+    const letters = new Set<string>();
+    for (const f of friends) letters.add(firstAlpha(f.name));
+    return Array.from(letters).sort();
+  }, [friends]);
+
+  const handleLetterPress = useCallback(
+    (letter: string) => {
+      const index = friends.findIndex((f) => firstAlpha(f.name) === letter);
+      if (index < 0) return;
+      setCurrentLetter(letter);
+      listRef.current?.scrollToIndex?.({ index, animated: false, viewPosition: 0 });
+    },
+    [friends],
+  );
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
@@ -133,37 +187,80 @@ const FriendPickerSheet: React.FC<Props> = ({
       onDismiss={onClose}
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}
+      keyboardBehavior="interactive"
+      keyboardBlurBehavior="restore"
+      android_keyboardInputMode="adjustResize"
+      enableContentPanningGesture={false}
+      enableOverDrag={false}
+      topInset={topInset}
+      // Stack on top of the ReceiveSheet rather than dismissing it —
+      // @gorhom's default "switch" makes the parent modal dismiss, which
+      // cascades to the parent's early-return `if (!visible) return null`
+      // and unmounts this modal before it finishes animating in.
+      stackBehavior="push"
     >
-      <BottomSheetView style={styles.header}>
-        <Text style={styles.title}>{title}</Text>
-        {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
-        <BottomSheetTextInput
-          style={styles.searchInput}
-          placeholder="Search friends"
-          placeholderTextColor={colors.textSupplementary}
-          value={search}
-          onChangeText={setSearch}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-      </BottomSheetView>
-      <BottomSheetFlatList<PickedFriend>
-        data={friends}
-        keyExtractor={(f: PickedFriend) => f.pubkey}
-        renderItem={renderItem}
-        contentContainerStyle={styles.listContent}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyText}>
-              {contacts.length === 0
-                ? 'You don’t follow anyone on Nostr yet.'
-                : search
-                  ? 'No friends match your search.'
-                  : 'No contacts with resolved profiles to send to.'}
-            </Text>
+      {/* Flex column so the sticky header takes its content height and the
+       *  list fills the rest. Previous setup nested the search input inside
+       *  BottomSheetFlatList's ListHeaderComponent, which swallowed focus
+       *  taps because the FlatList's own gesture handler intercepted them. */}
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <View style={styles.titleRow}>
+            <View style={styles.titleText}>
+              <Text style={styles.title}>{title}</Text>
+              {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+            </View>
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={onClose}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              accessibilityLabel="Close"
+              testID="friend-picker-close"
+            >
+              <X size={22} color={colors.textSupplementary} />
+            </TouchableOpacity>
           </View>
-        }
-      />
+          <BottomSheetTextInput
+            style={styles.searchInput}
+            placeholder="Search friends"
+            placeholderTextColor={colors.textSupplementary}
+            value={search}
+            onChangeText={setSearch}
+            autoCapitalize="none"
+            autoCorrect={false}
+            testID="friend-picker-search"
+          />
+        </View>
+        <View style={styles.listWithBar}>
+          {availableLetters.length > 1 ? (
+            <AlphabetBar
+              letters={availableLetters}
+              currentLetter={currentLetter}
+              onLetterPress={handleLetterPress}
+            />
+          ) : null}
+          <BottomSheetFlatList<PickedFriend>
+            ref={listRef}
+            data={friends}
+            keyExtractor={(f: PickedFriend) => f.pubkey}
+            renderItem={renderItem}
+            contentContainerStyle={styles.listContent}
+            keyboardShouldPersistTaps="handled"
+            style={styles.list}
+            ListEmptyComponent={
+              <View style={styles.empty}>
+                <Text style={styles.emptyText}>
+                  {contacts.length === 0
+                    ? 'You don’t follow anyone on Nostr yet.'
+                    : search
+                      ? 'No friends match your search.'
+                      : 'No contacts with resolved profiles to send to.'}
+                </Text>
+              </View>
+            }
+          />
+        </View>
+      </View>
     </BottomSheetModal>
   );
 };
@@ -173,6 +270,31 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
+  },
+  container: {
+    flex: 1,
+  },
+  listWithBar: {
+    flex: 1,
+    flexDirection: 'row',
+    overflow: 'hidden',
+  },
+  list: {
+    flex: 1,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  titleText: {
+    flex: 1,
+  },
+  closeButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   header: {
     paddingHorizontal: 20,
