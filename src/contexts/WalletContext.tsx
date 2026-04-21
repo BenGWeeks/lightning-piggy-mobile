@@ -1225,51 +1225,39 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, [wallets]);
 
-  // Foreground polling for the active wallet. ReceiveSheet runs its own
-  // 1.5s poll while an invoice is pending (for fast detection); this
-  // slower 10s baseline covers the case where the user is *not* on the
-  // receive sheet — e.g. sitting on Home when someone pays their
-  // lightning address. On-chain wallets are skipped here; BDK sync is
-  // expensive and runs on its own cadence elsewhere.
-  // NOTE: background / app-closed delivery is a separate concern — OS
-  // push requires FCM/APNs + a backend, tracked in issue #45.
+  // Refresh the active wallet's balance once whenever the app returns
+  // to the foreground. Cheap (one NWC round-trip per resume) and
+  // catches payments that arrived while the app was backgrounded — the
+  // balance diff then fires the global celebration overlay. We
+  // deliberately do NOT run a continuous baseline poll: the
+  // ReceiveSheet's 1.5 s window covers the "actively waiting" case,
+  // and any other organic refresh (pull-to-refresh, tab swap, invoice
+  // creation, send flow) will also trigger the detector. Burning a
+  // network request every 10 s just in case a lightning-address
+  // payment lands isn't worth the battery for most users.
+  // NOTE: true background / app-closed delivery needs OS push
+  // (FCM/APNs + backend relay), tracked in issue #45.
   useEffect(() => {
     if (!activeWalletId) return;
     const wallet = wallets.find((w) => w.id === activeWalletId);
     if (!wallet || wallet.walletType === 'onchain' || !wallet.isConnected) return;
 
-    let interval: ReturnType<typeof setInterval> | null = null;
-    const start = () => {
-      if (interval) return;
-      interval = setInterval(() => {
-        // Fire-and-forget: failures are non-fatal (next tick retries)
-        // and must not leak unhandled promise rejections.
-        nwcService
-          .getBalance(activeWalletId)
-          .then((b) => {
-            if (b !== null) updateWalletInState(activeWalletId, { balance: b });
-          })
-          .catch(() => {});
-      }, 10000);
+    const refreshOnce = () => {
+      nwcService
+        .getBalance(activeWalletId)
+        .then((b) => {
+          if (b !== null) updateWalletInState(activeWalletId, { balance: b });
+        })
+        .catch(() => {});
     };
-    const stop = () => {
-      if (interval) {
-        clearInterval(interval);
-        interval = null;
-      }
-    };
-    if (AppState.currentState === 'active') start();
+
     const sub = AppState.addEventListener('change', (next) => {
-      if (next === 'active') start();
-      else stop();
+      if (next === 'active') refreshOnce();
     });
-    return () => {
-      stop();
-      sub.remove();
-    };
+    return () => sub.remove();
     // `wallets` is intentionally omitted so we don't thrash the
-    // interval on every balance tick — we only re-wire when the active
-    // wallet itself changes.
+    // subscription on every balance tick — we only re-wire when the
+    // active wallet itself changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWalletId, updateWalletInState]);
 

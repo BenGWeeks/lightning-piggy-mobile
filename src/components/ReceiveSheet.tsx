@@ -125,9 +125,9 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
         needsBaseline.current = true;
         // Poll every 1.5 s for the first 3 minutes after invoice
         // creation — that's the window the user is actively waiting for
-        // payment. After that, stop the aggressive poll: the global
-        // WalletContext poll (every 10 s while foreground) still catches
-        // payments that come in later, just a bit slower. Prevents
+        // payment. After that the aggressive poll stops; a late-arriving
+        // payment is still detected by any organic balance refresh
+        // (pull-to-refresh, send, app foreground-resume, etc.). Prevents
         // forever-1.5 s battery/network drain if the user leaves the
         // sheet open and walks away.
         if (pollDownshiftTimer.current) clearTimeout(pollDownshiftTimer.current);
