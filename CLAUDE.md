@@ -22,7 +22,7 @@
 - Prettier and ESLint must pass before committing
 - TypeScript strict mode — `npx tsc --noEmit` must pass
 
-## Pull request titles
+## Pull Request Titles
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/) plus a trailing issue reference when the PR resolves one:
 
