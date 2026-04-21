@@ -66,6 +66,45 @@ export const styles = StyleSheet.create({
   chipTextActive: {
     color: colors.brandPink,
   },
+  subChipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 8,
+  },
+  subChip: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 14,
+  },
+  subChipActive: {
+    backgroundColor: 'rgba(255,255,255,0.9)',
+  },
+  subChipText: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  subChipTextActive: {
+    color: colors.brandPink,
+  },
+  fab: {
+    position: 'absolute',
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.brandPink,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 6,
+  },
   searchRow: {
     flex: 1,
     flexDirection: 'row',
