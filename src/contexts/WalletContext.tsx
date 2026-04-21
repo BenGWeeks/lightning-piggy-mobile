@@ -126,6 +126,15 @@ interface WalletContextType {
   lastIncomingPayment: IncomingPayment | null;
   clearLastIncomingPayment: () => void;
 
+  // Kick off aggressive 1 s polling for a specific NWC invoice for the
+  // next 3 minutes. Called by ReceiveSheet when an invoice is
+  // generated — the poll lives in the context so it survives the sheet
+  // closing (user can generate an invoice, close the sheet, wander
+  // into Friends, and still get the confetti pop). Subsequent calls
+  // replace any in-flight expectation. Stops early on detected
+  // settlement or after the duration elapses.
+  expectPayment: (walletId: string, paymentHash: string, durationMs?: number) => void;
+
   // Legacy compatibility
   isConnected: boolean;
   balance: number | null;
@@ -1192,6 +1201,79 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const clearLastIncomingPayment = useCallback(() => setLastIncomingPayment(null), []);
 
+  // In-flight "I'm expecting a payment on this invoice" poll state.
+  // Only one at a time — a new expectPayment() replaces the previous.
+  // The balance-diff detector still runs independently, so even if this
+  // poll is replaced before the first invoice settles, the eventual
+  // balance increment will still fire the overlay.
+  const expectedPaymentRef = useRef<{
+    walletId: string;
+    paymentHash: string;
+    interval: ReturnType<typeof setInterval>;
+    timeout: ReturnType<typeof setTimeout>;
+  } | null>(null);
+
+  const stopExpectedPayment = useCallback(() => {
+    const current = expectedPaymentRef.current;
+    if (!current) return;
+    clearInterval(current.interval);
+    clearTimeout(current.timeout);
+    expectedPaymentRef.current = null;
+  }, []);
+
+  const expectPayment = useCallback(
+    (walletId: string, paymentHash: string, durationMs: number = 3 * 60 * 1000) => {
+      // Replace any previous expectation — we only track one at a time.
+      stopExpectedPayment();
+
+      const tick = async () => {
+        const [lookupResult] = await Promise.allSettled([
+          nwcService.lookupInvoice(walletId, paymentHash),
+          // The balance refresh is what ultimately drives the
+          // WalletContext diff-detector and fires the overlay; fire
+          // both every tick so either path catches the settle.
+          (async () => {
+            const b = await nwcService.getBalance(walletId);
+            if (b !== null) updateWalletInState(walletId, { balance: b });
+          })(),
+        ]);
+        if (lookupResult.status === 'fulfilled' && lookupResult.value?.paid) {
+          if (__DEV__)
+            console.log(
+              `[Wallet] expected invoice paid (${paymentHash.slice(0, 12)}…) — stopping poll`,
+            );
+          stopExpectedPayment();
+        }
+      };
+
+      const interval = setInterval(tick, 1000);
+      const timeout = setTimeout(() => {
+        // Only clear if THIS expectation is still current; a newer one
+        // may have replaced it already.
+        if (expectedPaymentRef.current?.interval === interval) {
+          if (__DEV__)
+            console.log(
+              `[Wallet] expected payment poll window expired (${paymentHash.slice(0, 12)}…)`,
+            );
+          stopExpectedPayment();
+        }
+      }, durationMs);
+
+      expectedPaymentRef.current = { walletId, paymentHash, interval, timeout };
+      if (__DEV__)
+        console.log(
+          `[Wallet] expecting payment on ${paymentHash.slice(0, 12)}… (${Math.round(durationMs / 1000)} s window)`,
+        );
+    },
+    [stopExpectedPayment, updateWalletInState],
+  );
+
+  // Tear down any outstanding expectation when the context unmounts —
+  // leaked intervals kept polling NWC after a logout / hot-reload.
+  useEffect(() => {
+    return () => stopExpectedPayment();
+  }, [stopExpectedPayment]);
+
   // When an incoming payment is detected, also pull the latest
   // transaction list for that wallet so the Home / Transactions screens
   // show the new tx immediately — not on the user's next manual refresh.
@@ -1245,18 +1327,22 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, [wallets]);
 
-  // Refresh the active wallet's balance once whenever the app returns
-  // to the foreground. Cheap (one NWC round-trip per resume) and
-  // catches payments that arrived while the app was backgrounded — the
-  // balance diff then fires the global celebration overlay. We
-  // deliberately do NOT run a continuous baseline poll: the
-  // ReceiveSheet's 1.5 s window covers the "actively waiting" case,
-  // and any other organic refresh (pull-to-refresh, tab swap, invoice
-  // creation, send flow) will also trigger the detector. Burning a
-  // network request every 10 s just in case a lightning-address
-  // payment lands isn't worth the battery for most users.
-  // NOTE: true background / app-closed delivery needs OS push
-  // (FCM/APNs + backend relay), tracked in issue #45.
+  // Keep the active NWC wallet's balance in rough sync so the global
+  // overlay pops for *any* incoming payment — not just ones the user
+  // explicitly asked us to watch via expectPayment. Covers:
+  //
+  //   - app returns to foreground → one-shot refresh to catch anything
+  //     that arrived while backgrounded.
+  //   - 30 s slow poll while the app is foregrounded → catches
+  //     lightning-address payments that land without an in-app
+  //     invoice-generation trigger. Worst-case latency ~30 s, which
+  //     is acceptable for casual address receives; the expectPayment
+  //     fast poll (1 s for 3 min) takes over when the user is
+  //     *actively* waiting on a specific invoice.
+  //
+  // On-chain is skipped — BDK sync is expensive and not safe to run
+  // every 30 s; #134 tracks the on-chain variant of this coverage.
+  // True background / app-closed delivery needs OS push (#45).
   useEffect(() => {
     if (!activeWalletId) return;
     const wallet = wallets.find((w) => w.id === activeWalletId);
@@ -1271,10 +1357,34 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         .catch(() => {});
     };
 
+    let interval: ReturnType<typeof setInterval> | null = null;
+    const startPoll = () => {
+      if (interval) return;
+      interval = setInterval(refreshOnce, 30000);
+    };
+    const stopPoll = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+
+    if (AppState.currentState === 'active') {
+      refreshOnce();
+      startPoll();
+    }
     const sub = AppState.addEventListener('change', (next) => {
-      if (next === 'active') refreshOnce();
+      if (next === 'active') {
+        refreshOnce();
+        startPoll();
+      } else {
+        stopPoll();
+      }
     });
-    return () => sub.remove();
+    return () => {
+      stopPoll();
+      sub.remove();
+    };
     // `wallets` is intentionally omitted so we don't thrash the
     // subscription on every balance tick — we only re-wire when the
     // active wallet itself changes.
@@ -1316,6 +1426,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         getReceiveAddress,
         lastIncomingPayment,
         clearLastIncomingPayment,
+        expectPayment,
         isConnected,
         balance,
         walletAlias,

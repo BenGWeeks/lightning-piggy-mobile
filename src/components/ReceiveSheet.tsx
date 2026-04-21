@@ -30,7 +30,6 @@ import { walletLabel } from '../types/wallet';
 import { colors } from '../styles/theme';
 import { receiveSheetStyles as styles } from '../styles/ReceiveSheet.styles';
 import { satsToFiatString, satsToFiat } from '../services/fiatService';
-import * as nwcService from '../services/nwcService';
 import FriendPickerSheet, { PickedFriend } from './FriendPickerSheet';
 import type { RootStackParamList } from '../navigation/types';
 
@@ -98,6 +97,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
     currency,
     lightningAddress,
     getReceiveAddress,
+    expectPayment,
   } = useWallet();
   const [capturedWalletId, setCapturedWalletId] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -111,11 +111,6 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
   const [onchainAddress, setOnchainAddress] = useState<string | null>(null);
   const [friendPickerOpen, setFriendPickerOpen] = useState(false);
   const [sendingToFriend, setSendingToFriend] = useState(false);
-  const intervalId = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Timer that downshifts the poll cadence once the user has been
-  // actively waiting for a payment for a while. Avoids running a 1.5 s
-  // poll forever if the user leaves the sheet open and walks away.
-  const pollDownshiftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevBalance = useRef<number | null>(null);
   // When true, the next observed balance is treated as the "pre-invoice"
   // baseline and is NOT fired as a received payment. Reset on sheet-open,
@@ -146,10 +141,6 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
 
   const generateInvoice = useCallback(
     async (sats: number) => {
-      if (intervalId.current) {
-        clearInterval(intervalId.current);
-        intervalId.current = null;
-      }
       setLoading(true);
       setPaymentReceived(false);
       try {
@@ -162,56 +153,28 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
         // balance we see after this poll starts becomes the baseline.
         needsBaseline.current = true;
 
-        // Belt-and-suspenders poll: on every tick we fire BOTH a
-        // `lookup_invoice` (targeted per-hash check — fastest signal
-        // when paid flips, independent of balance aggregation) AND a
-        // `refreshBalanceForWallet` (which ultimately lands in the
-        // WalletContext diff-detector that renders the global overlay).
-        // Running both means a flaky NWC backend — `get_balance` is
-        // observed to time out on our LNbits occasionally — still
-        // has a fallback path: whichever returns first wins. The
-        // balance refresh is the one that actually fires the overlay,
-        // so don't early-return from the lookup path; let the balance
-        // diff drive detection.
+        // Hand the invoice off to WalletContext.expectPayment, which
+        // runs a 1 s lookup_invoice + balance poll for the next 3 min.
+        // The poll lives in the context (not this sheet), so it keeps
+        // running even if the user closes the receive sheet and wanders
+        // off to Friends / Home etc. — the app-root overlay still pops
+        // on settle regardless of which screen is active.
         const paymentHash = paymentHashFromBolt11(inv);
-        if (__DEV__)
-          console.log(
-            `[Receive] starting 1 s poll · paymentHash=${paymentHash ? paymentHash.slice(0, 12) + '…' : 'null (fallback to balance)'}`,
-          );
-        if (pollDownshiftTimer.current) clearTimeout(pollDownshiftTimer.current);
-        intervalId.current = setInterval(async () => {
-          if (!wId) return;
-          const [lookupResult] = await Promise.allSettled([
-            paymentHash ? nwcService.lookupInvoice(wId, paymentHash) : Promise.resolve(null),
-            refreshBalanceForWallet(wId),
-          ]);
-          if (lookupResult.status === 'fulfilled' && lookupResult.value?.paid) {
-            if (__DEV__) console.log('[Receive] lookup_invoice reports PAID — stopping poll');
-            if (intervalId.current) {
-              clearInterval(intervalId.current);
-              intervalId.current = null;
-            }
-          }
-        }, 1000);
-        // Stop the aggressive poll after 3 min. A late-arriving payment
-        // is still detected by any organic refresh (pull-to-refresh,
-        // foreground resume, etc.) — see WalletContext baseline logic.
-        pollDownshiftTimer.current = setTimeout(
-          () => {
-            if (intervalId.current) {
-              clearInterval(intervalId.current);
-              intervalId.current = null;
-            }
-          },
-          3 * 60 * 1000,
-        );
+        if (paymentHash) {
+          expectPayment(wId, paymentHash);
+        } else {
+          // Unparseable bolt11 — fall back to a single balance refresh.
+          // The WalletContext 30 s baseline poll still picks the
+          // settle up eventually if the user lingers in-app.
+          await refreshBalanceForWallet(wId);
+        }
       } catch (error) {
         console.warn('Failed to create invoice:', error);
       } finally {
         setLoading(false);
       }
     },
-    [makeInvoiceForWallet, refreshBalanceForWallet, capturedWalletId],
+    [makeInvoiceForWallet, refreshBalanceForWallet, capturedWalletId, expectPayment],
   );
 
   const isOnchainWallet = selectedWallet?.walletType === 'onchain';
@@ -256,14 +219,10 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
       bottomSheetRef.current?.dismiss();
     }
     return () => {
-      if (intervalId.current) {
-        clearInterval(intervalId.current);
-        intervalId.current = null;
-      }
-      if (pollDownshiftTimer.current) {
-        clearTimeout(pollDownshiftTimer.current);
-        pollDownshiftTimer.current = null;
-      }
+      // Poll lives in WalletContext.expectPayment now and survives
+      // sheet closure (so the user can generate an invoice, close the
+      // sheet, navigate elsewhere, and still get the celebration).
+      // Only the debounce timer is sheet-local.
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -291,10 +250,6 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
     // the new wallet is treated as the pre-invoice starting point.
     prevBalance.current = null;
     needsBaseline.current = true;
-    if (intervalId.current) {
-      clearInterval(intervalId.current);
-      intervalId.current = null;
-    }
     if (selectedWallet?.walletType === 'onchain') {
       setMode('address');
       getReceiveAddress(capturedWalletId)
@@ -328,10 +283,6 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
     if (sats <= 0) {
       setInvoice('');
-      if (intervalId.current) {
-        clearInterval(intervalId.current);
-        intervalId.current = null;
-      }
       return;
     }
     debounceTimer.current = setTimeout(() => {
