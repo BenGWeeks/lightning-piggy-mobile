@@ -245,6 +245,19 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
           setDetail(null);
           setProfileContact(contact);
         }}
+        onZapCounterparty={(contact) => {
+          setDetail(null);
+          setZapContact(contact);
+        }}
+        onMessageCounterparty={(contact) => {
+          setDetail(null);
+          navigation.navigate('Conversation', {
+            pubkey: contact.pubkey,
+            name: contact.name,
+            picture: contact.picture,
+            lightningAddress: contact.lightningAddress,
+          });
+        }}
       />
       <ContactProfileSheet
         visible={profileContact !== null}

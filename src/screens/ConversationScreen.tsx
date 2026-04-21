@@ -23,9 +23,11 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
+import * as nwcService from '../services/nwcService';
 import { colors } from '../styles/theme';
 import SendSheet from '../components/SendSheet';
 import AttachSheet from '../components/AttachSheet';
+import ReceiveSheet from '../components/ReceiveSheet';
 import TransactionDetailSheet, {
   TransactionDetailData,
   CounterpartyContact,
@@ -87,6 +89,8 @@ interface DecodedInvoice {
   description: string | null;
   /** Epoch seconds at which the invoice becomes invalid. `null` = unknown. */
   expiresAt: number | null;
+  /** 32-byte payment hash (hex). Used to poll NWC for paid status. */
+  paymentHash: string | null;
 }
 
 function extractInvoice(text: string): DecodedInvoice | null {
@@ -100,6 +104,7 @@ function extractInvoice(text: string): DecodedInvoice | null {
     let description: string | null = null;
     let timestamp: number | null = null;
     let expirySeconds: number | null = null;
+    let paymentHash: string | null = null;
     for (const section of decoded.sections) {
       if (section.name === 'amount') {
         amountSats = Math.round(Number(section.value) / 1000);
@@ -109,13 +114,15 @@ function extractInvoice(text: string): DecodedInvoice | null {
         timestamp = section.value as number;
       } else if (section.name === 'expiry') {
         expirySeconds = section.value as number;
+      } else if (section.name === 'payment_hash') {
+        paymentHash = section.value as string;
       }
     }
     const expiresAt =
       timestamp !== null && expirySeconds !== null ? timestamp + expirySeconds : null;
-    return { raw, amountSats, description, expiresAt };
+    return { raw, amountSats, description, expiresAt, paymentHash };
   } catch {
-    return { raw, amountSats: null, description: null, expiresAt: null };
+    return { raw, amountSats: null, description: null, expiresAt: null, paymentHash: null };
   }
 }
 
@@ -140,6 +147,14 @@ function formatTime(epochSeconds: number): string {
   return `${day}/${month} ${hh}:${mm}`;
 }
 
+function formatRelativeFuture(epochMs: number): string {
+  const deltaSec = Math.max(0, Math.floor((epochMs - Date.now()) / 1000));
+  if (deltaSec < 60) return 'in <1 min';
+  if (deltaSec < 3600) return `in ${Math.floor(deltaSec / 60)} min`;
+  if (deltaSec < 86400) return `in ${Math.floor(deltaSec / 3600)}h`;
+  return `in ${Math.floor(deltaSec / 86400)}d`;
+}
+
 const ConversationScreen: React.FC = () => {
   const navigation = useNavigation<ConversationNavigation>();
   const route = useRoute<ConversationRoute>();
@@ -147,7 +162,7 @@ const ConversationScreen: React.FC = () => {
   const { pubkey, name, picture, lightningAddress } = route.params;
 
   const { isLoggedIn, fetchConversation, sendDirectMessage } = useNostr();
-  const { wallets } = useWallet();
+  const { wallets, activeWalletId, activeWallet } = useWallet();
 
   const [messages, setMessages] = useState<
     { id: string; fromMe: boolean; text: string; createdAt: number }[]
@@ -162,7 +177,10 @@ const ConversationScreen: React.FC = () => {
   const [detailTx, setDetailTx] = useState<TransactionDetailData | null>(null);
   const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
   const [attachSheetOpen, setAttachSheetOpen] = useState(false);
+  const [invoiceSheetOpen, setInvoiceSheetOpen] = useState(false);
   const [sharingLocation, setSharingLocation] = useState(false);
+  // Payment hashes of outgoing invoices the active NWC wallet reports paid.
+  const [paidHashes, setPaidHashes] = useState<Set<string>>(() => new Set());
   const listRef = useRef<FlatList<Item>>(null);
 
   const zapItems = useMemo<Item[]>(() => {
@@ -207,7 +225,11 @@ const ConversationScreen: React.FC = () => {
         createdAt: m.createdAt,
       };
     });
-    return [...msgItems, ...zapItems].sort((a, b) => a.createdAt - b.createdAt);
+    // Descending order — index 0 is newest. The FlatList is `inverted`, so
+    // index 0 renders at the visual bottom (chat default) and the
+    // RefreshControl attaches to the visual bottom too, which is what
+    // drives the pull-up-to-refresh gesture.
+    return [...msgItems, ...zapItems].sort((a, b) => b.createdAt - a.createdAt);
   }, [messages, zapItems]);
 
   const load = useCallback(
@@ -238,6 +260,54 @@ const ConversationScreen: React.FC = () => {
     }, 50);
     return () => clearTimeout(t);
   }, [items.length]);
+
+  // Payment hashes of outgoing invoices that are plausibly still payable —
+  // not expired and not already known paid. Memoised so the polling effect
+  // doesn't re-run on every render.
+  const outgoingOpenHashes = useMemo(() => {
+    const now = Date.now();
+    const hashes: string[] = [];
+    for (const m of messages) {
+      if (!m.fromMe) continue;
+      const inv = extractInvoice(m.text);
+      if (!inv || !inv.paymentHash) continue;
+      if (paidHashes.has(inv.paymentHash)) continue;
+      if (inv.expiresAt !== null && inv.expiresAt * 1000 < now) continue;
+      hashes.push(inv.paymentHash);
+    }
+    return hashes;
+  }, [messages, paidHashes]);
+
+  // Poll NWC for the paid status of outgoing invoices. Lightning-only.
+  // We assume the active wallet is the one that issued the invoice — not
+  // strictly true if the user switched wallets mid-session, but the cost
+  // of a miss is that a paid invoice stays "unpaid" in the UI.
+  useEffect(() => {
+    if (!activeWalletId || activeWallet?.walletType === 'onchain') return;
+    if (outgoingOpenHashes.length === 0) return;
+    let cancelled = false;
+    const poll = async () => {
+      for (const hash of outgoingOpenHashes) {
+        if (cancelled) return;
+        const result = await nwcService.lookupInvoice(activeWalletId, hash);
+        if (cancelled) return;
+        if (result?.paid) {
+          setPaidHashes((prev) => {
+            if (prev.has(hash)) return prev;
+            const next = new Set(prev);
+            next.add(hash);
+            return next;
+          });
+        }
+      }
+    };
+    poll();
+    const id = setInterval(poll, 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [activeWalletId, activeWallet?.walletType, outgoingOpenHashes]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -340,6 +410,7 @@ const ConversationScreen: React.FC = () => {
         const invoice = extractInvoice(item.text);
         if (invoice) {
           const expired = invoice.expiresAt !== null && invoice.expiresAt * 1000 < Date.now();
+          const paid = invoice.paymentHash !== null && paidHashes.has(invoice.paymentHash);
           return (
             <View
               style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
@@ -352,7 +423,7 @@ const ConversationScreen: React.FC = () => {
               >
                 <View style={styles.invoiceHeaderRow}>
                   <Text style={[styles.invoiceLabel, item.fromMe && styles.invoiceLabelMe]}>
-                    {item.fromMe ? 'Invoice sent' : 'Invoice'}
+                    {item.fromMe ? 'Invoice sent' : 'Invoice received'}
                   </Text>
                   <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
                     {formatTime(item.createdAt)}
@@ -371,11 +442,22 @@ const ConversationScreen: React.FC = () => {
                     {invoice.description}
                   </Text>
                 ) : null}
-                {item.fromMe ? null : expired ? (
-                  <View style={[styles.invoicePayButton, styles.invoicePayButtonDisabled]}>
-                    <Text style={styles.invoicePayExpiredText}>Expired</Text>
-                  </View>
-                ) : (
+                {paid ? (
+                  <Text
+                    style={[styles.invoicePaid, item.fromMe && styles.invoicePaidMe]}
+                  >
+                    Paid
+                  </Text>
+                ) : invoice.expiresAt !== null ? (
+                  <Text
+                    style={[styles.invoiceExpiry, item.fromMe && styles.invoiceExpiryMe]}
+                  >
+                    {expired
+                      ? 'Expired'
+                      : `Expires ${formatRelativeFuture(invoice.expiresAt * 1000)}`}
+                  </Text>
+                ) : null}
+                {item.fromMe ? null : paid || expired ? null : (
                   <TouchableOpacity
                     style={styles.invoicePayButton}
                     onPress={() => {
@@ -552,7 +634,7 @@ const ConversationScreen: React.FC = () => {
         </View>
       );
     },
-    [openLocation],
+    [openLocation, paidHashes],
   );
 
   const avatarNode =
@@ -600,16 +682,6 @@ const ConversationScreen: React.FC = () => {
         <Text style={styles.headerName} numberOfLines={1}>
           {name}
         </Text>
-        {lightningAddress ? (
-          <TouchableOpacity
-            onPress={handleOpenZap}
-            style={styles.zapHeaderButton}
-            accessibilityLabel="Send zap"
-            testID="conversation-zap"
-          >
-            <Zap size={20} color={colors.white} fill={colors.white} />
-          </TouchableOpacity>
-        ) : null}
       </View>
 
       <KeyboardAvoidingView
@@ -629,6 +701,7 @@ const ConversationScreen: React.FC = () => {
             keyExtractor={(it) => it.id}
             renderItem={renderItem}
             contentContainerStyle={styles.listContent}
+            inverted
             ListEmptyComponent={
               <View style={styles.empty}>
                 <Text style={styles.emptyTitle}>No messages yet</Text>
@@ -638,9 +711,6 @@ const ConversationScreen: React.FC = () => {
               </View>
             }
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
-            onContentSizeChange={() => {
-              if (items.length > 0) listRef.current?.scrollToEnd({ animated: false });
-            }}
           />
         )}
 
@@ -669,33 +739,22 @@ const ConversationScreen: React.FC = () => {
             accessibilityLabel="Message input"
             testID="conversation-input"
           />
-          {lightningAddress && draft.trim().length === 0 ? (
-            <TouchableOpacity
-              style={styles.composerZapButton}
-              onPress={handleOpenZap}
-              accessibilityLabel="Send zap"
-              testID="conversation-composer-zap"
-            >
-              <Zap size={22} color={colors.white} fill={colors.white} />
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={[
-                styles.composerSendButton,
-                (!draft.trim() || sending) && styles.composerSendButtonDisabled,
-              ]}
-              onPress={handleSend}
-              disabled={!draft.trim() || sending}
-              accessibilityLabel="Send message"
-              testID="conversation-send"
-            >
-              {sending ? (
-                <ActivityIndicator color={colors.white} />
-              ) : (
-                <Send size={20} color={colors.white} />
-              )}
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            style={[
+              styles.composerSendButton,
+              (!draft.trim() || sending) && styles.composerSendButtonDisabled,
+            ]}
+            onPress={handleSend}
+            disabled={!draft.trim() || sending}
+            accessibilityLabel="Send message"
+            testID="conversation-send"
+          >
+            {sending ? (
+              <ActivityIndicator color={colors.white} />
+            ) : (
+              <Send size={20} color={colors.white} />
+            )}
+          </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
 
@@ -703,6 +762,34 @@ const ConversationScreen: React.FC = () => {
         visible={attachSheetOpen}
         onClose={() => setAttachSheetOpen(false)}
         onShareLocation={handleShareLocation}
+        onSendZap={
+          lightningAddress
+            ? () => {
+                setAttachSheetOpen(false);
+                setSendSheetOpen(true);
+              }
+            : undefined
+        }
+        onSendInvoice={() => {
+          setAttachSheetOpen(false);
+          setInvoiceSheetOpen(true);
+        }}
+      />
+      <ReceiveSheet
+        visible={invoiceSheetOpen}
+        onClose={() => setInvoiceSheetOpen(false)}
+        presetFriend={{ pubkey, name, picture: picture ?? null, lightningAddress: lightningAddress ?? null }}
+        onSent={(payload) => {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `local-${Date.now()}`,
+              fromMe: true,
+              text: payload,
+              createdAt: Math.floor(Date.now() / 1000),
+            },
+          ]);
+        }}
       />
       <SendSheet
         visible={sendSheetOpen}
@@ -796,14 +883,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: colors.textHeader,
-  },
-  zapHeaderButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.brandPink,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   listContent: {
     paddingHorizontal: 12,
@@ -989,6 +1068,23 @@ const styles = StyleSheet.create({
   invoiceMemoMe: {
     color: 'rgba(255,255,255,0.9)',
   },
+  invoiceExpiry: {
+    fontSize: 12,
+    color: colors.textSupplementary,
+    marginTop: 4,
+  },
+  invoiceExpiryMe: {
+    color: 'rgba(255,255,255,0.75)',
+  },
+  invoicePaid: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#2e7d32',
+    marginTop: 4,
+  },
+  invoicePaidMe: {
+    color: '#c8f2cc',
+  },
   invoicePayButton: {
     marginTop: 8,
     flexDirection: 'row',
@@ -1044,14 +1140,6 @@ const styles = StyleSheet.create({
   },
   composerSendButtonDisabled: {
     opacity: 0.4,
-  },
-  composerZapButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.brandPink,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   composerAttachButton: {
     width: 40,

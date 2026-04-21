@@ -339,17 +339,26 @@ export async function listTransactions(walletId: string): Promise<any[]> {
 
 // LNbits (and some other NWC backends) omit preimage/invoice from
 // list_transactions; this fills them in. Returns null on failure.
+// `paid` is derived from whichever of the Alby-SDK fields is populated
+// (`settled_at` on newer servers, non-empty `preimage` on older ones).
 export async function lookupInvoice(
   walletId: string,
   paymentHash: string,
-): Promise<{ preimage?: string; invoice?: string } | null> {
+): Promise<{ preimage?: string; invoice?: string; paid: boolean } | null> {
   const provider = await ensureConnected(walletId);
   if (!provider) return null;
   try {
-    const result = await provider.lookupInvoice({ payment_hash: paymentHash });
+    const result = (await provider.lookupInvoice({ payment_hash: paymentHash })) as {
+      preimage?: string;
+      invoice?: string;
+      settled_at?: number;
+      settled?: boolean;
+    };
+    const paid = Boolean(result?.settled_at || result?.settled || result?.preimage);
     return {
       preimage: result?.preimage,
       invoice: result?.invoice,
+      paid,
     };
   } catch (error) {
     console.warn(`lookupInvoice failed for ${walletId}:`, error);

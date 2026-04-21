@@ -25,7 +25,7 @@ import TransactionTypeIcon from './TransactionTypeIcon';
 import type { ZapCounterpartyInfo } from '../types/wallet';
 import { colors } from '../styles/theme';
 import { BOLTZ_SUPPORT_NPUB, dmRecipient } from '../constants/npubs';
-import { Copy } from 'lucide-react-native';
+import { Copy, Zap, MessageCircle } from 'lucide-react-native';
 
 export interface TransactionDetailData {
   type: 'incoming' | 'outgoing' | string;
@@ -70,6 +70,10 @@ interface Props {
    *  top of an already-visible modal, which looks crowded and fights
    *  @gorhom's modal dismissal semantics. */
   onCounterpartyPress?: (contact: CounterpartyContact) => void;
+  /** Fired when the user taps the Zap icon in the recipient/sender card. */
+  onZapCounterparty?: (contact: CounterpartyContact) => void;
+  /** Fired when the user taps the Message icon in the recipient/sender card. */
+  onMessageCounterparty?: (contact: CounterpartyContact) => void;
 }
 
 type BoltzSwapView = {
@@ -102,7 +106,14 @@ const CopyRow: React.FC<{
   </TouchableOpacity>
 );
 
-const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose, onCounterpartyPress }) => {
+const TransactionDetailSheet: React.FC<Props> = ({
+  visible,
+  tx,
+  onClose,
+  onCounterpartyPress,
+  onZapCounterparty,
+  onMessageCounterparty,
+}) => {
   const { btcPrice, currency, activeWallet } = useWallet();
   const { isLoggedIn, signerType, sendDirectMessage, contacts } = useNostr();
   const sheetRef = useRef<BottomSheetModal>(null);
@@ -380,6 +391,40 @@ const TransactionDetailSheet: React.FC<Props> = ({ visible, tx, onClose, onCount
                     </Text>
                   ) : null}
                 </View>
+                {counterpartyContact ? (
+                  <View style={styles.senderActions}>
+                    {onZapCounterparty && counterpartyContact.lightningAddress ? (
+                      <TouchableOpacity
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          onClose();
+                          onZapCounterparty(counterpartyContact);
+                        }}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        style={styles.senderActionIcon}
+                        accessibilityLabel={`Zap ${counterpartyContact.name}`}
+                        testID="tx-detail-zap"
+                      >
+                        <Zap size={20} color={colors.white} fill={colors.white} />
+                      </TouchableOpacity>
+                    ) : null}
+                    {onMessageCounterparty ? (
+                      <TouchableOpacity
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          onClose();
+                          onMessageCounterparty(counterpartyContact);
+                        }}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        style={styles.senderActionIcon}
+                        accessibilityLabel={`Message ${counterpartyContact.name}`}
+                        testID="tx-detail-message"
+                      >
+                        <MessageCircle size={20} color={colors.white} />
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                ) : null}
               </TouchableOpacity>
               {zapCounterparty.comment ? (
                 <Text style={styles.senderComment}>{zapCounterparty.comment}</Text>

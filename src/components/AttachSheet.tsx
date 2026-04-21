@@ -6,18 +6,29 @@ import {
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
-import { MapPin } from 'lucide-react-native';
+import { MapPin, Zap, Receipt } from 'lucide-react-native';
 import { colors } from '../styles/theme';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
   onShareLocation: () => void;
+  onSendZap?: () => void;
+  onSendInvoice?: () => void;
 }
 
-const AttachSheet: React.FC<Props> = ({ visible, onClose, onShareLocation }) => {
+const AttachSheet: React.FC<Props> = ({
+  visible,
+  onClose,
+  onShareLocation,
+  onSendZap,
+  onSendInvoice,
+}) => {
   const sheetRef = useRef<BottomSheetModal>(null);
-  const snapPoints = useMemo(() => ['28%'], []);
+  const snapPoints = useMemo(() => {
+    const rows = 1 + (onSendZap ? 1 : 0) + (onSendInvoice ? 1 : 0);
+    return [rows >= 3 ? '44%' : rows === 2 ? '36%' : '28%'];
+  }, [onSendZap, onSendInvoice]);
 
   useEffect(() => {
     if (visible) {
@@ -62,6 +73,42 @@ const AttachSheet: React.FC<Props> = ({ visible, onClose, onShareLocation }) => 
     >
       <BottomSheetView style={styles.content}>
         <Text style={styles.title}>Share</Text>
+        {onSendZap ? (
+          <TouchableOpacity
+            style={styles.row}
+            onPress={onSendZap}
+            accessibilityLabel="Send a zap"
+            testID="attach-send-zap"
+          >
+            <View style={styles.iconBadge}>
+              <Zap size={22} color={colors.white} fill={colors.white} />
+            </View>
+            <View style={styles.rowText}>
+              <Text style={styles.rowTitle}>Send zap</Text>
+              <Text style={styles.rowSubtitle}>
+                Pay sats to their lightning address.
+              </Text>
+            </View>
+          </TouchableOpacity>
+        ) : null}
+        {onSendInvoice ? (
+          <TouchableOpacity
+            style={styles.row}
+            onPress={onSendInvoice}
+            accessibilityLabel="Send an invoice"
+            testID="attach-send-invoice"
+          >
+            <View style={styles.iconBadge}>
+              <Receipt size={22} color={colors.white} />
+            </View>
+            <View style={styles.rowText}>
+              <Text style={styles.rowTitle}>Send invoice</Text>
+              <Text style={styles.rowSubtitle}>
+                Create a bolt11 invoice and DM it to them.
+              </Text>
+            </View>
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity
           style={styles.row}
           onPress={onShareLocation}
