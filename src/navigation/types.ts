@@ -25,6 +25,8 @@ export type RootStackParamList = {
     picture?: string | null;
     lightningAddress?: string | null;
   };
+  Groups: undefined;
+  GroupConversation: { groupId: string };
 };
 
 // Learn sub-stack
@@ -42,3 +44,4 @@ export type LearnNavigation = NativeStackNavigationProp<LearnStackParamList>;
 export type CourseDetailRoute = RouteProp<LearnStackParamList, 'CourseDetail'>;
 export type MissionDetailRoute = RouteProp<LearnStackParamList, 'MissionDetail'>;
 export type HomeRoute = RouteProp<MainTabParamList, 'Home'>;
+export type GroupConversationRoute = RouteProp<RootStackParamList, 'GroupConversation'>;

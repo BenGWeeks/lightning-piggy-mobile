@@ -9,6 +9,7 @@ import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import Toast, { BaseToast, ErrorToast, InfoToast } from 'react-native-toast-message';
 import { WalletProvider } from './src/contexts/WalletContext';
 import { NostrProvider } from './src/contexts/NostrContext';
+import { GroupsProvider } from './src/contexts/GroupsContext';
 import AppNavigator from './src/navigation/AppNavigator';
 
 // Render toasts with unlimited-line body so long error messages (e.g. Electrum
@@ -48,11 +49,13 @@ export default function App() {
     <GestureHandlerRootView style={styles.container}>
       <WalletProvider>
         <NostrProvider>
-          <BottomSheetModalProvider>
-            <StatusBar style="light" />
-            <AppNavigator />
-          </BottomSheetModalProvider>
-          <Toast topOffset={60} config={toastConfig} />
+          <GroupsProvider>
+            <BottomSheetModalProvider>
+              <StatusBar style="light" />
+              <AppNavigator />
+            </BottomSheetModalProvider>
+            <Toast topOffset={60} config={toastConfig} />
+          </GroupsProvider>
         </NostrProvider>
       </WalletProvider>
     </GestureHandlerRootView>

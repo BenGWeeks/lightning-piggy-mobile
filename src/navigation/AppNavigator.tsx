@@ -17,6 +17,8 @@ import MissionDetailScreen from '../screens/MissionDetailScreen';
 import AccountScreen from '../screens/AccountScreen';
 import FriendsScreen from '../screens/FriendsScreen';
 import ConversationScreen from '../screens/ConversationScreen';
+import GroupsScreen from '../screens/GroupsScreen';
+import GroupConversationScreen from '../screens/GroupConversationScreen';
 import FriendsIcon from '../components/icons/FriendsIcon';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -160,6 +162,8 @@ export default function AppNavigator() {
           <>
             <Stack.Screen name="MainTabs" component={HomeTabs} />
             <Stack.Screen name="Conversation" component={ConversationScreen} />
+            <Stack.Screen name="Groups" component={GroupsScreen} />
+            <Stack.Screen name="GroupConversation" component={GroupConversationScreen} />
           </>
         )}
       </Stack.Navigator>
