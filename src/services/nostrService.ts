@@ -75,6 +75,34 @@ export function npubEncode(hex: string): string {
   return nip19.npubEncode(hex);
 }
 
+export function nprofileEncode(pubkey: string, relays: string[] = []): string {
+  return nip19.nprofileEncode({ pubkey, relays });
+}
+
+export interface DecodedProfileReference {
+  pubkey: string;
+  relays: string[];
+}
+
+// Accepts a NIP-21 `nostr:` URI or a bare bech32 identifier and returns
+// the pubkey + optional relay hints when it's a profile reference
+// (npub or nprofile). Returns null for anything else (note, nevent, …).
+export function decodeProfileReference(input: string): DecodedProfileReference | null {
+  const stripped = input.startsWith('nostr:') ? input.slice(6) : input;
+  try {
+    const decoded = nip19.decode(stripped);
+    if (decoded.type === 'npub') {
+      return { pubkey: decoded.data, relays: [] };
+    }
+    if (decoded.type === 'nprofile') {
+      return { pubkey: decoded.data.pubkey, relays: decoded.data.relays ?? [] };
+    }
+  } catch {
+    // fall through
+  }
+  return null;
+}
+
 export function parseProfileContent(content: string): {
   name: string | null;
   displayName: string | null;

@@ -28,6 +28,8 @@ import TransactionDetailSheet, {
   CounterpartyContact,
 } from '../components/TransactionDetailSheet';
 import ContactProfileSheet from '../components/ContactProfileSheet';
+import { decodeProfileReference, fetchProfile, DEFAULT_RELAYS } from '../services/nostrService';
+import type { NostrProfile } from '../types/nostr';
 import type { RootStackParamList } from '../navigation/types';
 
 type ConversationRoute = RouteProp<RootStackParamList, 'Conversation'>;
@@ -60,6 +62,11 @@ const INVOICE_REGEX = /\b(?:lightning:)?(ln(?:bc|tb|ts|bs)[0-9a-z]{50,})\b/i;
 // explicitly prefixes it with `lightning:`. Otherwise we'd turn every
 // shared email into a Pay button and guess wrong.
 const LN_ADDRESS_REGEX = /lightning:([a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,})\b/i;
+
+// NIP-21 nostr: URIs carrying a NIP-19 profile reference (npub or nprofile).
+// We only treat profile-kind references as contact shares here — note, nevent,
+// naddr etc. fall through to plain text rendering.
+const NOSTR_PROFILE_URI_REGEX = /nostr:(npub1[0-9a-z]+|nprofile1[0-9a-z]+)/i;
 
 interface DecodedInvoice {
   raw: string;
@@ -105,6 +112,18 @@ function extractLightningAddress(text: string): string | null {
   return match ? match[1] : null;
 }
 
+interface SharedContactRef {
+  pubkey: string;
+  relays: string[];
+}
+
+function extractSharedContact(text: string): SharedContactRef | null {
+  if (!text) return null;
+  const match = text.match(NOSTR_PROFILE_URI_REGEX);
+  if (!match) return null;
+  return decodeProfileReference(match[0]);
+}
+
 function formatTime(epochSeconds: number): string {
   const d = new Date(epochSeconds * 1000);
   const today = new Date();
@@ -141,6 +160,7 @@ const ConversationScreen: React.FC = () => {
   const [avatarError, setAvatarError] = useState(false);
   const [detailTx, setDetailTx] = useState<TransactionDetailData | null>(null);
   const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
+  const [sharedProfiles, setSharedProfiles] = useState<Record<string, NostrProfile | null>>({});
   const listRef = useRef<FlatList<Item>>(null);
 
   const zapItems = useMemo<Item[]>(() => {
@@ -205,6 +225,56 @@ const ConversationScreen: React.FC = () => {
     return () => clearTimeout(t);
   }, [items.length]);
 
+  // Batch-fetch profiles for every `nostr:` profile reference that appears
+  // in the conversation. Relay hints from the nprofile (when present) are
+  // merged with the default set so we find the shared person's kind-0
+  // even if they publish on niche relays.
+  useEffect(() => {
+    const byPubkey = new Map<string, Set<string>>();
+    for (const m of messages) {
+      const ref = extractSharedContact(m.text);
+      if (!ref) continue;
+      if (ref.pubkey in sharedProfiles) continue;
+      const set = byPubkey.get(ref.pubkey) ?? new Set<string>();
+      for (const r of ref.relays) set.add(r);
+      byPubkey.set(ref.pubkey, set);
+    }
+    if (byPubkey.size === 0) return;
+    let cancelled = false;
+    (async () => {
+      const updates: Record<string, NostrProfile | null> = {};
+      await Promise.all(
+        [...byPubkey.entries()].map(async ([pk, relaySet]) => {
+          const relays = [...new Set([...DEFAULT_RELAYS, ...relaySet])];
+          try {
+            updates[pk] = await fetchProfile(pk, relays);
+          } catch {
+            updates[pk] = null;
+          }
+        }),
+      );
+      if (!cancelled) {
+        setSharedProfiles((prev) => ({ ...prev, ...updates }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [messages, sharedProfiles]);
+
+  const openSharedContact = useCallback((pk: string, profile: NostrProfile | null) => {
+    const name = profile?.displayName || profile?.name || `${pk.slice(0, 8)}…`;
+    setProfileContact({
+      pubkey: pk,
+      name,
+      picture: profile?.picture ?? null,
+      banner: profile?.banner ?? null,
+      nip05: profile?.nip05 ?? null,
+      lightningAddress: profile?.lud16 ?? null,
+      source: 'nostr',
+    });
+  }, []);
+
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -245,164 +315,241 @@ const ConversationScreen: React.FC = () => {
     setSendSheetOpen(true);
   }, [lightningAddress, name]);
 
-  const renderItem = useCallback(({ item }: { item: Item }) => {
-    if (item.kind === 'message') {
-      const invoice = extractInvoice(item.text);
-      if (invoice) {
-        const expired = invoice.expiresAt !== null && invoice.expiresAt * 1000 < Date.now();
-        return (
-          <View
-            style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
-          >
+  const renderItem = useCallback(
+    ({ item }: { item: Item }) => {
+      if (item.kind === 'message') {
+        const invoice = extractInvoice(item.text);
+        if (invoice) {
+          const expired = invoice.expiresAt !== null && invoice.expiresAt * 1000 < Date.now();
+          return (
             <View
-              style={[
-                styles.invoiceCard,
-                item.fromMe ? styles.invoiceCardMe : styles.invoiceCardThem,
-              ]}
+              style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
             >
-              <View style={styles.invoiceHeaderRow}>
-                <Text style={[styles.invoiceLabel, item.fromMe && styles.invoiceLabelMe]}>
-                  {item.fromMe ? 'Invoice sent' : 'Invoice'}
+              <View
+                style={[
+                  styles.invoiceCard,
+                  item.fromMe ? styles.invoiceCardMe : styles.invoiceCardThem,
+                ]}
+              >
+                <View style={styles.invoiceHeaderRow}>
+                  <Text style={[styles.invoiceLabel, item.fromMe && styles.invoiceLabelMe]}>
+                    {item.fromMe ? 'Invoice sent' : 'Invoice'}
+                  </Text>
+                  <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
+                    {formatTime(item.createdAt)}
+                  </Text>
+                </View>
+                <Text style={[styles.invoiceAmount, item.fromMe && styles.invoiceAmountMe]}>
+                  {invoice.amountSats !== null
+                    ? `${invoice.amountSats.toLocaleString()} sats`
+                    : 'Any amount'}
                 </Text>
-                <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
-                  {formatTime(item.createdAt)}
-                </Text>
+                {invoice.description ? (
+                  <Text
+                    style={[styles.invoiceMemo, item.fromMe && styles.invoiceMemoMe]}
+                    numberOfLines={2}
+                  >
+                    {invoice.description}
+                  </Text>
+                ) : null}
+                {item.fromMe ? null : expired ? (
+                  <View style={[styles.invoicePayButton, styles.invoicePayButtonDisabled]}>
+                    <Text style={styles.invoicePayExpiredText}>Expired</Text>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.invoicePayButton}
+                    onPress={() => {
+                      setInvoiceToPay(invoice.raw);
+                      setSendSheetOpen(true);
+                    }}
+                    accessibilityLabel="Pay this invoice"
+                    testID={`conversation-pay-${item.id}`}
+                  >
+                    <Zap size={16} color={colors.white} fill={colors.white} />
+                    <Text style={styles.invoicePayText}>Pay</Text>
+                  </TouchableOpacity>
+                )}
               </View>
-              <Text style={[styles.invoiceAmount, item.fromMe && styles.invoiceAmountMe]}>
-                {invoice.amountSats !== null
-                  ? `${invoice.amountSats.toLocaleString()} sats`
-                  : 'Any amount'}
-              </Text>
-              {invoice.description ? (
+            </View>
+          );
+        }
+        const sharedContact = extractSharedContact(item.text);
+        if (sharedContact) {
+          const loaded = sharedContact.pubkey in sharedProfiles;
+          const prof = sharedProfiles[sharedContact.pubkey] ?? null;
+          const displayName =
+            prof?.displayName || prof?.name || `${sharedContact.pubkey.slice(0, 8)}…`;
+          return (
+            <View
+              style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
+            >
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => openSharedContact(sharedContact.pubkey, prof)}
+                style={[
+                  styles.contactCard,
+                  item.fromMe ? styles.contactCardMe : styles.contactCardThem,
+                ]}
+                accessibilityLabel={`Shared contact ${displayName}`}
+                testID={`conversation-contact-${item.id}`}
+              >
+                <View style={styles.contactHeaderRow}>
+                  <Text style={[styles.contactLabel, item.fromMe && styles.contactLabelMe]}>
+                    {item.fromMe ? 'Contact shared' : 'Contact'}
+                  </Text>
+                  <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
+                    {formatTime(item.createdAt)}
+                  </Text>
+                </View>
+                <View style={styles.contactBodyRow}>
+                  {prof?.picture ? (
+                    <Image source={{ uri: prof.picture }} style={styles.contactAvatar} />
+                  ) : (
+                    <View style={[styles.contactAvatar, styles.contactAvatarFallback]}>
+                      <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+                        <Circle cx="12" cy="8" r="4" fill={colors.textSupplementary} />
+                        <Path
+                          d="M4 20c0-3.314 3.582-6 8-6s8 2.686 8 6"
+                          stroke={colors.textSupplementary}
+                          strokeWidth={2}
+                          strokeLinecap="round"
+                        />
+                      </Svg>
+                    </View>
+                  )}
+                  <View style={styles.contactInfo}>
+                    <Text
+                      style={[styles.contactName, item.fromMe && styles.contactNameMe]}
+                      numberOfLines={1}
+                    >
+                      {loaded ? displayName : 'Loading…'}
+                    </Text>
+                    {prof?.lud16 ? (
+                      <Text
+                        style={[styles.contactLn, item.fromMe && styles.contactLnMe]}
+                        numberOfLines={1}
+                      >
+                        {prof.lud16}
+                      </Text>
+                    ) : prof?.nip05 ? (
+                      <Text
+                        style={[styles.contactLn, item.fromMe && styles.contactLnMe]}
+                        numberOfLines={1}
+                      >
+                        {prof.nip05}
+                      </Text>
+                    ) : null}
+                  </View>
+                </View>
+              </TouchableOpacity>
+            </View>
+          );
+        }
+        const lnAddress = extractLightningAddress(item.text);
+        if (lnAddress) {
+          return (
+            <View
+              style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
+            >
+              <View
+                style={[
+                  styles.invoiceCard,
+                  item.fromMe ? styles.invoiceCardMe : styles.invoiceCardThem,
+                ]}
+              >
+                <View style={styles.invoiceHeaderRow}>
+                  <Text style={[styles.invoiceLabel, item.fromMe && styles.invoiceLabelMe]}>
+                    {item.fromMe ? 'Address sent' : 'Lightning address'}
+                  </Text>
+                  <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
+                    {formatTime(item.createdAt)}
+                  </Text>
+                </View>
                 <Text
                   style={[styles.invoiceMemo, item.fromMe && styles.invoiceMemoMe]}
-                  numberOfLines={2}
+                  numberOfLines={1}
                 >
-                  {invoice.description}
+                  {lnAddress}
                 </Text>
-              ) : null}
-              {item.fromMe ? null : expired ? (
-                <View style={[styles.invoicePayButton, styles.invoicePayButtonDisabled]}>
-                  <Text style={styles.invoicePayExpiredText}>Expired</Text>
-                </View>
-              ) : (
-                <TouchableOpacity
-                  style={styles.invoicePayButton}
-                  onPress={() => {
-                    setInvoiceToPay(invoice.raw);
-                    setSendSheetOpen(true);
-                  }}
-                  accessibilityLabel="Pay this invoice"
-                  testID={`conversation-pay-${item.id}`}
-                >
-                  <Zap size={16} color={colors.white} fill={colors.white} />
-                  <Text style={styles.invoicePayText}>Pay</Text>
-                </TouchableOpacity>
-              )}
+                {item.fromMe ? null : (
+                  <TouchableOpacity
+                    style={styles.invoicePayButton}
+                    onPress={() => {
+                      setInvoiceToPay(lnAddress);
+                      setSendSheetOpen(true);
+                    }}
+                    accessibilityLabel="Pay this lightning address"
+                    testID={`conversation-pay-${item.id}`}
+                  >
+                    <Zap size={16} color={colors.white} fill={colors.white} />
+                    <Text style={styles.invoicePayText}>Pay</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
-          </View>
-        );
-      }
-      const lnAddress = extractLightningAddress(item.text);
-      if (lnAddress) {
+          );
+        }
         return (
           <View
             style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
           >
-            <View
-              style={[
-                styles.invoiceCard,
-                item.fromMe ? styles.invoiceCardMe : styles.invoiceCardThem,
-              ]}
-            >
-              <View style={styles.invoiceHeaderRow}>
-                <Text style={[styles.invoiceLabel, item.fromMe && styles.invoiceLabelMe]}>
-                  {item.fromMe ? 'Address sent' : 'Lightning address'}
-                </Text>
-                <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
-                  {formatTime(item.createdAt)}
-                </Text>
-              </View>
-              <Text
-                style={[styles.invoiceMemo, item.fromMe && styles.invoiceMemoMe]}
-                numberOfLines={1}
-              >
-                {lnAddress}
+            <View style={[styles.bubble, item.fromMe ? styles.bubbleMe : styles.bubbleThem]}>
+              <Text style={[styles.bubbleText, item.fromMe && styles.bubbleTextMe]}>
+                {item.text}
               </Text>
-              {item.fromMe ? null : (
-                <TouchableOpacity
-                  style={styles.invoicePayButton}
-                  onPress={() => {
-                    setInvoiceToPay(lnAddress);
-                    setSendSheetOpen(true);
-                  }}
-                  accessibilityLabel="Pay this lightning address"
-                  testID={`conversation-pay-${item.id}`}
-                >
-                  <Zap size={16} color={colors.white} fill={colors.white} />
-                  <Text style={styles.invoicePayText}>Pay</Text>
-                </TouchableOpacity>
-              )}
+              <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
+                {formatTime(item.createdAt)}
+              </Text>
             </View>
           </View>
         );
       }
       return (
-        <View
-          style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
-        >
-          <View style={[styles.bubble, item.fromMe ? styles.bubbleMe : styles.bubbleThem]}>
-            <Text style={[styles.bubbleText, item.fromMe && styles.bubbleTextMe]}>{item.text}</Text>
-            <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
-              {formatTime(item.createdAt)}
-            </Text>
-          </View>
+        <View style={[styles.zapRow, item.fromMe ? styles.zapRowRight : styles.zapRowLeft]}>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => setDetailTx(item.tx)}
+            style={[styles.zapCard, item.fromMe ? styles.zapCardMe : styles.zapCardThem]}
+            accessibilityLabel={item.fromMe ? 'Zap sent' : 'Zap received'}
+            testID={`conversation-zap-${item.id}`}
+          >
+            <View
+              style={[
+                styles.zapCardIconBadge,
+                item.fromMe ? styles.zapCardIconBadgeMe : styles.zapCardIconBadgeThem,
+              ]}
+            >
+              <Zap
+                size={18}
+                color={item.fromMe ? colors.brandPink : colors.white}
+                fill={item.fromMe ? colors.brandPink : colors.white}
+              />
+            </View>
+            <View style={styles.zapCardBody}>
+              <View style={styles.zapCardHeaderRow}>
+                <Text style={[styles.zapCardLabel, item.fromMe && styles.zapCardLabelMe]}>
+                  {item.fromMe ? 'Zap sent' : 'Zap received'}
+                </Text>
+                <Text style={[styles.zapCardTime, item.fromMe && styles.zapCardTimeMe]}>
+                  {formatTime(item.createdAt)}
+                </Text>
+              </View>
+              <Text style={[styles.zapCardAmount, item.fromMe && styles.zapCardAmountMe]}>
+                {item.amountSats.toLocaleString()} sats
+              </Text>
+              {item.comment ? (
+                <Text style={[styles.zapCardComment, item.fromMe && styles.zapCardCommentMe]}>
+                  {item.comment}
+                </Text>
+              ) : null}
+            </View>
+          </TouchableOpacity>
         </View>
       );
-    }
-    return (
-      <View style={[styles.zapRow, item.fromMe ? styles.zapRowRight : styles.zapRowLeft]}>
-        <TouchableOpacity
-          activeOpacity={0.8}
-          onPress={() => setDetailTx(item.tx)}
-          style={[styles.zapCard, item.fromMe ? styles.zapCardMe : styles.zapCardThem]}
-          accessibilityLabel={item.fromMe ? 'Zap sent' : 'Zap received'}
-          testID={`conversation-zap-${item.id}`}
-        >
-          <View
-            style={[
-              styles.zapCardIconBadge,
-              item.fromMe ? styles.zapCardIconBadgeMe : styles.zapCardIconBadgeThem,
-            ]}
-          >
-            <Zap
-              size={18}
-              color={item.fromMe ? colors.brandPink : colors.white}
-              fill={item.fromMe ? colors.brandPink : colors.white}
-            />
-          </View>
-          <View style={styles.zapCardBody}>
-            <View style={styles.zapCardHeaderRow}>
-              <Text style={[styles.zapCardLabel, item.fromMe && styles.zapCardLabelMe]}>
-                {item.fromMe ? 'Zap sent' : 'Zap received'}
-              </Text>
-              <Text style={[styles.zapCardTime, item.fromMe && styles.zapCardTimeMe]}>
-                {formatTime(item.createdAt)}
-              </Text>
-            </View>
-            <Text style={[styles.zapCardAmount, item.fromMe && styles.zapCardAmountMe]}>
-              {item.amountSats.toLocaleString()} sats
-            </Text>
-            {item.comment ? (
-              <Text style={[styles.zapCardComment, item.fromMe && styles.zapCardCommentMe]}>
-                {item.comment}
-              </Text>
-            ) : null}
-          </View>
-        </TouchableOpacity>
-      </View>
-    );
-  }, []);
+    },
+    [sharedProfiles, openSharedContact],
+  );
 
   const avatarNode =
     picture && !avatarError ? (
@@ -842,6 +989,79 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: colors.textSupplementary,
+  },
+  contactCard: {
+    maxWidth: '85%',
+    minWidth: 240,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    gap: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  contactCardMe: {
+    backgroundColor: colors.brandPink,
+    borderColor: colors.brandPink,
+  },
+  contactCardThem: {
+    backgroundColor: colors.white,
+    borderColor: colors.divider,
+  },
+  contactHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  contactLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textSupplementary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  contactLabelMe: {
+    color: 'rgba(255,255,255,0.85)',
+  },
+  contactBodyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  contactAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.background,
+  },
+  contactAvatarFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  contactInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  contactName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.textHeader,
+  },
+  contactNameMe: {
+    color: colors.white,
+  },
+  contactLn: {
+    fontSize: 13,
+    color: colors.textSupplementary,
+    marginTop: 2,
+  },
+  contactLnMe: {
+    color: 'rgba(255,255,255,0.9)',
   },
   composer: {
     flexDirection: 'row',

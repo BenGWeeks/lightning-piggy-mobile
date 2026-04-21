@@ -17,11 +17,13 @@ import {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { Zap, Copy } from 'lucide-react-native';
+import { Zap, Copy, Share2 } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
-import { npubEncode } from '../services/nostrService';
+import Toast from 'react-native-toast-message';
+import { npubEncode, nprofileEncode } from '../services/nostrService';
 import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
+import FriendPickerSheet, { PickedFriend } from './FriendPickerSheet';
 
 interface ContactData {
   pubkey: string | null;
@@ -52,13 +54,15 @@ const ContactProfileSheet: React.FC<Props> = ({
 }) => {
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['55%'], []);
-  const { contacts, followContact, unfollowContact } = useNostr();
+  const { contacts, followContact, unfollowContact, sendDirectMessage } = useNostr();
   const [following, setFollowing] = useState(false);
   const [loadingFollow, setLoadingFollow] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
   const [avatarLoaded, setAvatarLoaded] = useState(false);
   const [editingLnAddress, setEditingLnAddress] = useState(false);
   const [lnAddressDraft, setLnAddressDraft] = useState('');
+  const [shareOpen, setShareOpen] = useState(false);
+  const [sharing, setSharing] = useState(false);
 
   // Timeout: if image hasn't loaded in 8s, show fallback
   useEffect(() => {
@@ -143,6 +147,51 @@ const ContactProfileSheet: React.FC<Props> = ({
     if (!contact?.pubkey) return;
     await Clipboard.setStringAsync(npubEncode(contact.pubkey));
   };
+
+  const handleShare = useCallback(() => {
+    if (!contact?.pubkey) return;
+    setShareOpen(true);
+  }, [contact?.pubkey]);
+
+  const handleShareToFriend = useCallback(
+    async (friend: PickedFriend) => {
+      if (!contact?.pubkey || sharing) return;
+      setSharing(true);
+      setShareOpen(false);
+      try {
+        // NIP-19 nprofile includes relay hints so the receiving client can
+        // find the shared person's profile without searching every relay.
+        // Prefixing with `nostr:` (NIP-21) means any conforming client
+        // — Damus, Amethyst, Primal, Coracle, 0xchat — renders it as a
+        // clickable profile mention. The human-readable first line is a
+        // fallback for clients that don't unfurl the URI.
+        const nprofile = nprofileEncode(contact.pubkey, []);
+        const label = contact.name || 'a contact';
+        const payload = `Shared contact: ${label}\nnostr:${nprofile}`;
+        const result = await sendDirectMessage(friend.pubkey, payload);
+        if (!result.success) {
+          Toast.show({
+            type: 'error',
+            text1: 'Share failed',
+            text2: result.error ?? 'Could not share contact.',
+            position: 'top',
+            visibilityTime: 4000,
+          });
+          return;
+        }
+        Toast.show({
+          type: 'success',
+          text1: `${label} shared with ${friend.name}`,
+          position: 'top',
+          visibilityTime: 2500,
+        });
+        onClose();
+      } finally {
+        setSharing(false);
+      }
+    },
+    [contact?.pubkey, contact?.name, sharing, sendDirectMessage, onClose],
+  );
 
   const handleViewProfile = useCallback(async () => {
     if (!contact?.pubkey) return;
@@ -330,7 +379,23 @@ const ContactProfileSheet: React.FC<Props> = ({
             </TouchableOpacity>
           )}
           {contact.pubkey && (
-            <TouchableOpacity style={styles.viewProfileButton} onPress={handleViewProfile}>
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={handleShare}
+              disabled={sharing}
+              accessibilityLabel="Share contact"
+              testID="contact-share-button"
+            >
+              <Share2 size={18} color={colors.brandPink} />
+            </TouchableOpacity>
+          )}
+          {contact.pubkey && (
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={handleViewProfile}
+              accessibilityLabel="Open in external client"
+              testID="contact-view-profile-button"
+            >
               <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
                 <Path
                   d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3"
@@ -344,6 +409,13 @@ const ContactProfileSheet: React.FC<Props> = ({
           )}
         </View>
       </BottomSheetView>
+      <FriendPickerSheet
+        visible={shareOpen}
+        onClose={() => setShareOpen(false)}
+        onSelect={handleShareToFriend}
+        title={`Share ${contact.name || 'contact'}`}
+        subtitle="They'll receive an encrypted Nostr DM with a person card."
+      />
     </BottomSheetModal>
   );
 };
@@ -537,7 +609,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.white,
   },
-  viewProfileButton: {
+  iconButton: {
     paddingHorizontal: 12,
     paddingVertical: 12,
     borderRadius: 10,
