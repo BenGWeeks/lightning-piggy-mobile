@@ -78,6 +78,25 @@ function isLightningAddress(input: string): boolean {
   return input.includes('@') && !input.startsWith('lnbc') && !input.startsWith('lntb');
 }
 
+// Accept only digits — sats are whole integers. A hardware keyboard,
+// paste, or autocomplete can inject junk that the soft-keyboard's
+// `numeric` hint alone doesn't block.
+function sanitizeSatsInput(text: string): string {
+  return text.replace(/[^0-9]/g, '');
+}
+
+// Digits + a single decimal point, max two decimal places.
+function sanitizeFiatInput(text: string): string {
+  let cleaned = text.replace(/[^0-9.]/g, '');
+  const firstDot = cleaned.indexOf('.');
+  if (firstDot !== -1) {
+    cleaned = cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, '');
+    const [intPart, fracPart = ''] = cleaned.split('.');
+    cleaned = `${intPart}.${fracPart.slice(0, 2)}`;
+  }
+  return cleaned;
+}
+
 function isValidInvoice(data: string): boolean {
   const lower = data.toLowerCase();
   return (
@@ -343,8 +362,9 @@ const SendSheet: React.FC<Props> = ({
   };
 
   const handleSatsChange = (text: string) => {
-    setSatsValue(text);
-    const sats = parseInt(text) || 0;
+    const clean = sanitizeSatsInput(text);
+    setSatsValue(clean);
+    const sats = parseInt(clean) || 0;
     if (btcPrice) {
       setFiatValue(satsToFiat(sats, btcPrice).toFixed(2));
     } else {
@@ -353,8 +373,9 @@ const SendSheet: React.FC<Props> = ({
   };
 
   const handleFiatChange = (text: string) => {
-    setFiatValue(text);
-    const fiat = parseFloat(text) || 0;
+    const clean = sanitizeFiatInput(text);
+    setFiatValue(clean);
+    const fiat = parseFloat(clean) || 0;
     const sats = fiatToSats(fiat);
     setSatsValue(sats.toString());
   };

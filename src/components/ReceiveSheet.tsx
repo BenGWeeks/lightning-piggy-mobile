@@ -23,14 +23,52 @@ import * as Clipboard from 'expo-clipboard';
 import Toast from 'react-native-toast-message';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
 import { walletLabel } from '../types/wallet';
 import { colors } from '../styles/theme';
 import { receiveSheetStyles as styles } from '../styles/ReceiveSheet.styles';
 import { satsToFiatString, satsToFiat } from '../services/fiatService';
+import * as nwcService from '../services/nwcService';
 import FriendPickerSheet, { PickedFriend } from './FriendPickerSheet';
 import type { RootStackParamList } from '../navigation/types';
+
+function paymentHashFromBolt11(bolt11: string): string | null {
+  try {
+    const decoded = bolt11Decode(bolt11);
+    const section = decoded.sections?.find((s: { name: string }) => s.name === 'payment_hash') as
+      | { value?: string }
+      | undefined;
+    return section?.value ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// Accept only digit characters — sats are whole integers. A hardware
+// keyboard, paste, or an autocomplete suggestion can all inject junk
+// that the soft-keyboard's `numeric` hint alone doesn't block.
+function sanitizeSatsInput(text: string): string {
+  return text.replace(/[^0-9]/g, '');
+}
+
+// Accept digits and a single decimal point, with at most two decimal
+// places (standard fiat presentation). Strip everything else. Dropping
+// a stray comma / currency symbol on paste is the common reason users
+// see "Invalid amount" when they didn't mistype anything.
+function sanitizeFiatInput(text: string): string {
+  let cleaned = text.replace(/[^0-9.]/g, '');
+  const firstDot = cleaned.indexOf('.');
+  if (firstDot !== -1) {
+    // Keep the first dot, drop any subsequent ones.
+    cleaned = cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, '');
+    // Trim to two decimal places.
+    const [intPart, fracPart = ''] = cleaned.split('.');
+    cleaned = `${intPart}.${fracPart.slice(0, 2)}`;
+  }
+  return cleaned;
+}
 // On-chain address fetching is done via WalletContext.getReceiveAddress
 
 interface Props {
@@ -123,17 +161,40 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
         // not fire a celebration attributed to the new one. The first
         // balance we see after this poll starts becomes the baseline.
         needsBaseline.current = true;
-        // Poll every 1.5 s for the first 3 minutes after invoice
-        // creation — that's the window the user is actively waiting for
-        // payment. After that the aggressive poll stops; a late-arriving
-        // payment is still detected by any organic balance refresh
-        // (pull-to-refresh, send, app foreground-resume, etc.). Prevents
-        // forever-1.5 s battery/network drain if the user leaves the
-        // sheet open and walks away.
+
+        // Targeted invoice polling: ask the NWC backend directly whether
+        // THIS invoice is settled (`lookup_invoice`) rather than polling
+        // the wallet-wide balance. LNbits flips the invoice's settled_at
+        // the moment LND signals settle — no need to wait for balance
+        // aggregation. Faster than get_balance on most backends and
+        // race-free (we get definitive paid/unpaid per invoice hash).
+        // Falls through to refreshBalanceForWallet on settle so the
+        // detector in WalletContext picks it up and fires the overlay.
+        const paymentHash = paymentHashFromBolt11(inv);
         if (pollDownshiftTimer.current) clearTimeout(pollDownshiftTimer.current);
         intervalId.current = setInterval(async () => {
-          if (wId) await refreshBalanceForWallet(wId);
-        }, 1500);
+          if (!wId) return;
+          if (paymentHash) {
+            const result = await nwcService.lookupInvoice(wId, paymentHash);
+            if (result?.paid) {
+              if (intervalId.current) {
+                clearInterval(intervalId.current);
+                intervalId.current = null;
+              }
+              // Trigger a balance refresh so the diff-detector in
+              // WalletContext fires the overlay. Wallet balance lags the
+              // invoice-settled flag by at most a tick.
+              await refreshBalanceForWallet(wId);
+              return;
+            }
+          } else {
+            // No extractable payment_hash — fall back to balance polling.
+            await refreshBalanceForWallet(wId);
+          }
+        }, 1000);
+        // Stop the aggressive poll after 3 min. A late-arriving payment
+        // is still detected by any organic refresh (pull-to-refresh,
+        // foreground resume, etc.) — see WalletContext baseline logic.
         pollDownshiftTimer.current = setTimeout(
           () => {
             if (intervalId.current) {
@@ -278,8 +339,9 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
   };
 
   const handleSatsChange = (text: string) => {
-    setSatsValue(text);
-    const sats = parseInt(text) || 0;
+    const clean = sanitizeSatsInput(text);
+    setSatsValue(clean);
+    const sats = parseInt(clean) || 0;
     if (btcPrice) {
       setFiatValue(satsToFiat(sats, btcPrice).toFixed(2));
     } else {
@@ -289,8 +351,9 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
   };
 
   const handleFiatChange = (text: string) => {
-    setFiatValue(text);
-    const fiat = parseFloat(text) || 0;
+    const clean = sanitizeFiatInput(text);
+    setFiatValue(clean);
+    const fiat = parseFloat(clean) || 0;
     const sats = fiatToSats(fiat);
     setSatsValue(sats.toString());
     scheduleInvoice(sats);
