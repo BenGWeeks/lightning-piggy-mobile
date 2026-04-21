@@ -20,7 +20,7 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { Zap, Copy, Share2 } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
 import Toast from 'react-native-toast-message';
-import { npubEncode, nprofileEncode } from '../services/nostrService';
+import { npubEncode, nprofileEncode, buildProfileRelayHints } from '../services/nostrService';
 import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
 import FriendPickerSheet, { PickedFriend } from './FriendPickerSheet';
@@ -54,7 +54,7 @@ const ContactProfileSheet: React.FC<Props> = ({
 }) => {
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['55%'], []);
-  const { contacts, followContact, unfollowContact, sendDirectMessage } = useNostr();
+  const { contacts, followContact, unfollowContact, sendDirectMessage, relays } = useNostr();
   const [following, setFollowing] = useState(false);
   const [loadingFollow, setLoadingFollow] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
@@ -165,7 +165,9 @@ const ContactProfileSheet: React.FC<Props> = ({
         // — Damus, Amethyst, Primal, Coracle, 0xchat — renders it as a
         // clickable profile mention. The human-readable first line is a
         // fallback for clients that don't unfurl the URI.
-        const nprofile = nprofileEncode(contact.pubkey, []);
+        const readRelays = relays.filter((r) => r.read).map((r) => r.url);
+        const relayHints = buildProfileRelayHints(contact.pubkey, contacts, readRelays);
+        const nprofile = nprofileEncode(contact.pubkey, relayHints);
         const label = contact.name || 'a contact';
         const payload = `Shared contact: ${label}\nnostr:${nprofile}`;
         const result = await sendDirectMessage(friend.pubkey, payload);
@@ -190,7 +192,7 @@ const ContactProfileSheet: React.FC<Props> = ({
         setSharing(false);
       }
     },
-    [contact?.pubkey, contact?.name, sharing, sendDirectMessage, onClose],
+    [contact?.pubkey, contact?.name, sharing, sendDirectMessage, onClose, contacts, relays],
   );
 
   const handleViewProfile = useCallback(async () => {

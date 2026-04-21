@@ -49,6 +49,7 @@ import {
   decodeProfileReference,
   fetchProfile,
   nprofileEncode,
+  buildProfileRelayHints,
   DEFAULT_RELAYS,
 } from '../services/nostrService';
 import type { NostrProfile } from '../types/nostr';
@@ -187,7 +188,7 @@ const ConversationScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { pubkey, name, picture, lightningAddress } = route.params;
 
-  const { isLoggedIn, fetchConversation, sendDirectMessage } = useNostr();
+  const { isLoggedIn, fetchConversation, sendDirectMessage, contacts, relays } = useNostr();
   const { wallets, activeWalletId, activeWallet } = useWallet();
 
   const [messages, setMessages] = useState<
@@ -571,7 +572,9 @@ const ConversationScreen: React.FC = () => {
   const handleShareContactPicked = useCallback(
     async (friend: PickedFriend) => {
       setContactPickerOpen(false);
-      const nprofile = nprofileEncode(friend.pubkey, []);
+      const readRelays = relays.filter((r) => r.read).map((r) => r.url);
+      const relayHints = buildProfileRelayHints(friend.pubkey, contacts, readRelays);
+      const nprofile = nprofileEncode(friend.pubkey, relayHints);
       const label = friend.name || 'a contact';
       const payload = `Shared contact: ${label}\nnostr:${nprofile}`;
       const result = await sendDirectMessage(pubkey, payload);
@@ -589,7 +592,7 @@ const ConversationScreen: React.FC = () => {
         },
       ]);
     },
-    [pubkey, sendDirectMessage],
+    [pubkey, sendDirectMessage, contacts, relays],
   );
 
   const openLocation = useCallback((loc: SharedLocation) => {

@@ -84,11 +84,40 @@ export interface DecodedProfileReference {
   relays: string[];
 }
 
+// Best-effort relay hints to embed in an outgoing nprofile. Prefers the
+// contact's own kind-3 relay (where the user's follow entry suggests they
+// publish), falls back to the viewer's NIP-65 read relays (the places we
+// already trust for profile fetches), and finally to a small default slice
+// so the nprofile never carries zero hints — an empty hint list defeats
+// the purpose of nprofile vs. npub. Dedupes and caps at 3 to keep URIs
+// compact; receiving clients still search their own relays on top.
+export function buildProfileRelayHints(
+  targetPubkey: string,
+  viewerContacts: Array<{ pubkey: string; relay: string | null }>,
+  viewerReadRelays: string[],
+): string[] {
+  const hints: string[] = [];
+  const contactRelay = viewerContacts.find((c) => c.pubkey === targetPubkey)?.relay;
+  if (contactRelay) hints.push(contactRelay);
+  for (const r of viewerReadRelays) hints.push(r);
+  for (const r of DEFAULT_RELAYS) hints.push(r);
+  const deduped: string[] = [];
+  for (const r of hints) {
+    if (!r) continue;
+    if (deduped.includes(r)) continue;
+    deduped.push(r);
+    if (deduped.length >= 3) break;
+  }
+  return deduped;
+}
+
 // Accepts a NIP-21 `nostr:` URI or a bare bech32 identifier and returns
 // the pubkey + optional relay hints when it's a profile reference
 // (npub or nprofile). Returns null for anything else (note, nevent, …).
+// NIP-21 URI schemes are case-insensitive — `NOSTR:`, `Nostr:`, etc.
+// all need to be accepted, so strip with a case-insensitive match.
 export function decodeProfileReference(input: string): DecodedProfileReference | null {
-  const stripped = input.startsWith('nostr:') ? input.slice(6) : input;
+  const stripped = /^nostr:/i.test(input) ? input.slice(6) : input;
   try {
     const decoded = nip19.decode(stripped);
     if (decoded.type === 'npub') {
