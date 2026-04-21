@@ -65,6 +65,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         contactsPermission: 'Allow Lightning Piggy to access your contacts to find friends.',
       },
     ],
+    [
+      'expo-location',
+      {
+        locationAlwaysAndWhenInUsePermission:
+          'Allow Lightning Piggy to access your location so you can share it in a private message.',
+        locationWhenInUsePermission:
+          'Allow Lightning Piggy to access your location so you can share it in a private message.',
+        isAndroidBackgroundLocationEnabled: false,
+      },
+    ],
   ],
   android: {
     adaptiveIcon: {
