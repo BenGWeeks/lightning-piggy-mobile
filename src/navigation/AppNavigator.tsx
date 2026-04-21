@@ -17,6 +17,7 @@ import CourseDetailScreen from '../screens/CourseDetailScreen';
 import MissionDetailScreen from '../screens/MissionDetailScreen';
 import AccountScreen from '../screens/AccountScreen';
 import FriendsScreen from '../screens/FriendsScreen';
+import ConversationScreen from '../screens/ConversationScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -147,7 +148,10 @@ export default function AppNavigator() {
             <Stack.Screen name="Onboarding" component={OnboardingScreen} />
           </>
         ) : (
-          <Stack.Screen name="MainTabs" component={HomeTabs} />
+          <>
+            <Stack.Screen name="MainTabs" component={HomeTabs} />
+            <Stack.Screen name="Conversation" component={ConversationScreen} />
+          </>
         )}
       </Stack.Navigator>
     </NavigationContainer>

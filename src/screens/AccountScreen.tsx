@@ -23,10 +23,9 @@ import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
 import { CURRENCIES } from '../services/fiatService';
-import { Trash2, Eye, EyeOff, ChevronUp, ChevronDown, Zap, Home } from 'lucide-react-native';
+import { Trash2, Eye, EyeOff, ChevronUp, ChevronDown, Zap, Home, Copy } from 'lucide-react-native';
 import { getElectrumServer, setElectrumServer } from '../services/walletStorageService';
 import { disconnectElectrum } from '../services/onchainService';
-import CopyIcon from '../components/icons/CopyIcon';
 import NostrLoginSheet from '../components/NostrLoginSheet';
 import EditProfileSheet from '../components/EditProfileSheet';
 import QrSheet from '../components/QrSheet';
@@ -302,7 +301,7 @@ const AccountScreen: React.FC = () => {
             <View style={styles.npubRow}>
               <TouchableOpacity style={styles.npubCopy} onPress={copyNpub}>
                 <Text style={styles.npubText}>{truncatedNpub}</Text>
-                <CopyIcon size={20} color={colors.textSupplementary} />
+                <Copy size={20} color={colors.textSupplementary} />
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => {
