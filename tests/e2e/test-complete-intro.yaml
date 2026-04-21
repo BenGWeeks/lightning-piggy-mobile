@@ -13,9 +13,10 @@ name: Complete Intro + Onboarding
 - waitForAnimationToEnd:
     timeout: 8000
 
-# IntroScreen: tap "Let's Go" (optional — skipped if already past)
+# IntroScreen auto-advances to Onboarding after a brief fade.
+# Tap to short-circuit the timer in case we land mid-animation.
 - tapOn:
-    text: "Let's Go"
+    id: 'intro-screen'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000
