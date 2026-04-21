@@ -23,6 +23,7 @@ import ContactProfileSheet from '../components/ContactProfileSheet';
 import AddFriendSheet from '../components/AddFriendSheet';
 import SendSheet from '../components/SendSheet';
 import AlphabetBar from '../components/AlphabetBar';
+import FriendPickerSheet, { type PickedFriend } from '../components/FriendPickerSheet';
 import { fetchPhoneContacts, PhoneContact, setLightningAddress } from '../services/contactsService';
 import {
   buildConversationSummaries,
@@ -66,6 +67,7 @@ const FriendsScreen: React.FC = () => {
   const [selectedContact, setSelectedContact] = useState<ListItem | null>(null);
   const [profileSheetVisible, setProfileSheetVisible] = useState(false);
   const [addFriendVisible, setAddFriendVisible] = useState(false);
+  const [pickerVisible, setPickerVisible] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
   const [zapTarget, setZapTarget] = useState<ListItem | null>(null);
   const [currentLetter, setCurrentLetter] = useState<string | null>(null);
@@ -256,34 +258,54 @@ const FriendsScreen: React.FC = () => {
 
   const handleConversationPress = useCallback(
     (summary: ConversationSummary) => {
-      // Find the matching Nostr contact to hydrate the profile sheet with
-      // petname / banner / etc. Fall back to the summary's own fields
-      // (useful for anonymous zaps, or counterparties not in the contact list).
       const contact = summary.pubkey
         ? contacts.find((c) => c.pubkey === summary.pubkey)
         : undefined;
+      const picture = summary.picture ?? contact?.profile?.picture ?? null;
+      const lightningAddress = summary.lightningAddress ?? contact?.profile?.lud16 ?? null;
+      if (summary.pubkey) {
+        navigation.navigate('Conversation', {
+          pubkey: summary.pubkey,
+          name: summary.name,
+          picture,
+          lightningAddress,
+        });
+        return;
+      }
+      // Anonymous zap: no pubkey to thread against. Surface what we have via
+      // the profile sheet so the user can at least see the zap metadata.
       const item: ListItem = {
-        id: summary.pubkey ? `nostr-${summary.pubkey}` : `conv-${summary.id}`,
+        id: `conv-${summary.id}`,
         name: summary.name,
-        picture: summary.picture ?? contact?.profile?.picture ?? null,
-        banner: contact?.profile?.banner ?? null,
-        nip05: summary.nip05 ?? contact?.profile?.nip05 ?? null,
-        lightningAddress: summary.lightningAddress ?? contact?.profile?.lud16 ?? null,
-        pubkey: summary.pubkey,
+        picture,
+        banner: null,
+        nip05: summary.nip05,
+        lightningAddress,
+        pubkey: null,
         source: 'nostr',
       };
       setSelectedContact(item);
       setProfileSheetVisible(true);
     },
-    [contacts],
+    [contacts, navigation],
   );
 
   const handleStartConversation = useCallback(() => {
-    // v1 picker: switch to the alphabetical Contacts view. A dedicated
-    // FriendPickerSheet is a follow-up.
-    setMode('contacts');
-    setFilter('all');
+    setPickerVisible(true);
   }, []);
+
+  const handlePickerSelect = useCallback(
+    (friend: PickedFriend) => {
+      setPickerVisible(false);
+      navigation.navigate('Conversation', {
+        pubkey: friend.pubkey,
+        name: friend.name,
+        picture: friend.picture,
+        lightningAddress: friend.lightningAddress,
+      });
+    },
+    [navigation],
+  );
 
   const handleAddFriend = useCallback(
     async (npubOrHex: string) => {
@@ -621,6 +643,13 @@ const FriendsScreen: React.FC = () => {
         visible={addFriendVisible}
         onClose={() => setAddFriendVisible(false)}
         onAdd={handleAddFriend}
+      />
+
+      <FriendPickerSheet
+        visible={pickerVisible}
+        onClose={() => setPickerVisible(false)}
+        onSelect={handlePickerSelect}
+        title="Start a conversation"
       />
 
       <SendSheet

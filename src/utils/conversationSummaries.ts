@@ -2,7 +2,12 @@ import type { WalletState, WalletTransaction } from '../types/wallet';
 import type { NostrContact } from '../types/nostr';
 
 export interface ConversationSummary {
-  /** Stable id — derived from pubkey (hex), or `anon-<idx>` when the counterparty is anonymous. */
+  /**
+   * Stable id — `pubkey` (hex) for identified counterparties; otherwise
+   * `anon:<walletId>:<paymentHash|txid|bolt11>` so the id doesn't shift
+   * when new zaps are prepended to the transaction list (keeps FlashList
+   * row identity stable across renders).
+   */
   id: string;
   pubkey: string | null;
   name: string;
@@ -47,7 +52,6 @@ export function buildConversationSummaries(
 
   const byPubkey = new Map<string, ConversationSummary>();
   const anonymous: ConversationSummary[] = [];
-  let anonIdx = 0;
 
   for (const wallet of wallets) {
     for (const tx of wallet.transactions) {
@@ -58,8 +62,12 @@ export function buildConversationSummaries(
 
       const contact = info.pubkey ? contactByPubkey.get(info.pubkey) : undefined;
       const name = displayNameFor(info, contact);
+      // Anonymous rows need an id that survives list churn (new zaps prepended,
+      // resolver re-runs). Prefer paymentHash → txid → bolt11; fall back to
+      // the event timestamp so we never collide with an earlier-indexed anon.
+      const anonKey = tx.paymentHash ?? tx.txid ?? tx.bolt11 ?? `ts-${ts}`;
       const summary: ConversationSummary = {
-        id: info.pubkey ?? `anon-${anonIdx++}`,
+        id: info.pubkey ?? `anon:${wallet.id}:${anonKey}`,
         pubkey: info.pubkey,
         name,
         picture: info.profile?.picture ?? contact?.profile?.picture ?? null,
