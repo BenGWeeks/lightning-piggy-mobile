@@ -162,34 +162,35 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
         // balance we see after this poll starts becomes the baseline.
         needsBaseline.current = true;
 
-        // Targeted invoice polling: ask the NWC backend directly whether
-        // THIS invoice is settled (`lookup_invoice`) rather than polling
-        // the wallet-wide balance. LNbits flips the invoice's settled_at
-        // the moment LND signals settle — no need to wait for balance
-        // aggregation. Faster than get_balance on most backends and
-        // race-free (we get definitive paid/unpaid per invoice hash).
-        // Falls through to refreshBalanceForWallet on settle so the
-        // detector in WalletContext picks it up and fires the overlay.
+        // Belt-and-suspenders poll: on every tick we fire BOTH a
+        // `lookup_invoice` (targeted per-hash check — fastest signal
+        // when paid flips, independent of balance aggregation) AND a
+        // `refreshBalanceForWallet` (which ultimately lands in the
+        // WalletContext diff-detector that renders the global overlay).
+        // Running both means a flaky NWC backend — `get_balance` is
+        // observed to time out on our LNbits occasionally — still
+        // has a fallback path: whichever returns first wins. The
+        // balance refresh is the one that actually fires the overlay,
+        // so don't early-return from the lookup path; let the balance
+        // diff drive detection.
         const paymentHash = paymentHashFromBolt11(inv);
+        if (__DEV__)
+          console.log(
+            `[Receive] starting 1 s poll · paymentHash=${paymentHash ? paymentHash.slice(0, 12) + '…' : 'null (fallback to balance)'}`,
+          );
         if (pollDownshiftTimer.current) clearTimeout(pollDownshiftTimer.current);
         intervalId.current = setInterval(async () => {
           if (!wId) return;
-          if (paymentHash) {
-            const result = await nwcService.lookupInvoice(wId, paymentHash);
-            if (result?.paid) {
-              if (intervalId.current) {
-                clearInterval(intervalId.current);
-                intervalId.current = null;
-              }
-              // Trigger a balance refresh so the diff-detector in
-              // WalletContext fires the overlay. Wallet balance lags the
-              // invoice-settled flag by at most a tick.
-              await refreshBalanceForWallet(wId);
-              return;
+          const [lookupResult] = await Promise.allSettled([
+            paymentHash ? nwcService.lookupInvoice(wId, paymentHash) : Promise.resolve(null),
+            refreshBalanceForWallet(wId),
+          ]);
+          if (lookupResult.status === 'fulfilled' && lookupResult.value?.paid) {
+            if (__DEV__) console.log('[Receive] lookup_invoice reports PAID — stopping poll');
+            if (intervalId.current) {
+              clearInterval(intervalId.current);
+              intervalId.current = null;
             }
-          } else {
-            // No extractable payment_hash — fall back to balance polling.
-            await refreshBalanceForWallet(wId);
           }
         }, 1000);
         // Stop the aggressive poll after 3 min. A late-arriving payment

@@ -1212,6 +1212,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (bal > prev) {
         const delta = bal - prev;
         baselines.set(wallet.id, bal);
+        if (__DEV__)
+          console.log(
+            `[Wallet] incoming payment detected: +${delta} sats on ${walletLabel(wallet)} (${prev} → ${bal})`,
+          );
         setLastIncomingPayment({
           walletId: wallet.id,
           amountSats: delta,
