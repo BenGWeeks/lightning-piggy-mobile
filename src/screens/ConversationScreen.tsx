@@ -571,7 +571,9 @@ const ConversationScreen: React.FC = () => {
   // clickable profile mention.
   const handleShareContactPicked = useCallback(
     async (friend: PickedFriend) => {
+      // Dismiss both sheets in reverse stack order (top first).
       setContactPickerOpen(false);
+      setAttachSheetOpen(false);
       const readRelays = relays.filter((r) => r.read).map((r) => r.url);
       const relayHints = buildProfileRelayHints(friend.pubkey, contacts, readRelays);
       const nprofile = nprofileEncode(friend.pubkey, relayHints);
@@ -1058,13 +1060,26 @@ const ConversationScreen: React.FC = () => {
           setInvoiceSheetOpen(true);
         }}
         onShareContact={() => {
-          setAttachSheetOpen(false);
+          // Don't dismiss AttachSheet first — FriendPickerSheet has
+          // `stackBehavior="push"` and expects to layer *on top* of an
+          // already-presented parent. Dismissing AttachSheet + presenting
+          // FriendPickerSheet in the same render trips a gorhom race
+          // (see gorhom/react-native-bottom-sheet#1941) that leaves the
+          // child sheet at an invalid position when the keyboard opens —
+          // symptom we hit: the search-input focus collapsed the sheet
+          // to ~15 % of screen height.
           setContactPickerOpen(true);
         }}
       />
       <FriendPickerSheet
         visible={contactPickerOpen}
-        onClose={() => setContactPickerOpen(false)}
+        onClose={() => {
+          // Closing the picker with no selection also closes the
+          // AttachSheet underneath — the user has navigated away from
+          // the attach flow, the parent is no longer relevant.
+          setContactPickerOpen(false);
+          setAttachSheetOpen(false);
+        }}
         onSelect={handleShareContactPicked}
         title={`Share a contact with ${name}`}
         subtitle="They'll see it as a Nostr profile card they can open."
