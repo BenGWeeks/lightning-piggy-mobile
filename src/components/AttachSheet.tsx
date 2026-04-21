@@ -6,7 +6,7 @@ import {
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
-import { MapPin, Zap, Receipt } from 'lucide-react-native';
+import { MapPin, Zap, Receipt, UserRound } from 'lucide-react-native';
 import { colors } from '../styles/theme';
 
 interface Props {
@@ -15,6 +15,7 @@ interface Props {
   onShareLocation: () => void;
   onSendZap?: () => void;
   onSendInvoice?: () => void;
+  onShareContact?: () => void;
 }
 
 const AttachSheet: React.FC<Props> = ({
@@ -23,12 +24,13 @@ const AttachSheet: React.FC<Props> = ({
   onShareLocation,
   onSendZap,
   onSendInvoice,
+  onShareContact,
 }) => {
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => {
-    const rows = 1 + (onSendZap ? 1 : 0) + (onSendInvoice ? 1 : 0);
-    return [rows >= 3 ? '44%' : rows === 2 ? '36%' : '28%'];
-  }, [onSendZap, onSendInvoice]);
+    const rows = 1 + (onSendZap ? 1 : 0) + (onSendInvoice ? 1 : 0) + (onShareContact ? 1 : 0);
+    return [rows >= 4 ? '52%' : rows >= 3 ? '44%' : rows === 2 ? '36%' : '28%'];
+  }, [onSendZap, onSendInvoice, onShareContact]);
 
   useEffect(() => {
     if (visible) {
@@ -102,6 +104,22 @@ const AttachSheet: React.FC<Props> = ({
             <View style={styles.rowText}>
               <Text style={styles.rowTitle}>Send invoice</Text>
               <Text style={styles.rowSubtitle}>Create a bolt11 invoice and DM it to them.</Text>
+            </View>
+          </TouchableOpacity>
+        ) : null}
+        {onShareContact ? (
+          <TouchableOpacity
+            style={styles.row}
+            onPress={onShareContact}
+            accessibilityLabel="Share a contact's profile"
+            testID="attach-share-contact"
+          >
+            <View style={styles.iconBadge}>
+              <UserRound size={22} color={colors.white} />
+            </View>
+            <View style={styles.rowText}>
+              <Text style={styles.rowTitle}>Share profile</Text>
+              <Text style={styles.rowSubtitle}>Send another contact's Nostr profile.</Text>
             </View>
           </TouchableOpacity>
         ) : null}
