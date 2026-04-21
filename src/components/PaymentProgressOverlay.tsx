@@ -364,13 +364,23 @@ export default function PaymentProgressOverlay({
     subtitle = errorMessage || 'Please try again.';
   }
 
+  // Android expects a stable `onRequestClose` for hardware-back behaviour
+  // — passing `undefined` intermittently can warn and makes the button
+  // feel inconsistent. Always provide a handler; swallow the back press
+  // while the payment is still in flight so the user doesn't accidentally
+  // dismiss the "Sending…" state and lose sight of the outcome.
+  const handleRequestClose = () => {
+    if (state === 'sending') return;
+    onDismiss();
+  };
+
   return (
     <Modal
       visible={visible}
       transparent
       statusBarTranslucent
       animationType="fade"
-      onRequestClose={state === 'sending' ? undefined : onDismiss}
+      onRequestClose={handleRequestClose}
     >
       <View style={styles.root}>
         {/* Particle layer renders BEHIND the card — later siblings stack

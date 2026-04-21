@@ -548,9 +548,9 @@ const SendSheet: React.FC<Props> = ({
   };
 
   const handleOverlayDismiss = useCallback(() => {
-    // Success auto-dismisses via the overlay's timer — on success we also
-    // close the parent sheet. On error we only dismiss the overlay so the
-    // user can retry from the filled-in form.
+    // Dismissing the overlay after a successful payment also closes the
+    // parent sheet. On error we only dismiss the overlay so the user can
+    // retry from the filled-in form.
     const wasSuccess = progressState === 'success';
     setProgressState('hidden');
     setProgressError(undefined);

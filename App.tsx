@@ -50,8 +50,13 @@ const toastConfig = {
 // confetti pops no matter where the user is when a payment lands.
 function GlobalIncomingPaymentOverlay() {
   const { lastIncomingPayment, clearLastIncomingPayment } = useWallet();
+  // Key on the event timestamp so a second payment arriving while the
+  // overlay is still visible remounts the component and re-arms the
+  // confetti animation. Without this, a second `success` in a row
+  // wouldn't retrigger the burst (state stays 'success', no transition).
   return (
     <PaymentProgressOverlay
+      key={lastIncomingPayment?.at ?? 'idle'}
       state={lastIncomingPayment ? 'success' : 'hidden'}
       direction="receive"
       amountSats={lastIncomingPayment?.amountSats}

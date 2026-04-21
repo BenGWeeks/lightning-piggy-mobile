@@ -40,7 +40,11 @@ function paymentHashFromBolt11(bolt11: string): string | null {
       | { value?: string }
       | undefined;
     return section?.value ?? null;
-  } catch {
+  } catch (error) {
+    // Silent null returns would mask broken invoice generation; at
+    // least surface it in dev logs so the fallback-to-balance-poll is
+    // traceable.
+    if (__DEV__) console.warn('[Receive] bolt11 decode failed:', error);
     return null;
   }
 }
@@ -98,6 +102,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
     lightningAddress,
     getReceiveAddress,
     expectPayment,
+    lastIncomingPayment,
   } = useWallet();
   const [capturedWalletId, setCapturedWalletId] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -111,14 +116,6 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
   const [onchainAddress, setOnchainAddress] = useState<string | null>(null);
   const [friendPickerOpen, setFriendPickerOpen] = useState(false);
   const [sendingToFriend, setSendingToFriend] = useState(false);
-  const prevBalance = useRef<number | null>(null);
-  // When true, the next observed balance is treated as the "pre-invoice"
-  // baseline and is NOT fired as a received payment. Reset on sheet-open,
-  // wallet-switch, and each new invoice creation — so pending credits
-  // that settle between app-open and invoice-create get absorbed into
-  // the baseline instead of firing a bogus celebration attributed to
-  // the newly-created invoice.
-  const needsBaseline = useRef(true);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   const { sendDirectMessage, contacts } = useNostr();
@@ -137,7 +134,6 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
     [wallets, selectedWalletId],
   );
   const walletName = selectedWallet ? walletLabel(selectedWallet) : 'Wallet';
-  const balance = selectedWallet?.balance ?? null;
 
   const generateInvoice = useCallback(
     async (sats: number) => {
@@ -148,20 +144,19 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
         if (!wId) return;
         const inv = await makeInvoiceForWallet(wId, sats, 'Lightning Piggy');
         setInvoice(inv);
-        // Re-baseline: any pending credit from a previous invoice must
-        // not fire a celebration attributed to the new one. The first
-        // balance we see after this poll starts becomes the baseline.
-        needsBaseline.current = true;
 
         // Hand the invoice off to WalletContext.expectPayment, which
         // runs a 1 s lookup_invoice + balance poll for the next 3 min.
         // The poll lives in the context (not this sheet), so it keeps
         // running even if the user closes the receive sheet and wanders
         // off to Friends / Home etc. — the app-root overlay still pops
-        // on settle regardless of which screen is active.
+        // on settle regardless of which screen is active. Passing the
+        // expected amount means the overlay shows the exact invoice
+        // value rather than a balance-delta that could include prior
+        // settles piled up between polls.
         const paymentHash = paymentHashFromBolt11(inv);
         if (paymentHash) {
-          expectPayment(wId, paymentHash);
+          expectPayment(wId, paymentHash, sats);
         } else {
           // Unparseable bolt11 — fall back to a single balance refresh.
           // The WalletContext 30 s baseline poll still picks the
@@ -189,8 +184,6 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
       // below), not from the cached value here — the cache may be stale
       // if the app has been backgrounded and a previous invoice settled
       // while we weren't polling.
-      prevBalance.current = null;
-      needsBaseline.current = true;
       setOnchainAddress(null);
       setSatsValue('');
       setFiatValue('');
@@ -246,10 +239,6 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
     setPaymentReceived(false);
     setSatsValue('');
     setFiatValue('');
-    // Wallet switch clears the baseline; the next balance observed for
-    // the new wallet is treated as the pre-invoice starting point.
-    prevBalance.current = null;
-    needsBaseline.current = true;
     if (selectedWallet?.walletType === 'onchain') {
       setMode('address');
       getReceiveAddress(capturedWalletId)
@@ -261,23 +250,23 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [capturedWalletId]);
 
-  // The "paymentReceived" checkmark on the QR thumbnail is driven by
-  // any balance increment while the sheet is open. The actual
-  // celebration overlay (confetti + tick card) is now rendered at app
-  // root via WalletContext.lastIncomingPayment — that way it pops on
-  // any screen, for any wallet, not just while this sheet is visible.
+  // The "paymentReceived" checkmark on the QR thumbnail flips to true
+  // whenever the app-root overlay fires for the wallet this sheet is
+  // currently showing. We used to duplicate the baseline-detector
+  // logic locally — pointlessly, since WalletContext already owns it.
+  // Keyed on the event timestamp so a second receive within the same
+  // sheet session still re-arms the checkmark after the user dismisses
+  // the global overlay and clears `lastIncomingPayment`.
   useEffect(() => {
-    if (!visible || balance === null) return;
-    if (needsBaseline.current) {
-      prevBalance.current = balance;
-      needsBaseline.current = false;
-      return;
-    }
-    if (prevBalance.current !== null && balance > prevBalance.current) {
-      prevBalance.current = balance;
+    if (!visible) return;
+    if (
+      lastIncomingPayment &&
+      selectedWallet &&
+      lastIncomingPayment.walletId === selectedWallet.id
+    ) {
       setPaymentReceived(true);
     }
-  }, [balance, visible]);
+  }, [lastIncomingPayment, selectedWallet, visible]);
 
   const scheduleInvoice = (sats: number) => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);

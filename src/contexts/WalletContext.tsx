@@ -21,8 +21,15 @@ import {
 export interface IncomingPayment {
   walletId: string;
   amountSats: number;
-  walletAlias: string;
+  // Timestamp; also serves as a stable React key for the overlay so a
+  // second payment with the same amount to the same wallet still
+  // re-mounts the animation.
   at: number;
+  // Set when detection came via a known invoice hash (expectPayment
+  // path); null when it came via balance-diff (e.g. lightning-address
+  // receive). Consumers can use this to distinguish "exactly this
+  // invoice settled" from "something credited the wallet".
+  paymentHash: string | null;
 }
 
 const USER_NAME_KEY = 'user_display_name';
@@ -126,14 +133,34 @@ interface WalletContextType {
   lastIncomingPayment: IncomingPayment | null;
   clearLastIncomingPayment: () => void;
 
-  // Kick off aggressive 1 s polling for a specific NWC invoice for the
-  // next 3 minutes. Called by ReceiveSheet when an invoice is
-  // generated — the poll lives in the context so it survives the sheet
-  // closing (user can generate an invoice, close the sheet, wander
-  // into Friends, and still get the confetti pop). Subsequent calls
-  // replace any in-flight expectation. Stops early on detected
-  // settlement or after the duration elapses.
-  expectPayment: (walletId: string, paymentHash: string, durationMs?: number) => void;
+  /**
+   * Kick off aggressive 1 s polling for a specific NWC invoice for up
+   * to `durationMs` (default 3 min). Called by ReceiveSheet when an
+   * invoice is generated — the poll lives in the context so it survives
+   * the sheet closing (user can generate an invoice, close the sheet,
+   * wander into Friends, and still get the confetti pop).
+   *
+   * **Replacement semantics:** subsequent calls replace any in-flight
+   * expectation (only one tracked at a time). This is safe because the
+   * balance-diff detector still runs independently — so if invoice A's
+   * expectation is replaced by invoice B before A settles, A's eventual
+   * balance increment will *still* fire the overlay via the diff path,
+   * just with worst-case 30 s latency (baseline poll) instead of 1 s.
+   *
+   * When `expectedAmountSats` is provided and the lookup reports
+   * `paid: true`, the overlay uses that exact amount rather than the
+   * balance-delta heuristic. This matters when two invoices settle
+   * between polls: the delta would report the combined total, the
+   * explicit amount reports what *this* invoice was for.
+   *
+   * Stops early on detected settlement or after the duration elapses.
+   */
+  expectPayment: (
+    walletId: string,
+    paymentHash: string,
+    expectedAmountSats?: number,
+    durationMs?: number,
+  ) => void;
 
   // Legacy compatibility
   isConnected: boolean;
@@ -1209,8 +1236,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const expectedPaymentRef = useRef<{
     walletId: string;
     paymentHash: string;
+    expectedAmountSats: number | null;
     interval: ReturnType<typeof setInterval>;
     timeout: ReturnType<typeof setTimeout>;
+    // Guards against pile-up on slow backends: if tick N hasn't
+    // completed by the time tick N+1 fires, we skip N+1.
+    inFlight: boolean;
   } | null>(null);
 
   const stopExpectedPayment = useCallback(() => {
@@ -1222,27 +1253,69 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   const expectPayment = useCallback(
-    (walletId: string, paymentHash: string, durationMs: number = 3 * 60 * 1000) => {
+    (
+      walletId: string,
+      paymentHash: string,
+      expectedAmountSats?: number,
+      durationMs: number = 3 * 60 * 1000,
+    ) => {
       // Replace any previous expectation — we only track one at a time.
+      // The balance-diff detector still catches the displaced invoice
+      // when it settles (just on a slower cadence), so we never drop
+      // detection entirely; see the expectPayment JSDoc in the context
+      // interface above.
       stopExpectedPayment();
 
       const tick = async () => {
-        const [lookupResult] = await Promise.allSettled([
-          nwcService.lookupInvoice(walletId, paymentHash),
-          // The balance refresh is what ultimately drives the
-          // WalletContext diff-detector and fires the overlay; fire
-          // both every tick so either path catches the settle.
-          (async () => {
-            const b = await nwcService.getBalance(walletId);
-            if (b !== null) updateWalletInState(walletId, { balance: b });
-          })(),
-        ]);
-        if (lookupResult.status === 'fulfilled' && lookupResult.value?.paid) {
-          if (__DEV__)
-            console.log(
-              `[Wallet] expected invoice paid (${paymentHash.slice(0, 12)}…) — stopping poll`,
-            );
-          stopExpectedPayment();
+        const current = expectedPaymentRef.current;
+        // Pile-up guard: if the previous tick is still in flight (slow
+        // NWC backend, see #133), skip this interval firing entirely
+        // rather than stacking N concurrent requests.
+        if (!current || current.inFlight) return;
+        current.inFlight = true;
+        try {
+          const [lookupResult] = await Promise.allSettled([
+            nwcService.lookupInvoice(walletId, paymentHash),
+            // The balance refresh feeds the generic balance-diff
+            // detector as a fallback; run it every tick so a flaky
+            // lookup_invoice path still settles detection.
+            (async () => {
+              const b = await nwcService.getBalance(walletId);
+              if (b !== null) updateWalletInState(walletId, { balance: b });
+            })(),
+          ]);
+          if (
+            lookupResult.status === 'fulfilled' &&
+            lookupResult.value?.paid &&
+            expectedPaymentRef.current?.paymentHash === paymentHash
+          ) {
+            if (__DEV__)
+              console.log(
+                `[Wallet] expected invoice paid (${paymentHash.slice(0, 12)}…) — stopping poll`,
+              );
+            // Fire with the *known* invoice amount rather than the
+            // balance delta. Two invoices settling between polls would
+            // show a combined delta on the generic path; the explicit
+            // amount is always correct.
+            if (expectedAmountSats !== undefined && expectedAmountSats > 0) {
+              // Advance the balance-diff baseline to the current balance
+              // so the /same/ settle doesn't also fire via the diff path.
+              const currentBalance = walletsRef.current.find((w) => w.id === walletId)?.balance;
+              if (currentBalance !== null && currentBalance !== undefined) {
+                paymentBaselinesRef.current.set(walletId, currentBalance);
+              }
+              setLastIncomingPayment({
+                walletId,
+                amountSats: expectedAmountSats,
+                at: Date.now(),
+                paymentHash,
+              });
+            }
+            stopExpectedPayment();
+          }
+        } finally {
+          const still = expectedPaymentRef.current;
+          if (still) still.inFlight = false;
         }
       };
 
@@ -1259,10 +1332,17 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       }, durationMs);
 
-      expectedPaymentRef.current = { walletId, paymentHash, interval, timeout };
+      expectedPaymentRef.current = {
+        walletId,
+        paymentHash,
+        expectedAmountSats: expectedAmountSats ?? null,
+        interval,
+        timeout,
+        inFlight: false,
+      };
       if (__DEV__)
         console.log(
-          `[Wallet] expecting payment on ${paymentHash.slice(0, 12)}… (${Math.round(durationMs / 1000)} s window)`,
+          `[Wallet] expecting payment on ${paymentHash.slice(0, 12)}… (${Math.round(durationMs / 1000)} s window, amount=${expectedAmountSats ?? '?'})`,
         );
     },
     [stopExpectedPayment, updateWalletInState],
@@ -1299,6 +1379,15 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // money lands — ReceiveSheet being open is no longer required.
   useEffect(() => {
     const baselines = paymentBaselinesRef.current;
+    const liveIds = new Set(wallets.map((w) => w.id));
+
+    // Garbage-collect baselines for wallets that have been removed.
+    // Without this the Map grows monotonically (e.g. user adds and
+    // removes wallets repeatedly during onboarding / debugging).
+    for (const id of baselines.keys()) {
+      if (!liveIds.has(id)) baselines.delete(id);
+    }
+
     for (const wallet of wallets) {
       const bal = wallet.balance;
       if (bal === null || bal === undefined) continue;
@@ -1317,8 +1406,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setLastIncomingPayment({
           walletId: wallet.id,
           amountSats: delta,
-          walletAlias: walletLabel(wallet),
           at: Date.now(),
+          // Balance-diff path doesn't know which invoice settled — only
+          // expectPayment can attribute by hash. Lightning-address /
+          // multi-invoice receives land here.
+          paymentHash: null,
         });
       } else if (bal < prev) {
         // Outgoing payment or reorg adjustment — silently rebase.
@@ -1343,12 +1435,24 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // On-chain is skipped — BDK sync is expensive and not safe to run
   // every 30 s; #134 tracks the on-chain variant of this coverage.
   // True background / app-closed delivery needs OS push (#45).
+  // Track the active wallet's connection state as an explicit dep so
+  // the poll starts/stops when a wallet reconnects without the active
+  // id changing. (Previous version only re-ran on `activeWalletId`
+  // change and could leave the poll running against a disconnected
+  // wallet — flagged in PR #135 review.) We still avoid putting the
+  // full `wallets` array in deps, which would thrash on every balance
+  // tick.
+  const activeWalletConnected =
+    activeWallet?.walletType !== 'onchain' && activeWallet?.isConnected === true;
+
   useEffect(() => {
-    if (!activeWalletId) return;
-    const wallet = wallets.find((w) => w.id === activeWalletId);
-    if (!wallet || wallet.walletType === 'onchain' || !wallet.isConnected) return;
+    if (!activeWalletId || !activeWalletConnected) return;
 
     const refreshOnce = () => {
+      // Bail if the wallet has since disconnected — we read through
+      // `walletsRef` rather than the closure so this is current.
+      const current = walletsRef.current.find((w) => w.id === activeWalletId);
+      if (!current || !current.isConnected || current.walletType === 'onchain') return;
       nwcService
         .getBalance(activeWalletId)
         .then((b) => {
@@ -1385,11 +1489,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       stopPoll();
       sub.remove();
     };
-    // `wallets` is intentionally omitted so we don't thrash the
-    // subscription on every balance tick — we only re-wire when the
-    // active wallet itself changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeWalletId, updateWalletInState]);
+  }, [activeWalletId, activeWalletConnected, updateWalletInState]);
 
   return (
     <WalletContext.Provider
