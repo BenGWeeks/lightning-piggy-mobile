@@ -83,6 +83,14 @@ export interface WalletTransaction {
   swapId?: string;
   swapType?: 'reverse' | 'submarine';
   claimTxId?: string;
+  /**
+   * Inserted client-side by SendSheet immediately after a successful
+   * pay_invoice so the UI (ConversationScreen, TransactionList) can show
+   * the send without waiting for LNbits to flush it into its ledger and
+   * the next refresh to pick it up. Dropped on the next refresh when the
+   * real tx arrives (matched by paymentHash).
+   */
+  optimistic?: boolean;
 }
 
 /** Format wallet name with type suffix for dropdowns */
