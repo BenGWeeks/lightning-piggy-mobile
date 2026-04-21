@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import {
   Modal,
   View,
@@ -6,6 +6,7 @@ import {
   StyleSheet,
   useWindowDimensions,
   ActivityIndicator,
+  TouchableOpacity,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -42,9 +43,6 @@ const CONFETTI_COUNT = 90;
 // Screen should be packed with bubbles by ~5s. Quadratic stagger means
 // early bubbles are sparse and density ramps up rapidly toward the 5s mark.
 const FULL_DENSITY_MS = 5000;
-// Auto-dismiss delay once we hit `success`; gives the user a beat to see
-// the tick + the green bubble wave (or confetti burst) before closing.
-const SUCCESS_DISMISS_MS = 2200;
 
 // On-brand confetti palette — Piggy pink plus blues and purples.
 const CONFETTI_COLORS = [
@@ -75,7 +73,7 @@ function makeSpecs(count: number, screenHeight: number): BubbleSpec[] {
     specs.push({
       index: i,
       startXRatio: Math.random(),
-      size: 10 + Math.random() * 34,
+      size: 22 + Math.random() * 46,
       duration: 2400 + Math.random() * 1800,
       driftPx: -40 + Math.random() * 80,
       delayMs,
@@ -90,12 +88,17 @@ function makeSpecs(count: number, screenHeight: number): BubbleSpec[] {
 
 interface ConfettiSpec {
   index: number;
-  startXRatio: number;
   width: number;
   height: number;
   color: string;
+  // Radial burst from the card centre: initial velocity (px/s).
+  vx: number;
+  vy: number;
+  // Gravity pulls pieces down after the initial burst (px/s²).
+  gravity: number;
+  // Total animation duration (ms).
   duration: number;
-  driftPx: number;
+  // Small per-piece launch stagger so the burst feels alive, not mechanical.
   delayMs: number;
   spinTurns: number;
   opacityPeak: number;
@@ -104,20 +107,27 @@ interface ConfettiSpec {
 function makeConfettiSpecs(count: number): ConfettiSpec[] {
   const specs: ConfettiSpec[] = [];
   for (let i = 0; i < count; i++) {
-    // Staggered launch over ~800ms for a celebratory wave rather than
-    // a hard burst. Longer than that and it feels sluggish.
-    const delayMs = Math.random() * 800;
+    // Pick a random angle across the full circle, then bias slightly
+    // upward so the burst feels explosive rather than dribbling straight
+    // down into gravity.
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 320 + Math.random() * 380; // px/s
+    const vx = Math.cos(angle) * speed;
+    // Bias upward: subtract a small extra upward component so on average
+    // pieces launch *outward-and-up* before gravity takes over.
+    const vy = Math.sin(angle) * speed - 80;
     specs.push({
       index: i,
-      startXRatio: Math.random(),
       width: 7 + Math.random() * 6,
       height: 10 + Math.random() * 8,
       color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
-      duration: 2200 + Math.random() * 1600,
-      driftPx: -60 + Math.random() * 120,
-      delayMs,
-      spinTurns: 2 + Math.random() * 4,
-      opacityPeak: 0.85 + Math.random() * 0.15,
+      vx,
+      vy,
+      gravity: 780 + Math.random() * 180,
+      duration: 1800 + Math.random() * 900,
+      delayMs: Math.random() * 220,
+      spinTurns: 1.5 + Math.random() * 3.5,
+      opacityPeak: 0.9 + Math.random() * 0.1,
     });
   }
   return specs;
@@ -180,22 +190,23 @@ function Bubble({ spec, colorProgress, screenWidth, screenHeight }: BubbleProps)
 interface ConfettiProps {
   spec: ConfettiSpec;
   armed: SharedValue<number>;
-  screenWidth: number;
-  screenHeight: number;
+  originX: number;
+  originY: number;
 }
 
-function Confetti({ spec, armed, screenWidth, screenHeight }: ConfettiProps) {
+function Confetti({ spec, armed, originX, originY }: ConfettiProps) {
+  // `progress` goes 0 → 1 across `spec.duration`. We interpret it as
+  // elapsed-time in seconds via `progress * duration/1000` and plug that
+  // into a standard projectile equation with gravity.
   const progress = useSharedValue(0);
 
-  // React to the `armed` shared value flipping 0 → 1 — that kicks off the
-  // fall animation for this piece with its per-spec stagger.
   useAnimatedReaction(
     () => armed.value,
     (armedNow, armedBefore) => {
       if (armedNow === 1 && armedBefore !== 1) {
         progress.value = withDelay(
           spec.delayMs,
-          withTiming(1, { duration: spec.duration, easing: Easing.in(Easing.quad) }),
+          withTiming(1, { duration: spec.duration, easing: Easing.linear }),
         );
       } else if (armedNow === 0) {
         cancelAnimation(progress);
@@ -205,21 +216,24 @@ function Confetti({ spec, armed, screenWidth, screenHeight }: ConfettiProps) {
   );
 
   const animatedStyle = useAnimatedStyle(() => {
-    const y = interpolate(progress.value, [0, 1], [-80, screenHeight + 80]);
-    const xOffset = Math.sin(progress.value * Math.PI * 1.5) * spec.driftPx;
+    // Seconds since this piece launched.
+    const t = (progress.value * spec.duration) / 1000;
+    // Classic projectile: s = v0·t + ½·g·t². Horizontal has no accel.
+    const tx = spec.vx * t;
+    const ty = spec.vy * t + 0.5 * spec.gravity * t * t;
     const rotate = `${progress.value * spec.spinTurns * 360}deg`;
+    // Quick fade-in at the start (so it pops from behind the card), then
+    // a longer tail fade as pieces fall past the edges.
     const opacity = interpolate(
       progress.value,
-      [0, 0.05, 0.9, 1],
+      [0, 0.06, 0.75, 1],
       [0, spec.opacityPeak, spec.opacityPeak, 0],
     );
     return {
-      transform: [{ translateX: xOffset }, { translateY: y }, { rotate }],
+      transform: [{ translateX: tx }, { translateY: ty }, { rotate }],
       opacity,
     };
   });
-
-  const baseLeft = spec.startXRatio * screenWidth - spec.width / 2;
 
   return (
     <Animated.View
@@ -230,8 +244,8 @@ function Confetti({ spec, armed, screenWidth, screenHeight }: ConfettiProps) {
           width: spec.width,
           height: spec.height,
           backgroundColor: spec.color,
-          left: baseLeft,
-          top: 0,
+          left: originX - spec.width / 2,
+          top: originY - spec.height / 2,
         },
         animatedStyle,
       ]}
@@ -280,24 +294,24 @@ export default function PaymentProgressOverlay({
     }
   }, [visible, cardScale, cardOpacity, colorProgress, iconScale, confettiArmed]);
 
-  // Drive colour + icon animations on state change, and auto-dismiss on success.
-  const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Drive colour + icon animations on state change. Dismissal is
+  // user-driven — neither send nor receive auto-closes, so the user
+  // always confirms they saw the outcome before we tear down the sheet.
   useEffect(() => {
     if (state === 'success') {
       if (direction === 'send') {
         // Bubbles morph from pink to green on a successful send.
         colorProgress.value = withTiming(1, { duration: 650 });
       } else {
-        // Receive: fire the on-brand confetti burst.
-        confettiArmed.value = 1;
+        // Receive: fire the on-brand confetti burst. We delay the
+        // launch by 280ms so the card visibly springs in *first* and
+        // the burst reads as coming from behind it.
+        confettiArmed.value = withDelay(280, withTiming(1, { duration: 0 }));
       }
       iconScale.value = withSequence(
         withTiming(0, { duration: 0 }),
         withSpring(1, { damping: 10, stiffness: 220 }),
       );
-      dismissTimerRef.current = setTimeout(() => {
-        onDismiss();
-      }, SUCCESS_DISMISS_MS);
     } else if (state === 'error') {
       iconScale.value = withSequence(
         withTiming(0, { duration: 0 }),
@@ -308,13 +322,7 @@ export default function PaymentProgressOverlay({
       iconScale.value = 0;
       confettiArmed.value = 0;
     }
-    return () => {
-      if (dismissTimerRef.current) {
-        clearTimeout(dismissTimerRef.current);
-        dismissTimerRef.current = null;
-      }
-    };
-  }, [state, direction, colorProgress, iconScale, confettiArmed, onDismiss]);
+  }, [state, direction, colorProgress, iconScale, confettiArmed]);
 
   const cardAnimatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: cardScale.value }],
@@ -365,27 +373,20 @@ export default function PaymentProgressOverlay({
       onRequestClose={state === 'sending' ? undefined : onDismiss}
     >
       <View style={styles.root}>
-        <View style={StyleSheet.absoluteFill} pointerEvents="none">
-          {isReceive
-            ? confettiSpecs.map((spec) => (
-                <Confetti
-                  key={spec.index}
-                  spec={spec}
-                  armed={confettiArmed}
-                  screenWidth={width}
-                  screenHeight={height}
-                />
-              ))
-            : bubbleSpecs.map((spec) => (
-                <Bubble
-                  key={spec.index}
-                  spec={spec}
-                  colorProgress={colorProgress}
-                  screenWidth={width}
-                  screenHeight={height}
-                />
-              ))}
-        </View>
+        {/* Bubbles live behind the card on the send flow. */}
+        {!isReceive ? (
+          <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            {bubbleSpecs.map((spec) => (
+              <Bubble
+                key={spec.index}
+                spec={spec}
+                colorProgress={colorProgress}
+                screenWidth={width}
+                screenHeight={height}
+              />
+            ))}
+          </View>
+        ) : null}
 
         <Animated.View style={[styles.card, cardAnimatedStyle]}>
           {state === 'sending' && (
@@ -404,7 +405,38 @@ export default function PaymentProgressOverlay({
 
           <Text style={styles.title}>{title}</Text>
           {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+
+          {/* The user must acknowledge send/receive/error outcomes before
+           *  we tear down the sheet — auto-dismiss can hide the fact the
+           *  money moved if they weren't looking. No button while sending. */}
+          {state !== 'sending' ? (
+            <TouchableOpacity
+              style={styles.okButton}
+              onPress={onDismiss}
+              accessibilityLabel="Dismiss payment confirmation"
+              testID="payment-overlay-ok"
+            >
+              <Text style={styles.okButtonText}>{state === 'error' ? 'Dismiss' : 'OK'}</Text>
+            </TouchableOpacity>
+          ) : null}
         </Animated.View>
+
+        {/* Confetti sits on top of the card so pieces visibly burst past
+         *  the card edges as they fly radially outward. Origin = screen
+         *  centre, which matches the card's visual centre. */}
+        {isReceive ? (
+          <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            {confettiSpecs.map((spec) => (
+              <Confetti
+                key={spec.index}
+                spec={spec}
+                armed={confettiArmed}
+                originX={width / 2}
+                originY={height / 2}
+              />
+            ))}
+          </View>
+        ) : null}
       </View>
     </Modal>
   );
@@ -464,5 +496,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textSupplementary,
     textAlign: 'center',
+  },
+  okButton: {
+    marginTop: 12,
+    alignSelf: 'stretch',
+    backgroundColor: colors.brandPink,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 14,
+    alignItems: 'center',
+  },
+  okButtonText: {
+    color: colors.white,
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
 });
