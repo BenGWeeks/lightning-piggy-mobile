@@ -22,6 +22,28 @@
 - Prettier and ESLint must pass before committing
 - TypeScript strict mode — `npx tsc --noEmit` must pass
 
+## Pull request titles
+
+Follow [Conventional Commits](https://www.conventionalcommits.org/) plus a trailing issue reference when the PR resolves one:
+
+```
+<type>(<scope>): <short description> (#<issue>)
+```
+
+- **type** — `feat`, `fix`, `chore`, `docs`, `refactor`, `perf`, `test`. Use `fix` only when the PR resolves a defect users would notice; `feat` for user-visible additions; `chore` for tooling / infra.
+- **scope** — a short noun for the affected area (`nwc`, `dm`, `onboarding`, `receive`, `zap`, `ui`, `nostr`, …). Omit the scope only when the change is truly repo-wide.
+- **short description** — imperative mood, lower case, no trailing period. Keep under ~70 characters total including the issue suffix so GitHub doesn't truncate it.
+- **issue suffix** — append `(#N)` for the primary issue the PR closes; for a PR that resolves multiple, use `(#N1, #N2)`. Prefer this trailing form over embedding `Closes #N` only in the body, because the PR index and commit history surface the title but not the body. The body should still include a `Closes #N` line so GitHub auto-closes the issue on merge.
+
+Examples from the repo:
+
+- `fix(receive): select amount input text on focus to prevent stale-append (#104)`
+- `feat(onboarding): auto-advance IntroScreen, drop "Let's Go" button (#107)`
+- `feat(nfc): scan + write Lightning/Nostr tags (#48, #49)`
+- `fix(zap): show outgoing zap in conversation thread on send (#123)`
+
+Refactors, infra, or pure-UX polish that doesn't correspond to a filed issue can omit the suffix — don't invent an issue number to fit the format.
+
 ## Screenshots
 
 - Always use ADB to capture screenshots from the Android device: `adb exec-out screencap -p > /tmp/screen.png`
