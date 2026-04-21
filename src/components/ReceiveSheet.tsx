@@ -111,9 +111,16 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
         if (!wId) return;
         const inv = await makeInvoiceForWallet(wId, sats, 'Lightning Piggy');
         setInvoice(inv);
+        // Poll every 1.5 s while the receive sheet is open. NWC
+        // notifications (NIP-47) would eliminate the wait entirely, but
+        // support is patchy across wallets (LNbits, Mutiny, Alby etc.),
+        // so a short active-poll remains the fallback. Battery cost is
+        // bounded — the interval is cleared as soon as the sheet closes
+        // or the balance increment is detected (see the paymentReceived
+        // handler further down).
         intervalId.current = setInterval(async () => {
           if (wId) await refreshBalanceForWallet(wId);
-        }, 5000);
+        }, 1500);
       } catch (error) {
         console.warn('Failed to create invoice:', error);
       } finally {
