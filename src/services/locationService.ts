@@ -42,28 +42,80 @@ export async function getCurrentLocation(): Promise<LocationResult | LocationFai
     };
   }
 
-  try {
-    const pos = await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.Balanced,
-    });
-    return {
-      ok: true,
-      location: {
-        lat: pos.coords.latitude,
-        lon: pos.coords.longitude,
-        accuracyMeters:
-          typeof pos.coords.accuracy === 'number' && isFinite(pos.coords.accuracy)
-            ? Math.round(pos.coords.accuracy)
-            : null,
-      },
-    };
-  } catch {
+  // Try the cheap path first: a recent cached fix returns instantly.
+  // Fall through to getCurrentPositionAsync for an active request, and
+  // finally watchPositionAsync — on Android, the fused provider throws
+  // ERR_CURRENT_LOCATION_IS_UNAVAILABLE when its cache is empty (emulator
+  // cold start, airplane-mode recovery), so we need to actively wait for
+  // a first fix rather than give up.
+  const pos = (await tryLastKnown()) ?? (await tryGetCurrent()) ?? (await waitForFirstFix(15000));
+  if (!pos) {
     return {
       ok: false,
-      error: 'unknown',
+      error: 'timeout',
       message: 'Could not determine your location. Try again in a moment.',
     };
   }
+  return {
+    ok: true,
+    location: {
+      lat: pos.coords.latitude,
+      lon: pos.coords.longitude,
+      accuracyMeters:
+        typeof pos.coords.accuracy === 'number' && isFinite(pos.coords.accuracy)
+          ? Math.round(pos.coords.accuracy)
+          : null,
+    },
+  };
+}
+
+async function tryLastKnown(): Promise<Location.LocationObject | null> {
+  try {
+    return await Location.getLastKnownPositionAsync({ maxAge: 60_000 });
+  } catch {
+    return null;
+  }
+}
+
+async function tryGetCurrent(): Promise<Location.LocationObject | null> {
+  try {
+    // Accuracy.High maps to FusedLocationProviderClient's PRIORITY_HIGH_ACCURACY,
+    // which actively demands GPS. Balanced prefers the network provider, which
+    // is unavailable on emulators configured with GPS only — so Balanced throws
+    // ERR_CURRENT_LOCATION_IS_UNAVAILABLE on empty cache even when GPS has a fix.
+    return await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+  } catch {
+    return null;
+  }
+}
+
+function waitForFirstFix(timeoutMs: number): Promise<Location.LocationObject | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    let subscription: Location.LocationSubscription | null = null;
+    const done = (value: Location.LocationObject | null) => {
+      if (settled) return;
+      settled = true;
+      subscription?.remove();
+      resolve(value);
+    };
+    const timer = setTimeout(() => done(null), timeoutMs);
+    Location.watchPositionAsync(
+      { accuracy: Location.Accuracy.High, timeInterval: 1000, distanceInterval: 0 },
+      (pos) => {
+        clearTimeout(timer);
+        done(pos);
+      },
+    )
+      .then((sub) => {
+        if (settled) sub.remove();
+        else subscription = sub;
+      })
+      .catch(() => {
+        clearTimeout(timer);
+        done(null);
+      });
+  });
 }
 
 const COORD_DECIMALS = 5;
@@ -111,29 +163,30 @@ export function buildOsmViewUrl(loc: SharedLocation, zoom = 16): string {
   return `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=${zoom}/${lat}/${lon}`;
 }
 
-/**
- * URL for a PNG thumbnail of the shared coordinates. Uses the OSM-DE
- * community static-map service — no API key, no Google. The recipient's
- * device fetches this once per unique (lat,lon) and it lands in the
- * `expo-image` disk cache, so repeat views don't re-contact the tile host.
- */
-export function buildStaticMapUrl(
-  loc: SharedLocation,
-  opts: { width?: number; height?: number; zoom?: number } = {},
-): string {
-  const width = opts.width ?? 400;
-  const height = opts.height ?? 220;
-  const zoom = opts.zoom ?? 15;
-  const lat = roundCoord(loc.lat);
-  const lon = roundCoord(loc.lon);
-  return (
-    `https://staticmap.openstreetmap.de/staticmap.php` +
-    `?center=${lat},${lon}` +
-    `&zoom=${zoom}` +
-    `&size=${width}x${height}` +
-    `&maptype=mapnik` +
-    `&markers=${lat},${lon},lightblue1`
+// A single slippy-map tile from the official OSMF tile server. No API key
+// and no stitching service: compute (x,y,z) from the coordinates and fetch
+// one 256×256 PNG. Per the OSMF tile usage policy we must cache responses
+// and identify ourselves with a specific User-Agent — the caller is
+// responsible for passing `USER_AGENT` through `source.headers`.
+// See https://operations.osmfoundation.org/policies/tiles/
+export const USER_AGENT = 'LightningPiggyMobile/dev (+https://lightningpiggy.com)';
+
+function lonToTileX(lon: number, z: number): number {
+  return Math.floor(((lon + 180) / 360) * Math.pow(2, z));
+}
+
+function latToTileY(lat: number, z: number): number {
+  const rad = (lat * Math.PI) / 180;
+  return Math.floor(
+    ((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * Math.pow(2, z),
   );
+}
+
+export function buildStaticMapUrl(loc: SharedLocation, opts: { zoom?: number } = {}): string {
+  const zoom = opts.zoom ?? 15;
+  const x = lonToTileX(loc.lon, zoom);
+  const y = latToTileY(loc.lat, zoom);
+  return `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`;
 }
 
 export function formatCoordsForDisplay(loc: SharedLocation): string {

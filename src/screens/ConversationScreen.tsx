@@ -38,6 +38,7 @@ import {
   buildOsmViewUrl,
   buildStaticMapUrl,
   formatCoordsForDisplay,
+  USER_AGENT,
   SharedLocation,
 } from '../services/locationService';
 import type { RootStackParamList } from '../navigation/types';
@@ -469,7 +470,7 @@ const ConversationScreen: React.FC = () => {
               testID={`conversation-location-${item.id}`}
             >
               <ExpoImage
-                source={{ uri: mapUrl }}
+                source={{ uri: mapUrl, headers: { 'User-Agent': USER_AGENT } }}
                 style={styles.locationMap}
                 contentFit="cover"
                 cachePolicy="disk"
