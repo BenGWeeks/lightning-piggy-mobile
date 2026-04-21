@@ -627,6 +627,7 @@ const AccountScreen: React.FC = () => {
           initialAddress={teamProfile.lud16}
           initialPicture={teamProfile.picture || undefined}
           recipientPubkey={teamProfile.pubkey}
+          suggestedAmounts={[21, 100, 1000, 10000]}
         />
       )}
       <FeedbackSheet

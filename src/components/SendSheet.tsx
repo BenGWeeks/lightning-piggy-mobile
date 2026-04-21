@@ -39,6 +39,7 @@ interface Props {
   initialAddress?: string;
   initialPicture?: string;
   recipientPubkey?: string;
+  suggestedAmounts?: number[];
 }
 
 type InputMode = 'scan' | 'paste';
@@ -92,6 +93,7 @@ const SendSheet: React.FC<Props> = ({
   initialAddress,
   initialPicture,
   recipientPubkey,
+  suggestedAmounts,
 }) => {
   const {
     payInvoiceForWallet,
@@ -337,6 +339,16 @@ const SendSheet: React.FC<Props> = ({
     const fiat = parseFloat(text) || 0;
     const sats = fiatToSats(fiat);
     setSatsValue(sats.toString());
+  };
+
+  const handleSuggestedAmount = (sats: number) => {
+    setInputUnit('sats');
+    setSatsValue(sats.toString());
+    if (btcPrice) {
+      setFiatValue(satsToFiat(sats, btcPrice).toFixed(2));
+    } else {
+      setFiatValue('0.00');
+    }
   };
 
   const handleSend = async () => {
@@ -723,6 +735,34 @@ const SendSheet: React.FC<Props> = ({
                               ? `${currentSats.toLocaleString()} sats`
                               : ''}
                         </Text>
+                        {suggestedAmounts && suggestedAmounts.length > 0 ? (
+                          <View style={styles.suggestedRow}>
+                            {suggestedAmounts.map((amount) => {
+                              const selected = currentSats === amount;
+                              return (
+                                <TouchableOpacity
+                                  key={amount}
+                                  style={[
+                                    styles.suggestedButton,
+                                    selected && styles.suggestedButtonActive,
+                                  ]}
+                                  onPress={() => handleSuggestedAmount(amount)}
+                                  accessibilityLabel={`${amount} sats`}
+                                  testID={`suggested-amount-${amount}`}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.suggestedButtonText,
+                                      selected && styles.suggestedButtonTextActive,
+                                    ]}
+                                  >
+                                    {amount.toLocaleString()}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                        ) : null}
                         {lnurlParams ? (
                           <Text style={styles.rangeText}>
                             {lnurlParams.minSats.toLocaleString()} –{' '}

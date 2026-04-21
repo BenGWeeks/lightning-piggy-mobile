@@ -193,6 +193,34 @@ export const sendSheetStyles = StyleSheet.create({
     fontSize: 12,
     color: colors.textSupplementary,
   },
+  suggestedRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  suggestedButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: colors.divider,
+    borderWidth: 1,
+    borderColor: colors.divider,
+  },
+  suggestedButtonActive: {
+    backgroundColor: colors.brandPink,
+    borderColor: colors.brandPink,
+  },
+  suggestedButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textBody,
+  },
+  suggestedButtonTextActive: {
+    color: colors.white,
+  },
   amountDisplay: {
     alignItems: 'center',
     gap: 4,
