@@ -58,7 +58,9 @@ echo -n "$MAESTRO_NWC1" | xclip -selection clipboard  # X11
 maestro test tests/e2e/test-add-wallet-via-paste.yaml
 ----
 
-The Maestro flow then taps the Paste button (`id: 'wizard-nwc-paste'`) instead of using `inputText`, and state updates cleanly through the normal React setter path. See `AddWalletWizard.tsx` for the canonical implementation and `tests/e2e/test-add-wallet-via-paste.yaml` for the flow.
+The Maestro flow then taps the Paste button (`id: 'wizard-nwc-paste'`) instead of using `inputText`, and state updates cleanly through the normal React setter path. See `AddWalletWizard.tsx` for the canonical implementation and `tests/e2e/test-add-wallet-via-paste.yaml` for the flow. +
+
+*Why `pasteText` (Maestro's built-in) doesn't help:* Maestro's `pasteText` / `copyTextFrom` use an **internal shim clipboard** (not Android's `ClipboardManager`) and still synthesize key events under the hood — so they hit the exact same wrapper-targeting failure. Seeding the real device clipboard and tapping an in-app Paste button bypasses both the shim and the keystroke path. Confirmed via the Maestro docs (https://docs.maestro.dev/api-reference/commands/pastetext) and feature-request https://github.com/mobile-dev-inc/Maestro/issues/2029. Deep-link seeding (`app://.../path?value=...`) is the only other approach that bypasses text entry entirely — viable if a Paste button isn't desired in the UI.
 
 | Maestro carousel swipes trigger notification shade or leave the app
 | Horizontal swipes at the top of the screen (y < 25%) can pull down the notification shade or swipe away the app. Use `y: 30%` or higher for carousel swipes. The wallet carousel sits at roughly 15-25% from the top, so swipe at `start: 85%, 30%` / `end: 15%, 30%` to target it safely.
