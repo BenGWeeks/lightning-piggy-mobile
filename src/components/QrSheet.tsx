@@ -8,7 +8,7 @@ import {
 } from '@gorhom/bottom-sheet';
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
-import CopyIcon from './icons/CopyIcon';
+import { Copy } from 'lucide-react-native';
 import { colors } from '../styles/theme';
 
 interface Props {
@@ -115,7 +115,7 @@ const QrSheet: React.FC<Props> = ({
           <Text style={styles.valueText} numberOfLines={1}>
             {displayValue}
           </Text>
-          <CopyIcon size={22} color={colors.brandPink} />
+          <Copy size={22} color={colors.brandPink} />
         </TouchableOpacity>
       </BottomSheetView>
     </BottomSheetModal>

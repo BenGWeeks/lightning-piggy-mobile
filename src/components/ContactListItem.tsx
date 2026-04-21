@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 import Svg, { Path, Circle } from 'react-native-svg';
-import ZapIcon from './icons/ZapIcon';
+import { Zap } from 'lucide-react-native';
 import { colors } from '../styles/theme';
 
 interface Props {
@@ -71,7 +71,7 @@ const ContactListItem: React.FC<Props> = ({ name, picture, lightningAddress, onP
       </View>
       {lightningAddress && onZap && (
         <TouchableOpacity style={styles.zapButton} onPress={onZap} activeOpacity={0.6}>
-          <ZapIcon size={22} color={colors.brandPink} />
+          <Zap size={22} color={colors.brandPink} fill={colors.brandPink} />
         </TouchableOpacity>
       )}
     </TouchableOpacity>

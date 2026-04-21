@@ -3,6 +3,7 @@ import {
   View,
   Text,
   TouchableOpacity,
+  Pressable,
   Share,
   TextInput,
   ActivityIndicator,
@@ -16,16 +17,20 @@ import {
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
-import { ChevronUp, ChevronDown, Check } from 'lucide-react-native';
+import { ChevronUp, ChevronDown, Check, Copy, Share2, Send } from 'lucide-react-native';
 import QRCode from 'react-native-qrcode-svg';
-import CopyIcon from './icons/CopyIcon';
-import ShareIcon from './icons/ShareIcon';
 import * as Clipboard from 'expo-clipboard';
+import Toast from 'react-native-toast-message';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useWallet } from '../contexts/WalletContext';
+import { useNostr } from '../contexts/NostrContext';
 import { walletLabel } from '../types/wallet';
 import { colors } from '../styles/theme';
 import { receiveSheetStyles as styles } from '../styles/ReceiveSheet.styles';
 import { satsToFiatString, satsToFiat } from '../services/fiatService';
+import FriendPickerSheet, { PickedFriend } from './FriendPickerSheet';
+import type { RootStackParamList } from '../navigation/types';
 // On-chain address fetching is done via WalletContext.getReceiveAddress
 
 interface Props {
@@ -58,10 +63,14 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [fiatValue, setFiatValue] = useState('');
   const [inputUnit, setInputUnit] = useState<InputUnit>('sats');
   const [onchainAddress, setOnchainAddress] = useState<string | null>(null);
+  const [friendPickerOpen, setFriendPickerOpen] = useState(false);
+  const [sendingToFriend, setSendingToFriend] = useState(false);
   const intervalId = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevBalance = useRef<number | null>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
+  const { sendDirectMessage, contacts } = useNostr();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   const snapPoints = useMemo(() => ['85%'], []);
 
@@ -263,6 +272,71 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
     }
   };
 
+  // What we'd DM to a friend in the current state. In Address mode that's
+  // the user's static lightning address (friend can pay it any time). In
+  // Amount mode it's the just-generated bolt11 invoice (friend can pay it
+  // once, for that exact amount). Empty during Amount-tab amount entry
+  // before the debounced invoice has come back — the Copy / Share /
+  // Friend buttons all disable in that window.
+  const friendShareValue =
+    !isOnchainWallet && mode === 'address' ? lightningAddress || '' : invoice || '';
+
+  const handleSendToFriend = useCallback(() => {
+    if (!friendShareValue) return;
+    setFriendPickerOpen(true);
+  }, [friendShareValue]);
+
+  const handleFriendPicked = useCallback(
+    async (friend: PickedFriend) => {
+      if (!friendShareValue || sendingToFriend) return;
+      const sharedAddress = mode === 'address';
+      setSendingToFriend(true);
+      setFriendPickerOpen(false);
+      try {
+        // Bolt11 invoices are self-identifying by their `lnbc…` prefix — no
+        // URI scheme needed, and sending bare `lnbc…` matches what Damus
+        // (and other Nostr clients that use nostrdb's block parser) expect
+        // for cross-client interop. Lightning addresses look like plain
+        // emails (`alice@example.com`), so we have to prefix them with
+        // `lightning:` so the receiver can safely render a Pay button
+        // without mis-classifying a regular email.
+        const payload = mode === 'address' ? `lightning:${friendShareValue}` : friendShareValue;
+        const result = await sendDirectMessage(friend.pubkey, payload);
+        if (!result.success) {
+          Toast.show({
+            type: 'error',
+            text1: 'Send failed',
+            text2: result.error ?? 'Could not send to friend.',
+            position: 'top',
+            visibilityTime: 4000,
+          });
+          return;
+        }
+        Toast.show({
+          type: 'success',
+          text1: sharedAddress
+            ? `Lightning address sent to ${friend.name}`
+            : `Invoice sent to ${friend.name}`,
+          position: 'top',
+          visibilityTime: 2500,
+        });
+        // Close this sheet and drop the user into the conversation so they
+        // can see the message land and the friend's "Pay" response.
+        onClose();
+        const contact = contacts.find((c) => c.pubkey === friend.pubkey);
+        navigation.navigate('Conversation', {
+          pubkey: friend.pubkey,
+          name: friend.name,
+          picture: friend.picture,
+          lightningAddress: contact?.profile?.lud16 ?? friend.lightningAddress,
+        });
+      } finally {
+        setSendingToFriend(false);
+      }
+    },
+    [friendShareValue, mode, sendingToFriend, sendDirectMessage, contacts, navigation, onClose],
+  );
+
   const handleSheetChange = useCallback(
     (index: number) => {
       if (index === -1) onClose();
@@ -280,17 +354,26 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   if (!visible) return null;
 
   return (
-    <BottomSheetModal
-      ref={bottomSheetRef}
-      snapPoints={snapPoints}
-      onChange={handleSheetChange}
-      enablePanDownToClose
-      backdropComponent={renderBackdrop}
-      handleIndicatorStyle={styles.handleIndicator}
-      backgroundStyle={styles.sheetBackground}
-    >
-      <BottomSheetView style={styles.content}>
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+    <>
+      <BottomSheetModal
+        ref={bottomSheetRef}
+        snapPoints={snapPoints}
+        onChange={handleSheetChange}
+        enablePanDownToClose
+        backdropComponent={renderBackdrop}
+        handleIndicatorStyle={styles.handleIndicator}
+        backgroundStyle={styles.sheetBackground}
+      >
+        <BottomSheetView style={styles.content}>
+          {/* No TouchableWithoutFeedback-with-Keyboard.dismiss wrapper here
+           *  per TROUBLESHOOTING.adoc rule (6): it interferes with the
+           *  sheet's keyboard handling AND, under the New Architecture,
+           *  swallows UiAutomator/Maestro accessibility clicks that should
+           *  reach the inner Pressable/TouchableOpacity testIDs (caused
+           *  issue #106 — Maestro tap on `receive-send-to-friend` reported
+           *  COMPLETED but never dispatched onPress). The keyboard can be
+           *  dismissed naturally by tapping any of the buttons or the
+           *  hardware back key. */}
           <View style={styles.innerContent}>
             <Text style={styles.title}>Receive</Text>
 
@@ -350,6 +433,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
                 <TouchableOpacity
                   style={[styles.tab, mode === 'address' && styles.tabActive]}
                   onPress={() => setMode('address')}
+                  testID="receive-tab-address"
                 >
                   <Text style={[styles.tabText, mode === 'address' && styles.tabTextActive]}>
                     Address
@@ -358,6 +442,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
                 <TouchableOpacity
                   style={[styles.tab, mode === 'amount' && styles.tabActive]}
                   onPress={() => setMode('amount')}
+                  testID="receive-tab-amount"
                 >
                   <Text style={[styles.tabText, mode === 'amount' && styles.tabTextActive]}>
                     Amount
@@ -376,7 +461,13 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
                     onChangeText={inputUnit === 'sats' ? handleSatsChange : handleFiatChange}
                     keyboardType={inputUnit === 'sats' ? 'numeric' : 'decimal-pad'}
                     placeholder={inputUnit === 'sats' ? '0' : '0.00'}
+                    // Select any existing amount on focus so the next
+                    // keypress (or Maestro `inputText`) replaces it cleanly
+                    // rather than appending. Avoids the "0" + "21" = "021"
+                    // /  "211" confusion when tapping an already-typed-in
+                    // field.
                     selectTextOnFocus
+                    testID="receive-amount-input"
                   />
                   <TouchableOpacity
                     style={[styles.unitButton, inputUnit === 'sats' && styles.unitButtonActive]}
@@ -485,19 +576,53 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
             ) : null}
 
             <View style={styles.buttonRow}>
-              <TouchableOpacity style={styles.actionButton} onPress={handleCopy}>
-                <CopyIcon color={colors.brandPink} />
+              <TouchableOpacity
+                style={[styles.actionButton, !copyValue && styles.actionButtonDisabled]}
+                onPress={handleCopy}
+                disabled={!copyValue}
+              >
+                <Copy size={20} color={colors.brandPink} />
                 <Text style={styles.actionButtonText}>Copy</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
+              <TouchableOpacity
+                style={[styles.actionButton, !copyValue && styles.actionButtonDisabled]}
+                onPress={handleShare}
+                disabled={!copyValue}
+              >
                 <Text style={styles.actionButtonText}>Share</Text>
-                <ShareIcon color={colors.brandPink} />
+                <Share2 size={20} color={colors.brandPink} />
               </TouchableOpacity>
+              {!isOnchainWallet ? (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.actionButton,
+                    !friendShareValue && styles.actionButtonDisabled,
+                    pressed && { opacity: 0.7 },
+                  ]}
+                  onPress={() => {
+                    if (__DEV__) console.log('[ReceiveSheet] Friend Pressable FIRED');
+                    handleSendToFriend();
+                  }}
+                  disabled={!friendShareValue}
+                  accessibilityLabel="Send to a friend"
+                  testID="receive-send-to-friend"
+                >
+                  <Text style={styles.actionButtonText}>Friend</Text>
+                  <Send size={20} color={colors.brandPink} />
+                </Pressable>
+              ) : null}
             </View>
           </View>
-        </TouchableWithoutFeedback>
-      </BottomSheetView>
-    </BottomSheetModal>
+        </BottomSheetView>
+      </BottomSheetModal>
+      <FriendPickerSheet
+        visible={friendPickerOpen}
+        onClose={() => setFriendPickerOpen(false)}
+        onSelect={handleFriendPicked}
+        title="Send invoice to a friend"
+        subtitle="They'll get an encrypted Nostr DM with a Pay button."
+      />
+    </>
   );
 };
 

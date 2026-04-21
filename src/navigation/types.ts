@@ -19,6 +19,12 @@ export type RootStackParamList = {
   Onboarding: undefined;
   Setup: undefined;
   MainTabs: NavigatorScreenParams<MainTabParamList>;
+  Conversation: {
+    pubkey: string;
+    name: string;
+    picture?: string | null;
+    lightningAddress?: string | null;
+  };
 };
 
 // Learn sub-stack
