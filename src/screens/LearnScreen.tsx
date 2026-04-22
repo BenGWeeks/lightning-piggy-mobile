@@ -9,7 +9,8 @@ import {
   getCourseCompletedCount,
   isCourseComplete,
 } from '../services/learnProgressService';
-import { Check } from 'lucide-react-native';
+import { Check, GraduationCap } from 'lucide-react-native';
+import { colors } from '../styles/theme';
 import { styles } from '../styles/LearnScreen.styles';
 
 import { LearnNavigation } from '../navigation/types';
@@ -37,16 +38,7 @@ const LearnScreen: React.FC<Props> = ({ navigation }) => {
           resizeMode="cover"
         />
         <View style={styles.headerOverlay} />
-        <TabHeader
-          title="Learn"
-          icon={
-            <Image
-              source={require('../../assets/images/Learn.png')}
-              style={styles.badgeIcon}
-              resizeMode="contain"
-            />
-          }
-        />
+        <TabHeader title="Learn" icon={<GraduationCap size={20} color={colors.brandPink} />} />
       </View>
 
       {/* Course grid */}

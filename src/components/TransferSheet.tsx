@@ -75,7 +75,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   // skips component-state setters if it has changed — otherwise a late callback
   // from a previous transfer can leak error/progress state into a new one.
   const sessionRef = useRef(0);
-  const snapPoints = useMemo(() => ['85%'], []);
+  // No explicit snapPoints — content-height only, not user-draggable.
 
   const currentSats = parseInt(satsValue) || 0;
 
@@ -687,7 +687,6 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   return (
     <BottomSheetModal
       ref={bottomSheetRef}
-      snapPoints={snapPoints}
       onChange={handleSheetChange}
       enablePanDownToClose
       backdropComponent={renderBackdrop}
