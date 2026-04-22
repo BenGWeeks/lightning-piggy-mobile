@@ -18,7 +18,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { Zap, Send, Plus, MapPin } from 'lucide-react-native';
+import { Zap, Send, Plus, MapPin, ArrowDown } from 'lucide-react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import * as ImagePicker from 'expo-image-picker';
@@ -381,6 +381,11 @@ const ConversationScreen: React.FC = () => {
   // `onScroll` so a new message doesn't yank them back from an upward
   // scroll they did deliberately.
   const nearBottomRef = useRef(true);
+  // `atBottom` drives the floating scroll-to-bottom button's visibility.
+  // nearBottomRef alone is a ref so the FlatList onScroll handler can
+  // update it without re-rendering; the mirror state re-renders on
+  // actual transitions so the FAB fades in/out.
+  const [atBottom, setAtBottom] = useState(true);
   const initialScrollDoneRef = useRef(false);
   useEffect(() => {
     if (items.length === 0) {
@@ -837,14 +842,9 @@ const ConversationScreen: React.FC = () => {
                   item.fromMe ? styles.invoiceCardMe : styles.invoiceCardThem,
                 ]}
               >
-                <View style={styles.invoiceHeaderRow}>
-                  <Text style={[styles.invoiceLabel, item.fromMe && styles.invoiceLabelMe]}>
-                    {item.fromMe ? 'Invoice sent' : 'Invoice received'}
-                  </Text>
-                  <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
-                    {formatTime(item.createdAt)}
-                  </Text>
-                </View>
+                <Text style={[styles.invoiceLabel, item.fromMe && styles.invoiceLabelMe]}>
+                  {item.fromMe ? 'Invoice sent' : 'Invoice received'}
+                </Text>
                 <Text style={[styles.invoiceAmount, item.fromMe && styles.invoiceAmountMe]}>
                   {invoice.amountSats !== null
                     ? `${invoice.amountSats.toLocaleString()} sats`
@@ -892,6 +892,9 @@ const ConversationScreen: React.FC = () => {
                     <Text style={styles.invoicePayText}>Pay</Text>
                   </TouchableOpacity>
                 )}
+                <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
+                  {formatTime(item.createdAt)}
+                </Text>
               </View>
             </View>
           );
@@ -916,14 +919,9 @@ const ConversationScreen: React.FC = () => {
                 accessibilityLabel={`Shared contact ${displayName}`}
                 testID={`conversation-contact-${item.id}`}
               >
-                <View style={styles.contactHeaderRow}>
-                  <Text style={[styles.contactLabel, item.fromMe && styles.contactLabelMe]}>
-                    {item.fromMe ? 'Contact shared' : 'Contact'}
-                  </Text>
-                  <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
-                    {formatTime(item.createdAt)}
-                  </Text>
-                </View>
+                <Text style={[styles.contactLabel, item.fromMe && styles.contactLabelMe]}>
+                  {item.fromMe ? 'Contact shared' : 'Contact'}
+                </Text>
                 <View style={styles.contactBodyRow}>
                   {prof?.picture ? (
                     <Image source={{ uri: prof.picture }} style={styles.contactAvatar} />
@@ -964,6 +962,9 @@ const ConversationScreen: React.FC = () => {
                     ) : null}
                   </View>
                 </View>
+                <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
+                  {formatTime(item.createdAt)}
+                </Text>
               </TouchableOpacity>
             </View>
           );
@@ -980,14 +981,9 @@ const ConversationScreen: React.FC = () => {
                   item.fromMe ? styles.invoiceCardMe : styles.invoiceCardThem,
                 ]}
               >
-                <View style={styles.invoiceHeaderRow}>
-                  <Text style={[styles.invoiceLabel, item.fromMe && styles.invoiceLabelMe]}>
-                    {item.fromMe ? 'Address sent' : 'Lightning address'}
-                  </Text>
-                  <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
-                    {formatTime(item.createdAt)}
-                  </Text>
-                </View>
+                <Text style={[styles.invoiceLabel, item.fromMe && styles.invoiceLabelMe]}>
+                  {item.fromMe ? 'Address sent' : 'Lightning address'}
+                </Text>
                 <Text
                   style={[styles.invoiceMemo, item.fromMe && styles.invoiceMemoMe]}
                   numberOfLines={1}
@@ -1008,6 +1004,9 @@ const ConversationScreen: React.FC = () => {
                     <Text style={styles.invoicePayText}>Pay</Text>
                   </TouchableOpacity>
                 )}
+                <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
+                  {formatTime(item.createdAt)}
+                </Text>
               </View>
             </View>
           );
@@ -1083,18 +1082,13 @@ const ConversationScreen: React.FC = () => {
                 accessibilityIgnoresInvertColors
               />
               <View style={styles.locationBody}>
-                <View style={styles.locationHeaderRow}>
-                  <View style={styles.locationLabelRow}>
-                    <MapPin
-                      size={14}
-                      color={item.fromMe ? 'rgba(255,255,255,0.85)' : colors.textSupplementary}
-                    />
-                    <Text style={[styles.locationLabel, item.fromMe && styles.locationLabelMe]}>
-                      {item.fromMe ? 'Location sent' : 'Location'}
-                    </Text>
-                  </View>
-                  <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
-                    {formatTime(item.createdAt)}
+                <View style={styles.locationLabelRow}>
+                  <MapPin
+                    size={14}
+                    color={item.fromMe ? 'rgba(255,255,255,0.85)' : colors.textSupplementary}
+                  />
+                  <Text style={[styles.locationLabel, item.fromMe && styles.locationLabelMe]}>
+                    {item.fromMe ? 'Location sent' : 'Location'}
                   </Text>
                 </View>
                 <Text style={[styles.locationCoords, item.fromMe && styles.locationCoordsMe]}>
@@ -1109,6 +1103,9 @@ const ConversationScreen: React.FC = () => {
                     OpenStreetMap
                   </Text>
                 )}
+                <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
+                  {formatTime(item.createdAt)}
+                </Text>
               </View>
             </TouchableOpacity>
           </View>
@@ -1136,14 +1133,9 @@ const ConversationScreen: React.FC = () => {
               />
             </View>
             <View style={styles.zapCardBody}>
-              <View style={styles.zapCardHeaderRow}>
-                <Text style={[styles.zapCardLabel, item.fromMe && styles.zapCardLabelMe]}>
-                  {item.fromMe ? 'Zap sent' : 'Zap received'}
-                </Text>
-                <Text style={[styles.zapCardTime, item.fromMe && styles.zapCardTimeMe]}>
-                  {formatTime(item.createdAt)}
-                </Text>
-              </View>
+              <Text style={[styles.zapCardLabel, item.fromMe && styles.zapCardLabelMe]}>
+                {item.fromMe ? 'Zap sent' : 'Zap received'}
+              </Text>
               <Text style={[styles.zapCardAmount, item.fromMe && styles.zapCardAmountMe]}>
                 {item.amountSats.toLocaleString()} sats
               </Text>
@@ -1152,6 +1144,9 @@ const ConversationScreen: React.FC = () => {
                   {item.comment}
                 </Text>
               ) : null}
+              <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
+                {formatTime(item.createdAt)}
+              </Text>
             </View>
           </TouchableOpacity>
         </View>
@@ -1238,11 +1233,27 @@ const ConversationScreen: React.FC = () => {
               // "Near bottom" in an inverted list = scroll offset ~0.
               // 80 px gives enough slack that a brief finger rest still
               // qualifies as "at bottom" for the auto-scroll effect.
-              nearBottomRef.current = e.nativeEvent.contentOffset.y < 80;
+              const isNear = e.nativeEvent.contentOffset.y < 80;
+              nearBottomRef.current = isNear;
+              // Mirror to state only when the boolean actually flips —
+              // this keeps onScroll cheap while still triggering a
+              // re-render for the FAB's appearance.
+              setAtBottom((prev) => (prev !== isNear ? isNear : prev));
             }}
             scrollEventThrottle={100}
           />
         )}
+
+        {!atBottom && !loading ? (
+          <TouchableOpacity
+            style={styles.scrollToBottomFab}
+            onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
+            accessibilityLabel="Scroll to most recent message"
+            testID="conversation-scroll-to-bottom"
+          >
+            <ArrowDown size={20} color={colors.white} />
+          </TouchableOpacity>
+        ) : null}
 
         <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 8) }]}>
           <TouchableOpacity
@@ -1505,6 +1516,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     gap: 12,
   },
+  scrollToBottomFab: {
+    position: 'absolute',
+    right: 16,
+    // Sits just above the composer. The composer is ~60 px tall and
+    // floats at the bottom; 76 lifts the FAB clear of it without
+    // overlapping the last message bubble.
+    bottom: 76,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.brandPink,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
   dayHeaderRule: {
     flex: 1,
     height: StyleSheet.hairlineWidth,
@@ -1559,7 +1589,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     maxWidth: '85%',
     minWidth: 240,
-    paddingVertical: 12,
+    paddingTop: 12,
+    paddingBottom: 4,
     paddingHorizontal: 14,
     borderRadius: 14,
     borderWidth: 1,
@@ -1637,7 +1668,8 @@ const styles = StyleSheet.create({
   invoiceCard: {
     maxWidth: '85%',
     minWidth: 240,
-    paddingVertical: 12,
+    paddingTop: 12,
+    paddingBottom: 4,
     paddingHorizontal: 14,
     borderRadius: 14,
     borderWidth: 1,
@@ -1763,7 +1795,8 @@ const styles = StyleSheet.create({
   contactCard: {
     maxWidth: '85%',
     minWidth: 240,
-    paddingVertical: 12,
+    paddingTop: 12,
+    paddingBottom: 4,
     paddingHorizontal: 14,
     borderRadius: 14,
     borderWidth: 1,
@@ -1950,7 +1983,8 @@ const styles = StyleSheet.create({
   },
   locationBody: {
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingTop: 10,
+    paddingBottom: 4,
     gap: 2,
   },
   locationHeaderRow: {
