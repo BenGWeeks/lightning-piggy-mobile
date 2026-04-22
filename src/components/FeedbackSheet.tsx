@@ -8,12 +8,13 @@ import {
   Alert,
   ActivityIndicator,
   Platform,
+  Keyboard,
 } from 'react-native';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
-  BottomSheetView,
+  BottomSheetScrollView,
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
 import { colors } from '../styles/theme';
@@ -50,6 +51,23 @@ const FeedbackSheet: React.FC<Props> = ({
 }) => {
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['55%'], []);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  // Canonical keyboard-height tracking — mirrors SendSheet / NostrLoginSheet
+  // / EditProfileSheet. Rule 5 of the "Bottom sheet doesn't slide up when
+  // keyboard opens" checklist in docs/TROUBLESHOOTING.adoc.
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
   const [message, setMessage] = useState(initialMessage);
   const [sending, setSending] = useState(false);
   // Reset `message` only on hidden→visible transitions so async
@@ -129,8 +147,17 @@ const FeedbackSheet: React.FC<Props> = ({
       backdropComponent={renderBackdrop}
       handleIndicatorStyle={styles.handleIndicator}
       backgroundStyle={styles.sheetBackground}
+      keyboardBehavior="interactive"
+      keyboardBlurBehavior="restore"
+      android_keyboardInputMode="adjustResize"
     >
-      <BottomSheetView style={styles.content}>
+      <BottomSheetScrollView
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
+        ]}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={styles.title}>{title}</Text>
         <Text style={styles.subtitle}>{subtitle}</Text>
 
@@ -185,7 +212,7 @@ const FeedbackSheet: React.FC<Props> = ({
             </View>
           </>
         )}
-      </BottomSheetView>
+      </BottomSheetScrollView>
     </BottomSheetModal>
   );
 };

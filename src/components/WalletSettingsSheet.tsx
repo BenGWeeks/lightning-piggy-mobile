@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Platform } from 'react-native';
-import { BottomSheetModal, BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, Platform, Keyboard } from 'react-native';
+import {
+  BottomSheetModal,
+  BottomSheetBackdrop,
+  BottomSheetScrollView,
+  BottomSheetTextInput,
+} from '@gorhom/bottom-sheet';
 import * as Clipboard from 'expo-clipboard';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
@@ -19,6 +24,22 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const wallet = wallets.find((w) => w.id === walletId);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['85%'], []);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  // Canonical keyboard-height tracking — mirrors SendSheet / NostrLoginSheet.
+  // Rule 5 of docs/TROUBLESHOOTING.adoc "Bottom sheet doesn't slide up…".
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   const [alias, setAlias] = useState('');
   const [lnAddress, setLnAddress] = useState('');
@@ -118,12 +139,21 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}
       handleIndicatorStyle={styles.handle}
+      keyboardBehavior="interactive"
+      keyboardBlurBehavior="restore"
+      android_keyboardInputMode="adjustResize"
     >
-      <BottomSheetScrollView contentContainerStyle={styles.content}>
+      <BottomSheetScrollView
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
+        ]}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={styles.title}>Wallet Settings</Text>
 
         <Text style={styles.label}>Alias</Text>
-        <TextInput
+        <BottomSheetTextInput
           style={styles.input}
           value={alias}
           onChangeText={setAlias}
@@ -136,7 +166,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         {wallet.walletType === 'nwc' && (
           <>
             <Text style={[styles.label, { marginTop: 20 }]}>Lightning Address</Text>
-            <TextInput
+            <BottomSheetTextInput
               style={styles.input}
               value={lnAddress}
               onChangeText={setLnAddress}
