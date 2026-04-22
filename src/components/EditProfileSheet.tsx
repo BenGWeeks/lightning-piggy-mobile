@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -42,7 +42,7 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const sheetRef = useRef<BottomSheetModal>(null);
   const scrollRef = useRef<any>(null);
-  const snapPoints = useMemo(() => ['85%'], []);
+  // No explicit snapPoints — content-height only, not user-draggable.
 
   useEffect(() => {
     if (visible) {
@@ -134,7 +134,6 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
   return (
     <BottomSheetModal
       ref={sheetRef}
-      snapPoints={snapPoints}
       onDismiss={onClose}
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}

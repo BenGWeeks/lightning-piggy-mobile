@@ -60,7 +60,7 @@ const FriendPickerSheet: React.FC<Props> = ({
   // generic constraints; any-ref keeps the call site clean.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const listRef = useRef<any>(null);
-  const snapPoints = useMemo(() => ['75%'], []);
+  const snapPoints = useMemo(() => ['75%', '90%'], []);
   // Keep the drag handle clear of Android's notification-shade trigger
   // zone (<48 DP from the top) while still letting the sheet grow past
   // the 75% snap when `keyboardBehavior="interactive"` lifts it up to
