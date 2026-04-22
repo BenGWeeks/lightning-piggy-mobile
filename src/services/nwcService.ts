@@ -454,6 +454,33 @@ export async function listTransactions(walletId: string): Promise<any[]> {
   return [];
 }
 
+// A BOLT-11 payment hash is a SHA-256 digest — 64 hex chars.
+const PAYMENT_HASH_RE = /^[0-9a-fA-F]{64}$/;
+
+export function isValidPaymentHash(hash: string | null | undefined): hash is string {
+  return typeof hash === 'string' && PAYMENT_HASH_RE.test(hash);
+}
+
+// Per-session cache of payment hashes the NWC backend has already refused
+// to look up (or which were malformed). Some backends return transactions
+// whose `payment_hash` is null / truncated / otherwise rejected by the
+// NIP-47 `lookup_invoice` call — retrying those every refresh floods the
+// Metro log and burns NWC request budget (#98).
+const failedLookupCache = new Map<string, Set<string>>();
+
+function hasFailedLookup(walletId: string, paymentHash: string): boolean {
+  return failedLookupCache.get(walletId)?.has(paymentHash) ?? false;
+}
+
+function recordFailedLookup(walletId: string, paymentHash: string): void {
+  let set = failedLookupCache.get(walletId);
+  if (!set) {
+    set = new Set();
+    failedLookupCache.set(walletId, set);
+  }
+  set.add(paymentHash);
+}
+
 // LNbits (and some other NWC backends) omit preimage/invoice from
 // list_transactions; this fills them in. Returns null on failure.
 // `paid` relies on `settled_at` (a non-zero timestamp when the invoice
@@ -463,6 +490,8 @@ export async function lookupInvoice(
   walletId: string,
   paymentHash: string,
 ): Promise<{ preimage?: string; invoice?: string; paid: boolean } | null> {
+  if (!isValidPaymentHash(paymentHash)) return null;
+  if (hasFailedLookup(walletId, paymentHash)) return null;
   const provider = await ensureConnected(walletId);
   if (!provider) return null;
   try {
@@ -478,7 +507,8 @@ export async function lookupInvoice(
       paid,
     };
   } catch (error) {
-    console.warn(`lookupInvoice failed for ${walletId}:`, error);
+    recordFailedLookup(walletId, paymentHash);
+    console.warn(`lookupInvoice failed for ${walletId} (${paymentHash.slice(0, 12)}…):`, error);
     return null;
   }
 }
