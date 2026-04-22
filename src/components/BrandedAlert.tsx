@@ -29,7 +29,13 @@ interface AlertPayload {
 
 type Listener = (payload: AlertPayload) => void;
 
+const noop = () => {};
+
 let listener: Listener | null = null;
+// Monotonically-increasing id used as the Modal's React `key`, so a
+// second alert raised while the first is still visible remounts the
+// Modal and re-runs its fade-in animation (rather than silently swapping
+// the content underneath an already-presented dialog).
 let nextId = 1;
 
 function inferKind(title: string, buttons: BrandedAlertButton[]): BrandedAlertKind {
@@ -122,16 +128,18 @@ export function BrandedAlertHost(): React.ReactElement | null {
 
   return (
     <Modal
+      key={payload.id}
       visible
       transparent
       statusBarTranslucent
       animationType="fade"
-      onRequestClose={cancelable ? handleDismiss : close}
+      onRequestClose={cancelable ? handleDismiss : noop}
     >
       <Pressable
         style={styles.root}
         onPress={cancelable ? handleDismiss : undefined}
-        accessibilityLabel="Dismiss alert"
+        accessible={cancelable}
+        accessibilityLabel={cancelable ? 'Dismiss alert' : undefined}
       >
         <View
           onStartShouldSetResponder={() => true}
