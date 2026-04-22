@@ -45,7 +45,15 @@ interface AnonContact {
 const MessagesScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<MessagesNavigation>();
-  const { isLoggedIn, profile, contacts, refreshContacts, dmInbox, refreshDmInbox } = useNostr();
+  const {
+    isLoggedIn,
+    profile,
+    contacts,
+    refreshContacts,
+    refreshProfile,
+    dmInbox,
+    refreshDmInbox,
+  } = useNostr();
   const { wallets } = useWallet();
   const [search, setSearch] = useState('');
   const [searchExpanded, setSearchExpanded] = useState(false);
@@ -107,9 +115,9 @@ const MessagesScreen: React.FC = () => {
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([refreshContacts(), refreshDmInbox()]);
+    await Promise.all([refreshContacts(), refreshDmInbox(), refreshProfile()]);
     setRefreshing(false);
-  }, [refreshContacts, refreshDmInbox]);
+  }, [refreshContacts, refreshDmInbox, refreshProfile]);
 
   const handleConversationPress = useCallback(
     (summary: ConversationSummary) => {

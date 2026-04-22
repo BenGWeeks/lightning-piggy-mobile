@@ -154,28 +154,34 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
   }, [relays]);
 
-  const loadProfile = useCallback(async (pk: string, relayUrls: string[]) => {
-    const t0 = Date.now();
-    // Cache-fresh fast path: hydrate UI from cache and skip the relay RTT.
-    const { value: cached, ageMs } = await readCachedWithTtl<NostrProfile>(
-      OWN_PROFILE_CACHE_KEY,
-      OWN_PROFILE_TIMESTAMP_KEY,
-    );
-    if (cached && ageMs < CACHE_MAX_AGE_MS) {
-      setProfile(cached);
-      if (__DEV__) console.log(`[Nostr] fetchProfile: skipped (cache fresh)`);
-      return;
-    }
-    const fetchedProfile = await nostrService.fetchProfile(pk, relayUrls);
-    if (__DEV__) console.log(`[Nostr] fetchProfile: ${Date.now() - t0}ms`);
-    if (fetchedProfile) {
-      setProfile(fetchedProfile);
-      InteractionManager.runAfterInteractions(() => {
-        AsyncStorage.setItem(OWN_PROFILE_CACHE_KEY, JSON.stringify(fetchedProfile)).catch(() => {});
-        AsyncStorage.setItem(OWN_PROFILE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
-      });
-    }
-  }, []);
+  const loadProfile = useCallback(
+    async (pk: string, relayUrls: string[], opts?: { force?: boolean }) => {
+      const t0 = Date.now();
+      // Cache-fresh fast path: hydrate UI from cache and skip the relay RTT.
+      // `force` bypasses it for user-initiated refreshes.
+      const { value: cached, ageMs } = await readCachedWithTtl<NostrProfile>(
+        OWN_PROFILE_CACHE_KEY,
+        OWN_PROFILE_TIMESTAMP_KEY,
+      );
+      if (!opts?.force && cached && ageMs < CACHE_MAX_AGE_MS) {
+        setProfile(cached);
+        if (__DEV__) console.log(`[Nostr] fetchProfile: skipped (cache fresh)`);
+        return;
+      }
+      const fetchedProfile = await nostrService.fetchProfile(pk, relayUrls);
+      if (__DEV__) console.log(`[Nostr] fetchProfile: ${Date.now() - t0}ms`);
+      if (fetchedProfile) {
+        setProfile(fetchedProfile);
+        InteractionManager.runAfterInteractions(() => {
+          AsyncStorage.setItem(OWN_PROFILE_CACHE_KEY, JSON.stringify(fetchedProfile)).catch(
+            () => {},
+          );
+          AsyncStorage.setItem(OWN_PROFILE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+        });
+      }
+    },
+    [],
+  );
 
   const loadContactsFromCache = useCallback(async () => {
     try {
@@ -558,7 +564,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const refreshProfile = useCallback(async () => {
     if (!pubkey) return;
     const readRelays = getReadRelays();
-    await loadProfile(pubkey, readRelays);
+    // User-initiated — bypass the 24h cache so remote renames are
+    // picked up on the next pull.
+    await loadProfile(pubkey, readRelays, { force: true });
   }, [pubkey, getReadRelays, loadProfile]);
 
   const refreshContacts = useCallback(async () => {

@@ -1,0 +1,56 @@
+appId: com.lightningpiggy.app.dev
+name: Messages Search Filters Inbox by Preview Text
+---
+# Verifies that the Messages inbox search input filters conversation rows
+# by their preview text (not just partner name). Seeded with a known DM
+# containing "Hello, World!" from the test-pipeline (Little Piggy +
+# scripts/send-nip17-from-test-account.mjs or a manual send from the
+# current account's thread view).
+#
+# Preconditions:
+#   - Logged in (nsec or Amber).
+#   - At least one conversation row in the inbox exists whose most recent
+#     message preview contains the word "Hello".
+#
+# Run: maestro test tests/e2e/test-messages-search.yaml
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Land on the Messages tab
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Open the search input
+- tapOn:
+    id: 'messages-search-toggle'
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Type the query. Short string so the BottomSheetTextInput character-drop
+# bug (#146) is unlikely to bite — single word, 5 characters.
+- tapOn:
+    id: 'messages-search-input'
+- inputText: 'Hello'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+# Expect a row whose preview contains "Hello" to remain visible. The
+# preview is prefixed with "You: " on outgoing messages, so the full line
+# on a sent message is "You: Hello, World!" — assert on the substring.
+# The "Little Piggy" row should be among the matches because its
+# preview is "You: Hello, World!" (assumes the sending test ran before
+# this one). Match on the partner name rather than the preview text so
+# we don't need to escape the punctuation that appears inside "Hello,
+# World!".
+- extendedWaitUntil:
+    visible: 'Little Piggy'
+    timeout: 5000
+
+# Close search to leave the screen in a clean state
+- tapOn:
+    id: 'messages-close-search'
+- waitForAnimationToEnd:
+    timeout: 1000
