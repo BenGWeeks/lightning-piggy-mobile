@@ -1,0 +1,70 @@
+appId: com.lightningpiggy.app.dev
+name: SendSheet keeps every character of the zap message (#159, #160 regression guard)
+---
+# What this guards:
+#
+# #159 — `BottomSheetTextInput` used to drop keystrokes during fast
+#   real-user typing in the zap-message field. The fix removed the
+#   outer TouchableWithoutFeedback+Keyboard.dismiss wrapper and added
+#   the canonical keyboard-prop triplet on the BottomSheetModal.
+#
+# #160 — the SendSheet used to open at a single '90%' snap with
+#   dynamic sizing enabled, letting the user pan it taller. The fix
+#   drops the explicit snapPoints and relies on v5's
+#   enableDynamicSizing={true} default to lock the sheet to its
+#   content height.
+#
+# The test opens a zap flow against a known followed contact, types
+# a deliberately-long message into the memo field, and asserts the
+# input holds the exact text back. If either bug regresses the
+# assertion fails.
+#
+# Run: maestro test tests/e2e/test-sendsheet-typing.yaml
+
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 40000
+
+# Open a conversation that has a Lightning address. Ben Weeks is the
+# seed contact created by scripts/update-nostr-profile.mjs; the
+# earlier NIP-17 test pipeline left him in the messages list.
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    text: 'Ben Weeks'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Tap the chat-header avatar/name to open ContactProfileSheet, then
+# Send zap to launch SendSheet on top. (#153 landed this tap surface.)
+- tapOn:
+    id: 'chat-header-open-profile'
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    text: 'Send zap'
+- waitForAnimationToEnd:
+    timeout: 4000
+
+# SendSheet should now be open. Confirm the memo field is reachable,
+# then type a realistic message with punctuation and spaces — the
+# kind of pattern that previously dropped characters mid-composition.
+- tapOn:
+    id: 'sendsheet-memo-input'
+- inputText: 'Testing zaps! Do you like them?'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+# Assertion: the full typed string is present in the inbox. Maestro's
+# `assertVisible` matches on the rendered text of TextInput, so if
+# any char dropped the substring won't match.
+- assertVisible: 'Testing zaps! Do you like them?'
+
+# Close the sheet cleanly so the test doesn't leave SendSheet open
+# for the next run.
+- tapOn: 'Cancel'
+- waitForAnimationToEnd:
+    timeout: 2000

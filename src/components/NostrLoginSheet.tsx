@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -41,7 +41,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [creating, setCreating] = useState(false);
   const sheetRef = useRef<BottomSheetModal>(null);
   const scrollRef = useRef<any>(null);
-  const snapPoints = useMemo(() => ['75%'], []);
+  // No explicit snapPoints — content-height only, not user-draggable.
 
   useEffect(() => {
     if (visible) {
@@ -164,7 +164,6 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
   return (
     <BottomSheetModal
       ref={sheetRef}
-      snapPoints={snapPoints}
       onDismiss={onClose}
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}
