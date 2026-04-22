@@ -15,7 +15,9 @@ import { useNavigation, CompositeNavigationProp } from '@react-navigation/native
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr } from '../contexts/NostrContext';
-import ProfileIcon from '../components/ProfileIcon';
+import FriendsIcon from '../components/icons/FriendsIcon';
+import TabHeader from '../components/TabHeader';
+import { colors } from '../styles/theme';
 import ContactListItem from '../components/ContactListItem';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import AddFriendSheet from '../components/AddFriendSheet';
@@ -266,27 +268,8 @@ const FriendsScreen: React.FC = () => {
         style={styles.bgImage}
         resizeMode="contain"
       />
-      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-        <View style={styles.titleRow}>
-          <TouchableOpacity
-            style={styles.homeButton}
-            onPress={() => navigation.navigate('Home', {})}
-          >
-            <Image
-              source={require('../../assets/images/Home.png')}
-              style={styles.homeIcon}
-              resizeMode="contain"
-            />
-          </TouchableOpacity>
-          <Text style={styles.title}>Friends</Text>
-          <View style={{ flex: 1 }} />
-          <ProfileIcon
-            uri={profile?.picture}
-            size={36}
-            onPress={() => navigation.navigate('Account')}
-          />
-        </View>
-
+      <TabHeader title="Friends" icon={<FriendsIcon size={20} color={colors.brandPink} />} />
+      <View style={styles.headerExtras}>
         {/* Filter chips + search toggle */}
         <View style={styles.chipRow}>
           {searchExpanded ? (

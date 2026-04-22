@@ -6,33 +6,12 @@ export const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.brandPink,
   },
-  header: {
+  /** Extras row below TabHeader (search + chips). The TabHeader owns its
+   * own vertical padding; this just claims the bottom spacing the full
+   * header used to provide so the list content doesn't hug the chip row. */
+  headerExtras: {
     paddingHorizontal: 20,
-    paddingBottom: 40,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 16,
-  },
-  homeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  homeIcon: {
-    width: 20,
-    height: 20,
-    tintColor: colors.brandPink,
-  },
-  title: {
-    color: colors.white,
-    fontSize: 28,
-    fontWeight: '700',
+    paddingBottom: 24,
   },
   chipRow: {
     flexDirection: 'row',
