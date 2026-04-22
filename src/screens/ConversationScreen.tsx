@@ -604,10 +604,37 @@ const ConversationScreen: React.FC = () => {
     }
   }, [sharingLocation, name, pubkey, sendDirectMessage]);
 
-  // Pick an image from the photo library, upload to the user's configured
-  // Blossom server (or nostr.build fallback), then DM the returned URL.
-  // Triggered from the AttachSheet's "Send image" row — keep this handler
-  // in sync with the sheet's disabled state so it can't be invoked twice.
+  // Shared send-image path for both gallery and camera entry points.
+  // Uploads to the user's configured Blossom server (or nostr.build
+  // fallback) then DMs the returned URL to the conversation partner.
+  const uploadAndSendImage = useCallback(
+    async (localUri: string, base64: string | null | undefined) => {
+      setUploadingImage(true);
+      try {
+        const url = await uploadImage(localUri, signEvent, base64);
+        const sendResult = await sendDirectMessage(pubkey, url);
+        if (!sendResult.success) {
+          Alert.alert('Send failed', sendResult.error ?? 'Could not send image.');
+          return;
+        }
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `local-${Date.now()}`,
+            fromMe: true,
+            text: url,
+            createdAt: Math.floor(Date.now() / 1000),
+          },
+        ]);
+      } catch (error) {
+        Alert.alert('Upload failed', error instanceof Error ? error.message : 'Please try again.');
+      } finally {
+        setUploadingImage(false);
+      }
+    },
+    [signEvent, sendDirectMessage, pubkey],
+  );
+
   const handlePickAndSendImage = useCallback(async () => {
     if (!isLoggedIn || uploadingImage || sending) return;
     setAttachSheetOpen(false);
@@ -619,32 +646,28 @@ const ConversationScreen: React.FC = () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       quality: 0.8,
+      base64: true,
     });
     if (result.canceled || !result.assets?.[0]) return;
+    await uploadAndSendImage(result.assets[0].uri, result.assets[0].base64);
+  }, [isLoggedIn, uploadingImage, sending, uploadAndSendImage]);
 
-    setUploadingImage(true);
-    try {
-      const url = await uploadImage(result.assets[0].uri, signEvent);
-      const sendResult = await sendDirectMessage(pubkey, url);
-      if (!sendResult.success) {
-        Alert.alert('Send failed', sendResult.error ?? 'Could not send image.');
-        return;
-      }
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `local-${Date.now()}`,
-          fromMe: true,
-          text: url,
-          createdAt: Math.floor(Date.now() / 1000),
-        },
-      ]);
-    } catch (error) {
-      Alert.alert('Upload failed', error instanceof Error ? error.message : 'Please try again.');
-    } finally {
-      setUploadingImage(false);
+  const handleTakeAndSendPhoto = useCallback(async () => {
+    if (!isLoggedIn || uploadingImage || sending) return;
+    setAttachSheetOpen(false);
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission needed', 'Allow camera access to take and send photos.');
+      return;
     }
-  }, [isLoggedIn, uploadingImage, sending, signEvent, sendDirectMessage, pubkey]);
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images'],
+      quality: 0.8,
+      base64: true,
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+    await uploadAndSendImage(result.assets[0].uri, result.assets[0].base64);
+  }, [isLoggedIn, uploadingImage, sending, uploadAndSendImage]);
 
   // Share another contact's Nostr profile into this conversation. Payload
   // mirrors the ContactProfileSheet → "Share with friend" format: a
@@ -1210,6 +1233,7 @@ const ConversationScreen: React.FC = () => {
         onClose={() => setAttachSheetOpen(false)}
         onShareLocation={handleShareLocation}
         onSendImage={handlePickAndSendImage}
+        onTakePhoto={handleTakeAndSendPhoto}
         onSendZap={
           lightningAddress
             ? () => {

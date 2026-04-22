@@ -6,7 +6,7 @@ import {
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
-import { MapPin, Zap, Receipt, UserRound, ImagePlus, Smile } from 'lucide-react-native';
+import { MapPin, Zap, Receipt, UserRound, ImagePlus, Camera, Smile } from 'lucide-react-native';
 import { colors } from '../styles/theme';
 
 interface Props {
@@ -17,6 +17,7 @@ interface Props {
   onSendInvoice?: () => void;
   onShareContact?: () => void;
   onSendImage?: () => void;
+  onTakePhoto?: () => void;
   onSendGif?: () => void;
 }
 
@@ -28,6 +29,7 @@ const AttachSheet: React.FC<Props> = ({
   onSendInvoice,
   onShareContact,
   onSendImage,
+  onTakePhoto,
   onSendGif,
 }) => {
   const sheetRef = useRef<BottomSheetModal>(null);
@@ -37,22 +39,25 @@ const AttachSheet: React.FC<Props> = ({
       (onSendZap ? 1 : 0) +
       (onSendInvoice ? 1 : 0) +
       (onShareContact ? 1 : 0) +
+      (onTakePhoto ? 1 : 0) +
       (onSendImage ? 1 : 0) +
       (onSendGif ? 1 : 0);
     return [
-      rows >= 6
-        ? '68%'
-        : rows >= 5
-          ? '60%'
-          : rows >= 4
-            ? '52%'
-            : rows >= 3
-              ? '44%'
-              : rows === 2
-                ? '36%'
-                : '28%',
+      rows >= 7
+        ? '78%'
+        : rows >= 6
+          ? '68%'
+          : rows >= 5
+            ? '60%'
+            : rows >= 4
+              ? '52%'
+              : rows >= 3
+                ? '44%'
+                : rows === 2
+                  ? '36%'
+                  : '28%',
     ];
-  }, [onSendZap, onSendInvoice, onShareContact, onSendImage, onSendGif]);
+  }, [onSendZap, onSendInvoice, onShareContact, onTakePhoto, onSendImage, onSendGif]);
 
   useEffect(() => {
     if (visible) {
@@ -145,18 +150,36 @@ const AttachSheet: React.FC<Props> = ({
             </View>
           </TouchableOpacity>
         ) : null}
+        {onTakePhoto ? (
+          <TouchableOpacity
+            style={styles.row}
+            onPress={onTakePhoto}
+            accessibilityLabel="Take a photo with the camera"
+            testID="attach-take-photo"
+          >
+            <View style={styles.iconBadge}>
+              <Camera size={22} color={colors.white} />
+            </View>
+            <View style={styles.rowText}>
+              <Text style={styles.rowTitle}>Camera</Text>
+              <Text style={styles.rowSubtitle}>
+                Snap a photo — uploaded to your Blossom server.
+              </Text>
+            </View>
+          </TouchableOpacity>
+        ) : null}
         {onSendImage ? (
           <TouchableOpacity
             style={styles.row}
             onPress={onSendImage}
-            accessibilityLabel="Send an image"
+            accessibilityLabel="Send an image from the gallery"
             testID="attach-send-image"
           >
             <View style={styles.iconBadge}>
               <ImagePlus size={22} color={colors.white} />
             </View>
             <View style={styles.rowText}>
-              <Text style={styles.rowTitle}>Send image</Text>
+              <Text style={styles.rowTitle}>Gallery</Text>
               <Text style={styles.rowSubtitle}>
                 Pick a photo — uploaded to your Blossom server.
               </Text>

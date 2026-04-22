@@ -56,7 +56,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       'expo-image-picker',
       {
         photosPermission:
-          'Allow Lightning Piggy to access your photos to set your profile picture.',
+          'Allow Lightning Piggy to access your photos to set your profile picture and send images in conversations.',
+        cameraPermission:
+          'Allow Lightning Piggy to use your camera to take and send photos in conversations.',
       },
     ],
     [

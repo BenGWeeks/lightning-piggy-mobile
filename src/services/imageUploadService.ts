@@ -43,11 +43,22 @@ export async function uploadToNostrBuild(imageUri: string): Promise<string> {
  * available, falling back to nostr.build otherwise. Callers that don't have a
  * Nostr signer (e.g. not yet logged in) can pass `signer: null` to force the
  * nostr.build path.
+ *
+ * `base64` is the raw image bytes as a base64 string — available directly
+ * from `expo-image-picker` when the picker is launched with `base64: true`.
+ * Blossom uploads use this to avoid reading `file://` URIs, which is
+ * unreliable on Android in React Native. nostr.build uploads use
+ * FormData with `{uri, name, type}`, which the native FormData serializer
+ * can read without going through the JS fetch layer.
  */
-export async function uploadImage(imageUri: string, signer: BlossomSigner | null): Promise<string> {
+export async function uploadImage(
+  imageUri: string,
+  signer: BlossomSigner | null,
+  base64?: string | null,
+): Promise<string> {
   if (signer) {
     const server = await getBlossomServer();
-    return uploadToBlossom(imageUri, server, signer);
+    return uploadToBlossom(imageUri, server, signer, base64);
   }
   return uploadToNostrBuild(imageUri);
 }
