@@ -1,9 +1,11 @@
-import React, { useState, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, Image, RefreshControl } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
+import { Users, Clock } from 'lucide-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation, CompositeNavigationProp } from '@react-navigation/native';
+import { useNavigation, CompositeNavigationProp, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr } from '../contexts/NostrContext';
@@ -12,9 +14,13 @@ import ProfileIcon from '../components/ProfileIcon';
 import ConversationRow from '../components/ConversationRow';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import FriendPickerSheet, { type PickedFriend } from '../components/FriendPickerSheet';
+import MessagesIcon from '../components/icons/MessagesIcon';
+import { colors } from '../styles/theme';
 import {
   buildConversationSummaries,
+  buildDmSummaries,
   conversationPreview,
+  mergeSummaries,
   type ConversationSummary,
 } from '../utils/conversationSummaries';
 import { styles } from '../styles/MessagesScreen.styles';
@@ -39,7 +45,7 @@ interface AnonContact {
 const MessagesScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<MessagesNavigation>();
-  const { isLoggedIn, profile, contacts, refreshContacts } = useNostr();
+  const { isLoggedIn, profile, contacts, refreshContacts, dmInbox, refreshDmInbox } = useNostr();
   const { wallets } = useWallet();
   const [search, setSearch] = useState('');
   const [searchExpanded, setSearchExpanded] = useState(false);
@@ -47,27 +53,63 @@ const MessagesScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [pickerVisible, setPickerVisible] = useState(false);
   const [anonSheetContact, setAnonSheetContact] = useState<AnonContact | null>(null);
+  const [windowDays, setWindowDays] = useState<30 | 90>(30);
 
-  const conversationSummaries = useMemo(
-    () => buildConversationSummaries(wallets, contacts),
-    [wallets, contacts],
+  useEffect(() => {
+    AsyncStorage.getItem('messages_window_days').then((v) => {
+      if (v === '90') setWindowDays(90);
+    });
+  }, []);
+
+  const cycleWindowDays = useCallback(() => {
+    setWindowDays((prev) => {
+      const next: 30 | 90 = prev === 30 ? 90 : 30;
+      AsyncStorage.setItem('messages_window_days', String(next)).catch(() => {});
+      return next;
+    });
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (isLoggedIn) refreshDmInbox();
+    }, [isLoggedIn, refreshDmInbox]),
   );
 
+  const followPubkeys = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of contacts) set.add(c.pubkey);
+    return set;
+  }, [contacts]);
+
+  const conversationSummaries = useMemo(() => {
+    const zap = buildConversationSummaries(wallets, contacts);
+    const dm = buildDmSummaries(dmInbox, contacts);
+    return mergeSummaries(zap, dm);
+  }, [wallets, contacts, dmInbox]);
+
+  // "Following only" is always on by design — DMs from strangers never
+  // reach the inbox. Locked so it can't be toggled off (parental-control
+  // requirement). Time window (30/90 days) is user-selectable.
   const filteredSummaries = useMemo(() => {
-    if (!search.trim()) return conversationSummaries;
+    const cutoff = Math.floor(Date.now() / 1000) - windowDays * 86400;
+    let list = conversationSummaries.filter(
+      (s) => s.pubkey !== null && followPubkeys.has(s.pubkey) && s.lastActivityAt >= cutoff,
+    );
+    if (!search.trim()) return list;
     const lower = search.toLowerCase();
-    return conversationSummaries.filter(
+    list = list.filter(
       (s) =>
         s.name.toLowerCase().includes(lower) ||
         conversationPreview(s).toLowerCase().includes(lower),
     );
-  }, [conversationSummaries, search]);
+    return list;
+  }, [conversationSummaries, search, followPubkeys, windowDays]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    await refreshContacts();
+    await Promise.all([refreshContacts(), refreshDmInbox()]);
     setRefreshing(false);
-  }, [refreshContacts]);
+  }, [refreshContacts, refreshDmInbox]);
 
   const handleConversationPress = useCallback(
     (summary: ConversationSummary) => {
@@ -140,11 +182,7 @@ const MessagesScreen: React.FC = () => {
             accessibilityLabel="Home"
             testID="messages-home-button"
           >
-            <Image
-              source={require('../../assets/images/Home.png')}
-              style={styles.homeIcon}
-              resizeMode="contain"
-            />
+            <MessagesIcon size={20} color={colors.brandPink} />
           </TouchableOpacity>
           <Text style={styles.title}>Messages</Text>
           <View style={{ flex: 1 }} />
@@ -226,6 +264,28 @@ const MessagesScreen: React.FC = () => {
       </View>
 
       <View style={styles.content}>
+        {isLoggedIn && (
+          <View style={styles.filterChipRow}>
+            <View
+              style={styles.filterChip}
+              accessibilityLabel="Showing conversations from people you follow only"
+              testID="messages-follows-indicator"
+            >
+              <Users size={14} color={colors.brandPink} />
+              <Text style={styles.filterChipText}>Following only</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.filterChipInteractive}
+              onPress={cycleWindowDays}
+              accessibilityLabel={`Window: last ${windowDays} days. Tap to change.`}
+              accessibilityRole="button"
+              testID="messages-window-toggle"
+            >
+              <Clock size={14} color={colors.brandPink} />
+              <Text style={styles.filterChipText}>Last {windowDays} days</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         {!isLoggedIn ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>Connect Nostr</Text>
@@ -261,7 +321,7 @@ const MessagesScreen: React.FC = () => {
 
         {isLoggedIn && (
           <TouchableOpacity
-            style={[styles.fab, { bottom: 24 + insets.bottom }]}
+            style={styles.fab}
             onPress={handleStartConversation}
             accessibilityLabel="Start new conversation"
             testID="start-conversation-button"

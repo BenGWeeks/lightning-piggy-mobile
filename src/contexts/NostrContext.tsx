@@ -14,6 +14,7 @@ import * as nip19 from 'nostr-tools/nip19';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
 import type { NostrProfile, NostrContact, RelayConfig, SignerType } from '../types/nostr';
+import type { DmInboxEntry } from '../utils/conversationSummaries';
 
 const NSEC_KEY = 'nostr_nsec';
 const PUBKEY_KEY = 'nostr_pubkey';
@@ -93,6 +94,9 @@ interface NostrContextType {
     plaintext: string,
   ) => Promise<{ success: boolean; error?: string }>;
   fetchConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
+  dmInbox: DmInboxEntry[];
+  dmInboxLoading: boolean;
+  refreshDmInbox: () => Promise<void>;
   signEvent: (event: {
     kind: number;
     created_at: number;
@@ -128,6 +132,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [relays, setRelays] = useState<RelayConfig[]>([]);
   const [signerType, setSignerType] = useState<SignerType | null>(null);
   const [pubkey, setPubkey] = useState<string | null>(null);
+  const [dmInbox, setDmInbox] = useState<DmInboxEntry[]>([]);
+  const [dmInboxLoading, setDmInboxLoading] = useState(false);
 
   // Publish the logged-in pubkey through the nostrService module so
   // non-React consumers (e.g. WalletContext's zap sender resolver) can
@@ -872,6 +878,104 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [pubkey, isLoggedIn, signerType, getReadRelays],
   );
 
+  const refreshDmInbox = useCallback(async (): Promise<void> => {
+    if (!pubkey || !isLoggedIn) {
+      setDmInbox([]);
+      return;
+    }
+    setDmInboxLoading(true);
+    try {
+      const readRelays = getReadRelays();
+      const { kind4, kind1059 } = await nostrService.fetchInboxDmEvents(pubkey, readRelays);
+
+      let cachedSecretKey: Uint8Array | null = null;
+      const getSecretKey = async (): Promise<Uint8Array | null> => {
+        if (cachedSecretKey) return cachedSecretKey;
+        const nsec = await SecureStore.getItemAsync(NSEC_KEY);
+        if (!nsec) return null;
+        cachedSecretKey = nostrService.decodeNsec(nsec).secretKey;
+        return cachedSecretKey;
+      };
+
+      const entries: DmInboxEntry[] = [];
+
+      // NIP-04: decrypt per-event. Amber path works but each call prompts the
+      // signer — acceptable for a handful of inbox rows, but a large inbox
+      // will be slow. Not yet optimised.
+      for (const ev of kind4) {
+        const fromMe = ev.pubkey === pubkey;
+        const partnerPubkey = fromMe ? (ev.tags.find((t) => t[0] === 'p')?.[1] ?? null) : ev.pubkey;
+        if (!partnerPubkey || !/^[0-9a-f]{64}$/.test(partnerPubkey)) continue;
+        try {
+          let plaintext: string | null = null;
+          if (signerType === 'nsec') {
+            const secretKey = await getSecretKey();
+            if (!secretKey) continue;
+            plaintext = await nostrService.decryptNip04WithSecret(
+              secretKey,
+              partnerPubkey,
+              ev.content,
+            );
+          } else if (signerType === 'amber') {
+            plaintext = await amberService.requestNip04Decrypt(ev.content, partnerPubkey, pubkey);
+          }
+          if (plaintext === null) continue;
+          entries.push({
+            partnerPubkey,
+            fromMe,
+            createdAt: ev.created_at,
+            text: plaintext,
+            wireKind: 4,
+          });
+        } catch (error) {
+          if (__DEV__) console.warn('[Nostr] NIP-04 inbox decrypt failed:', error);
+        }
+      }
+
+      // NIP-17: only nsec for now — amberService has no NIP-44 plumbing yet.
+      if (signerType === 'nsec' && kind1059.length > 0) {
+        const secretKey = await getSecretKey();
+        if (secretKey) {
+          for (const wrap of kind1059) {
+            try {
+              const rumor = nostrService.unwrapGiftWrap(secretKey, wrap);
+              const fromMe = rumor.pubkey === pubkey;
+              const partnerPubkey = fromMe
+                ? (rumor.tags.find((t) => t[0] === 'p')?.[1] ?? null)
+                : rumor.pubkey;
+              if (!partnerPubkey || !/^[0-9a-f]{64}$/.test(partnerPubkey)) continue;
+              entries.push({
+                partnerPubkey,
+                fromMe,
+                createdAt: rumor.created_at,
+                text: rumor.content,
+                wireKind: rumor.kind,
+              });
+            } catch (error) {
+              if (__DEV__) console.warn('[Nostr] NIP-17 unwrap failed:', error);
+            }
+          }
+        }
+      } else if (signerType === 'amber' && kind1059.length > 0) {
+        if (__DEV__) {
+          console.log(
+            `[Nostr] Skipping ${kind1059.length} NIP-17 gift wrap(s) — Amber NIP-44 decrypt not wired yet`,
+          );
+        }
+      }
+
+      setDmInbox(entries);
+    } catch (error) {
+      if (__DEV__) console.warn('[Nostr] refreshDmInbox failed:', error);
+    } finally {
+      setDmInboxLoading(false);
+    }
+  }, [pubkey, isLoggedIn, signerType, getReadRelays]);
+
+  useEffect(() => {
+    if (!isLoggedIn) setDmInbox([]);
+  }, [isLoggedIn]);
+
   const signEvent = useCallback(
     async (event: {
       kind: number;
@@ -924,6 +1028,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       addContact,
       sendDirectMessage,
       fetchConversation,
+      dmInbox,
+      dmInboxLoading,
+      refreshDmInbox,
       signEvent,
     }),
     [
@@ -945,6 +1052,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       addContact,
       sendDirectMessage,
       fetchConversation,
+      dmInbox,
+      dmInboxLoading,
+      refreshDmInbox,
       signEvent,
     ],
   );

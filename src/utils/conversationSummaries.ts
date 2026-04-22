@@ -135,3 +135,95 @@ export function conversationPreview(s: ConversationSummary): string {
   }
   return `${prefix}⚡ ${amount} sats`;
 }
+
+/**
+ * A decrypted DM drawn from the inbox fetch — kind 4 (NIP-04) or kind 14
+ * (NIP-17 rumor unwrapped from a kind-1059 gift wrap). `wireKind` is 4
+ * for legacy, 14 for NIP-17 chat, 15 for NIP-17 file.
+ */
+export interface DmInboxEntry {
+  partnerPubkey: string;
+  fromMe: boolean;
+  createdAt: number;
+  text: string;
+  wireKind: number;
+}
+
+/**
+ * Bucket DM entries by partner pubkey and reduce to one ConversationSummary
+ * per partner (latest wins). When NIP-04 and NIP-17 copies land within the
+ * same minute for the same partner — which happens during the transition
+ * period while senders dual-publish — prefer the NIP-17 copy.
+ */
+export function buildDmSummaries(
+  entries: DmInboxEntry[],
+  contacts: NostrContact[],
+): ConversationSummary[] {
+  const contactByPubkey = new Map<string, NostrContact>();
+  for (const c of contacts) contactByPubkey.set(c.pubkey, c);
+
+  const winner = new Map<string, DmInboxEntry>();
+  for (const entry of entries) {
+    const existing = winner.get(entry.partnerPubkey);
+    if (!existing) {
+      winner.set(entry.partnerPubkey, entry);
+      continue;
+    }
+    const diff = entry.createdAt - existing.createdAt;
+    if (diff > 60) {
+      winner.set(entry.partnerPubkey, entry);
+    } else if (Math.abs(diff) <= 60 && entry.wireKind !== 4 && existing.wireKind === 4) {
+      // Dual-published during transition: prefer the NIP-17 copy.
+      winner.set(entry.partnerPubkey, entry);
+    }
+  }
+
+  const summaries: ConversationSummary[] = [];
+  for (const entry of winner.values()) {
+    const contact = contactByPubkey.get(entry.partnerPubkey);
+    const name =
+      contact?.profile?.displayName?.trim() ||
+      contact?.profile?.name?.trim() ||
+      contact?.petname?.trim() ||
+      entry.partnerPubkey.slice(0, 12);
+    summaries.push({
+      id: entry.partnerPubkey,
+      pubkey: entry.partnerPubkey,
+      name,
+      picture: contact?.profile?.picture ?? null,
+      nip05: contact?.profile?.nip05 ?? null,
+      lightningAddress: contact?.profile?.lud16 ?? null,
+      lastActivityAt: entry.createdAt,
+      lastAmountSats: 0,
+      lastDirection: entry.fromMe ? 'outgoing' : 'incoming',
+      lastComment: entry.text,
+      anonymous: false,
+    });
+  }
+
+  return summaries.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+}
+
+/**
+ * Merge zap-derived and DM-derived summaries into a single inbox list:
+ * one row per identified partner (newest activity wins), anonymous zap
+ * rows passed through untouched (no pubkey → nothing to merge against).
+ */
+export function mergeSummaries(
+  zap: ConversationSummary[],
+  dm: ConversationSummary[],
+): ConversationSummary[] {
+  const byPubkey = new Map<string, ConversationSummary>();
+  const anonymous: ConversationSummary[] = [];
+  for (const s of [...zap, ...dm]) {
+    if (!s.pubkey) {
+      anonymous.push(s);
+      continue;
+    }
+    const existing = byPubkey.get(s.pubkey);
+    if (!existing || s.lastActivityAt > existing.lastActivityAt) {
+      byPubkey.set(s.pubkey, s);
+    }
+  }
+  return [...byPubkey.values(), ...anonymous].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+}
