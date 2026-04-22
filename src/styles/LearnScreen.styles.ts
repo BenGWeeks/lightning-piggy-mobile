@@ -21,13 +21,6 @@ export const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(236, 0, 140, 0.65)', // brandPink with 65% opacity
   },
-  /** Glyph inside the TabHeader round badge for Learn. 20×20 is what the
-   * other tabs' badge glyphs use; the PNG is tinted pink to match. */
-  badgeIcon: {
-    width: 20,
-    height: 20,
-    tintColor: colors.brandPink,
-  },
   scrollArea: {
     flex: 1,
   },

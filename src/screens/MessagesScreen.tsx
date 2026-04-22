@@ -13,7 +13,7 @@ import { useWallet } from '../contexts/WalletContext';
 import ConversationRow from '../components/ConversationRow';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import FriendPickerSheet, { type PickedFriend } from '../components/FriendPickerSheet';
-import MessagesIcon from '../components/icons/MessagesIcon';
+import { MessageCircle } from 'lucide-react-native';
 import TabHeader from '../components/TabHeader';
 import { colors } from '../styles/theme';
 import {
@@ -193,7 +193,7 @@ const MessagesScreen: React.FC = () => {
         style={styles.bgImage}
         resizeMode="contain"
       />
-      <TabHeader title="Messages" icon={<MessagesIcon size={20} color={colors.brandPink} />} />
+      <TabHeader title="Messages" icon={<MessageCircle size={20} color={colors.brandPink} />} />
       <View style={styles.headerExtras}>
         <View style={styles.chipRow}>
           {searchExpanded ? (
