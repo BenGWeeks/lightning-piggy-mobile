@@ -11,6 +11,7 @@ import { WalletProvider, useWallet } from './src/contexts/WalletContext';
 import { NostrProvider } from './src/contexts/NostrContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
+import { BrandedAlertHost } from './src/components/BrandedAlert';
 
 // Render toasts with unlimited-line body so long error messages (e.g. Electrum
 // script-verify errors) aren't truncated. Height grows to fit content.
@@ -76,6 +77,7 @@ export default function App() {
           </BottomSheetModalProvider>
           <Toast topOffset={60} config={toastConfig} />
           <GlobalIncomingPaymentOverlay />
+          <BrandedAlertHost />
         </NostrProvider>
       </WalletProvider>
     </GestureHandlerRootView>

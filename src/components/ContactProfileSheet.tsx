@@ -6,9 +6,9 @@ import {
   TouchableOpacity,
   StyleSheet,
   BackHandler,
-  Alert,
   Linking,
 } from 'react-native';
+import { Alert } from './BrandedAlert';
 import { Image } from 'expo-image';
 import {
   BottomSheetModal,

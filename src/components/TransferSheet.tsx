@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  Alert,
   ActivityIndicator,
   BackHandler,
   Image,
@@ -11,6 +10,7 @@ import {
   Linking,
   Platform,
 } from 'react-native';
+import { Alert } from './BrandedAlert';
 import {
   BottomSheetModal,
   BottomSheetTextInput,

@@ -11,12 +11,12 @@ import {
   Platform,
   ActivityIndicator,
   RefreshControl,
-  Alert,
   AppState,
   Image,
   Linking,
   StyleSheet,
 } from 'react-native';
+import { Alert } from '../components/BrandedAlert';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Zap, Send, Plus, MapPin, ArrowDown } from 'lucide-react-native';
 import { Image as ExpoImage } from 'expo-image';

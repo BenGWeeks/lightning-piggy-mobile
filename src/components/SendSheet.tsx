@@ -3,13 +3,13 @@ import {
   View,
   Text,
   TouchableOpacity,
-  Alert,
   ActivityIndicator,
   BackHandler,
   Image,
   Keyboard,
   Platform,
 } from 'react-native';
+import { Alert } from './BrandedAlert';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,

@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, Image, TouchableOpacity, ScrollView, Linking, Alert } from 'react-native';
+import { View, Text, Image, TouchableOpacity, ScrollView, Linking } from 'react-native';
+import { Alert } from '../components/BrandedAlert';
 import { useFocusEffect } from '@react-navigation/native';
 import { courses } from '../data/learnContent';
 import {

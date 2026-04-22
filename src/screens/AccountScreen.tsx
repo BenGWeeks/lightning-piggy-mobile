@@ -7,12 +7,12 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Image,
   ActivityIndicator,
 } from 'react-native';
+import { Alert } from '../components/BrandedAlert';
 import Svg, { Rect, Path as SvgPath } from 'react-native-svg';
 import * as Clipboard from 'expo-clipboard';
 import * as nip19 from 'nostr-tools/nip19';

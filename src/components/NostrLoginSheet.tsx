@@ -8,8 +8,8 @@ import {
   Platform,
   BackHandler,
   Keyboard,
-  Alert,
 } from 'react-native';
+import { Alert } from './BrandedAlert';
 import Svg, { Path } from 'react-native-svg';
 import * as Clipboard from 'expo-clipboard';
 import {

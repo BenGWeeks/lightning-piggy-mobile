@@ -5,9 +5,9 @@ import {
   TouchableOpacity,
   StyleSheet,
   BackHandler,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
+import { Alert } from './BrandedAlert';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,

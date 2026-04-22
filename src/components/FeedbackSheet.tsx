@@ -5,11 +5,11 @@ import {
   TouchableOpacity,
   StyleSheet,
   BackHandler,
-  Alert,
   ActivityIndicator,
   Platform,
   Keyboard,
 } from 'react-native';
+import { Alert } from './BrandedAlert';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
