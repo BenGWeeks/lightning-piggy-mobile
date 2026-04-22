@@ -149,43 +149,103 @@ export interface DmInboxEntry {
   wireKind: number;
 }
 
+import * as nip19 from 'nostr-tools/nip19';
+
+/** Generates the display name shown when we have no kind-0 profile yet.
+ * Prefers an npub prefix (what the rest of the app uses when copying a
+ * pubkey for users) over raw hex. Returns the pubkey lowercased. */
+function fallbackName(partnerPubkey: string): string {
+  try {
+    return nip19.npubEncode(partnerPubkey).slice(0, 12) + '…';
+  } catch {
+    return partnerPubkey.slice(0, 12);
+  }
+}
+
+/** Dual-publish window — if the same partner sends a NIP-04 and a NIP-17
+ * copy of the same message within this many seconds, treat them as one
+ * and prefer the NIP-17 row. 5 minutes is generous enough to absorb relay
+ * propagation jitter (NIP-17 wraps use a randomised created_at up to 2
+ * days in the past, but we deduplicate on rumor.created_at which is the
+ * real send time, so 5 min of headroom is sufficient). */
+const DUAL_PUBLISH_WINDOW_SEC = 5 * 60;
+
+/** Similarly, when merging a zap row and a DM row for the same partner,
+ * if the two events are within this window pick the DM's preview text.
+ * Sorting timestamp still uses whichever is newer so the inbox order is
+ * correct — we only override the preview.  */
+const DM_PREVIEW_PREFERENCE_WINDOW_SEC = 5 * 60;
+
 /**
  * Bucket DM entries by partner pubkey and reduce to one ConversationSummary
- * per partner (latest wins). When NIP-04 and NIP-17 copies land within the
- * same minute for the same partner — which happens during the transition
- * period while senders dual-publish — prefer the NIP-17 copy.
+ * per partner. The caller passes the viewer's followed pubkeys (lowercase)
+ * as a safety net: even though refreshDmInbox already filters at the data
+ * layer, rebuilding the list after a contact is un-followed should also
+ * drop them here — the "Following only" rule is a render-time invariant,
+ * not just a fetch-time one.
+ *
+ * When a partner has both a NIP-04 and a NIP-17 message within
+ * DUAL_PUBLISH_WINDOW_SEC we always pick the NIP-17 copy regardless of
+ * which one has the newer timestamp. Clients in the wild deliver the
+ * two copies in either order, and wraps are the preferred metadata-
+ * minimising form — we never want a laggy kind-4 to displace its NIP-17
+ * twin and "unhide" the sender identity in the preview.
  */
 export function buildDmSummaries(
   entries: DmInboxEntry[],
   contacts: NostrContact[],
+  followPubkeys?: Set<string>,
 ): ConversationSummary[] {
   const contactByPubkey = new Map<string, NostrContact>();
-  for (const c of contacts) contactByPubkey.set(c.pubkey, c);
+  for (const c of contacts) contactByPubkey.set(c.pubkey.toLowerCase(), c);
 
   const winner = new Map<string, DmInboxEntry>();
   for (const entry of entries) {
-    const existing = winner.get(entry.partnerPubkey);
+    const key = entry.partnerPubkey.toLowerCase();
+    if (followPubkeys && !followPubkeys.has(key)) continue;
+    const existing = winner.get(key);
     if (!existing) {
-      winner.set(entry.partnerPubkey, entry);
+      winner.set(key, entry);
       continue;
     }
-    const diff = entry.createdAt - existing.createdAt;
-    if (diff > 60) {
-      winner.set(entry.partnerPubkey, entry);
-    } else if (Math.abs(diff) <= 60 && entry.wireKind !== 4 && existing.wireKind === 4) {
-      // Dual-published during transition: prefer the NIP-17 copy.
-      winner.set(entry.partnerPubkey, entry);
+
+    const newIsNip17 = entry.wireKind !== 4;
+    const existingIsNip17 = existing.wireKind !== 4;
+    const diff = Math.abs(entry.createdAt - existing.createdAt);
+
+    // Rule 1: NIP-17 always beats a NIP-04 twin inside the dual-publish
+    // window, regardless of which arrived first. (The old `diff > 60`
+    // path let a laggy kind-4 61 s newer than its wrap win the slot —
+    // that was the bug called out in review.)
+    if (diff <= DUAL_PUBLISH_WINDOW_SEC) {
+      if (newIsNip17 && !existingIsNip17) {
+        winner.set(key, entry);
+        continue;
+      }
+      if (!newIsNip17 && existingIsNip17) {
+        continue;
+      }
+      // Same wire kind within the window → newer wins.
+      if (entry.createdAt > existing.createdAt) {
+        winner.set(key, entry);
+      }
+      continue;
+    }
+
+    // Rule 2: outside the window, newer wins.
+    if (entry.createdAt > existing.createdAt) {
+      winner.set(key, entry);
     }
   }
 
   const summaries: ConversationSummary[] = [];
   for (const entry of winner.values()) {
-    const contact = contactByPubkey.get(entry.partnerPubkey);
+    const contact = contactByPubkey.get(entry.partnerPubkey.toLowerCase());
     const name =
       contact?.profile?.displayName?.trim() ||
       contact?.profile?.name?.trim() ||
       contact?.petname?.trim() ||
-      entry.partnerPubkey.slice(0, 12);
+      fallbackName(entry.partnerPubkey);
     summaries.push({
       id: entry.partnerPubkey,
       pubkey: entry.partnerPubkey,
@@ -206,24 +266,59 @@ export function buildDmSummaries(
 
 /**
  * Merge zap-derived and DM-derived summaries into a single inbox list:
- * one row per identified partner (newest activity wins), anonymous zap
- * rows passed through untouched (no pubkey → nothing to merge against).
+ * one row per identified partner, anonymous zap rows passed through
+ * untouched (no pubkey → nothing to merge against).
+ *
+ * When a partner has both a zap row and a DM row, we use the newest
+ * `lastActivityAt` as the sort key, but if the two events happened within
+ * DM_PREVIEW_PREFERENCE_WINDOW_SEC of each other we prefer the DM's
+ * `lastComment` for the preview text. Rationale: "You: Hello!" is a more
+ * useful at-a-glance preview than "You: ⚡ 21 sats" when both happened in
+ * the same conversational moment. Outside that window the newer event
+ * wins outright, since an old zap followed by a long pause and then a
+ * new DM should obviously show the DM.
  */
 export function mergeSummaries(
   zap: ConversationSummary[],
   dm: ConversationSummary[],
 ): ConversationSummary[] {
-  const byPubkey = new Map<string, ConversationSummary>();
+  const zapByPubkey = new Map<string, ConversationSummary>();
+  const dmByPubkey = new Map<string, ConversationSummary>();
   const anonymous: ConversationSummary[] = [];
-  for (const s of [...zap, ...dm]) {
+  for (const s of zap) {
     if (!s.pubkey) {
       anonymous.push(s);
       continue;
     }
-    const existing = byPubkey.get(s.pubkey);
-    if (!existing || s.lastActivityAt > existing.lastActivityAt) {
-      byPubkey.set(s.pubkey, s);
+    zapByPubkey.set(s.pubkey.toLowerCase(), s);
+  }
+  for (const s of dm) {
+    if (!s.pubkey) continue;
+    dmByPubkey.set(s.pubkey.toLowerCase(), s);
+  }
+
+  const merged: ConversationSummary[] = [];
+  const allKeys = new Set<string>([...zapByPubkey.keys(), ...dmByPubkey.keys()]);
+  for (const key of allKeys) {
+    const z = zapByPubkey.get(key);
+    const d = dmByPubkey.get(key);
+    if (z && d) {
+      const newest = d.lastActivityAt >= z.lastActivityAt ? d : z;
+      const diff = Math.abs(d.lastActivityAt - z.lastActivityAt);
+      // Sort by whichever is newer; prefer DM preview text when close.
+      const preferDmPreview = diff <= DM_PREVIEW_PREFERENCE_WINDOW_SEC;
+      merged.push({
+        ...newest,
+        lastComment: preferDmPreview ? d.lastComment : newest.lastComment,
+        lastAmountSats: preferDmPreview ? 0 : newest.lastAmountSats,
+        lastDirection: newest.lastDirection,
+      });
+    } else if (d) {
+      merged.push(d);
+    } else if (z) {
+      merged.push(z);
     }
   }
-  return [...byPubkey.values(), ...anonymous].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+
+  return [...merged, ...anonymous].sort((a, b) => b.lastActivityAt - a.lastActivityAt);
 }

@@ -23,16 +23,21 @@ name: Messages Search Filters Inbox by Preview Text
 - waitForAnimationToEnd:
     timeout: 3000
 
-# Open the search input
+# Open the search input if it's collapsed. Optional so the flow works
+# whether we come in cold or the search was already open from a prior
+# step.
 - tapOn:
     id: 'messages-search-toggle'
+    optional: true
 - waitForAnimationToEnd:
     timeout: 1000
 
-# Type the query. Short string so the BottomSheetTextInput character-drop
-# bug (#146) is unlikely to bite — single word, 5 characters.
+# Clear anything left over from a previous run, then type the query.
+# Short string so the BottomSheetTextInput character-drop bug (#146)
+# is unlikely to bite — single word, 5 characters.
 - tapOn:
     id: 'messages-search-input'
+- eraseText: 50
 - inputText: 'Hello'
 - waitForAnimationToEnd:
     timeout: 1500

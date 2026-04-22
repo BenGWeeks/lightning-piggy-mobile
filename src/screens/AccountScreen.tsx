@@ -38,6 +38,7 @@ import QrSheet from '../components/QrSheet';
 import SendSheet from '../components/SendSheet';
 import FeedbackSheet from '../components/FeedbackSheet';
 import { createDmSender } from '../utils/nostrDm';
+import * as amberService from '../services/amberService';
 import { fetchProfile, DEFAULT_RELAYS } from '../services/nostrService';
 import type { NostrProfile } from '../types/nostr';
 import type { MainTabParamList } from '../navigation/types';
@@ -75,7 +76,8 @@ const AccountScreen: React.FC = () => {
     updateWalletSettings,
     reorderWallet,
   } = useWallet();
-  const { isLoggedIn, profile, logout, sendDirectMessage, signerType } = useNostr();
+  const { isLoggedIn, profile, logout, sendDirectMessage, signerType, amberNip44Permission } =
+    useNostr();
   const [nameInput, setNameInput] = useState(userName);
   const [lnAddressInput, setLnAddressInput] = useState(lightningAddress || '');
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
@@ -142,6 +144,33 @@ const AccountScreen: React.FC = () => {
       return next;
     });
   }, []);
+
+  /**
+   * Grant Amber blanket NIP-44 encrypt+decrypt permission via a one-shot
+   * probe. We encrypt a tiny payload to the user's own pubkey and
+   * immediately decrypt it — both round-trips use the non-silent API so
+   * Amber's approval dialog appears, and the user can check "Remember my
+   * choice" to bank the permission for subsequent silent refreshes.
+   */
+  const grantAmberNip44Permission = useCallback(async () => {
+    if (!profile?.pubkey) throw new Error('No profile pubkey — log in first.');
+    const probePlaintext = 'lightning-piggy-nip44-permission-probe';
+    const ciphertext = await amberService.requestNip44Encrypt(
+      probePlaintext,
+      profile.pubkey,
+      profile.pubkey,
+    );
+    const roundTrip = await amberService.requestNip44Decrypt(
+      ciphertext,
+      profile.pubkey,
+      profile.pubkey,
+    );
+    if (roundTrip !== probePlaintext) {
+      throw new Error('Amber round-trip mismatch — permission may not be set.');
+    }
+    // Next inbox refresh will hit the silent fast-path and flip
+    // amberNip44Permission to 'granted' on its own.
+  }, [profile?.pubkey]);
 
   const handleVersionTap = () => {
     versionTapCount.current += 1;
@@ -490,6 +519,31 @@ const AccountScreen: React.FC = () => {
               &quot;Remember my choice&quot; so subsequent messages load silently. Messages from
               people you don&apos;t follow stay hidden.
             </Text>
+            {amberNip17Enabled && amberNip44Permission === 'denied' && (
+              <>
+                <Text style={[styles.fieldHint, { color: colors.brandPink, marginTop: 8 }]}>
+                  Amber hasn&apos;t granted NIP-44 decrypt permission to this app yet — tap the
+                  button below to grant it. One dialog, then subsequent messages decrypt silently.
+                </Text>
+                <TouchableOpacity
+                  style={[styles.saveButton, { marginTop: 8 }]}
+                  onPress={async () => {
+                    try {
+                      await grantAmberNip44Permission();
+                    } catch (e) {
+                      Alert.alert(
+                        'Amber permission',
+                        e instanceof Error ? e.message : 'Could not grant NIP-44 permission.',
+                      );
+                    }
+                  }}
+                  accessibilityLabel="Grant Amber NIP-44 permission"
+                  testID="amber-nip17-grant"
+                >
+                  <Text style={styles.saveButtonText}>Grant permission in Amber</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </>
         )}
 

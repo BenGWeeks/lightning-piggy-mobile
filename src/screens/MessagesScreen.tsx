@@ -85,24 +85,33 @@ const MessagesScreen: React.FC = () => {
 
   const followPubkeys = useMemo(() => {
     const set = new Set<string>();
-    for (const c of contacts) set.add(c.pubkey);
+    for (const c of contacts) set.add(c.pubkey.toLowerCase());
     return set;
   }, [contacts]);
 
   const conversationSummaries = useMemo(() => {
     const zap = buildConversationSummaries(wallets, contacts);
-    const dm = buildDmSummaries(dmInbox, contacts);
+    // Pass followPubkeys as a defence-in-depth filter. NostrContext's
+    // refreshDmInbox already drops non-follows at the data layer, but
+    // applying it again here guards against stale dmInbox state from
+    // before a follow was revoked. The "Following only" rule is
+    // load-bearing — keep it enforced everywhere a summary is built.
+    const dm = buildDmSummaries(dmInbox, contacts, followPubkeys);
     return mergeSummaries(zap, dm);
-  }, [wallets, contacts, dmInbox]);
+  }, [wallets, contacts, dmInbox, followPubkeys]);
 
-  // "Following only" is always on by design — DMs from strangers never
-  // reach the inbox. Locked so it can't be toggled off (parental-control
-  // requirement). Time window (30/90 days) is user-selectable.
+  // Following-only is always on by design (parental-control requirement);
+  // enforcement lives inside buildDmSummaries + refreshDmInbox. This memo
+  // applies the user-selectable time window + search, plus a defensive
+  // follow check for pubkey'd zap rows so non-followed zap counterparties
+  // don't slip in.
   const filteredSummaries = useMemo(() => {
     const cutoff = Math.floor(Date.now() / 1000) - windowDays * 86400;
-    let list = conversationSummaries.filter(
-      (s) => s.pubkey !== null && followPubkeys.has(s.pubkey) && s.lastActivityAt >= cutoff,
-    );
+    let list = conversationSummaries.filter((s) => {
+      if (s.lastActivityAt < cutoff) return false;
+      if (s.pubkey && !followPubkeys.has(s.pubkey.toLowerCase())) return false;
+      return true;
+    });
     if (!search.trim()) return list;
     const lower = search.toLowerCase();
     list = list.filter(
