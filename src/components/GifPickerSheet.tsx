@@ -1,4 +1,4 @@
-import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -39,7 +39,10 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
   const topInset = 60;
 
   const [search, setSearch] = useState('');
-  const deferredSearch = useDeferredValue(search);
+  // Debounced mirror — `useDeferredValue` only defers renders, not the
+  // outbound GIPHY request. A 250 ms setTimeout debounce keeps a fast
+  // typist from firing a request per keystroke (GIPHY rate-limits tight).
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [results, setResults] = useState<Gif[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +66,7 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
       // fetch rather than briefly flashing the previous session's
       // results while the new request is in flight.
       setSearch('');
+      setDebouncedSearch('');
       setResults([]);
       setError(null);
       setLoading(configured);
@@ -71,6 +75,14 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
       sheetRef.current?.dismiss();
     }
   }, [visible, configured]);
+
+  // Debounce the outbound search. 250 ms is short enough to feel live
+  // while the user pauses between words but long enough to collapse a
+  // burst of keystrokes into a single request.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 250);
+    return () => clearTimeout(t);
+  }, [search]);
 
   useEffect(() => {
     if (!visible) return;
@@ -82,6 +94,7 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
   }, [visible, onClose]);
 
   useEffect(() => {
+    if (!visible) return;
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
     const showSub = Keyboard.addListener(showEvent, (e) => {
@@ -91,12 +104,14 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
     return () => {
       showSub.remove();
       hideSub.remove();
+      // Reset so a stale height can't leak into the next open.
+      setKeyboardHeight(0);
     };
-  }, []);
+  }, [visible]);
 
   // Fetch trending / search results as the sheet opens and whenever the
-  // deferred query settles. `useDeferredValue` + an in-effect cancel flag
-  // keeps us from stomping an older slow search over a newer fast one.
+  // debounced query settles. The in-effect `cancelled` flag also protects
+  // against a slower earlier request stomping a faster later one.
   useEffect(() => {
     if (!visible || !configured) return;
     let cancelled = false;
@@ -104,7 +119,9 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
     setError(null);
     const run = async () => {
       try {
-        const gifs = deferredSearch.trim() ? await searchGifs(deferredSearch) : await getTrending();
+        const gifs = debouncedSearch.trim()
+          ? await searchGifs(debouncedSearch)
+          : await getTrending();
         if (!cancelled) setResults(gifs);
       } catch (e) {
         if (!cancelled) {
@@ -119,7 +136,7 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
     return () => {
       cancelled = true;
     };
-  }, [visible, deferredSearch, configured]);
+  }, [visible, debouncedSearch, configured]);
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (

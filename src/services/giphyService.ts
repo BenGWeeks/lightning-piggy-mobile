@@ -19,15 +19,11 @@ export interface Gif {
   url: string;
   /** Smaller preview used in the picker grid. */
   previewUrl: string;
-  width: number;
-  height: number;
   title: string;
 }
 
 interface GiphyImageFormat {
   url?: string;
-  width?: string;
-  height?: string;
 }
 
 interface GiphyResult {
@@ -67,12 +63,6 @@ function pickFormat(
   return null;
 }
 
-function toNumber(s: string | undefined): number {
-  if (!s) return 0;
-  const n = Number(s);
-  return Number.isFinite(n) ? n : 0;
-}
-
 function normalize(result: GiphyResult): Gif | null {
   // Send-order: prefer a reasonably-sized downsized variant so the bubble
   // renders crisply without pulling down the multi-megabyte original.
@@ -95,8 +85,6 @@ function normalize(result: GiphyResult): Gif | null {
     id: result.id,
     url: send.url,
     previewUrl: preview.url,
-    width: toNumber(send.width),
-    height: toNumber(send.height),
     title: result.title || '',
   };
 }

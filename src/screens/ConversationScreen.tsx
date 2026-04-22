@@ -630,10 +630,14 @@ const ConversationScreen: React.FC = () => {
         Alert.alert('Send failed', result.error ?? 'Could not send GIF.');
         return;
       }
+      // `local-<ms>` on its own collides if two sends land in the same
+      // millisecond (e.g. a double-tap on a slow network). Append a
+      // short random suffix so the FlatList keyExtractor stays unique.
+      const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       setMessages((prev) => [
         ...prev,
         {
-          id: `local-${Date.now()}`,
+          id: localId,
           fromMe: true,
           text: payload,
           createdAt: Math.floor(Date.now() / 1000),

@@ -67,6 +67,16 @@ npm start
 
 > **Note:** Always use `npm start` (not `npx expo start`) — the start script includes `--dev-client` which is required for custom native modules. Using `npx expo start` directly will launch in Expo Go mode and show "Something went wrong".
 
+### Environment variables
+
+Optional keys are read from `.env` at the repo root (gitignored) and inlined into the bundle at build time via `app.config.ts` / Metro's `EXPO_PUBLIC_*` handling.
+
+| Variable                    | Used by                    | Notes                                                                                                                                                                                                                                                                                                |
+| --------------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EXPO_PUBLIC_GIPHY_API_KEY` | In-conversation GIF picker | Free key from [developers.giphy.com/dashboard](https://developers.giphy.com/dashboard/). Restrict it to the Android package / iOS bundle ID in the GIPHY dashboard — keys are public by design, not a secret. When unset, the "Send GIF" row is hidden from the attach menu and nothing else breaks. |
+
+After changing `.env`, restart Metro (`npm start`) so the new value gets inlined. No native rebuild is required for `EXPO_PUBLIC_*` changes.
+
 ### Building an APK
 
 ```bash
