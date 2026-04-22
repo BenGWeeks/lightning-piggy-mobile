@@ -1,6 +1,7 @@
 const { FlatCompat } = require('@eslint/eslintrc');
 const typescriptParser = require('@typescript-eslint/parser');
 const typescriptPlugin = require('@typescript-eslint/eslint-plugin');
+const globals = require('globals');
 
 const compat = new FlatCompat();
 
@@ -20,6 +21,15 @@ module.exports = [
     rules: {
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/no-explicit-any': 'warn',
+    },
+  },
+  {
+    // Standalone Node ESM helpers under scripts/ run in Node, not in the
+    // React Native runtime, so give them access to Node globals like
+    // setTimeout and process.
+    files: ['scripts/**/*.mjs', 'scripts/**/*.js'],
+    languageOptions: {
+      globals: { ...globals.node },
     },
   },
 ];
