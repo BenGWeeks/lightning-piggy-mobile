@@ -10,12 +10,11 @@ import {
 } from 'react-native';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Users } from 'lucide-react-native';
 import { useNavigation, CompositeNavigationProp, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr } from '../contexts/NostrContext';
-import FriendsIcon from '../components/icons/FriendsIcon';
 import TabHeader from '../components/TabHeader';
 import { colors } from '../styles/theme';
 import ContactListItem from '../components/ContactListItem';
@@ -46,7 +45,6 @@ interface ListItem {
 }
 
 const FriendsScreen: React.FC = () => {
-  const insets = useSafeAreaInsets();
   const navigation = useNavigation<FriendsNavigation>();
   const { isLoggedIn, profile, contacts, refreshContacts, refreshProfile, addContact } = useNostr();
   const [filter, setFilter] = useState<Filter>('all');
@@ -277,7 +275,7 @@ const FriendsScreen: React.FC = () => {
         style={styles.bgImage}
         resizeMode="contain"
       />
-      <TabHeader title="Friends" icon={<FriendsIcon size={20} color={colors.brandPink} />} />
+      <TabHeader title="Friends" icon={<Users size={20} color={colors.brandPink} />} />
       <View style={styles.headerExtras}>
         {/* Filter chips + search toggle */}
         <View style={styles.chipRow}>

@@ -15,6 +15,8 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import * as nip19 from 'nostr-tools/nip19';
 import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
+import { Home } from 'lucide-react-native';
+import { colors } from '../styles/theme';
 import ReceiveSheet from '../components/ReceiveSheet';
 import SendSheet from '../components/SendSheet';
 import ContactProfileSheet from '../components/ContactProfileSheet';
@@ -320,13 +322,7 @@ const HomeScreen: React.FC = () => {
           // size; section titles (Messages/Friends/Learn) stay bolder to
           // read as section labels.
           titleStyle={{ fontSize: 22, fontWeight: '400' }}
-          icon={
-            <Image
-              source={require('../../assets/images/Home.png')}
-              style={styles.badgeIcon}
-              resizeMode="contain"
-            />
-          }
+          icon={<Home size={20} color={colors.brandPink} />}
         />
 
         <WalletCarousel
