@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
@@ -20,7 +20,7 @@ import TransactionList from '../components/TransactionList';
 import WalletCarousel from '../components/WalletCarousel';
 import AddWalletWizard from '../components/AddWalletWizard';
 import WalletSettingsSheet from '../components/WalletSettingsSheet';
-import ProfileIcon from '../components/ProfileIcon';
+import TabHeader from '../components/TabHeader';
 import { ArrowDownIcon, ArrowUpIcon, ArrowLeftRightIcon } from '../components/icons/ArrowIcons';
 import { styles } from '../styles/HomeScreen.styles';
 import type { MainTabParamList } from '../navigation/types';
@@ -38,7 +38,7 @@ const HomeScreen: React.FC = () => {
     btcPrice,
     currency,
   } = useWallet();
-  const { profile } = useNostr();
+  const { isLoggedIn, profile, refreshProfile } = useNostr();
   const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList, 'Home'>>();
   const route = useRoute<RouteProp<MainTabParamList, 'Home'>>();
   const insets = useSafeAreaInsets();
@@ -53,6 +53,20 @@ const HomeScreen: React.FC = () => {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [settingsWalletId, setSettingsWalletId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Refresh the own-profile kind-0 on focus so the top-right profile
+  // icon picks up external renames (e.g. via Amber or another client).
+  // The call is cache-respecting: if the 24h kind-0 cache is still
+  // fresh it short-circuits without hitting relays, so switching tabs
+  // doesn't incur a network cost. Pull-to-refresh in MessagesScreen
+  // passes `{ force: true }` for the explicit-user-intent path.
+  // (The greeting text itself reads from WalletContext's userName, not
+  // `profile` — aligning those is tracked separately under #150.)
+  useFocusEffect(
+    useCallback(() => {
+      if (isLoggedIn) refreshProfile();
+    }, [isLoggedIn, refreshProfile]),
+  );
 
   // Handle sendToAddress from navigation params (e.g., from Friends tab zap)
   useEffect(() => {
@@ -178,21 +192,27 @@ const HomeScreen: React.FC = () => {
   return (
     <View style={styles.container}>
       {/* Header area with brand background + faded pig behind carousel */}
-      <View style={[styles.headerBackground, { paddingTop: insets.top + 12 }]}>
+      <View style={styles.headerBackground}>
         <Image
           source={require('../../assets/images/lightning-piggy-intro.png')}
           style={styles.bgPigImage}
           resizeMode="contain"
         />
 
-        <View style={styles.headerRow}>
-          <Text style={styles.hello}>Hello{greetingName ? `, ${greetingName}` : ''}!</Text>
-          <ProfileIcon
-            uri={profile?.picture}
-            size={36}
-            onPress={() => navigation.navigate('Account')}
-          />
-        </View>
+        <TabHeader
+          title={`Hello${greetingName ? `, ${greetingName}` : ''}!`}
+          // Keep Home's greeting at its pre-#139 lighter weight + smaller
+          // size; section titles (Messages/Friends/Learn) stay bolder to
+          // read as section labels.
+          titleStyle={{ fontSize: 22, fontWeight: '400' }}
+          icon={
+            <Image
+              source={require('../../assets/images/Home.png')}
+              style={styles.badgeIcon}
+              resizeMode="contain"
+            />
+          }
+        />
 
         <WalletCarousel
           wallets={wallets}

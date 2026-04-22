@@ -16,7 +16,7 @@ import {
 import Svg, { Rect, Path as SvgPath } from 'react-native-svg';
 import * as Clipboard from 'expo-clipboard';
 import * as nip19 from 'nostr-tools/nip19';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useWallet } from '../contexts/WalletContext';
@@ -76,8 +76,15 @@ const AccountScreen: React.FC = () => {
     updateWalletSettings,
     reorderWallet,
   } = useWallet();
-  const { isLoggedIn, profile, logout, sendDirectMessage, signerType, amberNip44Permission } =
-    useNostr();
+  const {
+    isLoggedIn,
+    profile,
+    logout,
+    sendDirectMessage,
+    signerType,
+    amberNip44Permission,
+    refreshProfile,
+  } = useNostr();
   const [nameInput, setNameInput] = useState(userName);
   const [lnAddressInput, setLnAddressInput] = useState(lightningAddress || '');
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
@@ -136,6 +143,15 @@ const AccountScreen: React.FC = () => {
     AsyncStorage.getItem('dev_mode').then((v) => setDevMode(v === 'true'));
     AsyncStorage.getItem('amber_nip17_enabled').then((v) => setAmberNip17Enabled(v === 'true'));
   }, []);
+
+  // Force-refresh the own-profile kind-0 on focus so the header avatar
+  // and displayed name here pick up external renames (e.g. via Amber or
+  // another client) without waiting for the 24h cache to expire. See #148.
+  useFocusEffect(
+    useCallback(() => {
+      if (isLoggedIn) refreshProfile();
+    }, [isLoggedIn, refreshProfile]),
+  );
 
   const toggleAmberNip17 = useCallback(() => {
     setAmberNip17Enabled((prev) => {
