@@ -11,11 +11,13 @@ import {
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation, CompositeNavigationProp } from '@react-navigation/native';
+import { useNavigation, CompositeNavigationProp, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr } from '../contexts/NostrContext';
-import ProfileIcon from '../components/ProfileIcon';
+import FriendsIcon from '../components/icons/FriendsIcon';
+import TabHeader from '../components/TabHeader';
+import { colors } from '../styles/theme';
 import ContactListItem from '../components/ContactListItem';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import AddFriendSheet from '../components/AddFriendSheet';
@@ -46,7 +48,7 @@ interface ListItem {
 const FriendsScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<FriendsNavigation>();
-  const { isLoggedIn, profile, contacts, refreshContacts, addContact } = useNostr();
+  const { isLoggedIn, profile, contacts, refreshContacts, refreshProfile, addContact } = useNostr();
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
   const [searchExpanded, setSearchExpanded] = useState(false);
@@ -92,6 +94,15 @@ const FriendsScreen: React.FC = () => {
       .then(setPhoneContacts)
       .catch(() => {});
   }, []);
+
+  // Force-refresh the own-profile kind-0 on focus so the top-right
+  // profile icon picks up external renames (e.g. via Amber or another
+  // client) without waiting for the 24h cache to expire. See #148.
+  useFocusEffect(
+    useCallback(() => {
+      if (isLoggedIn) refreshProfile();
+    }, [isLoggedIn, refreshProfile]),
+  );
 
   const combinedList = useMemo(() => {
     const items: ListItem[] = [];
@@ -266,27 +277,8 @@ const FriendsScreen: React.FC = () => {
         style={styles.bgImage}
         resizeMode="contain"
       />
-      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-        <View style={styles.titleRow}>
-          <TouchableOpacity
-            style={styles.homeButton}
-            onPress={() => navigation.navigate('Home', {})}
-          >
-            <Image
-              source={require('../../assets/images/Home.png')}
-              style={styles.homeIcon}
-              resizeMode="contain"
-            />
-          </TouchableOpacity>
-          <Text style={styles.title}>Friends</Text>
-          <View style={{ flex: 1 }} />
-          <ProfileIcon
-            uri={profile?.picture}
-            size={36}
-            onPress={() => navigation.navigate('Account')}
-          />
-        </View>
-
+      <TabHeader title="Friends" icon={<FriendsIcon size={20} color={colors.brandPink} />} />
+      <View style={styles.headerExtras}>
         {/* Filter chips + search toggle */}
         <View style={styles.chipRow}>
           {searchExpanded ? (
