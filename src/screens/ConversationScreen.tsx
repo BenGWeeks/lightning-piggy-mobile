@@ -1206,10 +1206,25 @@ const ConversationScreen: React.FC = () => {
             />
           </Svg>
         </TouchableOpacity>
-        {avatarNode}
-        <Text style={styles.headerName} numberOfLines={1}>
-          {name}
-        </Text>
+        <TouchableOpacity
+          style={styles.headerPeer}
+          onPress={() =>
+            setProfileContact({
+              pubkey,
+              name,
+              picture: picture ?? null,
+              lightningAddress: lightningAddress ?? null,
+              source: 'nostr',
+            })
+          }
+          accessibilityLabel={`Open ${name}'s profile`}
+          testID="chat-header-open-profile"
+        >
+          {avatarNode}
+          <Text style={styles.headerName} numberOfLines={1}>
+            {name}
+          </Text>
+        </TouchableOpacity>
       </View>
 
       <KeyboardAvoidingView
@@ -1491,6 +1506,12 @@ const styles = StyleSheet.create({
   },
   backButton: {
     padding: 4,
+  },
+  headerPeer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   headerAvatar: {
     width: 36,
