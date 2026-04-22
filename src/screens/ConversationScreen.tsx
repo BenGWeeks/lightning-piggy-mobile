@@ -94,7 +94,16 @@ type Item =
       fromMe: boolean;
       url: string;
       createdAt: number;
+    }
+  | {
+      kind: 'dayHeader';
+      id: string;
+      label: string;
     };
+
+// Every Item variant except the dayHeader synthetic row — these are the
+// ones that have a real `createdAt` and participate in chronological sort.
+type TimedItem = Exclude<Item, { kind: 'dayHeader' }>;
 
 // Bolt11 invoices are self-identifying by their `lnXX` HRP, so detection
 // here matches them with or without the `lightning:` prefix.
@@ -186,18 +195,26 @@ function extractSharedContact(text: string): SharedContactRef | null {
 }
 
 function formatTime(epochSeconds: number): string {
+  // Message bubbles always show time only — the date context comes from
+  // the TODAY / YESTERDAY / date dividers that appear between day groups.
   const d = new Date(epochSeconds * 1000);
-  const today = new Date();
-  const sameDay =
-    d.getFullYear() === today.getFullYear() &&
-    d.getMonth() === today.getMonth() &&
-    d.getDate() === today.getDate();
   const hh = d.getHours().toString().padStart(2, '0');
   const mm = d.getMinutes().toString().padStart(2, '0');
-  if (sameDay) return `${hh}:${mm}`;
-  const day = d.getDate().toString().padStart(2, '0');
-  const month = (d.getMonth() + 1).toString().padStart(2, '0');
-  return `${day}/${month} ${hh}:${mm}`;
+  return `${hh}:${mm}`;
+}
+
+function formatDayHeader(epochSeconds: number): string {
+  const d = new Date(epochSeconds * 1000);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+  if (sameDay(d, today)) return 'Today';
+  if (sameDay(d, yesterday)) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function formatRelativeFuture(epochMs: number): string {
@@ -245,8 +262,8 @@ const ConversationScreen: React.FC = () => {
   const [paidHashes, setPaidHashes] = useState<Set<string>>(() => new Set());
   const listRef = useRef<FlatList<Item>>(null);
 
-  const zapItems = useMemo<Item[]>(() => {
-    const out: Item[] = [];
+  const zapItems = useMemo<TimedItem[]>(() => {
+    const out: TimedItem[] = [];
     for (const w of wallets) {
       for (const tx of w.transactions) {
         const cp = tx.zapCounterparty;
@@ -268,7 +285,7 @@ const ConversationScreen: React.FC = () => {
   }, [wallets, pubkey]);
 
   const items = useMemo<Item[]>(() => {
-    const msgItems: Item[] = messages.map((m) => {
+    const msgItems: TimedItem[] = messages.map((m) => {
       const gifUrl = extractGifUrl(m.text);
       if (gifUrl) {
         return {
@@ -301,7 +318,39 @@ const ConversationScreen: React.FC = () => {
     // index 0 renders at the visual bottom (chat default) and the
     // RefreshControl attaches to the visual bottom too, which is what
     // drives the pull-up-to-refresh gesture.
-    return [...msgItems, ...zapItems].sort((a, b) => b.createdAt - a.createdAt);
+    const sorted = [...msgItems, ...zapItems].sort((a, b) => b.createdAt - a.createdAt);
+
+    // Interleave "Today / Yesterday / <date>" dividers between day groups.
+    // With an inverted FlatList the array runs newest → oldest, so each
+    // divider must sit AFTER its group's oldest entry in array order
+    // (= visually above the group's newest entry). This gives the same
+    // chat-standard look as Transactions' date headers.
+    if (sorted.length === 0) return sorted;
+    const withHeaders: Item[] = [];
+    const dayKey = (ts: number) => new Date(ts * 1000).toDateString();
+    let prevKey: string | null = null;
+    let prevTs: number | null = null;
+    for (const it of sorted) {
+      const key = dayKey(it.createdAt);
+      if (prevKey !== null && prevKey !== key && prevTs !== null) {
+        withHeaders.push({
+          kind: 'dayHeader',
+          id: `day-${prevKey}`,
+          label: formatDayHeader(prevTs),
+        });
+      }
+      withHeaders.push(it);
+      prevKey = key;
+      prevTs = it.createdAt;
+    }
+    if (prevKey !== null && prevTs !== null) {
+      withHeaders.push({
+        kind: 'dayHeader',
+        id: `day-${prevKey}`,
+        label: formatDayHeader(prevTs),
+      });
+    }
+    return withHeaders;
   }, [messages, zapItems]);
 
   const load = useCallback(
@@ -738,6 +787,15 @@ const ConversationScreen: React.FC = () => {
 
   const renderItem = useCallback(
     ({ item }: { item: Item }) => {
+      if (item.kind === 'dayHeader') {
+        return (
+          <View style={styles.dayHeaderRow}>
+            <View style={styles.dayHeaderRule} />
+            <Text style={styles.dayHeaderText}>{item.label}</Text>
+            <View style={styles.dayHeaderRule} />
+          </View>
+        );
+      }
       if (item.kind === 'message') {
         const imageUrl = extractImageUrl(item.text);
         if (imageUrl) {
@@ -1439,6 +1497,26 @@ const styles = StyleSheet.create({
   },
   bubbleRowLeft: { justifyContent: 'flex-start' },
   bubbleRowRight: { justifyContent: 'flex-end' },
+  dayHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: 16,
+    paddingBottom: 6,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  dayHeaderRule: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.divider,
+  },
+  dayHeaderText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textSupplementary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
   bubble: {
     maxWidth: '80%',
     paddingHorizontal: 12,
