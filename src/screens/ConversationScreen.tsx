@@ -399,6 +399,11 @@ const ConversationScreen: React.FC = () => {
     const t = setTimeout(() => {
       listRef.current?.scrollToOffset({ offset: 0, animated: initialScrollDoneRef.current });
       initialScrollDoneRef.current = true;
+      // Programmatic scroll to the newest item — the FAB should match
+      // that reality regardless of whether onScroll fires a final
+      // event at offset 0 during the animation.
+      nearBottomRef.current = true;
+      setAtBottom(true);
     }, 50);
     return () => clearTimeout(t);
   }, [items.length]);
@@ -1230,10 +1235,13 @@ const ConversationScreen: React.FC = () => {
             }
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
             onScroll={(e) => {
+              const y = e.nativeEvent.contentOffset.y;
               // "Near bottom" in an inverted list = scroll offset ~0.
-              // 80 px gives enough slack that a brief finger rest still
-              // qualifies as "at bottom" for the auto-scroll effect.
-              const isNear = e.nativeEvent.contentOffset.y < 80;
+              // 200 px of slack covers the contentContainer padding +
+              // one message bubble, so sitting at the newest message
+              // reliably registers as "at bottom" for both the
+              // auto-scroll-on-new-message behaviour and the FAB.
+              const isNear = y < 200;
               nearBottomRef.current = isNear;
               // Mirror to state only when the boolean actually flips —
               // this keeps onScroll cheap while still triggering a
@@ -1245,12 +1253,12 @@ const ConversationScreen: React.FC = () => {
             // fire once per gesture, so they don't interfere with
             // RefreshControl's overscroll detection.
             onScrollEndDrag={(e) => {
-              const isNear = e.nativeEvent.contentOffset.y < 80;
+              const isNear = e.nativeEvent.contentOffset.y < 200;
               nearBottomRef.current = isNear;
               setAtBottom(isNear);
             }}
             onMomentumScrollEnd={(e) => {
-              const isNear = e.nativeEvent.contentOffset.y < 80;
+              const isNear = e.nativeEvent.contentOffset.y < 200;
               nearBottomRef.current = isNear;
               setAtBottom(isNear);
             }}
