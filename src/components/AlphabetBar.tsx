@@ -121,10 +121,10 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 2,
+    paddingTop: 12,
+    paddingBottom: 16,
     width: 22,
     marginLeft: 2,
-    maxHeight: 480,
   },
   alphabetLetterTouch: {
     paddingHorizontal: 2,
