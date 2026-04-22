@@ -160,6 +160,8 @@ const HomeScreen: React.FC = () => {
     setSettingsWalletId(walletId);
   }, []);
 
+  const greetingName = profile?.displayName?.trim() || profile?.name?.trim() || userName || '';
+
   const isOnchainWallet = activeWallet?.walletType === 'onchain';
   const isWatchOnly = isOnchainWallet && activeWallet?.onchainImportMethod !== 'mnemonic';
   const hasActiveConnection = isOnchainWallet ? true : (activeWallet?.isConnected ?? false);
@@ -183,7 +185,7 @@ const HomeScreen: React.FC = () => {
         />
 
         <View style={styles.headerRow}>
-          <Text style={styles.hello}>Hello{userName ? `, ${userName}` : ''}!</Text>
+          <Text style={styles.hello}>Hello{greetingName ? `, ${greetingName}` : ''}!</Text>
           <ProfileIcon
             uri={profile?.picture}
             size={36}
