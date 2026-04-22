@@ -1213,6 +1213,8 @@ const ConversationScreen: React.FC = () => {
               pubkey,
               name,
               picture: picture ?? null,
+              banner: null,
+              nip05: null,
               lightningAddress: lightningAddress ?? null,
               source: 'nostr',
             })
