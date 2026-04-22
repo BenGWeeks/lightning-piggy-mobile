@@ -102,7 +102,18 @@ interface NostrContextType {
   loginWithNsec: (nsec: string) => Promise<{ success: boolean; error?: string }>;
   loginWithAmber: () => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
-  refreshProfile: () => Promise<void>;
+  /**
+   * Re-fetch the logged-in user's kind-0.
+   *
+   * Default (no arg / `force: false`): honours the 24h cache — a no-op
+   * when a cached profile is still fresh. Safe to call from
+   * `useFocusEffect` on any tab without racking up relay round-trips.
+   *
+   * `force: true`: bypass the cache and hit relays. Reserved for
+   * explicit user-initiated refreshes (pull-to-refresh, manual
+   * "reload my profile" actions).
+   */
+  refreshProfile: (opts?: { force?: boolean }) => Promise<void>;
   refreshContacts: () => Promise<void>;
   signZapRequest: (
     recipientPubkey: string,
@@ -623,13 +634,18 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     nostrService.cleanup();
   }, []);
 
-  const refreshProfile = useCallback(async () => {
-    if (!pubkey) return;
-    const readRelays = getReadRelays();
-    // User-initiated — bypass the 24h cache so remote renames are
-    // picked up on the next pull.
-    await loadProfile(pubkey, readRelays, { force: true });
-  }, [pubkey, getReadRelays, loadProfile]);
+  const refreshProfile = useCallback(
+    async (opts?: { force?: boolean }) => {
+      if (!pubkey) return;
+      const readRelays = getReadRelays();
+      // Default respects the 24h cache so useFocusEffect callers don't
+      // thrash the network on every tab switch. `force: true` is for
+      // pull-to-refresh and other explicit user actions where we want
+      // the latest kind-0 regardless of cache freshness.
+      await loadProfile(pubkey, readRelays, { force: opts?.force === true });
+    },
+    [pubkey, getReadRelays, loadProfile],
+  );
 
   const refreshContacts = useCallback(async () => {
     if (!pubkey) return;
@@ -753,16 +769,23 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         // by updating local state + the 24h own-profile cache in-place,
         // otherwise the top-right profile icon keeps the pre-publish
         // avatar/name until the next force-refresh (up to 24h — see #148).
+        //
+        // Apply the same "drop falsy values" rule createProfileEvent uses
+        // (service.ts:520-524) so local state matches exactly what was
+        // published — a caller passing `name: ""` otherwise leaves the
+        // cache with an empty string while the kind-0 on the wire omits
+        // the field entirely.
+        const nullIfEmpty = (v: string | undefined): string | null => (v ? v : null);
         const updatedProfile: NostrProfile = {
           pubkey,
           npub: nip19.npubEncode(pubkey),
-          name: profileData.name ?? null,
-          displayName: profileData.display_name ?? null,
-          picture: profileData.picture ?? null,
-          banner: profileData.banner ?? null,
-          about: profileData.about ?? null,
-          lud16: profileData.lud16 ?? null,
-          nip05: profileData.nip05 ?? null,
+          name: nullIfEmpty(profileData.name),
+          displayName: nullIfEmpty(profileData.display_name),
+          picture: nullIfEmpty(profileData.picture),
+          banner: nullIfEmpty(profileData.banner),
+          about: nullIfEmpty(profileData.about),
+          lud16: nullIfEmpty(profileData.lud16),
+          nip05: nullIfEmpty(profileData.nip05),
         };
         setProfile(updatedProfile);
         InteractionManager.runAfterInteractions(() => {

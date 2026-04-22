@@ -54,9 +54,14 @@ const HomeScreen: React.FC = () => {
   const [settingsWalletId, setSettingsWalletId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Force-refresh the own-profile kind-0 on focus so the top-right
-  // profile icon / greeting picks up external renames (e.g. via Amber or
-  // another client) without waiting for the 24h cache to expire. See #148.
+  // Refresh the own-profile kind-0 on focus so the top-right profile
+  // icon picks up external renames (e.g. via Amber or another client).
+  // The call is cache-respecting: if the 24h kind-0 cache is still
+  // fresh it short-circuits without hitting relays, so switching tabs
+  // doesn't incur a network cost. Pull-to-refresh in MessagesScreen
+  // passes `{ force: true }` for the explicit-user-intent path.
+  // (The greeting text itself reads from WalletContext's userName, not
+  // `profile` — aligning those is tracked separately under #150.)
   useFocusEffect(
     useCallback(() => {
       if (isLoggedIn) refreshProfile();
