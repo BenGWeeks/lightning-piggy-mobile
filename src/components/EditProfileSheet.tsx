@@ -96,7 +96,7 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
       mediaTypes: ['images'],
       allowsEditing: true,
       aspect,
-      quality: 0.8,
+      quality: 1,
     });
 
     if (result.canceled || !result.assets?.[0]) return;

@@ -9,16 +9,22 @@ const NOSTR_BUILD_UPLOAD_URL = 'https://nostr.build/api/v2/upload/files';
  * (GPS coords, capture timestamp, camera make/model, …) before it leaves the
  * device. The fresh JPEG has no metadata chunks at all, so we don't need to
  * parse or allowlist individual tags.
+ *
+ * Base64 is requested up-front because Blossom uploads need it (reading
+ * `file://` URIs is unreliable on Android in RN). If the native module fails
+ * to return a base64 payload we throw so callers don't silently proceed with
+ * a null value and fail deeper in the upload path.
  */
-export async function stripImageMetadata(
-  uri: string,
-): Promise<{ uri: string; base64: string | null }> {
+export async function stripImageMetadata(uri: string): Promise<{ uri: string; base64: string }> {
   const result = await manipulateAsync(uri, [], {
     compress: 0.9,
     format: SaveFormat.JPEG,
     base64: true,
   });
-  return { uri: result.uri, base64: result.base64 ?? null };
+  if (!result.base64) {
+    throw new Error('Failed to strip image metadata: no base64 returned');
+  }
+  return { uri: result.uri, base64: result.base64 };
 }
 
 export async function uploadToNostrBuild(imageUri: string): Promise<string> {
