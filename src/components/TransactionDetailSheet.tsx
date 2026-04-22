@@ -133,12 +133,17 @@ const TransactionDetailSheet: React.FC<Props> = ({
 
   useEffect(() => {
     setEnrichment({});
-    if (!visible || !tx || !tx.paymentHash) return;
+    if (!visible || !tx) return;
+    // Some NWC backends return transactions whose payment_hash is null /
+    // truncated / otherwise not a 64-char hex string; skip those outright
+    // so we don't kick off a lookup the backend will reject (#98).
+    if (!nwcService.isValidPaymentHash(tx.paymentHash)) return;
     if (tx.preimage && tx.invoice) return;
     if (!activeWallet || activeWallet.walletType === 'onchain') return;
+    const paymentHash = tx.paymentHash;
     let cancelled = false;
     (async () => {
-      const result = await nwcService.lookupInvoice(activeWallet.id, tx.paymentHash!);
+      const result = await nwcService.lookupInvoice(activeWallet.id, paymentHash);
       if (!cancelled && result) setEnrichment(result);
     })();
     return () => {
