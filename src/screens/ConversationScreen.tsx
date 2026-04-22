@@ -4,6 +4,8 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  Pressable,
+  Modal,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -30,6 +32,7 @@ import { colors } from '../styles/theme';
 import { uploadImage } from '../services/imageUploadService';
 import SendSheet from '../components/SendSheet';
 import AttachSheet from '../components/AttachSheet';
+import GifPickerSheet from '../components/GifPickerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
 import TransactionDetailSheet, {
   TransactionDetailData,
@@ -54,6 +57,7 @@ import {
   buildProfileRelayHints,
   DEFAULT_RELAYS,
 } from '../services/nostrService';
+import { extractGifUrl, isConfigured as isGifConfigured, Gif } from '../services/giphyService';
 import type { NostrProfile } from '../types/nostr';
 import type { RootStackParamList } from '../navigation/types';
 
@@ -82,6 +86,13 @@ type Item =
       id: string;
       fromMe: boolean;
       location: SharedLocation;
+      createdAt: number;
+    }
+  | {
+      kind: 'gif';
+      id: string;
+      fromMe: boolean;
+      url: string;
       createdAt: number;
     };
 
@@ -227,6 +238,8 @@ const ConversationScreen: React.FC = () => {
   const [attachSheetOpen, setAttachSheetOpen] = useState(false);
   const [invoiceSheetOpen, setInvoiceSheetOpen] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
+  const [gifPickerOpen, setGifPickerOpen] = useState(false);
+  const [fullscreenGifUrl, setFullscreenGifUrl] = useState<string | null>(null);
   const [sharingLocation, setSharingLocation] = useState(false);
   // Payment hashes of outgoing invoices the active NWC wallet reports paid.
   const [paidHashes, setPaidHashes] = useState<Set<string>>(() => new Set());
@@ -256,6 +269,16 @@ const ConversationScreen: React.FC = () => {
 
   const items = useMemo<Item[]>(() => {
     const msgItems: Item[] = messages.map((m) => {
+      const gifUrl = extractGifUrl(m.text);
+      if (gifUrl) {
+        return {
+          kind: 'gif',
+          id: `dm-${m.id}`,
+          fromMe: m.fromMe,
+          url: gifUrl,
+          createdAt: m.createdAt,
+        };
+      }
       const loc = parseGeoMessage(m.text);
       if (loc) {
         return {
@@ -656,6 +679,33 @@ const ConversationScreen: React.FC = () => {
     [pubkey, sendDirectMessage, contacts, relays],
   );
 
+  const handleSendGif = useCallback(
+    async (gif: Gif) => {
+      setGifPickerOpen(false);
+      setAttachSheetOpen(false);
+      const payload = gif.url;
+      const result = await sendDirectMessage(pubkey, payload);
+      if (!result.success) {
+        Alert.alert('Send failed', result.error ?? 'Could not send GIF.');
+        return;
+      }
+      // `local-<ms>` on its own collides if two sends land in the same
+      // millisecond (e.g. a double-tap on a slow network). Append a
+      // short random suffix so the FlatList keyExtractor stays unique.
+      const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: localId,
+          fromMe: true,
+          text: payload,
+          createdAt: Math.floor(Date.now() / 1000),
+        },
+      ]);
+    },
+    [pubkey, sendDirectMessage],
+  );
+
   const openLocation = useCallback((loc: SharedLocation) => {
     const url = buildOsmViewUrl(loc);
     Linking.openURL(url).catch(() => {
@@ -891,6 +941,36 @@ const ConversationScreen: React.FC = () => {
                 {formatTime(item.createdAt)}
               </Text>
             </View>
+          </View>
+        );
+      }
+      if (item.kind === 'gif') {
+        return (
+          <View
+            style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
+          >
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => setFullscreenGifUrl(item.url)}
+              style={[styles.gifCard, item.fromMe ? styles.gifCardMe : styles.gifCardThem]}
+              accessibilityLabel={
+                item.fromMe ? 'GIF sent, tap to expand' : 'GIF received, tap to expand'
+              }
+              accessibilityRole="imagebutton"
+              testID={`conversation-gif-${item.id}`}
+            >
+              <ExpoImage
+                source={{ uri: item.url }}
+                style={styles.gifImage}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                transition={150}
+                accessibilityIgnoresInvertColors
+              />
+              <Text style={[styles.gifTime, item.fromMe && styles.gifTimeMe]}>
+                {formatTime(item.createdAt)}
+              </Text>
+            </TouchableOpacity>
           </View>
         );
       }
@@ -1153,7 +1233,47 @@ const ConversationScreen: React.FC = () => {
           // to ~15 % of screen height.
           setContactPickerOpen(true);
         }}
+        onSendGif={
+          isGifConfigured()
+            ? () => {
+                // Same stack-without-dismiss pattern as FriendPickerSheet
+                // above — GifPickerSheet opens over the AttachSheet.
+                setGifPickerOpen(true);
+              }
+            : undefined
+        }
       />
+      <GifPickerSheet
+        visible={gifPickerOpen}
+        onClose={() => {
+          setGifPickerOpen(false);
+          setAttachSheetOpen(false);
+        }}
+        onSelect={handleSendGif}
+      />
+      <Modal
+        visible={fullscreenGifUrl !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setFullscreenGifUrl(null)}
+      >
+        <Pressable
+          style={styles.fullscreenBackdrop}
+          onPress={() => setFullscreenGifUrl(null)}
+          accessibilityLabel="Close full-screen GIF"
+          testID="conversation-gif-fullscreen"
+        >
+          {fullscreenGifUrl ? (
+            <ExpoImage
+              source={{ uri: fullscreenGifUrl }}
+              style={styles.fullscreenImage}
+              contentFit="contain"
+              cachePolicy="memory-disk"
+              accessibilityIgnoresInvertColors
+            />
+          ) : null}
+        </Pressable>
+      </Modal>
       <FriendPickerSheet
         visible={contactPickerOpen}
         onClose={() => {
@@ -1649,6 +1769,55 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.background,
+  },
+  gifCard: {
+    // Match contact / location / invoice card width so GIF bubbles don't
+    // look oddly narrow next to the other attachment types.
+    maxWidth: '85%',
+    minWidth: 240,
+    borderRadius: 14,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  gifCardMe: {
+    backgroundColor: colors.brandPink,
+  },
+  gifCardThem: {
+    backgroundColor: colors.white,
+  },
+  gifImage: {
+    // Concrete width matches the contact/location cards' `minWidth: 240`
+    // so the GIF card sizes to the same visual footprint as the other
+    // attachment types (text-driven content would otherwise leave the
+    // gifCard stretched to its `maxWidth` while contact cards sit near
+    // their minWidth).
+    width: 240,
+    height: 240,
+    backgroundColor: colors.background,
+  },
+  fullscreenBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fullscreenImage: {
+    width: '100%',
+    height: '100%',
+  },
+  gifTime: {
+    fontSize: 10,
+    color: colors.textSupplementary,
+    alignSelf: 'flex-end',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  gifTimeMe: {
+    color: 'rgba(255,255,255,0.85)',
   },
   locationCard: {
     maxWidth: '85%',

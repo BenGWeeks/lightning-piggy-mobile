@@ -6,7 +6,7 @@ import {
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
-import { MapPin, Zap, Receipt, UserRound, ImagePlus } from 'lucide-react-native';
+import { MapPin, Zap, Receipt, UserRound, ImagePlus, Smile } from 'lucide-react-native';
 import { colors } from '../styles/theme';
 
 interface Props {
@@ -17,6 +17,7 @@ interface Props {
   onSendInvoice?: () => void;
   onShareContact?: () => void;
   onSendImage?: () => void;
+  onSendGif?: () => void;
 }
 
 const AttachSheet: React.FC<Props> = ({
@@ -27,6 +28,7 @@ const AttachSheet: React.FC<Props> = ({
   onSendInvoice,
   onShareContact,
   onSendImage,
+  onSendGif,
 }) => {
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => {
@@ -35,9 +37,22 @@ const AttachSheet: React.FC<Props> = ({
       (onSendZap ? 1 : 0) +
       (onSendInvoice ? 1 : 0) +
       (onShareContact ? 1 : 0) +
-      (onSendImage ? 1 : 0);
-    return [rows >= 5 ? '60%' : rows >= 4 ? '52%' : rows >= 3 ? '44%' : rows === 2 ? '36%' : '28%'];
-  }, [onSendZap, onSendInvoice, onShareContact, onSendImage]);
+      (onSendImage ? 1 : 0) +
+      (onSendGif ? 1 : 0);
+    return [
+      rows >= 6
+        ? '68%'
+        : rows >= 5
+          ? '60%'
+          : rows >= 4
+            ? '52%'
+            : rows >= 3
+              ? '44%'
+              : rows === 2
+                ? '36%'
+                : '28%',
+    ];
+  }, [onSendZap, onSendInvoice, onShareContact, onSendImage, onSendGif]);
 
   useEffect(() => {
     if (visible) {
@@ -145,6 +160,22 @@ const AttachSheet: React.FC<Props> = ({
               <Text style={styles.rowSubtitle}>
                 Pick a photo — uploaded to your Blossom server.
               </Text>
+            </View>
+          </TouchableOpacity>
+        ) : null}
+        {onSendGif ? (
+          <TouchableOpacity
+            style={styles.row}
+            onPress={onSendGif}
+            accessibilityLabel="Send a GIF"
+            testID="attach-send-gif"
+          >
+            <View style={styles.iconBadge}>
+              <Smile size={22} color={colors.white} />
+            </View>
+            <View style={styles.rowText}>
+              <Text style={styles.rowTitle}>Send GIF</Text>
+              <Text style={styles.rowSubtitle}>Pick a reaction GIF from GIPHY (G-rated only).</Text>
             </View>
           </TouchableOpacity>
         ) : null}
