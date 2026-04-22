@@ -1248,20 +1248,6 @@ const ConversationScreen: React.FC = () => {
               // re-render for the FAB's appearance.
               setAtBottom((prev) => (prev !== isNear ? isNear : prev));
             }}
-            // Make sure the final resting offset — which onScroll can
-            // miss under throttling — always updates the FAB. These
-            // fire once per gesture, so they don't interfere with
-            // RefreshControl's overscroll detection.
-            onScrollEndDrag={(e) => {
-              const isNear = e.nativeEvent.contentOffset.y < 200;
-              nearBottomRef.current = isNear;
-              setAtBottom(isNear);
-            }}
-            onMomentumScrollEnd={(e) => {
-              const isNear = e.nativeEvent.contentOffset.y < 200;
-              nearBottomRef.current = isNear;
-              setAtBottom(isNear);
-            }}
             scrollEventThrottle={100}
           />
         )}
