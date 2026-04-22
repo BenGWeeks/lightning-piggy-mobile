@@ -461,11 +461,14 @@ export function isValidPaymentHash(hash: string | null | undefined): hash is str
   return typeof hash === 'string' && PAYMENT_HASH_RE.test(hash);
 }
 
-// Per-session cache of payment hashes the NWC backend has already refused
-// to look up (or which were malformed). Some backends return transactions
-// whose `payment_hash` is null / truncated / otherwise rejected by the
-// NIP-47 `lookup_invoice` call — retrying those every refresh floods the
-// Metro log and burns NWC request budget (#98).
+// Per-session cache of payment hashes the NWC backend has *terminally*
+// refused (e.g. NIP-47 NOT_FOUND, or the SDK's "Missing/invalid
+// payment_hash" input rejection). Skipping these on subsequent calls
+// avoids flooding the Metro log every refresh and burning NWC request
+// budget (#98). Transient errors (relay disconnects, timeouts,
+// INTERNAL / RATE_LIMITED) are intentionally NOT cached so paid-status
+// polling (ConversationScreen) and expectPayment detection
+// (WalletContext) still settle when conditions recover.
 const failedLookupCache = new Map<string, Set<string>>();
 
 function hasFailedLookup(walletId: string, paymentHash: string): boolean {
@@ -479,6 +482,24 @@ function recordFailedLookup(walletId: string, paymentHash: string): void {
     failedLookupCache.set(walletId, set);
   }
   set.add(paymentHash);
+}
+
+// Errors that mean "this hash isn't coming back from this backend".
+// Anything else is treated as transient — caching transient failures
+// would permanently silence valid paid-status polling once a single
+// relay timeout slipped through.
+function isTerminalLookupError(error: unknown): boolean {
+  if (!error) return false;
+  const message = error instanceof Error ? error.message : String(error);
+  if (/missing payment_hash|invalid payment_hash|not[ _]?found/i.test(message)) {
+    return true;
+  }
+  // NIP-47 error responses surface a `code` on the thrown error object.
+  const code = (error as { code?: unknown })?.code;
+  if (typeof code === 'string' && code.toUpperCase() === 'NOT_FOUND') {
+    return true;
+  }
+  return false;
 }
 
 // LNbits (and some other NWC backends) omit preimage/invoice from
@@ -507,7 +528,9 @@ export async function lookupInvoice(
       paid,
     };
   } catch (error) {
-    recordFailedLookup(walletId, paymentHash);
+    if (isTerminalLookupError(error)) {
+      recordFailedLookup(walletId, paymentHash);
+    }
     console.warn(`lookupInvoice failed for ${walletId} (${paymentHash.slice(0, 12)}…):`, error);
     return null;
   }
