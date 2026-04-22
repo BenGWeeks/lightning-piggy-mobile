@@ -479,6 +479,98 @@ Profile pictures and banners are uploaded via the nostr.build API:
 - **Response**: NIP-94 event with `url` tag containing the hosted image URL
 - **Image picker**: `expo-image-picker` with 1:1 crop for avatars, 3:1 for banners
 
+== Direct Messages (NIP-04 + NIP-17)
+
+The Messages tab is a conversations inbox backed by two Nostr DM specs running side-by-side.
+
+=== Protocols
+
+- **https://github.com/nostr-protocol/nips/blob/master/04.md[NIP-04] — legacy.**
+  Single kind-4 event with AES-256-CBC content. Sender pubkey, recipient `p` tag, and `created_at` are all plaintext on the wire — the spec notes this leaks metadata. Deprecated by the spec text itself in favour of NIP-17.
+- **https://github.com/nostr-protocol/nips/blob/master/17.md[NIP-17] — the modern form.**
+  Three layers: kind-14 *rumor* (unsigned plaintext message) → kind-13 *seal* (NIP-44-encrypted, signed by the real sender) → kind-1059 *gift wrap* (NIP-44-encrypted to the recipient, signed by a disposable ephemeral key). Only the outermost wrap hits relays. Visible fields on the wrap: random `pubkey`, randomized `created_at` (up to 2 days in the past), `kind: 1059`, and a `p` tag for the recipient. Sender identity, message kind, tags, and true send time are all hidden inside the payload.
+- **https://github.com/nostr-protocol/nips/blob/master/44.md[NIP-44] — the cipher.**
+  secp256k1 ECDH + HKDF + ChaCha20 + HMAC-SHA256. The encryption primitive that NIP-17 uses at both layers. Not a DM spec on its own; appears in this codebase only as the tool NIP-17 calls for sealing.
+
+The app accepts both inbound formats and currently sends only NIP-04. Migrating outbound to NIP-17 is tracked under the send-side NIP-17 issue; the inbox work here is explicitly the read-side.
+
+=== Data flow (inbox list)
+
+[source]
+----
+refreshDmInbox(NostrContext)
+  │
+  ├─ fetchInboxDmEvents(myPubkey, relays)
+  │    three parallel pool.querySync calls:
+  │      {kinds:[4],    authors:[me], limit:500}
+  │      {kinds:[4],    #p:[me],      limit:500}
+  │      {kinds:[1059], #p:[me],      limit:500}
+  │
+  ├─ per kind-4 event:
+  │    1. derive partner = fromMe ? p-tag : ev.pubkey
+  │    2. if partner not in followPubkeys → skip (no decrypt)        ←── follow filter
+  │    3. decryptNip04ViaSigner(partner, ev.content)  (nsec or Amber)
+  │    4. push DmInboxEntry
+  │
+  ├─ per kind-1059 event (Amber path):
+  │    0. if NIP-17 toggle off → skip whole block
+  │    1. cache.get(wrap.id) → if present and partner still followed, push
+  │    2. unwrapWrapViaNip44(wrap, amberNip44DecryptSilent)
+  │       - verifyEvent(wrap) sig check
+  │       - layer 1: Amber silent nip44_decrypt → seal JSON
+  │       - parseSeal runtime validator (kind === 13, fields typed)
+  │       - layer 2: Amber silent nip44_decrypt → rumor JSON
+  │       - parseRumor runtime validator
+  │       - require rumor.pubkey === seal.pubkey (NIP-17 spec)
+  │    3. partnerFromRumor(rumor, myPubkey)
+  │    4. if partner not in followPubkeys → drop (no cache write)     ←── follow filter
+  │    5. cache.set(wrap.id, entry); push DmInboxEntry
+  │    6. on PERMISSION_NOT_GRANTED: set amberNip44Permission='denied'
+  │       and stop iterating (no dialog flood)
+  │
+  ├─ per kind-1059 event (nsec path):
+  │    same shape but via unwrapWrapNsec → nip59.unwrapEvent
+  │
+  └─ setDmInbox(entries) — identity-change guard first
+----
+
+The `followPubkeys` gate is a data-layer invariant: plaintext for non-followed senders never enters `dmInbox` React state or the persistent `amber_nip17_cache_v1` AsyncStorage map. `buildDmSummaries` re-applies the same filter when materialising summaries so that unfollowing a contact removes their rows on the next render even before the cache is next re-fetched.
+
+=== Amber silent-path for NIP-17
+
+Amber's `com.greenart7c3.nostrsigner` provider exposes two ways to call `nip44_decrypt`:
+
+1. **ContentResolver fast-path** (silent) — used by our `nip44DecryptSilent` binding. Resolves only if the user has granted blanket permission for the op; rejects with `PERMISSION_NOT_GRANTED` otherwise.
+2. **Intent fallback** (dialog) — used by the normal `requestNip44Decrypt` binding. Shows an approval dialog on every call unless the user previously ticked "Remember my choice".
+
+The inbox refresh uses (1) exclusively so we never fan out one dialog per gift wrap when the user toggles NIP-17 support on for the first time. A failed silent call is caught, the denial is surfaced as `amberNip44Permission === 'denied'`, and Account shows a single grant-permission button that fires a one-off encrypt+decrypt probe round-trip through (2) — one dialog, user taps "Remember my choice", subsequent refreshes are silent.
+
+`ConversationScreen`'s per-thread `fetchConversation` falls back to the Intent path for uncached wraps because that screen is user-initiated and the volume is small.
+
+=== Persistent wrap-id cache
+
+`amber_nip17_cache_v1` in AsyncStorage maps `wrap.id` → decrypted `DmInboxEntry`. Only rumors from followed senders ever land here. Capped at 5000 entries, trimmed by newest `createdAt`. Cleared on logout along with the `amber_nip17_enabled` toggle flag.
+
+A single-flight guard (`useRef<Promise>`) coalesces overlapping `refreshDmInbox` calls so the `useFocusEffect` firing on tab focus doesn't race a pull-to-refresh on the same cache.
+
+=== Shared helpers
+
+- `src/utils/nip17Unwrap.ts` owns the two-layer decrypt pipeline used by both `refreshDmInbox` and `fetchConversation`. Runtime type-guards (`parseSeal`, `parseRumor`) reject malformed payloads; `verifyWrapSig` runs `verifyEvent` before trusting the wrap's `pubkey` / `content`. `unwrapWrapViaNip44(wrap, decryptNip44Callback)` works for any signer; `unwrapWrapNsec(wrap, secretKey)` is the nsec-specialised fast path.
+- `partnerFromRumor(rumor, viewerPubkey)` centralises the "fromMe vs incoming" determination.
+- `getMemoisedSecretKey(pubkey)` in `NostrContext` reads + bech32-decodes the nsec from SecureStore once per session; cleared on logout.
+
+=== Following-only filter
+
+"Following only" is treated as a safety boundary for the kids-oriented UX: DMs from strangers are hidden from the inbox, the cache, and the thread view. The filter is enforced in three places:
+
+1. `refreshDmInbox` — gates decrypt attempts (NIP-04) or cache writes + state commits (NIP-17).
+2. `buildDmSummaries` — re-applies when summaries are built from state, so unfollowing is immediately reflected without waiting for the next fetch.
+3. `MessagesScreen` — defence-in-depth filter for zap-only rows and any stale state.
+
+=== Time window
+
+The 30 / 90-day chip on MessagesScreen filters summaries by `lastActivityAt` at render time. It's user-selectable and persists via `AsyncStorage.messages_window_days`. The fetch itself isn't time-bounded (relays return the most recent 500 matching events); the chip just narrows what's displayed.
+
 == Deep Linking
 
 - Contact profiles link to Primal via `https://primal.net/p/{npub}`
@@ -503,6 +595,9 @@ E2E tests use Maestro with accessibility labels (never coordinates):
 | `test-alphabet-m.yaml` | Alphabet sidebar navigation (M, S, A)
 | `test-keyboard-sheet.yaml` | Bottom sheet slides up with keyboard
 | `test-login-perf.yaml` | Login to Friends tab responsiveness
+| `test-amber-import-key.yaml` | Amber cold-start: key import + permissions mode
+| `test-login-amber.yaml` | Amber-signer login end-to-end
+| `test-messages-search.yaml` | Messages inbox search filters by preview text
 |===
 
 == Safety

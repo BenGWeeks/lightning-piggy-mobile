@@ -4,6 +4,8 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  Pressable,
+  Modal,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -16,9 +18,10 @@ import {
   StyleSheet,
 } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { Zap, Send, Plus, MapPin } from 'lucide-react-native';
+import { Zap, Send, Plus, MapPin, ArrowDown } from 'lucide-react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
+import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -26,8 +29,10 @@ import { useNostr } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import * as nwcService from '../services/nwcService';
 import { colors } from '../styles/theme';
+import { uploadImage } from '../services/imageUploadService';
 import SendSheet from '../components/SendSheet';
 import AttachSheet from '../components/AttachSheet';
+import GifPickerSheet from '../components/GifPickerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
 import TransactionDetailSheet, {
   TransactionDetailData,
@@ -52,6 +57,7 @@ import {
   buildProfileRelayHints,
   DEFAULT_RELAYS,
 } from '../services/nostrService';
+import { extractGifUrl, isConfigured as isGifConfigured, Gif } from '../services/giphyService';
 import type { NostrProfile } from '../types/nostr';
 import type { RootStackParamList } from '../navigation/types';
 
@@ -81,11 +87,40 @@ type Item =
       fromMe: boolean;
       location: SharedLocation;
       createdAt: number;
+    }
+  | {
+      kind: 'gif';
+      id: string;
+      fromMe: boolean;
+      url: string;
+      createdAt: number;
+    }
+  | {
+      kind: 'dayHeader';
+      id: string;
+      label: string;
     };
+
+// Every Item variant except the dayHeader synthetic row — these are the
+// ones that have a real `createdAt` and participate in chronological sort.
+type TimedItem = Exclude<Item, { kind: 'dayHeader' }>;
 
 // Bolt11 invoices are self-identifying by their `lnXX` HRP, so detection
 // here matches them with or without the `lightning:` prefix.
 const INVOICE_REGEX = /\b(?:lightning:)?(ln(?:bc|tb|ts|bs)[0-9a-z]{50,})\b/i;
+
+// Image URLs we render inline in message bubbles. We only match trusted image
+// extensions so we don't accidentally fetch arbitrary URLs as images.
+const IMAGE_URL_REGEX = /^(https?:\/\/\S+?\.(?:png|jpe?g|gif|webp|heic|heif))(?:\?\S*)?$/i;
+
+function extractImageUrl(text: string): string | null {
+  if (!text) return null;
+  // Only treat a message as an image when the entire body is the URL. This
+  // avoids silently dropping surrounding text like "check this https://…jpg".
+  const trimmed = text.trim();
+  const match = trimmed.match(IMAGE_URL_REGEX);
+  return match ? match[0] : null;
+}
 
 // Lightning addresses look like plain email addresses — `alice@example.com`
 // — so we only treat a message as a payable LN address when the sender
@@ -160,18 +195,26 @@ function extractSharedContact(text: string): SharedContactRef | null {
 }
 
 function formatTime(epochSeconds: number): string {
+  // Message bubbles always show time only — the date context comes from
+  // the TODAY / YESTERDAY / date dividers that appear between day groups.
   const d = new Date(epochSeconds * 1000);
-  const today = new Date();
-  const sameDay =
-    d.getFullYear() === today.getFullYear() &&
-    d.getMonth() === today.getMonth() &&
-    d.getDate() === today.getDate();
   const hh = d.getHours().toString().padStart(2, '0');
   const mm = d.getMinutes().toString().padStart(2, '0');
-  if (sameDay) return `${hh}:${mm}`;
-  const day = d.getDate().toString().padStart(2, '0');
-  const month = (d.getMonth() + 1).toString().padStart(2, '0');
-  return `${day}/${month} ${hh}:${mm}`;
+  return `${hh}:${mm}`;
+}
+
+function formatDayHeader(epochSeconds: number): string {
+  const d = new Date(epochSeconds * 1000);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+  if (sameDay(d, today)) return 'Today';
+  if (sameDay(d, yesterday)) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function formatRelativeFuture(epochMs: number): string {
@@ -188,7 +231,8 @@ const ConversationScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { pubkey, name, picture, lightningAddress } = route.params;
 
-  const { isLoggedIn, fetchConversation, sendDirectMessage, contacts, relays } = useNostr();
+  const { isLoggedIn, fetchConversation, sendDirectMessage, signEvent, contacts, relays } =
+    useNostr();
   const { wallets, activeWalletId, activeWallet } = useWallet();
 
   const [messages, setMessages] = useState<
@@ -198,6 +242,7 @@ const ConversationScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [sendSheetOpen, setSendSheetOpen] = useState(false);
   const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState(false);
@@ -210,13 +255,15 @@ const ConversationScreen: React.FC = () => {
   const [attachSheetOpen, setAttachSheetOpen] = useState(false);
   const [invoiceSheetOpen, setInvoiceSheetOpen] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
+  const [gifPickerOpen, setGifPickerOpen] = useState(false);
+  const [fullscreenGifUrl, setFullscreenGifUrl] = useState<string | null>(null);
   const [sharingLocation, setSharingLocation] = useState(false);
   // Payment hashes of outgoing invoices the active NWC wallet reports paid.
   const [paidHashes, setPaidHashes] = useState<Set<string>>(() => new Set());
   const listRef = useRef<FlatList<Item>>(null);
 
-  const zapItems = useMemo<Item[]>(() => {
-    const out: Item[] = [];
+  const zapItems = useMemo<TimedItem[]>(() => {
+    const out: TimedItem[] = [];
     for (const w of wallets) {
       for (const tx of w.transactions) {
         const cp = tx.zapCounterparty;
@@ -238,7 +285,17 @@ const ConversationScreen: React.FC = () => {
   }, [wallets, pubkey]);
 
   const items = useMemo<Item[]>(() => {
-    const msgItems: Item[] = messages.map((m) => {
+    const msgItems: TimedItem[] = messages.map((m) => {
+      const gifUrl = extractGifUrl(m.text);
+      if (gifUrl) {
+        return {
+          kind: 'gif',
+          id: `dm-${m.id}`,
+          fromMe: m.fromMe,
+          url: gifUrl,
+          createdAt: m.createdAt,
+        };
+      }
       const loc = parseGeoMessage(m.text);
       if (loc) {
         return {
@@ -261,7 +318,39 @@ const ConversationScreen: React.FC = () => {
     // index 0 renders at the visual bottom (chat default) and the
     // RefreshControl attaches to the visual bottom too, which is what
     // drives the pull-up-to-refresh gesture.
-    return [...msgItems, ...zapItems].sort((a, b) => b.createdAt - a.createdAt);
+    const sorted = [...msgItems, ...zapItems].sort((a, b) => b.createdAt - a.createdAt);
+
+    // Interleave "Today / Yesterday / <date>" dividers between day groups.
+    // With an inverted FlatList the array runs newest → oldest, so each
+    // divider must sit AFTER its group's oldest entry in array order
+    // (= visually above the group's newest entry). This gives the same
+    // chat-standard look as Transactions' date headers.
+    if (sorted.length === 0) return sorted;
+    const withHeaders: Item[] = [];
+    const dayKey = (ts: number) => new Date(ts * 1000).toDateString();
+    let prevKey: string | null = null;
+    let prevTs: number | null = null;
+    for (const it of sorted) {
+      const key = dayKey(it.createdAt);
+      if (prevKey !== null && prevKey !== key && prevTs !== null) {
+        withHeaders.push({
+          kind: 'dayHeader',
+          id: `day-${prevKey}`,
+          label: formatDayHeader(prevTs),
+        });
+      }
+      withHeaders.push(it);
+      prevKey = key;
+      prevTs = it.createdAt;
+    }
+    if (prevKey !== null && prevTs !== null) {
+      withHeaders.push({
+        kind: 'dayHeader',
+        id: `day-${prevKey}`,
+        label: formatDayHeader(prevTs),
+      });
+    }
+    return withHeaders;
   }, [messages, zapItems]);
 
   const load = useCallback(
@@ -292,6 +381,11 @@ const ConversationScreen: React.FC = () => {
   // `onScroll` so a new message doesn't yank them back from an upward
   // scroll they did deliberately.
   const nearBottomRef = useRef(true);
+  // `atBottom` drives the floating scroll-to-bottom button's visibility.
+  // nearBottomRef alone is a ref so the FlatList onScroll handler can
+  // update it without re-rendering; the mirror state re-renders on
+  // actual transitions so the FAB fades in/out.
+  const [atBottom, setAtBottom] = useState(true);
   const initialScrollDoneRef = useRef(false);
   useEffect(() => {
     if (items.length === 0) {
@@ -305,6 +399,11 @@ const ConversationScreen: React.FC = () => {
     const t = setTimeout(() => {
       listRef.current?.scrollToOffset({ offset: 0, animated: initialScrollDoneRef.current });
       initialScrollDoneRef.current = true;
+      // Programmatic scroll to the newest item — the FAB should match
+      // that reality regardless of whether onScroll fires a final
+      // event at offset 0 during the animation.
+      nearBottomRef.current = true;
+      setAtBottom(true);
     }, 50);
     return () => clearTimeout(t);
   }, [items.length]);
@@ -564,6 +663,71 @@ const ConversationScreen: React.FC = () => {
     }
   }, [sharingLocation, name, pubkey, sendDirectMessage]);
 
+  // Shared send-image path for both gallery and camera entry points.
+  // Uploads to the user's configured Blossom server (or nostr.build
+  // fallback) then DMs the returned URL to the conversation partner.
+  const uploadAndSendImage = useCallback(
+    async (localUri: string, base64: string | null | undefined) => {
+      setUploadingImage(true);
+      try {
+        const url = await uploadImage(localUri, signEvent, base64);
+        const sendResult = await sendDirectMessage(pubkey, url);
+        if (!sendResult.success) {
+          Alert.alert('Send failed', sendResult.error ?? 'Could not send image.');
+          return;
+        }
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `local-${Date.now()}`,
+            fromMe: true,
+            text: url,
+            createdAt: Math.floor(Date.now() / 1000),
+          },
+        ]);
+      } catch (error) {
+        Alert.alert('Upload failed', error instanceof Error ? error.message : 'Please try again.');
+      } finally {
+        setUploadingImage(false);
+      }
+    },
+    [signEvent, sendDirectMessage, pubkey],
+  );
+
+  const handlePickAndSendImage = useCallback(async () => {
+    if (!isLoggedIn || uploadingImage || sending) return;
+    setAttachSheetOpen(false);
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission needed', 'Allow photo library access to send images.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.8,
+      base64: true,
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+    await uploadAndSendImage(result.assets[0].uri, result.assets[0].base64);
+  }, [isLoggedIn, uploadingImage, sending, uploadAndSendImage]);
+
+  const handleTakeAndSendPhoto = useCallback(async () => {
+    if (!isLoggedIn || uploadingImage || sending) return;
+    setAttachSheetOpen(false);
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission needed', 'Allow camera access to take and send photos.');
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images'],
+      quality: 0.8,
+      base64: true,
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+    await uploadAndSendImage(result.assets[0].uri, result.assets[0].base64);
+  }, [isLoggedIn, uploadingImage, sending, uploadAndSendImage]);
+
   // Share another contact's Nostr profile into this conversation. Payload
   // mirrors the ContactProfileSheet → "Share with friend" format: a
   // human-readable first line plus a NIP-21 `nostr:nprofile…` URI that
@@ -597,6 +761,33 @@ const ConversationScreen: React.FC = () => {
     [pubkey, sendDirectMessage, contacts, relays],
   );
 
+  const handleSendGif = useCallback(
+    async (gif: Gif) => {
+      setGifPickerOpen(false);
+      setAttachSheetOpen(false);
+      const payload = gif.url;
+      const result = await sendDirectMessage(pubkey, payload);
+      if (!result.success) {
+        Alert.alert('Send failed', result.error ?? 'Could not send GIF.');
+        return;
+      }
+      // `local-<ms>` on its own collides if two sends land in the same
+      // millisecond (e.g. a double-tap on a slow network). Append a
+      // short random suffix so the FlatList keyExtractor stays unique.
+      const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: localId,
+          fromMe: true,
+          text: payload,
+          createdAt: Math.floor(Date.now() / 1000),
+        },
+      ]);
+    },
+    [pubkey, sendDirectMessage],
+  );
+
   const openLocation = useCallback((loc: SharedLocation) => {
     const url = buildOsmViewUrl(loc);
     Linking.openURL(url).catch(() => {
@@ -606,7 +797,41 @@ const ConversationScreen: React.FC = () => {
 
   const renderItem = useCallback(
     ({ item }: { item: Item }) => {
+      if (item.kind === 'dayHeader') {
+        return (
+          <View style={styles.dayHeaderRow}>
+            <View style={styles.dayHeaderRule} />
+            <Text style={styles.dayHeaderText}>{item.label}</Text>
+            <View style={styles.dayHeaderRule} />
+          </View>
+        );
+      }
       if (item.kind === 'message') {
+        const imageUrl = extractImageUrl(item.text);
+        if (imageUrl) {
+          return (
+            <View
+              style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
+            >
+              <View
+                style={[
+                  styles.imageBubble,
+                  item.fromMe ? styles.imageBubbleMe : styles.imageBubbleThem,
+                ]}
+              >
+                <Image
+                  source={{ uri: imageUrl }}
+                  style={styles.imageBubbleImage}
+                  resizeMode="cover"
+                  accessibilityLabel="Shared image"
+                />
+                <Text style={[styles.imageBubbleTime, item.fromMe && styles.imageBubbleTimeMe]}>
+                  {formatTime(item.createdAt)}
+                </Text>
+              </View>
+            </View>
+          );
+        }
         const invoice = extractInvoice(item.text);
         if (invoice) {
           const expired = invoice.expiresAt !== null && invoice.expiresAt * 1000 < Date.now();
@@ -622,14 +847,9 @@ const ConversationScreen: React.FC = () => {
                   item.fromMe ? styles.invoiceCardMe : styles.invoiceCardThem,
                 ]}
               >
-                <View style={styles.invoiceHeaderRow}>
-                  <Text style={[styles.invoiceLabel, item.fromMe && styles.invoiceLabelMe]}>
-                    {item.fromMe ? 'Invoice sent' : 'Invoice received'}
-                  </Text>
-                  <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
-                    {formatTime(item.createdAt)}
-                  </Text>
-                </View>
+                <Text style={[styles.invoiceLabel, item.fromMe && styles.invoiceLabelMe]}>
+                  {item.fromMe ? 'Invoice sent' : 'Invoice received'}
+                </Text>
                 <Text style={[styles.invoiceAmount, item.fromMe && styles.invoiceAmountMe]}>
                   {invoice.amountSats !== null
                     ? `${invoice.amountSats.toLocaleString()} sats`
@@ -677,6 +897,9 @@ const ConversationScreen: React.FC = () => {
                     <Text style={styles.invoicePayText}>Pay</Text>
                   </TouchableOpacity>
                 )}
+                <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
+                  {formatTime(item.createdAt)}
+                </Text>
               </View>
             </View>
           );
@@ -701,14 +924,9 @@ const ConversationScreen: React.FC = () => {
                 accessibilityLabel={`Shared contact ${displayName}`}
                 testID={`conversation-contact-${item.id}`}
               >
-                <View style={styles.contactHeaderRow}>
-                  <Text style={[styles.contactLabel, item.fromMe && styles.contactLabelMe]}>
-                    {item.fromMe ? 'Contact shared' : 'Contact'}
-                  </Text>
-                  <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
-                    {formatTime(item.createdAt)}
-                  </Text>
-                </View>
+                <Text style={[styles.contactLabel, item.fromMe && styles.contactLabelMe]}>
+                  {item.fromMe ? 'Contact shared' : 'Contact'}
+                </Text>
                 <View style={styles.contactBodyRow}>
                   {prof?.picture ? (
                     <Image source={{ uri: prof.picture }} style={styles.contactAvatar} />
@@ -749,6 +967,9 @@ const ConversationScreen: React.FC = () => {
                     ) : null}
                   </View>
                 </View>
+                <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
+                  {formatTime(item.createdAt)}
+                </Text>
               </TouchableOpacity>
             </View>
           );
@@ -765,14 +986,9 @@ const ConversationScreen: React.FC = () => {
                   item.fromMe ? styles.invoiceCardMe : styles.invoiceCardThem,
                 ]}
               >
-                <View style={styles.invoiceHeaderRow}>
-                  <Text style={[styles.invoiceLabel, item.fromMe && styles.invoiceLabelMe]}>
-                    {item.fromMe ? 'Address sent' : 'Lightning address'}
-                  </Text>
-                  <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
-                    {formatTime(item.createdAt)}
-                  </Text>
-                </View>
+                <Text style={[styles.invoiceLabel, item.fromMe && styles.invoiceLabelMe]}>
+                  {item.fromMe ? 'Address sent' : 'Lightning address'}
+                </Text>
                 <Text
                   style={[styles.invoiceMemo, item.fromMe && styles.invoiceMemoMe]}
                   numberOfLines={1}
@@ -793,6 +1009,9 @@ const ConversationScreen: React.FC = () => {
                     <Text style={styles.invoicePayText}>Pay</Text>
                   </TouchableOpacity>
                 )}
+                <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
+                  {formatTime(item.createdAt)}
+                </Text>
               </View>
             </View>
           );
@@ -809,6 +1028,36 @@ const ConversationScreen: React.FC = () => {
                 {formatTime(item.createdAt)}
               </Text>
             </View>
+          </View>
+        );
+      }
+      if (item.kind === 'gif') {
+        return (
+          <View
+            style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
+          >
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => setFullscreenGifUrl(item.url)}
+              style={[styles.gifCard, item.fromMe ? styles.gifCardMe : styles.gifCardThem]}
+              accessibilityLabel={
+                item.fromMe ? 'GIF sent, tap to expand' : 'GIF received, tap to expand'
+              }
+              accessibilityRole="imagebutton"
+              testID={`conversation-gif-${item.id}`}
+            >
+              <ExpoImage
+                source={{ uri: item.url }}
+                style={styles.gifImage}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                transition={150}
+                accessibilityIgnoresInvertColors
+              />
+              <Text style={[styles.gifTime, item.fromMe && styles.gifTimeMe]}>
+                {formatTime(item.createdAt)}
+              </Text>
+            </TouchableOpacity>
           </View>
         );
       }
@@ -838,18 +1087,13 @@ const ConversationScreen: React.FC = () => {
                 accessibilityIgnoresInvertColors
               />
               <View style={styles.locationBody}>
-                <View style={styles.locationHeaderRow}>
-                  <View style={styles.locationLabelRow}>
-                    <MapPin
-                      size={14}
-                      color={item.fromMe ? 'rgba(255,255,255,0.85)' : colors.textSupplementary}
-                    />
-                    <Text style={[styles.locationLabel, item.fromMe && styles.locationLabelMe]}>
-                      {item.fromMe ? 'Location sent' : 'Location'}
-                    </Text>
-                  </View>
-                  <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
-                    {formatTime(item.createdAt)}
+                <View style={styles.locationLabelRow}>
+                  <MapPin
+                    size={14}
+                    color={item.fromMe ? 'rgba(255,255,255,0.85)' : colors.textSupplementary}
+                  />
+                  <Text style={[styles.locationLabel, item.fromMe && styles.locationLabelMe]}>
+                    {item.fromMe ? 'Location sent' : 'Location'}
                   </Text>
                 </View>
                 <Text style={[styles.locationCoords, item.fromMe && styles.locationCoordsMe]}>
@@ -864,6 +1108,9 @@ const ConversationScreen: React.FC = () => {
                     OpenStreetMap
                   </Text>
                 )}
+                <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
+                  {formatTime(item.createdAt)}
+                </Text>
               </View>
             </TouchableOpacity>
           </View>
@@ -891,14 +1138,9 @@ const ConversationScreen: React.FC = () => {
               />
             </View>
             <View style={styles.zapCardBody}>
-              <View style={styles.zapCardHeaderRow}>
-                <Text style={[styles.zapCardLabel, item.fromMe && styles.zapCardLabelMe]}>
-                  {item.fromMe ? 'Zap sent' : 'Zap received'}
-                </Text>
-                <Text style={[styles.zapCardTime, item.fromMe && styles.zapCardTimeMe]}>
-                  {formatTime(item.createdAt)}
-                </Text>
-              </View>
+              <Text style={[styles.zapCardLabel, item.fromMe && styles.zapCardLabelMe]}>
+                {item.fromMe ? 'Zap sent' : 'Zap received'}
+              </Text>
               <Text style={[styles.zapCardAmount, item.fromMe && styles.zapCardAmountMe]}>
                 {item.amountSats.toLocaleString()} sats
               </Text>
@@ -907,6 +1149,9 @@ const ConversationScreen: React.FC = () => {
                   {item.comment}
                 </Text>
               ) : null}
+              <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
+                {formatTime(item.createdAt)}
+              </Text>
             </View>
           </TouchableOpacity>
         </View>
@@ -937,7 +1182,12 @@ const ConversationScreen: React.FC = () => {
     );
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <View style={styles.container}>
+      {/* Paint the safe-area / status-bar strip pink so the white
+          system icons (time, signal, battery) stay visible against
+          the brand colour instead of disappearing into our near-white
+          app background. */}
+      <View style={{ height: insets.top, backgroundColor: colors.brandPink }} />
       <View style={styles.header}>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
@@ -990,24 +1240,45 @@ const ConversationScreen: React.FC = () => {
             }
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
             onScroll={(e) => {
+              const y = e.nativeEvent.contentOffset.y;
               // "Near bottom" in an inverted list = scroll offset ~0.
-              // 80 px gives enough slack that a brief finger rest still
-              // qualifies as "at bottom" for the auto-scroll effect.
-              nearBottomRef.current = e.nativeEvent.contentOffset.y < 80;
+              // 200 px of slack covers the contentContainer padding +
+              // one message bubble, so sitting at the newest message
+              // reliably registers as "at bottom" for both the
+              // auto-scroll-on-new-message behaviour and the FAB.
+              const isNear = y < 200;
+              nearBottomRef.current = isNear;
+              // Mirror to state only when the boolean actually flips —
+              // this keeps onScroll cheap while still triggering a
+              // re-render for the FAB's appearance.
+              setAtBottom((prev) => (prev !== isNear ? isNear : prev));
             }}
             scrollEventThrottle={100}
           />
         )}
 
+        {!atBottom && !loading ? (
+          <View style={styles.scrollToBottomWrap} pointerEvents="box-none">
+            <TouchableOpacity
+              style={styles.scrollToBottomFab}
+              onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
+              accessibilityLabel="Scroll to most recent message"
+              testID="conversation-scroll-to-bottom"
+            >
+              <ArrowDown size={20} color={colors.white} />
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
         <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 8) }]}>
           <TouchableOpacity
             style={styles.composerAttachButton}
             onPress={() => setAttachSheetOpen(true)}
-            disabled={!isLoggedIn || sending || sharingLocation}
+            disabled={!isLoggedIn || sending || sharingLocation || uploadingImage}
             accessibilityLabel="Attach"
             testID="conversation-attach"
           >
-            {sharingLocation ? (
+            {sharingLocation || uploadingImage ? (
               <ActivityIndicator color={colors.brandPink} />
             ) : (
               <Plus size={22} color={colors.brandPink} />
@@ -1025,10 +1296,7 @@ const ConversationScreen: React.FC = () => {
             testID="conversation-input"
           />
           <TouchableOpacity
-            style={[
-              styles.composerSendButton,
-              (!draft.trim() || sending) && styles.composerSendButtonDisabled,
-            ]}
+            style={styles.composerSendButton}
             onPress={handleSend}
             disabled={!draft.trim() || sending}
             accessibilityLabel="Send message"
@@ -1047,6 +1315,8 @@ const ConversationScreen: React.FC = () => {
         visible={attachSheetOpen}
         onClose={() => setAttachSheetOpen(false)}
         onShareLocation={handleShareLocation}
+        onSendImage={handlePickAndSendImage}
+        onTakePhoto={handleTakeAndSendPhoto}
         onSendZap={
           lightningAddress
             ? () => {
@@ -1070,7 +1340,47 @@ const ConversationScreen: React.FC = () => {
           // to ~15 % of screen height.
           setContactPickerOpen(true);
         }}
+        onSendGif={
+          isGifConfigured()
+            ? () => {
+                // Same stack-without-dismiss pattern as FriendPickerSheet
+                // above — GifPickerSheet opens over the AttachSheet.
+                setGifPickerOpen(true);
+              }
+            : undefined
+        }
       />
+      <GifPickerSheet
+        visible={gifPickerOpen}
+        onClose={() => {
+          setGifPickerOpen(false);
+          setAttachSheetOpen(false);
+        }}
+        onSelect={handleSendGif}
+      />
+      <Modal
+        visible={fullscreenGifUrl !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setFullscreenGifUrl(null)}
+      >
+        <Pressable
+          style={styles.fullscreenBackdrop}
+          onPress={() => setFullscreenGifUrl(null)}
+          accessibilityLabel="Close full-screen GIF"
+          testID="conversation-gif-fullscreen"
+        >
+          {fullscreenGifUrl ? (
+            <ExpoImage
+              source={{ uri: fullscreenGifUrl }}
+              style={styles.fullscreenImage}
+              contentFit="contain"
+              cachePolicy="memory-disk"
+              accessibilityIgnoresInvertColors
+            />
+          ) : null}
+        </Pressable>
+      </Modal>
       <FriendPickerSheet
         visible={contactPickerOpen}
         onClose={() => {
@@ -1210,10 +1520,64 @@ const styles = StyleSheet.create({
   },
   bubbleRowLeft: { justifyContent: 'flex-start' },
   bubbleRowRight: { justifyContent: 'flex-end' },
+  dayHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: 16,
+    paddingBottom: 6,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  // Wrapper is a centered lane hovering above the composer; the FAB
+  // sits inside it so we can horizontally centre it without needing
+  // to know the FAB's width. `pointerEvents="box-none"` lets taps
+  // outside the button pass through to the message list below.
+  scrollToBottomWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    // Lifts the FAB clear of the ~60 px composer by a comfortable gap
+    // so it doesn't visually crowd the message input.
+    bottom: 92,
+    alignItems: 'center',
+  },
+  scrollToBottomFab: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.brandPink,
+    // White ring keeps the FAB visible when it overlaps a pink bubble
+    // — otherwise the pink-on-pink blends into an invisible blob.
+    borderWidth: 2,
+    borderColor: colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  dayHeaderRule: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.divider,
+  },
+  dayHeaderText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textSupplementary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
   bubble: {
     maxWidth: '80%',
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingTop: 8,
+    // Match the 4 px bottom gap used by every other bubble/card so
+    // the time sits the same distance from the bubble edge regardless
+    // of message type.
+    paddingBottom: 4,
     borderRadius: 16,
   },
   bubbleThem: {
@@ -1252,7 +1616,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     maxWidth: '85%',
     minWidth: 240,
-    paddingVertical: 12,
+    paddingTop: 12,
+    paddingBottom: 4,
     paddingHorizontal: 14,
     borderRadius: 14,
     borderWidth: 1,
@@ -1304,7 +1669,7 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.85)',
   },
   zapCardTime: {
-    fontSize: 11,
+    fontSize: 10,
     color: colors.textSupplementary,
   },
   zapCardTimeMe: {
@@ -1330,7 +1695,8 @@ const styles = StyleSheet.create({
   invoiceCard: {
     maxWidth: '85%',
     minWidth: 240,
-    paddingVertical: 12,
+    paddingTop: 12,
+    paddingBottom: 4,
     paddingHorizontal: 14,
     borderRadius: 14,
     borderWidth: 1,
@@ -1456,7 +1822,8 @@ const styles = StyleSheet.create({
   contactCard: {
     maxWidth: '85%',
     minWidth: 240,
-    paddingVertical: 12,
+    paddingTop: 12,
+    paddingBottom: 4,
     paddingHorizontal: 14,
     borderRadius: 14,
     borderWidth: 1,
@@ -1556,9 +1923,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  composerSendButtonDisabled: {
-    opacity: 0.4,
-  },
   composerAttachButton: {
     width: 40,
     height: 40,
@@ -1566,6 +1930,58 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.background,
+  },
+  gifCard: {
+    // Match contact / location / invoice card width so GIF bubbles don't
+    // look oddly narrow next to the other attachment types.
+    maxWidth: '85%',
+    minWidth: 240,
+    borderRadius: 14,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  gifCardMe: {
+    backgroundColor: colors.brandPink,
+  },
+  gifCardThem: {
+    backgroundColor: colors.white,
+  },
+  gifImage: {
+    // Concrete width matches the contact/location cards' `minWidth: 240`
+    // so the GIF card sizes to the same visual footprint as the other
+    // attachment types (text-driven content would otherwise leave the
+    // gifCard stretched to its `maxWidth` while contact cards sit near
+    // their minWidth).
+    width: 240,
+    height: 240,
+    backgroundColor: colors.background,
+  },
+  fullscreenBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fullscreenImage: {
+    width: '100%',
+    height: '100%',
+  },
+  gifTime: {
+    fontSize: 10,
+    color: colors.textSupplementary,
+    alignSelf: 'flex-end',
+    // Align with the card-timestamp right inset used by invoice /
+    // contact / location / zap so every attachment type sits at the
+    // same distance from its card's right edge.
+    paddingHorizontal: 14,
+    paddingVertical: 4,
+  },
+  gifTimeMe: {
+    color: 'rgba(255,255,255,0.85)',
   },
   locationCard: {
     maxWidth: '85%',
@@ -1594,7 +2010,8 @@ const styles = StyleSheet.create({
   },
   locationBody: {
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingTop: 10,
+    paddingBottom: 4,
     gap: 2,
   },
   locationHeaderRow: {
@@ -1632,6 +2049,38 @@ const styles = StyleSheet.create({
     color: colors.textSupplementary,
   },
   locationAccuracyMe: {
+    color: 'rgba(255,255,255,0.85)',
+  },
+  imageBubble: {
+    maxWidth: '85%',
+    minWidth: 240,
+    borderRadius: 14,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  imageBubbleMe: {
+    backgroundColor: colors.brandPink,
+  },
+  imageBubbleThem: {
+    backgroundColor: colors.white,
+  },
+  imageBubbleImage: {
+    width: 240,
+    height: 240,
+    backgroundColor: colors.background,
+  },
+  imageBubbleTime: {
+    fontSize: 10,
+    color: colors.textSupplementary,
+    alignSelf: 'flex-end',
+    paddingHorizontal: 14,
+    paddingVertical: 4,
+  },
+  imageBubbleTimeMe: {
     color: 'rgba(255,255,255,0.85)',
   },
   loading: {
