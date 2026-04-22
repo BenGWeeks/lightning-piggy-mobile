@@ -1,0 +1,51 @@
+appId: com.greenart7c3.nostrsigner
+name: Amber Import Key Test
+---
+# One-shot setup: imports an nsec into a fresh Amber install on the
+# emulator, picks "Approve basic actions" (auto-approve common ops,
+# reduces dialog noise on subsequent tests), dismisses the Android
+# notifications permission dialog.
+#
+# Prerequisite: Amber is installed and has never been opened — this
+# flow walks the cold-start welcome screen. If Amber already has a
+# key, uninstall and reinstall first:
+#   adb uninstall com.greenart7c3.nostrsigner
+#   adb install /tmp/amber-free-x86_64-release-v6.0.3.apk
+#
+# Run: source .env && maestro test -e MAESTRO_NSEC="$MAESTRO_NSEC" tests/e2e/test-amber-import-key.yaml
+
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Welcome screen — tap "Use your private key"
+- tapOn: 'Use your private key'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Paste the nsec, dismiss keyboard, tap Next
+- tapOn: 'Nsec / private key'
+- inputText: ${MAESTRO_NSEC}
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+- tapOn: 'Next'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Permissions screen — default "Approve basic actions" is already selected
+- tapOn: 'Finish'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Dismiss Android's notifications permission dialog (Unicode apostrophe)
+# Using regex-safe dot so the match works regardless of the exact quote char
+- tapOn:
+    text: "Don.t allow"
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Verify we landed on the Applications home screen
+- extendedWaitUntil:
+    visible: 'Applications'
+    timeout: 5000

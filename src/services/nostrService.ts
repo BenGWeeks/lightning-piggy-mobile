@@ -7,6 +7,7 @@ import {
 } from 'nostr-tools/pure';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nip04 from 'nostr-tools/nip04';
+import * as nip59 from 'nostr-tools/nip59';
 import type { NostrProfile, NostrContact, RelayConfig } from '../types/nostr';
 
 const pool = new SimplePool();
@@ -598,6 +599,87 @@ export async function fetchDirectMessageEvents(
     if (__DEV__) console.warn('[Nostr] fetchDirectMessageEvents failed:', error);
     return [];
   }
+}
+
+export interface RawGiftWrapEvent {
+  id: string;
+  pubkey: string;
+  kind: number;
+  created_at: number;
+  tags: string[][];
+  content: string;
+  sig: string;
+}
+
+export interface FetchedInboxEvents {
+  kind4: RawDmEvent[];
+  kind1059: RawGiftWrapEvent[];
+}
+
+/**
+ * Fetch every DM event that could end up in the current user's inbox:
+ * legacy NIP-04 kind-4 events in either direction, plus NIP-17 gift wraps
+ * (kind 1059) addressed to them. Returned events are raw — the caller
+ * decrypts/unwraps in the context layer where the signer lives.
+ *
+ * Three parallel filters: `authors=me` covers outgoing kind-4 (which tag
+ * the recipient, not me); `#p=me` covers incoming kind-4 and NIP-17 wraps
+ * (which always tag the recipient — including self-wraps of the sender's
+ * own copy). This matches Damus's twin kind-4 strategy and layers NIP-17
+ * on top.
+ */
+export async function fetchInboxDmEvents(
+  myPubkey: string,
+  relays: string[],
+  options: { limit?: number } = {},
+): Promise<FetchedInboxEvents> {
+  const allRelays = [...new Set([...relays, ...DEFAULT_RELAYS])];
+  trackRelays(allRelays);
+  const limit = options.limit ?? 500;
+  try {
+    const [sentK4, receivedK4, wraps] = await Promise.all([
+      withTimeout(pool.querySync(allRelays, { kinds: [4], authors: [myPubkey], limit }), 15000),
+      withTimeout(pool.querySync(allRelays, { kinds: [4], '#p': [myPubkey], limit }), 15000),
+      withTimeout(pool.querySync(allRelays, { kinds: [1059], '#p': [myPubkey], limit }), 15000),
+    ]);
+    const k4 = new Map<string, RawDmEvent>();
+    for (const ev of sentK4 ?? []) k4.set(ev.id, ev as RawDmEvent);
+    for (const ev of receivedK4 ?? []) k4.set(ev.id, ev as RawDmEvent);
+    const k1059 = new Map<string, RawGiftWrapEvent>();
+    for (const ev of wraps ?? []) k1059.set(ev.id, ev as RawGiftWrapEvent);
+    return { kind4: Array.from(k4.values()), kind1059: Array.from(k1059.values()) };
+  } catch (error) {
+    if (__DEV__) console.warn('[Nostr] fetchInboxDmEvents failed:', error);
+    return { kind4: [], kind1059: [] };
+  }
+}
+
+export interface UnwrappedRumor {
+  pubkey: string;
+  created_at: number;
+  kind: number;
+  tags: string[][];
+  content: string;
+}
+
+/**
+ * Unwrap a NIP-17 gift wrap (kind 1059) to its inner rumor. The rumor's
+ * `pubkey` is the real sender; its `created_at` is the real send time
+ * (the wrap's own timestamp is randomised up to 2 days in the past per
+ * the spec). `nip59.unwrapEvent` decrypts the wrap with our secret key,
+ * parses the inner seal, decrypts the seal, and verifies the rumor's
+ * pubkey matches the seal's pubkey — throws on mismatch, which the
+ * caller should treat as a skip-and-log.
+ */
+export function unwrapGiftWrap(secretKey: Uint8Array, wrap: RawGiftWrapEvent): UnwrappedRumor {
+  const rumor = nip59.unwrapEvent(wrap as Parameters<typeof nip59.unwrapEvent>[0], secretKey);
+  return {
+    pubkey: rumor.pubkey,
+    created_at: rumor.created_at,
+    kind: rumor.kind,
+    tags: rumor.tags,
+    content: rumor.content,
+  };
 }
 
 export async function decryptNip04WithSecret(

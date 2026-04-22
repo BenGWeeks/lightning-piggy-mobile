@@ -281,6 +281,21 @@ const FriendPickerSheet: React.FC<Props> = ({
             ]}
             keyboardShouldPersistTaps="handled"
             style={styles.list}
+            onScrollToIndexFailed={(info: {
+              index: number;
+              highestMeasuredFrameIndex: number;
+              averageItemLength: number;
+            }) => {
+              const offset = info.averageItemLength * info.index;
+              listRef.current?.scrollToOffset?.({ offset, animated: false });
+              setTimeout(() => {
+                listRef.current?.scrollToIndex?.({
+                  index: info.index,
+                  animated: false,
+                  viewPosition: 0,
+                });
+              }, 50);
+            }}
             ListEmptyComponent={
               <View style={styles.empty}>
                 <Text style={styles.emptyText}>
