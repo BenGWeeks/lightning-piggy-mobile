@@ -1182,7 +1182,12 @@ const ConversationScreen: React.FC = () => {
     );
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <View style={styles.container}>
+      {/* Paint the safe-area / status-bar strip pink so the white
+          system icons (time, signal, battery) stay visible against
+          the brand colour instead of disappearing into our near-white
+          app background. */}
+      <View style={{ height: insets.top, backgroundColor: colors.brandPink }} />
       <View style={styles.header}>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
@@ -1291,10 +1296,7 @@ const ConversationScreen: React.FC = () => {
             testID="conversation-input"
           />
           <TouchableOpacity
-            style={[
-              styles.composerSendButton,
-              (!draft.trim() || sending) && styles.composerSendButtonDisabled,
-            ]}
+            style={styles.composerSendButton}
             onPress={handleSend}
             disabled={!draft.trim() || sending}
             accessibilityLabel="Send message"
@@ -1920,9 +1922,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brandPink,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  composerSendButtonDisabled: {
-    opacity: 0.4,
   },
   composerAttachButton: {
     width: 40,
