@@ -1,0 +1,127 @@
+appId: com.lightningpiggy.app.dev
+name: Edit Profile picture upload — #141 regression guard
+---
+# Preconditions:
+#   - Already logged in (nsec or Amber).
+#   - Android photo library on the device/emulator has at least one
+#     image.
+#
+# What this guards:
+#   Before #141 was fixed, `EditProfileSheet.pickAndUpload` called
+#   `ImagePicker.launchImageLibraryAsync` without `base64: true` and
+#   then didn't forward the base64 to `uploadImage`. The Blossom path
+#   required the base64 inline and rejected every upload with
+#   "Selected image has no base64 payload" — no profile picture could
+#   ever be saved.
+#
+#   The fix adds `base64: true` to the picker call and forwards
+#   `result.assets[0].base64` as the third argument to `uploadImage`.
+#   This test exercises the full flow and asserts the failure alert
+#   never appears.
+
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 40000
+
+# Navigate to Account
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Open Edit Profile sheet
+- tapOn:
+    id: 'edit-profile-button'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Launch the Android photo picker
+- tapOn:
+    id: 'edit-picture-picker'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Tap the first image tile in the Android system photo picker.
+#
+# CLAUDE.md normally forbids coordinate taps because selectors survive
+# layout changes. The Android photo picker is an OS-owned UI we can't
+# instrument — its thumbnails are ImageView nodes with no stable text
+# labels, no app-reachable testIDs, and no reliable accessibility
+# strings across API levels. Matching by text ("Photo", "Image", etc.)
+# produces flaky passes on some API levels and hangs on others.
+#
+# The point below targets roughly the top-left tile of the picker
+# grid. If the picker layout shifts in a future Android release the
+# follow-up `Profile Updated` assertion will fail as a clear signal.
+- tapOn:
+    point: '20%, 55%'
+
+# With `allowsEditing: true` on the picker (required for the 1:1 avatar
+# crop) Android follows up with a crop editor. On the emulator the
+# confirm action is the "CROP" label at the top-right of the editor.
+# Like the photo picker tile, the crop editor is OS-owned UI we can't
+# instrument — a coordinate tap on the action's region is the most
+# reliable way across API levels. Multiple fallback text selectors
+# handle older pickers that return immediately (Done / Add / Use).
+- tapOn:
+    text: 'CROP'
+    optional: true
+- tapOn:
+    text: 'Done'
+    optional: true
+- tapOn:
+    text: 'Add'
+    optional: true
+- tapOn:
+    text: 'Use'
+    optional: true
+# Coordinate fallback — top-right of the editor where CROP/Save lives.
+# Bracketed by the optional text selectors above so newer pickers hit
+# their semantic target first.
+- tapOn:
+    point: '92%, 6%'
+    optional: true
+
+# When logged in via Amber, the Blossom upload signs a BUD-02
+# authorization event which opens Amber's approval dialog. Approve it
+# so the upload can complete. Both taps are optional for the nsec
+# signer path (which signs locally without any dialog).
+- tapOn:
+    text: 'Accept'
+    optional: true
+- tapOn:
+    text: 'Approve'
+    optional: true
+
+# Give the upload time to complete (Blossom / nostr.build round-trip
+# plus local crop rendering). Also covers the "still uploading"
+# spinner on the Edit Profile sheet.
+- waitForAnimationToEnd:
+    timeout: 20000
+
+# CORE REGRESSION ASSERTION. These are the two strings the pre-#141
+# failure alert surfaced — if either appears, the base64-forwarding
+# regressed.
+- assertNotVisible: 'Upload Failed'
+- assertNotVisible: 'Selected image has no base64 payload'
+
+# Persist the change. On Amber, this fires one more approval dialog
+# to sign the kind-0 event itself; optional for nsec.
+- tapOn:
+    id: 'save-profile'
+- tapOn:
+    text: 'Accept'
+    optional: true
+- tapOn:
+    text: 'Approve'
+    optional: true
+
+# "Profile Updated" alert means the kind-0 was published successfully
+# end-to-end.
+- extendedWaitUntil:
+    visible: 'Profile Updated'
+    timeout: 20000
+- tapOn:
+    text: 'OK'
+    optional: true
