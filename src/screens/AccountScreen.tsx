@@ -24,7 +24,13 @@ import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
 import { CURRENCIES } from '../services/fiatService';
 import { Trash2, Eye, EyeOff, ChevronUp, ChevronDown, Zap, Copy } from 'lucide-react-native';
-import { getElectrumServer, setElectrumServer } from '../services/walletStorageService';
+import {
+  getElectrumServer,
+  setElectrumServer,
+  getBlossomServer,
+  setBlossomServer,
+  DEFAULT_BLOSSOM_SERVER,
+} from '../services/walletStorageService';
 import { disconnectElectrum } from '../services/onchainService';
 import NostrLoginSheet from '../components/NostrLoginSheet';
 import EditProfileSheet from '../components/EditProfileSheet';
@@ -82,6 +88,7 @@ const AccountScreen: React.FC = () => {
   const [feedbackSheetOpen, setFeedbackSheetOpen] = useState(false);
   const [electrumHostPort, setElectrumHostPort] = useState('electrum.blockstream.info:50002');
   const [electrumSSL, setElectrumSSL] = useState(true);
+  const [blossomServer, setBlossomServerInput] = useState(DEFAULT_BLOSSOM_SERVER);
   const [devMode, setDevMode] = useState(false);
   const versionTapCount = useRef(0);
   const versionTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -154,7 +161,14 @@ const AccountScreen: React.FC = () => {
       setElectrumHostPort(parts.join(':'));
       setElectrumSSL(protocol === 's');
     });
+    getBlossomServer().then(setBlossomServerInput);
   }, []);
+
+  const handleBlossomSave = async () => {
+    const normalized = blossomServer.trim() || DEFAULT_BLOSSOM_SERVER;
+    setBlossomServerInput(normalized);
+    await setBlossomServer(normalized);
+  };
 
   const handleElectrumSave = async () => {
     const hostPort = electrumHostPort.trim() || 'electrum.blockstream.info:50002';
@@ -418,6 +432,26 @@ const AccountScreen: React.FC = () => {
             </View>
           </>
         )}
+
+        {/* Blossom media server (image uploads) */}
+        <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Image Server (Blossom)</Text>
+        <TextInput
+          style={styles.textInput}
+          value={blossomServer}
+          onChangeText={setBlossomServerInput}
+          placeholder={DEFAULT_BLOSSOM_SERVER}
+          placeholderTextColor={colors.textSupplementary}
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="url"
+          onBlur={handleBlossomSave}
+          testID="blossom-server-input"
+          accessibilityLabel="Blossom image server"
+        />
+        <Text style={styles.fieldHint}>
+          Hosts images you send in chats and set as your profile picture. Any Blossom
+          (BUD-01/BUD-02) server works — e.g. blossom.primal.net or nostr.build.
+        </Text>
 
         {/* Wallets summary */}
         <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Wallets</Text>

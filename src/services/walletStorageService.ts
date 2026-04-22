@@ -6,11 +6,15 @@ const WALLET_LIST_KEY = 'wallet_list';
 const NWC_URL_PREFIX = 'nwc_url_';
 const ONCHAIN_XPUB_PREFIX = 'onchain_xpub_';
 const ELECTRUM_SERVER_KEY = 'electrum_server';
+const BLOSSOM_SERVER_KEY = 'blossom_server';
 const LEGACY_NWC_KEY = 'nwc_connection_url';
 const ONBOARDING_KEY = 'onboarding_complete';
 
 /** Default Electrum server for on-chain balance/tx lookups (Blockstream, SSL) */
 export const DEFAULT_ELECTRUM_SERVER = 'electrum.blockstream.info:50002:s';
+
+/** Default Blossom media server (BUD-01/BUD-02) for image uploads. */
+export const DEFAULT_BLOSSOM_SERVER = 'https://blossom.primal.net';
 
 /**
  * SecureStore options for credentials (mnemonics, xpubs, NWC URLs).
@@ -90,6 +94,17 @@ export async function getElectrumServer(): Promise<string> {
 
 export async function setElectrumServer(url: string): Promise<void> {
   await AsyncStorage.setItem(ELECTRUM_SERVER_KEY, url);
+}
+
+// --- Blossom media server ---
+
+export async function getBlossomServer(): Promise<string> {
+  const saved = await AsyncStorage.getItem(BLOSSOM_SERVER_KEY);
+  return (saved && saved.trim()) || DEFAULT_BLOSSOM_SERVER;
+}
+
+export async function setBlossomServer(url: string): Promise<void> {
+  await AsyncStorage.setItem(BLOSSOM_SERVER_KEY, url);
 }
 
 // --- Onboarding ---
