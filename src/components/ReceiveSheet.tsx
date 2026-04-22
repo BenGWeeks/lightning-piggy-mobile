@@ -23,6 +23,7 @@ import * as Clipboard from 'expo-clipboard';
 import Toast from 'react-native-toast-message';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
 import { walletLabel } from '../types/wallet';
@@ -31,6 +32,46 @@ import { receiveSheetStyles as styles } from '../styles/ReceiveSheet.styles';
 import { satsToFiatString, satsToFiat } from '../services/fiatService';
 import FriendPickerSheet, { PickedFriend } from './FriendPickerSheet';
 import type { RootStackParamList } from '../navigation/types';
+
+function paymentHashFromBolt11(bolt11: string): string | null {
+  try {
+    const decoded = bolt11Decode(bolt11);
+    const section = decoded.sections?.find((s: { name: string }) => s.name === 'payment_hash') as
+      | { value?: string }
+      | undefined;
+    return section?.value ?? null;
+  } catch (error) {
+    // Silent null returns would mask broken invoice generation; at
+    // least surface it in dev logs so the fallback-to-balance-poll is
+    // traceable.
+    if (__DEV__) console.warn('[Receive] bolt11 decode failed:', error);
+    return null;
+  }
+}
+
+// Accept only digit characters — sats are whole integers. A hardware
+// keyboard, paste, or an autocomplete suggestion can all inject junk
+// that the soft-keyboard's `numeric` hint alone doesn't block.
+function sanitizeSatsInput(text: string): string {
+  return text.replace(/[^0-9]/g, '');
+}
+
+// Accept digits and a single decimal point, with at most two decimal
+// places (standard fiat presentation). Strip everything else. Dropping
+// a stray comma / currency symbol on paste is the common reason users
+// see "Invalid amount" when they didn't mistype anything.
+function sanitizeFiatInput(text: string): string {
+  let cleaned = text.replace(/[^0-9.]/g, '');
+  const firstDot = cleaned.indexOf('.');
+  if (firstDot !== -1) {
+    // Keep the first dot, drop any subsequent ones.
+    cleaned = cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, '');
+    // Trim to two decimal places.
+    const [intPart, fracPart = ''] = cleaned.split('.');
+    cleaned = `${intPart}.${fracPart.slice(0, 2)}`;
+  }
+  return cleaned;
+}
 // On-chain address fetching is done via WalletContext.getReceiveAddress
 
 interface Props {
@@ -60,6 +101,8 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
     currency,
     lightningAddress,
     getReceiveAddress,
+    expectPayment,
+    lastIncomingPayment,
   } = useWallet();
   const [capturedWalletId, setCapturedWalletId] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -73,8 +116,6 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
   const [onchainAddress, setOnchainAddress] = useState<string | null>(null);
   const [friendPickerOpen, setFriendPickerOpen] = useState(false);
   const [sendingToFriend, setSendingToFriend] = useState(false);
-  const intervalId = useRef<ReturnType<typeof setInterval> | null>(null);
-  const prevBalance = useRef<number | null>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   const { sendDirectMessage, contacts } = useNostr();
@@ -93,14 +134,9 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
     [wallets, selectedWalletId],
   );
   const walletName = selectedWallet ? walletLabel(selectedWallet) : 'Wallet';
-  const balance = selectedWallet?.balance ?? null;
 
   const generateInvoice = useCallback(
     async (sats: number) => {
-      if (intervalId.current) {
-        clearInterval(intervalId.current);
-        intervalId.current = null;
-      }
       setLoading(true);
       setPaymentReceived(false);
       try {
@@ -108,16 +144,32 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
         if (!wId) return;
         const inv = await makeInvoiceForWallet(wId, sats, 'Lightning Piggy');
         setInvoice(inv);
-        intervalId.current = setInterval(async () => {
-          if (wId) await refreshBalanceForWallet(wId);
-        }, 5000);
+
+        // Hand the invoice off to WalletContext.expectPayment, which
+        // runs a 1 s lookup_invoice + balance poll for the next 3 min.
+        // The poll lives in the context (not this sheet), so it keeps
+        // running even if the user closes the receive sheet and wanders
+        // off to Friends / Home etc. — the app-root overlay still pops
+        // on settle regardless of which screen is active. Passing the
+        // expected amount means the overlay shows the exact invoice
+        // value rather than a balance-delta that could include prior
+        // settles piled up between polls.
+        const paymentHash = paymentHashFromBolt11(inv);
+        if (paymentHash) {
+          expectPayment(wId, paymentHash, sats);
+        } else {
+          // Unparseable bolt11 — fall back to a single balance refresh.
+          // The WalletContext 30 s baseline poll still picks the
+          // settle up eventually if the user lingers in-app.
+          await refreshBalanceForWallet(wId);
+        }
       } catch (error) {
         console.warn('Failed to create invoice:', error);
       } finally {
         setLoading(false);
       }
     },
-    [makeInvoiceForWallet, refreshBalanceForWallet, capturedWalletId],
+    [makeInvoiceForWallet, refreshBalanceForWallet, capturedWalletId, expectPayment],
   );
 
   const isOnchainWallet = selectedWallet?.walletType === 'onchain';
@@ -128,7 +180,10 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
     if (visible) {
       setCapturedWalletId(activeWalletId);
       setDropdownOpen(false);
-      prevBalance.current = balance;
+      // Baseline is set from the first observed balance (see effect
+      // below), not from the cached value here — the cache may be stale
+      // if the app has been backgrounded and a previous invoice settled
+      // while we weren't polling.
       setOnchainAddress(null);
       setSatsValue('');
       setFiatValue('');
@@ -157,10 +212,10 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
       bottomSheetRef.current?.dismiss();
     }
     return () => {
-      if (intervalId.current) {
-        clearInterval(intervalId.current);
-        intervalId.current = null;
-      }
+      // Poll lives in WalletContext.expectPayment now and survives
+      // sheet closure (so the user can generate an invoice, close the
+      // sheet, navigate elsewhere, and still get the celebration).
+      // Only the debounce timer is sheet-local.
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -184,11 +239,6 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
     setPaymentReceived(false);
     setSatsValue('');
     setFiatValue('');
-    prevBalance.current = selectedWallet?.balance ?? null;
-    if (intervalId.current) {
-      clearInterval(intervalId.current);
-      intervalId.current = null;
-    }
     if (selectedWallet?.walletType === 'onchain') {
       setMode('address');
       getReceiveAddress(capturedWalletId)
@@ -200,30 +250,28 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [capturedWalletId]);
 
-  // Detect payment by watching balance changes
+  // The "paymentReceived" checkmark on the QR thumbnail flips to true
+  // whenever the app-root overlay fires for the wallet this sheet is
+  // currently showing. We used to duplicate the baseline-detector
+  // logic locally — pointlessly, since WalletContext already owns it.
+  // Keyed on the event timestamp so a second receive within the same
+  // sheet session still re-arms the checkmark after the user dismisses
+  // the global overlay and clears `lastIncomingPayment`.
   useEffect(() => {
+    if (!visible) return;
     if (
-      visible &&
-      prevBalance.current !== null &&
-      balance !== null &&
-      balance > prevBalance.current
+      lastIncomingPayment &&
+      selectedWallet &&
+      lastIncomingPayment.walletId === selectedWallet.id
     ) {
       setPaymentReceived(true);
-      if (intervalId.current) {
-        clearInterval(intervalId.current);
-        intervalId.current = null;
-      }
     }
-  }, [balance, visible]);
+  }, [lastIncomingPayment, selectedWallet, visible]);
 
   const scheduleInvoice = (sats: number) => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
     if (sats <= 0) {
       setInvoice('');
-      if (intervalId.current) {
-        clearInterval(intervalId.current);
-        intervalId.current = null;
-      }
       return;
     }
     debounceTimer.current = setTimeout(() => {
@@ -232,8 +280,9 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
   };
 
   const handleSatsChange = (text: string) => {
-    setSatsValue(text);
-    const sats = parseInt(text) || 0;
+    const clean = sanitizeSatsInput(text);
+    setSatsValue(clean);
+    const sats = parseInt(clean) || 0;
     if (btcPrice) {
       setFiatValue(satsToFiat(sats, btcPrice).toFixed(2));
     } else {
@@ -243,8 +292,9 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
   };
 
   const handleFiatChange = (text: string) => {
-    setFiatValue(text);
-    const fiat = parseFloat(text) || 0;
+    const clean = sanitizeFiatInput(text);
+    setFiatValue(clean);
+    const fiat = parseFloat(clean) || 0;
     const sats = fiatToSats(fiat);
     setSatsValue(sats.toString());
     scheduleInvoice(sats);
