@@ -533,6 +533,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       OWN_PROFILE_TIMESTAMP_KEY,
       RELAY_LIST_CACHE_KEY,
       RELAY_LIST_TIMESTAMP_KEY,
+      // DM-inbox state is identity-scoped — decrypted rumors and the
+      // Amber NIP-17 permission intent belong to the logged-in user,
+      // not globally.
+      'amber_nip17_cache_v1',
+      'amber_nip17_enabled',
     ]);
 
     setPubkey(null);
