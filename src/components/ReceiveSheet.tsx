@@ -119,7 +119,8 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
   const { sendDirectMessage, contacts } = useNostr();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
-  const snapPoints = useMemo(() => ['85%'], []);
+  // No explicit snapPoints — gorhom v5's default enableDynamicSizing=true
+  // gives a single content-height snap (not user-draggable).
 
   const fiatToSats = (fiat: number): number => {
     if (!btcPrice || btcPrice <= 0) return 0;
@@ -436,7 +437,6 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
     <>
       <BottomSheetModal
         ref={bottomSheetRef}
-        snapPoints={snapPoints}
         onChange={handleSheetChange}
         enablePanDownToClose
         backdropComponent={renderBackdrop}

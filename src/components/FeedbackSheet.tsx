@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -50,7 +50,7 @@ const FeedbackSheet: React.FC<Props> = ({
   successMessage = 'Thank you for your feedback!',
 }) => {
   const sheetRef = useRef<BottomSheetModal>(null);
-  const snapPoints = useMemo(() => ['55%'], []);
+  // No explicit snapPoints — content-height only, not user-draggable.
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   // Canonical keyboard-height tracking — mirrors SendSheet / NostrLoginSheet
@@ -141,7 +141,6 @@ const FeedbackSheet: React.FC<Props> = ({
   return (
     <BottomSheetModal
       ref={sheetRef}
-      snapPoints={snapPoints}
       onChange={handleSheetChange}
       enablePanDownToClose
       backdropComponent={renderBackdrop}

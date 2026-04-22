@@ -35,7 +35,7 @@ const TILE_HEIGHT = 110;
 
 const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
   const sheetRef = useRef<BottomSheetModal>(null);
-  const snapPoints = useMemo(() => ['75%'], []);
+  const snapPoints = useMemo(() => ['75%', '90%'], []);
   const topInset = 60;
 
   const [search, setSearch] = useState('');
@@ -178,6 +178,7 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
     <BottomSheetModal
       ref={sheetRef}
       snapPoints={snapPoints}
+      enableDynamicSizing={false}
       topInset={topInset}
       onChange={handleSheetChange}
       enablePanDownToClose

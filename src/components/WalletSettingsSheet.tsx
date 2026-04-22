@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert, Platform, Keyboard } from 'react-native';
 import {
   BottomSheetModal,
@@ -23,7 +23,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const { wallets, updateWalletSettings, removeWallet } = useWallet();
   const wallet = wallets.find((w) => w.id === walletId);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
-  const snapPoints = useMemo(() => ['85%'], []);
+  // No explicit snapPoints — content-height only, not user-draggable.
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   // Canonical keyboard-height tracking — mirrors SendSheet / NostrLoginSheet.
@@ -133,7 +133,6 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   return (
     <BottomSheetModal
       ref={bottomSheetRef}
-      snapPoints={snapPoints}
       enablePanDownToClose
       onChange={handleSheetChange}
       backdropComponent={renderBackdrop}
