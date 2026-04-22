@@ -1206,10 +1206,28 @@ const ConversationScreen: React.FC = () => {
             />
           </Svg>
         </TouchableOpacity>
-        {avatarNode}
-        <Text style={styles.headerName} numberOfLines={1}>
-          {name}
-        </Text>
+        <TouchableOpacity
+          style={styles.headerPeer}
+          onPress={() => {
+            const known = contacts.find((c) => c.pubkey === pubkey)?.profile ?? null;
+            setProfileContact({
+              pubkey,
+              name,
+              picture: known?.picture ?? picture ?? null,
+              banner: known?.banner ?? null,
+              nip05: known?.nip05 ?? null,
+              lightningAddress: known?.lud16 ?? lightningAddress ?? null,
+              source: 'nostr',
+            });
+          }}
+          accessibilityLabel={`Open ${name}'s profile`}
+          testID="chat-header-open-profile"
+        >
+          {avatarNode}
+          <Text style={styles.headerName} numberOfLines={1}>
+            {name}
+          </Text>
+        </TouchableOpacity>
       </View>
 
       <KeyboardAvoidingView
@@ -1491,6 +1509,12 @@ const styles = StyleSheet.create({
   },
   backButton: {
     padding: 4,
+  },
+  headerPeer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   headerAvatar: {
     width: 36,

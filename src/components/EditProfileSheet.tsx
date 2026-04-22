@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -42,7 +42,7 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const sheetRef = useRef<BottomSheetModal>(null);
   const scrollRef = useRef<any>(null);
-  const snapPoints = useMemo(() => ['85%'], []);
+  // No explicit snapPoints — content-height only, not user-draggable.
 
   useEffect(() => {
     if (visible) {
@@ -97,6 +97,11 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
       allowsEditing: true,
       aspect,
       quality: 1,
+      // `stripImageMetadata` re-encodes the picked image through
+      // expo-image-manipulator at `compress: 0.9` and produces fresh
+      // base64 (see #145). Picking at quality 1 here avoids a double
+      // JPEG encode; the manipulator's output is what ends up on
+      // Blossom, so the picker doesn't need `base64: true` either.
     });
 
     if (result.canceled || !result.assets?.[0]) return;
@@ -135,7 +140,6 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
   return (
     <BottomSheetModal
       ref={sheetRef}
-      snapPoints={snapPoints}
       onDismiss={onClose}
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}
