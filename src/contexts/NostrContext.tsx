@@ -843,8 +843,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (!/^[0-9a-f]{64}$/.test(normalized)) return [];
 
       const readRelays = getReadRelays();
-      const events = await nostrService.fetchDirectMessageEvents(pubkey, normalized, readRelays);
-      if (events.length === 0) return [];
 
       let cachedSecretKey: Uint8Array | null = null;
       const getSecretKey = async (): Promise<Uint8Array | null> => {
@@ -856,7 +854,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       };
 
       const decrypted: ConversationMessage[] = [];
-      for (const ev of events) {
+
+      // NIP-04 — peer-scoped fetch, two directions.
+      const kind4Events = await nostrService.fetchDirectMessageEvents(
+        pubkey,
+        normalized,
+        readRelays,
+      );
+      for (const ev of kind4Events) {
         const fromMe = ev.pubkey === pubkey;
         const counterparty = fromMe ? normalized : ev.pubkey;
         try {
@@ -881,6 +886,101 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           });
         } catch (error) {
           if (__DEV__) console.warn('[Nostr] decrypt DM failed:', error);
+        }
+      }
+
+      // NIP-17 — partner pubkey is hidden inside the encrypted rumor, so we
+      // can't peer-scope the filter at the relay. Pull all gift wraps
+      // addressed to me, unwrap, and keep only those whose rumor involves
+      // the current peer. Amber path gated by the opt-in toggle and backed
+      // by the same wrap-id cache that powers the inbox list so tab switches
+      // and thread open/close don't re-round-trip the signer.
+      const { kind1059 } = await nostrService.fetchInboxDmEvents(pubkey, readRelays);
+      if (kind1059.length > 0) {
+        if (signerType === 'nsec') {
+          const secretKey = await getSecretKey();
+          if (secretKey) {
+            for (const wrap of kind1059) {
+              try {
+                const rumor = nostrService.unwrapGiftWrap(secretKey, wrap);
+                const fromMe = rumor.pubkey === pubkey;
+                const partner = fromMe
+                  ? (rumor.tags.find((t) => t[0] === 'p')?.[1] ?? null)
+                  : rumor.pubkey;
+                if (partner !== normalized) continue;
+                decrypted.push({
+                  id: wrap.id,
+                  fromMe,
+                  text: rumor.content,
+                  createdAt: rumor.created_at,
+                });
+              } catch (error) {
+                if (__DEV__) console.warn('[Nostr] NIP-17 thread unwrap failed:', error);
+              }
+            }
+          }
+        } else if (signerType === 'amber') {
+          const amberEnabled = (await AsyncStorage.getItem('amber_nip17_enabled')) === 'true';
+          if (amberEnabled) {
+            const CACHE_KEY = 'amber_nip17_cache_v1';
+            const raw = await AsyncStorage.getItem(CACHE_KEY);
+            const cache: Record<string, DmInboxEntry & { wrapId: string }> = raw
+              ? JSON.parse(raw)
+              : {};
+            for (const wrap of kind1059) {
+              const cached = cache[wrap.id];
+              if (cached) {
+                if (cached.partnerPubkey !== normalized) continue;
+                decrypted.push({
+                  id: wrap.id,
+                  fromMe: cached.fromMe,
+                  text: cached.text,
+                  createdAt: cached.createdAt,
+                });
+                continue;
+              }
+              // Uncached: unwrap via Amber NIP-44, then check peer match.
+              try {
+                const sealJson = await amberService.requestNip44Decrypt(
+                  wrap.content,
+                  wrap.pubkey,
+                  pubkey,
+                );
+                const seal = JSON.parse(sealJson) as {
+                  pubkey: string;
+                  content: string;
+                  kind: number;
+                };
+                if (seal.kind !== 13) continue;
+                const rumorJson = await amberService.requestNip44Decrypt(
+                  seal.content,
+                  seal.pubkey,
+                  pubkey,
+                );
+                const rumor = JSON.parse(rumorJson) as {
+                  pubkey: string;
+                  created_at: number;
+                  kind: number;
+                  tags: string[][];
+                  content: string;
+                };
+                if (rumor.pubkey !== seal.pubkey) continue;
+                const fromMe = rumor.pubkey === pubkey;
+                const partner = fromMe
+                  ? (rumor.tags.find((t) => t[0] === 'p')?.[1] ?? null)
+                  : rumor.pubkey;
+                if (partner !== normalized) continue;
+                decrypted.push({
+                  id: wrap.id,
+                  fromMe,
+                  text: rumor.content,
+                  createdAt: rumor.created_at,
+                });
+              } catch (error) {
+                if (__DEV__) console.warn('[Nostr] Amber NIP-17 thread unwrap failed:', error);
+              }
+            }
+          }
         }
       }
 
