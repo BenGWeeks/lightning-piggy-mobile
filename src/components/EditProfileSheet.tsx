@@ -97,13 +97,27 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
       allowsEditing: true,
       aspect,
       quality: 0.8,
+      // Ask the picker to materialise base64 inline. The Blossom upload
+      // path in imageUploadService requires it — without this the upload
+      // rejects with "Selected image has no base64 payload" (issue #141).
+      // ConversationScreen's image-send flow already does this; keep the
+      // two paths aligned.
+      base64: true,
     });
 
     if (result.canceled || !result.assets?.[0]) return;
 
     setUploading(true);
     try {
-      const url = await uploadImage(result.assets[0].uri, isLoggedIn ? signEvent : null);
+      const url = await uploadImage(
+        result.assets[0].uri,
+        isLoggedIn ? signEvent : null,
+        // Forward the freshly-materialised base64 so uploadToBlossom can
+        // use the in-memory bytes instead of trying to read file:// on
+        // Android — which is what the Blossom helper is explicitly
+        // avoiding (see the comment in blossomService.ts:70).
+        result.assets[0].base64,
+      );
       setUrl(url);
     } catch (error) {
       Alert.alert('Upload Failed', error instanceof Error ? error.message : 'Please try again.');
