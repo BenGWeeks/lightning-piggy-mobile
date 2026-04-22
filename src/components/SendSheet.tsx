@@ -7,13 +7,15 @@ import {
   ActivityIndicator,
   BackHandler,
   Image,
+  Keyboard,
+  Platform,
 } from 'react-native';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetTextInput,
-  BottomSheetView,
+  BottomSheetScrollView,
 } from '@gorhom/bottom-sheet';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
@@ -150,7 +152,12 @@ const SendSheet: React.FC<Props> = ({
   const [progressError, setProgressError] = useState<string | undefined>(undefined);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
 
-  const snapPoints = useMemo(() => ['90%'], []);
+  // No explicit snapPoints — with gorhom v5's default
+  // `enableDynamicSizing={true}`, the sheet sizes itself to its content
+  // and content-height becomes the only snap (so the user can't pan it
+  // taller than its content). `keyboardBehavior="interactive"` grows
+  // the sheet above that snap when an input is focused. Closes #160.
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   const needsAmount = scanned && (isLightningAddress(invoiceData || '') || isOnchainAddress);
   const currentSats = parseInt(satsValue) || 0;
@@ -208,6 +215,24 @@ const SendSheet: React.FC<Props> = ({
     });
     return () => handler.remove();
   }, [visible, onClose]);
+
+  // Track keyboard height so the BottomSheetScrollView has enough bottom
+  // padding to reach past the keyboard to the last field. Mirrors the
+  // pattern in NostrLoginSheet / EditProfileSheet / TransferSheet —
+  // rule 5 of the "Bottom sheet doesn't slide up when keyboard opens"
+  // checklist in docs/TROUBLESHOOTING.adoc.
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   // Resolve lightning address when scanned
   useEffect(() => {
@@ -598,7 +623,6 @@ const SendSheet: React.FC<Props> = ({
     <>
       <BottomSheetModal
         ref={bottomSheetRef}
-        snapPoints={snapPoints}
         onChange={handleSheetChange}
         enablePanDownToClose
         backdropComponent={renderBackdrop}
@@ -608,7 +632,13 @@ const SendSheet: React.FC<Props> = ({
         keyboardBlurBehavior="restore"
         android_keyboardInputMode="adjustResize"
       >
-        <BottomSheetView style={styles.content}>
+        <BottomSheetScrollView
+          contentContainerStyle={[
+            styles.content,
+            { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
+          ]}
+          keyboardShouldPersistTaps="handled"
+        >
           <View style={styles.innerContent}>
             <Text style={styles.title}>Send</Text>
 
@@ -865,6 +895,8 @@ const SendSheet: React.FC<Props> = ({
                     onChangeText={setMemo}
                     maxLength={lnurlParams?.commentAllowed || 150}
                     autoCorrect
+                    testID="sendsheet-memo-input"
+                    accessibilityLabel="Zap message"
                   />
                 )}
 
@@ -906,7 +938,7 @@ const SendSheet: React.FC<Props> = ({
               </TouchableOpacity>
             </View>
           </View>
-        </BottomSheetView>
+        </BottomSheetScrollView>
       </BottomSheetModal>
       <PaymentProgressOverlay
         state={progressState}
