@@ -52,6 +52,45 @@ export async function nip04Decrypt(
   return AmberSigner.nip04Decrypt(ciphertext, pubkey, currentUser);
 }
 
+export async function nip44Encrypt(
+  plaintext: string,
+  pubkey: string,
+  currentUser: string,
+): Promise<{ result: string }> {
+  if (!AmberSigner) {
+    throw new Error('Amber is only supported on Android');
+  }
+  return AmberSigner.nip44Encrypt(plaintext, pubkey, currentUser);
+}
+
+export async function nip44Decrypt(
+  ciphertext: string,
+  pubkey: string,
+  currentUser: string,
+): Promise<{ result: string }> {
+  if (!AmberSigner) {
+    throw new Error('Amber is only supported on Android');
+  }
+  return AmberSigner.nip44Decrypt(ciphertext, pubkey, currentUser);
+}
+
+/**
+ * Silent-only NIP-44 decrypt. Resolves only if Amber has already granted
+ * blanket permission for this op; rejects with `PERMISSION_NOT_GRANTED`
+ * otherwise. Used by batch inbox paths that must not fan out approval
+ * dialogs.
+ */
+export async function nip44DecryptSilent(
+  ciphertext: string,
+  pubkey: string,
+  currentUser: string,
+): Promise<{ result: string }> {
+  if (!AmberSigner) {
+    throw new Error('Amber is only supported on Android');
+  }
+  return AmberSigner.nip44DecryptSilent(ciphertext, pubkey, currentUser);
+}
+
 export async function isInstalled(): Promise<boolean> {
   if (!AmberSigner) return false;
   return AmberSigner.isInstalled();
