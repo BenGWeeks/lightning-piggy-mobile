@@ -124,7 +124,9 @@ const MessagesScreen: React.FC = () => {
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([refreshContacts(), refreshDmInbox(), refreshProfile()]);
+    // Pull-to-refresh is explicit user intent — force-bypass the 24h
+    // own-profile cache so renames published elsewhere surface now.
+    await Promise.all([refreshContacts(), refreshDmInbox(), refreshProfile({ force: true })]);
     setRefreshing(false);
   }, [refreshContacts, refreshDmInbox, refreshProfile]);
 
