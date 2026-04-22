@@ -1,0 +1,42 @@
+appId: com.lightningpiggy.app
+name: Remove Wallet Test
+---
+# Removes the currently active wallet via the settings cog.
+# Swipe to the wallet you want to remove before running this test.
+# Run: maestro test tests/e2e/test-remove-wallet.yaml
+
+# Wait for app to be ready
+- waitForAnimationToEnd:
+    timeout: 25000
+
+# Wait for a wallet to be visible
+- extendedWaitUntil:
+    visible:
+      text: 'Connected'
+    timeout: 20000
+
+# Tap the settings cog on the wallet card
+- tapOn:
+    id: 'wallet-settings'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Scroll down in the settings sheet to reveal Remove Wallet
+- swipe:
+    start: 50%, 80%
+    end: 50%, 40%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Tap Remove Wallet
+- tapOn:
+    text: 'Remove Wallet'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Confirm the removal dialog
+- tapOn:
+    text: 'Remove'
+- waitForAnimationToEnd:
+    timeout: 3000

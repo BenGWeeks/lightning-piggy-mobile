@@ -1,187 +1,309 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
   Image,
   TouchableOpacity,
-  StyleSheet,
   ScrollView,
   RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useWallet } from '../contexts/WalletContext';
-import { colors } from '../styles/theme';
-import { satsToFiatString } from '../services/fiatService';
+import { useNostr } from '../contexts/NostrContext';
 import ReceiveSheet from '../components/ReceiveSheet';
 import SendSheet from '../components/SendSheet';
+import TransferSheet from '../components/TransferSheet';
 import TransactionList from '../components/TransactionList';
-import * as nwcService from '../services/nwcService';
+import WalletCarousel from '../components/WalletCarousel';
+import AddWalletWizard from '../components/AddWalletWizard';
+import WalletSettingsSheet from '../components/WalletSettingsSheet';
+import TabHeader from '../components/TabHeader';
+import { ArrowDownIcon, ArrowUpIcon, ArrowLeftRightIcon } from '../components/icons/ArrowIcons';
+import { styles } from '../styles/HomeScreen.styles';
+import type { MainTabParamList } from '../navigation/types';
 
 const HomeScreen: React.FC = () => {
-  const { balance, refreshBalance, userName, btcPrice, currency, walletAlias, isConnected } = useWallet();
+  const {
+    wallets,
+    activeWalletId,
+    activeWallet,
+    hasWallets,
+    refreshActiveBalance,
+    fetchTransactionsForWallet,
+    setActiveWallet,
+    userName,
+    btcPrice,
+    currency,
+  } = useWallet();
+  const { isLoggedIn, profile, refreshProfile } = useNostr();
+  const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList, 'Home'>>();
+  const route = useRoute<RouteProp<MainTabParamList, 'Home'>>();
+  const insets = useSafeAreaInsets();
+
   const [receiveOpen, setReceiveOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
-  const [transactions, setTransactions] = useState<any[]>([]);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [sendToAddress, setSendToAddress] = useState<string | undefined>();
+  const [sendToPicture, setSendToPicture] = useState<string | undefined>();
+  const [sendToPubkey, setSendToPubkey] = useState<string | undefined>();
+  const [sendToName, setSendToName] = useState<string | undefined>();
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [settingsWalletId, setSettingsWalletId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const fetchData = async () => {
-    await refreshBalance();
-    try {
-      const txs = await nwcService.listTransactions();
-      console.log('Transactions fetched:', txs.length, JSON.stringify(txs.slice(0, 2)));
-      setTransactions(txs);
-    } catch (error) {
-      console.warn('Failed to fetch transactions:', error);
-    }
-  };
+  // Refresh the own-profile kind-0 on focus so the top-right profile
+  // icon picks up external renames (e.g. via Amber or another client).
+  // The call is cache-respecting: if the 24h kind-0 cache is still
+  // fresh it short-circuits without hitting relays, so switching tabs
+  // doesn't incur a network cost. Pull-to-refresh in MessagesScreen
+  // passes `{ force: true }` for the explicit-user-intent path.
+  // (The greeting text itself reads from WalletContext's userName, not
+  // `profile` — aligning those is tracked separately under #150.)
+  useFocusEffect(
+    useCallback(() => {
+      if (isLoggedIn) refreshProfile();
+    }, [isLoggedIn, refreshProfile]),
+  );
 
+  // Handle sendToAddress from navigation params (e.g., from Friends tab zap)
   useEffect(() => {
-    if (isConnected) fetchData();
-  }, [isConnected]);
+    if (route.params?.sendToAddress) {
+      setSendToAddress(route.params.sendToAddress);
+      setSendToPicture(route.params.sendToPicture);
+      setSendToPubkey(route.params.sendToPubkey);
+      setSendToName(route.params.sendToName);
+      setSendOpen(true);
+      navigation.setParams({
+        sendToAddress: undefined,
+        sendToPicture: undefined,
+        sendToPubkey: undefined,
+        sendToName: undefined,
+      });
+    }
+  }, [
+    route.params?.sendToAddress,
+    route.params?.sendToPicture,
+    route.params?.sendToPubkey,
+    route.params?.sendToName,
+    navigation,
+  ]);
+
+  // Hold the latest wallets + context callbacks in refs so fetchTransactions
+  // and fetchData can read up-to-date values without taking `wallets` or the
+  // callbacks as dependencies. Without refs we'd either re-run the fetch
+  // callback on every wallet state change (triggering fetch loops via the
+  // effect below) or capture stale values (and mis-route NWC vs on-chain).
+  const walletsRef = useRef(wallets);
+  const refreshActiveBalanceRef = useRef(refreshActiveBalance);
+  const fetchTransactionsForWalletRef = useRef(fetchTransactionsForWallet);
+  useEffect(() => {
+    walletsRef.current = wallets;
+    refreshActiveBalanceRef.current = refreshActiveBalance;
+    fetchTransactionsForWalletRef.current = fetchTransactionsForWallet;
+  }, [wallets, refreshActiveBalance, fetchTransactionsForWallet]);
+
+  const fetchTransactions = useCallback(async () => {
+    if (!activeWalletId) return;
+    await fetchTransactionsForWalletRef.current(activeWalletId);
+  }, [activeWalletId]);
+
+  const fetchData = useCallback(async () => {
+    // For on-chain wallets, fetchTransactions already does syncAndRefresh
+    // which updates both balance and transactions in a single sync.
+    // Only call refreshActiveBalance separately for NWC wallets.
+    const wallet = walletsRef.current.find((w) => w.id === activeWalletId);
+    if (wallet?.walletType === 'onchain') {
+      await fetchTransactions();
+    } else {
+      await Promise.all([refreshActiveBalanceRef.current(), fetchTransactions()]);
+    }
+  }, [activeWalletId, fetchTransactions]);
+
+  const isWalletAvailable =
+    activeWallet?.walletType === 'onchain' ? true : (activeWallet?.isConnected ?? false);
+
+  // Transactions from the active wallet (owned by WalletContext)
+  const transactions = activeWallet?.transactions ?? [];
+  const fetchedWallets = useRef<Set<string>>(new Set());
+
+  // Show spinner only while first fetch is in progress (not for zero-tx wallets)
+  const loadingTransactions =
+    isWalletAvailable &&
+    transactions.length === 0 &&
+    activeWalletId != null &&
+    !fetchedWallets.current.has(activeWalletId);
+
+  // When swiping to a disconnected NWC wallet, trigger reconnection
+  useEffect(() => {
+    if (activeWallet?.walletType === 'nwc' && !activeWallet?.isConnected && activeWalletId) {
+      refreshActiveBalance();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWalletId]);
+
+  // Fetch fresh data once per wallet (not on every swipe back)
+  useEffect(() => {
+    setRefreshing(false);
+    if (isWalletAvailable && activeWalletId && !fetchedWallets.current.has(activeWalletId)) {
+      fetchedWallets.current.add(activeWalletId);
+      fetchData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWalletId, isWalletAvailable]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
+    if (activeWalletId) fetchedWallets.current.delete(activeWalletId);
     await fetchData();
     setRefreshing(false);
   };
 
+  const handleWalletChange = useCallback(
+    (walletId: string | null) => {
+      if (walletId !== activeWalletId) {
+        setActiveWallet(walletId);
+      }
+    },
+    [activeWalletId, setActiveWallet],
+  );
+
+  const handleSettingsPress = useCallback((walletId: string) => {
+    setSettingsWalletId(walletId);
+  }, []);
+
+  const isOnchainWallet = activeWallet?.walletType === 'onchain';
+  const isWatchOnly = isOnchainWallet && activeWallet?.onchainImportMethod !== 'mnemonic';
+  const hasActiveConnection = isOnchainWallet ? true : (activeWallet?.isConnected ?? false);
+  const canSend = hasActiveConnection && !isWatchOnly;
+  // Transfer requires at least 1 wallet that can send + 1 other wallet
+  const hasSendableWallet = wallets.some(
+    (w) =>
+      (w.walletType === 'nwc' && w.isConnected) ||
+      (w.walletType === 'onchain' && w.onchainImportMethod === 'mnemonic'),
+  );
+  const canTransfer = hasSendableWallet && wallets.length >= 2;
+
   return (
     <View style={styles.container}>
-      {/* Header area with pink background and faded pig */}
+      {/* Header area with brand background + faded pig behind carousel */}
       <View style={styles.headerBackground}>
         <Image
           source={require('../../assets/images/lightning-piggy-intro.png')}
-          style={styles.pigImage}
+          style={styles.bgPigImage}
           resizeMode="contain"
         />
-        <View style={styles.headerContent}>
-          <Text style={styles.hello}>Hello{userName ? `, ${userName}` : ''}!</Text>
-          {walletAlias ? (
-            <Text style={styles.walletAlias}>{walletAlias}</Text>
-          ) : null}
-          <TouchableOpacity onPress={handleRefresh}>
-            <Text style={styles.balance}>
-              {balance !== null ? `${balance.toLocaleString()} Sats` : 'Loading...'}
-            </Text>
-            {balance !== null && btcPrice !== null && (
-              <Text style={styles.fiatBalance}>
-                {satsToFiatString(balance, btcPrice, currency)}
-              </Text>
-            )}
+
+        <TabHeader
+          title={`Hello${userName ? `, ${userName}` : ''}!`}
+          // Keep Home's greeting at its pre-#139 lighter weight + smaller
+          // size; section titles (Messages/Friends/Learn) stay bolder to
+          // read as section labels.
+          titleStyle={{ fontSize: 22, fontWeight: '400' }}
+          icon={
+            <Image
+              source={require('../../assets/images/Home.png')}
+              style={styles.badgeIcon}
+              resizeMode="contain"
+            />
+          }
+        />
+
+        <WalletCarousel
+          wallets={wallets}
+          activeWalletId={activeWalletId}
+          btcPrice={btcPrice}
+          currency={currency}
+          onWalletChange={handleWalletChange}
+          onAddWallet={() => setWizardOpen(true)}
+          onSettingsPress={handleSettingsPress}
+        />
+
+        {/* Send/Receive/Transfer buttons */}
+        <View style={styles.buttonRow}>
+          <TouchableOpacity
+            style={[styles.actionButton, !hasActiveConnection && styles.actionButtonDisabled]}
+            onPress={() => setReceiveOpen(true)}
+            disabled={!hasActiveConnection}
+            accessibilityLabel="Receive"
+            testID="btn-receive"
+          >
+            <View style={styles.actionCircle}>
+              <ArrowDownIcon size={24} strokeWidth={3} />
+            </View>
+            <Text style={styles.actionText}>Receive</Text>
           </TouchableOpacity>
-          <View style={styles.buttonRow}>
-            <TouchableOpacity style={styles.actionButton} onPress={() => setReceiveOpen(true)}>
-              <Text style={styles.actionIcon}>↓</Text>
-              <Text style={styles.actionText}>Receive</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.actionButton} onPress={() => setSendOpen(true)}>
-              <Text style={styles.actionText}>Send</Text>
-              <Text style={styles.actionIcon}>↑</Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            style={[styles.actionButton, !canTransfer && styles.actionButtonDisabled]}
+            onPress={() => setTransferOpen(true)}
+            disabled={!canTransfer}
+            accessibilityLabel="Transfer"
+            testID="btn-transfer"
+          >
+            <View style={styles.actionCircle}>
+              <ArrowLeftRightIcon size={24} strokeWidth={3} />
+            </View>
+            <Text style={styles.actionText}>Transfer</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionButton, !canSend && styles.actionButtonDisabled]}
+            onPress={() => setSendOpen(true)}
+            disabled={!canSend}
+            accessibilityLabel="Send"
+            testID="btn-send"
+          >
+            <View style={styles.actionCircle}>
+              <ArrowUpIcon size={24} strokeWidth={3} />
+            </View>
+            <Text style={styles.actionText}>Send</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
       {/* Transaction list */}
-      <ScrollView
-        style={styles.transactionsContainer}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
-        }
-      >
-        <TransactionList transactions={transactions} />
-      </ScrollView>
+      <View style={styles.transactionsWrapper}>
+        <ScrollView
+          style={styles.transactionsContainer}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+        >
+          {!hasWallets || activeWalletId === null ? (
+            <View style={styles.emptyState}>
+              <TouchableOpacity onPress={() => setWizardOpen(true)}>
+                <Text style={styles.addWalletText}>+ Add a Wallet</Text>
+              </TouchableOpacity>
+            </View>
+          ) : loadingTransactions && transactions.length === 0 ? (
+            <View style={styles.emptyState}>
+              <ActivityIndicator size="small" color="#EC008C" />
+            </View>
+          ) : (
+            <TransactionList transactions={transactions} />
+          )}
+        </ScrollView>
+      </View>
 
       <ReceiveSheet visible={receiveOpen} onClose={() => setReceiveOpen(false)} />
-      <SendSheet visible={sendOpen} onClose={() => setSendOpen(false)} />
+      <SendSheet
+        visible={sendOpen}
+        onClose={() => {
+          setSendOpen(false);
+          setSendToAddress(undefined);
+          setSendToPicture(undefined);
+          setSendToPubkey(undefined);
+          setSendToName(undefined);
+        }}
+        initialAddress={sendToAddress}
+        initialPicture={sendToPicture}
+        recipientPubkey={sendToPubkey}
+        recipientName={sendToName}
+      />
+      <TransferSheet visible={transferOpen} onClose={() => setTransferOpen(false)} />
+      <AddWalletWizard visible={wizardOpen} onClose={() => setWizardOpen(false)} />
+      <WalletSettingsSheet walletId={settingsWalletId} onClose={() => setSettingsWalletId(null)} />
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  headerBackground: {
-    height: 380,
-    backgroundColor: colors.brandPink,
-    overflow: 'hidden',
-  },
-  pigImage: {
-    position: 'absolute',
-    width: 420,
-    height: 420,
-    right: -60,
-    top: -20,
-    opacity: 0.6,
-  },
-  headerContent: {
-    flex: 1,
-    paddingTop: 60,
-    paddingHorizontal: 24,
-    gap: 24,
-  },
-  hello: {
-    color: colors.white,
-    fontSize: 28,
-    fontWeight: '400',
-  },
-  walletAlias: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: '500',
-    opacity: 0.7,
-    marginTop: -16,
-  },
-  balance: {
-    color: colors.white,
-    fontSize: 48,
-    fontWeight: '700',
-  },
-  fiatBalance: {
-    color: colors.white,
-    fontSize: 18,
-    fontWeight: '400',
-    opacity: 0.8,
-    marginTop: 4,
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    gap: 20,
-    marginTop: 16,
-  },
-  actionButton: {
-    flex: 1,
-    flexDirection: 'row',
-    backgroundColor: colors.white,
-    height: 52,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  actionText: {
-    color: colors.brandPink,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  actionIcon: {
-    color: colors.brandPink,
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  transactionsContainer: {
-    flex: 1,
-    backgroundColor: colors.white,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    marginTop: -20,
-  },
-});
 
 export default HomeScreen;

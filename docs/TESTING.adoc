@@ -1,0 +1,142 @@
+== Testing
+
+This guide covers code quality checks and end-to-end testing for Lightning Piggy.
+
+=== Code Quality
+
+The project enforces code quality through TypeScript, ESLint, and Prettier. All checks must pass before committing.
+
+[source,bash]
+----
+# TypeScript type checking
+npx tsc --noEmit
+
+# ESLint
+npm run lint
+
+# Prettier format check
+npm run format:check
+
+# Auto-format with Prettier
+npm run format
+----
+
+=== E2E Testing with Maestro
+
+End-to-end tests use https://maestro.mobile.dev[Maestro], a mobile UI testing framework. Tests are written in YAML and interact with the app through accessibility labels and test IDs.
+
+==== Setup
+
+[source,bash]
+----
+# Install Maestro
+curl -Ls "https://get.maestro.mobile.dev" | bash
+
+# Verify installation
+maestro --version
+----
+
+Ensure the app is built and running on a connected device or emulator before running tests.
+
+==== Running Tests
+
+[source,bash]
+----
+# Run a single test
+maestro test tests/e2e/test-login.yaml
+
+# Run all tests
+maestro test tests/e2e/
+----
+
+==== Test Inventory
+
+[cols="2,3", options="header"]
+|===
+| Test File | Coverage
+
+| `test-login.yaml`
+| nsec login flow — enter key, verify login state
+
+| `test-logout.yaml`
+| Logout and state cleanup verification
+
+| `test-create-account.yaml`
+| Generate new Nostr keypair, set display name, backup nsec
+
+| `test-edit-profile.yaml`
+| Edit name, picture, banner, and lightning address
+
+| `test-follow-unfollow.yaml`
+| Follow 6 contacts via the Add Friend sheet
+
+| `test-unfollow.yaml`
+| Unfollow a contact via the profile sheet
+
+| `test-search.yaml`
+| Search contacts by name on the Friends screen
+
+| `test-alphabet-m.yaml`
+| Alphabet sidebar navigation (M, S, A sections)
+
+| `test-keyboard-sheet.yaml`
+| Bottom sheet slides up correctly when keyboard opens
+
+| `test-login-perf.yaml`
+| Login to Friends tab responsiveness timing
+
+|===
+
+==== Writing Tests
+
+IMPORTANT: Never use coordinates (`point:`, `tapOn: { point: }`, `adb shell input tap`) in Maestro tests. Coordinates are fragile and break across screen sizes, devices, and OS versions.
+
+Instead, always use accessibility-based selectors:
+
+[cols="1,2,2", options="header"]
+|===
+| Selector | Usage | Example
+
+| `id:`
+| Match by `testID` prop
+| `id: 'tab-friends'`
+
+| `text:`
+| Match by visible text or `accessibilityLabel`
+| `text: 'Friends tab'`
+
+|===
+
+If a component is missing an accessibility label, add one to the source code rather than working around it with coordinates.
+
+===== Accessibility Conventions
+
+[cols="1,2", options="header"]
+|===
+| Component | Pattern
+
+| Tab bar buttons
+| `tabBarButtonTestID` (e.g. `tab-friends`) and `tabBarAccessibilityLabel` (e.g. `Friends tab`)
+
+| Alphabet sidebar letters
+| `testID` pattern `alphabet-{letter}` (e.g. `alphabet-M`)
+
+| Interactive elements
+| All buttons, tabs, and tappable items must have `accessibilityLabel` and/or `testID`
+
+|===
+
+=== Screenshots
+
+Capture screenshots from a connected Android device using ADB:
+
+[source,bash]
+----
+# Capture screenshot
+adb exec-out screencap -p > /tmp/screen.png
+
+# Resize for high-DPI devices (> 2000px)
+convert /tmp/screen.png -resize 1200x1200\> /tmp/screen_small.png
+----
+
+The `\>` flag ensures ImageMagick only shrinks images that exceed 1200px — smaller images are left unchanged.

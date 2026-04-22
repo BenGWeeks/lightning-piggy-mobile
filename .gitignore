@@ -31,6 +31,7 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
 
 # typescript
@@ -39,3 +40,24 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+modules/*/android/build/
+
+# Maestro test screenshots
+*_after_tap_*.png
+*_friends_*.png
+*_search_*.png
+*_scrolled_*.png
+*_account_*.png
+*_logged_*.png
+*_login_*.png
+*_logout_*.png
+*_home_*.png
+*_contacts_*.png
+
+# Build artifacts
+*.apk
+
+# Generated documentation
+docs/*.pdf
+
+.claude/

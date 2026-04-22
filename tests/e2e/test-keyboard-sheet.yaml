@@ -1,0 +1,47 @@
+appId: ${APP_ID:-com.lightningpiggy.app}
+name: Bottom Sheet Keyboard Slide Test
+---
+# Verifies that the Connect Nostr bottom sheet slides up when keyboard opens
+# so that Login and Use Amber Signer buttons remain visible
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Navigate to Home first, then Account
+- tapOn:
+    text: 'Home tab'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Open Connect Nostr sheet
+- tapOn:
+    id: 'connect-nostr'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Verify sheet is fully visible before keyboard
+- assertVisible:
+    text: 'Use Amber Signer'
+
+# Tap nsec input to open keyboard
+- tapOn:
+    text: 'nsec1...'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Assert Login button is still visible with keyboard open
+- assertVisible:
+    id: 'login-button'
+
+# Dismiss keyboard
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Dismiss sheet
+- pressKey: back

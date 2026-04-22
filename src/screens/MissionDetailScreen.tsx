@@ -1,13 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import {
-  View,
-  Text,
-  Image,
-  TouchableOpacity,
-  ScrollView,
-  Linking,
-  Alert,
-} from 'react-native';
+import { View, Text, Image, TouchableOpacity, ScrollView, Linking, Alert } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { courses } from '../data/learnContent';
 import {
@@ -17,25 +9,28 @@ import {
   isMissionComplete,
   LearnProgress,
 } from '../services/learnProgressService';
+import { ChevronLeft, ChevronRight, Check } from 'lucide-react-native';
 import { styles } from '../styles/MissionDetailScreen.styles';
 import { colors } from '../styles/theme';
 import { extractYouTubeId } from '../utils/youtube';
 
+import { LearnNavigation, MissionDetailRoute } from '../navigation/types';
+
 interface Props {
-  route: any;
-  navigation: any;
+  route: MissionDetailRoute;
+  navigation: LearnNavigation;
 }
 
 const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { courseId, missionId } = route.params;
-  const course = courses.find(c => c.id === courseId);
-  const mission = course?.missions.find(m => m.id === missionId);
+  const course = courses.find((c) => c.id === courseId);
+  const mission = course?.missions.find((m) => m.id === missionId);
   const [progress, setProgress] = useState<LearnProgress>({ completedMissions: [] });
 
   useFocusEffect(
     useCallback(() => {
       getProgress().then(setProgress);
-    }, [])
+    }, []),
   );
 
   if (!course || !mission) {
@@ -73,35 +68,29 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         {mission.videoUrl || hasFullVideo ? (
           <TouchableOpacity
             style={styles.videoTouchable}
-            onPress={() => Linking.openURL(mission.videoUrl ?? mission.fullVideoUrl!).catch((e) => {
-              console.warn('Failed to open URL:', e);
-              Alert.alert('Unable to open link', 'Please try again later.');
-            })}
+            onPress={() =>
+              Linking.openURL(mission.videoUrl ?? mission.fullVideoUrl!).catch((e) => {
+                console.warn('Failed to open URL:', e);
+                Alert.alert('Unable to open link', 'Please try again later.');
+              })
+            }
             activeOpacity={0.8}
           >
-            <Image
-              source={thumbnailSource}
-              style={styles.videoThumbnail}
-              resizeMode="cover"
-            />
+            <Image source={thumbnailSource} style={styles.videoThumbnail} resizeMode="cover" />
             <View style={styles.playButton}>
               <Text style={styles.playIcon}>▶</Text>
             </View>
           </TouchableOpacity>
         ) : (
           <View style={styles.videoTouchable}>
-            <Image
-              source={thumbnailSource}
-              style={styles.videoThumbnail}
-              resizeMode="cover"
-            />
+            <Image source={thumbnailSource} style={styles.videoThumbnail} resizeMode="cover" />
             <View style={styles.comingSoonBubble}>
               <Text style={styles.comingSoonBubbleText}>Coming soon</Text>
             </View>
           </View>
         )}
         <TouchableOpacity style={styles.backButtonOverlay} onPress={() => navigation.goBack()}>
-          <Text style={styles.backArrow}>‹</Text>
+          <ChevronLeft size={28} color="#FFFFFF" />
         </TouchableOpacity>
       </View>
 
@@ -110,26 +99,29 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         {mission.producer && (
           <TouchableOpacity
             style={styles.producerRow}
-            onPress={() => Linking.openURL(mission.producer!.channelUrl).catch((e) => {
-              console.warn('Failed to open URL:', e);
-              Alert.alert('Unable to open link', 'Please try again later.');
-            })}
+            onPress={() =>
+              Linking.openURL(mission.producer!.channelUrl).catch((e) => {
+                console.warn('Failed to open URL:', e);
+                Alert.alert('Unable to open link', 'Please try again later.');
+              })
+            }
           >
-            <Image
-              source={{ uri: mission.producer.iconUrl }}
-              style={styles.producerIcon}
-            />
+            <Image source={{ uri: mission.producer.iconUrl }} style={styles.producerIcon} />
             <Text style={styles.producerText}>{mission.producer.name}</Text>
-            <Text style={styles.producerArrow}>›</Text>
+            <ChevronRight size={16} color={colors.textSupplementary} />
           </TouchableOpacity>
         )}
 
         {/* Watch full episode link */}
         {hasFullVideo && (
-          <TouchableOpacity onPress={() => Linking.openURL(mission.fullVideoUrl!).catch((e) => {
-              console.warn('Failed to open URL:', e);
-              Alert.alert('Unable to open link', 'Please try again later.');
-            })}>
+          <TouchableOpacity
+            onPress={() =>
+              Linking.openURL(mission.fullVideoUrl!).catch((e) => {
+                console.warn('Failed to open URL:', e);
+                Alert.alert('Unable to open link', 'Please try again later.');
+              })
+            }
+          >
             <Text style={styles.fullEpisodeLink}>Watch full episode free</Text>
           </TouchableOpacity>
         )}
@@ -144,7 +136,7 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         {mission.learningOutcomes.map((outcome, index) => (
           <View key={index} style={styles.outcomeRow}>
             <View style={[styles.outcomeDot, completed && styles.outcomeDotComplete]}>
-              {completed && <Text style={styles.outcomeDotCheck}>✓</Text>}
+              {completed && <Check size={12} color="#FFFFFF" />}
             </View>
             <Text style={styles.outcomeText}>{outcome.text}</Text>
           </View>

@@ -1,0 +1,112 @@
+= Supported Standards
+:toc:
+
+This document lists the Bitcoin, Lightning, and Nostr standards implemented by Lightning Piggy Mobile.
+
+== BIPs (Bitcoin Improvement Proposals)
+
+[cols="1,3,4"]
+|===
+| Standard | Name | Usage
+
+| https://github.com/bitcoin/bips/blob/master/bip-0021.mediawiki[BIP-21]
+| URI Scheme
+| Parsing and generating `bitcoin:` URIs with optional `?amount=` parameter for QR codes (SendSheet, ReceiveSheet)
+
+| https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki[BIP-32]
+| Hierarchical Deterministic Wallets
+| xpub key derivation for watch-only wallets; claim keypair generation for Boltz swaps (`onchainService`, `boltzService`)
+
+| https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki[BIP-39]
+| Mnemonic Seed Phrases
+| 12/24-word mnemonic validation and import for hot wallets; normalization and whitespace handling (`WalletContext`)
+
+| https://github.com/bitcoin/bips/blob/master/bip-0084.mediawiki[BIP-84]
+| Native SegWit HD Wallets
+| Derivation path `m/84'/0'/0'` for `bc1q...` address generation; zpub/ypub to xpub conversion (`onchainService`)
+
+| https://github.com/bitcoin/bips/blob/master/bip-0327.mediawiki[BIP-327]
+| MuSig2 Schnorr Key Aggregation
+| Taproot internal key aggregation (Boltz pubkey + app claim pubkey) for Boltz v2 swap claims (`boltzService`)
+
+| https://github.com/bitcoin/bips/blob/master/bip-0340.mediawiki[BIP-340]
+| Schnorr Signatures
+| Taproot script-path signing for Boltz swap claim transactions (`boltzService`)
+
+| https://github.com/bitcoin/bips/blob/master/bip-0341.mediawiki[BIP-341]
+| Taproot (SegWit v1)
+| Taproot output key tweaking, leaf hash computation, control block construction, and script-path spending for Boltz claims (`boltzService`)
+|===
+
+== NIPs (Nostr Implementation Possibilities)
+
+[cols="1,3,4"]
+|===
+| Standard | Name | Usage
+
+| https://github.com/nostr-protocol/nips/blob/master/01.md[NIP-01]
+| Basic Protocol
+| Nostr relay connections, event publishing (kind 0 metadata, kind 3 contacts, kind 10002 relay lists), subscriptions (`nostrService`)
+
+| https://github.com/nostr-protocol/nips/blob/master/04.md[NIP-04]
+| Encrypted Direct Messages
+| Encrypted communication between app and NWC relay for wallet commands (via `@getalby/sdk`)
+
+| https://github.com/nostr-protocol/nips/blob/master/05.md[NIP-05]
+| DNS Identity Verification
+| Display of NIP-05 identifiers on contact profiles (`ContactProfileSheet`)
+
+| https://github.com/nostr-protocol/nips/blob/master/19.md[NIP-19]
+| Bech32-encoded Entities
+| Encoding/decoding `nsec` (private key) and `npub` (public key) via `nostr-tools/nip19` (`nostrService`, `NostrContext`)
+
+| https://github.com/nostr-protocol/nips/blob/master/20.md[NIP-20]
+| Command Results (OK messages)
+| Relay OK response handling; includes workaround for LNbits Nostrclient missing OK responses (`nwcService`)
+
+| https://github.com/nostr-protocol/nips/blob/master/21.md[NIP-21]
+| `nostr:` URI Scheme
+| Deep linking to Nostr contacts via `nostr:` URIs (`ContactProfileSheet`)
+
+| https://github.com/nostr-protocol/nips/blob/master/47.md[NIP-47]
+| Nostr Wallet Connect (NWC)
+| Remote Lightning wallet control: `pay_invoice`, `make_invoice`, `get_balance`, `list_transactions` (`nwcService`)
+
+| https://github.com/nostr-protocol/nips/blob/master/55.md[NIP-55]
+| Android Signer
+| Amber signer integration for secure Nostr key management via Android intents (`amberService`)
+
+| https://github.com/nostr-protocol/nips/blob/master/57.md[NIP-57]
+| Lightning Zaps
+| Zap request events (kind 9734) for Lightning donations to Nostr contacts (`lnurlService`, `SendSheet`)
+
+| https://github.com/nostr-protocol/nips/blob/master/65.md[NIP-65]
+| Relay List Metadata
+| Fetching kind 10002 events for user read/write relay preferences (`nostrService`)
+
+| https://github.com/nostr-protocol/nips/blob/master/94.md[NIP-94]
+| File Metadata
+| NIP-94 events with `url` tag for profile picture uploads (`imageUploadService`)
+|===
+
+== Lightning Standards
+
+[cols="1,3,4"]
+|===
+| Standard | Name | Usage
+
+| https://github.com/lightning/bolts/blob/master/11-payment-encoding.md[BOLT-11]
+| Lightning Invoice Encoding
+| Invoice parsing (amount, description, expiry) and payment via `light-bolt11-decoder` (`SendSheet`, `nwcService`)
+
+| https://github.com/lnurl/luds[LNURL / LUD-16]
+| Lightning Address Protocol
+| Resolving `user@domain` to LNURL-pay endpoints; fetching invoices with comments and Nostr zap metadata (`lnurlService`)
+|===
+
+== Boltz Exchange Protocol
+
+The app uses https://docs.boltz.exchange[Boltz v2 API] for trustless cross-chain transfers:
+
+- **Reverse submarine swaps** (Lightning -> on-chain): Pay LN invoice, Boltz locks BTC on-chain, app claims via Taproot script-path
+- **Submarine swaps** (on-chain -> Lightning): App sends BTC on-chain to Boltz, Boltz pays the LN invoice

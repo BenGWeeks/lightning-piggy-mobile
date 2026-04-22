@@ -11,11 +11,14 @@ interface LnurlPayResponse {
   maxSendable: number; // millisatoshis
   metadata: string;
   tag: string;
+  commentAllowed?: number;
+  allowsNostr?: boolean;
+  nostrPubkey?: string;
 }
 
 interface LnurlInvoiceResponse {
   pr: string; // bolt11 invoice
-  routes: any[];
+  routes: unknown[];
 }
 
 export interface LnurlPayParams {
@@ -23,6 +26,9 @@ export interface LnurlPayParams {
   minSats: number;
   maxSats: number;
   description: string;
+  commentAllowed: number;
+  allowsNostr: boolean;
+  nostrPubkey: string | null;
 }
 
 /**
@@ -57,7 +63,7 @@ export async function resolveLightningAddress(address: string): Promise<LnurlPay
   let description = address;
   try {
     const metadata = JSON.parse(data.metadata);
-    const textEntry = metadata.find((m: any[]) => m[0] === 'text/plain');
+    const textEntry = metadata.find((m: [string, string]) => m[0] === 'text/plain');
     if (textEntry) description = textEntry[1];
   } catch {}
 
@@ -66,13 +72,21 @@ export async function resolveLightningAddress(address: string): Promise<LnurlPay
     minSats: Math.ceil(data.minSendable / 1000),
     maxSats: Math.floor(data.maxSendable / 1000),
     description,
+    commentAllowed: data.commentAllowed ?? 0,
+    allowsNostr: data.allowsNostr ?? false,
+    nostrPubkey: data.nostrPubkey ?? null,
   };
 }
 
 /**
  * Fetch a bolt11 invoice from an LNURL-pay callback for a given amount.
+ * Optionally includes a NIP-57 zap request event and/or a comment.
  */
-export async function fetchInvoice(callback: string, amountSats: number): Promise<string> {
+export async function fetchInvoice(
+  callback: string,
+  amountSats: number,
+  options?: { nostr?: string; comment?: string },
+): Promise<string> {
   let callbackUrl: URL;
   try {
     callbackUrl = new URL(callback);
@@ -85,8 +99,15 @@ export async function fetchInvoice(callback: string, amountSats: number): Promis
 
   const amountMsat = amountSats * 1000;
   callbackUrl.searchParams.set('amount', amountMsat.toString());
-  const url = callbackUrl.toString();
 
+  if (options?.nostr) {
+    callbackUrl.searchParams.set('nostr', options.nostr);
+  }
+  if (options?.comment) {
+    callbackUrl.searchParams.set('comment', options.comment);
+  }
+
+  const url = callbackUrl.toString();
   const response = await fetch(url);
 
   if (!response.ok) {

@@ -1,11 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import {
-  View,
-  Text,
-  Image,
-  TouchableOpacity,
-  ScrollView,
-} from 'react-native';
+import { View, Text, Image, TouchableOpacity, ScrollView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
 import { courses } from '../data/learnContent';
@@ -15,27 +9,28 @@ import {
   LearnProgress,
   isMissionComplete,
   isCourseComplete,
-  getCourseCompletedCount,
 } from '../services/learnProgressService';
+import { ChevronLeft, Check } from 'lucide-react-native';
 import { styles } from '../styles/CourseDetailScreen.styles';
 import { getYouTubeThumbnail } from '../utils/youtube';
 import { colors } from '../styles/theme';
+import { LearnNavigation, CourseDetailRoute } from '../navigation/types';
 
 interface Props {
-  route: any;
-  navigation: any;
+  route: CourseDetailRoute;
+  navigation: LearnNavigation;
 }
 
 const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { courseId } = route.params;
-  const course = courses.find(c => c.id === courseId);
+  const course = courses.find((c) => c.id === courseId);
   const [progress, setProgress] = useState<LearnProgress>({ completedMissions: [] });
   const [tipVisible, setTipVisible] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
       getProgress().then(setProgress);
-    }, [])
+    }, []),
   );
 
   if (!course) {
@@ -49,15 +44,14 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     );
   }
 
-  const missionIds = course.missions.map(m => m.id);
+  const missionIds = course.missions.map((m) => m.id);
   const allDone = isCourseComplete(progress, missionIds);
-  const completed = getCourseCompletedCount(progress, missionIds);
 
   return (
     <View style={styles.container}>
       {/* Back button floats above scroll */}
       <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-        <Text style={styles.backArrow}>‹</Text>
+        <ChevronLeft size={28} color="#FFFFFF" />
       </TouchableOpacity>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -87,7 +81,9 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
               <TouchableOpacity
                 key={mission.id}
                 style={styles.missionCard}
-                onPress={() => navigation.navigate('MissionDetail', { courseId, missionId: mission.id })}
+                onPress={() =>
+                  navigation.navigate('MissionDetail', { courseId, missionId: mission.id })
+                }
                 activeOpacity={0.7}
               >
                 <Image
@@ -120,7 +116,7 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                 </View>
                 {done && (
                   <View style={styles.checkCircle}>
-                    <Text style={styles.checkMark}>✓</Text>
+                    <Check size={14} color="#FFFFFF" />
                   </View>
                 )}
               </TouchableOpacity>

@@ -9,8 +9,14 @@ import {
   Share,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
-import BottomSheet, { BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
+import {
+  BottomSheetModal,
+  BottomSheetBackdrop,
+  BottomSheetBackdropProps,
+  BottomSheetView,
+} from '@gorhom/bottom-sheet';
 import QRCode from 'react-native-qrcode-svg';
+import { Check } from 'lucide-react-native';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
 import { satsToFiatString } from '../services/fiatService';
@@ -24,22 +30,24 @@ interface Props {
 }
 
 const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
-  const { makeInvoice, refreshBalance, balance, btcPrice, currency } = useWallet();
+  const { makeInvoice, refreshActiveBalance, balance, btcPrice, currency } = useWallet();
   const [invoice, setInvoice] = useState('');
   const [loading, setLoading] = useState(false);
   const [paymentReceived, setPaymentReceived] = useState(false);
   const [copied, setCopied] = useState(false);
   const intervalId = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevBalance = useRef<number | null>(null);
-  const bottomSheetRef = useRef<BottomSheet>(null);
+  const bottomSheetRef = useRef<BottomSheetModal>(null);
 
   const snapPoints = useMemo(() => ['90%'], []);
 
   const tipSats = course.satsReward;
 
   // Collect one key learning outcome per mission for the "quiz" section
-  const quizTopics = course.missions.map(m => m.learningOutcomes[0]?.text).filter(Boolean);
+  const quizTopics = course.missions.map((m) => m.learningOutcomes[0]?.text).filter(Boolean);
 
+  // Open/close the sheet — intentionally depends only on `visible`.
+  // Other values are read for initialisation, not as reactive triggers.
   useEffect(() => {
     if (visible) {
       prevBalance.current = balance;
@@ -47,13 +55,13 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
       setPaymentReceived(false);
       setCopied(false);
       setLoading(true);
-      bottomSheetRef.current?.expand();
+      bottomSheetRef.current?.present();
       (async () => {
         try {
           const inv = await makeInvoice(tipSats, `Lightning Piggy: ${course.title} tip`);
           setInvoice(inv);
           intervalId.current = setInterval(async () => {
-            await refreshBalance();
+            await refreshActiveBalance();
           }, 5000);
         } catch (error) {
           console.warn('Failed to create tip invoice:', error);
@@ -62,7 +70,7 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
         }
       })();
     } else {
-      bottomSheetRef.current?.close();
+      bottomSheetRef.current?.dismiss();
     }
     return () => {
       if (intervalId.current) {
@@ -70,11 +78,17 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
         intervalId.current = null;
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
   // Detect payment
   useEffect(() => {
-    if (visible && prevBalance.current !== null && balance !== null && balance > prevBalance.current) {
+    if (
+      visible &&
+      prevBalance.current !== null &&
+      balance !== null &&
+      balance > prevBalance.current
+    ) {
       setPaymentReceived(true);
       if (intervalId.current) {
         clearInterval(intervalId.current);
@@ -92,13 +106,18 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
     return () => handler.remove();
   }, [visible, onClose]);
 
-  const handleSheetChange = useCallback((index: number) => {
-    if (index === -1) onClose();
-  }, [onClose]);
+  const handleSheetChange = useCallback(
+    (index: number) => {
+      if (index === -1) onClose();
+    },
+    [onClose],
+  );
 
   const renderBackdrop = useCallback(
-    (props: any) => <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />,
-    []
+    (props: BottomSheetBackdropProps) => (
+      <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />
+    ),
+    [],
   );
 
   const handleCopy = async () => {
@@ -122,9 +141,8 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
   const fiatString = btcPrice ? satsToFiatString(tipSats, btcPrice, currency) : '';
 
   return (
-    <BottomSheet
+    <BottomSheetModal
       ref={bottomSheetRef}
-      index={0}
       snapPoints={snapPoints}
       onChange={handleSheetChange}
       enablePanDownToClose
@@ -133,14 +151,18 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
       backgroundStyle={styles.sheetBackground}
     >
       <BottomSheetView style={styles.content}>
-        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
           {/* QR Code at top */}
           <View style={styles.qrContainer}>
             {loading ? (
               <ActivityIndicator size="large" color={colors.brandPink} />
             ) : paymentReceived ? (
               <View style={styles.successOverlay}>
-                <Text style={styles.successCheck}>✓</Text>
+                <Check size={48} color={colors.green} />
                 <Text style={styles.successText}>Tip Received!</Text>
               </View>
             ) : invoice ? (
@@ -169,7 +191,8 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
 
           {/* Instructions */}
           <Text style={styles.instructionText}>
-            Show this to your parent or guardian. They can scan the QR code to send you a tip as a reward for completing this course!
+            Show this to your parent or guardian. They can scan the QR code to send you a tip as a
+            reward for completing this course!
           </Text>
 
           {/* Quiz topics */}
@@ -185,13 +208,11 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
 
           {/* Close button */}
           <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-            <Text style={styles.closeButtonText}>
-              {paymentReceived ? 'Done' : 'Close'}
-            </Text>
+            <Text style={styles.closeButtonText}>{paymentReceived ? 'Done' : 'Close'}</Text>
           </TouchableOpacity>
         </ScrollView>
       </BottomSheetView>
-    </BottomSheet>
+    </BottomSheetModal>
   );
 };
 

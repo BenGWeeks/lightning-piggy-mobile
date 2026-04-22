@@ -3,7 +3,7 @@ import {
   View,
   Text,
   TouchableOpacity,
-  StyleSheet,
+  Pressable,
   Share,
   TextInput,
   ActivityIndicator,
@@ -11,25 +11,101 @@ import {
   Keyboard,
   TouchableWithoutFeedback,
 } from 'react-native';
-import BottomSheet, { BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
+import {
+  BottomSheetModal,
+  BottomSheetBackdrop,
+  BottomSheetBackdropProps,
+  BottomSheetView,
+} from '@gorhom/bottom-sheet';
+import { ChevronUp, ChevronDown, Check, Copy, Share2, Send } from 'lucide-react-native';
 import QRCode from 'react-native-qrcode-svg';
-import CopyIcon from './icons/CopyIcon';
-import ShareIcon from './icons/ShareIcon';
 import * as Clipboard from 'expo-clipboard';
+import Toast from 'react-native-toast-message';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { useWallet } from '../contexts/WalletContext';
+import { useNostr } from '../contexts/NostrContext';
+import { walletLabel } from '../types/wallet';
 import { colors } from '../styles/theme';
+import { receiveSheetStyles as styles } from '../styles/ReceiveSheet.styles';
 import { satsToFiatString, satsToFiat } from '../services/fiatService';
+import FriendPickerSheet, { PickedFriend } from './FriendPickerSheet';
+import type { RootStackParamList } from '../navigation/types';
+
+function paymentHashFromBolt11(bolt11: string): string | null {
+  try {
+    const decoded = bolt11Decode(bolt11);
+    const section = decoded.sections?.find((s: { name: string }) => s.name === 'payment_hash') as
+      | { value?: string }
+      | undefined;
+    return section?.value ?? null;
+  } catch (error) {
+    // Silent null returns would mask broken invoice generation; at
+    // least surface it in dev logs so the fallback-to-balance-poll is
+    // traceable.
+    if (__DEV__) console.warn('[Receive] bolt11 decode failed:', error);
+    return null;
+  }
+}
+
+// Accept only digit characters — sats are whole integers. A hardware
+// keyboard, paste, or an autocomplete suggestion can all inject junk
+// that the soft-keyboard's `numeric` hint alone doesn't block.
+function sanitizeSatsInput(text: string): string {
+  return text.replace(/[^0-9]/g, '');
+}
+
+// Accept digits and a single decimal point, with at most two decimal
+// places (standard fiat presentation). Strip everything else. Dropping
+// a stray comma / currency symbol on paste is the common reason users
+// see "Invalid amount" when they didn't mistype anything.
+function sanitizeFiatInput(text: string): string {
+  let cleaned = text.replace(/[^0-9.]/g, '');
+  const firstDot = cleaned.indexOf('.');
+  if (firstDot !== -1) {
+    // Keep the first dot, drop any subsequent ones.
+    cleaned = cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, '');
+    // Trim to two decimal places.
+    const [intPart, fracPart = ''] = cleaned.split('.');
+    cleaned = `${intPart}.${fracPart.slice(0, 2)}`;
+  }
+  return cleaned;
+}
+// On-chain address fetching is done via WalletContext.getReceiveAddress
 
 interface Props {
   visible: boolean;
   onClose: () => void;
+  // When set, the sheet skips the friend-picker step and DMs the generated
+  // invoice (or lightning address) directly to this friend. Used when the
+  // sheet is opened from inside a conversation — the friend is implicit.
+  presetFriend?: PickedFriend;
+  // Fired after a successful DM send with the exact text that was sent.
+  // The conversation view uses this to append the outgoing message
+  // locally, since the Nostr subscription only sees inbound events.
+  onSent?: (payload: string) => void;
 }
 
 type Mode = 'address' | 'amount';
 type InputUnit = 'sats' | 'fiat';
 
-const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
-  const { makeInvoice, refreshBalance, balance, btcPrice, currency, lightningAddress } = useWallet();
+const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent }) => {
+  const {
+    makeInvoiceForWallet,
+    refreshBalanceForWallet,
+    activeWalletId,
+    activeWallet,
+    wallets,
+    btcPrice,
+    currency,
+    lightningAddress,
+    getReceiveAddress,
+    expectPayment,
+    lastIncomingPayment,
+  } = useWallet();
+  const [capturedWalletId, setCapturedWalletId] = useState<string | null>(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
   const [mode, setMode] = useState<Mode>('address');
   const [invoice, setInvoice] = useState('');
   const [paymentReceived, setPaymentReceived] = useState(false);
@@ -37,10 +113,13 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [satsValue, setSatsValue] = useState('');
   const [fiatValue, setFiatValue] = useState('');
   const [inputUnit, setInputUnit] = useState<InputUnit>('sats');
-  const intervalId = useRef<ReturnType<typeof setInterval> | null>(null);
-  const prevBalance = useRef<number | null>(null);
+  const [onchainAddress, setOnchainAddress] = useState<string | null>(null);
+  const [friendPickerOpen, setFriendPickerOpen] = useState(false);
+  const [sendingToFriend, setSendingToFriend] = useState(false);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const bottomSheetRef = useRef<BottomSheet>(null);
+  const bottomSheetRef = useRef<BottomSheetModal>(null);
+  const { sendDirectMessage, contacts } = useNostr();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   const snapPoints = useMemo(() => ['85%'], []);
 
@@ -49,47 +128,97 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
     return Math.round((fiat / btcPrice) * 100_000_000);
   };
 
-  const generateInvoice = useCallback(async (sats: number) => {
-    if (intervalId.current) {
-      clearInterval(intervalId.current);
-      intervalId.current = null;
-    }
-    setLoading(true);
-    setPaymentReceived(false);
-    try {
-      const inv = await makeInvoice(sats, 'Lightning Piggy');
-      setInvoice(inv);
-      intervalId.current = setInterval(async () => {
-        await refreshBalance();
-      }, 5000);
-    } catch (error) {
-      console.warn('Failed to create invoice:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [makeInvoice, refreshBalance]);
+  const selectedWalletId = capturedWalletId ?? activeWalletId;
+  const selectedWallet = useMemo(
+    () => wallets.find((w) => w.id === selectedWalletId) ?? null,
+    [wallets, selectedWalletId],
+  );
+  const walletName = selectedWallet ? walletLabel(selectedWallet) : 'Wallet';
 
-  // Open/close the sheet
+  const generateInvoice = useCallback(
+    async (sats: number) => {
+      setLoading(true);
+      setPaymentReceived(false);
+      try {
+        const wId = capturedWalletId;
+        if (!wId) return;
+        const inv = await makeInvoiceForWallet(wId, sats, 'Lightning Piggy');
+        setInvoice(inv);
+
+        // Hand the invoice off to WalletContext.expectPayment, which
+        // runs a 1 s lookup_invoice + balance poll for the next 3 min.
+        // The poll lives in the context (not this sheet), so it keeps
+        // running even if the user closes the receive sheet and wanders
+        // off to Friends / Home etc. — the app-root overlay still pops
+        // on settle regardless of which screen is active. Passing the
+        // expected amount means the overlay shows the exact invoice
+        // value rather than a balance-delta that could include prior
+        // settles piled up between polls.
+        const paymentHash = paymentHashFromBolt11(inv);
+        if (paymentHash) {
+          expectPayment(wId, paymentHash, sats);
+        } else {
+          // Unparseable bolt11 — fall back to a single balance refresh.
+          // The WalletContext 30 s baseline poll still picks the
+          // settle up eventually if the user lingers in-app.
+          await refreshBalanceForWallet(wId);
+        }
+      } catch (error) {
+        console.warn('Failed to create invoice:', error);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [makeInvoiceForWallet, refreshBalanceForWallet, capturedWalletId, expectPayment],
+  );
+
+  const isOnchainWallet = selectedWallet?.walletType === 'onchain';
+
+  // Open/close the sheet — intentionally depends only on `visible`.
+  // `balance` and `lightningAddress` are read for initialisation, not as reactive triggers.
   useEffect(() => {
     if (visible) {
-      prevBalance.current = balance;
-      setMode(lightningAddress ? 'address' : 'amount');
+      setCapturedWalletId(activeWalletId);
+      setDropdownOpen(false);
+      // Baseline is set from the first observed balance (see effect
+      // below), not from the cached value here — the cache may be stale
+      // if the app has been backgrounded and a previous invoice settled
+      // while we weren't polling.
+      setOnchainAddress(null);
       setSatsValue('');
       setFiatValue('');
       setInvoice('');
       setPaymentReceived(false);
       setInputUnit('sats');
-      bottomSheetRef.current?.expand();
+
+      if (activeWallet?.walletType === 'onchain' && activeWalletId) {
+        // On-chain wallet: fetch a receive address, default to address mode
+        setMode('address');
+        getReceiveAddress(activeWalletId)
+          .then((addr) => setOnchainAddress(addr))
+          .catch(() => {
+            console.warn('Failed to fetch on-chain address');
+          });
+      } else if (presetFriend) {
+        // "Send invoice" entry point: the user wants a bolt11 for the
+        // conversation partner, so skip the address tab by default.
+        setMode('amount');
+      } else {
+        setMode(lightningAddress ? 'address' : 'amount');
+      }
+
+      bottomSheetRef.current?.present();
     } else {
-      bottomSheetRef.current?.close();
+      bottomSheetRef.current?.dismiss();
     }
     return () => {
-      if (intervalId.current) {
-        clearInterval(intervalId.current);
-        intervalId.current = null;
-      }
+      // Poll lives in WalletContext.expectPayment now and survives
+      // sheet closure (so the user can generate an invoice, close the
+      // sheet, navigate elsewhere, and still get the celebration).
+      // Only the debounce timer is sheet-local.
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
   // Handle Android back button
@@ -102,25 +231,47 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
     return () => handler.remove();
   }, [visible, onClose]);
 
-  // Detect payment by watching balance changes
+  // Reset state when wallet is changed via dropdown
   useEffect(() => {
-    if (visible && prevBalance.current !== null && balance !== null && balance > prevBalance.current) {
-      setPaymentReceived(true);
-      if (intervalId.current) {
-        clearInterval(intervalId.current);
-        intervalId.current = null;
-      }
+    if (!visible || !capturedWalletId) return;
+    setOnchainAddress(null);
+    setInvoice('');
+    setPaymentReceived(false);
+    setSatsValue('');
+    setFiatValue('');
+    if (selectedWallet?.walletType === 'onchain') {
+      setMode('address');
+      getReceiveAddress(capturedWalletId)
+        .then((addr) => setOnchainAddress(addr))
+        .catch(() => {});
+    } else {
+      setMode(lightningAddress ? 'address' : 'amount');
     }
-  }, [balance, visible]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [capturedWalletId]);
+
+  // The "paymentReceived" checkmark on the QR thumbnail flips to true
+  // whenever the app-root overlay fires for the wallet this sheet is
+  // currently showing. We used to duplicate the baseline-detector
+  // logic locally — pointlessly, since WalletContext already owns it.
+  // Keyed on the event timestamp so a second receive within the same
+  // sheet session still re-arms the checkmark after the user dismisses
+  // the global overlay and clears `lastIncomingPayment`.
+  useEffect(() => {
+    if (!visible) return;
+    if (
+      lastIncomingPayment &&
+      selectedWallet &&
+      lastIncomingPayment.walletId === selectedWallet.id
+    ) {
+      setPaymentReceived(true);
+    }
+  }, [lastIncomingPayment, selectedWallet, visible]);
 
   const scheduleInvoice = (sats: number) => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
     if (sats <= 0) {
       setInvoice('');
-      if (intervalId.current) {
-        clearInterval(intervalId.current);
-        intervalId.current = null;
-      }
       return;
     }
     debounceTimer.current = setTimeout(() => {
@@ -129,8 +280,9 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   };
 
   const handleSatsChange = (text: string) => {
-    setSatsValue(text);
-    const sats = parseInt(text) || 0;
+    const clean = sanitizeSatsInput(text);
+    setSatsValue(clean);
+    const sats = parseInt(clean) || 0;
     if (btcPrice) {
       setFiatValue(satsToFiat(sats, btcPrice).toFixed(2));
     } else {
@@ -140,15 +292,30 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   };
 
   const handleFiatChange = (text: string) => {
-    setFiatValue(text);
-    const fiat = parseFloat(text) || 0;
+    const clean = sanitizeFiatInput(text);
+    setFiatValue(clean);
+    const fiat = parseFloat(clean) || 0;
     const sats = fiatToSats(fiat);
     setSatsValue(sats.toString());
     scheduleInvoice(sats);
   };
 
   const currentSats = parseInt(satsValue) || 0;
-  const copyValue = mode === 'address' ? lightningAddress || '' : invoice;
+
+  // BIP-21 URI for on-chain: optionally include amount
+  const onchainUri = onchainAddress
+    ? mode === 'amount' && currentSats > 0
+      ? `bitcoin:${onchainAddress}?amount=${(currentSats / 100_000_000).toFixed(8)}`
+      : `bitcoin:${onchainAddress}`
+    : '';
+
+  const copyValue = isOnchainWallet
+    ? mode === 'amount' && currentSats > 0
+      ? onchainUri
+      : onchainAddress || ''
+    : mode === 'address'
+      ? lightningAddress || ''
+      : invoice;
 
   const handleCopy = async () => {
     if (copyValue) await Clipboard.setStringAsync(copyValue);
@@ -157,304 +324,415 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose }) => {
   const handleShare = async () => {
     if (copyValue) {
       try {
-        await Share.share({ message: mode === 'address' ? `lightning:${lightningAddress}` : `lightning:${invoice}` });
+        const shareMsg = isOnchainWallet
+          ? onchainUri
+          : mode === 'address'
+            ? `lightning:${lightningAddress}`
+            : `lightning:${invoice}`;
+        await Share.share({ message: shareMsg });
       } catch {}
     }
   };
 
-  const handleSheetChange = useCallback((index: number) => {
-    if (index === -1) onClose();
-  }, [onClose]);
+  // What we'd DM to a friend in the current state. In Address mode that's
+  // the user's static lightning address (friend can pay it any time). In
+  // Amount mode it's the just-generated bolt11 invoice (friend can pay it
+  // once, for that exact amount). Empty during Amount-tab amount entry
+  // before the debounced invoice has come back — the Copy / Share /
+  // Friend buttons all disable in that window.
+  const friendShareValue =
+    !isOnchainWallet && mode === 'address' ? lightningAddress || '' : invoice || '';
+
+  const handleFriendPicked = useCallback(
+    async (friend: PickedFriend) => {
+      if (!friendShareValue || sendingToFriend) return;
+      const sharedAddress = mode === 'address';
+      setSendingToFriend(true);
+      setFriendPickerOpen(false);
+      try {
+        // Bolt11 invoices are self-identifying by their `lnbc…` prefix — no
+        // URI scheme needed, and sending bare `lnbc…` matches what Damus
+        // (and other Nostr clients that use nostrdb's block parser) expect
+        // for cross-client interop. Lightning addresses look like plain
+        // emails (`alice@example.com`), so we have to prefix them with
+        // `lightning:` so the receiver can safely render a Pay button
+        // without mis-classifying a regular email.
+        const payload = mode === 'address' ? `lightning:${friendShareValue}` : friendShareValue;
+        const result = await sendDirectMessage(friend.pubkey, payload);
+        if (result.success) onSent?.(payload);
+        if (!result.success) {
+          Toast.show({
+            type: 'error',
+            text1: 'Send failed',
+            text2: result.error ?? 'Could not send to friend.',
+            position: 'top',
+            visibilityTime: 4000,
+          });
+          return;
+        }
+        Toast.show({
+          type: 'success',
+          text1: sharedAddress
+            ? `Lightning address sent to ${friend.name}`
+            : `Invoice sent to ${friend.name}`,
+          position: 'top',
+          visibilityTime: 2500,
+        });
+        // Close this sheet and drop the user into the conversation so they
+        // can see the message land and the friend's "Pay" response. When
+        // opened from inside a conversation (presetFriend), we're already
+        // there — just close.
+        onClose();
+        if (!presetFriend) {
+          const contact = contacts.find((c) => c.pubkey === friend.pubkey);
+          navigation.navigate('Conversation', {
+            pubkey: friend.pubkey,
+            name: friend.name,
+            picture: friend.picture,
+            lightningAddress: contact?.profile?.lud16 ?? friend.lightningAddress,
+          });
+        }
+      } finally {
+        setSendingToFriend(false);
+      }
+    },
+    [
+      friendShareValue,
+      mode,
+      sendingToFriend,
+      sendDirectMessage,
+      contacts,
+      navigation,
+      onClose,
+      presetFriend,
+      onSent,
+    ],
+  );
+
+  const handleSendToFriend = useCallback(() => {
+    if (!friendShareValue) return;
+    if (presetFriend) {
+      handleFriendPicked(presetFriend);
+      return;
+    }
+    setFriendPickerOpen(true);
+  }, [friendShareValue, presetFriend, handleFriendPicked]);
+
+  const handleSheetChange = useCallback(
+    (index: number) => {
+      if (index === -1) onClose();
+    },
+    [onClose],
+  );
 
   const renderBackdrop = useCallback(
-    (props: any) => <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />,
-    []
+    (props: BottomSheetBackdropProps) => (
+      <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />
+    ),
+    [],
   );
 
   if (!visible) return null;
 
   return (
-    <BottomSheet
-      ref={bottomSheetRef}
-      index={0}
-      snapPoints={snapPoints}
-      onChange={handleSheetChange}
-      enablePanDownToClose
-      backdropComponent={renderBackdrop}
-      handleIndicatorStyle={styles.handleIndicator}
-      backgroundStyle={styles.sheetBackground}
-    >
-      <BottomSheetView style={styles.content}>
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
-        <View style={styles.innerContent}>
-        <Text style={styles.title}>Receive</Text>
+    <>
+      <BottomSheetModal
+        ref={bottomSheetRef}
+        snapPoints={snapPoints}
+        onChange={handleSheetChange}
+        enablePanDownToClose
+        backdropComponent={renderBackdrop}
+        handleIndicatorStyle={styles.handleIndicator}
+        backgroundStyle={styles.sheetBackground}
+      >
+        <BottomSheetView style={styles.content}>
+          {/* No TouchableWithoutFeedback-with-Keyboard.dismiss wrapper here
+           *  per TROUBLESHOOTING.adoc rule (6): it interferes with the
+           *  sheet's keyboard handling AND, under the New Architecture,
+           *  swallows UiAutomator/Maestro accessibility clicks that should
+           *  reach the inner Pressable/TouchableOpacity testIDs (caused
+           *  issue #106 — Maestro tap on `receive-send-to-friend` reported
+           *  COMPLETED but never dispatched onPress). The keyboard can be
+           *  dismissed naturally by tapping any of the buttons or the
+           *  hardware back key. */}
+          <View style={styles.innerContent}>
+            <Text style={styles.title}>Receive</Text>
 
-        {/* Mode tabs */}
-        {lightningAddress ? (
-          <View style={styles.tabRow}>
-            <TouchableOpacity
-              style={[styles.tab, mode === 'address' && styles.tabActive]}
-              onPress={() => setMode('address')}
-            >
-              <Text style={[styles.tabText, mode === 'address' && styles.tabTextActive]}>
-                Address
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.tab, mode === 'amount' && styles.tabActive]}
-              onPress={() => setMode('amount')}
-            >
-              <Text style={[styles.tabText, mode === 'amount' && styles.tabTextActive]}>
-                Amount
-              </Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
-
-        {/* Amount input */}
-        {mode === 'amount' ? (
-          <View style={styles.amountSection}>
-            <View style={styles.amountRow}>
-              <TextInput
-                style={styles.amountInput}
-                value={inputUnit === 'sats' ? satsValue : fiatValue}
-                onChangeText={inputUnit === 'sats' ? handleSatsChange : handleFiatChange}
-                keyboardType={inputUnit === 'sats' ? 'numeric' : 'decimal-pad'}
-                placeholder={inputUnit === 'sats' ? '0' : '0.00'}
-              />
-              <TouchableOpacity
-                style={[styles.unitButton, inputUnit === 'sats' && styles.unitButtonActive]}
-                onPress={() => setInputUnit('sats')}
-              >
-                <Text style={[styles.unitButtonText, inputUnit === 'sats' && styles.unitButtonTextActive]}>
-                  Sats
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.unitButton, inputUnit === 'fiat' && styles.unitButtonActive]}
-                onPress={() => setInputUnit('fiat')}
-              >
-                <Text style={[styles.unitButtonText, inputUnit === 'fiat' && styles.unitButtonTextActive]}>
-                  {currency}
-                </Text>
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.convertedAmount}>
-              {inputUnit === 'sats'
-                ? (btcPrice && currentSats > 0 ? satsToFiatString(currentSats, btcPrice, currency) : '')
-                : (currentSats > 0 ? `${currentSats.toLocaleString()} sats` : '')
-              }
-            </Text>
-          </View>
-        ) : null}
-
-        {/* QR Code */}
-        <View style={styles.qrContainer}>
-          {mode === 'address' && lightningAddress ? (
-            <View>
-              <QRCode value={`lightning:${lightningAddress}`} size={200} />
-              {paymentReceived && (
-                <View style={styles.checkmark}>
-                  <Text style={styles.checkmarkText}>✓</Text>
+            {/* Wallet selector */}
+            {wallets.filter((w) => w.isConnected || w.walletType === 'onchain').length > 1 ? (
+              <View style={styles.walletDropdownRow}>
+                <Text style={styles.walletLabel}>To:</Text>
+                <View style={styles.walletDropdownWrapper}>
+                  <TouchableOpacity
+                    style={styles.walletDropdown}
+                    onPress={() => setDropdownOpen(!dropdownOpen)}
+                  >
+                    <Text style={styles.walletDropdownText}>{walletName}</Text>
+                    {dropdownOpen ? (
+                      <ChevronUp size={16} color={colors.white} />
+                    ) : (
+                      <ChevronDown size={16} color={colors.white} />
+                    )}
+                  </TouchableOpacity>
+                  {dropdownOpen && (
+                    <View style={styles.walletDropdownMenu}>
+                      {wallets
+                        .filter((w) => w.isConnected || w.walletType === 'onchain')
+                        .map((w) => (
+                          <TouchableOpacity
+                            key={w.id}
+                            style={[
+                              styles.walletDropdownItem,
+                              capturedWalletId === w.id && styles.walletDropdownItemActive,
+                            ]}
+                            onPress={() => {
+                              setCapturedWalletId(w.id);
+                              setDropdownOpen(false);
+                            }}
+                          >
+                            <Text
+                              style={[
+                                styles.walletDropdownItemText,
+                                capturedWalletId === w.id && styles.walletDropdownItemTextActive,
+                              ]}
+                            >
+                              {walletLabel(w)}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                    </View>
+                  )}
                 </View>
+              </View>
+            ) : (
+              <Text style={styles.walletLabel}>To: {walletName}</Text>
+            )}
+
+            {/* Mode tabs — show for on-chain wallets and NWC wallets with lightning address */}
+            {isOnchainWallet || lightningAddress ? (
+              <View style={styles.tabRow}>
+                <TouchableOpacity
+                  style={[styles.tab, mode === 'address' && styles.tabActive]}
+                  onPress={() => setMode('address')}
+                  testID="receive-tab-address"
+                >
+                  <Text style={[styles.tabText, mode === 'address' && styles.tabTextActive]}>
+                    Address
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.tab, mode === 'amount' && styles.tabActive]}
+                  onPress={() => setMode('amount')}
+                  testID="receive-tab-amount"
+                >
+                  <Text style={[styles.tabText, mode === 'amount' && styles.tabTextActive]}>
+                    Amount
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+
+            {/* Amount input */}
+            {mode === 'amount' ? (
+              <View style={styles.amountSection}>
+                <View style={styles.amountRow}>
+                  <TextInput
+                    style={styles.amountInput}
+                    value={inputUnit === 'sats' ? satsValue : fiatValue}
+                    onChangeText={inputUnit === 'sats' ? handleSatsChange : handleFiatChange}
+                    keyboardType={inputUnit === 'sats' ? 'numeric' : 'decimal-pad'}
+                    placeholder={inputUnit === 'sats' ? '0' : '0.00'}
+                    // Select any existing amount on focus so the next
+                    // keypress (or Maestro `inputText`) replaces it cleanly
+                    // rather than appending. Avoids the "0" + "21" = "021"
+                    // /  "211" confusion when tapping an already-typed-in
+                    // field.
+                    selectTextOnFocus
+                    testID="receive-amount-input"
+                  />
+                  <TouchableOpacity
+                    style={[styles.unitButton, inputUnit === 'sats' && styles.unitButtonActive]}
+                    onPress={() => setInputUnit('sats')}
+                  >
+                    <Text
+                      style={[
+                        styles.unitButtonText,
+                        inputUnit === 'sats' && styles.unitButtonTextActive,
+                      ]}
+                    >
+                      Sats
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.unitButton, inputUnit === 'fiat' && styles.unitButtonActive]}
+                    onPress={() => setInputUnit('fiat')}
+                  >
+                    <Text
+                      style={[
+                        styles.unitButtonText,
+                        inputUnit === 'fiat' && styles.unitButtonTextActive,
+                      ]}
+                    >
+                      {currency}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.convertedAmount}>
+                  {inputUnit === 'sats'
+                    ? btcPrice && currentSats > 0
+                      ? satsToFiatString(currentSats, btcPrice, currency)
+                      : ''
+                    : currentSats > 0
+                      ? `${currentSats.toLocaleString()} sats`
+                      : ''}
+                </Text>
+              </View>
+            ) : null}
+
+            {/* QR Code */}
+            <View style={styles.qrContainer}>
+              {isOnchainWallet && onchainAddress && (mode === 'address' || currentSats > 0) ? (
+                <View>
+                  <QRCode value={onchainUri} size={200} />
+                  {paymentReceived && (
+                    <View style={styles.checkmark}>
+                      <Text style={styles.checkmarkText}>{'\u2713'}</Text>
+                    </View>
+                  )}
+                </View>
+              ) : isOnchainWallet && mode === 'amount' && currentSats === 0 ? (
+                <Text style={styles.noInvoice}>Enter an amount to generate QR code</Text>
+              ) : mode === 'address' && lightningAddress ? (
+                <View>
+                  <QRCode value={`lightning:${lightningAddress}`} size={200} />
+                  {paymentReceived && (
+                    <View style={styles.checkmark}>
+                      <Check size={28} color={colors.white} />
+                    </View>
+                  )}
+                </View>
+              ) : mode === 'amount' && loading ? (
+                <ActivityIndicator size="large" color={colors.brandPink} />
+              ) : mode === 'amount' && invoice ? (
+                <View>
+                  <QRCode value={invoice} size={200} />
+                  {paymentReceived && (
+                    <View style={styles.checkmark}>
+                      <Check size={28} color={colors.white} />
+                    </View>
+                  )}
+                </View>
+              ) : (
+                <Text style={styles.noInvoice}>
+                  {mode === 'address'
+                    ? 'No lightning address set'
+                    : 'Enter an amount to generate invoice'}
+                </Text>
               )}
             </View>
-          ) : mode === 'amount' && loading ? (
-            <ActivityIndicator size="large" color={colors.brandPink} />
-          ) : mode === 'amount' && invoice ? (
-            <View>
-              <QRCode value={invoice} size={200} />
-              {paymentReceived && (
-                <View style={styles.checkmark}>
-                  <Text style={styles.checkmarkText}>✓</Text>
-                </View>
+
+            <Text style={styles.qrLabel}>
+              {isOnchainWallet && onchainAddress && !(mode === 'amount' && currentSats > 0) ? (
+                <>
+                  <Text style={styles.addressHighlight}>{onchainAddress.slice(0, 6)}</Text>
+                  {onchainAddress.slice(6, -6)}
+                  <Text style={styles.addressHighlight}>{onchainAddress.slice(-6)}</Text>
+                </>
+              ) : isOnchainWallet ? (
+                mode === 'amount' && currentSats > 0 ? (
+                  `${currentSats.toLocaleString()} sats`
+                ) : (
+                  'Loading address...'
+                )
+              ) : mode === 'address' ? (
+                lightningAddress
+              ) : (
+                'Lightning invoice'
               )}
-            </View>
-          ) : (
-            <Text style={styles.noInvoice}>
-              {mode === 'address' ? 'No lightning address set' : 'Enter an amount to generate invoice'}
             </Text>
-          )}
-        </View>
+            {mode === 'amount' && invoice ? (
+              <Text style={styles.invoiceText} numberOfLines={2}>
+                {invoice}
+              </Text>
+            ) : null}
 
-        <Text style={styles.qrLabel}>
-          {mode === 'address' ? lightningAddress : 'Lightning invoice'}
-        </Text>
-        {mode === 'amount' && invoice ? (
-          <Text style={styles.invoiceText} numberOfLines={2}>{invoice}</Text>
-        ) : null}
-
-        <View style={styles.buttonRow}>
-          <TouchableOpacity style={styles.actionButton} onPress={handleCopy}>
-            <CopyIcon color={colors.brandPink} />
-            <Text style={styles.actionButtonText}>Copy</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
-            <Text style={styles.actionButtonText}>Share</Text>
-            <ShareIcon color={colors.brandPink} />
-          </TouchableOpacity>
-        </View>
-        </View>
-      </TouchableWithoutFeedback>
-      </BottomSheetView>
-    </BottomSheet>
+            {presetFriend ? (
+              <View style={styles.buttonRow}>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.actionButton,
+                    styles.actionButtonPrimary,
+                    !friendShareValue && styles.actionButtonDisabled,
+                    pressed && { opacity: 0.7 },
+                  ]}
+                  onPress={handleSendToFriend}
+                  disabled={!friendShareValue || sendingToFriend}
+                  accessibilityLabel={`Send to ${presetFriend.name}`}
+                  testID="receive-send-to-friend"
+                >
+                  {sendingToFriend ? (
+                    <ActivityIndicator color={colors.white} />
+                  ) : (
+                    <>
+                      <Send size={20} color={colors.white} />
+                      <Text style={[styles.actionButtonText, styles.actionButtonTextPrimary]}>
+                        Send to {presetFriend.name}
+                      </Text>
+                    </>
+                  )}
+                </Pressable>
+              </View>
+            ) : (
+              <View style={styles.buttonRow}>
+                <TouchableOpacity
+                  style={[styles.actionButton, !copyValue && styles.actionButtonDisabled]}
+                  onPress={handleCopy}
+                  disabled={!copyValue}
+                >
+                  <Copy size={20} color={colors.brandPink} />
+                  <Text style={styles.actionButtonText}>Copy</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionButton, !copyValue && styles.actionButtonDisabled]}
+                  onPress={handleShare}
+                  disabled={!copyValue}
+                >
+                  <Text style={styles.actionButtonText}>Share</Text>
+                  <Share2 size={20} color={colors.brandPink} />
+                </TouchableOpacity>
+                {!isOnchainWallet ? (
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.actionButton,
+                      !friendShareValue && styles.actionButtonDisabled,
+                      pressed && { opacity: 0.7 },
+                    ]}
+                    onPress={() => {
+                      if (__DEV__) console.log('[ReceiveSheet] Friend Pressable FIRED');
+                      handleSendToFriend();
+                    }}
+                    disabled={!friendShareValue}
+                    accessibilityLabel="Send to a friend"
+                    testID="receive-send-to-friend"
+                  >
+                    <Text style={styles.actionButtonText}>Friend</Text>
+                    <Send size={20} color={colors.brandPink} />
+                  </Pressable>
+                ) : null}
+              </View>
+            )}
+          </View>
+        </BottomSheetView>
+      </BottomSheetModal>
+      <FriendPickerSheet
+        visible={friendPickerOpen}
+        onClose={() => setFriendPickerOpen(false)}
+        onSelect={handleFriendPicked}
+        title="Send invoice to a friend"
+        subtitle="They'll get an encrypted Nostr DM with a Pay button."
+      />
+    </>
   );
 };
-
-const styles = StyleSheet.create({
-  sheetBackground: {
-    backgroundColor: colors.background,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-  },
-  handleIndicator: {
-    backgroundColor: colors.divider,
-    width: 40,
-  },
-  content: {
-    flex: 1,
-  },
-  innerContent: {
-    padding: 20,
-    alignItems: 'center',
-    gap: 12,
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.textHeader,
-  },
-  tabRow: {
-    flexDirection: 'row',
-    backgroundColor: colors.divider,
-    borderRadius: 10,
-    padding: 3,
-  },
-  tab: {
-    paddingHorizontal: 24,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  tabActive: {
-    backgroundColor: colors.white,
-  },
-  tabText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textSupplementary,
-  },
-  tabTextActive: {
-    color: colors.brandPink,
-  },
-  amountSection: {
-    alignItems: 'center',
-    gap: 4,
-  },
-  amountRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  amountInput: {
-    backgroundColor: colors.white,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    width: 100,
-    fontSize: 16,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  unitButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: colors.divider,
-  },
-  unitButtonActive: {
-    backgroundColor: colors.brandPink,
-  },
-  unitButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.textSupplementary,
-  },
-  unitButtonTextActive: {
-    color: colors.white,
-  },
-  convertedAmount: {
-    fontSize: 13,
-    color: colors.textSupplementary,
-    fontWeight: '500',
-    minHeight: 18,
-  },
-  qrContainer: {
-    width: 220,
-    height: 220,
-    borderRadius: 24,
-    backgroundColor: colors.white,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.background,
-  },
-  checkmark: {
-    position: 'absolute',
-    top: -20,
-    right: -20,
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: colors.green,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  checkmarkText: {
-    color: colors.white,
-    fontSize: 28,
-    fontWeight: '700',
-  },
-  noInvoice: {
-    color: colors.textSupplementary,
-    fontSize: 14,
-    textAlign: 'center',
-    padding: 20,
-  },
-  qrLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textBody,
-  },
-  invoiceText: {
-    color: colors.textSupplementary,
-    fontSize: 11,
-    textAlign: 'center',
-    paddingHorizontal: 20,
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    gap: 20,
-  },
-  actionButton: {
-    backgroundColor: colors.white,
-    height: 52,
-    paddingHorizontal: 30,
-    borderRadius: 12,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  actionButtonText: {
-    color: colors.brandPink,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-});
 
 export default ReceiveSheet;

@@ -1,0 +1,80 @@
+appId: ${APP_ID:-com.lightningpiggy.app}
+name: Edit Profile Test
+---
+# Tests editing Nostr profile fields
+# Assumes already logged in with a Nostr account
+# Run: maestro test tests/e2e/test-edit-profile.yaml
+
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# Navigate to Account
+- tapOn:
+    text: 'Home tab'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Tap Edit Profile
+- tapOn:
+    id: 'edit-profile-button'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Edit display name
+- tapOn:
+    id: 'edit-display-name'
+- eraseText: 50
+- inputText: 'Satoshi Store Test'
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Edit profile picture URL
+- tapOn:
+    id: 'edit-picture-url'
+- eraseText: 200
+- inputText: 'https://i.nostr.build/test-avatar.jpg'
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Edit banner URL
+- tapOn:
+    id: 'edit-banner-url'
+- eraseText: 200
+- inputText: 'https://i.nostr.build/test-banner.jpg'
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Edit lightning address
+- tapOn:
+    id: 'edit-lud16'
+- eraseText: 100
+- inputText: 'test@getalby.com'
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Save profile
+- tapOn:
+    id: 'save-profile'
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# Dismiss success alert
+- tapOn:
+    text: 'OK'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Return to Home
+- tapOn:
+    text: 'Home tab'
+    optional: true

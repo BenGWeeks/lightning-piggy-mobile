@@ -1,0 +1,149 @@
+import { StyleSheet } from 'react-native';
+import { colors } from './theme';
+
+export const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.brandPink,
+  },
+  /** Extras row below TabHeader (search + chips). TabHeader owns its own
+   * vertical padding; this just claims the bottom spacing the full header
+   * used to provide so the list content doesn't hug the chip row. */
+  headerExtras: {
+    paddingHorizontal: 20,
+    paddingBottom: 24,
+  },
+  addButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  chipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  chip: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    borderRadius: 20,
+  },
+  chipActive: {
+    backgroundColor: colors.white,
+  },
+  chipText: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  chipTextActive: {
+    color: colors.brandPink,
+  },
+  searchRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  searchToggle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 8,
+    fontSize: 15,
+    color: colors.white,
+    fontWeight: '500',
+  },
+  content: {
+    flex: 1,
+    backgroundColor: colors.white,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    marginTop: -24,
+    paddingTop: 0,
+    overflow: 'hidden',
+  },
+  bgImage: {
+    position: 'absolute',
+    width: '120%',
+    height: 420,
+    right: -40,
+    top: -20,
+    opacity: 0.15,
+  },
+  listContent: {
+    paddingTop: 12,
+    paddingBottom: 20,
+  },
+  alphabetBar: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 8,
+    width: 32,
+    marginLeft: 4,
+  },
+  alphabetLetterTouch: {
+    paddingVertical: 2,
+    paddingHorizontal: 4,
+    borderRadius: 10,
+    width: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  alphabetLetterActive: {
+    backgroundColor: colors.brandPink,
+    borderRadius: 10,
+  },
+  alphabetLetter: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.textSupplementary,
+    textAlign: 'center',
+  },
+  alphabetLetterTextActive: {
+    color: colors.white,
+  },
+  emptyState: {
+    padding: 40,
+    alignItems: 'center',
+    gap: 8,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.textHeader,
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: colors.textSupplementary,
+    textAlign: 'center',
+  },
+  connectButton: {
+    backgroundColor: colors.brandPink,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 10,
+    marginTop: 8,
+  },
+  connectButtonText: {
+    color: colors.white,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+});

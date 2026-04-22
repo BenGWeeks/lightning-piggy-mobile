@@ -5,18 +5,24 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
+import { RootStackParamList, LearnStackParamList, MainTabParamList } from './types';
 
 import IntroScreen from '../screens/IntroScreen';
+import OnboardingScreen from '../screens/OnboardingScreen';
 import HomeScreen from '../screens/HomeScreen';
-import EarnScreen from '../screens/EarnScreen';
+import MessagesScreen from '../screens/MessagesScreen';
 import LearnScreen from '../screens/LearnScreen';
 import CourseDetailScreen from '../screens/CourseDetailScreen';
 import MissionDetailScreen from '../screens/MissionDetailScreen';
 import AccountScreen from '../screens/AccountScreen';
+import FriendsScreen from '../screens/FriendsScreen';
+import ConversationScreen from '../screens/ConversationScreen';
+import FriendsIcon from '../components/icons/FriendsIcon';
+import MessagesIcon from '../components/icons/MessagesIcon';
 
-const Stack = createNativeStackNavigator();
-const Tab = createBottomTabNavigator();
-const LearnStack = createNativeStackNavigator();
+const Stack = createNativeStackNavigator<RootStackParamList>();
+const Tab = createBottomTabNavigator<MainTabParamList>();
+const LearnStack = createNativeStackNavigator<LearnStackParamList>();
 
 function LearnStackNavigator() {
   return (
@@ -33,6 +39,7 @@ function HomeTabs() {
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
+        freezeOnBlur: true,
         tabBarStyle: {
           backgroundColor: colors.white,
           borderTopColor: colors.divider,
@@ -52,6 +59,8 @@ function HomeTabs() {
         name="Home"
         component={HomeScreen}
         options={{
+          tabBarButtonTestID: 'tab-home',
+          tabBarAccessibilityLabel: 'Home tab',
           tabBarIcon: ({ focused }) => (
             <Image
               source={require('../../assets/images/Home.png')}
@@ -61,14 +70,13 @@ function HomeTabs() {
         }}
       />
       <Tab.Screen
-        name="Earn"
-        component={EarnScreen}
+        name="Messages"
+        component={MessagesScreen}
         options={{
+          tabBarButtonTestID: 'tab-messages',
+          tabBarAccessibilityLabel: 'Messages tab',
           tabBarIcon: ({ focused }) => (
-            <Image
-              source={require('../../assets/images/Earn.png')}
-              style={[styles.tabIcon, focused && styles.tabIconActive]}
-            />
+            <MessagesIcon size={22} color={focused ? colors.brandPink : colors.textSupplementary} />
           ),
         }}
       />
@@ -76,6 +84,8 @@ function HomeTabs() {
         name="Learn"
         component={LearnStackNavigator}
         options={{
+          tabBarButtonTestID: 'tab-learn',
+          tabBarAccessibilityLabel: 'Learn tab',
           tabBarIcon: ({ focused }) => (
             <Image
               source={require('../../assets/images/Learn.png')}
@@ -85,15 +95,22 @@ function HomeTabs() {
         }}
       />
       <Tab.Screen
-        name="Settings"
+        name="Friends"
+        component={FriendsScreen}
+        options={{
+          tabBarButtonTestID: 'tab-friends',
+          tabBarAccessibilityLabel: 'Friends tab',
+          tabBarIcon: ({ focused }) => (
+            <FriendsIcon size={22} color={focused ? colors.brandPink : colors.textSupplementary} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Account"
         component={AccountScreen}
         options={{
-          tabBarIcon: ({ focused }) => (
-            <Image
-              source={require('../../assets/images/Account.png')}
-              style={[styles.tabIcon, focused && styles.tabIconActive]}
-            />
-          ),
+          tabBarButton: () => null,
+          tabBarItemStyle: { display: 'none' },
         }}
       />
     </Tab.Navigator>
@@ -101,7 +118,7 @@ function HomeTabs() {
 }
 
 export default function AppNavigator() {
-  const { isConnected, isLoading } = useWallet();
+  const { isOnboarded, isLoading } = useWallet();
 
   if (isLoading) {
     return (
@@ -112,15 +129,36 @@ export default function AppNavigator() {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer
+      theme={{
+        dark: false,
+        colors: {
+          primary: colors.brandPink,
+          background: colors.brandPink,
+          card: colors.white,
+          text: colors.textHeader,
+          border: colors.divider,
+          notification: colors.brandPink,
+        },
+        fonts: {
+          regular: { fontFamily: 'System', fontWeight: '400' },
+          medium: { fontFamily: 'System', fontWeight: '500' },
+          bold: { fontFamily: 'System', fontWeight: '700' },
+          heavy: { fontFamily: 'System', fontWeight: '900' },
+        },
+      }}
+    >
       <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {!isConnected ? (
+        {!isOnboarded ? (
           <>
             <Stack.Screen name="Intro" component={IntroScreen} />
-            <Stack.Screen name="Setup" component={AccountScreen} />
+            <Stack.Screen name="Onboarding" component={OnboardingScreen} />
           </>
         ) : (
-          <Stack.Screen name="MainTabs" component={HomeTabs} />
+          <>
+            <Stack.Screen name="MainTabs" component={HomeTabs} />
+            <Stack.Screen name="Conversation" component={ConversationScreen} />
+          </>
         )}
       </Stack.Navigator>
     </NavigationContainer>

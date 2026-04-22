@@ -22,7 +22,9 @@
         "learningOutcomes": [
           { "text": "Understand the seven key properties of perfect money" },
           { "text": "Recognise how fiat currency management affects economies and societies" },
-          { "text": "Appreciate why Bitcoin offers a revolutionary alternative to traditional money" }
+          {
+            "text": "Appreciate why Bitcoin offers a revolutionary alternative to traditional money"
+          }
         ]
       },
       {
