@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   View,
@@ -90,6 +90,7 @@ const AccountScreen: React.FC = () => {
   const [electrumSSL, setElectrumSSL] = useState(true);
   const [blossomServer, setBlossomServerInput] = useState(DEFAULT_BLOSSOM_SERVER);
   const [devMode, setDevMode] = useState(false);
+  const [amberNip17Enabled, setAmberNip17Enabled] = useState(false);
   const versionTapCount = useRef(0);
   const versionTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<ScrollView>(null);
@@ -131,6 +132,15 @@ const AccountScreen: React.FC = () => {
 
   useEffect(() => {
     AsyncStorage.getItem('dev_mode').then((v) => setDevMode(v === 'true'));
+    AsyncStorage.getItem('amber_nip17_enabled').then((v) => setAmberNip17Enabled(v === 'true'));
+  }, []);
+
+  const toggleAmberNip17 = useCallback(() => {
+    setAmberNip17Enabled((prev) => {
+      const next = !prev;
+      AsyncStorage.setItem('amber_nip17_enabled', next ? 'true' : 'false').catch(() => {});
+      return next;
+    });
   }, []);
 
   const handleVersionTap = () => {
@@ -452,6 +462,36 @@ const AccountScreen: React.FC = () => {
           Hosts images you send in chats and set as your profile picture. Any Blossom
           (BUD-01/BUD-02) server works — e.g. blossom.primal.net or nostr.build.
         </Text>
+
+        {/* NIP-17 on Amber — only shown when signing via Amber */}
+        {signerType === 'amber' && (
+          <>
+            <Text style={[styles.sectionLabel, { marginTop: 24 }]}>
+              Encrypted Messages (NIP-17)
+            </Text>
+            <View style={styles.sslRow}>
+              <Text style={styles.sslLabel}>Enable NIP-17 on Amber</Text>
+              <TouchableOpacity
+                style={[styles.sslToggle, amberNip17Enabled && styles.sslToggleActive]}
+                onPress={toggleAmberNip17}
+                testID="amber-nip17-toggle"
+                accessibilityLabel="Enable NIP-17 messages on Amber"
+                accessibilityRole="switch"
+                accessibilityState={{ checked: amberNip17Enabled }}
+              >
+                <View
+                  style={[styles.sslToggleThumb, amberNip17Enabled && styles.sslToggleThumbActive]}
+                />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.fieldHint}>
+              NIP-17 gift-wrapped messages hide sender metadata from relays, but each one requires a
+              NIP-44 decrypt via Amber. When you first enable this, Amber will ask to approve — tap
+              &quot;Remember my choice&quot; so subsequent messages load silently. Messages from
+              people you don&apos;t follow stay hidden.
+            </Text>
+          </>
+        )}
 
         {/* Wallets summary */}
         <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Wallets</Text>

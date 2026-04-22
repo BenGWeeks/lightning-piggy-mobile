@@ -942,7 +942,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       }
 
-      // NIP-17: only nsec for now — amberService has no NIP-44 plumbing yet.
+      // NIP-17: nsec decrypts inline via nostr-tools. Amber decrypts through
+      // the signer app — gated by the Account-settings opt-in toggle because
+      // each wrap costs 2 nip44_decrypt calls (wrap → seal → rumor). The
+      // toggle's hint text explains that first-use will trigger Amber's
+      // permission dialog; after "Remember my choice" is checked, subsequent
+      // calls are silent ContentResolver round-trips.
       if (signerType === 'nsec' && kind1059.length > 0) {
         const secretKey = await getSecretKey();
         if (secretKey) {
@@ -967,10 +972,95 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
         }
       } else if (signerType === 'amber' && kind1059.length > 0) {
-        if (__DEV__) {
-          console.log(
-            `[Nostr] Skipping ${kind1059.length} NIP-17 gift wrap(s) — Amber NIP-44 decrypt not wired yet`,
-          );
+        const amberEnabled = (await AsyncStorage.getItem('amber_nip17_enabled')) === 'true';
+        if (!amberEnabled) {
+          if (__DEV__) {
+            console.log(
+              `[Nostr] Skipping ${kind1059.length} NIP-17 wrap(s) — Account toggle is off`,
+            );
+          }
+        } else {
+          // Persistent cache so we never re-decrypt the same wrap twice —
+          // saves Amber IPC round-trips across tab focuses and app restarts.
+          // Shape: { [wrapId]: DmInboxEntry }. Capped at 5000 entries.
+          type AmberNip17CacheEntry = DmInboxEntry & { wrapId: string };
+          const CACHE_KEY = 'amber_nip17_cache_v1';
+          const CACHE_CAP = 5000;
+          const raw = await AsyncStorage.getItem(CACHE_KEY);
+          const cache: Record<string, AmberNip17CacheEntry> = raw ? JSON.parse(raw) : {};
+          let cacheMutated = false;
+
+          for (const wrap of kind1059) {
+            const cached = cache[wrap.id];
+            if (cached) {
+              entries.push({
+                partnerPubkey: cached.partnerPubkey,
+                fromMe: cached.fromMe,
+                createdAt: cached.createdAt,
+                text: cached.text,
+                wireKind: cached.wireKind,
+              });
+              continue;
+            }
+            try {
+              // Layer 1: unwrap the gift wrap (1059) → seal JSON.
+              const sealJson = await amberService.requestNip44Decrypt(
+                wrap.content,
+                wrap.pubkey,
+                pubkey,
+              );
+              const seal = JSON.parse(sealJson) as {
+                pubkey: string;
+                content: string;
+                kind: number;
+              };
+              if (seal.kind !== 13) continue;
+              // Layer 2: decrypt the seal content → rumor JSON.
+              const rumorJson = await amberService.requestNip44Decrypt(
+                seal.content,
+                seal.pubkey,
+                pubkey,
+              );
+              const rumor = JSON.parse(rumorJson) as {
+                pubkey: string;
+                created_at: number;
+                kind: number;
+                tags: string[][];
+                content: string;
+              };
+              // NIP-17 spec requirement: rumor pubkey must match seal pubkey.
+              if (rumor.pubkey !== seal.pubkey) continue;
+              const fromMe = rumor.pubkey === pubkey;
+              const partnerPubkey = fromMe
+                ? (rumor.tags.find((t) => t[0] === 'p')?.[1] ?? null)
+                : rumor.pubkey;
+              if (!partnerPubkey || !/^[0-9a-f]{64}$/.test(partnerPubkey)) continue;
+              const entry: DmInboxEntry = {
+                partnerPubkey,
+                fromMe,
+                createdAt: rumor.created_at,
+                text: rumor.content,
+                wireKind: rumor.kind,
+              };
+              cache[wrap.id] = { wrapId: wrap.id, ...entry };
+              cacheMutated = true;
+              entries.push(entry);
+            } catch (error) {
+              if (__DEV__) console.warn('[Nostr] Amber NIP-17 unwrap failed:', error);
+            }
+          }
+
+          if (cacheMutated) {
+            const items = Object.values(cache);
+            if (items.length > CACHE_CAP) {
+              items.sort((a, b) => b.createdAt - a.createdAt);
+              const trimmed: Record<string, AmberNip17CacheEntry> = {};
+              for (const item of items.slice(0, CACHE_CAP)) trimmed[item.wrapId] = item;
+              await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(trimmed)).catch(() => {});
+            } else {
+              await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(cache)).catch(() => {});
+            }
+          }
         }
       }
 
