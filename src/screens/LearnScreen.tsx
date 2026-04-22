@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { View, Text, Image, TouchableOpacity, ScrollView } from 'react-native';
+import TabHeader from '../components/TabHeader';
 import { useFocusEffect } from '@react-navigation/native';
 import { courses } from '../data/learnContent';
 import {
@@ -8,6 +9,7 @@ import {
   getCourseCompletedCount,
   isCourseComplete,
 } from '../services/learnProgressService';
+import { Check } from 'lucide-react-native';
 import { styles } from '../styles/LearnScreen.styles';
 
 import { LearnNavigation } from '../navigation/types';
@@ -35,17 +37,16 @@ const LearnScreen: React.FC<Props> = ({ navigation }) => {
           resizeMode="cover"
         />
         <View style={styles.headerOverlay} />
-        <TouchableOpacity
-          style={styles.homeButton}
-          onPress={() => navigation.getParent()?.navigate('Home')}
-        >
-          <Image
-            source={require('../../assets/images/Home.png')}
-            style={styles.homeIcon}
-            resizeMode="contain"
-          />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Learn</Text>
+        <TabHeader
+          title="Learn"
+          icon={
+            <Image
+              source={require('../../assets/images/Learn.png')}
+              style={styles.badgeIcon}
+              resizeMode="contain"
+            />
+          }
+        />
       </View>
 
       {/* Course grid */}
@@ -67,7 +68,7 @@ const LearnScreen: React.FC<Props> = ({ navigation }) => {
                 <Image source={course.image} style={styles.courseImage} resizeMode="cover" />
                 {allDone && (
                   <View style={styles.completeBadge}>
-                    <Text style={styles.completeBadgeText}>✓</Text>
+                    <Check size={16} color="#FFFFFF" />
                   </View>
                 )}
               </View>

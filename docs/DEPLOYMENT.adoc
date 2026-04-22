@@ -1,0 +1,460 @@
+== Deployment
+
+This guide covers building, deploying, and distributing the Lightning Piggy mobile app.
+
+=== App Variants
+
+Lightning Piggy supports three build variants, each with distinct identifiers so they can be installed side-by-side on the same device.
+
+[cols="1,2,2,2", options="header"]
+|===
+| Variant | App Name | iOS Bundle ID | Android Package
+
+| **Development**
+| Lightning Piggy (Dev)
+| `com.lightningpiggy.app.dev`
+| `com.lightningpiggy.app.dev`
+
+| **Preview**
+| Lightning Piggy (Preview)
+| `com.lightningpiggy.app.preview`
+| `com.lightningpiggy.app.preview`
+
+| **Production**
+| Lightning Piggy
+| `com.lightningpiggy.app`
+| `com.lightningpiggy.app`
+
+|===
+
+Variants are selected via the `APP_VARIANT` environment variable in `app.config.ts`. The development variant uses a blue adaptive icon background (`#4A90D9`) to distinguish it visually from production (`#E6F4FE`).
+
+=== EAS Build Profiles
+
+Build profiles are defined in `eas.json`:
+
+[cols="1,1,1,2", options="header"]
+|===
+| Profile | Distribution | Android Build Type | Notes
+
+| `development`
+| Internal
+| APK
+| For local development and testing
+
+| `preview`
+| Internal
+| APK
+| For internal distribution to testers
+
+| `production`
+| Store (iOS) / Internal sideload (Android, today)
+| APK
+| Used by the release workflow. Outputs an APK for sideloading + Release attachment. **Switch to App Bundle (AAB)** once we enrol on Google Play, or split into a `production-aab` profile alongside.
+
+|===
+
+=== Local Builds
+
+[source,bash]
+----
+# Development build for Android
+APP_VARIANT=development npx expo run:android
+
+# Production-like build
+npx expo run:android
+----
+
+=== Release workflow
+
+Releases are cut by publishing a **GitHub Release** (which creates the tag server-side and fires `.github/workflows/release.yml`). The workflow:
+
+1. Runs quality gates (typecheck / lint / format-check).
+2. Kicks off EAS production builds for both platforms with `--auto-submit` (TestFlight for iOS, Play Internal once the Google Play account is wired up).
+3. Downloads the resulting Android APK and attaches it to the Release for sideloading.
+4. Regenerates `docs/TECHNICAL_SOLUTION_DOCUMENT.pdf` from the AsciiDoc sources and attaches that too.
+
+==== Cutting a release
+
+. Go to https://github.com/BenGWeeks/lightning-piggy-mobile/releases → *Draft a new release*.
+. Choose a tag like `v1.0.1` (create on publish) targeted at `main`. **The tag is the source of truth for the user-visible version** — the workflow strips the leading `v` and sets `version` in `app.config.ts` (which becomes iOS `CFBundleShortVersionString` and Android `versionName`). Pre-release suffixes (e.g. `v1.0.0-rc1`) are stripped to keep the store-facing version a strict `X.Y.Z`.
+. Write release notes, click *Publish release*.
+. Watch *Actions → Release*. When it finishes, the Release page has the APK and PDF attached; TestFlight has the iOS build.
+
+The tag format is `v*` (SemVer). A pre-release tag like `v1.0.0-rc1` publishes as a pre-release via the GitHub UI; the workflow still runs.
+
+==== Manual re-run without re-tagging
+
+If a release run fails (EAS queue timeout, flaky network), re-run it via *Actions → Release → Run workflow* without creating a new tag. Platform can be overridden (ios / android / all) — useful for retrying just one platform.
+
+Manual runs skip the asset-attach steps (they need a Release to attach to); use them for rebuilds, not for the first cut.
+
+==== Secrets
+
+- **`EXPO_TOKEN`** — repo secret. Generate at https://expo.dev/accounts/bengweeks/settings/access-tokens and add under *Settings → Secrets and variables → Actions*. Everything else (iOS ASC API key, Apple distribution cert, future Google Play service account) lives on EAS's server via `eas credentials`, so the workflow never handles a `.p8` or service account JSON.
+
+=== EAS Cloud Builds
+
+[source,bash]
+----
+# Development APK
+eas build --platform android --profile development
+
+# Preview APK for testers
+eas build --platform android --profile preview
+
+# Production app bundle for Play Store
+eas build --platform android --profile production
+
+# iOS builds (macOS required for local, EAS for cloud)
+eas build --platform ios --profile production
+----
+
+=== Apple Developer Organisation Account
+
+To publish Lightning Piggy on the App Store and TestFlight, an Apple Developer Organisation account is required (an individual account is insufficient for an organisation-published app).
+
+==== Requirements
+
+* **Legal entity**: Lightning Piggy must be registered as a legal entity (company, LLC, etc.) that can enter contracts with Apple
+* **D-U-N-S Number**: A free Dun & Bradstreet number that verifies the organisation's identity. Apply at https://developer.apple.com/enroll/duns-lookup/ — processing takes up to 5 business days
+* **Public website**: A functioning website at a domain associated with the organisation (e.g. `lightningpiggy.com`)
+* **Account holder**: The person enrolling must have legal authority to bind the organisation (owner, founder, or executive)
+* **Apple Account**: Create a dedicated Apple Account using an organisation email (e.g. `dev@lightningpiggy.com`) with two-factor authentication enabled
+
+==== Enrollment Steps
+
+1. Visit https://developer.apple.com/programs/enroll/
+2. Sign in with the organisation's Apple Account
+3. Select "Organisation" as the entity type
+4. Enter the legal entity name and D-U-N-S Number
+5. Apple verifies the organisation (may take 1-2 business days, sometimes longer)
+6. Once verified, review the licence agreement and pay the $99 USD/year membership fee
+7. After payment, the organisation account is active and can manage certificates, provisioning profiles, and App Store Connect
+
+NOTE: The existing individual developer account can remain separate. The organisation account is a new, independent enrollment.
+
+=== iOS Distribution — TestFlight
+
+TestFlight is Apple's beta testing platform. EAS integrates directly with it.
+
+==== One-time setup
+
+. **Create an App Store Connect API key** at https://appstoreconnect.apple.com/access/integrations/api → *Team Keys* → *+*. Name: `EAS Submit`, Access: *App Manager*. Download the `.p8` file (only shown once) and note the Key ID and Issuer ID.
+. **Create the App Store Connect app record** at https://appstoreconnect.apple.com/apps → *+* → *New App*. Pick `com.lightningpiggy.app` from the Bundle ID dropdown (EAS auto-registers it on first iOS build, so build once before creating the record). After creation, open the app → *App Information* and copy the numeric **Apple ID** — this is the `ascAppId`.
+. **Wire credentials into `eas.json`** — keep the `.p8` file *outside the repo* and reference the path. Do not commit the `.p8`. Add the `submit` block below alongside the existing top-level `cli` / `build` blocks:
++
+[source,json]
+----
+{
+  "cli": { "...": "..." },
+  "build": { "...": "..." },
+  "submit": {
+    "production": {
+      "ios": {
+        "ascApiKeyPath": "/absolute/path/to/AuthKey_XXXXXXXXXX.p8",
+        "ascApiKeyId": "XXXXXXXXXX",
+        "ascApiKeyIssuerId": "00000000-0000-0000-0000-000000000000",
+        "ascAppId": "0000000000"
+      }
+    }
+  }
+}
+----
+
+==== Build and submit
+
+[source,bash]
+----
+# 1. Build a production iOS archive (cloud or local — see "Local builds" below)
+eas build --platform ios --profile production
+
+# 2. Submit the latest iOS build to TestFlight
+eas submit --platform ios --latest
+----
+
+With `ascApiKey*` + `ascAppId` populated in `eas.json`, the submit is headless — no Apple ID sign-in, no 2FA, no Keychain prompt. Uploads in 1–3 minutes; Apple then processes the build for 5–10 minutes before it becomes installable.
+
+CAUTION: The App Store Connect *app-record creation* step still requires interactive Apple ID login (API keys cannot create new apps). Do the one-time record creation in the browser, not via EAS, and you avoid the Apple ID flow entirely afterwards.
+
+==== Local build on macOS (skip the EAS queue)
+
+The free-tier EAS build queue can be slow (60–180 min). A local build on a macOS machine is usually 10–20 minutes. Requires Xcode, Homebrew CocoaPods, and Fastlane installed; EAS-CLI handles the rest.
+
+[source,bash]
+----
+# One-time prerequisites on the Mac
+brew install cocoapods fastlane
+npm install -g eas-cli eas-cli-local-build-plugin
+
+# Build locally
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+eas build --platform ios --profile production --local \
+  --output /tmp/lightning-piggy.ipa
+
+# Then submit the IPA (uses ASC API key from eas.json)
+eas submit --platform ios --path /tmp/lightning-piggy.ipa
+----
+
+After submission, the build appears in App Store Connect under the TestFlight tab. Add internal testers (up to 100) or create external test groups (up to 10,000 testers).
+
+=== iOS Distribution — Ad-hoc (sideload)
+
+Ad-hoc distribution installs a signed IPA onto a specific iPhone without going through TestFlight or the App Store. Use it when:
+
+* The tester is **under 13** (Apple blocks them from TestFlight's terms).
+* You want to install a build immediately without waiting for Apple's Beta App Review or TestFlight processing.
+* The build will only run on a small, known set of devices (ad-hoc profiles cap at 100 registered device UDIDs per product category — iPhone, iPad, etc. — per Apple Developer membership year).
+
+==== How it works
+
+* EAS builds an IPA signed with an **ad-hoc provisioning profile** that has specific **device UDIDs** baked in at signing time.
+* The IPA only installs on iPhones whose UDID is in that profile. Every new tester requires re-signing (or a fresh rebuild) after their UDID is registered.
+* Unlike TestFlight, there's no age check — this is an Apple-sanctioned developer distribution channel, not a consumer beta programme.
+
+==== One-time Apple Developer Portal setup
+
+. Register the preview bundle ID at https://developer.apple.com/account/resources/identifiers[developer.apple.com/account/resources/identifiers]:
++
+* **Identifier type:** App IDs → App
+* **Description:** `Lightning Piggy Preview`
+* **Bundle ID (Explicit):** `com.lightningpiggy.app.preview`
+* Leave capabilities at defaults.
++
+(The production bundle ID gets auto-registered by EAS on the first iOS build, but the preview variant needs manual registration because the ad-hoc build path doesn't auto-create it.)
+
+. Register each tester's device UDID once via `eas device:create`:
++
+[source,bash]
+----
+npx -p eas-cli eas device:create
+----
++
+This produces a single reusable URL. Send it to every tester — they open it in Safari on their iPhone, tap *Download Profile*, then *Settings → General → VPN & Device Management* → install the profile. Their UDID is then reported back to your Apple team automatically.
+
+. Verify all UDIDs landed:
++
+[source,bash]
+----
+npx -p eas-cli eas device:list
+----
+
+==== Build the ad-hoc IPA
+
+Local build on macOS (recommended — skips the EAS queue):
+
+[source,bash]
+----
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+eas build --platform ios --profile preview --local \
+  --output /tmp/lightning-piggy-preview.ipa
+----
+
+Expected prompts on first run per bundle ID:
+
+* *"Log in to your Apple Developer account?"* → **Yes** (API keys cannot manage ad-hoc provisioning profiles — this needs full Developer Portal scope, Apple ID + 2FA).
+* *"Reuse this distribution certificate?"* → **Yes**.
+* *"Generate a new Apple Provisioning Profile?"* → **Yes**.
+* *"Select devices for the ad hoc build"* → select all registered UDIDs.
+
+If the Mac login keychain is locked (common when running over SSH without an active GUI session) you'll see *"Security returned a non-successful error code: 36"*. Unlock first:
+
+[source,bash]
+----
+security unlock-keychain ~/Library/Keychains/login.keychain-db
+----
+
+==== Install the IPA
+
+Two install paths depending on whether the iPhone is near the Mac or near your Linux box.
+
+**Option A — push over USB from Linux** (requires `libimobiledevice` / `ideviceinstaller`):
+
+[source,bash]
+----
+# One-time on Linux
+sudo apt install -y ideviceinstaller
+
+# For each install
+# Replace <user>@<mac-hostname> and the source path with the Mac + IPA you built on.
+scp <user>@<mac-hostname>:/tmp/lightning-piggy-preview.ipa /tmp/
+ideviceinstaller -i /tmp/lightning-piggy-preview.ipa
+----
+
+On the iPhone:
+
+* The first time, iOS prompts *"Trust this computer?"* → **Trust**, enter passcode.
+* On iOS 16+, Developer Mode must be enabled before sideloaded apps will launch. *Settings → Privacy & Security → Developer Mode → toggle on → Restart*. If the row isn't visible, tap the freshly installed app icon once to trigger iOS to reveal it.
+* First launch of the installed app: iOS shows *"Untrusted Developer"*. Go to *Settings → General → VPN & Device Management*, tap the developer profile, *Trust*.
+
+**Option B — EAS install URL via Safari** (works over cellular / WiFi, no USB):
+
+Local builds don't upload to EAS automatically; to get a shareable install URL, either use the EAS cloud build path (`eas build --platform ios --profile preview` without `--local`) or host the IPA plus an install manifest plist yourself (GitHub Release attachments require the `itms-services://` install URL to point at a plist you generate). Cloud build is simpler unless the queue is heavily backlogged.
+
+==== Limits
+
+* Ad-hoc provisioning profiles expire **1 year** after generation — rebuild or `eas build:resign` before expiry.
+* **100 registered devices per Apple product category** (iPhone, iPad, etc.) per membership year. You can remove unregistered devices at year-end to free slots.
+
+=== Android Distribution — Google Play Internal Testing
+
+Google Play's Internal Testing track is the Android equivalent of TestFlight.
+
+==== Setup
+
+1. Create a Google Play Developer account ($25 one-time fee) at https://play.google.com/console/
+2. Create the app listing in Google Play Console
+3. Set up a Google Service Account for automated uploads (EAS needs this)
+
+==== Deploy to Internal Testing
+
+[source,bash]
+----
+# 1. Build a production app bundle
+eas build --platform android --profile production
+
+# 2. Submit to Google Play (specify the internal track)
+eas submit --platform android
+----
+
+During `eas submit`, select the **internal** track. The app is then available to up to 100 internal testers added in Google Play Console.
+
+For wider testing, promote the build to the **closed** or **open** testing tracks.
+
+=== Zapstore (Nostr App Store)
+
+https://zapstore.dev[Zapstore] is a permissionless Android app store built on Nostr. Apps are discovered through social graphs, releases are cryptographically signed, and developers receive Bitcoin payments (zaps) directly from users.
+
+==== Why Zapstore
+
+* No registration or approval process — publish with a Nostr keypair
+* No fees — developers receive 100% of zaps
+* Cryptographic verification — releases are signed with your Nostr key; Zapstore verifies the signature on install
+* Native fit for a Bitcoin/Lightning app
+
+==== Publishing
+
+Install the `zsp` CLI tool:
+
+[source,bash]
+----
+# Install zsp (Zapstore Publisher)
+# See: https://github.com/zapstore/zsp
+----
+
+Publish a release:
+
+[source,bash]
+----
+# Build the APK
+eas build --platform android --profile preview
+
+# Run the publishing wizard (interactive)
+# Signs the release with your Nostr key and publishes metadata to relays
+zsp publish
+----
+
+The wizard guides you through source repository, metadata, signing, and relay selection. Signing options include `nsec`, NIP-07 browser extension, or NIP-46 bunker.
+
+To receive payments, add a Lightning address to your Nostr profile.
+
+=== F-Droid
+
+https://f-droid.org[F-Droid] is a catalogue of free and open-source Android apps. Publishing a React Native app to F-Droid requires additional steps because F-Droid builds apps from source and verifies all dependencies are FOSS.
+
+==== Key Considerations
+
+* F-Droid builds from source — the app must compile in their build environment
+* React Native apps have two dependency systems (npm + Gradle), both of which F-Droid scans for non-free components
+* The `android/` subdirectory must be specified via the `subdir` directive in the F-Droid metadata
+* Some npm dependencies may include pre-built binaries that F-Droid flags — these need to be reviewed and whitelisted or replaced
+
+==== Steps to Submit
+
+1. Ensure the app builds reproducibly from source
+2. Create a metadata file following the https://f-droid.org/docs/Build_Metadata_Reference/[F-Droid metadata format]
+3. Submit a merge request to the https://gitlab.com/fdroid/fdroiddata[fdroiddata] repository on GitLab
+4. F-Droid maintainers review the submission and verify the build
+
+See the official guide: https://f-droid.org/2020/10/14/adding-react-native-app-to-f-droid.html[Adding React Native Apps to F-Droid]
+
+=== Sideloading (Android / GrapheneOS)
+
+Users on Android, GrapheneOS, or other custom ROMs can install specific versions directly from APK files.
+
+==== From GitHub Releases
+
+Attach APK builds to GitHub Releases so users can download and install specific versions:
+
+[source,bash]
+----
+# Build an APK for sideloading
+eas build --platform android --profile preview
+
+# Download the APK from EAS
+eas build:list --platform android --status finished
+# Copy the build URL and download the APK
+
+# Attach to a GitHub Release
+gh release create v1.0.0 ./lightning-piggy.apk --title "v1.0.0" --notes "Release notes"
+----
+
+==== Installing on Device
+
+Users can install the APK by:
+
+1. **Direct download**: Download the `.apk` file from the GitHub Releases page on the device, then tap to install
+2. **ADB install**: Connect via USB and run `adb install lightning-piggy.apk`
+3. **Obtainium**: Users can add the GitHub repository to https://github.com/ImranR98/Obtainium[Obtainium], which automatically tracks releases and notifies users of updates
+4. **Zapstore**: If published to Zapstore, users can install and update from there
+
+On GrapheneOS, sideloading works the same as stock Android — enable "Install unknown apps" for the browser or file manager, then open the APK.
+
+==== Version Management
+
+Tag each release in Git and attach the corresponding APK to the GitHub Release. This gives users a clear history of versions to choose from:
+
+[source,bash]
+----
+# Tag a release
+git tag -a v1.0.0 -m "Release v1.0.0"
+git push origin v1.0.0
+----
+
+=== Expo Config Plugins
+
+The app uses custom Expo config plugins to modify native project settings during prebuild:
+
+[cols="1,3", options="header"]
+|===
+| Plugin | Purpose
+
+| `withAdjustResize`
+| Sets `android:windowSoftInputMode="adjustResize"` in AndroidManifest.xml. Required for bottom sheets to slide up correctly when the keyboard opens.
+
+| `withAmberQueries`
+| Adds the Amber signer package to the `<queries>` element in AndroidManifest.xml. Required on Android 11+ for the app to detect and communicate with Amber via NIP-55 intents.
+
+| `expo-secure-store`
+| Provides encrypted storage for sensitive credentials (NWC URLs, Nostr keys).
+
+| `expo-image-picker`
+| Camera and photo library access for profile picture selection. Permission message: "Allow Lightning Piggy to access your photos to set your profile picture."
+
+| `expo-contacts`
+| Device contacts access for finding friends. Permission message: "Allow Lightning Piggy to access your contacts to find friends."
+
+|===
+
+=== Deployment Checklist
+
+Before releasing to production:
+
+* [ ] TypeScript passes: `npx tsc --noEmit`
+* [ ] ESLint passes: `npm run lint`
+* [ ] Prettier passes: `npm run format:check`
+* [ ] App tested on physical Android device
+* [ ] App tested on physical iOS device (if applicable)
+* [ ] Version number incremented in `app.config.ts`
+* [ ] E2E tests pass: `maestro test tests/e2e/`
+* [ ] Git tag created for release version

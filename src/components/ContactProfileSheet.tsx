@@ -17,15 +17,16 @@ import {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import Svg, { Circle, Path } from 'react-native-svg';
-import ZapIcon from './icons/ZapIcon';
-import CopyIcon from './icons/CopyIcon';
+import { Zap, Copy, Share2 } from 'lucide-react-native';
 import NfcIcon from './icons/NfcIcon';
 import NfcWriteSheet from './NfcWriteSheet';
 import * as Clipboard from 'expo-clipboard';
-import { npubEncode } from '../services/nostrService';
+import Toast from 'react-native-toast-message';
+import { npubEncode, nprofileEncode, buildProfileRelayHints } from '../services/nostrService';
 import { useNostr } from '../contexts/NostrContext';
 import { isNfcSupported, isNfcEnabled, openNfcSettings } from '../services/nfcService';
 import { colors } from '../styles/theme';
+import FriendPickerSheet, { PickedFriend } from './FriendPickerSheet';
 
 interface ContactData {
   pubkey: string | null;
@@ -42,6 +43,7 @@ interface Props {
   onClose: () => void;
   contact: ContactData | null;
   onZap?: () => void;
+  onMessage?: () => void;
   onSetLightningAddress?: (address: string) => void;
 }
 
@@ -50,11 +52,12 @@ const ContactProfileSheet: React.FC<Props> = ({
   onClose,
   contact,
   onZap,
+  onMessage,
   onSetLightningAddress,
 }) => {
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['55%'], []);
-  const { contacts, followContact, unfollowContact } = useNostr();
+  const { contacts, followContact, unfollowContact, sendDirectMessage, relays } = useNostr();
   const [following, setFollowing] = useState(false);
   const [loadingFollow, setLoadingFollow] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
@@ -62,6 +65,8 @@ const ContactProfileSheet: React.FC<Props> = ({
   const [editingLnAddress, setEditingLnAddress] = useState(false);
   const [lnAddressDraft, setLnAddressDraft] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [nfcWriteOpen, setNfcWriteOpen] = useState(false);
   const [nfcAvailable, setNfcAvailable] = useState(false);
 
@@ -171,21 +176,53 @@ const ContactProfileSheet: React.FC<Props> = ({
     setNfcWriteOpen(true);
   };
 
-  const handleShare = async () => {
+  const handleShare = useCallback(() => {
     setMenuOpen(false);
     if (!contact?.pubkey) return;
-    const npub = npubEncode(contact.pubkey);
-    const url = `https://primal.net/p/${npub}`;
-    try {
-      await (
-        await import('react-native')
-      ).Share.share({
-        message: `${contact.name}: ${url}`,
-      });
-    } catch {
-      // user cancelled share
-    }
-  };
+    setShareOpen(true);
+  }, [contact?.pubkey]);
+
+  const handleShareToFriend = useCallback(
+    async (friend: PickedFriend) => {
+      if (!contact?.pubkey || sharing) return;
+      setSharing(true);
+      setShareOpen(false);
+      try {
+        // NIP-19 nprofile includes relay hints so the receiving client can
+        // find the shared person's profile without searching every relay.
+        // Prefixing with `nostr:` (NIP-21) means any conforming client
+        // — Damus, Amethyst, Primal, Coracle, 0xchat — renders it as a
+        // clickable profile mention. The human-readable first line is a
+        // fallback for clients that don't unfurl the URI.
+        const readRelays = relays.filter((r) => r.read).map((r) => r.url);
+        const relayHints = buildProfileRelayHints(contact.pubkey, contacts, readRelays);
+        const nprofile = nprofileEncode(contact.pubkey, relayHints);
+        const label = contact.name || 'a contact';
+        const payload = `Shared contact: ${label}\nnostr:${nprofile}`;
+        const result = await sendDirectMessage(friend.pubkey, payload);
+        if (!result.success) {
+          Toast.show({
+            type: 'error',
+            text1: 'Share failed',
+            text2: result.error ?? 'Could not share contact.',
+            position: 'top',
+            visibilityTime: 4000,
+          });
+          return;
+        }
+        Toast.show({
+          type: 'success',
+          text1: `${label} shared with ${friend.name}`,
+          position: 'top',
+          visibilityTime: 2500,
+        });
+        onClose();
+      } finally {
+        setSharing(false);
+      }
+    },
+    [contact?.pubkey, contact?.name, sharing, sendDirectMessage, onClose, contacts, relays],
+  );
 
   const handleViewProfile = useCallback(async () => {
     if (!contact?.pubkey) return;
@@ -273,7 +310,7 @@ const ContactProfileSheet: React.FC<Props> = ({
         {npubDisplay && (
           <TouchableOpacity style={styles.npubRow} onPress={handleCopyNpub}>
             <Text style={styles.npubText}>{npubDisplay}</Text>
-            <CopyIcon size={20} color={colors.brandPink} />
+            <Copy size={20} color={colors.brandPink} />
           </TouchableOpacity>
         )}
 
@@ -347,14 +384,49 @@ const ContactProfileSheet: React.FC<Props> = ({
               </Text>
             </TouchableOpacity>
           )}
+          {contact.pubkey && onMessage && (
+            <TouchableOpacity
+              style={styles.messageButton}
+              onPress={onMessage}
+              accessibilityLabel="Message"
+              testID="contact-message-button"
+            >
+              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                <Path
+                  d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+                  stroke={colors.white}
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </Svg>
+              <Text style={styles.messageButtonText}>Message</Text>
+            </TouchableOpacity>
+          )}
           {contact.lightningAddress && onZap && (
             <TouchableOpacity style={styles.zapButton} onPress={onZap}>
-              <ZapIcon size={20} color={colors.white} />
+              <Zap size={20} color={colors.white} fill={colors.white} />
               <Text style={styles.zapButtonText}>Zap</Text>
             </TouchableOpacity>
           )}
           {contact.pubkey && (
-            <TouchableOpacity style={styles.viewProfileButton} onPress={handleViewProfile}>
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={handleShare}
+              disabled={sharing}
+              accessibilityLabel="Share contact"
+              testID="contact-share-button"
+            >
+              <Share2 size={18} color={colors.brandPink} />
+            </TouchableOpacity>
+          )}
+          {contact.pubkey && (
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={handleViewProfile}
+              accessibilityLabel="Open in external client"
+              testID="contact-view-profile-button"
+            >
               <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
                 <Path
                   d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3"
@@ -403,7 +475,7 @@ const ContactProfileSheet: React.FC<Props> = ({
                     accessibilityLabel="Copy npub"
                     testID="contact-copy-npub"
                   >
-                    <CopyIcon size={16} color={colors.textBody} />
+                    <Copy size={16} color={colors.textBody} />
                     <Text style={styles.menuItemText}>Copy npub</Text>
                   </TouchableOpacity>
                 </View>
@@ -421,6 +493,13 @@ const ContactProfileSheet: React.FC<Props> = ({
           />
         )}
       </BottomSheetView>
+      <FriendPickerSheet
+        visible={shareOpen}
+        onClose={() => setShareOpen(false)}
+        onSelect={handleShareToFriend}
+        title={`Share ${contact.name || 'contact'}`}
+        subtitle="They'll receive an encrypted Nostr DM with a person card."
+      />
     </BottomSheetModal>
   );
 };
@@ -559,23 +638,25 @@ const styles = StyleSheet.create({
   },
   actionRow: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 8,
     marginTop: 20,
-    paddingHorizontal: 24,
+    paddingHorizontal: 16,
   },
   followButton: {
-    paddingHorizontal: 24,
+    paddingHorizontal: 14,
     paddingVertical: 12,
     borderRadius: 10,
     borderWidth: 1.5,
     borderColor: colors.brandPink,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   followingButton: {
     backgroundColor: colors.brandPinkLight,
     borderColor: colors.brandPinkLight,
   },
   followButtonText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
     color: colors.brandPink,
   },
@@ -585,19 +666,35 @@ const styles = StyleSheet.create({
   zapButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 24,
+    justifyContent: 'center',
+    gap: 4,
+    paddingHorizontal: 14,
     paddingVertical: 12,
     borderRadius: 10,
     backgroundColor: colors.brandPink,
   },
   zapButtonText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
     color: colors.white,
   },
-  viewProfileButton: {
+  messageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
     paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: colors.brandPink,
+  },
+  messageButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.white,
+  },
+  iconButton: {
+    paddingHorizontal: 12,
     paddingVertical: 12,
     borderRadius: 10,
     borderWidth: 1.5,

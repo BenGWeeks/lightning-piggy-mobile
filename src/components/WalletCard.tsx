@@ -1,10 +1,12 @@
 import React from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Grayscale } from 'react-native-color-matrix-image-filters';
 import { WalletState } from '../types/wallet';
 import { CardThemeConfig, cardThemes } from '../themes/cardThemes';
 import { getCardBgStyle } from '../themes/cards';
 import { satsToFiatString, FiatCurrency } from '../services/fiatService';
+import { ChainIcon, SettingsIcon } from './icons/ArrowIcons';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 export const CARD_MARGIN = 16;
@@ -37,9 +39,12 @@ const CardContent: React.FC<{
   btcPrice?: number | null;
   currency?: FiatCurrency;
   isConnected?: boolean;
+  walletType?: 'nwc' | 'onchain';
   walletAlias?: string | null;
+  hideBalance?: boolean;
   onSettingsPress?: () => void;
   showDetails?: boolean;
+  isWatchOnly?: boolean;
 }> = ({
   theme,
   alias,
@@ -47,44 +52,100 @@ const CardContent: React.FC<{
   btcPrice,
   currency,
   isConnected,
+  walletType = 'nwc',
   walletAlias,
+  hideBalance,
   onSettingsPress,
   showDetails = true,
+  isWatchOnly = false,
 }) => {
-  return (
+  const toGrey = (hex: string): string => {
+    const h = hex.replace('#', '');
+    const r = parseInt(h.substring(0, 2), 16);
+    const g = parseInt(h.substring(2, 4), 16);
+    const b = parseInt(h.substring(4, 6), 16);
+    const grey = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+    const gh = grey.toString(16).padStart(2, '0');
+    return `#${gh}${gh}${gh}`;
+  };
+
+  const gradientColors = isWatchOnly
+    ? (theme.gradientColors.map(toGrey) as [string, string, ...string[]])
+    : theme.gradientColors;
+
+  const card = (
     <LinearGradient
-      colors={theme.gradientColors}
+      colors={gradientColors}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={styles.card}
     >
-      {theme.backgroundImage && (
+      {theme.backgroundImage && isWatchOnly ? (
+        <Grayscale style={getCardBgStyle(theme.backgroundImageStyle, false)}>
+          <Image
+            source={theme.backgroundImage}
+            style={{ width: '100%', height: '100%' }}
+            resizeMode="contain"
+          />
+        </Grayscale>
+      ) : theme.backgroundImage ? (
         <Image
           source={theme.backgroundImage}
           style={getCardBgStyle(theme.backgroundImageStyle, false)}
           resizeMode="contain"
         />
-      )}
+      ) : null}
 
       {showDetails ? (
         <>
           <View style={styles.topRow}>
             <View style={styles.statusRow}>
               <View
-                style={[styles.statusDot, { backgroundColor: isConnected ? '#4CAF50' : '#F44336' }]}
+                style={[
+                  styles.statusDot,
+                  {
+                    backgroundColor:
+                      walletType === 'onchain'
+                        ? balance !== null
+                          ? '#4CAF50'
+                          : '#F44336'
+                        : isConnected
+                          ? '#4CAF50'
+                          : '#F44336',
+                  },
+                ]}
               />
               <Text style={[styles.statusText, { color: theme.textColor }]}>
-                {isConnected ? 'Connected' : 'Disconnected'}
+                {walletType === 'onchain'
+                  ? balance !== null
+                    ? 'Connected'
+                    : 'Disconnected'
+                  : isConnected
+                    ? 'Connected'
+                    : 'Disconnected'}
               </Text>
             </View>
-            {onSettingsPress && (
-              <TouchableOpacity
-                onPress={onSettingsPress}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Text style={[styles.settingsCog, { color: theme.textColor }]}>&#9881;</Text>
-              </TouchableOpacity>
-            )}
+            <View style={styles.topRightIcons}>
+              {walletType === 'onchain' ? (
+                <ChainIcon size={20} color={theme.textColor} strokeWidth={2.5} />
+              ) : (
+                <Image
+                  source={require('../../assets/images/nwc-icon.png')}
+                  style={[styles.walletTypeIcon, { tintColor: theme.textColor }]}
+                  resizeMode="contain"
+                />
+              )}
+              {onSettingsPress && (
+                <TouchableOpacity
+                  onPress={onSettingsPress}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  testID="wallet-settings"
+                  accessibilityLabel="Wallet settings"
+                >
+                  <SettingsIcon size={22} color={theme.textColor} strokeWidth={1.5} />
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
 
           <View style={styles.aliasBalanceGroup}>
@@ -92,9 +153,9 @@ const CardContent: React.FC<{
               {alias}
             </Text>
             <Text style={[styles.balance, { color: theme.textColor }]}>
-              {balance !== null ? `${balance!.toLocaleString()} sats` : '---'}
+              {hideBalance ? '***' : balance !== null ? `${balance!.toLocaleString()} sats` : '---'}
             </Text>
-            {balance !== null && btcPrice !== null && currency && (
+            {!hideBalance && balance !== null && btcPrice !== null && currency && (
               <Text style={[styles.fiatBalance, { color: theme.textColor }]}>
                 {satsToFiatString(balance!, btcPrice!, currency)}
               </Text>
@@ -114,6 +175,8 @@ const CardContent: React.FC<{
       )}
     </LinearGradient>
   );
+
+  return card;
 };
 
 /** Mini card for theme selection — renders the full card design scaled down */
@@ -147,7 +210,11 @@ const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onS
   const theme = cardThemes[wallet.theme];
 
   return (
-    <View style={styles.cardContainer}>
+    <View
+      style={styles.cardContainer}
+      testID={`wallet-card-${wallet.walletType}`}
+      accessibilityLabel={`${wallet.alias} ${wallet.walletType} wallet`}
+    >
       <CardContent
         theme={theme}
         alias={wallet.alias}
@@ -155,8 +222,11 @@ const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onS
         btcPrice={btcPrice}
         currency={currency}
         isConnected={wallet.isConnected}
+        walletType={wallet.walletType}
         walletAlias={wallet.walletAlias}
+        hideBalance={wallet.hideBalance}
         onSettingsPress={onSettingsPress}
+        isWatchOnly={wallet.walletType === 'onchain' && wallet.onchainImportMethod !== 'mnemonic'}
       />
     </View>
   );
@@ -194,8 +264,14 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     opacity: 0.8,
   },
-  settingsCog: {
-    fontSize: 22,
+  topRightIcons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  walletTypeIcon: {
+    width: 22,
+    height: 22,
     opacity: 0.9,
   },
   aliasBalanceGroup: {

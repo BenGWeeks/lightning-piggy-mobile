@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Platform } from 'react-native';
 import { BottomSheetModal, BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import * as Clipboard from 'expo-clipboard';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
 import { CardTheme } from '../types/wallet';
 import { themeList } from '../themes/cardThemes';
 import { MiniWalletCard } from './WalletCard';
+import { getXpub, getNwcUrl } from '../services/walletStorageService';
 
 interface Props {
   walletId: string | null;
@@ -19,14 +21,40 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const snapPoints = useMemo(() => ['85%'], []);
 
   const [alias, setAlias] = useState('');
+  const [lnAddress, setLnAddress] = useState('');
   const [selectedTheme, setSelectedTheme] = useState<CardTheme>('lightning-piggy');
+  const [xpubDisplay, setXpubDisplay] = useState<string | null>(null);
+  const [relayUrl, setRelayUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (wallet) {
       setAlias(wallet.alias);
+      setLnAddress(wallet.lightningAddress ?? '');
       setSelectedTheme(wallet.theme);
+
+      // Load xpub for on-chain wallets
+      if (wallet.walletType === 'onchain' && walletId) {
+        getXpub(walletId).then((xpub) => setXpubDisplay(xpub));
+        setRelayUrl(null);
+      } else if (wallet.walletType === 'nwc' && walletId) {
+        setXpubDisplay(null);
+        // Extract relay URL from NWC connection string
+        getNwcUrl(walletId).then((url) => {
+          if (url) {
+            try {
+              const params = new URLSearchParams(url.split('?')[1] || '');
+              setRelayUrl(params.get('relay'));
+            } catch {
+              setRelayUrl(null);
+            }
+          }
+        });
+      } else {
+        setXpubDisplay(null);
+        setRelayUrl(null);
+      }
     }
-  }, [wallet]);
+  }, [wallet, walletId]);
 
   const handleSheetChange = useCallback(
     (index: number) => {
@@ -54,26 +82,31 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
     await updateWalletSettings(walletId, {
       alias: alias.trim() || wallet.alias,
       theme: selectedTheme,
+      lightningAddress: lnAddress.trim() || null,
     });
     onClose();
   };
 
   const handleDisconnect = () => {
-    Alert.alert(
-      'Remove Wallet',
-      `Are you sure you want to remove "${wallet.alias}"? This will disconnect the wallet.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            await removeWallet(walletId);
-            onClose();
-          },
+    const actionText = wallet.walletType === 'onchain' ? 'remove' : 'disconnect';
+    Alert.alert('Remove Wallet', `Are you sure you want to ${actionText} "${wallet.alias}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          await removeWallet(walletId);
+          onClose();
         },
-      ],
-    );
+      },
+    ]);
+  };
+
+  const handleCopyXpub = async () => {
+    if (xpubDisplay) {
+      await Clipboard.setStringAsync(xpubDisplay);
+      Alert.alert('Copied', 'Extended public key copied to clipboard.');
+    }
   };
 
   return (
@@ -98,6 +131,49 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
           placeholderTextColor={colors.textSupplementary}
           autoCapitalize="words"
         />
+
+        {/* NWC wallet: lightning address (LUD-16) */}
+        {wallet.walletType === 'nwc' && (
+          <>
+            <Text style={[styles.label, { marginTop: 20 }]}>Lightning Address</Text>
+            <TextInput
+              style={styles.input}
+              value={lnAddress}
+              onChangeText={setLnAddress}
+              placeholder="user@domain.com"
+              placeholderTextColor={colors.textSupplementary}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+            />
+            <Text style={styles.hintText}>
+              LUD-16 address for receiving payments. Usually provided by the NWC connection.
+            </Text>
+          </>
+        )}
+
+        {/* NWC wallet: relay URL (read-only) */}
+        {wallet.walletType === 'nwc' && relayUrl && (
+          <>
+            <Text style={[styles.label, { marginTop: 20 }]}>Relay</Text>
+            <Text style={styles.xpubText} numberOfLines={2}>
+              {relayUrl}
+            </Text>
+          </>
+        )}
+
+        {/* On-chain wallet: show xpub (read-only) */}
+        {wallet.walletType === 'onchain' && xpubDisplay && (
+          <>
+            <Text style={[styles.label, { marginTop: 20 }]}>Extended Public Key</Text>
+            <TouchableOpacity onPress={handleCopyXpub} activeOpacity={0.7}>
+              <Text style={styles.xpubText} numberOfLines={3}>
+                {xpubDisplay}
+              </Text>
+              <Text style={styles.copyHint}>Tap to copy</Text>
+            </TouchableOpacity>
+          </>
+        )}
 
         <Text style={[styles.label, { marginTop: 20 }]}>Card Design</Text>
         <View style={styles.themeGrid}>
@@ -156,6 +232,26 @@ const styles = StyleSheet.create({
     padding: 16,
     fontSize: 16,
     color: colors.textBody,
+  },
+  xpubText: {
+    backgroundColor: colors.background,
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 12,
+    color: colors.textSupplementary,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  hintText: {
+    fontSize: 12,
+    color: colors.textSupplementary,
+    marginTop: 4,
+  },
+  copyHint: {
+    fontSize: 12,
+    color: colors.brandPink,
+    fontWeight: '600',
+    marginTop: 4,
+    textAlign: 'right',
   },
   themeGrid: {
     flexDirection: 'row',

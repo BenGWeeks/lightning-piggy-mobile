@@ -8,7 +8,7 @@ export const styles = StyleSheet.create({
   },
   headerBackground: {
     backgroundColor: colors.brandPink,
-    paddingBottom: 36,
+    paddingBottom: 44,
     overflow: 'hidden',
   },
   bgPigImage: {
@@ -19,51 +19,48 @@ export const styles = StyleSheet.create({
     top: -20,
     opacity: 0.15,
   },
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingRight: 24,
-    marginBottom: 8,
-  },
-  hello: {
-    color: colors.white,
-    fontSize: 22,
-    fontWeight: '400',
-    paddingHorizontal: 24,
+  /** Glyph inside the TabHeader round badge for Home. 20×20 matches the
+   * other tabs' badge glyphs; the Home.png is tinted pink to match. */
+  badgeIcon: {
+    width: 20,
+    height: 20,
+    tintColor: colors.brandPink,
   },
   buttonRow: {
     flexDirection: 'row',
-    gap: 16,
+    justifyContent: 'center',
+    gap: 28,
     paddingHorizontal: 24,
-    marginTop: 12,
+    marginTop: 16,
   },
   actionButton: {
-    flex: 1,
-    flexDirection: 'row',
-    backgroundColor: colors.white,
-    height: 52,
-    borderRadius: 12,
-    justifyContent: 'center',
     alignItems: 'center',
-    gap: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 4,
+    gap: 6,
   },
   actionButtonDisabled: {
-    opacity: 0.5,
+    opacity: 0.4,
   },
-  actionText: {
-    color: colors.brandPink,
-    fontSize: 16,
-    fontWeight: '700',
+  actionCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: colors.white,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
   },
   actionIcon: {
     color: colors.brandPink,
-    fontSize: 20,
+    fontSize: 24,
+    fontWeight: '900',
+  },
+  actionText: {
+    color: colors.white,
+    fontSize: 12,
     fontWeight: '700',
   },
   nfcButton: {
@@ -90,5 +87,10 @@ export const styles = StyleSheet.create({
     color: colors.textSupplementary,
     fontSize: 16,
     fontWeight: '500',
+  },
+  addWalletText: {
+    color: colors.brandPink,
+    fontSize: 18,
+    fontWeight: '700',
   },
 });

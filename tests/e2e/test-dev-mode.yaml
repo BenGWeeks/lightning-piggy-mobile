@@ -1,0 +1,90 @@
+appId: com.lightningpiggy.app
+name: Enable Developer Mode Test
+---
+# Enables developer mode by triple-tapping the version number in Account settings.
+# Verifies the "Import Seed Phrase (Beta)" option appears in Add Wallet wizard.
+# Run: maestro test tests/e2e/test-dev-mode.yaml
+
+# Wait for app to be ready
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Navigate to Account screen (works from any screen)
+# First try Home tab, then profile icon. If already on Account, just scroll.
+- tapOn:
+    id: 'tab-home'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'profile-icon'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Scroll to the bottom to find the version number
+- swipe:
+    start: 50%, 80%
+    end: 50%, 20%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+- swipe:
+    start: 50%, 80%
+    end: 50%, 20%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Triple-tap the version number to toggle dev mode
+- tapOn:
+    id: 'version-text'
+- tapOn:
+    id: 'version-text'
+- tapOn:
+    id: 'version-text'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Verify a developer mode alert appears (Enabled or Disabled)
+- extendedWaitUntil:
+    visible:
+      text: 'Developer Mode.*'
+    timeout: 3000
+
+# Dismiss the alert
+- tapOn:
+    text: 'OK'
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Go back to Home
+- tapOn:
+    id: 'tab-home'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Open Add Wallet wizard
+- scrollUntilVisible:
+    element:
+      id: 'add-wallet-card'
+    direction: RIGHT
+    timeout: 20000
+    speed: 40
+
+- tapOn:
+    id: 'add-wallet-card'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Scroll down to see all options
+- swipe:
+    start: 50%, 80%
+    end: 50%, 50%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Verify "Import Seed Phrase (Beta)" option is visible
+- assertVisible:
+    text: 'Import Seed Phrase.*'

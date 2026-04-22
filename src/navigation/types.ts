@@ -7,7 +7,7 @@ export type MainTabParamList = {
   Home:
     | { sendToAddress?: string; sendToName?: string; sendToPicture?: string; sendToPubkey?: string }
     | undefined;
-  Earn: undefined;
+  Messages: undefined;
   Learn: undefined;
   Friends: undefined;
   Account: undefined;
@@ -19,6 +19,12 @@ export type RootStackParamList = {
   Onboarding: undefined;
   Setup: undefined;
   MainTabs: NavigatorScreenParams<MainTabParamList>;
+  Conversation: {
+    pubkey: string;
+    name: string;
+    picture?: string | null;
+    lightningAddress?: string | null;
+  };
 };
 
 // Learn sub-stack

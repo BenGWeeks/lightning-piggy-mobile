@@ -3,6 +3,12 @@
 import 'message-port-polyfill';
 import 'react-native-get-random-values';
 import 'react-native-url-polyfill/auto';
+import { Buffer } from 'buffer';
+
+// Buffer polyfill for bitcoinjs-lib and bip32
+if (typeof global.Buffer === 'undefined') {
+  (global as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const TextEncodingPolyfill = require('text-encoding');

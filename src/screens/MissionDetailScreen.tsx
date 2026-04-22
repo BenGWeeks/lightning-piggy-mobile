@@ -9,6 +9,7 @@ import {
   isMissionComplete,
   LearnProgress,
 } from '../services/learnProgressService';
+import { ChevronLeft, ChevronRight, Check } from 'lucide-react-native';
 import { styles } from '../styles/MissionDetailScreen.styles';
 import { colors } from '../styles/theme';
 import { extractYouTubeId } from '../utils/youtube';
@@ -89,7 +90,7 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           </View>
         )}
         <TouchableOpacity style={styles.backButtonOverlay} onPress={() => navigation.goBack()}>
-          <Text style={styles.backArrow}>‹</Text>
+          <ChevronLeft size={28} color="#FFFFFF" />
         </TouchableOpacity>
       </View>
 
@@ -107,7 +108,7 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           >
             <Image source={{ uri: mission.producer.iconUrl }} style={styles.producerIcon} />
             <Text style={styles.producerText}>{mission.producer.name}</Text>
-            <Text style={styles.producerArrow}>›</Text>
+            <ChevronRight size={16} color={colors.textSupplementary} />
           </TouchableOpacity>
         )}
 
@@ -135,7 +136,7 @@ const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
         {mission.learningOutcomes.map((outcome, index) => (
           <View key={index} style={styles.outcomeRow}>
             <View style={[styles.outcomeDot, completed && styles.outcomeDotComplete]}>
-              {completed && <Text style={styles.outcomeDotCheck}>✓</Text>}
+              {completed && <Check size={12} color="#FFFFFF" />}
             </View>
             <Text style={styles.outcomeText}>{outcome.text}</Text>
           </View>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,10 +6,11 @@ import {
   TouchableOpacity,
   ScrollView,
   RefreshControl,
+  ActivityIndicator,
   Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import * as nip19 from 'nostr-tools/nip19';
 import { useWallet } from '../contexts/WalletContext';
@@ -17,13 +18,14 @@ import { useNostr } from '../contexts/NostrContext';
 import ReceiveSheet from '../components/ReceiveSheet';
 import SendSheet from '../components/SendSheet';
 import ContactProfileSheet from '../components/ContactProfileSheet';
+import TransferSheet from '../components/TransferSheet';
 import TransactionList from '../components/TransactionList';
 import WalletCarousel from '../components/WalletCarousel';
 import AddWalletWizard from '../components/AddWalletWizard';
 import WalletSettingsSheet from '../components/WalletSettingsSheet';
+import TabHeader from '../components/TabHeader';
+import { ArrowDownIcon, ArrowUpIcon, ArrowLeftRightIcon } from '../components/icons/ArrowIcons';
 import NfcIcon from '../components/icons/NfcIcon';
-import ProfileIcon from '../components/ProfileIcon';
-import * as nwcService from '../services/nwcService';
 import {
   isNfcSupported,
   isNfcEnabled,
@@ -44,24 +46,26 @@ const HomeScreen: React.FC = () => {
     activeWallet,
     hasWallets,
     refreshActiveBalance,
+    fetchTransactionsForWallet,
     setActiveWallet,
     userName,
     btcPrice,
     currency,
   } = useWallet();
-  const { profile } = useNostr();
+  const { isLoggedIn, profile, refreshProfile } = useNostr();
   const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList, 'Home'>>();
   const route = useRoute<RouteProp<MainTabParamList, 'Home'>>();
   const insets = useSafeAreaInsets();
 
   const [receiveOpen, setReceiveOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
   const [sendToAddress, setSendToAddress] = useState<string | undefined>();
   const [sendToPicture, setSendToPicture] = useState<string | undefined>();
   const [sendToPubkey, setSendToPubkey] = useState<string | undefined>();
+  const [sendToName, setSendToName] = useState<string | undefined>();
   const [wizardOpen, setWizardOpen] = useState(false);
   const [settingsWalletId, setSettingsWalletId] = useState<string | null>(null);
-  const [transactions, setTransactions] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [nfcSupported, setNfcSupported] = useState(false);
   const [nfcScanning, setNfcScanning] = useState(false);
@@ -76,59 +80,115 @@ const HomeScreen: React.FC = () => {
   } | null>(null);
   const [nfcContactSheetOpen, setNfcContactSheetOpen] = useState(false);
 
+  // Refresh the own-profile kind-0 on focus so the top-right profile
+  // icon picks up external renames (e.g. via Amber or another client).
+  // The call is cache-respecting: if the 24h kind-0 cache is still
+  // fresh it short-circuits without hitting relays, so switching tabs
+  // doesn't incur a network cost. Pull-to-refresh in MessagesScreen
+  // passes `{ force: true }` for the explicit-user-intent path.
+  // (The greeting text itself reads from WalletContext's userName, not
+  // `profile` — aligning those is tracked separately under #150.)
+  useFocusEffect(
+    useCallback(() => {
+      if (isLoggedIn) refreshProfile();
+    }, [isLoggedIn, refreshProfile]),
+  );
+
   // Handle sendToAddress from navigation params (e.g., from Friends tab zap)
   useEffect(() => {
     if (route.params?.sendToAddress) {
       setSendToAddress(route.params.sendToAddress);
       setSendToPicture(route.params.sendToPicture);
       setSendToPubkey(route.params.sendToPubkey);
+      setSendToName(route.params.sendToName);
       setSendOpen(true);
       navigation.setParams({
         sendToAddress: undefined,
         sendToPicture: undefined,
         sendToPubkey: undefined,
+        sendToName: undefined,
       });
     }
   }, [
     route.params?.sendToAddress,
     route.params?.sendToPicture,
     route.params?.sendToPubkey,
+    route.params?.sendToName,
     navigation,
   ]);
 
+  // Hold the latest wallets + context callbacks in refs so fetchTransactions
+  // and fetchData can read up-to-date values without taking `wallets` or the
+  // callbacks as dependencies. Without refs we'd either re-run the fetch
+  // callback on every wallet state change (triggering fetch loops via the
+  // effect below) or capture stale values (and mis-route NWC vs on-chain).
+  const walletsRef = useRef(wallets);
+  const refreshActiveBalanceRef = useRef(refreshActiveBalance);
+  const fetchTransactionsForWalletRef = useRef(fetchTransactionsForWallet);
+  useEffect(() => {
+    walletsRef.current = wallets;
+    refreshActiveBalanceRef.current = refreshActiveBalance;
+    fetchTransactionsForWalletRef.current = fetchTransactionsForWallet;
+  }, [wallets, refreshActiveBalance, fetchTransactionsForWallet]);
+
   const fetchTransactions = useCallback(async () => {
-    if (!activeWalletId) {
-      setTransactions([]);
-      return;
-    }
-    try {
-      const txs = await nwcService.listTransactions(activeWalletId);
-      setTransactions(txs);
-    } catch (error) {
-      console.warn('Failed to fetch transactions:', error);
-    }
+    if (!activeWalletId) return;
+    await fetchTransactionsForWalletRef.current(activeWalletId);
   }, [activeWalletId]);
 
   const fetchData = useCallback(async () => {
-    await Promise.all([refreshActiveBalance(), fetchTransactions()]);
-  }, [refreshActiveBalance, fetchTransactions]);
-
-  useEffect(() => {
-    if (activeWallet?.isConnected) {
-      fetchData();
+    // For on-chain wallets, fetchTransactions already does syncAndRefresh
+    // which updates both balance and transactions in a single sync.
+    // Only call refreshActiveBalance separately for NWC wallets.
+    const wallet = walletsRef.current.find((w) => w.id === activeWalletId);
+    if (wallet?.walletType === 'onchain') {
+      await fetchTransactions();
     } else {
-      setTransactions([]);
+      await Promise.all([refreshActiveBalanceRef.current(), fetchTransactions()]);
     }
-  }, [activeWalletId, activeWallet?.isConnected, fetchData]);
+  }, [activeWalletId, fetchTransactions]);
+
+  const isWalletAvailable =
+    activeWallet?.walletType === 'onchain' ? true : (activeWallet?.isConnected ?? false);
+
+  // Transactions from the active wallet (owned by WalletContext)
+  const transactions = activeWallet?.transactions ?? [];
+  const fetchedWallets = useRef<Set<string>>(new Set());
+
+  // Show spinner only while first fetch is in progress (not for zero-tx wallets)
+  const loadingTransactions =
+    isWalletAvailable &&
+    transactions.length === 0 &&
+    activeWalletId != null &&
+    !fetchedWallets.current.has(activeWalletId);
+
+  // When swiping to a disconnected NWC wallet, trigger reconnection
+  useEffect(() => {
+    if (activeWallet?.walletType === 'nwc' && !activeWallet?.isConnected && activeWalletId) {
+      refreshActiveBalance();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWalletId]);
+
+  // Fetch fresh data once per wallet (not on every swipe back)
+  useEffect(() => {
+    setRefreshing(false);
+    if (isWalletAvailable && activeWalletId && !fetchedWallets.current.has(activeWalletId)) {
+      fetchedWallets.current.add(activeWalletId);
+      fetchData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWalletId, isWalletAvailable]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
+    if (activeWalletId) fetchedWallets.current.delete(activeWalletId);
     await fetchData();
     setRefreshing(false);
   };
 
   const handleWalletChange = useCallback(
-    (walletId: string) => {
+    (walletId: string | null) => {
       if (walletId !== activeWalletId) {
         setActiveWallet(walletId);
       }
@@ -232,26 +292,42 @@ const HomeScreen: React.FC = () => {
     }
   };
 
-  const hasActiveConnection = activeWallet?.isConnected ?? false;
+  const isOnchainWallet = activeWallet?.walletType === 'onchain';
+  const isWatchOnly = isOnchainWallet && activeWallet?.onchainImportMethod !== 'mnemonic';
+  const hasActiveConnection = isOnchainWallet ? true : (activeWallet?.isConnected ?? false);
+  const canSend = hasActiveConnection && !isWatchOnly;
+  // Transfer requires at least 1 wallet that can send + 1 other wallet
+  const hasSendableWallet = wallets.some(
+    (w) =>
+      (w.walletType === 'nwc' && w.isConnected) ||
+      (w.walletType === 'onchain' && w.onchainImportMethod === 'mnemonic'),
+  );
+  const canTransfer = hasSendableWallet && wallets.length >= 2;
 
   return (
     <View style={styles.container}>
       {/* Header area with brand background + faded pig behind carousel */}
-      <View style={[styles.headerBackground, { paddingTop: insets.top + 12 }]}>
+      <View style={styles.headerBackground}>
         <Image
           source={require('../../assets/images/lightning-piggy-intro.png')}
           style={styles.bgPigImage}
           resizeMode="contain"
         />
 
-        <View style={styles.headerRow}>
-          <Text style={styles.hello}>Hello{userName ? `, ${userName}` : ''}!</Text>
-          <ProfileIcon
-            uri={profile?.picture}
-            size={36}
-            onPress={() => navigation.navigate('Account')}
-          />
-        </View>
+        <TabHeader
+          title={`Hello${userName ? `, ${userName}` : ''}!`}
+          // Keep Home's greeting at its pre-#139 lighter weight + smaller
+          // size; section titles (Messages/Friends/Learn) stay bolder to
+          // read as section labels.
+          titleStyle={{ fontSize: 22, fontWeight: '400' }}
+          icon={
+            <Image
+              source={require('../../assets/images/Home.png')}
+              style={styles.badgeIcon}
+              resizeMode="contain"
+            />
+          }
+        />
 
         <WalletCarousel
           wallets={wallets}
@@ -263,23 +339,43 @@ const HomeScreen: React.FC = () => {
           onSettingsPress={handleSettingsPress}
         />
 
-        {/* Send/Receive/NFC buttons */}
+        {/* Send/Receive/Transfer/NFC buttons */}
         <View style={styles.buttonRow}>
           <TouchableOpacity
             style={[styles.actionButton, !hasActiveConnection && styles.actionButtonDisabled]}
             onPress={() => setReceiveOpen(true)}
             disabled={!hasActiveConnection}
+            accessibilityLabel="Receive"
+            testID="btn-receive"
           >
-            <Text style={styles.actionIcon}>&#8595;</Text>
+            <View style={styles.actionCircle}>
+              <ArrowDownIcon size={24} strokeWidth={3} />
+            </View>
             <Text style={styles.actionText}>Receive</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.actionButton, !hasActiveConnection && styles.actionButtonDisabled]}
-            onPress={() => setSendOpen(true)}
-            disabled={!hasActiveConnection}
+            style={[styles.actionButton, !canTransfer && styles.actionButtonDisabled]}
+            onPress={() => setTransferOpen(true)}
+            disabled={!canTransfer}
+            accessibilityLabel="Transfer"
+            testID="btn-transfer"
           >
+            <View style={styles.actionCircle}>
+              <ArrowLeftRightIcon size={24} strokeWidth={3} />
+            </View>
+            <Text style={styles.actionText}>Transfer</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionButton, !canSend && styles.actionButtonDisabled]}
+            onPress={() => setSendOpen(true)}
+            disabled={!canSend}
+            accessibilityLabel="Send"
+            testID="btn-send"
+          >
+            <View style={styles.actionCircle}>
+              <ArrowUpIcon size={24} strokeWidth={3} />
+            </View>
             <Text style={styles.actionText}>Send</Text>
-            <Text style={styles.actionIcon}>&#8593;</Text>
           </TouchableOpacity>
           {nfcSupported && (
             <TouchableOpacity
@@ -305,12 +401,18 @@ const HomeScreen: React.FC = () => {
           style={styles.transactionsContainer}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         >
-          {hasWallets ? (
-            <TransactionList transactions={transactions} />
-          ) : (
+          {!hasWallets || activeWalletId === null ? (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>Add a wallet to get started</Text>
+              <TouchableOpacity onPress={() => setWizardOpen(true)}>
+                <Text style={styles.addWalletText}>+ Add a Wallet</Text>
+              </TouchableOpacity>
             </View>
+          ) : loadingTransactions && transactions.length === 0 ? (
+            <View style={styles.emptyState}>
+              <ActivityIndicator size="small" color="#EC008C" />
+            </View>
+          ) : (
+            <TransactionList transactions={transactions} />
           )}
         </ScrollView>
       </View>
@@ -323,11 +425,14 @@ const HomeScreen: React.FC = () => {
           setSendToAddress(undefined);
           setSendToPicture(undefined);
           setSendToPubkey(undefined);
+          setSendToName(undefined);
         }}
         initialAddress={sendToAddress}
         initialPicture={sendToPicture}
         recipientPubkey={sendToPubkey}
+        recipientName={sendToName}
       />
+      <TransferSheet visible={transferOpen} onClose={() => setTransferOpen(false)} />
       <AddWalletWizard visible={wizardOpen} onClose={() => setWizardOpen(false)} />
       <WalletSettingsSheet walletId={settingsWalletId} onClose={() => setSettingsWalletId(null)} />
       <ContactProfileSheet

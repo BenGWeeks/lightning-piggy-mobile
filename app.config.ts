@@ -11,15 +11,15 @@ const getAppName = () => {
 };
 
 const getIosBundleId = () => {
-  if (IS_DEV) return 'com.bengweeks.lightningpiggy.dev';
-  if (IS_PREVIEW) return 'com.bengweeks.lightningpiggy.preview';
-  return 'com.bengweeks.lightningpiggy';
+  if (IS_DEV) return 'com.lightningpiggy.app.dev';
+  if (IS_PREVIEW) return 'com.lightningpiggy.app.preview';
+  return 'com.lightningpiggy.app';
 };
 
 const getAndroidPackage = () => {
-  if (IS_DEV) return 'com.anonymous.lightningpiggyapp.dev';
-  if (IS_PREVIEW) return 'com.anonymous.lightningpiggyapp.preview';
-  return 'com.anonymous.lightningpiggyapp';
+  if (IS_DEV) return 'com.lightningpiggy.app.dev';
+  if (IS_PREVIEW) return 'com.lightningpiggy.app.preview';
+  return 'com.lightningpiggy.app';
 };
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
@@ -40,7 +40,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     supportsTablet: true,
     bundleIdentifier: getIosBundleId(),
     infoPlist: {
-      ITSAppUsesNonExemptEncryption: true,
+      // The app uses only standard cryptography (secp256k1, SHA-256, BIP-32/39/84,
+      // and AES/TLS via system libraries). All of that falls under Apple's
+      // export-compliance exemptions for cryptocurrency wallets, so we don't need
+      // to file separate export-compliance documentation. See
+      // https://developer.apple.com/documentation/security/complying_with_encryption_export_regulations
+      ITSAppUsesNonExemptEncryption: false,
     },
   },
   plugins: [
@@ -52,13 +57,23 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       'expo-image-picker',
       {
         photosPermission:
-          'Allow Lightning Piggy to access your photos to set your profile picture.',
+          'Allow Lightning Piggy to access your photos to set your profile picture and send images in conversations.',
+        cameraPermission:
+          'Allow Lightning Piggy to use your camera to take and send photos in conversations.',
       },
     ],
     [
       'expo-contacts',
       {
         contactsPermission: 'Allow Lightning Piggy to access your contacts to find friends.',
+      },
+    ],
+    [
+      'expo-location',
+      {
+        locationWhenInUsePermission:
+          'Allow Lightning Piggy to access your location so you can share it in a private message.',
+        isAndroidBackgroundLocationEnabled: false,
       },
     ],
   ],
@@ -79,6 +94,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     eas: {
       projectId: 'b01d6b21-2f80-40af-b58c-c40e4302fa65',
     },
+    // GIPHY API key for the conversation GIF picker. Build-time only —
+    // picker silently omits itself from the Attach menu when the key is
+    // absent. See `src/services/giphyService.ts` and README for setup.
+    giphyApiKey: process.env.EXPO_PUBLIC_GIPHY_API_KEY ?? null,
   },
   owner: 'bengweeks',
 });

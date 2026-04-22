@@ -4,8 +4,11 @@
 |===
 | Problem | Solution
 
+| Boltz reverse swap claim broadcast fails with "mandatory-script-verify-flag-failed (Witness program hash mismatch)"
+| The Taproot internal key for Boltz v2 swaps is a MuSig2 aggregate of Boltz's key and the user's key — in a specific order. Per Boltz docs, **"Boltz's public key always coming first"**: for reverse swaps that means `keyAggregate([refundPubKey, claimPubKey])` (Boltz's refund key first, user's claim key second; **not sorted, not the other way round, not just refundPubKey alone**). Keys must be 33-byte compressed, aggregated via `@scure/btc-signer`'s `keyAggregate` + `keyAggExport`, then used as the x-only internal key when computing the Taproot tweak. See `boltzService.ts` `claimSwap()` and the Boltz docs at https://api.docs.boltz.exchange/claiming-swaps.html. Confirmed against the chain by computing `p2tr(internalKey, [claimLeaf, refundLeaf], undefined, true)` from `@scure/btc-signer` and matching its `.script` to the on-chain lockup scriptPubKey.
+
 | Bottom sheet doesn't slide up when keyboard opens on Android
-| Use `BottomSheetTextInput` from `@gorhom/bottom-sheet` instead of React Native's `TextInput` inside bottom sheets. The library needs its own input component to detect keyboard events. Also set `keyboardBehavior="interactive"` and `android_keyboardInputMode="adjustResize"` on the `BottomSheetModal`, and ensure `android:windowSoftInputMode="adjustResize"` in AndroidManifest (via `plugins/withAdjustNothing.js`).
+| All of these are required: (1) Use `BottomSheetTextInput` from `@gorhom/bottom-sheet` instead of React Native's `TextInput`. (2) Use `BottomSheetScrollView` (not `BottomSheetView`) as the content wrapper. (3) Set `keyboardBehavior="interactive"`, `keyboardBlurBehavior="restore"`, and `android_keyboardInputMode="adjustResize"` on the `BottomSheetModal`. (4) Ensure `android:windowSoftInputMode="adjustResize"` in AndroidManifest (via `plugins/withAdjustResize.js`). (5) Add a `Keyboard.addListener` to track keyboard height and set dynamic `paddingBottom` on the `contentContainerStyle` (e.g. `paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40`). (6) Do NOT wrap content in `TouchableWithoutFeedback` with `Keyboard.dismiss` — this interferes with the sheet's keyboard handling. See `NostrLoginSheet.tsx` as the reference implementation.
 
 | Maestro can't find elements behind a modal Alert dialog
 | Dismiss the alert first (e.g. tap "KEEP CURRENT" or "Cancel") before asserting visibility of elements underneath.
@@ -25,9 +28,232 @@
 | Metro not connecting to device over USB
 | Run `adb reverse tcp:8081 tcp:8081` for USB port forwarding before launching the app.
 
+| React Native DevTools fails on Linux with `chrome-sandbox ... mode 4755`
+| Pressing `j` in Metro launches React Native DevTools (a bundled Chromium). On Ubuntu 24.04+, unprivileged user namespaces are disabled, so the SUID sandbox helper must be root-owned with mode 4755. The binary ships inside `~/.cache/dotslash/...` with the wrong permissions. +
+*Fix:* copy the **full `chrome-sandbox` path printed in the error** (do not construct it by hand) and run: +
+1. `sudo chown root:root <full_path_to_chrome_sandbox>` +
+2. `sudo chmod 4755 <full_path_to_chrome_sandbox>` +
+Example path format: `~/.cache/dotslash/cb/<hash>/React Native DevTools-linux-x64/chrome-sandbox`. +
+*Caveats:* this marks a cached binary as setuid-root, which is security-sensitive — apply only to the exact path from the error, never to other files. The hash segment changes when DevTools updates or the dotslash cache is cleared, so the fix must be re-applied against the new path. This does not cause a blank screen on the device — DevTools is a host-side debugger only.
+
 | App shows black screen or "Unable to load script" after force-stop
 | The Metro bundler connection can break when force-stopping the app. Fix: (1) Kill Metro with `pkill -f "expo start"`, (2) restart with `npm start` (or `npx expo start --clear` to also clear cache), (3) run `adb reverse tcp:8081 tcp:8081` again, (4) relaunch the app. If still black, do a full rebuild with `npx expo run:android`.
 
+| Red-screen "Failed to compile / None of these files exist" pointing at a deleted module after a pull or merge
+| Metro's transform cache keys on **file path**, not file hash. When you `git pull` (or merge) a branch that deletes or renames a module, the old transformer entries still resolve — so the next rebuild happily re-emits a phantom `require('./icons/ZapIcon')` even though the source has already been migrated (e.g. to `lucide-react-native`). The source view in the red-screen is the NEW file; the resolver is chasing the OLD graph. Restart Metro with `--clear` to wipe `$TMPDIR/metro-cache/*`: +
+[source,bash]
+----
+pkill -9 -f "expo start"
+npx expo start --dev-client --clear
+----
+Always follow merges that add/remove icon or asset files with a `--clear` restart. Seen on 2026-04-21 after merging PR #96 (lucide icon migration deleted `icons/{Zap,Copy,Share}Icon.tsx`).
+
 | Claude Code warns "image exceeds the dimension limit for many-image requests (2000px)"
 | Screenshots captured with `adb exec-out screencap -p` can exceed 2000px on high-DPI devices. Before sending to Claude, resize: `adb exec-out screencap -p > /tmp/screen.png && convert /tmp/screen.png -resize 1200x1200\> /tmp/screen_small.png`. Or run `/compact` to clear old images from context, or start a new conversation.
+
+| Characters dropped / visually deleted while typing into a `TextInput` inside a `@gorhom/bottom-sheet` modal
+| Plain React Native `TextInput` loses keystrokes when placed inside `BottomSheetView` / `BottomSheetModal` — the sheet container is animated by `react-native-reanimated` and can re-render while the IME is mid-composition, dropping characters. The symptom looks like the input "friendly deletes" letters you just typed. +
+*Fix:* use `BottomSheetTextInput` from `@gorhom/bottom-sheet` (not `TextInput` from `react-native`) for every input inside a bottom-sheet subtree. It hooks into the sheet's keyboard + animation context and keeps keystrokes intact. All sheets in this repo (FeedbackSheet, TransferSheet, AddWalletWizard, EditProfileSheet, AddFriendSheet, NostrLoginSheet, and — as of #96 — SendSheet) follow this pattern. If you add a new sheet, grep `BottomSheetTextInput` for the canonical import site.
+
+| Maestro `inputText` doesn't update React state in `BottomSheetTextInput`
+| `BottomSheetTextInput` from `@gorhom/bottom-sheet` doesn't always trigger `onChangeText` when Maestro uses `inputText`. The text appears visually in the input but the React state stays empty, causing validation to fail. Under React Native's New Architecture (Fabric, default in SDK 55) the `testID` lands on the wrapper View rather than the native `EditText`, so the synthetic `adb shell input text` keystrokes don't advance the JS event path. **Do not** replace with regular `TextInput` — the bottom sheet needs its own input to adjust when the keyboard opens. +
+*Canonical workaround — clipboard paste:* expose an in-app "Paste" button next to the input that calls `Clipboard.getStringAsync()` (expo-clipboard) and sets state directly. From the Maestro host, seed the clipboard first — host→emulator clipboard sync forwards it to the device (confirmed working on Android 16 emulator with Android Studio's default clipboard-sharing setting):
+
+[source,bash]
+----
+source .env && echo -n "$MAESTRO_NWC1" | wl-copy   # Wayland
+# or
+echo -n "$MAESTRO_NWC1" | xclip -selection clipboard  # X11
+maestro test tests/e2e/test-add-wallet-via-paste.yaml
+----
+
+The Maestro flow then taps the Paste button (`id: 'wizard-nwc-paste'`) instead of using `inputText`, and state updates cleanly through the normal React setter path. See `AddWalletWizard.tsx` for the canonical implementation and `tests/e2e/test-add-wallet-via-paste.yaml` for the flow. +
+
+*Why `pasteText` (Maestro's built-in) doesn't help:* Maestro's `pasteText` / `copyTextFrom` use an **internal shim clipboard** (not Android's `ClipboardManager`) and still synthesize key events under the hood — so they hit the exact same wrapper-targeting failure. Seeding the real device clipboard and tapping an in-app Paste button bypasses both the shim and the keystroke path. Confirmed via the Maestro docs (https://docs.maestro.dev/api-reference/commands/pastetext) and feature-request https://github.com/mobile-dev-inc/Maestro/issues/2029. Deep-link seeding (`app://.../path?value=...`) is the only other approach that bypasses text entry entirely — viable if a Paste button isn't desired in the UI.
+
+| Maestro carousel swipes trigger notification shade or leave the app
+| Horizontal swipes at the top of the screen (y < 25%) can pull down the notification shade or swipe away the app. Use `y: 30%` or higher for carousel swipes. The wallet carousel sits at roughly 15-25% from the top, so swipe at `start: 85%, 30%` / `end: 15%, 30%` to target it safely.
+
+| `tiny-secp256k1` fails to resolve in React Native (WASM not supported)
+| Hermes doesn't support WebAssembly. Use `@bitcoinerlab/secp256k1` (pure JS) instead. This is the same approach used by BlueWallet. See `metro.config.js` for the custom resolver needed for `@noble/curves` ESM exports.
+
+| Metro can't resolve `@noble/curves/secp256k1` or `@noble/hashes/sha2`
+| These packages use ESM `exports` maps with `.js` extensions that Metro doesn't handle by default. Add a custom resolver in `metro.config.js` that appends `.js` to `@noble/*` subpath imports. Also add `'cjs'` to `resolver.sourceExts` for `bitcoinjs-lib`'s CommonJS entry point.
+
+| `Buffer.equals is not a function` in React Native
+| The `buffer` npm polyfill doesn't implement all Node.js Buffer methods. Use `Uint8Array` operations or hex string comparison instead of `Buffer.equals()`, `Buffer.copy()`, etc.
+
+| `Invalid network version` when importing zpub or ypub
+| `bip32.fromBase58()` only recognises `xpub` version bytes by default. Convert zpub/ypub to xpub by swapping the 4-byte version prefix (see `toXpub()` in `onchainService.ts`). The key data is identical across all three formats.
+
+| Maestro `clearState` wipes all app data (wallets, Nostr login, settings)
+| `clearState` deletes AsyncStorage and SecureStore. Only use it when you want a truly fresh install. For tests that need existing wallets, use `launchApp` without `clearState`.
+
+| NWC "failed to publish: All promises were rejected"
+| The LNbits Nostrclient relay proxy does not send NIP-20 OK responses after receiving EVENT messages (see https://github.com/lnbits/nostrclient/issues/52[lnbits/nostrclient#52]). The `@getalby/sdk` uses `nostr-tools` `SimplePool.publish()` which waits for an OK response from the relay — when none comes, it times out (4.4s) and rejects with `AggregateError`. +
+*Fix:* `nwcService.ts` monkey-patches the relay pool's `publish` method to resolve immediately (fire-and-forget) since the NWC response comes back via the subscription, not the OK acknowledgement. This patch is applied during `connect()`.
+
+| NWC "reply timeout" after publish succeeds
+| The NWC request event was published to the relay but the wallet's response didn't arrive within the SDK's reply timeout (~10s). This can happen when the LNbits NWC extension is slow to process requests, or the relay is slow to forward the response event. +
+*Workaround:* The `withRetry` helper retries with exponential backoff (2s, 4s, 8s). If persistent, check the LNbits NWC extension is running and the Nostrclient relay has active upstream relay connections (green status indicators in the Nostrclient admin).
+
+| NWC relay intermittently drops WebSocket connections
+| The `@getalby/sdk` opens a WebSocket to the NWC relay during `enable()`. If the connection drops (idle timeout, network change), all subsequent requests fail with "failed to publish". +
+*Fix:* `nwcService.ts` detects publish failures and automatically reconnects by creating a fresh `NostrWebLNProvider` with the stored NWC URL. The reconnect logic is in `getBalance()`, `payInvoice()`, and `listTransactions()`.
+
+| App shows "Unable to load script" on physical device
+| The device can't reach Metro bundler. Run `adb reverse tcp:8081 tcp:8081` to forward the port from the device to the host machine. Then tap RELOAD (R, R) on the device.
+
+| Black screen after reload / app launch (eventually loads)
+| The NWC wallet connection retries block the loading spinner. Each wallet attempts `getBalance()` with 3 retries and exponential backoff (2s, 4s, 8s) = ~14s per wallet. With 2 NWC wallets, startup can take ~30 seconds before the UI renders. The wallet is marked "Connected" after `enable()` succeeds (not after `getBalance()`), but the loading state (`isLoading`) waits for all wallets to finish connecting. +
+*Workaround:* Force restart the app and wait ~30-40 seconds. If persistent, check the LNbits NWC relay is running.
+
+| LNbits "Payment in flight" log spam blocks NWC processing
+| A Lightning payment stuck in `IN_FLIGHT` status causes LNbits to poll LND at ~16 checks/second with no backoff, producing 50,000+ log lines/hour and starving the asyncio event loop. NWC, Nostrclient, and all WebSocket-based extensions stop responding while the HTTP UI continues working. +
+*Fix:* Apply the exponential backoff patch: +
+1. `cat scripts/fix_lnbits_inflight.py \| ssh black-panther "cat > /tmp/fix.py"` +
+2. `ssh black-panther "docker cp /tmp/fix.py lnbits-family:/tmp/ && docker exec lnbits-family python3 /tmp/fix.py"` +
+3. `ssh black-panther "docker restart lnbits-family"` +
+The patch modifies `get_payment_status()` in `lnbits/wallets/lndrest.py` to `continue` on IN_FLIGHT status instead of returning immediately, keeping the LND TrackPaymentV2 stream open until the payment resolves. Also adds a 300s stream timeout. Must be re-applied after LNbits upgrades. See https://github.com/lnbits/lnbits/issues/3917[lnbits/lnbits#3917], PR https://github.com/lnbits/lnbits/pull/3918[lnbits/lnbits#3918].
+
+| "Cannot read property 'reload' of undefined" on BDK send
+| This error is NOT from BDK — it's from React Native's `DevSettings` module. The actual error (Electrum connection failure) is swallowed, and RN's error handler tries to call `NativeDevSettings.reload()` which is null in Expo dev-client builds. +
+*Fix:* `onchainService.ts` now forces a fresh Electrum connection (`blockchain = null`) before every `sendTransaction()` call. This avoids stale cached connections that cause the underlying Electrum error. The "reload" symptom disappears because the Electrum call succeeds. +
+*Diagnosis:* Add `[BDK]` console.log statements before/after each step (sync, broadcast) to identify which step fails. The "reload" error masks the real cause.
+
+| Boltz reverse swaps (LN → on-chain) occasionally fail with `pay_invoice` timeout
+| Boltz Exchange dynamically selects which LND node issues reverse swap invoices based on amount. Observed on 2026-04-12:
+
+* **≤ 250,000 sats**: invoice issued by "Boltz Mini" (pubkey `03e9c515b1e48c0e3bff9af8af1fce15d9b3f1ebb51e0311b1f80e820ba4cabb18`, 17 public channels, 4.18 BTC capacity)
+* **≥ 250,001 sats**: invoice issued by the main Boltz LND node (pubkey `026165850492521f4ac8abd9bd8088123446d126f648ca35e60f88177dc149ceb2`)
+
+Boltz Mini IS publicly routable, but initial swap attempts failed because LND's route pathfinding defaulted to `nicehash-ln1 → kappa → Boltz Mini` which had a stuck HTLC problem at kappa. After opening a direct channel to the main Boltz node, LND's graph eventually learned the `Boltz → Boltz Mini` path and routing works. +
+
+*Mitigations:*
+
+* Open a direct channel to the main Boltz node — gives LND a reliable path to Boltz Mini (Boltz → Boltz Mini)
+* Penalise the problematic intermediate node in mission control: `lncli importmc --failure --force <problem_node> <dest> $(date +%s) <amt_msat>`
+* Wait for gossip to propagate new channel info (can take minutes)
+* For persistent failures at a specific amount, retry — Boltz node selection may rotate
+
+*Boltz response:* Node selection is dynamic and not exposed in the API. Any assigned Boltz node should be routable. Failures indicate a local routing/topology issue, not a Boltz-side routing hint problem. +
+
+*Status:* Working after direct channel to main Boltz established.
+
+| Electrum connection drops or broadcast fails silently
+| On-chain sync and broadcast use BDK (`bdk-rn`) now — the old `electrum-client` / `react-native-tcp-socket` stack is gone. Stale Electrum sockets can still manifest as confusing errors like "Cannot read property 'reload' of undefined" (a React Native DevSettings crash that masks the underlying BDK error). +
+*Fix:* `onchainService.broadcastRawTx` and `sendTransaction` force `blockchain = null` before each operation to open a fresh connection; `disconnectElectrum()` is called when the user changes Electrum server in Account settings. If errors persist, force-restart the app.
+
+| NIP-20 OK fix lost after LNbits upgrade or container recreate
+| The Nostrclient extension bundled with the LNbits Docker image does not include our NIP-20 OK fix (PR https://github.com/lnbits/nostrclient/pull/68[lnbits/nostrclient#68]). Without it, NWC clients using `@getalby/sdk` timeout waiting for OK responses after publishing events. +
+*To re-apply the fix after upgrading LNbits:* +
+1. Copy the fix script into the container: `cat apply_nip20_fix.py \| ssh black-panther "cat > /tmp/apply_nip20_fix.py"` +
+2. Run inside container: `ssh black-panther "docker cp /tmp/apply_nip20_fix.py lnbits-family:/tmp/ && docker exec lnbits-family python3 /tmp/apply_nip20_fix.py"` +
+3. Restart: `ssh black-panther "docker restart lnbits-family"` +
+4. Verify: `ssh black-panther "docker exec lnbits-family grep 'NIP-01: OK' /app/lnbits/extensions/nostrclient/router.py"` +
+The fix script (`apply_nip20_fix.py`) patches `router.py` to send `["OK", event_id, true, ""]` after publishing EVENT messages, and `["OK", event_id, false, "error: no relay connections"]` when no relays are connected.
+
+| `Security returned a non-successful error code: 36` during `eas build` or `eas submit` over SSH
+| The Mac's login keychain is locked because there's no active GUI session — `fastlane` can't save the Apple ID password so it treats auth as failed, even when the password is correct. +
+*Fix:* unlock the keychain once per session before running EAS commands: +
+`security unlock-keychain ~/Library/Keychains/login.keychain-db` +
+(prompts for the Mac login password, not the Apple ID). Stays unlocked per the machine's keychain auto-lock settings — typically long enough to clear Apple ID + 2FA + device selection.
+
+| `eas submit` fails with *"Invalid Export Compliance Code. The export compliance key value [] in the app's Info.plist doesn't match..."*
+| `ios.infoPlist.ITSAppUsesNonExemptEncryption: true` in `app.config.ts` tells App Store Connect to expect filed export-compliance documentation (a CCATS code). With no docs filed, uploads bounce. +
+*Fix:* set `ITSAppUsesNonExemptEncryption: false`. The app only uses standard cryptography (secp256k1, SHA-256, BIP-32/39/84, AES/TLS via system libraries) — all under Apple's standard cryptocurrency-wallet exemptions, so no docs are required. Rebuild and re-submit.
+
+| EAS iOS build stuck in `NEW` status for hours (`queuePosition: null`)
+| Free-tier iOS build queue gets heavily backlogged during peak (the public dashboard at https://expo.dev/eas/build-status occasionally shows 2000+ builds queued, 5–6 h low-priority wait times). The build hasn't failed — EAS just hasn't assigned it a queue slot yet. +
+*Options:* (1) wait it out; (2) cancel with `npx -p eas-cli eas build:cancel <id>` and build locally (`--local` flag) instead; (3) upgrade to a paid plan for priority queue. Also check https://status.expo.dev for active incidents.
+
+| Local Android build fails with *"Failed to run Gradle Worker Daemon... build machine is extremely loaded"*
+| The Gradle JVM worker was OOM-killed. Gradle + Android tooling needs ~4–6 GB RAM; if the machine is close to swap exhaustion the worker's 120 s daemon-connect timeout fires and Gradle errors out. +
+*Fix:* check `free -h` and `ps axo pid,rss,comm --sort=-rss | head`. Close heavy processes (VMs like WinApps/QEMU can easily eat 8 GB, browsers another couple), then stop Gradle cleanly with `./gradlew --stop`. If stale build processes still linger, target them narrowly rather than every Java process on the box: `pkill -f 'GradleDaemon|org\.gradle\.|com\.android\.'`. Retry.
+
+| `eas build --local --auto-submit` fails with *"Auto-submits are not yet supported when building locally"*
+| `--auto-submit` only works on cloud builds. Split into two commands: `eas build --platform ios --profile production --local --output /tmp/app.ipa` then `eas submit --platform ios --path /tmp/app.ipa`.
+
+| `eas build` iOS errors with *"Failed to find Bundle ID item with identifier 'com.lightningpiggy.app.preview'"*
+| EAS auto-registers only the *production* bundle ID on first iOS build. The preview / dev variants need manual registration the first time they're built. +
+*Fix:* at https://developer.apple.com/account/resources/identifiers → *+* → App IDs → App → Explicit Bundle ID → `com.lightningpiggy.app.preview` (or `.dev`). Then re-run the build.
+
+| iOS build installs but the app won't launch — *"Developer Mode required"*
+| iOS 16+ requires Developer Mode to be explicitly enabled before sideloaded / ad-hoc / dev-signed apps will run. +
+*Fix on the iPhone:* tap the just-installed app icon once so iOS recognises a dev-signed app is present → *Settings → Privacy & Security → Developer Mode* → toggle on → Restart → after reboot, *"Turn On Developer Mode?"* dialog → passcode. The row doesn't appear in Settings until iOS detects a dev-signed app.
+
+| TestFlight tester dropped with *"You must be 13 years or older to use TestFlight Beta Testing"*
+| Apple's TestFlight Terms of Service require testers be 13+ (16+ in parts of the EU). The rule is TestFlight-wide, not just internal vs external. +
+*Workarounds:* (1) use **ad-hoc distribution** instead — no age check, see the DEPLOYMENT.adoc *iOS Distribution — Ad-hoc* section; (2) wait for public App Store release (no age restriction); (3) test on Android (no TestFlight equivalent, APK installs directly).
+
+| On-chain transactions slow to load on first launch
+| Balance and tx history come from BDK's `wallet.sync(chain)`. BDK is configured with an in-memory database (`DatabaseConfig().memory()`), so sync state does not persist across app restarts — the first sync after launch rescans from scratch and can take 10–30 seconds on busy wallets. +
+*Mitigations:* WalletContext caches transactions per wallet ID and writes them to AsyncStorage, so the UI renders cached data instantly on wallet swipe while the background sync runs. *Future:* switch BDK to a persistent database config so only the delta is fetched across launches.
+
+| Android emulator "System UI isn't responding" / app stuck on splash
+| The AVD is thrashing on RAM. Symptoms in `adb logcat`: `kswapd0` burning 40%+ kernel CPU, `MemFree` under 100 MB, `system_server` over 100% CPU, Binder IPC failing with `No space left on device` (which is a RAM-pressure symptom, not disk). Default AVD RAM is 2 GB, which is insufficient for API 36 + Google Play + a React Native dev build. +
+*Fix:* bump the AVD RAM to 4 GB or more *and* the Dalvik heap to 1024 MB. Either via Android Studio → Device Manager → edit AVD → Advanced Settings → RAM + Heap, or by editing `~/.android/avd/<AVD_NAME>.avd/config.ini` to set `hw.ramSize=4096` and `vm.heapSize=1024`, then cold-boot the emulator with `-no-snapshot`. Validated: 2 GB / 512 MB heap crashes `system_server` / `PackageManagerService` during large APK installs; 4 GB / 1024 MB heap installs cleanly. +
+*Caveat:* a stray `sed -i` on `config.ini` can truncate the file to zero bytes on shutdown — prefer editing via Android Studio's UI, or back up `config.ini` before any scripted edit (`cp config.ini config.ini.bak`). If it does get wiped, `hardware-qemu.ini` in the same directory contains the last-used values and can be used to reconstruct it.
+
+| Emulator `adb install` hangs / `cmd: Can't find service: package`
+| Installing a 150 MB+ React Native dev APK OOMs `system_server` on an under-resourced AVD; `PackageManagerService` dies and every subsequent `adb install` / `pm list packages` / app launch fails until the guest OS reboots. +
+*Immediate recovery:* `adb reboot`, wait for `getprop sys.boot_completed` = 1, then `adb install -r android/app/build/outputs/apk/debug/app-debug.apk` — Expo's CLI install step is more fragile under memory pressure than raw `adb install`. +
+*Prevent:* bump AVD RAM + heap (see the "System UI isn't responding" entry above), and consider using a **Google APIs** (not Google Play) system image for dev — removes the Play Store + GMS daemons that consume ~300 MB RAM / 60% CPU.
+
+| React Native app crashes immediately with native SIGSEGV in `facebook::react::MountingCoordinator::pullTransaction`
+| The JS thread (`mqt_v_js`) segfaults in Fabric's mounting pipeline during the first render — the tombstone top frames are `MountingCoordinator::pullTransaction` → `FabricUIManagerBinding::schedulerDidFinishTransaction` → `ShadowTree::mount` → Hermes (`libhermesvm.so`) → `jsi::Function::call`. The process dies before any `console.log` appears. Confirmed via `adb pull /data/tombstones/tombstone_NN` followed by reading the backtrace. +
+*Root cause:* Expo SDK 55 `expo prebuild` defaults `newArchEnabled=true` in `android/gradle.properties`. The New Architecture (Fabric renderer + TurboModules) is not compatible with at least one component or native dep in this app — the shadow tree reaches an inconsistent state on first mount and the native commit null-derefs. +
+*Fix (outdated — see next entry for the current Expo SDK 55 story):* the old recipe was to add `expo-build-properties` plugin with `android.newArchEnabled: false`. That option was **removed** from `expo-build-properties` (per its CHANGELOG) and replaced with a top-level `newArchEnabled` key on the Expo config root. Setting either one on SDK 55 won't actually disable New Arch cleanly — see below. +
+*Future work:* to re-enable New Architecture, bisect which component triggers the mount crash (common suspects: old versions of `react-native-screens`, `@gorhom/bottom-sheet`, or `react-native-reanimated` not yet Fabric-ready). Disable-by-default is the safer stance until bisected.
+
+| Disabling `newArchEnabled` on Expo SDK 55 makes the app crash with `SoLoaderDSONotFoundError: couldn't find DSO to load: libreactnative.so`
+| The TROUBLESHOOTING entry above was written for an earlier SDK. On SDK 55, the toggle is a top-level `newArchEnabled` config key (the old `expo-build-properties.android.newArchEnabled` was removed per its CHANGELOG — see https://github.com/expo/expo/pull/41684). But disabling it exposes a template bug: `android/app/src/main/java/.../MainApplication.kt` unconditionally calls `DefaultNewArchitectureEntryPoint.releaseLevel = ...` and `loadReactNative(this)` — which requires `libreactnative.so` from the feature-flags native lib. With `newArchEnabled=false` that library isn't emitted, so the app crashes at `Application.onCreate()` before any JS runs. +
+*Workaround:* keep `newArchEnabled=true` and live with Fabric / Bridgeless for now. The Expo SDK 55 template doesn't ship the conditional around `DefaultNewArchitectureEntryPoint` that earlier templates had. Revisit when an upstream fix lands; until then, treat "can't disable New Arch" as a known limitation. +
+*Diagnosis tip:* a failed attempt produces this exact logcat trace: +
+  `FATAL EXCEPTION: main` → `SoLoaderDSONotFoundError: couldn't find DSO to load: libreactnative.so` → `ReactNativeFeatureFlagsCxxInterop.<clinit>` → `DefaultNewArchitectureEntryPoint.load` → `MainApplication.onCreate`.
+
+| `npx expo run:android --device emulator-5554` fails with `Could not find device with name`
+| `expo run:android --device <name>` expects the **AVD name** (e.g. `Medium_Phone_API_36.1`), not the adb serial (`emulator-5554`). Use `emulator -list-avds` to find the AVD name. Maestro, confusingly, accepts the adb serial via `--device emulator-5554` but not the AVD name. Rule of thumb: **expo CLI = AVD name; Maestro = adb serial**.
+
+| `expo run:android` installs the APK on the wrong device when multiple are attached
+| With a physical phone + emulator both connected, `expo run:android` with no `--device` flag picks the first — usually the physical phone. Output shows `Opening ... on Pixel_8` (your phone's device name). Fix: pass `--device Medium_Phone_API_36.1` (the emulator's AVD name). To check what's attached: `adb devices -l`. +
+*Related:* the resulting APK is also **built for that device's ABI** (arm64 for a Pixel, x86_64 for an emulator). If you built for a phone and then try to `adb install` that APK to the emulator, it'll install but crash at startup because the x86_64 libs aren't in it. Rebuild with the emulator target.
+
+| Metro port conflict with another Expo project on 8081
+| Running `npm start` for this project while another Expo project's Metro is already on port 8081 silently hijacks connections — the app loads the other project's bundle (or gets a red screen). +
+*Fix:* set `RCT_METRO_PORT=8082` to pick a different port, then `adb reverse tcp:8081 tcp:8082` (emulator's 8081 → host's 8082) so the APK's hardcoded 8081 request hits our Metro. Check active Metros with `ss -tlnp \| grep -E '8081\|8082'` — the CWD printed in `ps auxf` tells you which project each belongs to.
+
+| Red screen on app launch: `TurboModuleRegistry.getEnforcing('PlatformConstants') could not be found`
+| Stale Gradle / `android/app/build/` artifacts from toggling `newArchEnabled`. The native binary's TurboModule registry doesn't include `PlatformConstants` because a prior build was half-done. Symptom: red-screen before any user JS runs, showing `[runtime not ready]: Invariant Violation: TurboModuleRegistry.getEnforcing(...): 'PlatformConstants' could not be found`. +
+*Fix:* `rm -rf android/app/build android/build && APP_VARIANT=development npx expo run:android --device <AVD_NAME>`. A clean Gradle build re-links all TurboModule providers including core ones. A plain `--no-build-cache` doesn't always do it — the stale dir is the problem, not the cache.
+
+| `adb uninstall` wipes Nostr login + wallets + all app state
+| AsyncStorage (wallet URLs, theme prefs, cached contacts) and SecureStore (nsec) are both stored in the app's internal data dir, which Android deletes on `pm uninstall`. This happens whether you use `adb uninstall`, Android Settings → Uninstall, or anything that removes the package. +
+*Replace-install preserves data:* `adb install -r app-debug.apk` keeps the existing data dir and just swaps the APK. +
+*Fresh install wipes data:* `adb uninstall com.lightningpiggy.app.dev && adb install app-debug.apk` — the data is gone and you're back at the IntroScreen. +
+This also hits `expo run:android` flows if the APK signatures don't match between old and new (e.g. switching between dev-client builds and production builds with different signing keys) — Android refuses to replace-install across signing keys, so Expo falls back to uninstall + install, wiping data.
+
+| Location-share preview shows a blank rectangle (image never loads)
+| The `staticmap.openstreetmap.de` host (not an official OSM subdomain — it was a German community volunteer's stitcher) stopped resolving (NXDOMAIN) some time before 2026-04. There is no longer a no-API-key static-map stitching service on the `openstreetmap.org` namespace — the original `Static Maps API` was deprecated in 2012 per the https://wiki.openstreetmap.org/wiki/Static_map_images[OSM wiki]. Wikimedia Maps (`maps.wikimedia.org`) also returns 403 to third-party apps. +
+*Fix:* fetch a single slippy-map tile from the official OSMF tile server at `https://tile.openstreetmap.org/{z}/{x}/{y}.png`, computed from (lat,lon,zoom) via the standard slippy-map formula. One 256×256 PNG per unique location, disk-cached by `expo-image` — fits the https://operations.osmfoundation.org/policies/tiles/[OSMF tile usage policy]'s "acceptable use" bar. Two required policy items: (1) cache aggressively (disk cache in expo-image), (2) send a specific identifying `User-Agent` via `source.headers` — the generic RN / OkHttp UA is not acceptable. See `buildStaticMapUrl()` + `USER_AGENT` in `src/services/locationService.ts`. +
+*Trade-off:* single tile = no centered marker (the point can be anywhere inside the tile). The location card's `MapPin` icon and coord text carry the "where" information; the image is scene-setting. If you need a centered marker later, switch `buildStaticMapUrl` to a keyed provider (MapTiler / Geoapify) behind the same interface.
+
+| `expo-location` `getCurrentPositionAsync` throws `ERR_CURRENT_LOCATION_IS_UNAVAILABLE` on Android emulator even with location services on
+| On Android, `getCurrentPositionAsync` goes through `FusedLocationProviderClient`, which returns the *cached* fix and throws `ERR_CURRENT_LOCATION_IS_UNAVAILABLE` if the cache is empty — it does not block waiting for a GNSS fix. On emulators the cache is empty until something is actively listening. +
+Symptoms reproduce even after: granting `ACCESS_FINE_LOCATION` (`pm grant com.lightningpiggy.app.dev android.permission.ACCESS_FINE_LOCATION`), enabling location services (`settings get secure location_mode` returns `3`), pushing a one-shot fix (`adb emu geo fix <lon> <lat>`), and loading + playing a route in Android Studio's *Extended Controls → Location* panel. The "route playing" UI doesn't prime the fused cache reliably either. +
+*Diagnosis:* the native JS catch swallows the error. Add a temporary `console.error('[locationService] getCurrentPositionAsync threw:', e)` in the catch and grep logcat filtered to `--pid=$(adb shell pidof <package>)` for `ReactNativeJS`. If you see `ERR_CURRENT_LOCATION_IS_UNAVAILABLE`, it's this issue, not a permission / settings problem. +
+*Fix (in the app):* don't call `getCurrentPositionAsync` alone, and don't use `Accuracy.Balanced`. Use a fallback chain: (1) `getLastKnownPositionAsync({ maxAge: 60_000 })` — cheap cached read; (2) `getCurrentPositionAsync({ accuracy: Location.Accuracy.High })` — actively demands GPS; (3) `watchPositionAsync` wrapped in a `Promise` with a ~15 s timeout that resolves on the first callback and then `subscription.remove()`s. See `src/services/locationService.ts` `getCurrentLocation()` for the canonical shape. +
+*Why `Accuracy.High` matters:* on Android, `Accuracy.Balanced` maps to `PRIORITY_BALANCED_POWER_ACCURACY`, which prefers the *network* provider (wifi/cell). AVDs typically have only `gps` in `settings get secure location_providers_allowed`, so Balanced has nothing to satisfy the request and throws on empty cache. `High` = `PRIORITY_HIGH_ACCURACY` actively demands GPS and returns the active fix from a playing route in Extended Controls → Location. Confirmed 2026-04-21: after swapping Balanced → High, `getCurrentPositionAsync` hits in ~4.5 s with a route playing; prior attempts with Balanced threw `ERR_CURRENT_LOCATION_IS_UNAVAILABLE` regardless of the route. +
+*Emulator setup:* (a) `pm grant com.<package> android.permission.ACCESS_FINE_LOCATION`, (b) Extended Controls → Location → load a route → Play (continuous ticks, not a one-shot Set), (c) tap the feature in the app.
+
+| `@gorhom/bottom-sheet` v5 modal collapses to a thin strip when its `BottomSheetTextInput` is focused (keyboard opens)
+| Symptom: the sheet presents correctly at its snap point (e.g. 75%), but the moment the user taps a search input and the Android keyboard opens, the sheet animates down to ~15% — just enough to show the header + input — with the inner list/content cut off. `keyboardBehavior="interactive"` + `android:windowSoftInputMode="adjustResize"` + the canonical `Keyboard.addListener` padding pattern all correctly applied. Happens both when the sheet is presented alone and when it's stacked on another `BottomSheetModal`. +
+*Root cause:* **v5 defaults `enableDynamicSizing` to `true`** — the sheet's height tracks its content's intrinsic height rather than honouring `snapPoints`. When the keyboard opens, Android's `adjustResize` shrinks the window; the sheet's `BottomSheetFlatList` is a flex-child that collapses to ~0 in the shrunk window; dynamic sizing then re-measures and snaps the sheet down to "header-height". See https://github.com/gorhom/react-native-bottom-sheet/issues/1602[gorhom#1602]. v4 defaulted this to `false`, so sheets ported from v4 code inherit the bug silently after upgrading. +
+*Fix:* set `enableDynamicSizing={false}` explicitly on any `BottomSheetModal` that has fixed `snapPoints` (percent or absolute). Without dynamic sizing, the sheet locks to its snap, ignores content measurement, and the keyboard-open behaviour falls back to `keyboardBehavior` as intended. Confirmed on `FriendPickerSheet.tsx` 2026-04-21 — flipping `enableDynamicSizing={false}` fully resolved the collapse. +
+*Also check:* any `BottomSheet` subtree that wraps a scrollable list inside a `View` (rather than `BottomSheetScrollView`) is likely to have the same footgun waiting; add the explicit `enableDynamicSizing={false}` when the PR migrates to v5 or when copying v4 patterns forward.
+
+| Bottom-sheet inner buttons work when tapped manually but Maestro `tapOn id:...` reports COMPLETED without firing `onPress`
+| Symptom: Maestro's `commands.json` confirms the target element was found at correct bounds with `clickable=true, enabled=true`, but the handler never runs (no `console.log` in Metro or logcat) and the UI doesn't change. Manual human taps on the same button work every time. +
+*Root cause:* a `TouchableWithoutFeedback onPress={Keyboard.dismiss}` wrapper around the sheet content swallows the UiAutomator accessibility click before it reaches the nested testID-bearing `TouchableOpacity`/`Pressable`. Real finger taps propagate through differently because they use the native touch pipeline, but UiAutomator / Maestro dispatches via accessibility events which the outer wrapper eats. +
+*Fix:* remove the `TouchableWithoutFeedback + Keyboard.dismiss` wrapper per rule (6) of the earlier "Bottom sheet doesn't slide up when keyboard opens" entry. The keyboard can still be dismissed via the hardware back key, the keyboard's own Done key, or by tapping any of the buttons (which close the sheet anyway). Confirmed on `ReceiveSheet.tsx` in the #96 / #106 debugging session — pulling the wrapper restored normal Maestro interaction.
 |===
