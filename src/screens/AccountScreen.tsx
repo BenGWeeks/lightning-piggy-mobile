@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   View,
@@ -38,6 +38,7 @@ import QrSheet from '../components/QrSheet';
 import SendSheet from '../components/SendSheet';
 import FeedbackSheet from '../components/FeedbackSheet';
 import { createDmSender } from '../utils/nostrDm';
+import * as amberService from '../services/amberService';
 import { fetchProfile, DEFAULT_RELAYS } from '../services/nostrService';
 import type { NostrProfile } from '../types/nostr';
 import type { MainTabParamList } from '../navigation/types';
@@ -75,7 +76,8 @@ const AccountScreen: React.FC = () => {
     updateWalletSettings,
     reorderWallet,
   } = useWallet();
-  const { isLoggedIn, profile, logout, sendDirectMessage, signerType } = useNostr();
+  const { isLoggedIn, profile, logout, sendDirectMessage, signerType, amberNip44Permission } =
+    useNostr();
   const [nameInput, setNameInput] = useState(userName);
   const [lnAddressInput, setLnAddressInput] = useState(lightningAddress || '');
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
@@ -90,6 +92,7 @@ const AccountScreen: React.FC = () => {
   const [electrumSSL, setElectrumSSL] = useState(true);
   const [blossomServer, setBlossomServerInput] = useState(DEFAULT_BLOSSOM_SERVER);
   const [devMode, setDevMode] = useState(false);
+  const [amberNip17Enabled, setAmberNip17Enabled] = useState(false);
   const versionTapCount = useRef(0);
   const versionTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<ScrollView>(null);
@@ -131,7 +134,43 @@ const AccountScreen: React.FC = () => {
 
   useEffect(() => {
     AsyncStorage.getItem('dev_mode').then((v) => setDevMode(v === 'true'));
+    AsyncStorage.getItem('amber_nip17_enabled').then((v) => setAmberNip17Enabled(v === 'true'));
   }, []);
+
+  const toggleAmberNip17 = useCallback(() => {
+    setAmberNip17Enabled((prev) => {
+      const next = !prev;
+      AsyncStorage.setItem('amber_nip17_enabled', next ? 'true' : 'false').catch(() => {});
+      return next;
+    });
+  }, []);
+
+  /**
+   * Grant Amber blanket NIP-44 encrypt+decrypt permission via a one-shot
+   * probe. We encrypt a tiny payload to the user's own pubkey and
+   * immediately decrypt it — both round-trips use the non-silent API so
+   * Amber's approval dialog appears, and the user can check "Remember my
+   * choice" to bank the permission for subsequent silent refreshes.
+   */
+  const grantAmberNip44Permission = useCallback(async () => {
+    if (!profile?.pubkey) throw new Error('No profile pubkey — log in first.');
+    const probePlaintext = 'lightning-piggy-nip44-permission-probe';
+    const ciphertext = await amberService.requestNip44Encrypt(
+      probePlaintext,
+      profile.pubkey,
+      profile.pubkey,
+    );
+    const roundTrip = await amberService.requestNip44Decrypt(
+      ciphertext,
+      profile.pubkey,
+      profile.pubkey,
+    );
+    if (roundTrip !== probePlaintext) {
+      throw new Error('Amber round-trip mismatch — permission may not be set.');
+    }
+    // Next inbox refresh will hit the silent fast-path and flip
+    // amberNip44Permission to 'granted' on its own.
+  }, [profile?.pubkey]);
 
   const handleVersionTap = () => {
     versionTapCount.current += 1;
@@ -452,6 +491,61 @@ const AccountScreen: React.FC = () => {
           Hosts images you send in chats and set as your profile picture. Any Blossom
           (BUD-01/BUD-02) server works — e.g. blossom.primal.net or nostr.build.
         </Text>
+
+        {/* NIP-17 on Amber — only shown when signing via Amber */}
+        {signerType === 'amber' && (
+          <>
+            <Text style={[styles.sectionLabel, { marginTop: 24 }]}>
+              Encrypted Messages (NIP-17)
+            </Text>
+            <View style={styles.sslRow}>
+              <Text style={styles.sslLabel}>Enable NIP-17 on Amber</Text>
+              <TouchableOpacity
+                style={[styles.sslToggle, amberNip17Enabled && styles.sslToggleActive]}
+                onPress={toggleAmberNip17}
+                testID="amber-nip17-toggle"
+                accessibilityLabel="Enable NIP-17 messages on Amber"
+                accessibilityRole="switch"
+                accessibilityState={{ checked: amberNip17Enabled }}
+              >
+                <View
+                  style={[styles.sslToggleThumb, amberNip17Enabled && styles.sslToggleThumbActive]}
+                />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.fieldHint}>
+              NIP-17 gift-wrapped messages hide sender metadata from relays, but each one requires a
+              NIP-44 decrypt via Amber. When you first enable this, Amber will ask to approve — tap
+              &quot;Remember my choice&quot; so subsequent messages load silently. Messages from
+              people you don&apos;t follow stay hidden.
+            </Text>
+            {amberNip17Enabled && amberNip44Permission === 'denied' && (
+              <>
+                <Text style={[styles.fieldHint, { color: colors.brandPink, marginTop: 8 }]}>
+                  Amber hasn&apos;t granted NIP-44 decrypt permission to this app yet — tap the
+                  button below to grant it. One dialog, then subsequent messages decrypt silently.
+                </Text>
+                <TouchableOpacity
+                  style={[styles.saveButton, { marginTop: 8 }]}
+                  onPress={async () => {
+                    try {
+                      await grantAmberNip44Permission();
+                    } catch (e) {
+                      Alert.alert(
+                        'Amber permission',
+                        e instanceof Error ? e.message : 'Could not grant NIP-44 permission.',
+                      );
+                    }
+                  }}
+                  accessibilityLabel="Grant Amber NIP-44 permission"
+                  testID="amber-nip17-grant"
+                >
+                  <Text style={styles.saveButtonText}>Grant permission in Amber</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </>
+        )}
 
         {/* Wallets summary */}
         <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Wallets</Text>
