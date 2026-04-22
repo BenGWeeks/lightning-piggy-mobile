@@ -29,7 +29,7 @@ import { useNostr } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import * as nwcService from '../services/nwcService';
 import { colors } from '../styles/theme';
-import { uploadImage } from '../services/imageUploadService';
+import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 import SendSheet from '../components/SendSheet';
 import AttachSheet from '../components/AttachSheet';
 import GifPickerSheet from '../components/GifPickerSheet';
@@ -705,10 +705,10 @@ const ConversationScreen: React.FC = () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       quality: 0.8,
-      base64: true,
     });
     if (result.canceled || !result.assets?.[0]) return;
-    await uploadAndSendImage(result.assets[0].uri, result.assets[0].base64);
+    const scrubbed = await stripImageMetadata(result.assets[0].uri);
+    await uploadAndSendImage(scrubbed.uri, scrubbed.base64);
   }, [isLoggedIn, uploadingImage, sending, uploadAndSendImage]);
 
   const handleTakeAndSendPhoto = useCallback(async () => {
@@ -722,10 +722,10 @@ const ConversationScreen: React.FC = () => {
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ['images'],
       quality: 0.8,
-      base64: true,
     });
     if (result.canceled || !result.assets?.[0]) return;
-    await uploadAndSendImage(result.assets[0].uri, result.assets[0].base64);
+    const scrubbed = await stripImageMetadata(result.assets[0].uri);
+    await uploadAndSendImage(scrubbed.uri, scrubbed.base64);
   }, [isLoggedIn, uploadingImage, sending, uploadAndSendImage]);
 
   // Share another contact's Nostr profile into this conversation. Payload

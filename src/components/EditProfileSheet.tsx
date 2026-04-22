@@ -22,7 +22,7 @@ import {
 import Svg, { Path, Circle } from 'react-native-svg';
 import { colors } from '../styles/theme';
 import { useNostr } from '../contexts/NostrContext';
-import { uploadImage } from '../services/imageUploadService';
+import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 
 interface Props {
   visible: boolean;
@@ -103,7 +103,8 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
 
     setUploading(true);
     try {
-      const url = await uploadImage(result.assets[0].uri, isLoggedIn ? signEvent : null);
+      const scrubbed = await stripImageMetadata(result.assets[0].uri);
+      const url = await uploadImage(scrubbed.uri, isLoggedIn ? signEvent : null, scrubbed.base64);
       setUrl(url);
     } catch (error) {
       Alert.alert('Upload Failed', error instanceof Error ? error.message : 'Please try again.');

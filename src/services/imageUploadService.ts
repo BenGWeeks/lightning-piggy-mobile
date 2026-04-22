@@ -1,7 +1,25 @@
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { getBlossomServer } from './walletStorageService';
 import { uploadToBlossom, BlossomSigner } from './blossomService';
 
 const NOSTR_BUILD_UPLOAD_URL = 'https://nostr.build/api/v2/upload/files';
+
+/**
+ * Re-encode an image through expo-image-manipulator to drop every EXIF tag
+ * (GPS coords, capture timestamp, camera make/model, …) before it leaves the
+ * device. The fresh JPEG has no metadata chunks at all, so we don't need to
+ * parse or allowlist individual tags.
+ */
+export async function stripImageMetadata(
+  uri: string,
+): Promise<{ uri: string; base64: string | null }> {
+  const result = await manipulateAsync(uri, [], {
+    compress: 0.9,
+    format: SaveFormat.JPEG,
+    base64: true,
+  });
+  return { uri: result.uri, base64: result.base64 ?? null };
+}
 
 export async function uploadToNostrBuild(imageUri: string): Promise<string> {
   const filename = imageUri.split('/').pop() || 'image.jpg';

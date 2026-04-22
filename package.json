@@ -39,6 +39,7 @@
     "expo-clipboard": "~55.0.9",
     "expo-contacts": "~55.0.9",
     "expo-image": "~55.0.8",
+    "expo-image-manipulator": "~55.0.15",
     "expo-image-picker": "~55.0.16",
     "expo-linear-gradient": "~55.0.9",
     "expo-location": "~55.1.8",
