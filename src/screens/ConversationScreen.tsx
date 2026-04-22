@@ -1208,17 +1208,18 @@ const ConversationScreen: React.FC = () => {
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.headerPeer}
-          onPress={() =>
+          onPress={() => {
+            const known = contacts.find((c) => c.pubkey === pubkey)?.profile ?? null;
             setProfileContact({
               pubkey,
               name,
-              picture: picture ?? null,
-              banner: null,
-              nip05: null,
-              lightningAddress: lightningAddress ?? null,
+              picture: known?.picture ?? picture ?? null,
+              banner: known?.banner ?? null,
+              nip05: known?.nip05 ?? null,
+              lightningAddress: known?.lud16 ?? lightningAddress ?? null,
               source: 'nostr',
-            })
-          }
+            });
+          }}
           accessibilityLabel={`Open ${name}'s profile`}
           testID="chat-header-open-profile"
         >
