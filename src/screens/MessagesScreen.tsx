@@ -10,11 +10,11 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
-import ProfileIcon from '../components/ProfileIcon';
 import ConversationRow from '../components/ConversationRow';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import FriendPickerSheet, { type PickedFriend } from '../components/FriendPickerSheet';
 import MessagesIcon from '../components/icons/MessagesIcon';
+import TabHeader from '../components/TabHeader';
 import { colors } from '../styles/theme';
 import {
   buildConversationSummaries,
@@ -191,25 +191,8 @@ const MessagesScreen: React.FC = () => {
         style={styles.bgImage}
         resizeMode="contain"
       />
-      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-        <View style={styles.titleRow}>
-          <TouchableOpacity
-            style={styles.homeButton}
-            onPress={() => navigation.navigate('Home', {})}
-            accessibilityLabel="Home"
-            testID="messages-home-button"
-          >
-            <MessagesIcon size={20} color={colors.brandPink} />
-          </TouchableOpacity>
-          <Text style={styles.title}>Messages</Text>
-          <View style={{ flex: 1 }} />
-          <ProfileIcon
-            uri={profile?.picture}
-            size={36}
-            onPress={() => navigation.navigate('Account')}
-          />
-        </View>
-
+      <TabHeader title="Messages" icon={<MessagesIcon size={20} color={colors.brandPink} />} />
+      <View style={styles.headerExtras}>
         <View style={styles.chipRow}>
           {searchExpanded ? (
             <View style={styles.searchRow}>

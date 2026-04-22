@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { View, Text, Image, TouchableOpacity, ScrollView } from 'react-native';
+import TabHeader from '../components/TabHeader';
 import { useFocusEffect } from '@react-navigation/native';
 import { courses } from '../data/learnContent';
 import {
@@ -36,17 +37,16 @@ const LearnScreen: React.FC<Props> = ({ navigation }) => {
           resizeMode="cover"
         />
         <View style={styles.headerOverlay} />
-        <TouchableOpacity
-          style={styles.homeButton}
-          onPress={() => navigation.getParent()?.navigate('Home')}
-        >
-          <Image
-            source={require('../../assets/images/Home.png')}
-            style={styles.homeIcon}
-            resizeMode="contain"
-          />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Learn</Text>
+        <TabHeader
+          title="Learn"
+          icon={
+            <Image
+              source={require('../../assets/images/Learn.png')}
+              style={styles.badgeIcon}
+              resizeMode="contain"
+            />
+          }
+        />
       </View>
 
       {/* Course grid */}

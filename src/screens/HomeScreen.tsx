@@ -20,7 +20,7 @@ import TransactionList from '../components/TransactionList';
 import WalletCarousel from '../components/WalletCarousel';
 import AddWalletWizard from '../components/AddWalletWizard';
 import WalletSettingsSheet from '../components/WalletSettingsSheet';
-import ProfileIcon from '../components/ProfileIcon';
+import TabHeader from '../components/TabHeader';
 import { ArrowDownIcon, ArrowUpIcon, ArrowLeftRightIcon } from '../components/icons/ArrowIcons';
 import { styles } from '../styles/HomeScreen.styles';
 import type { MainTabParamList } from '../navigation/types';
@@ -175,21 +175,27 @@ const HomeScreen: React.FC = () => {
   return (
     <View style={styles.container}>
       {/* Header area with brand background + faded pig behind carousel */}
-      <View style={[styles.headerBackground, { paddingTop: insets.top + 12 }]}>
+      <View style={styles.headerBackground}>
         <Image
           source={require('../../assets/images/lightning-piggy-intro.png')}
           style={styles.bgPigImage}
           resizeMode="contain"
         />
 
-        <View style={styles.headerRow}>
-          <Text style={styles.hello}>Hello{userName ? `, ${userName}` : ''}!</Text>
-          <ProfileIcon
-            uri={profile?.picture}
-            size={36}
-            onPress={() => navigation.navigate('Account')}
-          />
-        </View>
+        <TabHeader
+          title={`Hello${userName ? `, ${userName}` : ''}!`}
+          // Keep Home's greeting at its pre-#139 lighter weight + smaller
+          // size; section titles (Messages/Friends/Learn) stay bolder to
+          // read as section labels.
+          titleStyle={{ fontSize: 22, fontWeight: '400' }}
+          icon={
+            <Image
+              source={require('../../assets/images/Home.png')}
+              style={styles.badgeIcon}
+              resizeMode="contain"
+            />
+          }
+        />
 
         <WalletCarousel
           wallets={wallets}
