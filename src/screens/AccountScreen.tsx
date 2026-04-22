@@ -144,9 +144,13 @@ const AccountScreen: React.FC = () => {
     AsyncStorage.getItem('amber_nip17_enabled').then((v) => setAmberNip17Enabled(v === 'true'));
   }, []);
 
-  // Force-refresh the own-profile kind-0 on focus so the header avatar
-  // and displayed name here pick up external renames (e.g. via Amber or
-  // another client) without waiting for the 24h cache to expire. See #148.
+  // Refresh the own-profile kind-0 on focus so the header avatar and
+  // displayed name here pick up external renames (e.g. via Amber or
+  // another client). The call is cache-respecting: if the 24h kind-0
+  // cache is still fresh it short-circuits without hitting relays, so
+  // switching tabs doesn't incur a network cost. Pull-to-refresh in
+  // MessagesScreen passes `{ force: true }` for the explicit-user-intent
+  // path. See #148.
   useFocusEffect(
     useCallback(() => {
       if (isLoggedIn) refreshProfile();
