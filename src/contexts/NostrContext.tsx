@@ -230,114 +230,119 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return false;
   }, []);
 
-  const loadContacts = useCallback(async (pk: string, relayUrls: string[]) => {
-    const t0 = Date.now();
+  const loadContacts = useCallback(
+    async (pk: string, relayUrls: string[], opts?: { force?: boolean }) => {
+      const t0 = Date.now();
 
-    // Read the contact-list cache AND profile cache concurrently — both
-    // are independent AsyncStorage round-trips, and the profile cache is
-    // also used for merging into whichever contact list we end up with.
-    const [
-      { value: cachedContacts, ageMs: contactsAgeMs },
-      { value: cachedProfileMapOrNull, ageMs: cacheAgeMs },
-    ] = await Promise.all([
-      readCachedWithTtl<NostrContact[]>(CONTACTS_CACHE_KEY, CONTACTS_TIMESTAMP_KEY),
-      readCachedWithTtl<Record<string, NostrProfile>>(PROFILES_CACHE_KEY, CACHE_TIMESTAMP_KEY),
-    ]);
-    const cachedProfileMap = cachedProfileMapOrNull ?? {};
-    const contactsCacheFresh = contactsAgeMs < CACHE_MAX_AGE_MS;
-    const cacheFresh = cacheAgeMs < CACHE_MAX_AGE_MS;
+      // Read the contact-list cache AND profile cache concurrently — both
+      // are independent AsyncStorage round-trips, and the profile cache is
+      // also used for merging into whichever contact list we end up with.
+      const [
+        { value: cachedContacts, ageMs: contactsAgeMs },
+        { value: cachedProfileMapOrNull, ageMs: cacheAgeMs },
+      ] = await Promise.all([
+        readCachedWithTtl<NostrContact[]>(CONTACTS_CACHE_KEY, CONTACTS_TIMESTAMP_KEY),
+        readCachedWithTtl<Record<string, NostrProfile>>(PROFILES_CACHE_KEY, CACHE_TIMESTAMP_KEY),
+      ]);
+      const cachedProfileMap = cachedProfileMapOrNull ?? {};
+      const contactsCacheFresh = !opts?.force && contactsAgeMs < CACHE_MAX_AGE_MS;
+      const cacheFresh = cacheAgeMs < CACHE_MAX_AGE_MS;
 
-    let fetchedContacts: NostrContact[];
-    if (contactsCacheFresh && cachedContacts) {
-      fetchedContacts = cachedContacts;
-      if (__DEV__)
-        console.log(
-          `[Nostr] fetchContactList: skipped (cache fresh @ ${Math.round(contactsAgeMs / 1000)}s old, ${fetchedContacts.length} contacts)`,
-        );
-    } else {
-      fetchedContacts = await nostrService.fetchContactList(pk, relayUrls);
-      if (__DEV__)
-        console.log(
-          `[Nostr] fetchContactList: ${Date.now() - t0}ms, ${fetchedContacts.length} contacts`,
-        );
-      InteractionManager.runAfterInteractions(() => {
-        AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(fetchedContacts)).catch(() => {});
-        AsyncStorage.setItem(CONTACTS_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
-      });
-    }
+      let fetchedContacts: NostrContact[];
+      if (contactsCacheFresh && cachedContacts) {
+        fetchedContacts = cachedContacts;
+        if (__DEV__)
+          console.log(
+            `[Nostr] fetchContactList: skipped (cache fresh @ ${Math.round(contactsAgeMs / 1000)}s old, ${fetchedContacts.length} contacts)`,
+          );
+      } else {
+        fetchedContacts = await nostrService.fetchContactList(pk, relayUrls);
+        if (__DEV__)
+          console.log(
+            `[Nostr] fetchContactList: ${Date.now() - t0}ms, ${fetchedContacts.length} contacts`,
+          );
+        InteractionManager.runAfterInteractions(() => {
+          AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(fetchedContacts)).catch(() => {});
+          AsyncStorage.setItem(CONTACTS_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+        });
+      }
 
-    startTransition(() =>
-      setContacts(
-        fetchedContacts.map((c) => ({
-          ...c,
-          profile: cachedProfileMap[c.pubkey] ?? c.profile,
-        })),
-      ),
-    );
-
-    if (fetchedContacts.length === 0) return;
-
-    const missingFromCache = fetchedContacts
-      .map((c) => c.pubkey)
-      .filter((pk) => !cachedProfileMap[pk]);
-
-    // Fast path: cache is fresh *and* covers every current contact. Avatars
-    // are already hydrated from cache above, so skip the 30-40s batch.
-    if (cacheFresh && missingFromCache.length === 0) {
-      if (__DEV__)
-        console.log(
-          `[Nostr] fetchProfiles: skipped (cache fresh @ ${Math.round(cacheAgeMs / 1000)}s old, all ${fetchedContacts.length} contacts cached)`,
-        );
-      return;
-    }
-
-    // When the cache is fresh, the "missing" contacts are the ones who had
-    // no kind-0 response last time we asked. Re-querying on every cold
-    // start costs 3 s for contacts that probably just never published a
-    // profile — so we skip — but only for MISSING_PROFILE_RETRY_MS, much
-    // shorter than the 24 h fast-path TTL, so a transient relay miss
-    // resolves within the hour.
-    const missingRetryFresh = cacheAgeMs < MISSING_PROFILE_RETRY_MS;
-    if (missingRetryFresh) {
-      if (__DEV__)
-        console.log(
-          `[Nostr] fetchProfiles: skipped (cache ${Math.round(cacheAgeMs / 1000)}s old, ${missingFromCache.length} unknown profiles will retry after ${Math.round(MISSING_PROFILE_RETRY_MS / 1000)}s)`,
-        );
-      return;
-    }
-
-    // Cache stale — refresh all contacts' profiles. (When cacheFresh is
-    // true we've already returned via one of the two fast paths above, so
-    // the dropped "X served from cache" suffix would always be 0.)
-    const pubkeysToFetch = fetchedContacts.map((c) => c.pubkey);
-    const t1 = Date.now();
-    const profileMap = await nostrService.fetchProfiles(pubkeysToFetch, relayUrls, (partial) => {
-      // Update UI incrementally as each batch of profiles arrives
       startTransition(() =>
-        setContacts((prev) =>
-          prev.map((c) => ({
+        setContacts(
+          fetchedContacts.map((c) => ({
             ...c,
-            profile: partial.get(c.pubkey) ?? c.profile,
+            profile: cachedProfileMap[c.pubkey] ?? c.profile,
           })),
         ),
       );
-    });
-    if (__DEV__)
-      console.log(
-        `[Nostr] fetchProfiles: ${Date.now() - t1}ms, ${profileMap.size}/${pubkeysToFetch.length} profiles loaded`,
-      );
 
-    // Merge new profiles on top of existing cache so we don't lose
-    // previously-known profiles for contacts we didn't refetch.
-    InteractionManager.runAfterInteractions(() => {
-      const merged: Record<string, NostrProfile> = { ...cachedProfileMap };
-      profileMap.forEach((v, k) => {
-        merged[k] = v;
+      if (fetchedContacts.length === 0) return;
+
+      const missingFromCache = fetchedContacts
+        .map((c) => c.pubkey)
+        .filter((pk) => !cachedProfileMap[pk]);
+
+      // Fast path: cache is fresh *and* covers every current contact. Avatars
+      // are already hydrated from cache above, so skip the 30-40s batch.
+      // `force` skips this fast path so user-initiated refreshes always
+      // re-hit relays.
+      if (!opts?.force && cacheFresh && missingFromCache.length === 0) {
+        if (__DEV__)
+          console.log(
+            `[Nostr] fetchProfiles: skipped (cache fresh @ ${Math.round(cacheAgeMs / 1000)}s old, all ${fetchedContacts.length} contacts cached)`,
+          );
+        return;
+      }
+
+      // When the cache is fresh, the "missing" contacts are the ones who had
+      // no kind-0 response last time we asked. Re-querying on every cold
+      // start costs 3 s for contacts that probably just never published a
+      // profile — so we skip — but only for MISSING_PROFILE_RETRY_MS, much
+      // shorter than the 24 h fast-path TTL, so a transient relay miss
+      // resolves within the hour. `force` bypasses this too.
+      const missingRetryFresh = !opts?.force && cacheAgeMs < MISSING_PROFILE_RETRY_MS;
+      if (missingRetryFresh) {
+        if (__DEV__)
+          console.log(
+            `[Nostr] fetchProfiles: skipped (cache ${Math.round(cacheAgeMs / 1000)}s old, ${missingFromCache.length} unknown profiles will retry after ${Math.round(MISSING_PROFILE_RETRY_MS / 1000)}s)`,
+          );
+        return;
+      }
+
+      // Cache stale — refresh all contacts' profiles. (When cacheFresh is
+      // true we've already returned via one of the two fast paths above, so
+      // the dropped "X served from cache" suffix would always be 0.)
+      const pubkeysToFetch = fetchedContacts.map((c) => c.pubkey);
+      const t1 = Date.now();
+      const profileMap = await nostrService.fetchProfiles(pubkeysToFetch, relayUrls, (partial) => {
+        // Update UI incrementally as each batch of profiles arrives
+        startTransition(() =>
+          setContacts((prev) =>
+            prev.map((c) => ({
+              ...c,
+              profile: partial.get(c.pubkey) ?? c.profile,
+            })),
+          ),
+        );
       });
-      AsyncStorage.setItem(PROFILES_CACHE_KEY, JSON.stringify(merged)).catch(() => {});
-      AsyncStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
-    });
-  }, []);
+      if (__DEV__)
+        console.log(
+          `[Nostr] fetchProfiles: ${Date.now() - t1}ms, ${profileMap.size}/${pubkeysToFetch.length} profiles loaded`,
+        );
+
+      // Merge new profiles on top of existing cache so we don't lose
+      // previously-known profiles for contacts we didn't refetch.
+      InteractionManager.runAfterInteractions(() => {
+        const merged: Record<string, NostrProfile> = { ...cachedProfileMap };
+        profileMap.forEach((v, k) => {
+          merged[k] = v;
+        });
+        AsyncStorage.setItem(PROFILES_CACHE_KEY, JSON.stringify(merged)).catch(() => {});
+        AsyncStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+      });
+    },
+    [],
+  );
 
   const loadRelays = useCallback(async (pk: string): Promise<string[]> => {
     const t0 = Date.now();
@@ -559,7 +564,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const refreshContacts = useCallback(async () => {
     if (!pubkey) return;
     const readRelays = getReadRelays();
-    await loadContacts(pubkey, readRelays);
+    // User-initiated refresh (e.g. pull-to-refresh) — bypass the 24h
+    // contacts cache so newly-added follows surface immediately.
+    await loadContacts(pubkey, readRelays, { force: true });
   }, [pubkey, getReadRelays, loadContacts]);
 
   const signZapRequest = useCallback(
@@ -904,46 +911,39 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       const entries: DmInboxEntry[] = [];
 
-      // NIP-04: for the nsec signer we decrypt in place so rows show a real
-      // message preview. For Amber we stay envelope-only — per-event
-      // nip04Decrypt round-trips through the external signer, and on every
-      // tab focus that would fan out up to ~500 ContentResolver calls (or
-      // far worse, 500 approval dialogs if the user hasn't granted blanket
-      // permission). Envelope data is enough to show the row; the actual
-      // message is decrypted lazily when the user opens the conversation
-      // via the existing ConversationScreen.fetchConversation path.
-      const AMBER_ENVELOPE_PLACEHOLDER = '🔒 Encrypted message';
+      // NIP-04: decrypt per event. nsec uses local ECDH (pure JS, fast).
+      // Amber goes through amberService.requestNip04Decrypt which attempts
+      // a silent ContentResolver call first (permission-granted fast path)
+      // and only falls back to a dialog when Amber hasn't pre-approved.
+      // Under "Approve basic actions" (the default Amber permission mode)
+      // NIP-04 decrypt is auto-approved, so this runs silently on tab focus.
       for (const ev of kind4) {
         const fromMe = ev.pubkey === pubkey;
         const partnerPubkey = fromMe ? (ev.tags.find((t) => t[0] === 'p')?.[1] ?? null) : ev.pubkey;
         if (!partnerPubkey || !/^[0-9a-f]{64}$/.test(partnerPubkey)) continue;
-        if (signerType === 'nsec') {
-          try {
+        try {
+          let plaintext: string | null = null;
+          if (signerType === 'nsec') {
             const secretKey = await getSecretKey();
             if (!secretKey) continue;
-            const plaintext = await nostrService.decryptNip04WithSecret(
+            plaintext = await nostrService.decryptNip04WithSecret(
               secretKey,
               partnerPubkey,
               ev.content,
             );
-            entries.push({
-              partnerPubkey,
-              fromMe,
-              createdAt: ev.created_at,
-              text: plaintext,
-              wireKind: 4,
-            });
-          } catch (error) {
-            if (__DEV__) console.warn('[Nostr] NIP-04 inbox decrypt failed:', error);
+          } else if (signerType === 'amber') {
+            plaintext = await amberService.requestNip04Decrypt(ev.content, partnerPubkey, pubkey);
           }
-        } else if (signerType === 'amber') {
+          if (plaintext === null) continue;
           entries.push({
             partnerPubkey,
             fromMe,
             createdAt: ev.created_at,
-            text: AMBER_ENVELOPE_PLACEHOLDER,
+            text: plaintext,
             wireKind: 4,
           });
+        } catch (error) {
+          if (__DEV__) console.warn('[Nostr] NIP-04 inbox decrypt failed:', error);
         }
       }
 
