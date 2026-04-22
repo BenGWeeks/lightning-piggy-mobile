@@ -745,17 +745,19 @@ const ConversationScreen: React.FC = () => {
             <View
               style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
             >
-              <View style={styles.imageBubble}>
+              <View
+                style={[
+                  styles.imageBubble,
+                  item.fromMe ? styles.imageBubbleMe : styles.imageBubbleThem,
+                ]}
+              >
                 <Image
                   source={{ uri: imageUrl }}
                   style={styles.imageBubbleImage}
                   resizeMode="cover"
                   accessibilityLabel="Shared image"
                 />
-                {/* Image bubble background is always white, so keep the default
-                    (darker) bubbleTime colour for both sides — bubbleTimeMe is
-                    near-white and would be illegible here. */}
-                <Text style={[styles.bubbleTime, styles.imageBubbleTime]}>
+                <Text style={[styles.imageBubbleTime, item.fromMe && styles.imageBubbleTimeMe]}>
                   {formatTime(item.createdAt)}
                 </Text>
               </View>
@@ -1531,7 +1533,7 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.85)',
   },
   zapCardTime: {
-    fontSize: 11,
+    fontSize: 10,
     color: colors.textSupplementary,
   },
   zapCardTimeMe: {
@@ -1915,12 +1917,17 @@ const styles = StyleSheet.create({
     minWidth: 240,
     borderRadius: 14,
     overflow: 'hidden',
-    backgroundColor: colors.white,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
     shadowRadius: 2,
     elevation: 1,
+  },
+  imageBubbleMe: {
+    backgroundColor: colors.brandPink,
+  },
+  imageBubbleThem: {
+    backgroundColor: colors.white,
   },
   imageBubbleImage: {
     width: 240,
@@ -1928,9 +1935,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   imageBubbleTime: {
+    fontSize: 10,
+    color: colors.textSupplementary,
     alignSelf: 'flex-end',
     paddingHorizontal: 8,
     paddingVertical: 4,
+  },
+  imageBubbleTimeMe: {
+    color: 'rgba(255,255,255,0.85)',
   },
   loading: {
     flex: 1,
