@@ -6,44 +6,19 @@ export const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.brandPink,
   },
-  /** Extras row below TabHeader (search + chips). TabHeader owns its own
-   * vertical padding; this just claims the bottom spacing the full header
-   * used to provide so the list content doesn't hug the chip row. */
+  /** Extras row below TabHeader (search + chips). The TabHeader owns its
+   * own vertical padding; this just claims the bottom spacing the full
+   * header used to provide so the list content doesn't hug the chip row. */
   headerExtras: {
     paddingHorizontal: 20,
     paddingBottom: 24,
   },
-  addButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
   chipRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-end',
     gap: 8,
     marginBottom: 4,
-  },
-  chip: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 16,
-    paddingVertical: 7,
-    borderRadius: 20,
-  },
-  chipActive: {
-    backgroundColor: colors.white,
-  },
-  chipText: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  chipTextActive: {
-    color: colors.brandPink,
   },
   searchRow: {
     flex: 1,
@@ -61,6 +36,38 @@ export const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  filterChipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+    marginLeft: 16,
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: 'rgba(229, 34, 120, 0.1)',
+  },
+  filterChipInteractive: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: 'rgba(229, 34, 120, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(229, 34, 120, 0.3)',
+  },
+  filterChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.brandPink,
   },
   searchInput: {
     flex: 1,
@@ -90,35 +97,6 @@ export const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 20,
   },
-  alphabetBar: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 8,
-    width: 32,
-    marginLeft: 4,
-  },
-  alphabetLetterTouch: {
-    paddingVertical: 2,
-    paddingHorizontal: 4,
-    borderRadius: 10,
-    width: 20,
-    height: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  alphabetLetterActive: {
-    backgroundColor: colors.brandPink,
-    borderRadius: 10,
-  },
-  alphabetLetter: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.textSupplementary,
-    textAlign: 'center',
-  },
-  alphabetLetterTextActive: {
-    color: colors.white,
-  },
   emptyState: {
     padding: 40,
     alignItems: 'center',
@@ -145,5 +123,21 @@ export const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 15,
     fontWeight: '700',
+  },
+  fab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.brandPink,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 6,
   },
 });

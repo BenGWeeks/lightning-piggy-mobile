@@ -19,19 +19,6 @@ export const styles = StyleSheet.create({
     top: -20,
     opacity: 0.15,
   },
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingRight: 24,
-    marginBottom: 8,
-  },
-  hello: {
-    color: colors.white,
-    fontSize: 22,
-    fontWeight: '400',
-    paddingHorizontal: 24,
-  },
   buttonRow: {
     flexDirection: 'row',
     justifyContent: 'center',

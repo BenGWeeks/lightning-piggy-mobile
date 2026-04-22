@@ -1,7 +1,5 @@
-import { StyleSheet, Platform, StatusBar } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { colors } from './theme';
-
-const STATUS_BAR_TOP = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 40) + 4 : 44;
 
 export const styles = StyleSheet.create({
   container: {
@@ -9,37 +7,19 @@ export const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   headerBackground: {
+    // Match the pre-#139 fixed 140 px header so the decorative image
+    // shows at the full height the design expects. TabHeader lays out
+    // inside this box at the top; the space below it shows the art.
     height: 140,
     backgroundColor: colors.brandPink,
     overflow: 'hidden',
   },
   headerImage: {
-    width: '100%',
-    height: '100%',
-  },
-  homeButton: {
-    position: 'absolute',
-    top: STATUS_BAR_TOP,
-    left: 16,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 10,
+    ...StyleSheet.absoluteFillObject,
   },
   headerOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(236, 0, 140, 0.65)', // brandPink with 65% opacity
-  },
-  headerTitle: {
-    position: 'absolute',
-    bottom: 16,
-    alignSelf: 'center',
-    color: colors.white,
-    fontSize: 22,
-    fontWeight: '700',
   },
   scrollArea: {
     flex: 1,

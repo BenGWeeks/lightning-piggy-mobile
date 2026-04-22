@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { View, Text, Image, TouchableOpacity, ScrollView } from 'react-native';
+import TabHeader from '../components/TabHeader';
 import { useFocusEffect } from '@react-navigation/native';
 import { courses } from '../data/learnContent';
 import {
@@ -8,7 +9,7 @@ import {
   getCourseCompletedCount,
   isCourseComplete,
 } from '../services/learnProgressService';
-import { Check, Home } from 'lucide-react-native';
+import { Check, GraduationCap } from 'lucide-react-native';
 import { colors } from '../styles/theme';
 import { styles } from '../styles/LearnScreen.styles';
 
@@ -37,13 +38,7 @@ const LearnScreen: React.FC<Props> = ({ navigation }) => {
           resizeMode="cover"
         />
         <View style={styles.headerOverlay} />
-        <TouchableOpacity
-          style={styles.homeButton}
-          onPress={() => navigation.getParent()?.navigate('Home')}
-        >
-          <Home size={20} color={colors.brandPink} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Learn</Text>
+        <TabHeader title="Learn" icon={<GraduationCap size={20} color={colors.brandPink} />} />
       </View>
 
       {/* Course grid */}

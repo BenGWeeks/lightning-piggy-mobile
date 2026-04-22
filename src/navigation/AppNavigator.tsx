@@ -3,7 +3,7 @@ import { StyleSheet, ActivityIndicator, View, Platform } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Home, PiggyBank, GraduationCap, Users } from 'lucide-react-native';
+import { Home, MessageCircle, GraduationCap, Users } from 'lucide-react-native';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
 import { RootStackParamList, LearnStackParamList, MainTabParamList } from './types';
@@ -11,7 +11,7 @@ import { RootStackParamList, LearnStackParamList, MainTabParamList } from './typ
 import IntroScreen from '../screens/IntroScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
 import HomeScreen from '../screens/HomeScreen';
-import EarnScreen from '../screens/EarnScreen';
+import MessagesScreen from '../screens/MessagesScreen';
 import LearnScreen from '../screens/LearnScreen';
 import CourseDetailScreen from '../screens/CourseDetailScreen';
 import MissionDetailScreen from '../screens/MissionDetailScreen';
@@ -60,19 +60,19 @@ function HomeTabs() {
         options={{
           tabBarButtonTestID: 'tab-home',
           tabBarAccessibilityLabel: 'Home tab',
-          tabBarIcon: ({ focused, color }) => (
-            <Home size={22} color={color} strokeWidth={focused ? 2.5 : 2} />
+          tabBarIcon: ({ focused, color, size }) => (
+            <Home size={size} color={color} strokeWidth={focused ? 2.5 : 2} />
           ),
         }}
       />
       <Tab.Screen
-        name="Earn"
-        component={EarnScreen}
+        name="Messages"
+        component={MessagesScreen}
         options={{
-          tabBarButtonTestID: 'tab-earn',
-          tabBarAccessibilityLabel: 'Earn tab',
-          tabBarIcon: ({ focused, color }) => (
-            <PiggyBank size={22} color={color} strokeWidth={focused ? 2.5 : 2} />
+          tabBarButtonTestID: 'tab-messages',
+          tabBarAccessibilityLabel: 'Messages tab',
+          tabBarIcon: ({ focused, color, size }) => (
+            <MessageCircle size={size} color={color} strokeWidth={focused ? 2.5 : 2} />
           ),
         }}
       />
@@ -82,8 +82,8 @@ function HomeTabs() {
         options={{
           tabBarButtonTestID: 'tab-learn',
           tabBarAccessibilityLabel: 'Learn tab',
-          tabBarIcon: ({ focused, color }) => (
-            <GraduationCap size={22} color={color} strokeWidth={focused ? 2.5 : 2} />
+          tabBarIcon: ({ focused, color, size }) => (
+            <GraduationCap size={size} color={color} strokeWidth={focused ? 2.5 : 2} />
           ),
         }}
       />
@@ -93,8 +93,8 @@ function HomeTabs() {
         options={{
           tabBarButtonTestID: 'tab-friends',
           tabBarAccessibilityLabel: 'Friends tab',
-          tabBarIcon: ({ focused, color }) => (
-            <Users size={22} color={color} strokeWidth={focused ? 2.5 : 2} />
+          tabBarIcon: ({ focused, color, size }) => (
+            <Users size={size} color={color} strokeWidth={focused ? 2.5 : 2} />
           ),
         }}
       />
