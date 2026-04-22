@@ -1,13 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { colors } from '../styles/theme';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet } from '../contexts/WalletContext';
-import TransactionDetailSheet, { TransactionDetailData } from './TransactionDetailSheet';
+import { useNostr } from '../contexts/NostrContext';
+import TransactionDetailSheet, {
+  TransactionDetailData,
+  CounterpartyContact,
+} from './TransactionDetailSheet';
+import ContactProfileSheet from './ContactProfileSheet';
+import SendSheet from './SendSheet';
 import TransactionTypeIcon from './TransactionTypeIcon';
 import { getTxCategory } from '../utils/txCategory';
 import type { WalletTransaction, ZapCounterpartyInfo } from '../types/wallet';
+import type { RootStackParamList } from '../navigation/types';
 
 interface Props {
   transactions: WalletTransaction[];
@@ -80,8 +89,31 @@ function txKey(tx: WalletTransaction, fallbackIndex: number): string {
 
 const TransactionList: React.FC<Props> = ({ transactions }) => {
   const { btcPrice, currency } = useWallet();
+  const { contacts } = useNostr();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  // When contacts' profiles refresh, we want transaction rows to pick up
+  // the newer name/picture immediately. Tx's embedded `zapCounterparty`
+  // is a snapshot from when the zap was attributed, so we layer a live
+  // lookup on top by pubkey.
+  const contactProfileByPubkey = useMemo(() => {
+    const m = new Map<string, ZapCounterpartyInfo['profile']>();
+    for (const c of contacts) {
+      if (c.profile) {
+        m.set(c.pubkey, {
+          npub: c.profile.npub ?? '',
+          name: c.profile.name ?? null,
+          displayName: c.profile.displayName ?? null,
+          picture: c.profile.picture ?? null,
+          nip05: c.profile.nip05 ?? null,
+        });
+      }
+    }
+    return m;
+  }, [contacts]);
   const [showAll, setShowAll] = useState(false);
   const [detail, setDetail] = useState<TransactionDetailData | null>(null);
+  const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
+  const [zapContact, setZapContact] = useState<CounterpartyContact | null>(null);
 
   React.useEffect(() => setShowAll(false), [transactions]);
 
@@ -138,7 +170,15 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
         const amountSats = Math.abs(item.amount);
         const ts = item.settled_at || item.created_at;
         const isPending = !ts && !item.blockHeight;
-        const zapCp = item.zapCounterparty ?? undefined;
+        const zapCpRaw = item.zapCounterparty ?? undefined;
+        // Prefer the live profile from contacts (which refreshes when the
+        // profile cache updates) over the snapshot embedded in the tx.
+        const liveProfile = zapCpRaw?.pubkey
+          ? contactProfileByPubkey.get(zapCpRaw.pubkey)
+          : undefined;
+        const zapCp = zapCpRaw
+          ? { ...zapCpRaw, profile: liveProfile ?? zapCpRaw.profile }
+          : undefined;
 
         // Primary label: counterparty name if attributed; else URL host or
         // raw description; else "Received" / "Sent".
@@ -230,6 +270,59 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
         visible={detail !== null}
         tx={detail}
         onClose={() => setDetail(null)}
+        onCounterpartyPress={(contact) => {
+          setDetail(null);
+          setProfileContact(contact);
+        }}
+        onZapCounterparty={(contact) => {
+          setDetail(null);
+          setZapContact(contact);
+        }}
+        onMessageCounterparty={(contact) => {
+          setDetail(null);
+          navigation.navigate('Conversation', {
+            pubkey: contact.pubkey,
+            name: contact.name,
+            picture: contact.picture,
+            lightningAddress: contact.lightningAddress,
+          });
+        }}
+      />
+      <ContactProfileSheet
+        visible={profileContact !== null}
+        onClose={() => setProfileContact(null)}
+        contact={profileContact}
+        onMessage={
+          profileContact
+            ? () => {
+                const c = profileContact;
+                setProfileContact(null);
+                navigation.navigate('Conversation', {
+                  pubkey: c.pubkey,
+                  name: c.name,
+                  picture: c.picture,
+                  lightningAddress: c.lightningAddress,
+                });
+              }
+            : undefined
+        }
+        onZap={
+          profileContact?.lightningAddress
+            ? () => {
+                const c = profileContact;
+                setProfileContact(null);
+                setZapContact(c);
+              }
+            : undefined
+        }
+      />
+      <SendSheet
+        visible={zapContact !== null}
+        onClose={() => setZapContact(null)}
+        initialAddress={zapContact?.lightningAddress ?? undefined}
+        initialPicture={zapContact?.picture ?? undefined}
+        recipientPubkey={zapContact?.pubkey ?? undefined}
+        recipientName={zapContact?.name ?? undefined}
       />
     </View>
   );

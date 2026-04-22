@@ -10,13 +10,15 @@ import { RootStackParamList, LearnStackParamList, MainTabParamList } from './typ
 import IntroScreen from '../screens/IntroScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
 import HomeScreen from '../screens/HomeScreen';
-import EarnScreen from '../screens/EarnScreen';
+import MessagesScreen from '../screens/MessagesScreen';
 import LearnScreen from '../screens/LearnScreen';
 import CourseDetailScreen from '../screens/CourseDetailScreen';
 import MissionDetailScreen from '../screens/MissionDetailScreen';
 import AccountScreen from '../screens/AccountScreen';
 import FriendsScreen from '../screens/FriendsScreen';
+import ConversationScreen from '../screens/ConversationScreen';
 import FriendsIcon from '../components/icons/FriendsIcon';
+import MessagesIcon from '../components/icons/MessagesIcon';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -68,16 +70,13 @@ function HomeTabs() {
         }}
       />
       <Tab.Screen
-        name="Earn"
-        component={EarnScreen}
+        name="Messages"
+        component={MessagesScreen}
         options={{
-          tabBarButtonTestID: 'tab-earn',
-          tabBarAccessibilityLabel: 'Earn tab',
+          tabBarButtonTestID: 'tab-messages',
+          tabBarAccessibilityLabel: 'Messages tab',
           tabBarIcon: ({ focused }) => (
-            <Image
-              source={require('../../assets/images/Earn.png')}
-              style={[styles.tabIcon, focused && styles.tabIconActive]}
-            />
+            <MessagesIcon size={22} color={focused ? colors.brandPink : colors.textSupplementary} />
           ),
         }}
       />
@@ -156,7 +155,10 @@ export default function AppNavigator() {
             <Stack.Screen name="Onboarding" component={OnboardingScreen} />
           </>
         ) : (
-          <Stack.Screen name="MainTabs" component={HomeTabs} />
+          <>
+            <Stack.Screen name="MainTabs" component={HomeTabs} />
+            <Stack.Screen name="Conversation" component={ConversationScreen} />
+          </>
         )}
       </Stack.Navigator>
     </NavigationContainer>

@@ -56,13 +56,23 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       'expo-image-picker',
       {
         photosPermission:
-          'Allow Lightning Piggy to access your photos to set your profile picture.',
+          'Allow Lightning Piggy to access your photos to set your profile picture and send images in conversations.',
+        cameraPermission:
+          'Allow Lightning Piggy to use your camera to take and send photos in conversations.',
       },
     ],
     [
       'expo-contacts',
       {
         contactsPermission: 'Allow Lightning Piggy to access your contacts to find friends.',
+      },
+    ],
+    [
+      'expo-location',
+      {
+        locationWhenInUsePermission:
+          'Allow Lightning Piggy to access your location so you can share it in a private message.',
+        isAndroidBackgroundLocationEnabled: false,
       },
     ],
   ],
@@ -83,6 +93,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     eas: {
       projectId: 'b01d6b21-2f80-40af-b58c-c40e4302fa65',
     },
+    // GIPHY API key for the conversation GIF picker. Build-time only —
+    // picker silently omits itself from the Attach menu when the key is
+    // absent. See `src/services/giphyService.ts` and README for setup.
+    giphyApiKey: process.env.EXPO_PUBLIC_GIPHY_API_KEY ?? null,
   },
   owner: 'bengweeks',
 });

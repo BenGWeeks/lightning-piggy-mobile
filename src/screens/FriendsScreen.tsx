@@ -7,20 +7,22 @@ import {
   Image,
   RefreshControl,
   Alert,
-  GestureResponderEvent,
 } from 'react-native';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation, CompositeNavigationProp } from '@react-navigation/native';
+import { useNavigation, CompositeNavigationProp, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr } from '../contexts/NostrContext';
-import ProfileIcon from '../components/ProfileIcon';
+import FriendsIcon from '../components/icons/FriendsIcon';
+import TabHeader from '../components/TabHeader';
+import { colors } from '../styles/theme';
 import ContactListItem from '../components/ContactListItem';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import AddFriendSheet from '../components/AddFriendSheet';
 import SendSheet from '../components/SendSheet';
+import AlphabetBar from '../components/AlphabetBar';
 import { fetchPhoneContacts, PhoneContact, setLightningAddress } from '../services/contactsService';
 import { styles } from '../styles/FriendsScreen.styles';
 import type { MainTabParamList, RootStackParamList } from '../navigation/types';
@@ -43,124 +45,10 @@ interface ListItem {
   source: 'nostr' | 'contacts';
 }
 
-const AlphabetBar: React.FC<{
-  letters: string[];
-  currentLetter: string | null;
-  onLetterPress: (letter: string) => void;
-}> = React.memo(
-  ({ letters, currentLetter, onLetterPress }) => {
-    const [tapped, setTapped] = useState<string | null>(null);
-    const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const onPressRef = useRef(onLetterPress);
-    onPressRef.current = onLetterPress;
-
-    const barRef = useRef<View>(null);
-    const barLayout = useRef({ y: 0, height: 0 });
-    const lastDragLetter = useRef<string | null>(null);
-
-    useEffect(() => {
-      return () => {
-        if (timerRef.current) clearTimeout(timerRef.current);
-      };
-    }, []);
-
-    const handlePress = useCallback((letter: string) => {
-      setTapped(letter);
-      onPressRef.current(letter);
-      if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => {
-        timerRef.current = null;
-        setTapped(null);
-      }, 1500);
-    }, []);
-
-    const getLetterFromY = useCallback(
-      (pageY: number) => {
-        const { y, height } = barLayout.current;
-        if (height === 0 || letters.length === 0) return null;
-        const relY = pageY - y;
-        const idx = Math.max(
-          0,
-          Math.min(Math.floor((relY / height) * letters.length), letters.length - 1),
-        );
-        return letters[idx];
-      },
-      [letters],
-    );
-
-    const handleTouchStart = useCallback((e: GestureResponderEvent) => {
-      // Store absolute Y offset for drag calculations — don't scroll here,
-      // let TouchableOpacity.onPress handle taps to avoid double-scroll
-      const { locationY, pageY } = e.nativeEvent;
-      barLayout.current.y = pageY - locationY;
-      lastDragLetter.current = null;
-    }, []);
-
-    const handleTouchMove = useCallback(
-      (e: GestureResponderEvent) => {
-        const pageY = e.nativeEvent.pageY;
-        const letter = getLetterFromY(pageY);
-        if (letter && letter !== lastDragLetter.current) {
-          lastDragLetter.current = letter;
-          setTapped(letter);
-          onPressRef.current(letter);
-          if (timerRef.current) clearTimeout(timerRef.current);
-        }
-      },
-      [getLetterFromY],
-    );
-
-    const handleTouchEnd = useCallback(() => {
-      lastDragLetter.current = null;
-      timerRef.current = setTimeout(() => setTapped(null), 1500);
-    }, []);
-
-    return (
-      <View
-        ref={barRef}
-        style={styles.alphabetBar}
-        accessibilityRole="list"
-        accessibilityLabel="Alphabet index"
-        onLayout={(e) => {
-          barLayout.current.height = e.nativeEvent.layout.height;
-        }}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-      >
-        {letters.map((letter) => {
-          const isActive = tapped === letter || (tapped === null && currentLetter === letter);
-          return (
-            <TouchableOpacity
-              key={letter}
-              style={[styles.alphabetLetterTouch, isActive && styles.alphabetLetterActive]}
-              activeOpacity={0.7}
-              onPress={() => handlePress(letter)}
-              accessibilityRole="button"
-              accessibilityLabel={`Jump to ${letter}`}
-              testID={`alphabet-${letter}`}
-            >
-              <Text style={[styles.alphabetLetter, isActive && styles.alphabetLetterTextActive]}>
-                {letter}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-    );
-  },
-  (prev, next) => {
-    if (prev.currentLetter !== next.currentLetter) return false;
-    if (prev.letters.length !== next.letters.length) return false;
-    return prev.letters === next.letters || prev.letters.every((l, i) => l === next.letters[i]);
-  },
-);
-AlphabetBar.displayName = 'AlphabetBar';
-
 const FriendsScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<FriendsNavigation>();
-  const { isLoggedIn, profile, contacts, refreshContacts, addContact } = useNostr();
+  const { isLoggedIn, profile, contacts, refreshContacts, refreshProfile, addContact } = useNostr();
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
   const [searchExpanded, setSearchExpanded] = useState(false);
@@ -206,6 +94,15 @@ const FriendsScreen: React.FC = () => {
       .then(setPhoneContacts)
       .catch(() => {});
   }, []);
+
+  // Force-refresh the own-profile kind-0 on focus so the top-right
+  // profile icon picks up external renames (e.g. via Amber or another
+  // client) without waiting for the 24h cache to expire. See #148.
+  useFocusEffect(
+    useCallback(() => {
+      if (isLoggedIn) refreshProfile();
+    }, [isLoggedIn, refreshProfile]),
+  );
 
   const combinedList = useMemo(() => {
     const items: ListItem[] = [];
@@ -380,27 +277,8 @@ const FriendsScreen: React.FC = () => {
         style={styles.bgImage}
         resizeMode="contain"
       />
-      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-        <View style={styles.titleRow}>
-          <TouchableOpacity
-            style={styles.homeButton}
-            onPress={() => navigation.navigate('Home', {})}
-          >
-            <Image
-              source={require('../../assets/images/Home.png')}
-              style={styles.homeIcon}
-              resizeMode="contain"
-            />
-          </TouchableOpacity>
-          <Text style={styles.title}>Friends</Text>
-          <View style={{ flex: 1 }} />
-          <ProfileIcon
-            uri={profile?.picture}
-            size={36}
-            onPress={() => navigation.navigate('Account')}
-          />
-        </View>
-
+      <TabHeader title="Friends" icon={<FriendsIcon size={20} color={colors.brandPink} />} />
+      <View style={styles.headerExtras}>
         {/* Filter chips + search toggle */}
         <View style={styles.chipRow}>
           {searchExpanded ? (
@@ -569,6 +447,21 @@ const FriendsScreen: React.FC = () => {
               }
             : undefined
         }
+        onMessage={
+          selectedContact?.pubkey
+            ? () => {
+                const c = selectedContact;
+                setProfileSheetVisible(false);
+                setSelectedContact(null);
+                navigation.navigate('Conversation', {
+                  pubkey: c.pubkey!,
+                  name: c.name,
+                  picture: c.picture,
+                  lightningAddress: c.lightningAddress,
+                });
+              }
+            : undefined
+        }
         onSetLightningAddress={
           selectedContact?.source === 'contacts'
             ? async (address: string) => {
@@ -600,6 +493,7 @@ const FriendsScreen: React.FC = () => {
         initialAddress={zapTarget?.lightningAddress ?? undefined}
         initialPicture={zapTarget?.picture ?? undefined}
         recipientPubkey={zapTarget?.pubkey ?? undefined}
+        recipientName={zapTarget?.name ?? undefined}
       />
     </View>
   );

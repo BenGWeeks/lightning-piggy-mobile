@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nwcService from '../services/nwcService';
 import * as nostrService from '../services/nostrService';
@@ -14,7 +15,22 @@ import {
   WalletState,
   WalletTransaction,
   ZapCounterpartyInfo,
+  walletLabel,
 } from '../types/wallet';
+
+export interface IncomingPayment {
+  walletId: string;
+  amountSats: number;
+  // Timestamp; also serves as a stable React key for the overlay so a
+  // second payment with the same amount to the same wallet still
+  // re-mounts the animation.
+  at: number;
+  // Set when detection came via a known invoice hash (expectPayment
+  // path); null when it came via balance-diff (e.g. lightning-address
+  // receive). Consumers can use this to distinguish "exactly this
+  // invoice settled" from "something credited the wallet".
+  paymentHash: string | null;
+}
 
 const USER_NAME_KEY = 'user_display_name';
 const CURRENCY_KEY = 'user_fiat_currency';
@@ -111,6 +127,41 @@ interface WalletContextType {
   // On-chain actions
   getReceiveAddress: (walletId: string) => Promise<string>;
 
+  // Incoming payment event bus. Set whenever any connected wallet's
+  // balance goes UP; consumed by the app-root PaymentProgressOverlay
+  // so the celebration appears regardless of which screen is active.
+  lastIncomingPayment: IncomingPayment | null;
+  clearLastIncomingPayment: () => void;
+
+  /**
+   * Kick off aggressive 1 s polling for a specific NWC invoice for up
+   * to `durationMs` (default 3 min). Called by ReceiveSheet when an
+   * invoice is generated — the poll lives in the context so it survives
+   * the sheet closing (user can generate an invoice, close the sheet,
+   * wander into Friends, and still get the confetti pop).
+   *
+   * **Replacement semantics:** subsequent calls replace any in-flight
+   * expectation (only one tracked at a time). This is safe because the
+   * balance-diff detector still runs independently — so if invoice A's
+   * expectation is replaced by invoice B before A settles, A's eventual
+   * balance increment will *still* fire the overlay via the diff path,
+   * just with worst-case 30 s latency (baseline poll) instead of 1 s.
+   *
+   * When `expectedAmountSats` is provided and the lookup reports
+   * `paid: true`, the overlay uses that exact amount rather than the
+   * balance-delta heuristic. This matters when two invoices settle
+   * between polls: the delta would report the combined total, the
+   * explicit amount reports what *this* invoice was for.
+   *
+   * Stops early on detected settlement or after the duration elapses.
+   */
+  expectPayment: (
+    walletId: string,
+    paymentHash: string,
+    expectedAmountSats?: number,
+    durationMs?: number,
+  ) => void;
+
   // Legacy compatibility
   isConnected: boolean;
   balance: number | null;
@@ -128,7 +179,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [currency, setCurrencyState] = useState<FiatCurrency>('USD');
   const [btcPrice, setBtcPrice] = useState<number | null>(null);
   const [lightningAddress, setLightningAddressState] = useState<string | null>(null);
+  const [lastIncomingPayment, setLastIncomingPayment] = useState<IncomingPayment | null>(null);
   const priceInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Per-wallet baseline balances. Used to decide whether a balance
+  // change is an incoming payment (increment) or the local consequence
+  // of a send / send-like flow (decrement). First observation of a
+  // wallet seeds its baseline silently — we don't fire for the initial
+  // balance we happen to observe.
+  const paymentBaselinesRef = useRef<Map<string, number>>(new Map());
 
   // Derived state
   const activeWallet = wallets.find((w) => w.id === activeWalletId) ?? null;
@@ -664,7 +722,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const fetchTransactionsForWallet = useCallback(
     async (walletId: string) => {
-      const wallet = wallets.find((w) => w.id === walletId);
+      // Read from walletsRef, not the closure's captured `wallets`: this
+      // callback is fired-and-forgotten by SendSheet after pay-success,
+      // so by the time the awaited setTimeout resolves, the closure's
+      // `wallets` snapshot is already stale and `find()` returns the old
+      // wallet — or undefined after a removal — and we silently bail.
+      // See #123.
+      const wallet = walletsRef.current.find((w) => w.id === walletId);
       if (!wallet) return;
 
       try {
@@ -688,8 +752,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           const raw = await nwcService.listTransactions(walletId);
           // Preserve any previously resolved zap sender info so a refresh
           // doesn't re-trigger relay lookups for transactions we've already
-          // attributed.
-          const existing = wallets.find((w) => w.id === walletId)?.transactions ?? [];
+          // attributed. Also preserves optimistic counterparty entries
+          // written at pay-time (see SendSheet) so the zap card doesn't
+          // flicker out when the LNbits refresh lands.
+          const existing = walletsRef.current.find((w) => w.id === walletId)?.transactions ?? [];
           const counterpartyByHash = new Map<string, WalletTransaction['zapCounterparty']>();
           for (const prev of existing) {
             if (prev.paymentHash && prev.zapCounterparty !== undefined) {
@@ -722,6 +788,28 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               typeof tx.fees_paid === 'number' ? Math.round(tx.fees_paid / 1000) : undefined,
             zapCounterparty: tx.payment_hash ? counterpartyByHash.get(tx.payment_hash) : undefined,
           }));
+          // Preserve optimistic rows that SendSheet inserted at pay-time but
+          // LNbits hasn't flushed into its own ledger yet. Without this the
+          // freshly-sent zap would disappear from the conversation thread on
+          // the very next refresh, then reappear a second or two later when
+          // LNbits catches up. Only rows marked `optimistic` are preserved —
+          // the matching uses `paymentHash + type` because a self-pay produces
+          // both an incoming and an outgoing leg with the same hash; keying on
+          // hash alone would drop our optimistic outgoing leg as soon as the
+          // incoming leg came back from the server. The `optimistic` flag also
+          // scopes preservation to newly-inserted rows, so older historical
+          // txs that fall off the listTransactions window aren't regrown.
+          const returnedKeys = new Set(
+            txs.filter((t) => !!t.paymentHash).map((t) => `${t.type}:${t.paymentHash}`),
+          );
+          const stillPending = existing.filter(
+            (t) => t.optimistic && t.paymentHash && !returnedKeys.has(`${t.type}:${t.paymentHash}`),
+          );
+          if (stillPending.length > 0) {
+            txs = [...stillPending, ...txs].sort(
+              (a, b) => (b.settled_at ?? b.created_at ?? 0) - (a.settled_at ?? a.created_at ?? 0),
+            );
+          }
         }
         updateWalletInState(walletId, { transactions: txs });
 
@@ -737,7 +825,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         console.warn(`fetchTransactions failed for ${walletId}:`, error);
       }
     },
-    [wallets, updateWalletInState],
+    // `walletsRef` is stable, so we don't need `wallets` in the deps. Keeping
+    // the list short means callers that capture this function (e.g. SendSheet's
+    // post-pay refresh IIFE) hold onto a stable reference across renders.
+    [updateWalletInState],
   );
 
   /**
@@ -1135,6 +1226,271 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return onchainService.getNextReceiveAddress(walletId);
   }, []);
 
+  const clearLastIncomingPayment = useCallback(() => setLastIncomingPayment(null), []);
+
+  // In-flight "I'm expecting a payment on this invoice" poll state.
+  // Only one at a time — a new expectPayment() replaces the previous.
+  // The balance-diff detector still runs independently, so even if this
+  // poll is replaced before the first invoice settles, the eventual
+  // balance increment will still fire the overlay.
+  const expectedPaymentRef = useRef<{
+    walletId: string;
+    paymentHash: string;
+    expectedAmountSats: number | null;
+    interval: ReturnType<typeof setInterval>;
+    timeout: ReturnType<typeof setTimeout>;
+    // Guards against pile-up on slow backends: if tick N hasn't
+    // completed by the time tick N+1 fires, we skip N+1.
+    inFlight: boolean;
+  } | null>(null);
+
+  const stopExpectedPayment = useCallback(() => {
+    const current = expectedPaymentRef.current;
+    if (!current) return;
+    clearInterval(current.interval);
+    clearTimeout(current.timeout);
+    expectedPaymentRef.current = null;
+  }, []);
+
+  const expectPayment = useCallback(
+    (
+      walletId: string,
+      paymentHash: string,
+      expectedAmountSats?: number,
+      durationMs: number = 3 * 60 * 1000,
+    ) => {
+      // Replace any previous expectation — we only track one at a time.
+      // The balance-diff detector still catches the displaced invoice
+      // when it settles (just on a slower cadence), so we never drop
+      // detection entirely; see the expectPayment JSDoc in the context
+      // interface above.
+      stopExpectedPayment();
+
+      const tick = async () => {
+        const current = expectedPaymentRef.current;
+        // Pile-up guard: if the previous tick is still in flight (slow
+        // NWC backend, see #133), skip this interval firing entirely
+        // rather than stacking N concurrent requests.
+        if (!current || current.inFlight) return;
+        current.inFlight = true;
+        try {
+          const [lookupResult] = await Promise.allSettled([
+            nwcService.lookupInvoice(walletId, paymentHash),
+            // The balance refresh feeds the generic balance-diff
+            // detector as a fallback; run it every tick so a flaky
+            // lookup_invoice path still settles detection.
+            (async () => {
+              const b = await nwcService.getBalance(walletId);
+              if (b !== null) updateWalletInState(walletId, { balance: b });
+            })(),
+          ]);
+          if (
+            lookupResult.status === 'fulfilled' &&
+            lookupResult.value?.paid &&
+            expectedPaymentRef.current?.paymentHash === paymentHash
+          ) {
+            if (__DEV__)
+              console.log(
+                `[Wallet] expected invoice paid (${paymentHash.slice(0, 12)}…) — stopping poll`,
+              );
+            // Fire with the *known* invoice amount rather than the
+            // balance delta. Two invoices settling between polls would
+            // show a combined delta on the generic path; the explicit
+            // amount is always correct.
+            if (expectedAmountSats !== undefined && expectedAmountSats > 0) {
+              // Advance the balance-diff baseline to the current balance
+              // so the /same/ settle doesn't also fire via the diff path.
+              const currentBalance = walletsRef.current.find((w) => w.id === walletId)?.balance;
+              if (currentBalance !== null && currentBalance !== undefined) {
+                paymentBaselinesRef.current.set(walletId, currentBalance);
+              }
+              setLastIncomingPayment({
+                walletId,
+                amountSats: expectedAmountSats,
+                at: Date.now(),
+                paymentHash,
+              });
+            }
+            stopExpectedPayment();
+          }
+        } finally {
+          const still = expectedPaymentRef.current;
+          if (still) still.inFlight = false;
+        }
+      };
+
+      const interval = setInterval(tick, 1000);
+      const timeout = setTimeout(() => {
+        // Only clear if THIS expectation is still current; a newer one
+        // may have replaced it already.
+        if (expectedPaymentRef.current?.interval === interval) {
+          if (__DEV__)
+            console.log(
+              `[Wallet] expected payment poll window expired (${paymentHash.slice(0, 12)}…)`,
+            );
+          stopExpectedPayment();
+        }
+      }, durationMs);
+
+      expectedPaymentRef.current = {
+        walletId,
+        paymentHash,
+        expectedAmountSats: expectedAmountSats ?? null,
+        interval,
+        timeout,
+        inFlight: false,
+      };
+      if (__DEV__)
+        console.log(
+          `[Wallet] expecting payment on ${paymentHash.slice(0, 12)}… (${Math.round(durationMs / 1000)} s window, amount=${expectedAmountSats ?? '?'})`,
+        );
+    },
+    [stopExpectedPayment, updateWalletInState],
+  );
+
+  // Tear down any outstanding expectation when the context unmounts —
+  // leaked intervals kept polling NWC after a logout / hot-reload.
+  useEffect(() => {
+    return () => stopExpectedPayment();
+  }, [stopExpectedPayment]);
+
+  // When an incoming payment is detected, also pull the latest
+  // transaction list for that wallet so the Home / Transactions screens
+  // show the new tx immediately — not on the user's next manual refresh.
+  // Separate effect so it reads `fetchTransactionsForWallet` after it's
+  // defined below without the closure-ordering dance.
+  useEffect(() => {
+    if (!lastIncomingPayment) return;
+    fetchTransactionsForWallet(lastIncomingPayment.walletId).catch(() => {
+      // Non-fatal: next organic refresh will pick the tx up.
+    });
+    // Intentionally only fire on `lastIncomingPayment` changes; the
+    // callback identity is stable enough across renders that adding it
+    // would double-fetch on unrelated renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastIncomingPayment]);
+
+  // Incoming-payment detector. Watches every wallet's balance: the first
+  // time we see a wallet, we record its balance silently as a baseline;
+  // any subsequent increase fires a `lastIncomingPayment` event that the
+  // app-root overlay consumes. Decreases simply re-baseline (a send is
+  // not a "received payment" event). Because this lives in the context,
+  // the overlay pops regardless of which screen the user is on when
+  // money lands — ReceiveSheet being open is no longer required.
+  useEffect(() => {
+    const baselines = paymentBaselinesRef.current;
+    const liveIds = new Set(wallets.map((w) => w.id));
+
+    // Garbage-collect baselines for wallets that have been removed.
+    // Without this the Map grows monotonically (e.g. user adds and
+    // removes wallets repeatedly during onboarding / debugging).
+    for (const id of baselines.keys()) {
+      if (!liveIds.has(id)) baselines.delete(id);
+    }
+
+    for (const wallet of wallets) {
+      const bal = wallet.balance;
+      if (bal === null || bal === undefined) continue;
+      const prev = baselines.get(wallet.id);
+      if (prev === undefined) {
+        baselines.set(wallet.id, bal);
+        continue;
+      }
+      if (bal > prev) {
+        const delta = bal - prev;
+        baselines.set(wallet.id, bal);
+        if (__DEV__)
+          console.log(
+            `[Wallet] incoming payment detected: +${delta} sats on ${walletLabel(wallet)} (${prev} → ${bal})`,
+          );
+        setLastIncomingPayment({
+          walletId: wallet.id,
+          amountSats: delta,
+          at: Date.now(),
+          // Balance-diff path doesn't know which invoice settled — only
+          // expectPayment can attribute by hash. Lightning-address /
+          // multi-invoice receives land here.
+          paymentHash: null,
+        });
+      } else if (bal < prev) {
+        // Outgoing payment or reorg adjustment — silently rebase.
+        baselines.set(wallet.id, bal);
+      }
+    }
+  }, [wallets]);
+
+  // Keep the active NWC wallet's balance in rough sync so the global
+  // overlay pops for *any* incoming payment — not just ones the user
+  // explicitly asked us to watch via expectPayment. Covers:
+  //
+  //   - app returns to foreground → one-shot refresh to catch anything
+  //     that arrived while backgrounded.
+  //   - 30 s slow poll while the app is foregrounded → catches
+  //     lightning-address payments that land without an in-app
+  //     invoice-generation trigger. Worst-case latency ~30 s, which
+  //     is acceptable for casual address receives; the expectPayment
+  //     fast poll (1 s for 3 min) takes over when the user is
+  //     *actively* waiting on a specific invoice.
+  //
+  // On-chain is skipped — BDK sync is expensive and not safe to run
+  // every 30 s; #134 tracks the on-chain variant of this coverage.
+  // True background / app-closed delivery needs OS push (#45).
+  // Track the active wallet's connection state as an explicit dep so
+  // the poll starts/stops when a wallet reconnects without the active
+  // id changing. (Previous version only re-ran on `activeWalletId`
+  // change and could leave the poll running against a disconnected
+  // wallet — flagged in PR #135 review.) We still avoid putting the
+  // full `wallets` array in deps, which would thrash on every balance
+  // tick.
+  const activeWalletConnected =
+    activeWallet?.walletType !== 'onchain' && activeWallet?.isConnected === true;
+
+  useEffect(() => {
+    if (!activeWalletId || !activeWalletConnected) return;
+
+    const refreshOnce = () => {
+      // Bail if the wallet has since disconnected — we read through
+      // `walletsRef` rather than the closure so this is current.
+      const current = walletsRef.current.find((w) => w.id === activeWalletId);
+      if (!current || !current.isConnected || current.walletType === 'onchain') return;
+      nwcService
+        .getBalance(activeWalletId)
+        .then((b) => {
+          if (b !== null) updateWalletInState(activeWalletId, { balance: b });
+        })
+        .catch(() => {});
+    };
+
+    let interval: ReturnType<typeof setInterval> | null = null;
+    const startPoll = () => {
+      if (interval) return;
+      interval = setInterval(refreshOnce, 30000);
+    };
+    const stopPoll = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+
+    if (AppState.currentState === 'active') {
+      refreshOnce();
+      startPoll();
+    }
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') {
+        refreshOnce();
+        startPoll();
+      } else {
+        stopPoll();
+      }
+    });
+    return () => {
+      stopPoll();
+      sub.remove();
+    };
+  }, [activeWalletId, activeWalletConnected, updateWalletInState]);
+
   return (
     <WalletContext.Provider
       value={{
@@ -1168,6 +1524,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         fetchTransactionsForWallet,
         addPendingTransaction,
         getReceiveAddress,
+        lastIncomingPayment,
+        clearLastIncomingPayment,
+        expectPayment,
         isConnected,
         balance,
         walletAlias,

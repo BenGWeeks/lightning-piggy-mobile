@@ -17,6 +17,7 @@ import {
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Clipboard from 'expo-clipboard';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
 import { CardTheme, WalletType } from '../types/wallet';
@@ -25,6 +26,7 @@ import { MiniWalletCard } from './WalletCard';
 import { validateNwcUrl } from '../services/nwcService';
 import { validateOnchainImport } from '../services/onchainService';
 import { LightningIcon, ChainIcon } from './icons/ArrowIcons';
+import { ClipboardPaste, QrCode } from 'lucide-react-native';
 
 interface Props {
   visible: boolean;
@@ -373,9 +375,32 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                   testID="nwc-url-input"
                   accessibilityLabel="NWC connection URL input"
                 />
-                <TouchableOpacity style={styles.secondaryButton} onPress={handleScan}>
-                  <Text style={styles.secondaryButtonText}>Scan QR Code</Text>
-                </TouchableOpacity>
+                <View style={styles.secondaryButtonRow}>
+                  <TouchableOpacity
+                    style={[styles.secondaryButton, styles.secondaryButtonHalf]}
+                    onPress={handleScan}
+                    accessibilityLabel="Scan QR Code"
+                    testID="wizard-nwc-scan"
+                  >
+                    <QrCode size={18} color={colors.textBody} strokeWidth={2} />
+                    <Text style={styles.secondaryButtonText}>Scan QR</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.secondaryButton, styles.secondaryButtonHalf]}
+                    onPress={async () => {
+                      const text = await Clipboard.getStringAsync();
+                      if (text) {
+                        setNwcUrl(text.trim());
+                        setError(null);
+                      }
+                    }}
+                    accessibilityLabel="Paste NWC URL from clipboard"
+                    testID="wizard-nwc-paste"
+                  >
+                    <ClipboardPaste size={18} color={colors.textBody} strokeWidth={2} />
+                    <Text style={styles.secondaryButtonText}>Paste</Text>
+                  </TouchableOpacity>
+                </View>
                 {error && <Text style={styles.errorText}>{error}</Text>}
                 <View style={styles.buttonRow}>
                   <TouchableOpacity
@@ -390,6 +415,8 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                   <TouchableOpacity
                     style={[styles.primaryButton, { flex: 1 }]}
                     onPress={handleUrlNext}
+                    accessibilityLabel="Next — validate NWC URL"
+                    testID="wizard-url-next"
                   >
                     <Text style={styles.primaryButtonText}>Next</Text>
                   </TouchableOpacity>
@@ -681,8 +708,17 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     height: 48,
     borderRadius: 12,
+    flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
+    gap: 8,
+  },
+  secondaryButtonRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  secondaryButtonHalf: {
+    flex: 1,
   },
   secondaryButtonText: {
     color: colors.textBody,
