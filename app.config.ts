@@ -91,6 +91,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     eas: {
       projectId: 'b01d6b21-2f80-40af-b58c-c40e4302fa65',
     },
+    // GIPHY API key for the conversation GIF picker. Build-time only —
+    // picker silently omits itself from the Attach menu when the key is
+    // absent. See `src/services/giphyService.ts` and README for setup.
+    giphyApiKey: process.env.EXPO_PUBLIC_GIPHY_API_KEY ?? null,
   },
   owner: 'bengweeks',
 });
