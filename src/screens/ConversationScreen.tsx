@@ -1245,14 +1245,16 @@ const ConversationScreen: React.FC = () => {
         )}
 
         {!atBottom && !loading ? (
-          <TouchableOpacity
-            style={styles.scrollToBottomFab}
-            onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
-            accessibilityLabel="Scroll to most recent message"
-            testID="conversation-scroll-to-bottom"
-          >
-            <ArrowDown size={20} color={colors.white} />
-          </TouchableOpacity>
+          <View style={styles.scrollToBottomWrap} pointerEvents="box-none">
+            <TouchableOpacity
+              style={styles.scrollToBottomFab}
+              onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
+              accessibilityLabel="Scroll to most recent message"
+              testID="conversation-scroll-to-bottom"
+            >
+              <ArrowDown size={20} color={colors.white} />
+            </TouchableOpacity>
+          </View>
         ) : null}
 
         <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 8) }]}>
@@ -1516,17 +1518,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     gap: 12,
   },
-  scrollToBottomFab: {
+  // Wrapper is a centered lane hovering above the composer; the FAB
+  // sits inside it so we can horizontally centre it without needing
+  // to know the FAB's width. `pointerEvents="box-none"` lets taps
+  // outside the button pass through to the message list below.
+  scrollToBottomWrap: {
     position: 'absolute',
-    right: 16,
-    // Sits just above the composer. The composer is ~60 px tall and
-    // floats at the bottom; 76 lifts the FAB clear of it without
-    // overlapping the last message bubble.
-    bottom: 76,
+    left: 0,
+    right: 0,
+    // Lifts the FAB clear of the ~60 px composer by a comfortable gap
+    // so it doesn't visually crowd the message input.
+    bottom: 92,
+    alignItems: 'center',
+  },
+  scrollToBottomFab: {
     width: 40,
     height: 40,
     borderRadius: 20,
     backgroundColor: colors.brandPink,
+    // White ring keeps the FAB visible when it overlaps a pink bubble
+    // — otherwise the pink-on-pink blends into an invisible blob.
+    borderWidth: 2,
+    borderColor: colors.white,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
