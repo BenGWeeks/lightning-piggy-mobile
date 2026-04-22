@@ -303,7 +303,7 @@ USB-C vs Lightning iPhones behave identically here — `usbmuxd` on Linux handle
 
 * Enrolled in the Apple Developer Programme (individual or organisation — both support ad-hoc).
 * Preview bundle ID registered at developer.apple.com (see *One-time Apple Developer Portal setup* above).
-* Tester's iPhone UDID registered via `eas device:create` and the tester has confirmed the profile on their device.
+* Tester's iPhone UDID registered via `npx -p eas-cli eas device:create` and the tester has confirmed the profile on their device.
 * `libimobiledevice` tooling installed on Linux:
 +
 [source,bash]
