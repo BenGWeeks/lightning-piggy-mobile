@@ -252,6 +252,18 @@ Symptoms reproduce even after: granting `ACCESS_FINE_LOCATION` (`pm grant com.li
 *Fix:* set `enableDynamicSizing={false}` explicitly on any `BottomSheetModal` that has fixed `snapPoints` (percent or absolute). Without dynamic sizing, the sheet locks to its snap, ignores content measurement, and the keyboard-open behaviour falls back to `keyboardBehavior` as intended. Confirmed on `FriendPickerSheet.tsx` 2026-04-21 — flipping `enableDynamicSizing={false}` fully resolved the collapse. +
 *Also check:* any `BottomSheet` subtree that wraps a scrollable list inside a `View` (rather than `BottomSheetScrollView`) is likely to have the same footgun waiting; add the explicit `enableDynamicSizing={false}` when the PR migrates to v5 or when copying v4 patterns forward.
 
+| Bottom sheet still looks / behaves like it has the old `snapPoints` after editing the source
+| Metro fast-refresh reliably reloads function bodies and JSX children, but **removing a top-level prop from a `<BottomSheetModal>` (e.g. deleting `snapPoints={snapPoints}`)** sometimes leaves the sheet rendering with the prior prop still in effect — the sheet opens at the old 85%/75% snap and is still user-draggable even though the source no longer sets a snap. Common trap when applying the uniform snap policy across sheets (see `ReceiveSheet.tsx`, `TransferSheet.tsx`, etc). +
+*Fix:* cold-restart the app so Metro serves a fresh bundle: +
+[source,bash]
+----
+adb shell am force-stop com.lightningpiggy.app.dev
+adb shell monkey -p com.lightningpiggy.app.dev -c android.intent.category.LAUNCHER 1
+----
+A Metro `r`-`r` reload from the dev menu usually also works; `--clear` is only needed if the transformer cache is also stale (see the "red-screen after merge" entry). Confirmed 2026-04-22 during the uniform-snap-policy sweep: the 10 sheets edited in one pass looked unchanged until a cold restart. +
+*Why it happens:* Fast-refresh preserves component state by re-executing the function body on top of the live fiber. When a prop is *added* or *removed*, the JSX tree is re-reconciled and the prop diff is re-applied; but for `BottomSheetModal`'s imperative internals (the gorhom animated position, `useMemo`'d layout values held on the fiber), the stale value can persist on the existing instance until the modal is unmounted and re-mounted. Cold restart guarantees unmount.
+Similar quick-check before blaming the code: `grep -n '<property>' src/components/<Sheet>.tsx` to confirm the edit actually landed, then restart.
+
 | Bottom-sheet inner buttons work when tapped manually but Maestro `tapOn id:...` reports COMPLETED without firing `onPress`
 | Symptom: Maestro's `commands.json` confirms the target element was found at correct bounds with `clickable=true, enabled=true`, but the handler never runs (no `console.log` in Metro or logcat) and the UI doesn't change. Manual human taps on the same button work every time. +
 *Root cause:* a `TouchableWithoutFeedback onPress={Keyboard.dismiss}` wrapper around the sheet content swallows the UiAutomator accessibility click before it reaches the nested testID-bearing `TouchableOpacity`/`Pressable`. Real finger taps propagate through differently because they use the native touch pipeline, but UiAutomator / Maestro dispatches via accessibility events which the outer wrapper eats. +

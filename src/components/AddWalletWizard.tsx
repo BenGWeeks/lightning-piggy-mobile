@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -52,7 +52,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   const scrollRef = useRef<any>(null);
-  const snapPoints = useMemo(() => ['90%'], []);
+  // No explicit snapPoints — content-height only, not user-draggable.
 
   useEffect(() => {
     AsyncStorage.getItem('dev_mode').then((v) => setDevMode(v === 'true'));
@@ -264,7 +264,6 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   return (
     <BottomSheetModal
       ref={bottomSheetRef}
-      snapPoints={snapPoints}
       enablePanDownToClose
       onChange={handleSheetChange}
       backdropComponent={renderBackdrop}
