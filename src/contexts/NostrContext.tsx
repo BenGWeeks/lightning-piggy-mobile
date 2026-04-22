@@ -748,10 +748,29 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           await nostrService.publishSignedEvent(signed, targetRelays);
         }
 
-        // Refresh profile to pick up changes
-        const readRelays = getReadRelays();
-        const updated = await nostrService.fetchProfile(pubkey, readRelays);
-        if (updated) setProfile(updated);
+        // We just signed and published this kind-0, so the client already
+        // has the authoritative new profile. Shortcut the relay round-trip
+        // by updating local state + the 24h own-profile cache in-place,
+        // otherwise the top-right profile icon keeps the pre-publish
+        // avatar/name until the next force-refresh (up to 24h — see #148).
+        const updatedProfile: NostrProfile = {
+          pubkey,
+          npub: nip19.npubEncode(pubkey),
+          name: profileData.name ?? null,
+          displayName: profileData.display_name ?? null,
+          picture: profileData.picture ?? null,
+          banner: profileData.banner ?? null,
+          about: profileData.about ?? null,
+          lud16: profileData.lud16 ?? null,
+          nip05: profileData.nip05 ?? null,
+        };
+        setProfile(updatedProfile);
+        InteractionManager.runAfterInteractions(() => {
+          AsyncStorage.setItem(OWN_PROFILE_CACHE_KEY, JSON.stringify(updatedProfile)).catch(
+            () => {},
+          );
+          AsyncStorage.setItem(OWN_PROFILE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+        });
 
         return true;
       } catch (error) {
@@ -759,7 +778,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         return false;
       }
     },
-    [pubkey, isLoggedIn, signerType, relays, getReadRelays],
+    [pubkey, isLoggedIn, signerType, relays],
   );
 
   const followContact = useCallback(

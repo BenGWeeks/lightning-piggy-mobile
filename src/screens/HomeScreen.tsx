@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
@@ -38,7 +38,7 @@ const HomeScreen: React.FC = () => {
     btcPrice,
     currency,
   } = useWallet();
-  const { profile } = useNostr();
+  const { isLoggedIn, profile, refreshProfile } = useNostr();
   const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList, 'Home'>>();
   const route = useRoute<RouteProp<MainTabParamList, 'Home'>>();
   const insets = useSafeAreaInsets();
@@ -53,6 +53,15 @@ const HomeScreen: React.FC = () => {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [settingsWalletId, setSettingsWalletId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Force-refresh the own-profile kind-0 on focus so the top-right
+  // profile icon / greeting picks up external renames (e.g. via Amber or
+  // another client) without waiting for the 24h cache to expire. See #148.
+  useFocusEffect(
+    useCallback(() => {
+      if (isLoggedIn) refreshProfile();
+    }, [isLoggedIn, refreshProfile]),
+  );
 
   // Handle sendToAddress from navigation params (e.g., from Friends tab zap)
   useEffect(() => {
