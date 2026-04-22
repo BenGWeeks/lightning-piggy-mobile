@@ -1240,6 +1240,20 @@ const ConversationScreen: React.FC = () => {
               // re-render for the FAB's appearance.
               setAtBottom((prev) => (prev !== isNear ? isNear : prev));
             }}
+            // Make sure the final resting offset — which onScroll can
+            // miss under throttling — always updates the FAB. These
+            // fire once per gesture, so they don't interfere with
+            // RefreshControl's overscroll detection.
+            onScrollEndDrag={(e) => {
+              const isNear = e.nativeEvent.contentOffset.y < 80;
+              nearBottomRef.current = isNear;
+              setAtBottom(isNear);
+            }}
+            onMomentumScrollEnd={(e) => {
+              const isNear = e.nativeEvent.contentOffset.y < 80;
+              nearBottomRef.current = isNear;
+              setAtBottom(isNear);
+            }}
             scrollEventThrottle={100}
           />
         )}
@@ -1563,7 +1577,11 @@ const styles = StyleSheet.create({
   bubble: {
     maxWidth: '80%',
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingTop: 8,
+    // Match the 4 px bottom gap used by every other bubble/card so
+    // the time sits the same distance from the bubble edge regardless
+    // of message type.
+    paddingBottom: 4,
     borderRadius: 16,
   },
   bubbleThem: {
@@ -1963,7 +1981,10 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: colors.textSupplementary,
     alignSelf: 'flex-end',
-    paddingHorizontal: 8,
+    // Align with the card-timestamp right inset used by invoice /
+    // contact / location / zap so every attachment type sits at the
+    // same distance from its card's right edge.
+    paddingHorizontal: 14,
     paddingVertical: 4,
   },
   gifTimeMe: {
@@ -2063,7 +2084,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: colors.textSupplementary,
     alignSelf: 'flex-end',
-    paddingHorizontal: 8,
+    paddingHorizontal: 14,
     paddingVertical: 4,
   },
   imageBubbleTimeMe: {
