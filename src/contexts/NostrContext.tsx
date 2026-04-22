@@ -899,36 +899,46 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       const entries: DmInboxEntry[] = [];
 
-      // NIP-04: decrypt per-event. Amber path works but each call prompts the
-      // signer — acceptable for a handful of inbox rows, but a large inbox
-      // will be slow. Not yet optimised.
+      // NIP-04: for the nsec signer we decrypt in place so rows show a real
+      // message preview. For Amber we stay envelope-only — per-event
+      // nip04Decrypt round-trips through the external signer, and on every
+      // tab focus that would fan out up to ~500 ContentResolver calls (or
+      // far worse, 500 approval dialogs if the user hasn't granted blanket
+      // permission). Envelope data is enough to show the row; the actual
+      // message is decrypted lazily when the user opens the conversation
+      // via the existing ConversationScreen.fetchConversation path.
+      const AMBER_ENVELOPE_PLACEHOLDER = '🔒 Encrypted message';
       for (const ev of kind4) {
         const fromMe = ev.pubkey === pubkey;
         const partnerPubkey = fromMe ? (ev.tags.find((t) => t[0] === 'p')?.[1] ?? null) : ev.pubkey;
         if (!partnerPubkey || !/^[0-9a-f]{64}$/.test(partnerPubkey)) continue;
-        try {
-          let plaintext: string | null = null;
-          if (signerType === 'nsec') {
+        if (signerType === 'nsec') {
+          try {
             const secretKey = await getSecretKey();
             if (!secretKey) continue;
-            plaintext = await nostrService.decryptNip04WithSecret(
+            const plaintext = await nostrService.decryptNip04WithSecret(
               secretKey,
               partnerPubkey,
               ev.content,
             );
-          } else if (signerType === 'amber') {
-            plaintext = await amberService.requestNip04Decrypt(ev.content, partnerPubkey, pubkey);
+            entries.push({
+              partnerPubkey,
+              fromMe,
+              createdAt: ev.created_at,
+              text: plaintext,
+              wireKind: 4,
+            });
+          } catch (error) {
+            if (__DEV__) console.warn('[Nostr] NIP-04 inbox decrypt failed:', error);
           }
-          if (plaintext === null) continue;
+        } else if (signerType === 'amber') {
           entries.push({
             partnerPubkey,
             fromMe,
             createdAt: ev.created_at,
-            text: plaintext,
+            text: AMBER_ENVELOPE_PLACEHOLDER,
             wireKind: 4,
           });
-        } catch (error) {
-          if (__DEV__) console.warn('[Nostr] NIP-04 inbox decrypt failed:', error);
         }
       }
 
