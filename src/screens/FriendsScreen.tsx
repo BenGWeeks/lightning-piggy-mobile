@@ -17,7 +17,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr } from '../contexts/NostrContext';
 import TabHeader from '../components/TabHeader';
 import { colors } from '../styles/theme';
-import ContactListItem from '../components/ContactListItem';
+import ContactListItem, { CONTACT_LIST_ITEM_HEIGHT } from '../components/ContactListItem';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import AddFriendSheet from '../components/AddFriendSheet';
 import SendSheet from '../components/SendSheet';
@@ -174,9 +174,10 @@ const FriendsScreen: React.FC = () => {
     return Array.from(letters).sort();
   }, [combinedList]);
 
-  // Row height is fixed by ContactListItem styles: 44px avatar + 14px*2
-  // vertical padding. We use this to compute a deterministic scroll
-  // offset for alphabet taps — scrollToIndex could silently no-op on
+  // Row height comes from ContactListItem (44 avatar + 14×2 padding).
+  // Imported rather than duplicated so a future avatar-size change only
+  // needs updating in one place. Used below to compute deterministic
+  // alphabet-tap offsets — scrollToIndex could silently no-op on
   // warm-cache devices when the target row hadn't been virtualised yet
   // (see #178). FlashList v2 auto-measures, so there's no size-hint API
   // to give it (overrideItemLayout in v2 only controls column span).
@@ -185,7 +186,7 @@ const FriendsScreen: React.FC = () => {
   // FlashList's contentContainerStyle shifts row 0 down by that amount,
   // so any offset math needs to add it back to land on the right row.
   // If you change styles.listContent.paddingTop, update this too.
-  const ITEM_HEIGHT = 72;
+  const ITEM_HEIGHT = CONTACT_LIST_ITEM_HEIGHT;
   const LIST_PADDING_TOP = 12;
 
   const handleScroll = useCallback(
@@ -441,7 +442,11 @@ const FriendsScreen: React.FC = () => {
                 }
                 contentContainerStyle={styles.listContent}
                 onScroll={handleScroll}
-                scrollEventThrottle={250}
+                // 32ms ≈ 2 frames at 60fps — keeps the alphabet-bar
+                // highlight in sync with fast flings without firing the
+                // handler every frame. The previous 250ms made the
+                // highlight lag visibly on momentum scrolls.
+                scrollEventThrottle={32}
               />
             </Profiler>
           </View>
