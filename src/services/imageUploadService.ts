@@ -30,7 +30,10 @@ export async function stripImageMetadata(uri: string): Promise<{ uri: string; ba
 export async function uploadToNostrBuild(imageUri: string): Promise<string> {
   const filename = imageUri.split('/').pop() || 'image.jpg';
   const match = /\.(\w+)$/.exec(filename);
-  const type = match ? `image/${match[1]}` : 'image/jpeg';
+  // Normalise JPEG variants to the spec-correct image/jpeg — `image/${ext}`
+  // otherwise emits the non-standard `image/jpg` for `.jpg` filenames.
+  const ext = match?.[1]?.toLowerCase();
+  const type = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext ? `image/${ext}` : 'image/jpeg';
 
   const formData = new FormData();
   // React Native FormData accepts {uri, name, type} but TypeScript expects Blob
