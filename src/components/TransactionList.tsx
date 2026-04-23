@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
@@ -20,6 +20,11 @@ import type { RootStackParamList } from '../navigation/types';
 
 interface Props {
   transactions: WalletTransaction[];
+}
+
+export interface TransactionListHandle {
+  /** Reveal the next batch of cached transactions. No-op when all are visible. */
+  loadMore: () => void;
 }
 
 function zapCounterpartyLabel(cp: ZapCounterpartyInfo): string {
@@ -69,7 +74,7 @@ function formatTime(ts: number): string {
   });
 }
 
-const INITIAL_COUNT = 20;
+const BATCH_SIZE = 20;
 
 type ItemRow = { kind: 'tx'; tx: WalletTransaction; key: string };
 type HeaderRow = { kind: 'header'; label: string; key: string };
@@ -87,7 +92,7 @@ function txKey(tx: WalletTransaction, fallbackIndex: number): string {
   return `fb:${tx.type}:${tx.created_at ?? tx.settled_at ?? 'pending'}:${tx.amount}:${fallbackIndex}`;
 }
 
-const TransactionList: React.FC<Props> = ({ transactions }) => {
+const TransactionList = forwardRef<TransactionListHandle, Props>(({ transactions }, ref) => {
   const { btcPrice, currency } = useWallet();
   const { contacts } = useNostr();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -110,12 +115,28 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
     }
     return m;
   }, [contacts]);
-  const [showAll, setShowAll] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(BATCH_SIZE);
   const [detail, setDetail] = useState<TransactionDetailData | null>(null);
   const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
   const [zapContact, setZapContact] = useState<CounterpartyContact | null>(null);
 
-  React.useEffect(() => setShowAll(false), [transactions]);
+  // Reset back to the first batch when the wallet (and therefore the tx list
+  // identity) changes, so swiping wallets starts from the top.
+  React.useEffect(() => setVisibleCount(BATCH_SIZE), [transactions]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      loadMore: () => {
+        setVisibleCount((c) => {
+          const total = transactions.length;
+          if (c >= total) return c;
+          return Math.min(c + BATCH_SIZE, total);
+        });
+      },
+    }),
+    [transactions.length],
+  );
 
   if (transactions.length === 0) {
     return (
@@ -134,8 +155,7 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
     if (!bTime) return 1;
     return bTime - aTime;
   });
-  const visibleTransactions = showAll ? sorted : sorted.slice(0, INITIAL_COUNT);
-  const hasMore = transactions.length > INITIAL_COUNT;
+  const visibleTransactions = sorted.slice(0, visibleCount);
 
   // Flatten into a mixed list of day headers + rows. Pending entries (no
   // timestamp) get a "Pending" header so they still group visually.
@@ -156,7 +176,7 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
   });
 
   return (
-    <View style={styles.list}>
+    <View style={styles.list} testID="transaction-list">
       {rows.map((row) => {
         if (row.kind === 'header') {
           return (
@@ -261,11 +281,6 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
           </TouchableOpacity>
         );
       })}
-      {hasMore && !showAll && (
-        <TouchableOpacity style={styles.showMore} onPress={() => setShowAll(true)}>
-          <Text style={styles.showMoreText}>Show all {transactions.length} transactions</Text>
-        </TouchableOpacity>
-      )}
       <TransactionDetailSheet
         visible={detail !== null}
         tx={detail}
@@ -326,7 +341,9 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
       />
     </View>
   );
-};
+});
+
+TransactionList.displayName = 'TransactionList';
 
 const AVATAR_SIZE = 40;
 
@@ -425,15 +442,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.textSupplementary,
     marginTop: 1,
-  },
-  showMore: {
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  showMoreText: {
-    color: colors.brandPink,
-    fontSize: 14,
-    fontWeight: '600',
   },
   incoming: {
     color: colors.green,

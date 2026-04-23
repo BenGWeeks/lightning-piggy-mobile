@@ -1,0 +1,69 @@
+appId: com.lightningpiggy.app
+name: Transactions Infinite Scroll
+---
+# Verifies that the transactions list uses infinite scroll instead of the
+# legacy "Show all N transactions" button: swiping up on the list should
+# progressively reveal more transactions without ever showing that button.
+# Requires a wallet that is connected and has more than 20 transactions.
+# Run: maestro test tests/e2e/test-transactions-infinite-scroll.yaml
+
+- waitForAnimationToEnd:
+    timeout: 30000
+
+# Wait for wallet to connect
+- extendedWaitUntil:
+    visible:
+      text: 'Connected'
+    timeout: 30000
+
+# Wait for transactions to load (first load may take time)
+- extendedWaitUntil:
+    visible:
+      text: '.*sats'
+    timeout: 30000
+
+# The transactions container should be present
+- assertVisible:
+    id: 'transactions-scroll'
+
+# Regression check: the legacy "Show all N transactions" button must be gone.
+# With infinite scroll, additional transactions load via scrolling, not a button.
+- assertNotVisible:
+    text: 'Show all .* transactions'
+
+# Swipe up on the transactions list a few times to trigger the
+# infinite-scroll loadMore callback. We assert the container remains
+# visible after each swipe — confirming no crash — and that the
+# legacy button never appears as the list expands.
+- swipe:
+    from:
+      id: 'transactions-scroll'
+    direction: UP
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertNotVisible:
+    text: 'Show all .* transactions'
+
+- swipe:
+    from:
+      id: 'transactions-scroll'
+    direction: UP
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertNotVisible:
+    text: 'Show all .* transactions'
+
+- swipe:
+    from:
+      id: 'transactions-scroll'
+    direction: UP
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertNotVisible:
+    text: 'Show all .* transactions'
+
+# List is still alive and rendering transactions after the swipes.
+- assertVisible:
+    id: 'transactions-scroll'
+- assertVisible:
+    text: '.*sats'

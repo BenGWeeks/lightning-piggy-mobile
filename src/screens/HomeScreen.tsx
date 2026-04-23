@@ -7,6 +7,8 @@ import {
   ScrollView,
   RefreshControl,
   ActivityIndicator,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
@@ -18,7 +20,7 @@ import { colors } from '../styles/theme';
 import ReceiveSheet from '../components/ReceiveSheet';
 import SendSheet from '../components/SendSheet';
 import TransferSheet from '../components/TransferSheet';
-import TransactionList from '../components/TransactionList';
+import TransactionList, { TransactionListHandle } from '../components/TransactionList';
 import WalletCarousel from '../components/WalletCarousel';
 import AddWalletWizard from '../components/AddWalletWizard';
 import WalletSettingsSheet from '../components/WalletSettingsSheet';
@@ -26,6 +28,9 @@ import TabHeader from '../components/TabHeader';
 import { ArrowDownIcon, ArrowUpIcon, ArrowLeftRightIcon } from '../components/icons/ArrowIcons';
 import { styles } from '../styles/HomeScreen.styles';
 import type { MainTabParamList } from '../navigation/types';
+
+// How close to the bottom (in px) we trigger a new batch of transactions.
+const INFINITE_SCROLL_THRESHOLD = 200;
 
 const HomeScreen: React.FC = () => {
   const {
@@ -176,6 +181,18 @@ const HomeScreen: React.FC = () => {
     setSettingsWalletId(walletId);
   }, []);
 
+  // Infinite-scroll for the transactions list: when the user scrolls within
+  // INFINITE_SCROLL_THRESHOLD of the bottom, ask TransactionList to reveal
+  // the next batch of cached transactions.
+  const txListRef = useRef<TransactionListHandle>(null);
+  const handleTransactionsScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+    const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
+    if (distanceFromBottom < INFINITE_SCROLL_THRESHOLD) {
+      txListRef.current?.loadMore();
+    }
+  }, []);
+
   const greetingName =
     profile?.displayName?.trim() || profile?.name?.trim() || userName?.trim() || '';
 
@@ -266,6 +283,9 @@ const HomeScreen: React.FC = () => {
         <ScrollView
           style={styles.transactionsContainer}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+          onScroll={handleTransactionsScroll}
+          scrollEventThrottle={100}
+          testID="transactions-scroll"
         >
           {!hasWallets || activeWalletId === null ? (
             <View style={styles.emptyState}>
@@ -278,7 +298,7 @@ const HomeScreen: React.FC = () => {
               <ActivityIndicator size="small" color="#EC008C" />
             </View>
           ) : (
-            <TransactionList transactions={transactions} />
+            <TransactionList ref={txListRef} transactions={transactions} />
           )}
         </ScrollView>
       </View>
