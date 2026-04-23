@@ -174,6 +174,8 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="email-address"
+              testID="wallet-lightning-address-input"
+              accessibilityLabel="Lightning Address"
             />
             <Text style={styles.hintText}>
               LUD-16 address for receiving payments. Usually provided by the NWC connection.
@@ -216,7 +218,12 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
           ))}
         </View>
 
-        <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
+        <TouchableOpacity
+          style={styles.saveButton}
+          onPress={handleSave}
+          testID="wallet-settings-save"
+          accessibilityLabel="Save wallet settings"
+        >
           <Text style={styles.saveButtonText}>Save</Text>
         </TouchableOpacity>
 

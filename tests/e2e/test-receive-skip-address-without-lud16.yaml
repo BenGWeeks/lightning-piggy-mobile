@@ -1,0 +1,25 @@
+appId: com.lightningpiggy.app.dev
+name: Receive skips Address tab when wallet has no Lightning Address
+---
+# Covers #168 / #169. When the selected wallet has no lightningAddress
+# (the NWC URL carries no `lud16=` and the user hasn't set one manually),
+# the Receive sheet must skip the Address mode entirely and land in the
+# amount-entry flow directly — no "Address/Amount" tab bar, no
+# "No lightning address set" placeholder.
+#
+# Assumes a wallet without a Lightning Address is already the active
+# one. Pair with test-add-nwc-wallet.yaml using an NWC URL that has no
+# `lud16` query param, or clear the address via Wallet Settings first.
+
+- waitForAnimationToEnd: { timeout: 10000 }
+
+- tapOn: { id: 'tab-home' }
+- waitForAnimationToEnd: { timeout: 3000 }
+
+- tapOn: { id: 'btn-receive' }
+- waitForAnimationToEnd: { timeout: 3000 }
+
+# The Address tab must NOT render — we expect the amount-entry CTA to be
+# the only path out of the receive main view.
+- assertNotVisible: { id: 'receive-tab-address' }
+- assertVisible: { id: 'receive-enter-custom-amount' }

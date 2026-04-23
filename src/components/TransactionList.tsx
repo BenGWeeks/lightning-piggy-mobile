@@ -110,6 +110,30 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
     }
     return m;
   }, [contacts]);
+  // Non-zap transactions (plain outgoing pays to a friend's lightning
+  // address, incoming LNURL-pays) never get a zapCounterparty, so the
+  // row's avatar falls back to the type icon even though the description
+  // often *is* the counterparty's lud16. Build a side-index keyed on the
+  // normalized lightning address so we can still surface the contact's
+  // picture + name (#167).
+  const contactByLud16 = useMemo(() => {
+    const m = new Map<string, (typeof contacts)[number]>();
+    for (const c of contacts) {
+      const lud = c.profile?.lud16?.trim().toLowerCase();
+      if (lud) m.set(lud, c);
+    }
+    return m;
+  }, [contacts]);
+
+  // Extract a lightning address from a tx description. NWC/LNbits ledger
+  // entries frequently encode the counterparty as `user@host`, either as
+  // the whole string or embedded in a longer memo like
+  // "Zap from alice@primal.net - nice work!".
+  const findLud16InDescription = (desc: string | undefined): string | null => {
+    if (!desc) return null;
+    const match = desc.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+    return match ? match[0].toLowerCase() : null;
+  };
   const [showAll, setShowAll] = useState(false);
   const [detail, setDetail] = useState<TransactionDetailData | null>(null);
   const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
@@ -180,8 +204,18 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
           ? { ...zapCpRaw, profile: liveProfile ?? zapCpRaw.profile }
           : undefined;
 
-        // Primary label: counterparty name if attributed; else URL host or
-        // raw description; else "Received" / "Sent".
+        // For non-zap transactions, attempt to resolve the counterparty
+        // via a lightning-address in the description. Keyed in
+        // `contactByLud16` off the user's contacts, so it only promotes
+        // people they follow (same source Friends tab reads from).
+        const lud16FromDescription = !zapCp ? findLud16InDescription(item.description) : null;
+        const descriptionContact = lud16FromDescription
+          ? contactByLud16.get(lud16FromDescription)
+          : undefined;
+
+        // Primary label: counterparty name if attributed; else contact-by-
+        // lud16 name; else URL host or raw description; else
+        // "Received" / "Sent".
         let primary: string;
         let subtitle: string | null = null;
         if (isPending) {
@@ -189,6 +223,12 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
         } else if (zapCp) {
           primary = zapCounterpartyLabel(zapCp);
           subtitle = zapCp.comment?.trim() || null;
+        } else if (descriptionContact) {
+          primary =
+            descriptionContact.profile?.displayName ??
+            descriptionContact.profile?.name ??
+            lud16FromDescription ??
+            (isIncoming ? 'Received' : 'Sent');
         } else if (item.description) {
           const split = splitDescription(item.description);
           primary = split.primary;
@@ -198,7 +238,8 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
         }
 
         const timeStr = ts ? formatTime(ts) : '';
-        const counterpartyAvatar = zapCp?.profile?.picture ?? null;
+        const counterpartyAvatar =
+          zapCp?.profile?.picture ?? descriptionContact?.profile?.picture ?? null;
         const fiatStr = satsToFiatString(amountSats, btcPrice, currency);
 
         return (

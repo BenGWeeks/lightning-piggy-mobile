@@ -74,7 +74,6 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
     wallets,
     btcPrice,
     currency,
-    lightningAddress,
     getReceiveAddress,
     expectPayment,
     lastIncomingPayment,
@@ -103,6 +102,12 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
     [wallets, selectedWalletId],
   );
   const walletName = selectedWallet ? walletLabel(selectedWallet) : 'Wallet';
+  // Lightning Address is a per-wallet field (#169). Each NWC wallet can
+  // carry its own lud16 (either parsed from the NWC URL or set manually
+  // in Wallet Settings) — the Receive flow must read the *selected*
+  // wallet's address, not a global one that may route payments to the
+  // wrong inbox.
+  const lightningAddress = selectedWallet?.lightningAddress ?? null;
 
   const generateInvoice = useCallback(
     async (sats: number) => {
