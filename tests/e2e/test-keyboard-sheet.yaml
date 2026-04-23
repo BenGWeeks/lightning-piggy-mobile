@@ -7,7 +7,7 @@ name: Bottom Sheet Keyboard Slide Test
 - waitForAnimationToEnd:
     timeout: 10000
 
-# Navigate to Home first, then Account
+# Navigate to Home, open drawer → Profile sub-screen
 - tapOn:
     text: 'Home tab'
     optional: true
@@ -17,6 +17,10 @@ name: Bottom Sheet Keyboard Slide Test
     id: 'profile-icon'
 - waitForAnimationToEnd:
     timeout: 5000
+- tapOn:
+    id: 'drawer-row-profile'
+- waitForAnimationToEnd:
+    timeout: 3000
 
 # Open Connect Nostr sheet
 - tapOn:

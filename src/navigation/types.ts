@@ -1,4 +1,5 @@
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { DrawerNavigationProp } from '@react-navigation/drawer';
 import { RouteProp } from '@react-navigation/native';
 import { NavigatorScreenParams } from '@react-navigation/native';
 
@@ -10,7 +11,20 @@ export type MainTabParamList = {
   Messages: undefined;
   Learn: undefined;
   Friends: undefined;
-  Account: undefined;
+};
+
+// Drawer wrapping the main tabs + per-section account screens. MainTabs
+// is the initial drawer route, so on launch the user sees the tabs and
+// can open the drawer with the top-right avatar (or edge-swipe).
+export type AccountDrawerParamList = {
+  MainTabs: NavigatorScreenParams<MainTabParamList>;
+  AccountProfile: undefined;
+  AccountWallets: undefined;
+  AccountNostr: undefined;
+  AccountOnChain: undefined;
+  AccountDisplay: undefined;
+  AccountSupport: undefined;
+  AccountAbout: undefined;
 };
 
 // Root stack (pre-auth and post-auth)
@@ -18,7 +32,7 @@ export type RootStackParamList = {
   Intro: undefined;
   Onboarding: undefined;
   Setup: undefined;
-  MainTabs: NavigatorScreenParams<MainTabParamList>;
+  Main: NavigatorScreenParams<AccountDrawerParamList>;
   Conversation: {
     pubkey: string;
     name: string;
@@ -37,6 +51,7 @@ export type LearnStackParamList = {
 // Navigation prop shortcuts
 export type RootNavigation = NativeStackNavigationProp<RootStackParamList>;
 export type LearnNavigation = NativeStackNavigationProp<LearnStackParamList>;
+export type AccountDrawerNavigation = DrawerNavigationProp<AccountDrawerParamList>;
 
 // Route prop shortcuts
 export type CourseDetailRoute = RouteProp<LearnStackParamList, 'CourseDetail'>;

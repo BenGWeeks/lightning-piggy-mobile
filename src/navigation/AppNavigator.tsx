@@ -1,12 +1,18 @@
 import React from 'react';
-import { StyleSheet, ActivityIndicator, View, Platform } from 'react-native';
+import { StyleSheet, ActivityIndicator, View, Platform, useWindowDimensions } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createDrawerNavigator } from '@react-navigation/drawer';
 import { Home, MessageCircle, GraduationCap, Users } from 'lucide-react-native';
 import { useWallet } from '../contexts/WalletContext';
 import { colors } from '../styles/theme';
-import { RootStackParamList, LearnStackParamList, MainTabParamList } from './types';
+import {
+  RootStackParamList,
+  LearnStackParamList,
+  MainTabParamList,
+  AccountDrawerParamList,
+} from './types';
 
 import IntroScreen from '../screens/IntroScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
@@ -15,13 +21,21 @@ import MessagesScreen from '../screens/MessagesScreen';
 import LearnScreen from '../screens/LearnScreen';
 import CourseDetailScreen from '../screens/CourseDetailScreen';
 import MissionDetailScreen from '../screens/MissionDetailScreen';
-import AccountScreen from '../screens/AccountScreen';
 import FriendsScreen from '../screens/FriendsScreen';
 import ConversationScreen from '../screens/ConversationScreen';
+import ProfileScreen from '../screens/account/ProfileScreen';
+import WalletsScreen from '../screens/account/WalletsScreen';
+import NostrScreen from '../screens/account/NostrScreen';
+import OnChainScreen from '../screens/account/OnChainScreen';
+import DisplayScreen from '../screens/account/DisplayScreen';
+import SupportScreen from '../screens/account/SupportScreen';
+import AboutScreen from '../screens/account/AboutScreen';
+import AccountDrawerContent from '../components/AccountDrawerContent';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 const LearnStack = createNativeStackNavigator<LearnStackParamList>();
+const AccountDrawer = createDrawerNavigator<AccountDrawerParamList>();
 
 function LearnStackNavigator() {
   return (
@@ -98,15 +112,42 @@ function HomeTabs() {
           ),
         }}
       />
-      <Tab.Screen
-        name="Account"
-        component={AccountScreen}
-        options={{
-          tabBarButton: () => null,
-          tabBarItemStyle: { display: 'none' },
-        }}
-      />
     </Tab.Navigator>
+  );
+}
+
+/**
+ * Drawer wrapping the main tabs + per-section account screens. Tapping
+ * the avatar in the tab header opens the drawer; tapping a row closes
+ * the drawer and navigates to the matching section screen. See issue
+ * #100 for the Primal/Damus-style spec.
+ */
+function MainDrawer() {
+  const { width } = useWindowDimensions();
+  // Drawer width sized to fit the menu comfortably (not a fixed 50%).
+  // Capped so it still looks like a drawer on tablets.
+  const drawerWidth = Math.min(Math.max(280, width * 0.78), 360);
+
+  return (
+    <AccountDrawer.Navigator
+      initialRouteName="MainTabs"
+      drawerContent={(props) => <AccountDrawerContent {...props} />}
+      screenOptions={{
+        headerShown: false,
+        drawerType: 'front',
+        drawerStyle: { width: drawerWidth, backgroundColor: colors.white },
+        swipeEdgeWidth: 32,
+      }}
+    >
+      <AccountDrawer.Screen name="MainTabs" component={HomeTabs} />
+      <AccountDrawer.Screen name="AccountProfile" component={ProfileScreen} />
+      <AccountDrawer.Screen name="AccountWallets" component={WalletsScreen} />
+      <AccountDrawer.Screen name="AccountNostr" component={NostrScreen} />
+      <AccountDrawer.Screen name="AccountOnChain" component={OnChainScreen} />
+      <AccountDrawer.Screen name="AccountDisplay" component={DisplayScreen} />
+      <AccountDrawer.Screen name="AccountSupport" component={SupportScreen} />
+      <AccountDrawer.Screen name="AccountAbout" component={AboutScreen} />
+    </AccountDrawer.Navigator>
   );
 }
 
@@ -149,7 +190,7 @@ export default function AppNavigator() {
           </>
         ) : (
           <>
-            <Stack.Screen name="MainTabs" component={HomeTabs} />
+            <Stack.Screen name="Main" component={MainDrawer} />
             <Stack.Screen name="Conversation" component={ConversationScreen} />
           </>
         )}

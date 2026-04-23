@@ -8,29 +8,33 @@ name: Nostr Login Test
 - waitForAnimationToEnd:
     timeout: 15000
 
-# Navigate to Account via the profile icon
+# Open the account drawer
 - tapOn:
     id: 'profile-icon'
 - waitForAnimationToEnd:
     timeout: 5000
 
-# Logout first if already logged in
+# Sign out first if already logged in (drawer row is enabled only when logged in)
 - tapOn:
-    id: 'logout-button'
+    id: 'drawer-sign-out'
     optional: true
 - waitForAnimationToEnd:
     timeout: 2000
-# Confirm logout dialog
 - tapOn:
-    text: 'Logout'
+    text: 'Sign Out'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000
 
-# Re-navigate to Account (logout may have navigated away)
+# Re-open drawer (sign-out closes it) and navigate to Profile
 - tapOn:
     id: 'profile-icon'
     optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- tapOn:
+    id: 'drawer-row-profile'
 - waitForAnimationToEnd:
     timeout: 3000
 
@@ -63,8 +67,14 @@ name: Nostr Login Test
 - waitForAnimationToEnd:
     timeout: 2000
 
-# Verify the Logout button is now visible (meaning we're logged in)
+# Verify the drawer Sign Out row is now available (we're logged in)
+- tapOn:
+    id: 'profile-icon'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
 - extendedWaitUntil:
     visible:
-      id: 'logout-button'
+      id: 'drawer-sign-out'
     timeout: 20000

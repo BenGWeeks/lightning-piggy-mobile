@@ -1,12 +1,11 @@
 import React from 'react';
 import { View, Text, StyleSheet, type TextStyle } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ProfileIcon from './ProfileIcon';
 import { useNostr } from '../contexts/NostrContext';
 import { colors } from '../styles/theme';
-import type { MainTabParamList } from '../navigation/types';
+import type { AccountDrawerNavigation } from '../navigation/types';
 
 interface Props {
   /**
@@ -54,11 +53,19 @@ const TabHeader: React.FC<Props> = ({
   titleStyle,
 }) => {
   const insets = useSafeAreaInsets();
-  const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList>>();
+  const navigation = useNavigation();
   const { profile } = useNostr();
 
+  // Profile icon opens the account drawer (wraps MainTabs). See issue #100.
   const defaultRight = (
-    <ProfileIcon uri={profile?.picture} size={36} onPress={() => navigation.navigate('Account')} />
+    <ProfileIcon
+      uri={profile?.picture}
+      size={36}
+      onPress={() => {
+        const parent = navigation.getParent<AccountDrawerNavigation>();
+        parent?.openDrawer();
+      }}
+    />
   );
 
   return (

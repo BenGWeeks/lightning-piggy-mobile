@@ -5,7 +5,7 @@ name: Nostr Login via Amber
 #   1. Amber is installed with a key imported (run test-amber-import-key.yaml first).
 #   2. The app is already foregrounded on any screen.
 #
-# If the user is already logged in, we log them out first so the
+# If the user is already logged in, we sign them out first so the
 # Connect Nostr path is reachable.
 #
 # Run: maestro test tests/e2e/test-login-amber.yaml
@@ -13,29 +13,33 @@ name: Nostr Login via Amber
 - waitForAnimationToEnd:
     timeout: 10000
 
-# Navigate to Account if we're not already there
+# Open the account drawer
 - tapOn:
     id: 'profile-icon'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000
 
-# Logout first if already logged in, to make this script idempotent
+# Sign out first if already logged in, to make this script idempotent
 - tapOn:
-    id: 'logout-button'
+    id: 'drawer-sign-out'
     optional: true
 - waitForAnimationToEnd:
     timeout: 1000
 - tapOn:
-    text: 'Logout'
+    text: 'Sign Out'
     optional: true
 - waitForAnimationToEnd:
     timeout: 2000
 
-# Return to Account if logout navigated us away
+# Re-open drawer → Profile
 - tapOn:
     id: 'profile-icon'
     optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: 'drawer-row-profile'
 - waitForAnimationToEnd:
     timeout: 2000
 
@@ -67,9 +71,14 @@ name: Nostr Login via Amber
 - waitForAnimationToEnd:
     timeout: 5000
 
-# We should be back in Lightning Piggy. Verify the logout button is
-# visible (means login succeeded and we're on the Account view).
+# We should be back in Lightning Piggy. Reopen the drawer and verify
+# the Sign Out row is available (means login succeeded).
+- tapOn:
+    id: 'profile-icon'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
 - extendedWaitUntil:
     visible:
-      id: 'logout-button'
+      id: 'drawer-sign-out'
     timeout: 20000

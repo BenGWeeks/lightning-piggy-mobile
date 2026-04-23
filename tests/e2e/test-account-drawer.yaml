@@ -1,0 +1,107 @@
+appId: ${APP_ID:-com.lightningpiggy.app}
+name: Account Drawer Test
+---
+# Exercises the account drawer introduced in #100:
+#   1. Tapping the top-right profile icon opens the drawer.
+#   2. The drawer shows the version footer.
+#   3. Each section row navigates to its screen and the back button
+#      returns to the tabs.
+#   4. Triple-tapping the About version toggles developer mode.
+# Run: maestro test tests/e2e/test-account-drawer.yaml
+
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# Start on Home
+- tapOn:
+    id: 'tab-home'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# --- 1. Profile icon opens the drawer ---
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Drawer shell is visible: display-name header + version footer.
+- assertVisible:
+    id: 'drawer-display-name'
+- assertVisible:
+    id: 'drawer-version'
+
+# --- 2. Navigate to Wallets and back ---
+- tapOn:
+    id: 'drawer-row-wallets'
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible: 'Wallets'
+- tapOn:
+    id: 'account-back-button'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# --- 3. Navigate to Display and back ---
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: 'drawer-row-display'
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible:
+    id: 'display-name-input'
+- tapOn:
+    id: 'account-back-button'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# --- 4. Navigate to About and toggle dev mode by triple-tapping version ---
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: 'drawer-row-about'
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible:
+    id: 'version-text'
+- tapOn:
+    id: 'version-text'
+- tapOn:
+    id: 'version-text'
+- tapOn:
+    id: 'version-text'
+- extendedWaitUntil:
+    visible:
+      text: 'Developer Mode.*'
+    timeout: 3000
+- tapOn:
+    text: 'OK'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Toggle dev mode back off so we leave global state unchanged.
+- tapOn:
+    id: 'version-text'
+- tapOn:
+    id: 'version-text'
+- tapOn:
+    id: 'version-text'
+- extendedWaitUntil:
+    visible:
+      text: 'Developer Mode.*'
+    timeout: 3000
+- tapOn:
+    text: 'OK'
+    optional: true
+
+# --- 5. Back to Home ---
+- tapOn:
+    id: 'account-back-button'
+- waitForAnimationToEnd:
+    timeout: 3000

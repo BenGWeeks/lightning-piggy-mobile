@@ -24,9 +24,13 @@ name: Edit Profile picture upload — #141 regression guard
       id: 'tab-home'
     timeout: 40000
 
-# Navigate to Account
+# Open drawer → Profile sub-screen
 - tapOn:
     id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'drawer-row-profile'
 - waitForAnimationToEnd:
     timeout: 3000
 

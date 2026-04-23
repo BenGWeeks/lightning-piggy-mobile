@@ -8,33 +8,38 @@ name: Nostr Logout Test
 - waitForAnimationToEnd:
     timeout: 15000
 
-# Navigate to Account via the profile icon
+# Open the account drawer via the profile icon
 - tapOn:
     id: 'profile-icon'
 - waitForAnimationToEnd:
     timeout: 5000
 
-# Verify we're logged in first
+# Sign out row lives at the bottom of the drawer
 - extendedWaitUntil:
     visible:
-      id: 'logout-button'
+      id: 'drawer-sign-out'
     timeout: 5000
 
-# Tap Logout
 - tapOn:
-    id: 'logout-button'
+    id: 'drawer-sign-out'
 - waitForAnimationToEnd:
     timeout: 2000
 
-# Confirm logout
+# Confirm the Sign Out alert
 - tapOn:
-    text: 'Logout'
+    text: 'Sign Out'
 - waitForAnimationToEnd:
     timeout: 3000
 
-# Navigate back to Account and verify Connect Nostr button is visible
+# Open drawer → Profile sub-screen and verify the Connect Nostr CTA is back
 - tapOn:
     id: 'profile-icon'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- tapOn:
+    id: 'drawer-row-profile'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000
