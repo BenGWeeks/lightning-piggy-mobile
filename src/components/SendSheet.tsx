@@ -132,6 +132,10 @@ const SendSheet: React.FC<Props> = ({
   const [progressState, setProgressState] = useState<PaymentProgressState>('hidden');
   const [progressError, setProgressError] = useState<string | undefined>(undefined);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
+  // Per-send AbortController so the Cancel button on PaymentProgressOverlay
+  // can abort the NWC call's publish → reply-timeout → poll-for-preimage
+  // chain without waiting ~5 minutes for it to give up on its own (#175).
+  const paymentAbortRef = useRef<AbortController | null>(null);
 
   // No explicit snapPoints — with gorhom v5's default
   // `enableDynamicSizing={true}`, the sheet sizes itself to its content
@@ -359,6 +363,13 @@ const SendSheet: React.FC<Props> = ({
 
   const handleSend = async () => {
     if (!invoiceData) return;
+    // Abort any stale in-flight send (shouldn't happen in normal flow,
+    // but guards against a cancel-then-resend race where the previous
+    // controller is still referenced).
+    paymentAbortRef.current?.abort();
+    const abortController = new AbortController();
+    paymentAbortRef.current = abortController;
+    const signal = abortController.signal;
     setSending(true);
     setProgressError(undefined);
     setProgressState('sending');
@@ -378,7 +389,7 @@ const SendSheet: React.FC<Props> = ({
         } else {
           // Boltz reverse swap: Lightning → on-chain
           const swap = await boltzService.createReverseSwap(invoiceData, currentSats);
-          await payInvoiceForWallet(walletId!, swap.invoice);
+          await payInvoiceForWallet(walletId!, swap.invoice, signal);
           const lockup = await boltzService.waitForLockup(swap.id, 120000);
           await boltzService.claimSwap(swap, lockup, invoiceData);
         }
@@ -420,7 +431,7 @@ const SendSheet: React.FC<Props> = ({
         }
 
         const bolt11 = await fetchInvoice(lnurlParams.callback, currentSats, invoiceOptions);
-        await payInvoiceForWallet(walletId!, bolt11);
+        await payInvoiceForWallet(walletId!, bolt11, signal);
 
         if (__DEV__)
           console.log(
@@ -487,7 +498,7 @@ const SendSheet: React.FC<Props> = ({
           }
         }
       } else {
-        await payInvoiceForWallet(walletId!, invoiceData);
+        await payInvoiceForWallet(walletId!, invoiceData, signal);
       }
       if (walletId) {
         // Refresh both balance and tx list so the user sees the send
@@ -514,15 +525,36 @@ const SendSheet: React.FC<Props> = ({
           }
         })();
       }
+      if (signal.aborted) return;
       setProgressState('success');
     } catch (error) {
+      // User-initiated cancel via PaymentProgressOverlay's Cancel button:
+      // the overlay has already been hidden by handleCancelPayment, so
+      // just let the send complete silently without surfacing an error.
+      if ((error as Error)?.name === 'AbortError' || signal.aborted) {
+        return;
+      }
       const message = error instanceof Error ? error.message : 'Payment failed';
       setProgressError(message);
       setProgressState('error');
     } finally {
+      if (paymentAbortRef.current === abortController) {
+        paymentAbortRef.current = null;
+      }
       setSending(false);
     }
   };
+
+  const handleCancelPayment = useCallback(() => {
+    // Abort the NWC pay_invoice chain and hide the overlay so the user
+    // can edit / retry / close from the filled-in SendSheet. Keep
+    // `sending` true-ish in the background until the aborted promise
+    // resolves in handleSend's finally, which will flip it off.
+    paymentAbortRef.current?.abort();
+    setProgressState('hidden');
+    setProgressError(undefined);
+    setSending(false);
+  }, []);
 
   const handleOverlayDismiss = useCallback(() => {
     // Dismissing the overlay after a successful payment also closes the
@@ -896,6 +928,7 @@ const SendSheet: React.FC<Props> = ({
         recipientName={recipientName}
         errorMessage={progressError}
         onDismiss={handleOverlayDismiss}
+        onCancel={handleCancelPayment}
       />
     </>
   );

@@ -4,6 +4,62 @@ import type { Nip47GetInfoResponse } from '@getalby/sdk';
 const providers = new Map<string, NostrWebLNProvider>();
 const nwcUrls = new Map<string, string>();
 
+// Per-wallet timestamp of the most recent relay-publish failure. Used
+// to fast-fail pay_invoice when the relay is unreachable (see #175).
+// A "reply timeout" that lands within PUBLISH_FAILURE_FRESH_MS of a
+// publish failure means the request never reached the wallet, so
+// polling for the preimage is pointless — raise straight away.
+const lastPublishFailureAt = new Map<string, number>();
+const PUBLISH_FAILURE_FRESH_MS = 10_000;
+
+function markPublishFailure(walletId: string): void {
+  lastPublishFailureAt.set(walletId, Date.now());
+}
+
+function hasRecentPublishFailure(walletId: string): boolean {
+  const ts = lastPublishFailureAt.get(walletId);
+  if (!ts) return false;
+  if (Date.now() - ts > PUBLISH_FAILURE_FRESH_MS) {
+    lastPublishFailureAt.delete(walletId);
+    return false;
+  }
+  return true;
+}
+
+/** Standard DOMException-shape abort error: `name === 'AbortError'`.
+ * Callers can detect via `error.name === 'AbortError'` or by checking
+ * `signal.aborted` after await. */
+export function createAbortError(message = 'Payment cancelled'): Error {
+  const err = new Error(message);
+  err.name = 'AbortError';
+  return err;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw createAbortError();
+}
+
+/** Sleep that rejects with AbortError if the signal fires, instead of
+ * resolving on schedule. Without this the 5-minute poll loop below
+ * ignores cancellation between polls. */
+function abortableSleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(createAbortError());
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(createAbortError());
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 async function withRetry<T>(
   fn: () => Promise<T>,
   { attempts = 3, delayMs = 1000, label = 'operation' } = {},
@@ -67,7 +123,7 @@ export async function connect(
       nostrWalletConnectUrl: nwcUrl.trim(),
     });
 
-    patchRelayPublish(provider);
+    patchRelayPublish(provider, walletId);
 
     await withRetry(() => provider.enable(), { label: 'connect', attempts: 3, delayMs: 2000 });
 
@@ -151,8 +207,13 @@ export async function makeInvoice(
  * publish method to resolve immediately after sending.
  *
  * Can be removed once lnbits/nostrclient#68 is merged upstream.
+ *
+ * When the fire-and-forget publish rejects (e.g. the relay is
+ * unreachable), we record the timestamp per-walletId so payInvoice
+ * can fast-fail instead of waiting 5 min for a preimage that's
+ * never going to arrive (see #175).
  */
-function patchRelayPublish(provider: NostrWebLNProvider): void {
+function patchRelayPublish(provider: NostrWebLNProvider, walletId: string): void {
   try {
     const pool = (provider as any).client?.pool;
     if (pool) {
@@ -165,6 +226,7 @@ function patchRelayPublish(provider: NostrWebLNProvider): void {
           relay.publish = (event: any) => {
             origPublish(event).catch((err: unknown) => {
               console.warn('[NWC] Relay publish failed (fire-and-forget):', err);
+              markPublishFailure(walletId);
             });
             return Promise.resolve(); // resolve immediately
           };
@@ -193,7 +255,7 @@ async function reconnect(walletId: string): Promise<NostrWebLNProvider> {
   }
 
   const provider = new NostrWebLNProvider({ nostrWalletConnectUrl: url });
-  patchRelayPublish(provider);
+  patchRelayPublish(provider, walletId);
   await provider.enable();
   providers.set(walletId, provider);
   return provider;
@@ -215,13 +277,23 @@ async function ensureConnected(walletId: string): Promise<NostrWebLNProvider | n
   return provider;
 }
 
-export async function payInvoice(walletId: string, bolt11: string): Promise<{ preimage: string }> {
+export async function payInvoice(
+  walletId: string,
+  bolt11: string,
+  signal?: AbortSignal,
+): Promise<{ preimage: string }> {
+  throwIfAborted(signal);
   let provider = await ensureConnected(walletId);
   if (!provider) throw new Error('Not connected');
   try {
     const result = await provider.sendPayment(bolt11);
+    throwIfAborted(signal);
     return { preimage: result.preimage };
   } catch (error) {
+    // Propagate user-initiated cancel straight away.
+    if ((error as Error)?.name === 'AbortError') throw error;
+    throwIfAborted(signal);
+
     const msg = error instanceof Error ? error.message : String(error);
     if (msg.includes('failed to publish')) {
       // 'failed to publish' from nostr-tools usually means the event never
@@ -235,6 +307,7 @@ export async function payInvoice(walletId: string, bolt11: string): Promise<{ pr
           '[NWC] Publish failed, checking invoice status before retry to avoid double-pay...',
         );
       provider = await reconnect(walletId);
+      throwIfAborted(signal);
       const paymentHash = extractPaymentHash(bolt11);
       if (paymentHash) {
         try {
@@ -248,10 +321,20 @@ export async function payInvoice(walletId: string, bolt11: string): Promise<{ pr
           // duplicate payment for the same payment_hash anyway.
         }
       }
+      throwIfAborted(signal);
       const result = await provider.sendPayment(bolt11);
       return { preimage: result.preimage };
     }
     if (msg.includes('reply timeout')) {
+      // If the relay's fire-and-forget publish just failed, the NIP-47
+      // request never reached the wallet. Don't waste 5 minutes polling
+      // lookupInvoice for a preimage that isn't coming — bail out now
+      // with a message the humanizer can turn into the UX string.
+      if (hasRecentPublishFailure(walletId)) {
+        console.log('[NWC] pay_invoice reply timeout + recent publish failure — failing fast');
+        throw new Error("Couldn't reach your wallet: relay publish timed out");
+      }
+
       // NWC SDK times out after ~60s but the payment may still be in flight.
       // Poll lookupInvoice to check if it completes within 5 minutes.
       console.log('[NWC] pay_invoice timed out, polling for completion...');
@@ -259,7 +342,12 @@ export async function payInvoice(walletId: string, bolt11: string): Promise<{ pr
       if (!paymentHash) throw error;
       const deadline = Date.now() + 5 * 60 * 1000;
       while (Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 5000));
+        // abortableSleep rejects with AbortError when the caller cancels,
+        // so the poll loop exits immediately on a Cancel tap.
+        await abortableSleep(5000, signal);
+        if (hasRecentPublishFailure(walletId)) {
+          throw new Error("Couldn't reach your wallet: relay publish timed out");
+        }
         try {
           const lookup = await provider.lookupInvoice({ paymentHash });
           if (lookup?.preimage) {
