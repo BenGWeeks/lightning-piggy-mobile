@@ -86,7 +86,11 @@ fi
 sleep 2
 
 # ---- extract Blossom URL from logcat ----
-URL=$(grep -oE 'https?://[^ ]+' "$LOGFILE" | grep -iE '\.(jpg|jpeg|png|webp)([?#]|$)' | head -n1 || true)
+# Match URL up to but not including whitespace/quote characters, ending at
+# a recognised image extension. The Blossom log line quotes the URL with
+# single quotes (`'https://.../abc.jpg'`) — stopping at the quote keeps
+# them out of the captured URL.
+URL=$(grep -oE "https?://[^ '\"]+\.(jpg|jpeg|png|webp)" "$LOGFILE" | head -n1 || true)
 if [ -z "$URL" ]; then
   echo "FAIL: no Blossom URL logged — check blossomService console.log"
   tail -40 "$LOGFILE"

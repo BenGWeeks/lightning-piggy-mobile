@@ -59,7 +59,7 @@ name: EXIF strip upload — #145 regression guard
     text: 'Use'
     optional: true
 - tapOn:
-    point: '92%, 10%'
+    point: '92%, 6%'
     optional: true
 
 # Amber BUD-02 auth sign (no-op on nsec)
