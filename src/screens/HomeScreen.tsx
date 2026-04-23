@@ -184,13 +184,22 @@ const HomeScreen: React.FC = () => {
   // Infinite-scroll for the transactions list: when the user scrolls within
   // INFINITE_SCROLL_THRESHOLD of the bottom, ask TransactionList to reveal
   // the next batch of cached transactions.
+  //
+  // `onScroll` fires continuously while the user remains near the bottom, so
+  // we latch on entry into the bottom zone via `nearBottomRef`: each crossing
+  // from above-threshold to below-threshold triggers exactly one loadMore().
+  // Revealing a batch grows contentSize and pushes the user back above the
+  // threshold, clearing the latch so the next pull fires again.
   const txListRef = useRef<TransactionListHandle>(null);
+  const nearBottomRef = useRef(false);
   const handleTransactionsScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
     const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
-    if (distanceFromBottom < INFINITE_SCROLL_THRESHOLD) {
+    const nearBottom = distanceFromBottom < INFINITE_SCROLL_THRESHOLD;
+    if (nearBottom && !nearBottomRef.current) {
       txListRef.current?.loadMore();
     }
+    nearBottomRef.current = nearBottom;
   }, []);
 
   const greetingName =

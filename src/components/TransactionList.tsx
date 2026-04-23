@@ -138,6 +138,21 @@ const TransactionList = forwardRef<TransactionListHandle, Props>(({ transactions
     [transactions.length],
   );
 
+  // Sort: pending (no timestamp) first, then newest first. Memoised on
+  // `transactions` identity so that infinite-scroll re-renders (which bump
+  // `visibleCount` but leave `transactions` unchanged) only re-slice the
+  // array below instead of re-sorting the full list each time.
+  const sorted = useMemo(() => {
+    return [...transactions].sort((a, b) => {
+      const aTime = a.settled_at || a.created_at;
+      const bTime = b.settled_at || b.created_at;
+      if (!aTime && !bTime) return 0;
+      if (!aTime) return -1;
+      if (!bTime) return 1;
+      return bTime - aTime;
+    });
+  }, [transactions]);
+
   if (transactions.length === 0) {
     return (
       <View style={styles.emptyContainer}>
@@ -146,15 +161,6 @@ const TransactionList = forwardRef<TransactionListHandle, Props>(({ transactions
     );
   }
 
-  // Sort: pending (no timestamp) first, then newest first.
-  const sorted = [...transactions].sort((a, b) => {
-    const aTime = a.settled_at || a.created_at;
-    const bTime = b.settled_at || b.created_at;
-    if (!aTime && !bTime) return 0;
-    if (!aTime) return -1;
-    if (!bTime) return 1;
-    return bTime - aTime;
-  });
   const visibleTransactions = sorted.slice(0, visibleCount);
 
   // Flatten into a mixed list of day headers + rows. Pending entries (no
