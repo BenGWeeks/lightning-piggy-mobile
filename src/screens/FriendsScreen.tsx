@@ -180,13 +180,19 @@ const FriendsScreen: React.FC = () => {
   // warm-cache devices when the target row hadn't been virtualised yet
   // (see #178). FlashList v2 auto-measures, so there's no size-hint API
   // to give it (overrideItemLayout in v2 only controls column span).
+  //
+  // LIST_PADDING_TOP must match styles.listContent.paddingTop — the
+  // FlashList's contentContainerStyle shifts row 0 down by that amount,
+  // so any offset math needs to add it back to land on the right row.
+  // If you change styles.listContent.paddingTop, update this too.
   const ITEM_HEIGHT = 72;
+  const LIST_PADDING_TOP = 12;
 
   const handleScroll = useCallback(
     (e: { nativeEvent: { contentOffset: { y: number } } }) => {
       if (scrollTrackingPaused.current) return;
       const offsetY = e.nativeEvent.contentOffset.y;
-      const index = Math.floor(offsetY / ITEM_HEIGHT);
+      const index = Math.floor(Math.max(0, offsetY - LIST_PADDING_TOP) / ITEM_HEIGHT);
       if (index >= 0 && index < combinedList.length) {
         const first = combinedList[index].name.charAt(0).toUpperCase();
         const letter = /[A-Z]/.test(first) ? first : '#';
@@ -215,7 +221,7 @@ const FriendsScreen: React.FC = () => {
         // measured yet and scrollToIndex can no-op leaving the viewport
         // blank (see #178). Offset math is O(1) given the uniform height.
         flatListRef.current?.scrollToOffset({
-          offset: index * ITEM_HEIGHT,
+          offset: LIST_PADDING_TOP + index * ITEM_HEIGHT,
           animated: false,
         });
         setTimeout(() => {
