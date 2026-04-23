@@ -415,7 +415,14 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
               initialSats={currentSats}
               title="Custom amount"
               confirmLabel="Generate invoice"
-              onBack={() => setStep('main')}
+              onBack={
+                // If the main view has nothing useful to show (no lud16
+                // to display, not an on-chain wallet with an address),
+                // don't render the back arrow at all — there's nothing
+                // meaningful to navigate back to. Hardware back / swipe
+                // down still dismisses the sheet.
+                !lightningAddress && !isOnchainWallet ? undefined : () => setStep('main')
+              }
               onConfirm={(sats) => {
                 setSatsValue(String(sats));
                 setStep('main');

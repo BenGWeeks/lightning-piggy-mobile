@@ -44,3 +44,10 @@ name: Receive landing depends on wallet's lud16
 - assertNotVisible:
     id: 'receive-tab-address'
 - assertNotVisible: 'Enter an amount to generate invoice'
+
+# Back arrow must NOT render — for a wallet without a lud16 there's no
+# meaningful place to navigate back to (the main view we'd return to
+# is the useless "Enter an amount..." placeholder). Hardware back and
+# swipe-down still dismiss the sheet.
+- assertNotVisible:
+    id: 'amount-entry-back'
