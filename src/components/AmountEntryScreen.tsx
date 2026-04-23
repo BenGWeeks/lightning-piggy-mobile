@@ -46,6 +46,12 @@ const AmountEntryScreen: React.FC<Props> = ({
     if (initialSats > 0 && btcPrice) return satsToFiat(initialSats, btcPrice).toFixed(2);
     return '';
   });
+  // `pristine` is true when the active primary field hasn't been typed
+  // into since the last swap-into-that-unit. While pristine, the display
+  // shows the formatted conversion (so a 3-sats → fiat swap shows
+  // "< $0.01" instead of the misleading "0.00") and the first keypress
+  // replaces rather than appends — phone-dialer feel.
+  const [pristine, setPristine] = useState(false);
 
   // Keep the off-screen text in sync when btcPrice updates mid-entry —
   // without this, a swap after a price refresh can surface a stale
@@ -101,31 +107,43 @@ const AmountEntryScreen: React.FC<Props> = ({
 
   const pressDigit = useCallback(
     (digit: string) => {
-      const current = primaryUnit === 'sats' ? satsText : fiatText;
+      // Any keypress exits pristine mode, and first press after a swap
+      // starts from an empty field instead of appending to the derived
+      // value (e.g. swap 3 sats → fiat displays "< $0.01" but fiatText is
+      // "0.00" — tapping "5" should give "5", not be blocked by the
+      // already-at-2-decimals guard).
+      const current = pristine ? '' : primaryUnit === 'sats' ? satsText : fiatText;
+      if (pristine) setPristine(false);
       if (primaryUnit === 'fiat') {
         const dotIdx = current.indexOf('.');
         if (dotIdx !== -1 && current.length - dotIdx - 1 >= 2) return;
-        const next = current === '0' ? digit : current + digit;
-        setPrimaryRaw(next);
-      } else {
-        const next = current === '0' ? digit : current + digit;
-        setPrimaryRaw(next);
       }
+      const next = current === '0' ? digit : current + digit;
+      setPrimaryRaw(next);
     },
-    [primaryUnit, satsText, fiatText, setPrimaryRaw],
+    [primaryUnit, pristine, satsText, fiatText, setPrimaryRaw],
   );
 
   const pressDecimal = useCallback(() => {
     if (primaryUnit !== 'fiat') return;
-    const current = fiatText;
+    const current = pristine ? '' : fiatText;
+    if (pristine) setPristine(false);
     if (current.includes('.')) return;
     setPrimaryRaw(current.length === 0 ? '0.' : current + '.');
-  }, [primaryUnit, fiatText, setPrimaryRaw]);
+  }, [primaryUnit, pristine, fiatText, setPrimaryRaw]);
 
   const pressBackspace = useCallback(() => {
+    // Backspace while pristine fully clears — same rationale as
+    // pressDigit above. Avoids the "backspace 4× through the
+    // derived '0.00'" UX when the user just wants to re-enter.
+    if (pristine) {
+      setPrimaryRaw('');
+      setPristine(false);
+      return;
+    }
     const current = primaryUnit === 'sats' ? satsText : fiatText;
     setPrimaryRaw(current.slice(0, -1));
-  }, [primaryUnit, satsText, fiatText, setPrimaryRaw]);
+  }, [primaryUnit, pristine, satsText, fiatText, setPrimaryRaw]);
 
   const swapPrimary = () => {
     // Can't enter fiat without a price feed — tap becomes a no-op instead
@@ -138,12 +156,22 @@ const AmountEntryScreen: React.FC<Props> = ({
       setSatsText(sats > 0 ? String(sats) : '');
     }
     setPrimaryUnit((u) => (u === 'sats' ? 'fiat' : 'sats'));
+    // New primary is "pristine" — first press replaces instead of appends.
+    setPristine(sats > 0);
   };
 
   // Display values: always show at least "0" so the card never looks empty.
   // For fiat, preserve a trailing dot ("0.") or user's decimal places; for
   // sats, format with thousands separators.
+  //
+  // Post-swap pristine state: show the `formatFiat()`-rendered value of
+  // the canonical sats amount ("< $0.01" for sub-cent values) rather than
+  // the raw `.toFixed(2)` text — which would misleadingly render "0.00"
+  // when the user had e.g. 3 sats.
   const primaryDisplay = useMemo(() => {
+    if (primaryUnit === 'fiat' && pristine && btcPrice && currentSats > 0) {
+      return formatFiat(satsToFiat(currentSats, btcPrice), currency);
+    }
     const raw = primaryUnit === 'sats' ? satsText : fiatText;
     if (!raw) return '0';
     if (primaryUnit === 'sats') {
@@ -157,7 +185,7 @@ const AmountEntryScreen: React.FC<Props> = ({
       return raw.endsWith('.') ? `${intFormatted}.` : intFormatted;
     }
     return `${intFormatted}.${fracPart}`;
-  }, [primaryUnit, satsText, fiatText]);
+  }, [primaryUnit, pristine, btcPrice, currentSats, currency, satsText, fiatText]);
 
   const secondaryDisplay = useMemo(() => {
     if (primaryUnit === 'sats') {
