@@ -1,0 +1,99 @@
+appId: com.lightningpiggy.app.dev
+name: EXIF strip upload — #145 regression guard
+---
+# This flow is the UI driver for scripts/verify_exif_strip.sh. Maestro
+# drives the Edit Profile picture upload to completion; the wrapping
+# shell script then downloads the uploaded image from the Blossom URL
+# logged by blossomService.ts:137 and asserts exiftool sees zero
+# user-identifying tags (GPS, camera Make/Model, DateTimeOriginal,
+# Software).
+#
+# Do NOT run this flow alone — it only confirms the UI path doesn't
+# error. The byte-level privacy assertion lives in the shell wrapper.
+#
+# Preconditions (handled by the wrapper):
+#   - emulator/device connected via adb
+#   - app already installed AND logged in (nsec or Amber)
+#   - /sdcard/Pictures/exif-loaded-fixture.jpg present, freshly scanned
+#     into MediaStore so the Android photo picker surfaces it
+
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 40000
+
+# Navigate: Home -> Account -> Edit Profile sheet
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- tapOn:
+    id: 'edit-profile-button'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- tapOn:
+    id: 'edit-picture-picker'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Android photo picker — select the first tile. CLAUDE.md's "no
+# coordinates" rule has an accepted exception for OS-owned UIs with no
+# stable selectors across API levels; same rationale as
+# tests/e2e/test-edit-profile-picture.yaml.
+- tapOn:
+    point: '20%, 55%'
+
+# Crop editor confirm. Text selectors first, coordinate fallback last.
+- tapOn:
+    text: 'CROP'
+    optional: true
+- tapOn:
+    text: 'Done'
+    optional: true
+- tapOn:
+    text: 'Add'
+    optional: true
+- tapOn:
+    text: 'Use'
+    optional: true
+- tapOn:
+    point: '92%, 10%'
+    optional: true
+
+# Amber BUD-02 auth sign (no-op on nsec)
+- tapOn:
+    text: 'Accept'
+    optional: true
+- tapOn:
+    text: 'Approve'
+    optional: true
+
+# The upload round-trip plus re-encode can take a while on slower
+# emulators. 25 s is comfortable.
+- waitForAnimationToEnd:
+    timeout: 25000
+
+# Sanity — upload path shouldn't have errored. Real privacy check is
+# done by the wrapper script after this flow exits.
+- assertNotVisible: 'Upload Failed'
+- assertNotVisible: 'Failed to strip image metadata'
+
+# Save the profile so the URL makes it to the kind-0 event (also useful
+# for visual confirmation) and surface a positive signal.
+- tapOn:
+    id: 'save-profile'
+- tapOn:
+    text: 'Accept'
+    optional: true
+- tapOn:
+    text: 'Approve'
+    optional: true
+
+- extendedWaitUntil:
+    visible: 'Profile Updated'
+    timeout: 20000
+- tapOn:
+    text: 'OK'
+    optional: true
