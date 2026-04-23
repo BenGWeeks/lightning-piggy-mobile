@@ -15,10 +15,43 @@ const NOSTR_BUILD_UPLOAD_URL = 'https://nostr.build/api/v2/upload/files';
  * to return a base64 payload we throw so callers don't silently proceed with
  * a null value and fail deeper in the upload path.
  */
-export async function stripImageMetadata(uri: string): Promise<{ uri: string; base64: string }> {
+export async function stripImageMetadata(
+  uri: string,
+  pickerBase64?: string | null,
+): Promise<{ uri: string; base64: string }> {
+  // GIF: skip the manipulator re-encode so animation survives. GIF89a has
+  // no EXIF chunk (nothing analogous to JPEG APP1), so typical GIFs from
+  // gallery / chat / meme sources carry no privacy-sensitive metadata.
+  // Adobe-exported GIFs can embed XMP via an Application Extension Block —
+  // if that becomes a real attack vector, swap in a pure-JS block walker
+  // that drops comment/application extensions while keeping frames.
+  //
+  // We rely on the picker's `base64: true` output here because reading
+  // file:// URIs via fetch/XHR is unreliable on Android RN (see the
+  // comment in blossomService.ts).
+  if (/\.gif$/i.test(uri)) {
+    if (!pickerBase64) {
+      throw new Error(
+        'GIF upload requires picker base64 — call launchImageLibraryAsync with base64: true',
+      );
+    }
+    return { uri, base64: pickerBase64 };
+  }
+
+  // Preserve PNG → PNG re-encode (alpha channel survives; compress is a
+  // no-op since PNG is lossless). All other inputs flatten to JPEG with
+  // compress 0.9. Detect by extension — both the raw picker URI and the
+  // crop-editor output on Android keep the source extension.
+  //
+  // Caveat: EditProfileSheet uses `allowsEditing: true`, which routes
+  // through the OS crop editor; on most Androids that editor emits JPEG
+  // regardless of input, so a transparent PNG avatar (or animated GIF)
+  // may still arrive here as a .jpg — already flattened. Chat's gallery/
+  // camera pickers (no `allowsEditing`) preserve the source extension.
+  const isPng = /\.png$/i.test(uri);
   const result = await manipulateAsync(uri, [], {
     compress: 0.9,
-    format: SaveFormat.JPEG,
+    format: isPng ? SaveFormat.PNG : SaveFormat.JPEG,
     base64: true,
   });
   if (!result.base64) {

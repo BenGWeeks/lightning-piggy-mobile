@@ -100,15 +100,20 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
       // `stripImageMetadata` re-encodes the picked image through
       // expo-image-manipulator at `compress: 0.9` and produces fresh
       // base64 (see #145). Picking at quality 1 here avoids a double
-      // JPEG encode; the manipulator's output is what ends up on
-      // Blossom, so the picker doesn't need `base64: true` either.
+      // JPEG encode.
+      // `base64: true` feeds the GIF passthrough branch in
+      // stripImageMetadata (expo-image-manipulator has no animated
+      // output). In practice the OS crop editor from `allowsEditing`
+      // flattens GIFs to JPEG before we see them, so the GIF branch
+      // rarely fires here — set for consistency with chat paths.
+      base64: true,
     });
 
     if (result.canceled || !result.assets?.[0]) return;
 
     setUploading(true);
     try {
-      const scrubbed = await stripImageMetadata(result.assets[0].uri);
+      const scrubbed = await stripImageMetadata(result.assets[0].uri, result.assets[0].base64);
       const url = await uploadImage(scrubbed.uri, isLoggedIn ? signEvent : null, scrubbed.base64);
       setUrl(url);
     } catch (error) {

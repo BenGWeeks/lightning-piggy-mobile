@@ -668,10 +668,10 @@ const ConversationScreen: React.FC = () => {
   // Blossom server (or nostr.build fallback), then DMs the returned URL
   // to the conversation partner.
   const uploadAndSendImage = useCallback(
-    async (localUri: string) => {
+    async (localUri: string, pickerBase64?: string | null) => {
       setUploadingImage(true);
       try {
-        const scrubbed = await stripImageMetadata(localUri);
+        const scrubbed = await stripImageMetadata(localUri, pickerBase64);
         const url = await uploadImage(scrubbed.uri, signEvent, scrubbed.base64);
         const sendResult = await sendDirectMessage(pubkey, url);
         if (!sendResult.success) {
@@ -707,9 +707,13 @@ const ConversationScreen: React.FC = () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       quality: 1,
+      // Needed so stripImageMetadata can pass animated GIFs through
+      // without re-encoding (expo-image-manipulator has no animated
+      // output format). No-op for JPEG/PNG — those get re-encoded.
+      base64: true,
     });
     if (result.canceled || !result.assets?.[0]) return;
-    await uploadAndSendImage(result.assets[0].uri);
+    await uploadAndSendImage(result.assets[0].uri, result.assets[0].base64);
   }, [isLoggedIn, uploadingImage, sending, uploadAndSendImage]);
 
   const handleTakeAndSendPhoto = useCallback(async () => {
@@ -723,9 +727,12 @@ const ConversationScreen: React.FC = () => {
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ['images'],
       quality: 1,
+      // Camera never captures GIF, but keep the shape consistent with the
+      // gallery path — harmless for JPEG output.
+      base64: true,
     });
     if (result.canceled || !result.assets?.[0]) return;
-    await uploadAndSendImage(result.assets[0].uri);
+    await uploadAndSendImage(result.assets[0].uri, result.assets[0].base64);
   }, [isLoggedIn, uploadingImage, sending, uploadAndSendImage]);
 
   // Share another contact's Nostr profile into this conversation. Payload
