@@ -12,7 +12,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import { Search, X } from 'lucide-react-native';
+import { Search } from 'lucide-react-native';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
@@ -196,14 +196,6 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
     >
       <View style={styles.header}>
         <Text style={styles.title}>Send a GIF</Text>
-        <TouchableOpacity
-          onPress={onClose}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          accessibilityLabel="Close GIF picker"
-          testID="gif-close"
-        >
-          <X size={22} color={colors.textSupplementary} />
-        </TouchableOpacity>
       </View>
       <View style={styles.searchRow}>
         <Search size={18} color={colors.textSupplementary} />
