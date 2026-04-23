@@ -64,11 +64,20 @@ const AmountEntryScreen: React.FC<Props> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [btcPrice]);
 
-  const currentSats = useMemo(() => {
-    if (primaryUnit === 'sats') return parseInt(satsText, 10) || 0;
-    const fiat = parseFloat(fiatText) || 0;
-    return fiatToSats(fiat, btcPrice);
-  }, [primaryUnit, satsText, fiatText, btcPrice]);
+  // Auto-revert to SATS if price feed drops out while user is in fiat mode.
+  // Without this, `currentSats` silently collapses to 0 and confirm stays
+  // disabled with no on-screen explanation.
+  useEffect(() => {
+    if (!btcPrice && primaryUnit === 'fiat') setPrimaryUnit('sats');
+  }, [btcPrice, primaryUnit]);
+
+  // `satsText` is the source of truth for the amount. `setPrimaryRaw`
+  // keeps it in sync whether the user is typing in sats or in fiat
+  // (fiat keystrokes fiat→sats-convert and write through to satsText).
+  // Reading currentSats through the fiat text instead would re-round
+  // via `.toFixed(2)` on every swap, so a sats→fiat→sats round-trip
+  // drifts off by the rounding error (e.g. 5,000 → $3.90 → 5,006).
+  const currentSats = useMemo(() => parseInt(satsText, 10) || 0, [satsText]);
 
   const setPrimaryRaw = useCallback(
     (next: string) => {
@@ -119,6 +128,9 @@ const AmountEntryScreen: React.FC<Props> = ({
   }, [primaryUnit, satsText, fiatText, setPrimaryRaw]);
 
   const swapPrimary = () => {
+    // Can't enter fiat without a price feed — tap becomes a no-op instead
+    // of flipping into a dead-end state.
+    if (!btcPrice && primaryUnit === 'sats') return;
     const sats = currentSats;
     if (primaryUnit === 'sats') {
       setFiatText(btcPrice && sats > 0 ? satsToFiat(sats, btcPrice).toFixed(2) : '');
