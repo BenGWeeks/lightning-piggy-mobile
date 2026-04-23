@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
@@ -88,7 +88,7 @@ function txKey(tx: WalletTransaction, fallbackIndex: number): string {
 }
 
 const TransactionList: React.FC<Props> = ({ transactions }) => {
-  const { btcPrice, currency } = useWallet();
+  const { btcPrice, currency, activeWalletId } = useWallet();
   const { contacts } = useNostr();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   // When contacts' profiles refresh, we want transaction rows to pick up
@@ -139,14 +139,18 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
   const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
   const [zapContact, setZapContact] = useState<CounterpartyContact | null>(null);
 
-  // Previously an effect reset showAll to false on every `transactions`
-  // change, intended to collapse the list when the user switched wallets.
-  // But WalletContext polls balances/transactions every few seconds and
-  // produces a new array reference each time, firing this effect and
-  // immediately undoing the user's "Show all N" tap (symptom: tap does
-  // nothing visible — it expands for a split second, then collapses).
-  // Removed: a wallet-switch re-mounts the component via key change in
-  // HomeScreen anyway; benign to leave showAll=true across tx updates.
+  // Collapse the list back to the initial N rows when the active wallet
+  // changes, but NOT on every transactions-array update. WalletContext
+  // polls balances/transactions every few seconds and emits a new array
+  // reference each time; keying the reset on `transactions` meant the
+  // effect fired on every poll and immediately undid the user's "Show
+  // all N" tap (symptom: tap appeared to expand for a split second and
+  // then collapse). HomeScreen renders TransactionList without a `key`
+  // so it doesn't remount on wallet switch — we reset explicitly here
+  // instead.
+  useEffect(() => {
+    setShowAll(false);
+  }, [activeWalletId]);
 
   if (transactions.length === 0) {
     return (

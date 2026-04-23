@@ -174,8 +174,9 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
           });
       } else if (presetFriend) {
         // "Send invoice to friend" entry point: skip straight to the
-        // amount-entry screen so the user doesn't land on the address
-        // tab they can't use, then a second tap on "Enter custom amount".
+        // amount-entry screen so the user doesn't land on the main
+        // receive/address view they can't use, then need a second tap
+        // on "Enter custom amount".
         setMode('amount');
         setStep('amount');
       } else if (!lightningAddress) {
