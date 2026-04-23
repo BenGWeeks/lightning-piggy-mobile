@@ -174,8 +174,15 @@ const FriendsScreen: React.FC = () => {
     return Array.from(letters).sort();
   }, [combinedList]);
 
-  // Approximate item height for scroll-position letter tracking only (not used for layout)
+  // Row height is fixed by ContactListItem styles: 44px avatar + 14px*2
+  // vertical padding. Telling FlashList this via overrideItemLayout makes
+  // scroll math O(1) and lets us scrollToOffset deterministically — which
+  // fixes the "tap N, list goes blank" race on warm-cache devices where
+  // scrollToIndex could target an unmeasured row.
   const ITEM_HEIGHT = 72;
+  const overrideItemLayout = useCallback((layout: { size?: number }) => {
+    layout.size = ITEM_HEIGHT;
+  }, []);
 
   const handleScroll = useCallback(
     (e: { nativeEvent: { contentOffset: { y: number } } }) => {
@@ -205,7 +212,14 @@ const FriendsScreen: React.FC = () => {
         // Pause scroll tracking to prevent currentLetter flashing during scroll
         scrollTrackingPaused.current = true;
         setCurrentLetter(letter);
-        flatListRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0 });
+        // Use scrollToOffset with the pinned row height instead of
+        // scrollToIndex. On a warm cache, offscreen rows haven't been
+        // measured yet and scrollToIndex can no-op leaving the viewport
+        // blank (see #178). Offset math is O(1) given the uniform height.
+        flatListRef.current?.scrollToOffset({
+          offset: index * ITEM_HEIGHT,
+          animated: false,
+        });
         setTimeout(() => {
           scrollTrackingPaused.current = false;
         }, 500);
@@ -411,6 +425,7 @@ const FriendsScreen: React.FC = () => {
                 data={combinedList}
                 keyExtractor={(item) => item.id}
                 renderItem={renderItem}
+                overrideItemLayout={overrideItemLayout}
                 refreshControl={
                   <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
                 }

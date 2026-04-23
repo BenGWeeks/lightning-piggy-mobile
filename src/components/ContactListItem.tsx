@@ -44,6 +44,7 @@ const ContactListItem: React.FC<Props> = ({ name, picture, lightningAddress, onP
             cachePolicy="disk"
             transition={200}
             recyclingKey={picture || undefined}
+            autoplay={false}
             onError={() => setAvatarError(true)}
             onLoad={() => setAvatarLoaded(true)}
           />
