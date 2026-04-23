@@ -29,7 +29,7 @@ import { useNostr } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import * as nwcService from '../services/nwcService';
 import { colors } from '../styles/theme';
-import { uploadImage } from '../services/imageUploadService';
+import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 import SendSheet from '../components/SendSheet';
 import AttachSheet from '../components/AttachSheet';
 import GifPickerSheet from '../components/GifPickerSheet';
@@ -664,13 +664,15 @@ const ConversationScreen: React.FC = () => {
   }, [sharingLocation, name, pubkey, sendDirectMessage]);
 
   // Shared send-image path for both gallery and camera entry points.
-  // Uploads to the user's configured Blossom server (or nostr.build
-  // fallback) then DMs the returned URL to the conversation partner.
+  // Strips EXIF from the picked image, uploads to the user's configured
+  // Blossom server (or nostr.build fallback), then DMs the returned URL
+  // to the conversation partner.
   const uploadAndSendImage = useCallback(
-    async (localUri: string, base64: string | null | undefined) => {
+    async (localUri: string, pickerBase64?: string | null) => {
       setUploadingImage(true);
       try {
-        const url = await uploadImage(localUri, signEvent, base64);
+        const scrubbed = await stripImageMetadata(localUri, pickerBase64);
+        const url = await uploadImage(scrubbed.uri, signEvent, scrubbed.base64);
         const sendResult = await sendDirectMessage(pubkey, url);
         if (!sendResult.success) {
           Alert.alert('Send failed', sendResult.error ?? 'Could not send image.');
@@ -704,7 +706,10 @@ const ConversationScreen: React.FC = () => {
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      quality: 0.8,
+      quality: 1,
+      // Needed so stripImageMetadata can pass animated GIFs through
+      // without re-encoding (expo-image-manipulator has no animated
+      // output format). No-op for JPEG/PNG — those get re-encoded.
       base64: true,
     });
     if (result.canceled || !result.assets?.[0]) return;
@@ -721,7 +726,9 @@ const ConversationScreen: React.FC = () => {
     }
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ['images'],
-      quality: 0.8,
+      quality: 1,
+      // Camera never captures GIF, but keep the shape consistent with the
+      // gallery path — harmless for JPEG output.
       base64: true,
     });
     if (result.canceled || !result.assets?.[0]) return;

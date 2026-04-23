@@ -471,13 +471,31 @@ Loading 500+ contacts with profiles requires careful optimization:
 
 == Image Upload
 
-Profile pictures and banners are uploaded via the nostr.build API:
+Used by three flows: profile picture / banner (EditProfileSheet), chat image attachments (ConversationScreen). All three funnel through the same helper chain in `src/services/imageUploadService.ts`.
 
-- **Endpoint**: `POST https://nostr.build/api/v2/upload/files`
-- **Method**: multipart/form-data with `file` field
-- **Auth**: Anonymous (no NIP-98 required)
-- **Response**: NIP-94 event with `url` tag containing the hosted image URL
-- **Image picker**: `expo-image-picker` with 1:1 crop for avatars, 3:1 for banners
+=== Pipeline (ordered)
+
+1. **Pick & crop** — `expo-image-picker` with `allowsEditing: true`, `quality: 1`, 1:1 aspect for avatars, 3:1 for banners.
+2. **Strip EXIF metadata** — `stripImageMetadata()` re-encodes the image through `expo-image-manipulator` at `compress: 0.9`, `format: JPEG`, `base64: true`. Re-encoding drops every EXIF chunk (GPS coordinates, capture timestamp, camera Make/Model, Software, …) — no tag-by-tag allowlist needed; the fresh JPEG has no metadata segments at all. Quality is `1` at the picker (not `0.8`) so the manipulator's `0.9` is the only lossy step. Returns `{ uri, base64 }`. Privacy rationale: issue #145.
+3. **Upload** — `uploadImage(uri, signer, base64)`:
+** **Signed in (nsec or Amber)** → `uploadToBlossom(uri, server, signer, base64)`. Blossom PUT with a BUD-02 signed auth event (`kind: 24242`). Server is user-configurable (`getBlossomServer()`), defaults to the Lightning Piggy–hosted instance. See BUD-01 / BUD-02 at https://github.com/hzrd149/blossom.
+** **Not signed in (public key only / hot wallet)** → `uploadToNostrBuild(uri)`. Anonymous `POST https://nostr.build/api/v2/upload/files` with multipart/form-data. Fallback only; no kind-0 publish path hits this branch because profile edits require signing.
+
+=== Why base64 is forwarded inline
+
+`uploadToBlossom` requires the image bytes. Reading `file://` URIs via `fetch` / `XHR` is flaky on Android React Native (encoding lossage, race with `AsyncStorage` locking). The picker's `base64: true` / manipulator's `base64: true` outputs bypass that by passing the bytes in memory as a base64 string; `blossomService.ts` then `Buffer.from(base64, 'base64')` to get the raw `Uint8Array` for the PUT body. Issue #141 regressed because a prior refactor dropped this forwarding.
+
+=== Key files
+
+- `src/services/imageUploadService.ts` — `stripImageMetadata`, `uploadImage`, `uploadToNostrBuild`.
+- `src/services/blossomService.ts` — Blossom BUD-02 signing (`kind: 24242`, 5-min expiration), XHR binary PUT, response parsing. Logs `[Blossom] uploaded <url>` on success — grepped by `scripts/verify_exif_strip.sh`.
+- `src/components/EditProfileSheet.tsx` `pickAndUpload` — profile flow.
+- `src/screens/ConversationScreen.tsx` `uploadAndSendImage` — chat flow.
+
+=== Verification
+
+- `tests/e2e/test-edit-profile-picture.yaml` — drives the UI, asserts no `Upload Failed` alert (#141 regression guard).
+- `tests/e2e/test-exif-strip.yaml` + `scripts/verify_exif_strip.sh` — two-stage check: Maestro drives upload, shell wrapper seeds a JPEG with known GPS / Make / Model / DateTimeOriginal / Software tags, greps logcat for the Blossom URL, downloads the uploaded bytes, and asserts `exiftool` sees none of the seeded tags. Exits 3 on privacy regression.
 
 == Direct Messages (NIP-04 + NIP-17)
 
