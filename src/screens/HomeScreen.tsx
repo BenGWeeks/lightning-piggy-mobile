@@ -176,6 +176,9 @@ const HomeScreen: React.FC = () => {
     setSettingsWalletId(walletId);
   }, []);
 
+  const greetingName =
+    profile?.displayName?.trim() || profile?.name?.trim() || userName?.trim() || '';
+
   const isOnchainWallet = activeWallet?.walletType === 'onchain';
   const isWatchOnly = isOnchainWallet && activeWallet?.onchainImportMethod !== 'mnemonic';
   const hasActiveConnection = isOnchainWallet ? true : (activeWallet?.isConnected ?? false);
@@ -199,7 +202,7 @@ const HomeScreen: React.FC = () => {
         />
 
         <TabHeader
-          title={`Hello${userName ? `, ${userName}` : ''}!`}
+          title={`Hello${greetingName ? `, ${greetingName}` : ''}!`}
           // Keep Home's greeting at its pre-#139 lighter weight + smaller
           // size; section titles (Messages/Friends/Learn) stay bolder to
           // read as section labels.
