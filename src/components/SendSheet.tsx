@@ -133,11 +133,12 @@ const SendSheet: React.FC<Props> = ({
   const [progressError, setProgressError] = useState<string | undefined>(undefined);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
 
-  // No explicit snapPoints — with gorhom v5's default
-  // `enableDynamicSizing={true}`, the sheet sizes itself to its content
-  // and content-height becomes the only snap (so the user can't pan it
-  // taller than its content). `keyboardBehavior="interactive"` grows
-  // the sheet above that snap when an input is focused. Closes #160.
+  // No explicit snapPoints — gorhom v5's `enableDynamicSizing={true}`
+  // default sizes the sheet to its content. Trailing action buttons
+  // are rendered as a sticky footer below the scroll view (see the
+  // fixed-footer structure in the render output below) so they stay
+  // reachable even when the form content is tall enough to require
+  // internal scrolling.
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   const needsAmount = scanned && (isLightningAddress(invoiceData || '') || isOnchainAddress);
