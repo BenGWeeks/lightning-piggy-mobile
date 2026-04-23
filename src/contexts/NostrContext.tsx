@@ -44,9 +44,23 @@ const AMBER_NIP17_CACHE_KEY = 'amber_nip17_cache_v1';
 const AMBER_NIP17_CACHE_CAP = 5000;
 const AMBER_NIP17_ENABLED_KEY = 'amber_nip17_enabled';
 
+// The nsec signer has the same wrap-id → DmInboxEntry cache shape as
+// Amber. Without it, every thread open re-fetches and re-decrypts the
+// full NIP-17 inbox — see #176.
+const NSEC_NIP17_CACHE_KEY = 'nsec_nip17_cache_v1';
+
 /** Persistent wrap-id → DmInboxEntry cache. Only ever contains rumors
  * from followed senders — see refreshDmInbox's filter gate. */
 type AmberNip17CacheEntry = DmInboxEntry & { wrapId: string };
+
+/** Yield to the JS event loop so UI interactions can tick between
+ * chunks of a synchronous decrypt loop (#177). `await`ing an already-
+ * resolved promise only drains the microtask queue, which still
+ * starves UI events — setTimeout(0) returns to the task scheduler. */
+const DECRYPT_YIELD_EVERY = 15;
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 const NSEC_KEY = 'nostr_nsec';
 const PUBKEY_KEY = 'nostr_pubkey';
@@ -622,6 +636,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // not globally.
       'amber_nip17_cache_v1',
       'amber_nip17_enabled',
+      'nsec_nip17_cache_v1',
     ]);
 
     setPubkey(null);
@@ -1007,12 +1022,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         normalized,
         readRelays,
       );
+      let kind4Decrypted = 0;
       for (const ev of kind4Events) {
         const fromMe = ev.pubkey === pubkey;
         const counterparty = fromMe ? normalized : ev.pubkey.toLowerCase();
         const plaintext = await decryptNip04ViaSigner(counterparty, ev.content);
         if (plaintext === null) continue;
         decrypted.push({ id: ev.id, fromMe, text: plaintext, createdAt: ev.created_at });
+        if (++kind4Decrypted % DECRYPT_YIELD_EVERY === 0) await yieldToEventLoop();
       }
 
       // NIP-17 — partner pubkey is hidden inside the encrypted rumor, so
@@ -1028,8 +1045,27 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (signerType === 'nsec') {
           const secretKey = await getMemoisedSecretKey(pubkey);
           if (secretKey) {
+            // Reuse the persistent wrap-id cache populated by
+            // refreshDmInbox — re-entering a thread shouldn't re-decrypt
+            // the full inbox (#176). Cache writes happen only in the
+            // inbox refresh path; here we read-only short-circuit.
+            const raw = await AsyncStorage.getItem(NSEC_NIP17_CACHE_KEY);
+            const cache: Record<string, AmberNip17CacheEntry> = raw ? JSON.parse(raw) : {};
+            let nip17Decrypted = 0;
             for (const wrap of kind1059) {
+              const cached = cache[wrap.id];
+              if (cached) {
+                if (cached.partnerPubkey !== normalized) continue;
+                decrypted.push({
+                  id: wrap.id,
+                  fromMe: cached.fromMe,
+                  text: cached.text,
+                  createdAt: cached.createdAt,
+                });
+                continue;
+              }
               const rumor = unwrapWrapNsec(wrap, secretKey, onSkip);
+              if (++nip17Decrypted % DECRYPT_YIELD_EVERY === 0) await yieldToEventLoop();
               if (!rumor) continue;
               const partnership = partnerFromRumor(rumor, pubkey);
               if (!partnership || partnership.partnerPubkey !== normalized) continue;
@@ -1125,6 +1161,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         // NIP-04 — partner pubkey is in the envelope, so we can apply the
         // follow filter BEFORE decrypting. A non-followed sender never
         // gets a round-trip through Amber, let alone land in state.
+        let kind4Decrypted = 0;
         for (const ev of kind4) {
           const fromMe = ev.pubkey.toLowerCase() === refreshForPubkey;
           const partnerPubkey = (
@@ -1141,6 +1178,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             text: plaintext,
             wireKind: 4,
           });
+          if (++kind4Decrypted % DECRYPT_YIELD_EVERY === 0) await yieldToEventLoop();
         }
 
         // NIP-17 — partner pubkey is INSIDE the encrypted rumor, so we
@@ -1158,8 +1196,32 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (refreshForSigner === 'nsec' && kind1059.length > 0) {
           const secretKey = await getMemoisedSecretKey(refreshForPubkey);
           if (secretKey) {
+            // Persistent wrap-id cache mirroring the Amber branch. Only
+            // ever contains rumors from followed senders — see the
+            // filter gate below. This is the fix for #176.
+            const raw = await AsyncStorage.getItem(NSEC_NIP17_CACHE_KEY);
+            const cache: Record<string, AmberNip17CacheEntry> = raw ? JSON.parse(raw) : {};
+            const newlyCached: AmberNip17CacheEntry[] = [];
+            let nip17Decrypted = 0;
             for (const wrap of kind1059) {
+              const cached = cache[wrap.id];
+              if (cached) {
+                // Cache entry exists → it was from a followed sender
+                // when first stored. Re-check against the *current*
+                // follow set so unfollowed partners don't keep
+                // surfacing from cache.
+                if (!refreshFollows.has(cached.partnerPubkey)) continue;
+                entries.push({
+                  partnerPubkey: cached.partnerPubkey,
+                  fromMe: cached.fromMe,
+                  createdAt: cached.createdAt,
+                  text: cached.text,
+                  wireKind: cached.wireKind,
+                });
+                continue;
+              }
               const rumor = unwrapWrapNsec(wrap, secretKey, onSkip);
+              if (++nip17Decrypted % DECRYPT_YIELD_EVERY === 0) await yieldToEventLoop();
               if (!rumor) continue;
               const partnership = partnerFromRumor(rumor, refreshForPubkey);
               if (!partnership) continue;
@@ -1167,13 +1229,36 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               // state. The filter is load-bearing ("parental control"),
               // so it runs here not in the view.
               if (!refreshFollows.has(partnership.partnerPubkey)) continue;
-              entries.push({
+              const entry: AmberNip17CacheEntry = {
+                wrapId: wrap.id,
                 partnerPubkey: partnership.partnerPubkey,
                 fromMe: partnership.fromMe,
                 createdAt: rumor.created_at,
                 text: rumor.content,
                 wireKind: rumor.kind,
+              };
+              cache[wrap.id] = entry;
+              newlyCached.push(entry);
+              entries.push({
+                partnerPubkey: entry.partnerPubkey,
+                fromMe: entry.fromMe,
+                createdAt: entry.createdAt,
+                text: entry.text,
+                wireKind: entry.wireKind,
               });
+            }
+
+            if (newlyCached.length > 0) {
+              const items = Object.values(cache);
+              const toWrite =
+                items.length > AMBER_NIP17_CACHE_CAP
+                  ? items.sort((a, b) => b.createdAt - a.createdAt).slice(0, AMBER_NIP17_CACHE_CAP)
+                  : items;
+              const next: Record<string, AmberNip17CacheEntry> = {};
+              for (const item of toWrite) next[item.wrapId] = item;
+              await AsyncStorage.setItem(NSEC_NIP17_CACHE_KEY, JSON.stringify(next)).catch(
+                () => {},
+              );
             }
           }
         } else if (refreshForSigner === 'amber' && kind1059.length > 0) {
