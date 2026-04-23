@@ -175,14 +175,12 @@ const FriendsScreen: React.FC = () => {
   }, [combinedList]);
 
   // Row height is fixed by ContactListItem styles: 44px avatar + 14px*2
-  // vertical padding. Telling FlashList this via overrideItemLayout makes
-  // scroll math O(1) and lets us scrollToOffset deterministically — which
-  // fixes the "tap N, list goes blank" race on warm-cache devices where
-  // scrollToIndex could target an unmeasured row.
+  // vertical padding. We use this to compute a deterministic scroll
+  // offset for alphabet taps — scrollToIndex could silently no-op on
+  // warm-cache devices when the target row hadn't been virtualised yet
+  // (see #178). FlashList v2 auto-measures, so there's no size-hint API
+  // to give it (overrideItemLayout in v2 only controls column span).
   const ITEM_HEIGHT = 72;
-  const overrideItemLayout = useCallback((layout: { size?: number }) => {
-    layout.size = ITEM_HEIGHT;
-  }, []);
 
   const handleScroll = useCallback(
     (e: { nativeEvent: { contentOffset: { y: number } } }) => {
@@ -425,7 +423,6 @@ const FriendsScreen: React.FC = () => {
                 data={combinedList}
                 keyExtractor={(item) => item.id}
                 renderItem={renderItem}
-                overrideItemLayout={overrideItemLayout}
                 refreshControl={
                   <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
                 }
