@@ -193,8 +193,8 @@ eas env:create \
   --scope project \
   --type string \
   --non-interactive
-# verify
-eas env:list production
+# verify (one env at a time)
+eas env:list --environment production
 ----
 *Visibility:* `plaintext` is correct for `EXPO_PUBLIC_*` — the value is already embedded in the client bundle by design, so "sensitive/secret" is the wrong protection model. Server-only secrets that must never land in a client bundle should **not** be prefixed `EXPO_PUBLIC_`. +
 *Timing caveat:* EAS fetches env at build start, not at submission. For a build that's already `IN_PROGRESS`, setting the var won't apply — you need another build. For a build still `IN_QUEUE` at the time you set the var, it will pick up the new value when gradle starts. +

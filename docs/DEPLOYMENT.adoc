@@ -111,8 +111,8 @@ eas env:create \
   --type string \
   --non-interactive
 
-# Verify
-eas env:list production
+# Verify (one env at a time; list it for each if you want to double-check)
+eas env:list --environment production
 ----
 
 Visibility can be `plaintext` for keys that are already publicly embedded in the client bundle (which is true of every `EXPO_PUBLIC_*` value by design). Use `sensitive` for server-only secrets that must never end up in a client bundle — those should **not** be prefixed `EXPO_PUBLIC_`.
