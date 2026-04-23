@@ -538,10 +538,16 @@ const SendSheet: React.FC<Props> = ({
       setProgressError(message);
       setProgressState('error');
     } finally {
+      // Only clear state if this invocation is still the active one.
+      // A cancel-then-resend can leave the first (aborted) handleSend
+      // resolving AFTER a new send has already set sending=true and
+      // swapped in a new controller — clearing unconditionally here
+      // would stomp that new send's state (re-enable Send button,
+      // allow a double-tap). See Copilot review on #185.
       if (paymentAbortRef.current === abortController) {
         paymentAbortRef.current = null;
+        setSending(false);
       }
-      setSending(false);
     }
   };
 

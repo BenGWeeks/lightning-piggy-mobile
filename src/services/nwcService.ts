@@ -60,6 +60,29 @@ function abortableSleep(ms: number, signal: AbortSignal | undefined): Promise<vo
   });
 }
 
+/** Race a non-cancellable promise against an AbortSignal so the caller
+ * can stop waiting even while the underlying SDK call keeps running.
+ * The background promise is allowed to complete; its result is just
+ * discarded if abort wins the race. */
+function abortable<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(createAbortError());
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(createAbortError());
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (err) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(err);
+      },
+    );
+  });
+}
+
 async function withRetry<T>(
   fn: () => Promise<T>,
   { attempts = 3, delayMs = 1000, label = 'operation' } = {},
@@ -349,13 +372,19 @@ export async function payInvoice(
           throw new Error("Couldn't reach your wallet: relay publish timed out");
         }
         try {
-          const lookup = await provider.lookupInvoice({ paymentHash });
+          // `abortable` lets Cancel win the race even while the SDK is
+          // blocked inside lookupInvoice's own NIP-47 round-trip; the
+          // underlying promise completes in the background and its
+          // result is discarded.
+          const lookup = await abortable(provider.lookupInvoice({ paymentHash }), signal);
           if (lookup?.preimage) {
             console.log('[NWC] Payment completed after timeout:', paymentHash);
             return { preimage: lookup.preimage };
           }
-        } catch {
-          // keep polling
+        } catch (err) {
+          // AbortError must propagate so the caller sees the cancel.
+          if ((err as Error)?.name === 'AbortError') throw err;
+          // Any other lookupInvoice failure — keep polling.
         }
       }
     }

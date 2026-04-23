@@ -445,23 +445,30 @@ export default function PaymentProgressOverlay({
 
           {/* Error detail toggle: the humanised subtitle is shown by
            *  default; tapping "Show details" reveals the raw error for
-           *  dev / support. Only renders if the humaniser actually
-           *  rewrote the message (i.e. detail differs from subtitle). */}
-          {state === 'error' && humanizedError.detail ? (
-            showDetails ? (
-              <Text style={styles.detailText} selectable testID="payment-overlay-error-detail">
-                {humanizedError.detail}
-              </Text>
-            ) : (
+           *  dev / support, tapping "Hide details" collapses it again.
+           *  Only renders when the humaniser actually rewrote the
+           *  message — no point showing a toggle whose detail equals
+           *  the subtitle already on screen. */}
+          {state === 'error' &&
+          humanizedError.detail &&
+          humanizedError.detail !== humanizedError.message ? (
+            <>
+              {showDetails ? (
+                <Text style={styles.detailText} selectable testID="payment-overlay-error-detail">
+                  {humanizedError.detail}
+                </Text>
+              ) : null}
               <TouchableOpacity
-                onPress={() => setShowDetails(true)}
+                onPress={() => setShowDetails((prev) => !prev)}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityLabel="Show error details"
-                testID="payment-overlay-show-details"
+                accessibilityLabel={showDetails ? 'Hide error details' : 'Show error details'}
+                testID="payment-overlay-details-toggle"
               >
-                <Text style={styles.detailsToggle}>Show details</Text>
+                <Text style={styles.detailsToggle}>
+                  {showDetails ? 'Hide details' : 'Show details'}
+                </Text>
               </TouchableOpacity>
-            )
+            </>
           ) : null}
 
           {/* The user must acknowledge send/receive/error outcomes before

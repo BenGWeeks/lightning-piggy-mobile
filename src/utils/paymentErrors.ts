@@ -68,11 +68,12 @@ export function humanizePaymentError(raw: string | undefined | null): HumanizedP
 
   // Heuristic: if the raw string looks like a hex event id (64 hex chars
   // anywhere in the message), strip it out before showing — users shouldn't
-  // see internal event hashes even on the fallback path.
+  // see internal event hashes even on the fallback path. `cleaned` is
+  // what we display; `trimmed` is kept as the raw detail for support.
   const cleaned = trimmed.replace(/[0-9a-f]{64}/gi, '').trim();
   const looksTechnical = cleaned.length < 4 || /^[^a-zA-Z]+$/.test(cleaned);
   return {
-    message: looksTechnical ? 'Payment failed. Please try again.' : trimmed,
+    message: looksTechnical ? 'Payment failed. Please try again.' : cleaned,
     detail: trimmed,
   };
 }
