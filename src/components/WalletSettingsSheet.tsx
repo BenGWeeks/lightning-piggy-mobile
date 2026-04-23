@@ -47,6 +47,11 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const [xpubDisplay, setXpubDisplay] = useState<string | null>(null);
   const [relayUrl, setRelayUrl] = useState<string | null>(null);
 
+  // Populate fields ONCE when the sheet opens for a given walletId. Using
+  // `wallet` as a dep would re-fire on every `wallets` array update (balance
+  // polls, NWC reconnect pings, etc.), each time stomping the user's in-
+  // progress edits with the stored value — symptom: typing into Lightning
+  // Address makes characters disappear.
   useEffect(() => {
     if (wallet) {
       setAlias(wallet.alias);
@@ -75,7 +80,8 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         setRelayUrl(null);
       }
     }
-  }, [wallet, walletId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [walletId]);
 
   const handleSheetChange = useCallback(
     (index: number) => {
