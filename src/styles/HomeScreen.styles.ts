@@ -19,13 +19,6 @@ export const styles = StyleSheet.create({
     top: -20,
     opacity: 0.15,
   },
-  /** Glyph inside the TabHeader round badge for Home. 20×20 matches the
-   * other tabs' badge glyphs; the Home.png is tinted pink to match. */
-  badgeIcon: {
-    width: 20,
-    height: 20,
-    tintColor: colors.brandPink,
-  },
   buttonRow: {
     flexDirection: 'row',
     justifyContent: 'center',

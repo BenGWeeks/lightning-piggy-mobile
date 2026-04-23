@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -28,7 +28,7 @@ interface Props {
 
 const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
   const sheetRef = useRef<BottomSheetModal>(null);
-  const snapPoints = useMemo(() => ['65%'], []);
+  // No explicit snapPoints — content-height only, not user-draggable.
   const [mode, setMode] = useState<'paste' | 'scan'>('paste');
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
@@ -105,7 +105,6 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
   return (
     <BottomSheetModal
       ref={sheetRef}
-      snapPoints={snapPoints}
       onDismiss={onClose}
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}

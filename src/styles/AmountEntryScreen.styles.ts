@@ -141,6 +141,9 @@ export const amountEntryStyles = StyleSheet.create({
   confirmButton: {
     marginTop: 16,
     marginHorizontal: 16,
+    // Match the horizontal gap so the button has the same 16 DP breathing
+    // room above the keypad as it does to the left/right screen edges.
+    marginBottom: 16,
     height: 52,
     backgroundColor: colors.brandPink,
     borderRadius: 12,

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -22,7 +22,7 @@ import {
 import Svg, { Path, Circle } from 'react-native-svg';
 import { colors } from '../styles/theme';
 import { useNostr } from '../contexts/NostrContext';
-import { uploadImage } from '../services/imageUploadService';
+import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 
 interface Props {
   visible: boolean;
@@ -42,7 +42,7 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const sheetRef = useRef<BottomSheetModal>(null);
   const scrollRef = useRef<any>(null);
-  const snapPoints = useMemo(() => ['85%'], []);
+  // No explicit snapPoints — content-height only, not user-draggable.
 
   useEffect(() => {
     if (visible) {
@@ -96,14 +96,25 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
       mediaTypes: ['images'],
       allowsEditing: true,
       aspect,
-      quality: 0.8,
+      quality: 1,
+      // `stripImageMetadata` re-encodes the picked image through
+      // expo-image-manipulator at `compress: 0.9` and produces fresh
+      // base64 (see #145). Picking at quality 1 here avoids a double
+      // JPEG encode.
+      // `base64: true` feeds the GIF passthrough branch in
+      // stripImageMetadata (expo-image-manipulator has no animated
+      // output). In practice the OS crop editor from `allowsEditing`
+      // flattens GIFs to JPEG before we see them, so the GIF branch
+      // rarely fires here — set for consistency with chat paths.
+      base64: true,
     });
 
     if (result.canceled || !result.assets?.[0]) return;
 
     setUploading(true);
     try {
-      const url = await uploadImage(result.assets[0].uri, isLoggedIn ? signEvent : null);
+      const scrubbed = await stripImageMetadata(result.assets[0].uri, result.assets[0].base64);
+      const url = await uploadImage(scrubbed.uri, isLoggedIn ? signEvent : null, scrubbed.base64);
       setUrl(url);
     } catch (error) {
       Alert.alert('Upload Failed', error instanceof Error ? error.message : 'Please try again.');
@@ -134,7 +145,6 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
   return (
     <BottomSheetModal
       ref={sheetRef}
-      snapPoints={snapPoints}
       onDismiss={onClose}
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}

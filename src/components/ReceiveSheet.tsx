@@ -94,7 +94,8 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
   const { sendDirectMessage, contacts } = useNostr();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
-  const snapPoints = useMemo(() => ['85%'], []);
+  // No explicit snapPoints — gorhom v5's default enableDynamicSizing=true
+  // gives a single content-height snap (not user-draggable).
 
   const selectedWalletId = capturedWalletId ?? activeWalletId;
   const selectedWallet = useMemo(
@@ -369,12 +370,14 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
     <>
       <BottomSheetModal
         ref={bottomSheetRef}
-        snapPoints={snapPoints}
         onChange={handleSheetChange}
         enablePanDownToClose
         backdropComponent={renderBackdrop}
         handleIndicatorStyle={styles.handleIndicator}
         backgroundStyle={styles.sheetBackground}
+        keyboardBehavior="interactive"
+        keyboardBlurBehavior="restore"
+        android_keyboardInputMode="adjustResize"
       >
         <BottomSheetView style={styles.content}>
           {/* No TouchableWithoutFeedback-with-Keyboard.dismiss wrapper here

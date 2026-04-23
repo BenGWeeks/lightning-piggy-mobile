@@ -64,7 +64,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   const scrollRef = useRef<any>(null);
-  const snapPoints = useMemo(() => ['85%'], []);
+  // No explicit snapPoints — content-height only, not user-draggable.
 
   const currentSats = parseInt(satsValue) || 0;
 
@@ -634,7 +634,6 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   return (
     <BottomSheetModal
       ref={bottomSheetRef}
-      snapPoints={snapPoints}
       onChange={handleSheetChange}
       enablePanDownToClose
       backdropComponent={renderBackdrop}
