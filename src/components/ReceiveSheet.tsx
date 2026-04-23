@@ -173,11 +173,19 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
             console.warn('Failed to fetch on-chain address');
           });
       } else if (presetFriend) {
-        // "Send invoice" entry point: the user wants a bolt11 for the
-        // conversation partner, so skip the address tab by default.
+        // "Send invoice to friend" entry point: skip straight to the
+        // amount-entry screen so the user doesn't land on the address
+        // tab they can't use, then a second tap on "Enter custom amount".
         setMode('amount');
+        setStep('amount');
+      } else if (!lightningAddress) {
+        // No per-wallet LN address (#168/#169). Nothing useful to show
+        // on the main view — jump directly to amount entry instead of
+        // surfacing "Enter an amount to generate invoice" placeholder.
+        setMode('amount');
+        setStep('amount');
       } else {
-        setMode(lightningAddress ? 'address' : 'amount');
+        setMode('address');
       }
 
       bottomSheetRef.current?.present();
@@ -200,21 +208,29 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
     return () => handler.remove();
   }, [visible, onClose]);
 
-  // Reset state when wallet is changed via dropdown
+  // Reset state when wallet is changed via dropdown. Must mirror the
+  // skip-to-amount rule from the visible-open effect — otherwise this
+  // effect races after the first sets capturedWalletId and forces step
+  // back to 'main', dropping the user on the "Enter an amount to
+  // generate invoice" placeholder for wallets without a lud16.
   useEffect(() => {
     if (!visible || !capturedWalletId) return;
     setOnchainAddress(null);
     setInvoice('');
     setPaymentReceived(false);
     setSatsValue('');
-    setStep('main');
     if (selectedWallet?.walletType === 'onchain') {
       setMode('address');
+      setStep('main');
       getReceiveAddress(capturedWalletId)
         .then((addr) => setOnchainAddress(addr))
         .catch(() => {});
+    } else if (!lightningAddress) {
+      setMode('amount');
+      setStep('amount');
     } else {
-      setMode(lightningAddress ? 'address' : 'amount');
+      setMode('address');
+      setStep('main');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [capturedWalletId]);
