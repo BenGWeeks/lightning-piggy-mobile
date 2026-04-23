@@ -17,14 +17,11 @@ name: Send Lightning Address to Friend (dev)
 - waitForAnimationToEnd: { timeout: 3000 }
 
 - tapOn: { id: 'btn-receive' }
-- extendedWaitUntil:
-    visible: { id: 'receive-tab-address' }
-    timeout: 10000
-
-# Stay on Address tab (default) — friendShareValue = lightningAddress
+# Address/Amount tabs were removed; wallets with a lud16 land directly
+# on the lud16 QR view (friendShareValue = lightningAddress).
 - extendedWaitUntil:
     visible: { text: 'test@getalby.com' }
-    timeout: 5000
+    timeout: 10000
 
 # Tap Friend
 - tapOn: { id: 'receive-send-to-friend' }

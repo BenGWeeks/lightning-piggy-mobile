@@ -486,30 +486,6 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
                 <Text style={styles.walletLabel}>To: {walletName}</Text>
               )}
 
-              {/* Mode tabs — show for on-chain wallets and NWC wallets with lightning address */}
-              {isOnchainWallet || lightningAddress ? (
-                <View style={styles.tabRow}>
-                  <TouchableOpacity
-                    style={[styles.tab, mode === 'address' && styles.tabActive]}
-                    onPress={() => setMode('address')}
-                    testID="receive-tab-address"
-                  >
-                    <Text style={[styles.tabText, mode === 'address' && styles.tabTextActive]}>
-                      Address
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.tab, mode === 'amount' && styles.tabActive]}
-                    onPress={() => setMode('amount')}
-                    testID="receive-tab-amount"
-                  >
-                    <Text style={[styles.tabText, mode === 'amount' && styles.tabTextActive]}>
-                      Amount
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              ) : null}
-
               {/* QR Code */}
               <View style={styles.qrContainer}>
                 {isOnchainWallet && onchainAddress && (mode === 'address' || currentSats > 0) ? (
@@ -643,11 +619,17 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
                 </View>
               )}
 
-              {/* Amount summary / Enter-custom-amount CTA — matches Figma
-               *  57-2276 (no amount) and 57-2515 (with amount). Hidden for
-               *  the presetFriend flow since that sheet is a single-shot
-               *  send-invoice-to-a-friend operation with its own CTA. */}
-              {!presetFriend && mode === 'amount' ? (
+              {/* Amount / address switcher — matches Figma 57-2276 + 57-2515.
+               *  Replaces the old Address/Amount tab bar (removed: the tab
+               *  was a view-switch whose only purpose was to reach the
+               *  Enter-custom-amount button, itself just a navigation
+               *  affordance to the AmountEntryScreen). Now the primary
+               *  amount affordance sits directly on the current view.
+               *  Hidden for presetFriend (single-shot flow with its own CTA).
+               */}
+              {!presetFriend ? (
+                // With invoice (or on-chain amount set) → show summary +
+                // Change amount + "Show my address" fallback to lud16.
                 currentSats > 0 && (invoice || (isOnchainWallet && onchainAddress)) ? (
                   <View style={styles.amountSummary}>
                     <View style={styles.amountSummaryLine}>
@@ -667,15 +649,43 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
                     >
                       <Text style={styles.changeAmountText}>Change amount</Text>
                     </TouchableOpacity>
+                    {!isOnchainWallet && lightningAddress ? (
+                      <TouchableOpacity
+                        style={styles.secondaryActionButton}
+                        onPress={() => {
+                          // Clear the generated invoice so the next render
+                          // falls back to the lud16 QR view. setMode keeps
+                          // the derived copy/share values in the right
+                          // branch too.
+                          setInvoice('');
+                          setSatsValue('');
+                          setMode('address');
+                        }}
+                        testID="receive-show-address"
+                        accessibilityLabel="Show lightning address"
+                      >
+                        <Text style={styles.secondaryActionText}>Show my address</Text>
+                      </TouchableOpacity>
+                    ) : null}
                   </View>
                 ) : !loading ? (
+                  // No invoice yet → the primary way to initiate an
+                  // amount-specific receive. Renders on the lud16/on-chain
+                  // view (replacing the old "tap Amount tab, then Enter
+                  // custom amount" two-step).
                   <TouchableOpacity
                     style={styles.enterAmountButton}
-                    onPress={() => setStep('amount')}
+                    onPress={() => {
+                      // Switch into amount mode up-front so when the user
+                      // returns from AmountEntryScreen the invoice-display
+                      // code paths (mode === 'amount' && invoice) fire.
+                      setMode('amount');
+                      setStep('amount');
+                    }}
                     testID="receive-enter-custom-amount"
-                    accessibilityLabel="Enter custom amount"
+                    accessibilityLabel="Enter an amount"
                   >
-                    <Text style={styles.enterAmountText}>Enter custom amount</Text>
+                    <Text style={styles.enterAmountText}>Enter an amount</Text>
                   </TouchableOpacity>
                 ) : null
               ) : null}

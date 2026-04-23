@@ -310,4 +310,16 @@ export const receiveSheetStyles = StyleSheet.create({
     fontWeight: '700',
     color: colors.textBody,
   },
+  // "Show my address" — lower-emphasis than Change amount, takes the
+  // user back to the lud16 QR after an invoice has been generated.
+  secondaryActionButton: {
+    marginTop: 4,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  secondaryActionText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.brandPink,
+  },
 });

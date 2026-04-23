@@ -139,7 +139,14 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
   const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
   const [zapContact, setZapContact] = useState<CounterpartyContact | null>(null);
 
-  React.useEffect(() => setShowAll(false), [transactions]);
+  // Previously an effect reset showAll to false on every `transactions`
+  // change, intended to collapse the list when the user switched wallets.
+  // But WalletContext polls balances/transactions every few seconds and
+  // produces a new array reference each time, firing this effect and
+  // immediately undoing the user's "Show all N" tap (symptom: tap does
+  // nothing visible — it expands for a split second, then collapses).
+  // Removed: a wallet-switch re-mounts the component via key change in
+  // HomeScreen anyway; benign to leave showAll=true across tx updates.
 
   if (transactions.length === 0) {
     return (
