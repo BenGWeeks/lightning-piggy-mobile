@@ -178,6 +178,28 @@ The fix script (`apply_nip20_fix.py`) patches `router.py` to send `["OK", event_
 | EAS auto-registers only the *production* bundle ID on first iOS build. The preview / dev variants need manual registration the first time they're built. +
 *Fix:* at https://developer.apple.com/account/resources/identifiers → *+* → App IDs → App → Explicit Bundle ID → `com.lightningpiggy.app.preview` (or `.dev`). Then re-run the build.
 
+| In-app feature reads `process.env.EXPO_PUBLIC_*` as `undefined` on a release/preview build even though the emulator (Metro) has it, e.g. GIF picker shows *"The GIPHY API key hasn't been set for this build"* on the installed APK but works fine in dev
+| `EXPO_PUBLIC_*` values are **inlined into the JS bundle at build time** by Metro — they are not read at runtime. The local `.env` file is only consulted by `expo start` / `npm start`; EAS builds (cloud or `--local`) don't read it. Every `EXPO_PUBLIC_*` variable the app depends on must be registered on the matching EAS environment before `eas build` runs, or it ends up undefined in the bundle. +
+*Diagnosis:* the build log contains the smoking-gun line: +
+`No environment variables with visibility "Plain text" and "Sensitive" found for the "<profile>" environment on EAS.` +
+*Fix (one-time per variable, covers all three profiles in one command):* +
+[source,bash]
+----
+eas env:create \
+  --environment production --environment preview --environment development \
+  --name EXPO_PUBLIC_GIPHY_API_KEY \
+  --value "<paste value from .env>" \
+  --visibility plaintext \
+  --scope project \
+  --type string \
+  --non-interactive
+# verify
+eas env:list production
+----
+*Visibility:* `plaintext` is correct for `EXPO_PUBLIC_*` — the value is already embedded in the client bundle by design, so "sensitive/secret" is the wrong protection model. Server-only secrets that must never land in a client bundle should **not** be prefixed `EXPO_PUBLIC_`. +
+*Timing caveat:* EAS fetches env at build start, not at submission. For a build that's already `IN_PROGRESS`, setting the var won't apply — you need another build. For a build still `IN_QUEUE` at the time you set the var, it will pick up the new value when gradle starts. +
+*Docs:* `docs/DEPLOYMENT.adoc` → "Secrets" section keeps a living table of required `EXPO_PUBLIC_*` vars. Extend it when adding a new one and run `eas env:create` for all three environments before the next release, otherwise the dependent feature ships broken. Seen on 2026-04-23: `versionCode=10` Pixel APK shipped without `EXPO_PUBLIC_GIPHY_API_KEY` while the emulator build via `npm start` had it.
+
 | iOS build installs but the app won't launch — *"Developer Mode required"*
 | iOS 16+ requires Developer Mode to be explicitly enabled before sideloaded / ad-hoc / dev-signed apps will run. +
 *Fix on the iPhone:* tap the just-installed app icon once so iOS recognises a dev-signed app is present → *Settings → Privacy & Security → Developer Mode* → toggle on → Restart → after reboot, *"Turn On Developer Mode?"* dialog → passcode. The row doesn't appear in Settings until iOS detects a dev-signed app.
