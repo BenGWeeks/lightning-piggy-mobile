@@ -44,6 +44,7 @@ const ContactListItem: React.FC<Props> = ({ name, picture, lightningAddress, onP
             cachePolicy="disk"
             transition={200}
             recyclingKey={picture || undefined}
+            autoplay={false}
             onError={() => setAvatarError(true)}
             onLoad={() => setAvatarLoaded(true)}
           />
@@ -77,6 +78,13 @@ const ContactListItem: React.FC<Props> = ({ name, picture, lightningAddress, onP
     </TouchableOpacity>
   );
 };
+
+// Row height is fixed by the styles below — avatar 44 + paddingVertical
+// 14 × 2 = 72. Exported so FriendsScreen's alphabet-tap offset math
+// doesn't duplicate the magic number; if you change avatar size or
+// paddingVertical, update this constant too (the FriendsScreen comment
+// references it).
+export const CONTACT_LIST_ITEM_HEIGHT = 72;
 
 const styles = StyleSheet.create({
   container: {
