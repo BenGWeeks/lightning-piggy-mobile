@@ -39,19 +39,35 @@ function clearMemoisedSecretKey(): void {
   _cachedSecretKey = null;
 }
 
-// AsyncStorage keys scoped to the Amber NIP-17 pipeline.
+// AsyncStorage keys for the NIP-17 gift-wrap caches. Both signer paths
+// use the same cache shape (wrap-id → decrypted rumor entry); they're
+// kept under separate keys so cross-signer login on the same device
+// doesn't leak plaintext between identities.
 const AMBER_NIP17_CACHE_KEY = 'amber_nip17_cache_v1';
-const AMBER_NIP17_CACHE_CAP = 5000;
-const AMBER_NIP17_ENABLED_KEY = 'amber_nip17_enabled';
-
-// The nsec signer has the same wrap-id → DmInboxEntry cache shape as
-// Amber. Without it, every thread open re-fetches and re-decrypts the
-// full NIP-17 inbox — see #176.
 const NSEC_NIP17_CACHE_KEY = 'nsec_nip17_cache_v1';
+const NIP17_CACHE_CAP = 5000;
+const AMBER_NIP17_ENABLED_KEY = 'amber_nip17_enabled';
 
 /** Persistent wrap-id → DmInboxEntry cache. Only ever contains rumors
  * from followed senders — see refreshDmInbox's filter gate. */
-type AmberNip17CacheEntry = DmInboxEntry & { wrapId: string };
+type Nip17CacheEntry = DmInboxEntry & { wrapId: string };
+
+/** Parse an AsyncStorage JSON blob into an object-keyed record, falling
+ * back to `{}` if the value is missing, not valid JSON, or not an
+ * object. A corrupted cache should be treated as a cold cache rather
+ * than an exception that aborts the caller. */
+function safeParseRecord<T>(raw: string | null): Record<string, T> {
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, T>;
+    }
+  } catch {
+    // fall through — treat corrupted blob as empty
+  }
+  return {};
+}
 
 /** Yield to the JS event loop so UI interactions can tick between
  * chunks of a synchronous decrypt loop (#177). `await`ing an already-
@@ -634,9 +650,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // DM-inbox state is identity-scoped — decrypted rumors and the
       // Amber NIP-17 permission intent belong to the logged-in user,
       // not globally.
-      'amber_nip17_cache_v1',
-      'amber_nip17_enabled',
-      'nsec_nip17_cache_v1',
+      AMBER_NIP17_CACHE_KEY,
+      AMBER_NIP17_ENABLED_KEY,
+      NSEC_NIP17_CACHE_KEY,
     ]);
 
     setPubkey(null);
@@ -1022,14 +1038,17 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         normalized,
         readRelays,
       );
-      let kind4Decrypted = 0;
+      // Yield every DECRYPT_YIELD_EVERY *attempts*, not successes — a
+      // run of decrypt failures would otherwise never tick the counter
+      // and keep blocking the JS thread.
+      let kind4Attempts = 0;
       for (const ev of kind4Events) {
         const fromMe = ev.pubkey === pubkey;
         const counterparty = fromMe ? normalized : ev.pubkey.toLowerCase();
         const plaintext = await decryptNip04ViaSigner(counterparty, ev.content);
+        if (++kind4Attempts % DECRYPT_YIELD_EVERY === 0) await yieldToEventLoop();
         if (plaintext === null) continue;
         decrypted.push({ id: ev.id, fromMe, text: plaintext, createdAt: ev.created_at });
-        if (++kind4Decrypted % DECRYPT_YIELD_EVERY === 0) await yieldToEventLoop();
       }
 
       // NIP-17 — partner pubkey is hidden inside the encrypted rumor, so
@@ -1050,7 +1069,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             // the full inbox (#176). Cache writes happen only in the
             // inbox refresh path; here we read-only short-circuit.
             const raw = await AsyncStorage.getItem(NSEC_NIP17_CACHE_KEY);
-            const cache: Record<string, AmberNip17CacheEntry> = raw ? JSON.parse(raw) : {};
+            const cache = safeParseRecord<Nip17CacheEntry>(raw);
             let nip17Decrypted = 0;
             for (const wrap of kind1059) {
               const cached = cache[wrap.id];
@@ -1081,7 +1100,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           const amberEnabled = (await AsyncStorage.getItem(AMBER_NIP17_ENABLED_KEY)) === 'true';
           if (amberEnabled) {
             const raw = await AsyncStorage.getItem(AMBER_NIP17_CACHE_KEY);
-            const cache: Record<string, AmberNip17CacheEntry> = raw ? JSON.parse(raw) : {};
+            const cache = safeParseRecord<Nip17CacheEntry>(raw);
             for (const wrap of kind1059) {
               const cached = cache[wrap.id];
               if (cached) {
@@ -1161,7 +1180,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         // NIP-04 — partner pubkey is in the envelope, so we can apply the
         // follow filter BEFORE decrypting. A non-followed sender never
         // gets a round-trip through Amber, let alone land in state.
-        let kind4Decrypted = 0;
+        // Yield every DECRYPT_YIELD_EVERY *attempts*, not successes — a
+        // run of decrypt failures would otherwise never tick the counter
+        // and keep blocking the JS thread.
+        let kind4Attempts = 0;
         for (const ev of kind4) {
           const fromMe = ev.pubkey.toLowerCase() === refreshForPubkey;
           const partnerPubkey = (
@@ -1170,6 +1192,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           if (!/^[0-9a-f]{64}$/.test(partnerPubkey)) continue;
           if (!refreshFollows.has(partnerPubkey)) continue;
           const plaintext = await decryptNip04ViaSigner(partnerPubkey, ev.content);
+          if (++kind4Attempts % DECRYPT_YIELD_EVERY === 0) await yieldToEventLoop();
           if (plaintext === null) continue;
           entries.push({
             partnerPubkey,
@@ -1178,7 +1201,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             text: plaintext,
             wireKind: 4,
           });
-          if (++kind4Decrypted % DECRYPT_YIELD_EVERY === 0) await yieldToEventLoop();
         }
 
         // NIP-17 — partner pubkey is INSIDE the encrypted rumor, so we
@@ -1200,8 +1222,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             // ever contains rumors from followed senders — see the
             // filter gate below. This is the fix for #176.
             const raw = await AsyncStorage.getItem(NSEC_NIP17_CACHE_KEY);
-            const cache: Record<string, AmberNip17CacheEntry> = raw ? JSON.parse(raw) : {};
-            const newlyCached: AmberNip17CacheEntry[] = [];
+            const cache = safeParseRecord<Nip17CacheEntry>(raw);
+            const newlyCached: Nip17CacheEntry[] = [];
             let nip17Decrypted = 0;
             for (const wrap of kind1059) {
               const cached = cache[wrap.id];
@@ -1229,7 +1251,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               // state. The filter is load-bearing ("parental control"),
               // so it runs here not in the view.
               if (!refreshFollows.has(partnership.partnerPubkey)) continue;
-              const entry: AmberNip17CacheEntry = {
+              const entry: Nip17CacheEntry = {
                 wrapId: wrap.id,
                 partnerPubkey: partnership.partnerPubkey,
                 fromMe: partnership.fromMe,
@@ -1251,10 +1273,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             if (newlyCached.length > 0) {
               const items = Object.values(cache);
               const toWrite =
-                items.length > AMBER_NIP17_CACHE_CAP
-                  ? items.sort((a, b) => b.createdAt - a.createdAt).slice(0, AMBER_NIP17_CACHE_CAP)
+                items.length > NIP17_CACHE_CAP
+                  ? items.sort((a, b) => b.createdAt - a.createdAt).slice(0, NIP17_CACHE_CAP)
                   : items;
-              const next: Record<string, AmberNip17CacheEntry> = {};
+              const next: Record<string, Nip17CacheEntry> = {};
               for (const item of toWrite) next[item.wrapId] = item;
               await AsyncStorage.setItem(NSEC_NIP17_CACHE_KEY, JSON.stringify(next)).catch(
                 () => {},
@@ -1273,8 +1295,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             // Persistent cache keyed by wrap id. Only ever contains rumors
             // from *followed* senders — see the filter gate below.
             const raw = await AsyncStorage.getItem(AMBER_NIP17_CACHE_KEY);
-            const cache: Record<string, AmberNip17CacheEntry> = raw ? JSON.parse(raw) : {};
-            const newlyCached: AmberNip17CacheEntry[] = [];
+            const cache = safeParseRecord<Nip17CacheEntry>(raw);
+            const newlyCached: Nip17CacheEntry[] = [];
             let permissionDenied = false;
 
             for (const wrap of kind1059) {
@@ -1306,7 +1328,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 // silent path is ~1 ms per call and keeps plaintext off
                 // AsyncStorage.
                 if (!refreshFollows.has(partnership.partnerPubkey)) continue;
-                const entry: AmberNip17CacheEntry = {
+                const entry: Nip17CacheEntry = {
                   wrapId: wrap.id,
                   partnerPubkey: partnership.partnerPubkey,
                   fromMe: partnership.fromMe,
@@ -1344,10 +1366,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             if (newlyCached.length > 0) {
               const items = Object.values(cache);
               const toWrite =
-                items.length > AMBER_NIP17_CACHE_CAP
-                  ? items.sort((a, b) => b.createdAt - a.createdAt).slice(0, AMBER_NIP17_CACHE_CAP)
+                items.length > NIP17_CACHE_CAP
+                  ? items.sort((a, b) => b.createdAt - a.createdAt).slice(0, NIP17_CACHE_CAP)
                   : items;
-              const next: Record<string, AmberNip17CacheEntry> = {};
+              const next: Record<string, Nip17CacheEntry> = {};
               for (const item of toWrite) next[item.wrapId] = item;
               await AsyncStorage.setItem(AMBER_NIP17_CACHE_KEY, JSON.stringify(next)).catch(
                 () => {},
