@@ -1,0 +1,81 @@
+appId: com.lightningpiggy.app.dev
+name: AmountEntryScreen — shared component regression guard
+---
+# AmountEntryScreen is reused by Send, Receive, and Transfer — a keypad /
+# swap / confirm regression here breaks all three flows. This test
+# exercises the component through the Receive entry point (no NWC
+# signer required, no Blossom round-trip) and asserts each interaction
+# leaves the expected state.
+#
+# Preconditions:
+#   - Logged in (any signer)
+#   - At least one connected wallet on Home
+
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 20000
+
+# Receive → Custom amount screen
+- tapOn:
+    id: 'btn-receive'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    text: 'Custom amount'
+    optional: true
+- tapOn:
+    id: 'receive-enter-custom-amount'
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: 'amount-entry-screen'
+    timeout: 5000
+
+# Type 5000 via the in-app keypad (no system IME).
+- tapOn:
+    id: 'amount-entry-key-5'
+- tapOn:
+    id: 'amount-entry-key-0'
+- tapOn:
+    id: 'amount-entry-key-0'
+- tapOn:
+    id: 'amount-entry-key-0'
+- assertVisible: '5,000'
+
+# Delete the last digit → 500.
+- tapOn:
+    id: 'amount-entry-key-del'
+- assertVisible: '500'
+
+# Put it back to 5,000 so the swap round-trips cleanly.
+- tapOn:
+    id: 'amount-entry-key-0'
+- assertVisible: '5,000'
+
+# Swap units — the "5,000 sats" becomes the secondary and the fiat
+# conversion (non-zero while btcPrice is available) becomes the
+# primary. After swap, swapping back should restore 5,000 sats.
+- tapOn:
+    id: 'amount-entry-swap'
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn:
+    id: 'amount-entry-swap'
+- waitForAnimationToEnd:
+    timeout: 1500
+- assertVisible: '5,000'
+
+# Confirm — "Generate invoice" closes the amount screen and the
+# ReceiveSheet comes back showing a bolt11 invoice keyed to 5,000 sats.
+# Assert both: the amount screen is gone AND the amount is echoed back
+# on Receive (the "Change amount" CTA and the "5,000 SATS" label both
+# land after the invoice is generated).
+- tapOn:
+    id: 'amount-entry-confirm'
+- extendedWaitUntil:
+    visible: 'Change amount'
+    timeout: 20000
+- assertNotVisible:
+    id: 'amount-entry-screen'
+- assertVisible: '5,000'
