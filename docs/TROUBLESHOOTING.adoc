@@ -274,6 +274,22 @@ Symptoms reproduce even after: granting `ACCESS_FINE_LOCATION` (`pm grant com.li
 *Fix:* set `enableDynamicSizing={false}` explicitly on any `BottomSheetModal` that has fixed `snapPoints` (percent or absolute). Without dynamic sizing, the sheet locks to its snap, ignores content measurement, and the keyboard-open behaviour falls back to `keyboardBehavior` as intended. Confirmed on `FriendPickerSheet.tsx` 2026-04-21 — flipping `enableDynamicSizing={false}` fully resolved the collapse. +
 *Also check:* any `BottomSheet` subtree that wraps a scrollable list inside a `View` (rather than `BottomSheetScrollView`) is likely to have the same footgun waiting; add the explicit `enableDynamicSizing={false}` when the PR migrates to v5 or when copying v4 patterns forward.
 
+| A fixed-layout step inside a dynamic-sized `BottomSheetModal` renders with its bottom rows clipped (e.g. keypad last row or confirm button cut off)
+| Symptom: the step opens at a reasonable height but the last few rows are below the sheet's bottom edge. The same component renders fine in isolation. Attempts that don't help: bumping `snapPoints`, setting `maxDynamicContentSize`, or restoring `flex: 1` + `marginTop: 'auto'` on the screen container. +
+*Root cause:* with `enableDynamicSizing=true` (the v5 default) the sheet measures its height from its children's intrinsic content height. If the step is wrapped in a `BottomSheetScrollView`, the ScrollView's content size and the sheet's height form a circular dependency — the sheet asks the ScrollView for a height, the ScrollView reports the height its parent allows, and the layout settles below the true intrinsic height, clipping the last rows. `flex: 1` inside the screen collapses for the same reason (no minimum height to fill against). +
+*Fix:* for any step whose content has a known fixed layout (card + button + keypad, no scrolling needed), render it inside a plain `BottomSheetView` (not `BottomSheetScrollView`). That lets the sheet measure the component's true intrinsic height so the full content fits. Keep `BottomSheetScrollView` only for steps that actually need to scroll (long forms, tx lists). Applied on `SendSheet.tsx` and `TransferSheet.tsx` for the `step === 'amount'` branch (AmountEntryScreen); `ReceiveSheet.tsx` already used `BottomSheetView` for the same step. Canonical pattern:
+[source,tsx]
+----
+{step === 'amount' ? (
+  <BottomSheetView style={styles.content}>
+    <AmountEntryScreen ... />
+  </BottomSheetView>
+) : (
+  <BottomSheetScrollView ...>{/* scrollable form */}</BottomSheetScrollView>
+)}
+----
+Verified via screenshot at Home > Send > Amount and Friends > <contact> > Zap > Change Amount. The test assertion `assertVisible` alone is not sufficient — Maestro reports accessibility bounds, not pixel visibility, so a clipped keypad still asserts visible. Always eyeball the screenshot when verifying a layout fix.
+
 | Bottom sheet still looks / behaves like it has the old `snapPoints` after editing the source
 | Metro fast-refresh reliably reloads function bodies and JSX children, but **removing a top-level prop from a `<BottomSheetModal>` (e.g. deleting `snapPoints={snapPoints}`)** sometimes leaves the sheet rendering with the prior prop still in effect — the sheet opens at the old 85%/75% snap and is still user-draggable even though the source no longer sets a snap. Common trap when applying the uniform snap policy across sheets (see `ReceiveSheet.tsx`, `TransferSheet.tsx`, etc). +
 *Fix:* cold-restart the app so Metro serves a fresh bundle: +
@@ -285,6 +301,12 @@ adb shell monkey -p com.lightningpiggy.app.dev -c android.intent.category.LAUNCH
 A Metro `r`-`r` reload from the dev menu usually also works; `--clear` is only needed if the transformer cache is also stale (see the "red-screen after merge" entry). Confirmed 2026-04-22 during the uniform-snap-policy sweep: the 10 sheets edited in one pass looked unchanged until a cold restart. +
 *Why it happens:* Fast-refresh preserves component state by re-executing the function body on top of the live fiber. When a prop is *added* or *removed*, the JSX tree is re-reconciled and the prop diff is re-applied; but for `BottomSheetModal`'s imperative internals (the gorhom animated position, `useMemo`'d layout values held on the fiber), the stale value can persist on the existing instance until the modal is unmounted and re-mounted. Cold restart guarantees unmount.
 Similar quick-check before blaming the code: `grep -n '<property>' src/components/<Sheet>.tsx` to confirm the edit actually landed, then restart.
+
+| Characters "disappear" mid-typing in a bottom-sheet form input, with no IME animation glitch
+| Distinct from the "characters dropped" entry above (that one is about `TextInput` vs `BottomSheetTextInput` + reanimated). This one is a state-reset race: a `useEffect` that populates local `useState` fields from a context object re-fires on every context re-render (balance poll, relay reconnect, contact cache refresh) and overwrites the user's in-progress edit with the stored value. Symptom: the first keystroke you type lands, but within 1–10 seconds (next poll tick) the input resets and any further typing "disappears" on each tick. +
+*Root cause:* `useEffect(() => { setField(ctx.value); }, [ctx])` — where `ctx` is an object returned by `useNostr()` / `useWallet()` / derived via `wallets.find(...)`. Context objects get a new identity on every provider re-render, not just when the form-relevant fields change. Each identity-change fires the effect and clobbers state. +
+*Fix:* narrow the dep array to a primitive trigger — usually `[visible]` (fire once per sheet open) or `[walletId]` / `[pubkey]` (fire once per identity switch). Keep an `eslint-disable-next-line react-hooks/exhaustive-deps` comment since the setters inside still read the latest context value at effect time. Examples: `WalletSettingsSheet.tsx` (`[walletId]`), `EditProfileSheet.tsx` (`[visible]`). +
+*Audit pattern to grep for:* `useEffect(..., [profile, ...])`, `useEffect(..., [wallet, ...])`, `useEffect(..., [contact, ...])` inside any `*Sheet*.tsx`. If the effect body calls `setX(ctx.field)` for an `<Input value={x}/>` elsewhere in the file, it likely needs this fix.
 
 | Bottom-sheet inner buttons work when tapped manually but Maestro `tapOn id:...` reports COMPLETED without firing `onPress`
 | Symptom: Maestro's `commands.json` confirms the target element was found at correct bounds with `clickable=true, enabled=true`, but the handler never runs (no `console.log` in Metro or logcat) and the UI doesn't change. Manual human taps on the same button work every time. +

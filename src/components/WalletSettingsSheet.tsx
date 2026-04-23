@@ -50,6 +50,11 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const [xpubDisplay, setXpubDisplay] = useState<string | null>(null);
   const [relayUrl, setRelayUrl] = useState<string | null>(null);
 
+  // Populate fields ONCE when the sheet opens for a given walletId. Using
+  // `wallet` as a dep would re-fire on every `wallets` array update (balance
+  // polls, NWC reconnect pings, etc.), each time stomping the user's in-
+  // progress edits with the stored value — symptom: typing into Lightning
+  // Address makes characters disappear.
   useEffect(() => {
     if (wallet) {
       setAlias(wallet.alias);
@@ -78,7 +83,8 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         setRelayUrl(null);
       }
     }
-  }, [wallet, walletId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [walletId]);
 
   const handleSheetChange = useCallback(
     (index: number) => {
@@ -184,6 +190,8 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="email-address"
+              testID="wallet-lightning-address-input"
+              accessibilityLabel="Lightning Address"
             />
             <Text style={styles.hintText}>
               LUD-16 address for receiving payments. Usually provided by the NWC connection.
@@ -226,7 +234,12 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
           ))}
         </View>
 
-        <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
+        <TouchableOpacity
+          style={styles.saveButton}
+          onPress={handleSave}
+          testID="wallet-settings-save"
+          accessibilityLabel="Save wallet settings"
+        >
           <Text style={styles.saveButtonText}>Save</Text>
         </TouchableOpacity>
 

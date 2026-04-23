@@ -16,6 +16,7 @@ import {
   BottomSheetBackdropProps,
   BottomSheetTextInput,
   BottomSheetScrollView,
+  BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
@@ -133,11 +134,12 @@ const SendSheet: React.FC<Props> = ({
   const [progressError, setProgressError] = useState<string | undefined>(undefined);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
 
-  // No explicit snapPoints — with gorhom v5's default
-  // `enableDynamicSizing={true}`, the sheet sizes itself to its content
-  // and content-height becomes the only snap (so the user can't pan it
-  // taller than its content). `keyboardBehavior="interactive"` grows
-  // the sheet above that snap when an input is focused. Closes #160.
+  // No explicit snapPoints — gorhom v5's `enableDynamicSizing={true}`
+  // default sizes the sheet to its content. Trailing action buttons
+  // are rendered as a sticky footer below the scroll view (see the
+  // fixed-footer structure in the render output below) so they stay
+  // reachable even when the form content is tall enough to require
+  // internal scrolling.
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   const needsAmount = scanned && (isLightningAddress(invoiceData || '') || isOnchainAddress);
@@ -597,14 +599,14 @@ const SendSheet: React.FC<Props> = ({
         keyboardBlurBehavior="restore"
         android_keyboardInputMode="adjustResize"
       >
-        <BottomSheetScrollView
-          contentContainerStyle={[
-            styles.content,
-            { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
-          ]}
-          keyboardShouldPersistTaps="handled"
-        >
-          {step === 'amount' ? (
+        {/* AmountEntryScreen is a fixed-height component (card + button +
+         *  4-row keypad) — wrap it in a plain BottomSheetView so the
+         *  sheet's dynamic sizing measures the full intrinsic height.
+         *  Wrapping inside a BottomSheetScrollView caused the sheet's
+         *  height and the ScrollView's content height to become
+         *  circular references, clipping the keypad's last row. */}
+        {step === 'amount' ? (
+          <BottomSheetView style={styles.content}>
             <AmountEntryScreen
               initialSats={currentSats}
               title="Enter amount"
@@ -617,7 +619,15 @@ const SendSheet: React.FC<Props> = ({
                 setStep('main');
               }}
             />
-          ) : (
+          </BottomSheetView>
+        ) : (
+          <BottomSheetScrollView
+            contentContainerStyle={[
+              styles.content,
+              { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
+            ]}
+            keyboardShouldPersistTaps="handled"
+          >
             <View style={styles.innerContent}>
               <Text style={styles.title}>Send</Text>
 
@@ -886,8 +896,8 @@ const SendSheet: React.FC<Props> = ({
                 </TouchableOpacity>
               </View>
             </View>
-          )}
-        </BottomSheetScrollView>
+          </BottomSheetScrollView>
+        )}
       </BottomSheetModal>
       <PaymentProgressOverlay
         state={progressState}

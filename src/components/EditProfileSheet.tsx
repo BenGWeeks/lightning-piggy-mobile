@@ -44,6 +44,12 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
   const scrollRef = useRef<any>(null);
   // No explicit snapPoints — content-height only, not user-draggable.
 
+  // Populate fields ONCE per open. Keying on `visible` alone: if `profile`
+  // were in the deps, every NostrContext re-render (contact sync, cache
+  // refresh, relay reconnect) would re-fire this effect and stomp the
+  // user's in-progress edits — symptom: typing into Display Name /
+  // Lightning Address / About makes characters "disappear" on every
+  // context tick. See the matching fix in WalletSettingsSheet.
   useEffect(() => {
     if (visible) {
       setDisplayName(profile?.displayName || profile?.name || '');
@@ -55,7 +61,8 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
     } else {
       sheetRef.current?.dismiss();
     }
-  }, [visible, profile]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
 
   useEffect(() => {
     if (!visible) return;

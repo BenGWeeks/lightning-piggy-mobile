@@ -9,6 +9,12 @@ const ELECTRUM_SERVER_KEY = 'electrum_server';
 const BLOSSOM_SERVER_KEY = 'blossom_server';
 const LEGACY_NWC_KEY = 'nwc_connection_url';
 const ONBOARDING_KEY = 'onboarding_complete';
+const GLOBAL_LIGHTNING_ADDRESS_KEY = 'lightning_address';
+// Bumped each time a new one-shot migration step is added to
+// `migrateLegacy`. Stored as an integer; any step whose target version
+// exceeds the persisted value runs once and then writes the new version.
+const STORAGE_MIGRATION_VERSION_KEY = 'storage_migration_version';
+const CURRENT_STORAGE_MIGRATION_VERSION = 1;
 
 /** Default Electrum server for on-chain balance/tx lookups (Blockstream, SSL) */
 export const DEFAULT_ELECTRUM_SERVER = 'electrum.blockstream.info:50002:s';
@@ -181,5 +187,51 @@ export async function migrateLegacy(): Promise<void> {
   });
   if (needsSave) {
     await saveWalletList(updated);
+  }
+
+  // 3. Versioned migrations. See #169 for the original driver.
+  const persistedVersionRaw = await AsyncStorage.getItem(STORAGE_MIGRATION_VERSION_KEY);
+  const persistedVersion = persistedVersionRaw ? parseInt(persistedVersionRaw, 10) || 0 : 0;
+
+  // Each step sets this to `false` when it needs to defer (e.g. waiting
+  // for prerequisite state to exist) so we don't advance the version
+  // past work that hasn't run yet. Next cold start re-evaluates.
+  let canAdvance = true;
+
+  if (persistedVersion < 1) {
+    // v1: Lightning Address moves from a single global field into each
+    // wallet's metadata (#169). Copy the global value into any wallet
+    // that doesn't already have its own address, preserving wallet-
+    // specific addresses parsed from NWC `lud16=` query strings, then
+    // remove the global storage key — nothing reads it anymore.
+    const globalAddress = await AsyncStorage.getItem(GLOBAL_LIGHTNING_ADDRESS_KEY);
+    if (globalAddress) {
+      const list = await getWalletList();
+      if (list.length === 0) {
+        // Defer: older builds let users set a lightning address before
+        // adding any wallet. Dropping the key now would throw that
+        // value away before a wallet exists to own it — retry next
+        // startup (and leave `storage_migration_version` at 0 so we
+        // re-run). Nothing else in the codebase reads the legacy key,
+        // so leaving it in place is harmless.
+        canAdvance = false;
+      } else {
+        const backfilled = list.map((w) =>
+          w.lightningAddress ? w : { ...w, lightningAddress: globalAddress },
+        );
+        const anyChange = backfilled.some(
+          (w, i) => w.lightningAddress !== list[i].lightningAddress,
+        );
+        if (anyChange) await saveWalletList(backfilled);
+        await AsyncStorage.removeItem(GLOBAL_LIGHTNING_ADDRESS_KEY);
+      }
+    }
+  }
+
+  if (canAdvance && persistedVersion < CURRENT_STORAGE_MIGRATION_VERSION) {
+    await AsyncStorage.setItem(
+      STORAGE_MIGRATION_VERSION_KEY,
+      String(CURRENT_STORAGE_MIGRATION_VERSION),
+    );
   }
 }

@@ -31,28 +31,29 @@ name: Send 21 sat Invoice to Friend
 - waitForAnimationToEnd:
     timeout: 3000
 
-# Open Receive — wait for the sheet's Amount tab to exist rather than
-# generic "Receive" text, which matches the Home button too.
+# Open Receive — the Address/Amount tab bar was removed; amount entry
+# now goes through the AmountEntryScreen (tap "Enter an amount" on the
+# main view, or the sheet lands there directly for wallets without a
+# lud16).
 - tapOn:
     id: 'btn-receive'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'receive-enter-custom-amount'
+    optional: true
 - extendedWaitUntil:
     visible:
-      id: 'receive-tab-amount'
+      id: 'amount-entry-screen'
     timeout: 10000
 
-# Switch to Amount tab
+# Enter 21 sats via the in-app keypad.
 - tapOn:
-    id: 'receive-tab-amount'
-- waitForAnimationToEnd:
-    timeout: 2000
-
-# Enter 21 sats (selectTextOnFocus replaces any stale value)
+    id: 'amount-entry-key-2'
 - tapOn:
-    id: 'receive-amount-input'
-- eraseText:
-    charactersToErase: 12
-- inputText: '21'
-- hideKeyboard
+    id: 'amount-entry-key-1'
+- tapOn:
+    id: 'amount-entry-confirm'
 - waitForAnimationToEnd:
     timeout: 2000
 
