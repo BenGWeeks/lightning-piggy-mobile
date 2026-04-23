@@ -93,6 +93,40 @@ Manual runs skip the asset-attach steps (they need a Release to attach to); use 
 
 - **`EXPO_TOKEN`** — repo secret. Generate at https://expo.dev/accounts/bengweeks/settings/access-tokens and add under *Settings → Secrets and variables → Actions*. Everything else (iOS ASC API key, Apple distribution cert, future Google Play service account) lives on EAS's server via `eas credentials`, so the workflow never handles a `.p8` or service account JSON.
 
+==== Build-time `EXPO_PUBLIC_*` environment variables
+
+`EXPO_PUBLIC_*` values are **inlined into the JS bundle at build time** by Metro — they are not read at runtime. The local `.env` file is only consulted by `expo start` / `npm start`, not by EAS cloud/local builds.
+
+For EAS-driven builds (production, preview, development) every required `EXPO_PUBLIC_*` variable must be registered on the corresponding EAS environment:
+
+[source,bash]
+----
+# One-time, per variable, per environment
+eas env:create \
+  --environment production --environment preview --environment development \
+  --name EXPO_PUBLIC_GIPHY_API_KEY \
+  --value "<paste value from .env>" \
+  --visibility plaintext \
+  --scope project \
+  --type string \
+  --non-interactive
+
+# Verify (one env at a time; list it for each if you want to double-check)
+eas env:list --environment production
+----
+
+Visibility can be `plaintext` for keys that are already publicly embedded in the client bundle (which is true of every `EXPO_PUBLIC_*` value by design). Use `sensitive` for server-only secrets that must never end up in a client bundle — those should **not** be prefixed `EXPO_PUBLIC_`.
+
+**Currently required variables** (if you add a new one, extend this list and run `eas env:create` for the three environments **before** cutting the next release, otherwise the in-app feature that relies on it ships broken):
+
+[cols="1,3", options="header"]
+|===
+| Variable | Purpose
+
+| `EXPO_PUBLIC_GIPHY_API_KEY`
+| GIPHY v1 REST client key for the in-app GIF picker (`src/services/giphyService.ts`). If missing, the GIF panel shows a "key not set" empty state (`src/components/GifPickerSheet.tsx`). Get one at https://developers.giphy.com/dashboard/.
+|===
+
 === EAS Cloud Builds
 
 [source,bash]

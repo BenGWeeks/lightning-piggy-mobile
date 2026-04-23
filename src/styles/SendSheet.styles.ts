@@ -150,6 +150,33 @@ export const sendSheetStyles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
   },
+  amountPickerRow: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    backgroundColor: colors.brandPinkLight,
+    borderWidth: 1,
+    borderColor: colors.brandPink,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 180,
+  },
+  amountPickerValue: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: colors.brandPink,
+  },
+  amountPickerFiat: {
+    fontSize: 13,
+    color: colors.textSupplementary,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  amountPickerPlaceholder: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.brandPink,
+  },
   amountRow: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -89,6 +89,33 @@ export const transferSheetStyles = StyleSheet.create({
     fontStyle: 'italic',
   },
   // --- Amount ---
+  amountPickerRow: {
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    backgroundColor: colors.brandPinkLight,
+    borderWidth: 1,
+    borderColor: colors.brandPink,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  amountPickerValue: {
+    fontSize: 26,
+    fontWeight: '700',
+    color: colors.brandPink,
+  },
+  amountPickerFiat: {
+    fontSize: 13,
+    color: colors.textSupplementary,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  amountPickerPlaceholder: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.brandPink,
+  },
   amountRow: {
     flexDirection: 'row',
     alignItems: 'center',
