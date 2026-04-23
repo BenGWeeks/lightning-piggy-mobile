@@ -325,6 +325,72 @@ On the iPhone:
 
 Local builds don't upload to EAS automatically; to get a shareable install URL, either use the EAS cloud build path (`eas build --platform ios --profile preview` without `--local`) or host the IPA plus an install manifest plist yourself (GitHub Release attachments require the `itms-services://` install URL to point at a plist you generate). Cloud build is simpler unless the queue is heavily backlogged.
 
+==== End-to-end: deploy from a Linux laptop (no Mac required)
+
+Full flow for installing a specific release onto a tester's iPhone over USB-C from Linux, when you do not own a Mac. This is the right path for testers **under 13**, who are blocked from TestFlight by Apple's terms of service.
+
+A Mac is **not** required. EAS cloud builds produce a signed IPA without a macOS machine; Linux handles the install over USB via `libimobiledevice`. A Mac only saves time on the build step (the free-tier EAS iOS queue is 60–180 min; a local Mac build is ~15 min) — it is never required for distribution or install. Linux cannot substitute for the build because Apple's code-signing toolchain is macOS-only, so EAS cloud is the Mac-free build path.
+
+USB-C vs Lightning iPhones behave identically here — `usbmuxd` on Linux handles both.
+
+===== Prerequisites (one-time)
+
+* Enrolled in the Apple Developer Programme (individual or organisation — both support ad-hoc).
+* Preview bundle ID registered at developer.apple.com (see *One-time Apple Developer Portal setup* above).
+* Tester's iPhone UDID registered via `npx -p eas-cli eas device:create` and the tester has confirmed the profile on their device.
+* `libimobiledevice` tooling installed on Linux:
++
+[source,bash]
+----
+sudo apt install -y ideviceinstaller libimobiledevice-utils usbmuxd
+sudo systemctl enable --now usbmuxd
+----
+
+===== Per-release flow
+
+. **Build the IPA on EAS cloud.** The first iOS ad-hoc build prompts for Apple ID + 2FA (ad-hoc provisioning profiles cannot be managed via API keys); subsequent builds reuse the stored credentials.
++
+[source,bash]
+----
+eas build --platform ios --profile preview
+----
++
+When prompted to select devices for the ad-hoc build, pick the tester's UDID (plus any other registered testers).
+
+. **Download the resulting IPA** from the EAS build page linked at the end of the build, or via the CLI:
++
+[source,bash]
+----
+eas build:list --platform ios --status finished --limit 1
+# copy the Artifact URL from the output, then:
+curl -L -o /tmp/lightning-piggy-preview.ipa '<artifact url>'
+----
+
+. **Plug the iPhone into the Linux laptop via USB-C** (or Lightning). On the iPhone, tap *Trust* when prompted and enter the passcode. This pairing only happens the first time the phone sees this computer.
+
+. **Verify the device is visible:**
++
+[source,bash]
+----
+idevice_id -l    # should print the UDID
+----
++
+If nothing is listed, restart the USB daemon: `sudo systemctl restart usbmuxd`, then replug the cable.
+
+. **Install the IPA:**
++
+[source,bash]
+----
+ideviceinstaller -i /tmp/lightning-piggy-preview.ipa
+----
+
+. **On the iPhone — one-time setup per developer certificate:**
++
+* *Settings → General → VPN & Device Management* → tap the *Lightning Piggy* developer profile → *Trust "…"* → *Trust*.
+* On iOS 16+, enable Developer Mode: *Settings → Privacy & Security → Developer Mode → toggle on → Restart*. If the row isn't visible, tap the freshly installed app icon once so iOS reveals it.
+
+. **Launch the app.** It runs exactly like a production install and keeps working until the provisioning profile expires (1 year from generation).
+
 ==== Limits
 
 * Ad-hoc provisioning profiles expire **1 year** after generation — rebuild or `eas build:resign` before expiry.
