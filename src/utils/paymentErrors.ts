@@ -25,7 +25,11 @@ const CONNECTIVITY_PATTERNS = [
   'websocket',
 ];
 
-const INSUFFICIENT_FUNDS_PATTERNS = ['insufficient balance', 'insufficient_balance', 'insufficient'];
+const INSUFFICIENT_FUNDS_PATTERNS = [
+  'insufficient balance',
+  'insufficient_balance',
+  'insufficient',
+];
 
 const EXPIRED_PATTERNS = ['invoice has expired', 'invoice expired', 'expired'];
 
