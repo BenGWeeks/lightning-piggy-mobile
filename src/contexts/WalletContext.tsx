@@ -341,7 +341,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                           isConnected: true,
                           balance: result.balance ?? null,
                           walletAlias: info?.alias || null,
-                          lightningAddress: lud16 || info?.lud16 || w.lightningAddress,
+                          // Prefer any user-set / previously-persisted
+                          // address — a manual override in Wallet
+                          // Settings must survive every startup, even
+                          // when the NWC URL still carries a `lud16=`
+                          // that resolves to the provider's default.
+                          lightningAddress: w.lightningAddress || lud16 || info?.lud16 || null,
                         }
                       : w,
                   ),

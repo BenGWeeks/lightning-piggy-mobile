@@ -930,19 +930,6 @@ const styles = StyleSheet.create({
   sslToggleThumbActive: {
     alignSelf: 'flex-end',
   },
-  lnAddressRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  lnQrButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: colors.white,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
   currencyRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
