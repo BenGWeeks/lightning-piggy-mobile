@@ -113,6 +113,76 @@ function yieldToEventLoop(): Promise<void> {
  */
 const DM_INBOX_REFRESH_TTL_MS = 30_000;
 
+/**
+ * Persisted inbox + per-peer message caches (PR B).
+ *
+ * Key shape: `<prefix>_<userPubkeyHex>` — per-user so multiple nsec
+ * identities on the same device don't share or overwrite each other.
+ * On logout the three blobs are removed via `AsyncStorage.multiRemove`
+ * alongside the NIP-17 wrap caches.
+ *
+ * Storage cap: `DM_INBOX_CAP` keeps the serialised JSON under ~400 KB
+ * even with verbose messages (≈1000 entries × ~400 bytes each).
+ */
+const DM_INBOX_CACHE_PREFIX = 'nostr_dm_inbox_v1_';
+const DM_INBOX_LAST_SEEN_PREFIX = 'nostr_dm_inbox_last_seen_v1_';
+const DM_CONV_CACHE_PREFIX = 'nostr_dm_conv_v1_';
+const DM_CONV_LAST_SEEN_PREFIX = 'nostr_dm_conv_last_seen_v1_';
+const DM_INBOX_CAP = 1000;
+const DM_CONV_CAP = 500;
+
+function inboxCacheKey(user: string) { return DM_INBOX_CACHE_PREFIX + user; }
+function inboxLastSeenKey(user: string) { return DM_INBOX_LAST_SEEN_PREFIX + user; }
+function convCacheKey(user: string, peer: string) { return DM_CONV_CACHE_PREFIX + user + '_' + peer; }
+function convLastSeenKey(user: string, peer: string) { return DM_CONV_LAST_SEEN_PREFIX + user + '_' + peer; }
+
+async function loadLastSeen(key: string): Promise<number | undefined> {
+  const raw = await AsyncStorage.getItem(key);
+  if (!raw) return undefined;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/**
+ * Merge cached list with freshly-decrypted entries. Cached entries we
+ * already have take precedence (they might have had properties we'd
+ * need to re-decrypt to recover). Dedup key is explicit because
+ * `DmInboxEntry` doesn't carry an event id — we use
+ * `partnerPubkey+createdAt+wireKind` which is unique in practice
+ * (a relay that returns two events with the same triple is
+ * misbehaving; last one wins via Map semantics). Conversation
+ * messages use `id` (event id) directly.
+ */
+function mergeInboxEntries(
+  cached: DmInboxEntry[],
+  fresh: DmInboxEntry[],
+  cap: number,
+): DmInboxEntry[] {
+  const map = new Map<string, DmInboxEntry>();
+  for (const e of cached) {
+    map.set(`${e.partnerPubkey}|${e.createdAt}|${e.wireKind}`, e);
+  }
+  for (const e of fresh) {
+    map.set(`${e.partnerPubkey}|${e.createdAt}|${e.wireKind}`, e);
+  }
+  const all = Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
+  return all.slice(0, cap);
+}
+
+function mergeConversationMessages(
+  cached: ConversationMessage[],
+  fresh: ConversationMessage[],
+  cap: number,
+): ConversationMessage[] {
+  const map = new Map<string, ConversationMessage>();
+  for (const m of cached) map.set(m.id, m);
+  for (const m of fresh) map.set(m.id, m);
+  const all = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
+  if (all.length <= cap) return all;
+  // Keep the newest DM_CONV_CAP messages; drop oldest.
+  return all.slice(all.length - cap);
+}
+
 const NSEC_KEY = 'nostr_nsec';
 const PUBKEY_KEY = 'nostr_pubkey';
 const SIGNER_TYPE_KEY = 'nostr_signer_type';
@@ -685,10 +755,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const logout = useCallback(async () => {
     clearMemoisedSecretKey();
     setAmberNip44Permission('unknown');
+    nip04PlaintextCache.clear();
+    const loggedOutPubkey = pubkey;
     await SecureStore.deleteItemAsync(NSEC_KEY);
     await SecureStore.deleteItemAsync(PUBKEY_KEY);
     await SecureStore.deleteItemAsync(SIGNER_TYPE_KEY);
-    await AsyncStorage.multiRemove([
+    const toRemove: string[] = [
       CONTACTS_CACHE_KEY,
       CONTACTS_TIMESTAMP_KEY,
       PROFILES_CACHE_KEY,
@@ -703,7 +775,21 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       AMBER_NIP17_CACHE_KEY,
       AMBER_NIP17_ENABLED_KEY,
       NSEC_NIP17_CACHE_KEY,
-    ]);
+    ];
+    // PR B caches are per-user-keyed — only clear the ones for the
+    // user we're logging out of. Per-peer conversation caches share
+    // the same prefix; we grep AsyncStorage keys for them.
+    if (loggedOutPubkey) {
+      toRemove.push(inboxCacheKey(loggedOutPubkey));
+      toRemove.push(inboxLastSeenKey(loggedOutPubkey));
+      const allKeys = await AsyncStorage.getAllKeys();
+      const convPrefix = DM_CONV_CACHE_PREFIX + loggedOutPubkey + '_';
+      const lastSeenPrefix = DM_CONV_LAST_SEEN_PREFIX + loggedOutPubkey + '_';
+      for (const k of allKeys) {
+        if (k.startsWith(convPrefix) || k.startsWith(lastSeenPrefix)) toRemove.push(k);
+      }
+    }
+    await AsyncStorage.multiRemove(toRemove);
 
     setPubkey(null);
     setProfile(null);
@@ -1092,11 +1178,31 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const readRelays = getReadRelays();
       const decrypted: ConversationMessage[] = [];
 
-      // NIP-04 — peer-scoped fetch, two directions.
+      // PR B: load persisted per-peer conversation + per-peer last-seen.
+      // Merge cached-and-fresh at the end; keep the cache for the next
+      // open so we only ever re-decrypt the (typically 0-few) events
+      // that arrived since last open.
+      const [convRaw, convLastSeen] = await Promise.all([
+        AsyncStorage.getItem(convCacheKey(pubkey, normalized)),
+        loadLastSeen(convLastSeenKey(pubkey, normalized)),
+      ]);
+      const cachedConv: ConversationMessage[] = convRaw
+        ? (() => {
+            try {
+              const parsed = JSON.parse(convRaw);
+              return Array.isArray(parsed) ? parsed : [];
+            } catch {
+              return [];
+            }
+          })()
+        : [];
+
+      // NIP-04 — peer-scoped fetch, two directions, filtered by since.
       const kind4Events = await nostrService.fetchDirectMessageEvents(
         pubkey,
         normalized,
         readRelays,
+        { since: convLastSeen },
       );
       // Two-pass decrypt with module-level LRU cache:
       //  1. Pull plaintext synchronously for events already in the
@@ -1140,9 +1246,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (i + DECRYPT_YIELD_EVERY < freshDecryptTargets.length) await yieldToEventLoop();
       }
       // Merge cached + fresh preserving original event order.
-      const merged = new Array<ConversationMessage | null>(kind4Events.length).fill(null);
+      const orderedByIndex = new Array<ConversationMessage | null>(kind4Events.length).fill(null);
       for (const c of cachedPlaintexts) {
-        merged[c.idx] = {
+        orderedByIndex[c.idx] = {
           id: c.ev.id,
           fromMe: c.fromMe,
           text: c.text,
@@ -1151,16 +1257,29 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
       for (const r of freshResults) {
         if (!r) continue;
-        merged[r.idx] = { id: r.ev.id, fromMe: r.fromMe, text: r.text, createdAt: r.ev.created_at };
+        orderedByIndex[r.idx] = {
+          id: r.ev.id,
+          fromMe: r.fromMe,
+          text: r.text,
+          createdAt: r.ev.created_at,
+        };
       }
-      for (const m of merged) if (m !== null) decrypted.push(m);
+      for (const m of orderedByIndex) if (m !== null) decrypted.push(m);
 
       // NIP-17 — partner pubkey is hidden inside the encrypted rumor, so
       // we can't peer-scope at the relay. Pull all gift wraps addressed to
       // me, unwrap, keep only rumors whose partner matches the current
       // peer. Amber path reuses the persistent wrap-id cache populated by
       // refreshDmInbox so re-entering a thread doesn't re-round-trip.
-      const { kind1059 } = await nostrService.fetchInboxDmEvents(pubkey, readRelays);
+      // For NIP-17 gift-wraps we can't peer-scope at the relay (partner
+      // pubkey is inside the encrypted rumor), so we use the inbox-wide
+      // last-seen (not the per-peer one) to narrow the gift-wrap query.
+      // Reading the inbox last-seen is cheap; it's a few bytes of
+      // AsyncStorage.
+      const inboxLastSeenForWraps = await loadLastSeen(inboxLastSeenKey(pubkey));
+      const { kind1059 } = await nostrService.fetchInboxDmEvents(pubkey, readRelays, {
+        since: inboxLastSeenForWraps,
+      });
       if (kind1059.length > 0) {
         const onSkip = (reason: string, wrapId: string) => {
           if (__DEV__) console.warn(`[Nostr] NIP-17 thread unwrap skip (${wrapId}): ${reason}`);
@@ -1280,7 +1399,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       }
 
-      decrypted.sort((a, b) => a.createdAt - b.createdAt);
+      // PR B: merge fresh decrypt results with what we had cached
+      // from previous opens. Fresh takes precedence via `mergeConversationMessages`
+      // Map semantics so re-ordered or edited events (rare) land right.
+      const merged = mergeConversationMessages(cachedConv, decrypted, DM_CONV_CAP);
+
       // Single-line perf summary — grep `[Perf] fetchConversation` out
       // of logcat to compare cold-cache vs warm-cache thread opens.
       // Cold cache shows `hits=0, fresh=N` — whole inbox decrypted.
@@ -1290,9 +1413,32 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           `${(performance.now() - perfStart).toFixed(0)}ms, ` +
           `k4=${kind4Events.length} (hits=${nip04CacheHits}, fresh=${nip04FreshDecrypts}), ` +
           `k1059=${nip17CacheHits + nip17FreshDecrypts} (hits=${nip17CacheHits}, fresh=${nip17FreshDecrypts}), ` +
-          `rendered=${decrypted.length}`,
+          `since=${convLastSeen ?? 0}, ` +
+          `cached=${cachedConv.length}, ` +
+          `merged=${merged.length}`,
       );
-      return decrypted;
+
+      // Persist merged list + new per-peer last-seen so next open of
+      // THIS thread sees only the delta. Fire-and-forget; the caller
+      // gets its data immediately via `merged`.
+      const newConvLastSeen = Math.max(
+        convLastSeen ?? 0,
+        ...kind4Events.map((e) => e.created_at),
+        ...kind1059.map((e) => e.created_at),
+      );
+      Promise.all([
+        AsyncStorage.setItem(convCacheKey(pubkey, normalized), JSON.stringify(merged)).catch(
+          () => {},
+        ),
+        newConvLastSeen > (convLastSeen ?? 0)
+          ? AsyncStorage.setItem(
+              convLastSeenKey(pubkey, normalized),
+              String(newConvLastSeen),
+            ).catch(() => {})
+          : Promise.resolve(),
+      ]).catch(() => {});
+
+      return merged;
     },
     [pubkey, isLoggedIn, signerType, getReadRelays, decryptNip04ViaSigner],
   );
@@ -1336,9 +1482,39 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const refreshStart = performance.now();
         let nip04CacheHits = 0;
         let nip04FreshDecrypts = 0;
+
+        // PR B: load persisted inbox + last-seen so we can (a) paint
+        // cached entries before the relay round-trip finishes and
+        // (b) only fetch events newer than the last one we saw.
+        const [cachedInboxRaw, lastSeen] = await Promise.all([
+          AsyncStorage.getItem(inboxCacheKey(refreshForPubkey)),
+          loadLastSeen(inboxLastSeenKey(refreshForPubkey)),
+        ]);
+        const cachedInbox: DmInboxEntry[] = cachedInboxRaw
+          ? (() => {
+              try {
+                const parsed = JSON.parse(cachedInboxRaw);
+                return Array.isArray(parsed) ? parsed : [];
+              } catch {
+                return [];
+              }
+            })()
+          : [];
+        // Render the cached entries immediately so the Messages tab
+        // isn't blank while the relay fetches the delta. The followers
+        // set may have changed since the cache was written; re-apply
+        // the filter here so unfollowed senders don't resurrect.
+        if (cachedInbox.length > 0) {
+          const filteredCache = cachedInbox.filter((e) =>
+            refreshFollows.has(e.partnerPubkey),
+          );
+          setDmInbox(filteredCache);
+        }
+
         const { kind4, kind1059 } = await nostrService.fetchInboxDmEvents(
           refreshForPubkey,
           readRelays,
+          { since: lastSeen },
         );
         const entries: DmInboxEntry[] = [];
 
@@ -1591,16 +1767,45 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         // different session's state.
         if (refreshForPubkey !== pubkey || refreshForSigner !== signerType) return;
 
+        // PR B: merge cached-with-fresh, keep at most DM_INBOX_CAP
+        // entries (newest-first), then persist + update last-seen.
+        const merged = mergeInboxEntries(cachedInbox, entries, DM_INBOX_CAP);
+        const filteredFinal = merged.filter((e) => refreshFollows.has(e.partnerPubkey));
+
         // Perf summary: one line per refresh, grep with `\[Perf\] refreshDmInbox`.
         console.log(
           `[Perf] refreshDmInbox: ` +
             `${(performance.now() - refreshStart).toFixed(0)}ms, ` +
             `k4=${kind4.length} (hits=${nip04CacheHits}, fresh=${nip04FreshDecrypts}), ` +
             `k1059=${kind1059.length}, ` +
-            `entries=${entries.length}`,
+            `since=${lastSeen ?? 0}, ` +
+            `fresh=${entries.length}, ` +
+            `merged=${merged.length}, ` +
+            `rendered=${filteredFinal.length}`,
         );
 
-        setDmInbox(entries);
+        setDmInbox(filteredFinal);
+
+        // Persist merged list + new last-seen (max created_at across
+        // fresh entries, kind-4 + kind-1059 both contribute). Debounced
+        // writes would be nicer but AsyncStorage setItem is async and
+        // rarely blocking at this scale; keep simple for now.
+        const newLastSeen = Math.max(
+          lastSeen ?? 0,
+          ...kind4.map((e) => e.created_at),
+          ...kind1059.map((e) => e.created_at),
+        );
+        await Promise.all([
+          AsyncStorage.setItem(inboxCacheKey(refreshForPubkey), JSON.stringify(merged)).catch(
+            () => {},
+          ),
+          newLastSeen > (lastSeen ?? 0)
+            ? AsyncStorage.setItem(
+                inboxLastSeenKey(refreshForPubkey),
+                String(newLastSeen),
+              ).catch(() => {})
+            : Promise.resolve(),
+        ]);
       } catch (error) {
         if (__DEV__) console.warn('[Nostr] refreshDmInbox failed:', error);
       } finally {
