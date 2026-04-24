@@ -136,8 +136,8 @@ subsequent tests may still be exercising the pre-fix app. Verify
 Releases are cut by publishing a **GitHub Release** (which creates the tag server-side and fires `.github/workflows/release.yml`). The workflow:
 
 1. Runs quality gates (typecheck / lint / format-check).
-2. Kicks off EAS production builds for both platforms with `--auto-submit` (TestFlight for iOS, Play Internal once the Google Play account is wired up).
-3. Downloads the resulting Android APK and attaches it to the Release for sideloading.
+2. Kicks off EAS production builds for both platforms. **iOS** is auto-submitted to TestFlight via EAS's ASC API key. **Android** is built only — no auto-submit to Play Internal until the Google Play Developer account + service-account JSON are wired up via `eas credentials` (see the "Android Distribution — Google Play Internal Testing" section below). The Android APK is attached to the GitHub Release instead, so testers can sideload it immediately.
+3. Downloads the resulting Android APK from EAS and attaches it as `lightning-piggy-<tag>.apk` on the Release page for sideloading.
 4. Regenerates `docs/TECHNICAL_SOLUTION_DOCUMENT.pdf` from the AsciiDoc sources and attaches that too.
 
 ==== Version numbering
