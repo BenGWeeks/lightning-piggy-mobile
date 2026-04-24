@@ -86,20 +86,47 @@ function safeParseRecord<T>(raw: string | null): Record<string, T> {
   return {};
 }
 
+/** Persist a wrap-id cache back to AsyncStorage, enforcing the size
+ * cap in insertion order (oldest-inserted evicts first — LRU-ish, and
+ * O(overflow) instead of the O(n log n) sort-by-createdAt this
+ * replaced). Object keys in JS preserve insertion order for non-
+ * integer string keys, and wrap ids are hex, so iteration order is
+ * stable across parse/stringify round-trips. Write failures are
+ * surfaced as a warn — a corrupted storage subsystem would otherwise
+ * silently re-decrypt on every refresh with no breadcrumb. */
+async function writeNip17Cache(
+  storageKey: string,
+  cache: Record<string, Nip17CacheEntry>,
+): Promise<void> {
+  const keys = Object.keys(cache);
+  const overflow = keys.length - NIP17_CACHE_CAP;
+  if (overflow > 0) {
+    for (let i = 0; i < overflow; i++) delete cache[keys[i]];
+  }
+  try {
+    await AsyncStorage.setItem(storageKey, JSON.stringify(cache));
+  } catch (err) {
+    console.warn(`[Nostr] NIP-17 cache write failed (${storageKey}):`, err);
+  }
+}
+
 /** Yield to the JS event loop so UI interactions can tick between
  * chunks of a synchronous decrypt loop (#177). `await`ing an already-
  * resolved promise only drains the microtask queue, which still
  * starves UI events — setTimeout(0) returns to the task scheduler. */
-/** Chunk size for yielding between decrypt attempts. Tuned for nsec:
- * `nip04.decrypt` / `unwrapWrapNsec` are ~1 ms each on mid-range mobile
- * CPUs, so 15 iterations ≈ 15 ms of blocking work per batch — just
- * under a 60 fps frame budget. On Amber the actual IPC round-trip is
- * inherently async, so explicit yielding matters less there. If you
- * retune this, profile with `Profiler` in FriendsScreen as the canary. */
-const DECRYPT_YIELD_EVERY = 15;
 function yieldToEventLoop(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
+
+/** Chunk size for yielding between decrypt attempts. Sized for the
+ * nsec path: `nip04.decrypt` / `unwrapWrapNsec` are ~1 ms each on
+ * mid-range mobile CPUs, so 15 iterations ≈ 15 ms of blocking work
+ * per batch — just under a 60 fps frame budget. The Amber path uses
+ * the same constant, but its decrypt is IPC-bound and already
+ * yields per call, so the extra `setTimeout(0)` there is effectively
+ * free. If you retune this, profile the nsec path with `Profiler`
+ * in FriendsScreen as the canary. */
+const DECRYPT_YIELD_EVERY = 15;
 
 /**
  * Minimum gap between `refreshDmInbox` calls fired by
@@ -154,12 +181,10 @@ async function loadLastSeen(key: string): Promise<number | undefined> {
 /**
  * Merge cached list with freshly-decrypted entries. Cached entries we
  * already have take precedence (they might have had properties we'd
- * need to re-decrypt to recover). Dedup key is explicit because
- * `DmInboxEntry` doesn't carry an event id — we use
- * `partnerPubkey+createdAt+wireKind` which is unique in practice
- * (a relay that returns two events with the same triple is
- * misbehaving; last one wins via Map semantics). Conversation
- * messages use `id` (event id) directly.
+ * need to re-decrypt to recover). Dedup key is `id` (kind-4 event id
+ * or kind-1059 wrap id). A fallback composite key covers persisted
+ * entries written before `id` was added to the type so loading an
+ * old cache doesn't silently drop everything to the same slot.
  */
 function mergeInboxEntries(
   cached: DmInboxEntry[],
@@ -167,12 +192,10 @@ function mergeInboxEntries(
   cap: number,
 ): DmInboxEntry[] {
   const map = new Map<string, DmInboxEntry>();
-  for (const e of cached) {
-    map.set(`${e.partnerPubkey}|${e.createdAt}|${e.wireKind}`, e);
-  }
-  for (const e of fresh) {
-    map.set(`${e.partnerPubkey}|${e.createdAt}|${e.wireKind}`, e);
-  }
+  const dedupKey = (e: DmInboxEntry): string =>
+    e.id ?? `${e.partnerPubkey}|${e.createdAt}|${e.wireKind}`;
+  for (const e of cached) map.set(dedupKey(e), e);
+  for (const e of fresh) map.set(dedupKey(e), e);
   const all = Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
   return all.slice(0, cap);
 }
@@ -1410,6 +1433,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               // benefit too. Filter to this thread's partner only for
               // the render-side `decrypted` array.
               const entry: Nip17CacheEntry = {
+                id: wrap.id,
                 wrapId: wrap.id,
                 partnerPubkey: partnership.partnerPubkey,
                 fromMe: partnership.fromMe,
@@ -1428,16 +1452,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               });
             }
             if (newlyCached.length > 0) {
-              const items = Object.values(cache);
-              const toWrite =
-                items.length > NIP17_CACHE_CAP
-                  ? items.sort((a, b) => b.createdAt - a.createdAt).slice(0, NIP17_CACHE_CAP)
-                  : items;
-              const next: Record<string, Nip17CacheEntry> = {};
-              for (const item of toWrite) next[item.wrapId] = item;
-              await AsyncStorage.setItem(NSEC_NIP17_CACHE_KEY, JSON.stringify(next)).catch(
-                () => {},
-              );
+              await writeNip17Cache(NSEC_NIP17_CACHE_KEY, cache);
             }
           }
         } else if (signerType === 'amber') {
@@ -1631,6 +1646,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             if (hit !== undefined) {
               nip04CacheHits++;
               entries.push({
+                id: t.ev.id,
                 partnerPubkey: t.partnerPubkey,
                 fromMe: t.fromMe,
                 createdAt: t.ev.created_at,
@@ -1656,6 +1672,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             for (const r of batchResults) {
               if (!r) continue;
               entries.push({
+                id: r.t.ev.id,
                 partnerPubkey: r.t.partnerPubkey,
                 fromMe: r.t.fromMe,
                 createdAt: r.t.ev.created_at,
@@ -1704,6 +1721,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                     continue;
                   }
                   entries.push({
+                    id: cached.wrapId,
                     partnerPubkey: cached.partnerPubkey,
                     fromMe: cached.fromMe,
                     createdAt: cached.createdAt,
@@ -1722,6 +1740,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 // so it runs here not in the view.
                 if (!refreshFollows.has(partnership.partnerPubkey)) continue;
                 const entry: Nip17CacheEntry = {
+                  id: wrap.id,
                   wrapId: wrap.id,
                   partnerPubkey: partnership.partnerPubkey,
                   fromMe: partnership.fromMe,
@@ -1732,6 +1751,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 cache[wrap.id] = entry;
                 newlyCached.push(entry);
                 entries.push({
+                  id: entry.id,
                   partnerPubkey: entry.partnerPubkey,
                   fromMe: entry.fromMe,
                   createdAt: entry.createdAt,
@@ -1741,16 +1761,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               }
 
               if (newlyCached.length > 0 || unfollowedPurged > 0) {
-                const items = Object.values(cache);
-                const toWrite =
-                  items.length > NIP17_CACHE_CAP
-                    ? items.sort((a, b) => b.createdAt - a.createdAt).slice(0, NIP17_CACHE_CAP)
-                    : items;
-                const next: Record<string, Nip17CacheEntry> = {};
-                for (const item of toWrite) next[item.wrapId] = item;
-                await AsyncStorage.setItem(NSEC_NIP17_CACHE_KEY, JSON.stringify(next)).catch(
-                  () => {},
-                );
+                await writeNip17Cache(NSEC_NIP17_CACHE_KEY, cache);
               }
             }
           } else if (refreshForSigner === 'amber' && kind1059.length > 0) {
@@ -1777,6 +1788,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   // so unfollowed partners don't keep surfacing from cache.
                   if (!refreshFollows.has(cached.partnerPubkey)) continue;
                   entries.push({
+                    id: cached.wrapId,
                     partnerPubkey: cached.partnerPubkey,
                     fromMe: cached.fromMe,
                     createdAt: cached.createdAt,
@@ -1799,6 +1811,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   // AsyncStorage.
                   if (!refreshFollows.has(partnership.partnerPubkey)) continue;
                   const entry: Nip17CacheEntry = {
+                    id: wrap.id,
                     wrapId: wrap.id,
                     partnerPubkey: partnership.partnerPubkey,
                     fromMe: partnership.fromMe,
@@ -1809,6 +1822,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   cache[wrap.id] = entry;
                   newlyCached.push(entry);
                   entries.push({
+                    id: entry.id,
                     partnerPubkey: entry.partnerPubkey,
                     fromMe: entry.fromMe,
                     createdAt: entry.createdAt,
@@ -1834,16 +1848,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               setAmberNip44Permission(permissionDenied ? 'denied' : 'granted');
 
               if (newlyCached.length > 0) {
-                const items = Object.values(cache);
-                const toWrite =
-                  items.length > NIP17_CACHE_CAP
-                    ? items.sort((a, b) => b.createdAt - a.createdAt).slice(0, NIP17_CACHE_CAP)
-                    : items;
-                const next: Record<string, Nip17CacheEntry> = {};
-                for (const item of toWrite) next[item.wrapId] = item;
-                await AsyncStorage.setItem(AMBER_NIP17_CACHE_KEY, JSON.stringify(next)).catch(
-                  () => {},
-                );
+                await writeNip17Cache(AMBER_NIP17_CACHE_KEY, cache);
               }
             }
           }

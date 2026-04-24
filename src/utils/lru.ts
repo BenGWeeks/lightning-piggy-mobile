@@ -22,10 +22,24 @@ export class LRUCache<K, V> {
   private readonly map = new Map<K, V>();
 
   constructor(opts: LRUCacheOptions) {
+    // Reject malformed sizes up-front — `max=0` would evict on every
+    // set (making the cache useless); negatives would wrap via `>=`
+    // comparison and never evict. Fail loud so misconfigurations
+    // show up at construction, not silently degrade at runtime.
+    if (!Number.isInteger(opts.max) || opts.max < 1) {
+      throw new Error(`LRUCache: max must be a positive integer, got ${opts.max}`);
+    }
     this.max = opts.max;
     this.touchOnGet = opts.touchOnGet ?? true;
   }
 
+  /**
+   * Return the value for `key`, or `undefined` if absent. Use `has()`
+   * to disambiguate if a caller genuinely stores `undefined` values
+   * (this cache's current consumer — the NIP-04 plaintext pipeline —
+   * never stores `undefined`, since `null`-plaintext from a failed
+   * decrypt is filtered out before `set()`).
+   */
   get(key: K): V | undefined {
     const v = this.map.get(key);
     if (v === undefined) return undefined;
@@ -35,6 +49,10 @@ export class LRUCache<K, V> {
       this.map.set(key, v);
     }
     return v;
+  }
+
+  has(key: K): boolean {
+    return this.map.has(key);
   }
 
   set(key: K, value: V): void {

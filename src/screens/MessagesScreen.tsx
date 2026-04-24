@@ -154,9 +154,15 @@ const MessagesScreen: React.FC = () => {
     // so any new-since-last-refresh followers' messages get dropped
     // by the follow gate. Profile refresh is independent and can run
     // in parallel.
-    await Promise.all([refreshContacts(), refreshProfile({ force: true })]);
-    await refreshDmInbox({ force: true });
-    setRefreshing(false);
+    //
+    // try/finally so a relay timeout / decrypt throw doesn't leave the
+    // UI stuck in the "refreshing" spinner state.
+    try {
+      await Promise.all([refreshContacts(), refreshProfile({ force: true })]);
+      await refreshDmInbox({ force: true });
+    } finally {
+      setRefreshing(false);
+    }
   }, [refreshContacts, refreshDmInbox, refreshProfile]);
 
   const handleConversationPress = useCallback(

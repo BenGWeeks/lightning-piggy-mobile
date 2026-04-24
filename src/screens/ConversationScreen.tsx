@@ -365,6 +365,20 @@ const ConversationScreen: React.FC = () => {
     return withHeaders;
   }, [messages, zapItems]);
 
+  // Mount/unmount tracker so the async `load()` below can bail when
+  // the user navigates back mid-fetch. Without this, every back-press
+  // during the 6-12 s cold fetchConversation still runs the full
+  // decrypt + persist chain on the unmounted component, wasting JS
+  // thread time that could have been responding to input.
+  // Declared BEFORE `load` because `load`'s body closes over it.
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   const load = useCallback(
     async (showSpinner: boolean) => {
       if (!isLoggedIn) {
@@ -400,19 +414,6 @@ const ConversationScreen: React.FC = () => {
     },
     [isLoggedIn, fetchConversation, getCachedConversation, pubkey],
   );
-
-  // Mount/unmount tracker so the async `load()` above can bail when
-  // the user navigates back mid-fetch. Without this, every back-press
-  // during the 6-12 s cold fetchConversation still runs the full
-  // decrypt + persist chain on the unmounted component, wasting JS
-  // thread time that could have been responding to input.
-  const isMountedRef = useRef(true);
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
 
   useEffect(() => {
     load(true);
