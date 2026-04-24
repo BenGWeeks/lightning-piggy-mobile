@@ -12,6 +12,7 @@ import {
   QrCode,
 } from 'lucide-react-native';
 import QrSheet from './QrSheet';
+import NostrLoginSheet from './NostrLoginSheet';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { DrawerContentComponentProps } from '@react-navigation/drawer';
 import { DrawerContentScrollView } from '@react-navigation/drawer';
@@ -76,13 +77,12 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
   const { isLoggedIn, profile, logout } = useNostr();
   const [signingOut, setSigningOut] = useState(false);
   const [qrSheetOpen, setQrSheetOpen] = useState(false);
+  const [loginSheetOpen, setLoginSheetOpen] = useState(false);
 
-  const displayName = profile?.displayName || profile?.name || 'Not signed in';
+  const displayName = profile?.displayName || profile?.name || '';
   const truncatedNpub = profile?.npub
     ? `${profile.npub.slice(0, 12)}…${profile.npub.slice(-6)}`
-    : isLoggedIn
-      ? ''
-      : 'Sign in to connect';
+    : '';
 
   const handleSignOut = () => {
     if (!isLoggedIn) return;
@@ -123,32 +123,48 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
               <View style={[styles.avatarImage, styles.avatarPlaceholder]} />
             )}
           </View>
-          <View style={styles.nameRow}>
-            <Text
-              style={[styles.headerName, styles.flex1]}
-              numberOfLines={1}
-              testID="drawer-display-name"
+          {isLoggedIn ? (
+            <>
+              <View style={styles.nameRow}>
+                <Text
+                  style={[styles.headerName, styles.flex1]}
+                  numberOfLines={1}
+                  testID="drawer-display-name"
+                >
+                  {displayName}
+                </Text>
+                {profile?.npub && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      props.navigation.closeDrawer();
+                      setQrSheetOpen(true);
+                    }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    accessibilityLabel="Show npub QR"
+                    testID="drawer-npub-qr"
+                  >
+                    <QrCode size={28} color={colors.textSupplementary} />
+                  </TouchableOpacity>
+                )}
+              </View>
+              {truncatedNpub !== '' && (
+                <Text style={styles.headerNpub} numberOfLines={1}>
+                  {truncatedNpub}
+                </Text>
+              )}
+            </>
+          ) : (
+            <TouchableOpacity
+              style={styles.signInButton}
+              onPress={() => {
+                props.navigation.closeDrawer();
+                setLoginSheetOpen(true);
+              }}
+              accessibilityLabel="Sign in or create account"
+              testID="drawer-sign-in"
             >
-              {displayName}
-            </Text>
-            {profile?.npub && (
-              <TouchableOpacity
-                onPress={() => {
-                  props.navigation.closeDrawer();
-                  setQrSheetOpen(true);
-                }}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityLabel="Show npub QR"
-                testID="drawer-npub-qr"
-              >
-                <QrCode size={28} color={colors.textSupplementary} />
-              </TouchableOpacity>
-            )}
-          </View>
-          {truncatedNpub !== '' && (
-            <Text style={styles.headerNpub} numberOfLines={1}>
-              {truncatedNpub}
-            </Text>
+              <Text style={styles.signInButtonText}>Sign In / Create Account</Text>
+            </TouchableOpacity>
           )}
         </View>
 
@@ -208,6 +224,8 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
           defaultMode="npub"
         />
       )}
+
+      <NostrLoginSheet visible={loginSheetOpen} onClose={() => setLoginSheetOpen(false)} />
     </View>
   );
 };
@@ -255,6 +273,20 @@ const styles = StyleSheet.create({
   },
   flex1: {
     flex: 1,
+  },
+  signInButton: {
+    alignSelf: 'stretch',
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: colors.brandPink,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  signInButtonText: {
+    color: colors.white,
+    fontSize: 15,
+    fontWeight: '700',
   },
   headerNpub: {
     color: colors.textSupplementary,
