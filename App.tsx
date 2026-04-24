@@ -1,7 +1,7 @@
 // CRITICAL: Polyfills must be imported FIRST, before any other imports
 import './src/polyfills';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -11,6 +11,7 @@ import { WalletProvider, useWallet } from './src/contexts/WalletContext';
 import { NostrProvider } from './src/contexts/NostrContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
+import BootSplash from './src/components/BootSplash';
 
 // Render toasts with unlimited-line body so long error messages (e.g. Electrum
 // script-verify errors) aren't truncated. Height grows to fit content.
@@ -66,6 +67,18 @@ function GlobalIncomingPaymentOverlay() {
 }
 
 export default function App() {
+  // Boot splash — keeps the pig on screen from JS-mount for a minimum
+  // 600 ms so the user never sees the plain-pink native-splash-to-JS
+  // handoff. 600 ms is well under the observed cold-launch time on
+  // Pixel/cellular (55+ s) but long enough that the splash doesn't
+  // feel like a flash. Home renders behind the splash during this
+  // window; when we fade the splash out, Home is usually ready.
+  const [bootDone, setBootDone] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setBootDone(true), 600);
+    return () => clearTimeout(t);
+  }, []);
+
   return (
     <GestureHandlerRootView style={styles.container}>
       <WalletProvider>
@@ -78,6 +91,7 @@ export default function App() {
           <GlobalIncomingPaymentOverlay />
         </NostrProvider>
       </WalletProvider>
+      <BootSplash done={bootDone} />
     </GestureHandlerRootView>
   );
 }

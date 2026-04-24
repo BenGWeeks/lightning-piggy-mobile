@@ -30,10 +30,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   orientation: 'portrait',
   icon: './assets/icon.png',
   userInterfaceStyle: 'light',
+  // Splash screen: the pig + brand wordmark on brand-pink. Same asset
+  // IntroScreen uses so first-time users get a continuous pig → Home
+  // transition without the pink-spinner gap. `contain` leaves padding
+  // around the image so different device aspect ratios render cleanly.
   splash: {
-    image: './assets/splash-icon.png',
+    image: './assets/images/lightning-piggy-intro.png',
     resizeMode: 'contain',
-    backgroundColor: '#ffffff',
+    backgroundColor: '#e91e63',
   },
   scheme: 'lightningpiggy',
   ios: {
