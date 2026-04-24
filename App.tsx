@@ -5,6 +5,7 @@ import React, { useEffect, useState } from 'react';
 import { StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import Toast, { BaseToast, ErrorToast, InfoToast } from 'react-native-toast-message';
 import { WalletProvider, useWallet } from './src/contexts/WalletContext';
@@ -81,17 +82,24 @@ export default function App() {
 
   return (
     <GestureHandlerRootView style={styles.container}>
-      <WalletProvider>
-        <NostrProvider>
-          <BottomSheetModalProvider>
-            <StatusBar style="light" />
-            <AppNavigator />
-          </BottomSheetModalProvider>
-          <Toast topOffset={60} config={toastConfig} />
-          <GlobalIncomingPaymentOverlay />
-        </NostrProvider>
-      </WalletProvider>
-      <BootSplash done={bootDone} />
+      {/* KeyboardProvider drives react-native-keyboard-controller. On
+          Android 15 edge-to-edge the classic RN Keyboard event API is
+          unreliable (issue #194); RNKC subscribes to the platform
+          IME inset via WindowInsetsCompat and exposes it to hooks
+          like useReanimatedKeyboardAnimation that the composer uses. */}
+      <KeyboardProvider>
+        <WalletProvider>
+          <NostrProvider>
+            <BottomSheetModalProvider>
+              <StatusBar style="light" />
+              <AppNavigator />
+            </BottomSheetModalProvider>
+            <Toast topOffset={60} config={toastConfig} />
+            <GlobalIncomingPaymentOverlay />
+          </NostrProvider>
+        </WalletProvider>
+        <BootSplash done={bootDone} />
+      </KeyboardProvider>
     </GestureHandlerRootView>
   );
 }

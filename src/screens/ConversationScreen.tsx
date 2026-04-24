@@ -16,7 +16,7 @@ import {
   Linking,
   StyleSheet,
 } from 'react-native';
-import Animated, { useAnimatedKeyboard, useAnimatedStyle } from 'react-native-reanimated';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Zap, Send, Plus, MapPin, ArrowDown } from 'lucide-react-native';
 import { Image as ExpoImage } from 'expo-image';
@@ -254,13 +254,6 @@ const ConversationScreen: React.FC = () => {
   const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState(false);
   const [detailTx, setDetailTx] = useState<TransactionDetailData | null>(null);
-  // Keyboard height (IME inset) — read directly from the platform via
-  // Reanimated's native module. On Android 15 edge-to-edge the RN
-  // `Keyboard.addListener` + `endCoordinates.height` pattern fires
-  // inconsistently and reports stale values (issue #194); reading the
-  // inset via `useAnimatedKeyboard` bypasses that by subscribing to
-  // `WindowInsetsCompat.Type.ime()` directly.
-  const animatedKeyboard = useAnimatedKeyboard();
   const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
   // Profiles resolved from `nostr:` contact references the other party
   // has shared in this conversation. Keyed by hex pubkey; a `null` value
@@ -420,18 +413,6 @@ const ConversationScreen: React.FC = () => {
   useEffect(() => {
     load(true);
   }, [load]);
-
-  // Keyboard-avoidance: pad the composer by the live IME inset so its
-  // visible content sits just above the keyboard. Falls back to the
-  // bottom safe-area inset (gesture bar) when the keyboard is closed.
-  // Runs on the UI thread — avoids the JS-thread jank that the old
-  // `Keyboard.addListener` + `setState` pattern caused during decrypts.
-  const composerKeyboardStyle = useAnimatedStyle(() => {
-    const h = animatedKeyboard.height.value;
-    return {
-      paddingBottom: h > 0 ? h : Math.max(insets.bottom, 8),
-    };
-  });
 
   // Jump to the newest message on first content load, and when the user is
   // already near the bottom and a new message arrives. The list is
@@ -1296,13 +1277,16 @@ const ConversationScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
 
-      {/* Keyboard-avoidance via Reanimated's `useAnimatedKeyboard`
-          (see hook above). Plain `KeyboardAvoidingView` and the
-          `Keyboard.addListener` + `setState` pattern both failed on
-          Pixel 8 / Android 15 edge-to-edge (#194): the IME inset is
-          dispatched via WindowInsetsCompat, which Reanimated picks
-          up directly but the classic APIs don't. */}
-      <View style={styles.flex}>
+      {/* Keyboard-avoidance via react-native-keyboard-controller. Both
+          RN's `KeyboardAvoidingView` and Reanimated v4's (deprecated)
+          `useAnimatedKeyboard` failed to lift the composer on Pixel 8 /
+          Android 15 edge-to-edge (#194) — RN's classic API reports
+          stale IME heights and Reanimated's hook returns 0 on release
+          builds. RNKC's `KeyboardAvoidingView` reads the inset from
+          `WindowInsetsCompat.Type.ime()` through its native module and
+          lifts the contained flex container frame-for-frame with the
+          keyboard animation. */}
+      <KeyboardAvoidingView style={styles.flex} behavior="padding">
         {loading ? (
           <View style={styles.loading}>
             <ActivityIndicator color={colors.brandPink} />
@@ -1372,7 +1356,7 @@ const ConversationScreen: React.FC = () => {
           </View>
         ) : null}
 
-        <Animated.View style={[styles.composer, composerKeyboardStyle]}>
+        <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 8) }]}>
           <TouchableOpacity
             style={styles.composerAttachButton}
             onPress={() => setAttachSheetOpen(true)}
@@ -1410,8 +1394,8 @@ const ConversationScreen: React.FC = () => {
               <Send size={20} color={colors.white} />
             )}
           </TouchableOpacity>
-        </Animated.View>
-      </View>
+        </View>
+      </KeyboardAvoidingView>
 
       <AttachSheet
         visible={attachSheetOpen}
