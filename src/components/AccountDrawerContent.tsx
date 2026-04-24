@@ -9,7 +9,9 @@ import {
   Coins,
   Info,
   LogOut,
+  QrCode,
 } from 'lucide-react-native';
+import QrSheet from './QrSheet';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { DrawerContentComponentProps } from '@react-navigation/drawer';
 import { DrawerContentScrollView } from '@react-navigation/drawer';
@@ -73,6 +75,7 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
   const insets = useSafeAreaInsets();
   const { isLoggedIn, profile, logout } = useNostr();
   const [signingOut, setSigningOut] = useState(false);
+  const [qrSheetOpen, setQrSheetOpen] = useState(false);
 
   const displayName = profile?.displayName || profile?.name || 'Not signed in';
   const truncatedNpub = profile?.npub
@@ -120,9 +123,28 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
               <View style={[styles.avatarImage, styles.avatarPlaceholder]} />
             )}
           </View>
-          <Text style={styles.headerName} numberOfLines={1} testID="drawer-display-name">
-            {displayName}
-          </Text>
+          <View style={styles.nameRow}>
+            <Text
+              style={[styles.headerName, styles.flex1]}
+              numberOfLines={1}
+              testID="drawer-display-name"
+            >
+              {displayName}
+            </Text>
+            {profile?.npub && (
+              <TouchableOpacity
+                onPress={() => {
+                  props.navigation.closeDrawer();
+                  setQrSheetOpen(true);
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityLabel="Show npub QR"
+                testID="drawer-npub-qr"
+              >
+                <QrCode size={28} color={colors.textSupplementary} />
+              </TouchableOpacity>
+            )}
+          </View>
           {truncatedNpub !== '' && (
             <Text style={styles.headerNpub} numberOfLines={1}>
               {truncatedNpub}
@@ -176,6 +198,16 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
           v{appVersion}
         </Text>
       </View>
+
+      {profile?.npub && (
+        <QrSheet
+          visible={qrSheetOpen}
+          onClose={() => setQrSheetOpen(false)}
+          npub={profile.npub}
+          lightningAddress={profile.lud16 ?? null}
+          defaultMode="npub"
+        />
+      )}
     </View>
   );
 };
@@ -214,6 +246,15 @@ const styles = StyleSheet.create({
     color: colors.textHeader,
     fontSize: 18,
     fontWeight: '700',
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'stretch',
+  },
+  flex1: {
+    flex: 1,
   },
   headerNpub: {
     color: colors.textSupplementary,
