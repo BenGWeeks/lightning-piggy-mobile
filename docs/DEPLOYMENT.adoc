@@ -84,7 +84,7 @@ EXPO_NO_DOCTOR=1 eas build --local --platform android --profile production --non
 
 # Install over the existing app — preserves user data (Nostr nsec,
 # wallet pairings, conversation cache).
-adb -s <device-serial> install -r android/app/build/outputs/apk/release/app-release.apk
+adb -s <serial> install -r android/app/build/outputs/apk/release/app-release.apk
 ----
 
 Build time: ~10-15 min fresh, ~2-3 min on a warm gradle cache. No
