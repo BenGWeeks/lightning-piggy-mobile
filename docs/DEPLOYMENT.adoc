@@ -126,11 +126,10 @@ Three options if you really want gradle-direct builds in the loop:
    must not be committed (`*.jks` is already in `.gitignore`).
 3. **Uninstall and reinstall** — loses data on the target device.
 
-Issue #194's fix took longer than it should have because I was
-running `./gradlew assembleRelease` + `adb install -r` and trusting
-the "Success" output. The APK never landed; all subsequent "tests"
-were against the pre-fix install. Moral: verify lastUpdateTime or
-use `eas build --local`.
+Running `./gradlew assembleRelease` + `adb install -r` can appear
+to succeed while leaving the previous install in place, so
+subsequent tests may still be exercising the pre-fix app. Verify
+`lastUpdateTime` after install, or use `eas build --local`.
 
 === Release workflow
 
