@@ -11,12 +11,29 @@ import React, {
 import { InteractionManager } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
+import { LRUCache } from '../utils/lru';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
 import type { NostrProfile, NostrContact, RelayConfig, SignerType } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import { partnerFromRumor, unwrapWrapNsec, unwrapWrapViaNip44 } from '../utils/nip17Unwrap';
+
+/**
+ * Module-level LRU cache for NIP-04 plaintext keyed by event id. Keeps
+ * the app-session-latest 1000 decrypted messages in RAM so re-opening
+ * the same thread (or navigating away and back) doesn't re-decrypt from
+ * scratch. Event id → plaintext mapping is immutable once decrypted
+ * (the NIP-04 payload never changes for a given id), so no TTL needed.
+ *
+ * Cribbed from Arcade's arclib/src/private.ts:9 (`LRUCache<string, …>`).
+ * Stays in RAM only — no AsyncStorage persistence — to keep the write
+ * path free and avoid serialising full-bundle JSON on every decrypt.
+ */
+const nip04PlaintextCache = new LRUCache<string, string>({ max: 1000 });
+export function __clearNip04PlaintextCacheForTests() {
+  nip04PlaintextCache.clear();
+}
 
 // Module-scope memo for the current user's secret key. Five paths in this
 // file need access to the nsec (sign, publishProfile, publishContactList,
@@ -83,6 +100,18 @@ const DECRYPT_YIELD_EVERY = 15;
 function yieldToEventLoop(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
+
+/**
+ * Minimum gap between `refreshDmInbox` calls fired by
+ * `useFocusEffect` on the Messages tab. Without a TTL, every tab return
+ * triggered a fresh 3-query relay round-trip + full NIP-04 decrypt
+ * sweep — locking the app up for seconds on the 2nd/3rd/Nth visit.
+ * 30 s is long enough that quick tab-bouncing stays responsive, short
+ * enough that a user who genuinely wants fresh state (open app after
+ * a break) still pays normal refresh cost. Pull-to-refresh bypasses
+ * the TTL via `{ force: true }`.
+ */
+const DM_INBOX_REFRESH_TTL_MS = 30_000;
 
 const NSEC_KEY = 'nostr_nsec';
 const PUBKEY_KEY = 'nostr_pubkey';
@@ -175,7 +204,18 @@ interface NostrContextType {
   fetchConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
   dmInbox: DmInboxEntry[];
   dmInboxLoading: boolean;
-  refreshDmInbox: () => Promise<void>;
+  /**
+   * Refresh the NIP-04 + NIP-17 DM inbox from read relays.
+   *
+   * Default (no arg / `force: false`): honours a 30s TTL — calls
+   * within that window are no-ops. Safe to call from
+   * `useFocusEffect` on the Messages tab without racking up relay
+   * round-trips on every tab bounce.
+   *
+   * `force: true`: bypass the TTL and hit relays. Reserved for
+   * explicit user-initiated refreshes (pull-to-refresh).
+   */
+  refreshDmInbox: (opts?: { force?: boolean }) => Promise<void>;
   /**
    * Tri-state for the NIP-17 silent-decrypt fast path.
    *  - 'unknown': haven't tried yet in this session
@@ -230,6 +270,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // useFocusEffect firing while a pull-to-refresh is still in-flight) so
   // they don't race on the AsyncStorage wrap-id cache.
   const dmInboxInFlight = useRef<Promise<void> | null>(null);
+  /** `performance.now()` of last successful `refreshDmInbox` completion.
+   * Gate for the `DM_INBOX_REFRESH_TTL_MS` throttle so that Messages-tab
+   * focus doesn't re-fire full relay queries on every tab bounce. */
+  const dmInboxLastRefreshAt = useRef<number>(0);
 
   /**
    * Set of followed pubkeys (lowercase hex). Used to gate who can land a
@@ -1042,6 +1086,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const perfStart = performance.now();
       let nip17CacheHits = 0;
       let nip17FreshDecrypts = 0;
+      let nip04CacheHits = 0;
+      let nip04FreshDecrypts = 0;
 
       const readRelays = getReadRelays();
       const decrypted: ConversationMessage[] = [];
@@ -1052,18 +1098,62 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         normalized,
         readRelays,
       );
-      // Yield every DECRYPT_YIELD_EVERY *attempts*, not successes — a
-      // run of decrypt failures would otherwise never tick the counter
-      // and keep blocking the JS thread.
-      let kind4Attempts = 0;
-      for (const ev of kind4Events) {
+      // Two-pass decrypt with module-level LRU cache:
+      //  1. Pull plaintext synchronously for events already in the
+      //     cache — no decrypt round-trip, no Amber IPC, no CPU.
+      //  2. Decrypt the misses in parallel (`Promise.all`). For nsec
+      //     this drains the JS queue faster than a serial for-await
+      //     loop; for Amber the IPC round-trips pipeline. Chunk the
+      //     Promise.all in slices of DECRYPT_YIELD_EVERY to yield to
+      //     the UI thread between batches on very long threads.
+      const freshDecryptTargets: { idx: number; counterparty: string; ev: (typeof kind4Events)[0] }[] = [];
+      const cachedPlaintexts: { idx: number; fromMe: boolean; text: string; ev: (typeof kind4Events)[0] }[] = [];
+      for (let i = 0; i < kind4Events.length; i++) {
+        const ev = kind4Events[i];
         const fromMe = ev.pubkey === pubkey;
         const counterparty = fromMe ? normalized : ev.pubkey.toLowerCase();
-        const plaintext = await decryptNip04ViaSigner(counterparty, ev.content);
-        if (++kind4Attempts % DECRYPT_YIELD_EVERY === 0) await yieldToEventLoop();
-        if (plaintext === null) continue;
-        decrypted.push({ id: ev.id, fromMe, text: plaintext, createdAt: ev.created_at });
+        const hit = nip04PlaintextCache.get(ev.id);
+        if (hit !== undefined) {
+          nip04CacheHits++;
+          cachedPlaintexts.push({ idx: i, fromMe, text: hit, ev });
+        } else {
+          freshDecryptTargets.push({ idx: i, counterparty, ev });
+        }
       }
+      // Parallel decrypt of misses, in yield-able chunks.
+      const freshResults: ({ idx: number; fromMe: boolean; text: string; ev: (typeof kind4Events)[0] } | null)[] = [];
+      for (let i = 0; i < freshDecryptTargets.length; i += DECRYPT_YIELD_EVERY) {
+        const batch = freshDecryptTargets.slice(i, i + DECRYPT_YIELD_EVERY);
+        const batchResults = await Promise.all(
+          batch.map(async (t) => {
+            nip04FreshDecrypts++;
+            const plaintext = await decryptNip04ViaSigner(t.counterparty, t.ev.content);
+            if (plaintext === null) return null;
+            // Cache the successful decrypt. Event ids are immutable so
+            // we can store unconditionally — no staleness possible.
+            nip04PlaintextCache.set(t.ev.id, plaintext);
+            const fromMe = t.ev.pubkey === pubkey;
+            return { idx: t.idx, fromMe, text: plaintext, ev: t.ev };
+          }),
+        );
+        freshResults.push(...batchResults);
+        if (i + DECRYPT_YIELD_EVERY < freshDecryptTargets.length) await yieldToEventLoop();
+      }
+      // Merge cached + fresh preserving original event order.
+      const merged = new Array<ConversationMessage | null>(kind4Events.length).fill(null);
+      for (const c of cachedPlaintexts) {
+        merged[c.idx] = {
+          id: c.ev.id,
+          fromMe: c.fromMe,
+          text: c.text,
+          createdAt: c.ev.created_at,
+        };
+      }
+      for (const r of freshResults) {
+        if (!r) continue;
+        merged[r.idx] = { id: r.ev.id, fromMe: r.fromMe, text: r.text, createdAt: r.ev.created_at };
+      }
+      for (const m of merged) if (m !== null) decrypted.push(m);
 
       // NIP-17 — partner pubkey is hidden inside the encrypted rumor, so
       // we can't peer-scope at the relay. Pull all gift wraps addressed to
@@ -1198,10 +1288,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       console.log(
         `[Perf] fetchConversation(${normalized.slice(0, 8)}): ` +
           `${(performance.now() - perfStart).toFixed(0)}ms, ` +
-          `k4=${kind4Events.length}, ` +
-          `k1059=${nip17CacheHits + nip17FreshDecrypts}, ` +
-          `hits=${nip17CacheHits}, ` +
-          `fresh=${nip17FreshDecrypts}, ` +
+          `k4=${kind4Events.length} (hits=${nip04CacheHits}, fresh=${nip04FreshDecrypts}), ` +
+          `k1059=${nip17CacheHits + nip17FreshDecrypts} (hits=${nip17CacheHits}, fresh=${nip17FreshDecrypts}), ` +
           `rendered=${decrypted.length}`,
       );
       return decrypted;
@@ -1209,17 +1297,29 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [pubkey, isLoggedIn, signerType, getReadRelays, decryptNip04ViaSigner],
   );
 
-  const refreshDmInbox = useCallback(async (): Promise<void> => {
-    if (!pubkey || !isLoggedIn) {
-      setDmInbox([]);
-      return;
-    }
-    // Single-flight: if a refresh is already in flight, piggy-back on it
-    // rather than kicking off a second concurrent fetch that would race
-    // the AsyncStorage wrap-id cache.
-    if (dmInboxInFlight.current) {
-      return dmInboxInFlight.current;
-    }
+  const refreshDmInbox = useCallback(
+    async (opts?: { force?: boolean }): Promise<void> => {
+      if (!pubkey || !isLoggedIn) {
+        setDmInbox([]);
+        return;
+      }
+      // Freshness TTL: skip the refresh entirely if the previous one
+      // finished within DM_INBOX_REFRESH_TTL_MS, unless the caller
+      // explicitly opts into a forced refresh (pull-to-refresh). The
+      // Messages tab's `useFocusEffect` uses the default TTL path so
+      // tab-bouncing doesn't retrigger expensive relay+decrypt work.
+      if (!opts?.force) {
+        const age = performance.now() - dmInboxLastRefreshAt.current;
+        if (dmInboxLastRefreshAt.current > 0 && age < DM_INBOX_REFRESH_TTL_MS) {
+          return;
+        }
+      }
+      // Single-flight: if a refresh is already in flight, piggy-back on it
+      // rather than kicking off a second concurrent fetch that would race
+      // the AsyncStorage wrap-id cache.
+      if (dmInboxInFlight.current) {
+        return dmInboxInFlight.current;
+      }
 
     // Capture local references once so the closure isn't affected by
     // mid-flight signer / identity changes. If we detect pubkey/signerType
@@ -1233,19 +1333,26 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setDmInboxLoading(true);
       try {
         const readRelays = getReadRelays();
+        const refreshStart = performance.now();
+        let nip04CacheHits = 0;
+        let nip04FreshDecrypts = 0;
         const { kind4, kind1059 } = await nostrService.fetchInboxDmEvents(
           refreshForPubkey,
           readRelays,
         );
         const entries: DmInboxEntry[] = [];
 
-        // NIP-04 — partner pubkey is in the envelope, so we can apply the
-        // follow filter BEFORE decrypting. A non-followed sender never
-        // gets a round-trip through Amber, let alone land in state.
-        // Yield every DECRYPT_YIELD_EVERY *attempts*, not successes — a
-        // run of decrypt failures would otherwise never tick the counter
-        // and keep blocking the JS thread.
-        let kind4Attempts = 0;
+        // NIP-04 — partner pubkey is in the envelope, so we can apply
+        // the follow filter BEFORE decrypting. A non-followed sender
+        // never gets a round-trip through Amber, let alone land in
+        // state. Same cache/parallel pattern as fetchConversation:
+        // pull cached plaintext synchronously, decrypt misses in
+        // DECRYPT_YIELD_EVERY-sized parallel batches.
+        const k4Targets: {
+          ev: (typeof kind4)[0];
+          fromMe: boolean;
+          partnerPubkey: string;
+        }[] = [];
         for (const ev of kind4) {
           const fromMe = ev.pubkey.toLowerCase() === refreshForPubkey;
           const partnerPubkey = (
@@ -1253,16 +1360,48 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           ).toLowerCase();
           if (!/^[0-9a-f]{64}$/.test(partnerPubkey)) continue;
           if (!refreshFollows.has(partnerPubkey)) continue;
-          const plaintext = await decryptNip04ViaSigner(partnerPubkey, ev.content);
-          if (++kind4Attempts % DECRYPT_YIELD_EVERY === 0) await yieldToEventLoop();
-          if (plaintext === null) continue;
-          entries.push({
-            partnerPubkey,
-            fromMe,
-            createdAt: ev.created_at,
-            text: plaintext,
-            wireKind: 4,
-          });
+          k4Targets.push({ ev, fromMe, partnerPubkey });
+        }
+        // Fast pass — cache lookup only.
+        const k4Misses: typeof k4Targets = [];
+        for (const t of k4Targets) {
+          const hit = nip04PlaintextCache.get(t.ev.id);
+          if (hit !== undefined) {
+            nip04CacheHits++;
+            entries.push({
+              partnerPubkey: t.partnerPubkey,
+              fromMe: t.fromMe,
+              createdAt: t.ev.created_at,
+              text: hit,
+              wireKind: 4,
+            });
+          } else {
+            k4Misses.push(t);
+          }
+        }
+        // Slow pass — parallel decrypt of misses in yield-able chunks.
+        for (let i = 0; i < k4Misses.length; i += DECRYPT_YIELD_EVERY) {
+          const batch = k4Misses.slice(i, i + DECRYPT_YIELD_EVERY);
+          const batchResults = await Promise.all(
+            batch.map(async (t) => {
+              nip04FreshDecrypts++;
+              const plaintext = await decryptNip04ViaSigner(t.partnerPubkey, t.ev.content);
+              if (plaintext === null) return null;
+              nip04PlaintextCache.set(t.ev.id, plaintext);
+              return { t, plaintext };
+            }),
+          );
+          for (const r of batchResults) {
+            if (!r) continue;
+            entries.push({
+              partnerPubkey: r.t.partnerPubkey,
+              fromMe: r.t.fromMe,
+              createdAt: r.t.ev.created_at,
+              text: r.plaintext,
+              wireKind: 4,
+            });
+          }
+          if (i + DECRYPT_YIELD_EVERY < k4Misses.length) await yieldToEventLoop();
         }
 
         // NIP-17 — partner pubkey is INSIDE the encrypted rumor, so we
@@ -1452,6 +1591,15 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         // different session's state.
         if (refreshForPubkey !== pubkey || refreshForSigner !== signerType) return;
 
+        // Perf summary: one line per refresh, grep with `\[Perf\] refreshDmInbox`.
+        console.log(
+          `[Perf] refreshDmInbox: ` +
+            `${(performance.now() - refreshStart).toFixed(0)}ms, ` +
+            `k4=${kind4.length} (hits=${nip04CacheHits}, fresh=${nip04FreshDecrypts}), ` +
+            `k1059=${kind1059.length}, ` +
+            `entries=${entries.length}`,
+        );
+
         setDmInbox(entries);
       } catch (error) {
         if (__DEV__) console.warn('[Nostr] refreshDmInbox failed:', error);
@@ -1460,21 +1608,24 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     })();
 
-    dmInboxInFlight.current = task;
-    try {
-      await task;
-    } finally {
-      dmInboxInFlight.current = null;
-    }
-  }, [
-    pubkey,
-    isLoggedIn,
-    signerType,
-    getReadRelays,
-    followPubkeys,
-    decryptNip04ViaSigner,
-    amberNip44DecryptSilent,
-  ]);
+      dmInboxInFlight.current = task;
+      try {
+        await task;
+        dmInboxLastRefreshAt.current = performance.now();
+      } finally {
+        dmInboxInFlight.current = null;
+      }
+    },
+    [
+      pubkey,
+      isLoggedIn,
+      signerType,
+      getReadRelays,
+      followPubkeys,
+      decryptNip04ViaSigner,
+      amberNip44DecryptSilent,
+    ],
+  );
 
   useEffect(() => {
     if (!isLoggedIn) setDmInbox([]);

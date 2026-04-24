@@ -125,8 +125,14 @@ const MessagesScreen: React.FC = () => {
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     // Pull-to-refresh is explicit user intent — force-bypass the 24h
-    // own-profile cache so renames published elsewhere surface now.
-    await Promise.all([refreshContacts(), refreshDmInbox(), refreshProfile({ force: true })]);
+    // own-profile cache so renames published elsewhere surface now,
+    // and also bypass the 30s DM-inbox TTL so the relay query actually
+    // runs (the TTL's default path is for useFocusEffect tab bounces).
+    await Promise.all([
+      refreshContacts(),
+      refreshDmInbox({ force: true }),
+      refreshProfile({ force: true }),
+    ]);
     setRefreshing(false);
   }, [refreshContacts, refreshDmInbox, refreshProfile]);
 
