@@ -1255,6 +1255,17 @@ const ConversationScreen: React.FC = () => {
             renderItem={renderItem}
             contentContainerStyle={styles.listContent}
             inverted
+            // Window the list so a thread with hundreds of messages
+            // doesn't mount every row up front — first-frame work goes
+            // from "render all N bubbles + avatars" to "render the
+            // 20 newest then lazy-mount as the user scrolls". These
+            // defaults are chosen for chat-style threads: one screen
+            // fits ~8-10 bubbles, so 20 covers the visible viewport
+            // plus one screen of pre-roll for smooth momentum scrolls.
+            initialNumToRender={20}
+            maxToRenderPerBatch={10}
+            windowSize={10}
+            removeClippedSubviews
             ListEmptyComponent={
               <View style={styles.empty}>
                 <Text style={styles.emptyTitle}>No messages yet</Text>
