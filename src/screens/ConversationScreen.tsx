@@ -231,8 +231,15 @@ const ConversationScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { pubkey, name, picture, lightningAddress } = route.params;
 
-  const { isLoggedIn, fetchConversation, getCachedConversation, sendDirectMessage, signEvent, contacts, relays } =
-    useNostr();
+  const {
+    isLoggedIn,
+    fetchConversation,
+    getCachedConversation,
+    sendDirectMessage,
+    signEvent,
+    contacts,
+    relays,
+  } = useNostr();
   const { wallets, activeWalletId, activeWallet } = useWallet();
 
   const [messages, setMessages] = useState<
