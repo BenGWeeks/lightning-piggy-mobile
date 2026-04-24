@@ -7,7 +7,6 @@ import {
   Pressable,
   Modal,
   FlatList,
-  KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
   RefreshControl,
@@ -17,6 +16,7 @@ import {
   Linking,
   StyleSheet,
 } from 'react-native';
+import { KeyboardStickyView } from 'react-native-keyboard-controller';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Zap, Send, Plus, MapPin, ArrowDown } from 'lucide-react-native';
 import { Image as ExpoImage } from 'expo-image';
@@ -234,8 +234,15 @@ const ConversationScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { pubkey, name, picture, lightningAddress } = route.params;
 
-  const { isLoggedIn, fetchConversation, sendDirectMessage, signEvent, contacts, relays } =
-    useNostr();
+  const {
+    isLoggedIn,
+    fetchConversation,
+    getCachedConversation,
+    sendDirectMessage,
+    signEvent,
+    contacts,
+    relays,
+  } = useNostr();
   const { wallets, activeWalletId, activeWallet } = useWallet();
 
   const [messages, setMessages] = useState<
@@ -356,21 +363,54 @@ const ConversationScreen: React.FC = () => {
     return withHeaders;
   }, [messages, zapItems]);
 
+  // Mount/unmount tracker so the async `load()` below can bail when
+  // the user navigates back mid-fetch. Without this, every back-press
+  // during the 6-12 s cold fetchConversation still runs the full
+  // decrypt + persist chain on the unmounted component, wasting JS
+  // thread time that could have been responding to input.
+  // Declared BEFORE `load` because `load`'s body closes over it.
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   const load = useCallback(
     async (showSpinner: boolean) => {
       if (!isLoggedIn) {
         setLoading(false);
         return;
       }
-      if (showSpinner) setLoading(true);
+      // Paint cached messages instantly if we have any — user sees a
+      // populated thread within one frame instead of "Loading…" for
+      // the 6-8 s relay round-trip. Arcade `db_only=true` pattern.
+      // Only show the spinner if the cache was empty (true cold open).
+      const cached = await getCachedConversation(pubkey);
+      if (isMountedRef.current && cached.length > 0) {
+        setMessages(cached);
+        setLoading(false);
+      } else if (isMountedRef.current && showSpinner) {
+        setLoading(true);
+      }
       try {
         const conv = await fetchConversation(pubkey);
-        setMessages(conv);
+        // If the user navigated away while the fetch was in flight,
+        // don't fire state updates — those would either trigger a
+        // re-render on an unmounted component (React warning) or land
+        // on the *next* thread that inherits this instance. Check the
+        // ref and bail.
+        if (isMountedRef.current) {
+          setMessages(conv);
+        }
       } finally {
-        if (showSpinner) setLoading(false);
+        if (isMountedRef.current) {
+          setLoading(false);
+        }
       }
     },
-    [isLoggedIn, fetchConversation, pubkey],
+    [isLoggedIn, fetchConversation, getCachedConversation, pubkey],
   );
 
   useEffect(() => {
@@ -1240,11 +1280,15 @@ const ConversationScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
 
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
-      >
+      {/* KeyboardStickyView (below) floats the composer above the IME
+          on Android 15+ edge-to-edge. `react-native-edge-to-edge` (in
+          app.config.ts) installs the `WindowInsetsCompat` root listener
+          that makes the IME inset visible to RNKC in the first place —
+          without it every keyboard API silently reported 0 height on
+          Android 16 (#194 diagnosis). `offset.opened: -insets.bottom`
+          pulls the composer flush against the keyboard's top edge
+          (RNKC's canonical chat pattern). */}
+      <View style={styles.flex}>
         {loading ? (
           <View style={styles.loading}>
             <ActivityIndicator color={colors.brandPink} />
@@ -1258,6 +1302,22 @@ const ConversationScreen: React.FC = () => {
             renderItem={renderItem}
             contentContainerStyle={styles.listContent}
             inverted
+            // Window the list so a thread with hundreds of messages
+            // doesn't mount every row up front — first-frame work goes
+            // from "render all N bubbles + avatars" to "render the
+            // 20 newest then lazy-mount as the user scrolls". These
+            // defaults are chosen for chat-style threads: one screen
+            // fits ~8-10 bubbles, so 20 covers the visible viewport
+            // plus one screen of pre-roll for smooth momentum scrolls.
+            //
+            // NOTE: `removeClippedSubviews` is deliberately OFF. It's
+            // broken with `inverted` on Android — breaks the contentOffset
+            // reporting so onScroll's `y < 200` check flips when the user
+            // is visually at the bottom, making the scroll-to-bottom FAB
+            // show spuriously. See facebook/react-native#30521 / #26061.
+            initialNumToRender={20}
+            maxToRenderPerBatch={10}
+            windowSize={10}
             ListEmptyComponent={
               <View style={styles.empty}>
                 <Text style={styles.emptyTitle}>No messages yet</Text>
@@ -1298,46 +1358,56 @@ const ConversationScreen: React.FC = () => {
           </View>
         ) : null}
 
-        <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 8) }]}>
-          <TouchableOpacity
-            style={styles.composerAttachButton}
-            onPress={() => setAttachSheetOpen(true)}
-            disabled={!isLoggedIn || sending || sharingLocation || uploadingImage}
-            accessibilityLabel="Attach"
-            testID="conversation-attach"
-          >
-            {sharingLocation || uploadingImage ? (
-              <ActivityIndicator color={colors.brandPink} />
-            ) : (
-              <Plus size={22} color={colors.brandPink} />
-            )}
-          </TouchableOpacity>
-          <TextInput
-            style={styles.composerInput}
-            placeholder="Message"
-            placeholderTextColor={colors.textSupplementary}
-            value={draft}
-            onChangeText={setDraft}
-            multiline
-            editable={isLoggedIn && !sending}
-            accessibilityLabel="Message input"
-            testID="conversation-input"
-          />
-          <TouchableOpacity
-            style={styles.composerSendButton}
-            onPress={handleSend}
-            disabled={!draft.trim() || sending}
-            accessibilityLabel="Send message"
-            testID="conversation-send"
-          >
-            {sending ? (
-              <ActivityIndicator color={colors.white} />
-            ) : (
-              <Send size={20} color={colors.white} />
-            )}
-          </TouchableOpacity>
-        </View>
-      </KeyboardAvoidingView>
+        {/* Safe-area inset for the gesture bar is applied via the
+            sticky view's `closed` offset (lifts composer up by that
+            much when keyboard is closed) rather than via the
+            composer's `paddingBottom`. That way when the keyboard
+            opens, composer content sits flush against the keyboard's
+            top edge — no whitespace gap. Small fixed 8 px internal
+            pad for visual breathing room between the inputs and
+            the composer's own bottom border. */}
+        <KeyboardStickyView offset={{ closed: -Math.max(insets.bottom, 0), opened: 0 }}>
+          <View style={[styles.composer, { paddingBottom: 8 }]}>
+            <TouchableOpacity
+              style={styles.composerAttachButton}
+              onPress={() => setAttachSheetOpen(true)}
+              disabled={!isLoggedIn || sending || sharingLocation || uploadingImage}
+              accessibilityLabel="Attach"
+              testID="conversation-attach"
+            >
+              {sharingLocation || uploadingImage ? (
+                <ActivityIndicator color={colors.brandPink} />
+              ) : (
+                <Plus size={22} color={colors.brandPink} />
+              )}
+            </TouchableOpacity>
+            <TextInput
+              style={styles.composerInput}
+              placeholder="Message"
+              placeholderTextColor={colors.textSupplementary}
+              value={draft}
+              onChangeText={setDraft}
+              multiline
+              editable={isLoggedIn && !sending}
+              accessibilityLabel="Message input"
+              testID="conversation-input"
+            />
+            <TouchableOpacity
+              style={styles.composerSendButton}
+              onPress={handleSend}
+              disabled={!draft.trim() || sending}
+              accessibilityLabel="Send message"
+              testID="conversation-send"
+            >
+              {sending ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <Send size={20} color={colors.white} />
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardStickyView>
+      </View>
 
       <AttachSheet
         visible={attachSheetOpen}

@@ -1,0 +1,89 @@
+= Issue #194 — Approaches + Outcomes
+
+Tracking the attempts at fixing "composer hidden under docked keyboard on Pixel 8 / Android 16" (issue #194). Updated live as I iterate.
+
+**Current install on Pixel**: `com.lightningpiggy.app` v12, cert `9106c54b…`, last updated `2026-04-24 02:17:17 UTC` — this predates every fix below.
+
+== Approach table
+
+[cols="1,4,2,3,4", options="header"]
+|===
+| # | Approach | Deployed to Pixel? | Outcome | Root cause / notes
+
+| 1
+| Classic `Keyboard.addListener('keyboardDidShow', e => setKeyboardHeight(e.endCoordinates.height))` + `paddingBottom: keyboardHeight` on composer. +
+**Merged in PR #191.**
+| ❌ No (see row "install meta" below)
+| Unknown — never landed on device
+| Android 15+ edge-to-edge silently stops dispatching the IME inset to the classic `Keyboard` event API. Hook would have reported 0 even if installed.
+
+| 2
+| Reanimated v4 `useAnimatedKeyboard()` + `useAnimatedStyle(() => ({ paddingBottom: h.value }))` on an `Animated.View` composer
+| ❌ No
+| Unknown — never landed
+| `useAnimatedKeyboard` is **deprecated in Reanimated v4** (docstring itself points to `react-native-keyboard-controller`). Returns 0 on release builds because the v4 keyboard subsystem is decoupled and expects RNKC.
+
+| 3
+| RNKC `<KeyboardAvoidingView behavior="padding">` wrapping `FlatList + composer` flex container
+| ❌ No
+| Unknown — never landed
+| RNKC reads the IME inset via `WindowInsetsCompat.Type.ime()`. Without `react-native-edge-to-edge` installing the root listener, RNKC sees 0 and does no lift.
+
+| 4
+| RNKC `<KeyboardStickyView offset={{ opened: 0 }}>` wrapping just the composer
+| ❌ No
+| Unknown — never landed
+| Same as row 3 — RNKC depends on the inset listener from `react-native-edge-to-edge`.
+
+| 5
+| Android 15 `android:windowOptOutEdgeToEdgeEnforcement=true` in `values-v35/styles.xml` to restore classic `adjustResize`
+| ❌ No
+| Would have failed anyway — Pixel runs Android 16 (API 36), and the flag was **removed in Android 16**
+| Confirmed by `adb getprop ro.build.version.sdk` → `36`. Rolled back.
+
+| 6
+| **Approach #4 (RNKC `KeyboardStickyView`) + the native foundation it requires: `react-native-edge-to-edge` plugin (→ `Theme.EdgeToEdge` parent + root `WindowInsetsCompat` listener) + `<SafeAreaProvider>` at the app root.** +
+Same component tree as #4, just actually-wired-up now. Offset is `{{ closed: 0, opened: -insets.bottom }}` per RNKC's canonical chat-app docs.
+| ✅ Yes — installed as `.dev` variant on Pixel 8 (Android 16) at 14:38 UTC
+| ✅ **FIXED**. Composer bounds `[166,2207][914,2332]` (hidden under keyboard) → `[166,1259][914,1384]` (above keyboard top ~y=1538). Lift of ~950px matches keyboard height (~724 px) + safe-area inset.
+| #3 and #4 ARE the standard patterns — the reason they "didn't work" earlier was the missing native foundation, not the pattern itself. Agent 2's diagnosis was correct: `react-native-edge-to-edge` installs the root `WindowInsetsCompat.Type.ime()` listener; without it every keyboard API (classic, Reanimated, KAV, KeyboardStickyView) silently reads 0 on Android 15+.
+
+| 7
+| **Suna pattern** (backup if #6 fails) — drop the explicit `react-native-edge-to-edge` plugin and `Theme.EdgeToEdge` parent; use Expo's built-in `"edgeToEdgeEnabled": true` in `app.config.ts` + `"softwareKeyboardLayoutMode": "pan"` + AppTheme parent `Theme.AppCompat.DayNight.NoActionBar` + RNKC `<KeyboardAvoidingView behavior="padding">` wrapping `FlatList + composer`.
+| ⏸ Not needed — #6 worked
+| **Shelved**
+| Reference: https://github.com/kortix-ai/suna. Kept in the table as an alternative pattern if #6 regresses in a future Expo / RN upgrade.
+|===
+
+== Install meta (why nothing ever landed)
+
+[cols="1,3,3", options="header"]
+|===
+| # | Observation | Impact
+
+| M1
+| Installed APK on Pixel is signed with cert `9106c54b976ba48e5e89de6fdf950059e1b2abee58851dcdb86d79e83ee5d56d` (EAS-managed keystore, empty DN — classic EAS build signer).
+| This is what the OS allows replacements for.
+
+| M2
+| Every local `./gradlew assembleRelease` in this session produced an APK signed with `fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c` (`CN=Android Debug, OU=Android, …`). Local `debug.keystore`.
+| Different key → Android rejects `adb install -r` with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`.
+
+| M3
+| I was tailing only the last 3 lines of `adb install -r` output — which caught the `"Performing Streamed Install" / "Success"` lines from the file-transfer phase, but missed the `adb: failed to install` error line that precedes them when the install-commit stage rejects.
+| Every "✓ installed" claim in this session was wrong. `lastUpdateTime=2026-04-24 02:17:17` on the Pixel proves no install landed after that.
+
+| M4
+| `eas build --local --platform android --profile production` uses the same EAS-managed keystore as the installed APK, so the install will actually go through as a replacement. Initiated — this is what row 6 is using.
+| Once row 6's build completes and installs, we finally get a real test of any fix.
+|===
+
+== What counts as "fixed" for this issue
+
+1. On Pixel 8 (Android 16), open a conversation, tap the Message input.
+2. Keyboard slides up from the bottom.
+3. Composer (attach `+`, `Message` field, send button) remains visible directly above the keyboard's top edge.
+4. Typed characters appear in the `Message` field without occlusion.
+5. Emulator behaviour unchanged (no regression).
+
+Verified by: screenshot + `adb shell uiautomator dump` confirming `conversation-input` bounds move from their closed-state position (y=2207) to somewhere above the keyboard top (y<~1538).

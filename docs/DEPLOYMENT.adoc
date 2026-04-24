@@ -58,21 +58,121 @@ Build profiles are defined in `eas.json`:
 
 [source,bash]
 ----
-# Development build for Android
+# Development build for Android — Metro-dependent, for active JS hacking
 APP_VARIANT=development npx expo run:android
 
-# Production-like build
+# Production-like build via Expo (convenience wrapper)
 npx expo run:android
 ----
+
+==== Dogfooding: local production build → physical Android device (fast loop)
+
+When you want to ship a working release to your own device **without**
+cutting a formal GitHub Release (TestFlight / Play are not yet wired,
+and the phone already has an EAS-signed `com.lightningpiggy.app`
+install you don't want to lose data on):
+
+[source,bash]
+----
+# Build locally but with EAS's production keystore, so the APK is
+# sig-compatible with whatever's already on the phone. APK lands at
+# android/app/build/outputs/apk/release/app-release.apk.
+#
+# EXPO_NO_DOCTOR=1 skips the pre-flight version-compatibility checker
+# which is noisy on minor-mismatch deps and not relevant to signing.
+EXPO_NO_DOCTOR=1 eas build --local --platform android --profile production --non-interactive
+
+# Install over the existing app — preserves user data (Nostr nsec,
+# wallet pairings, conversation cache).
+adb -s <serial> install -r android/app/build/outputs/apk/release/app-release.apk
+----
+
+Build time: ~10-15 min fresh, ~2-3 min on a warm gradle cache. No
+cloud queue, no Metro, no fresh-login required on the device.
+
+===== Verify the install actually committed
+
+`adb install -r` can print `Performing Streamed Install / Success`
+for the file-transfer phase even when the install-commit is
+rejected. Always tail the **full** adb output (not `tail -3`), and
+cross-check the on-device state:
+
+[source,bash]
+----
+# Confirm lastUpdateTime is now (not hours ago) + versionCode matches
+# what you just built. If lastUpdateTime hasn't moved, the install
+# DIDN'T land — check for INSTALL_FAILED_* lines in the adb output.
+adb -s <serial> shell dumpsys package com.lightningpiggy.app | \
+  grep -E "versionCode|lastUpdateTime"
+----
+
+==== Why `./gradlew assembleRelease` + `adb install -r` silently fails
+
+Running `cd android && ./gradlew :app:assembleRelease` directly works
+*and* produces a smaller/faster build — but the APK is signed with
+the local `android/app/debug.keystore`, NOT the EAS-managed keystore
+that produced the install currently on your Pixel. Different
+signatures → Android rejects the install as
+`INSTALL_FAILED_UPDATE_INCOMPATIBLE`, with no way to `-r` over it
+short of uninstalling (which wipes user data).
+
+Three options if you really want gradle-direct builds in the loop:
+
+1. **Use `eas build --local`** (above) — slower but keystore-correct.
+2. **Download the EAS production keystore locally once** via
+   `eas credentials -p android`, point `signingConfigs.release` at
+   it in `android/app/build.gradle`. Subsequent `./gradlew
+   :app:assembleRelease` runs produce EAS-signed APKs. Keystore file
+   must not be committed (`*.jks` is already in `.gitignore`).
+3. **Uninstall and reinstall** — loses data on the target device.
+
+Running `./gradlew assembleRelease` + `adb install -r` can appear
+to succeed while leaving the previous install in place, so
+subsequent tests may still be exercising the pre-fix app. Verify
+`lastUpdateTime` after install, or use `eas build --local`.
 
 === Release workflow
 
 Releases are cut by publishing a **GitHub Release** (which creates the tag server-side and fires `.github/workflows/release.yml`). The workflow:
 
 1. Runs quality gates (typecheck / lint / format-check).
-2. Kicks off EAS production builds for both platforms with `--auto-submit` (TestFlight for iOS, Play Internal once the Google Play account is wired up).
-3. Downloads the resulting Android APK and attaches it to the Release for sideloading.
+2. Kicks off EAS production builds for both platforms. **iOS** is auto-submitted to TestFlight via EAS's ASC API key. **Android** is built only — no auto-submit to Play Internal until the Google Play Developer account + service-account JSON are wired up via `eas credentials` (see the "Android Distribution — Google Play Internal Testing" section below). The Android APK is attached to the GitHub Release instead, so testers can sideload it immediately.
+3. Downloads the resulting Android APK from EAS and attaches it as `lightning-piggy-<tag>.apk` on the Release page for sideloading.
 4. Regenerates `docs/TECHNICAL_SOLUTION_DOCUMENT.pdf` from the AsciiDoc sources and attaches that too.
+
+==== Version numbering
+
+Three separate numbers, maintained by three different actors — easy to confuse, so documenting the split explicitly:
+
+[cols="1,2,3", options="header"]
+|===
+| Number | Maintained by | Notes
+
+| `X.Y.Z` (user-visible version)
+| **Git tag**, applied by `.github/workflows/release.yml`
+| The workflow strips the leading `v` and any `-rcN` suffix from the tag, then writes the result into `version:` in `app.config.ts`. Tag `v1.0.0-rc1` → `version: '1.0.0'`. **Do NOT hand-edit `app.config.ts` before a release** — the workflow overwrites it.
+
+| Build number (iOS) / `versionCode` (Android)
+| **EAS**, via `"autoIncrement": true` in the `production` profile of `eas.json`
+| Auto-bumps on every production build. Monotonic integer, never reused, independent of `X.Y.Z`. Not tracked in-repo.
+
+| The in-repo `version:` field in `app.config.ts`
+| The last release workflow run
+| Between releases this is a stale snapshot of the most recent tag's `X.Y.Z` minus any RC suffix. Treat it as read-only; the tag is the source of truth.
+|===
+
+Reading the version of a running install:
+
+* iOS: *Settings → General → About → Lightning Piggy* shows `X.Y.Z (buildNumber)`.
+* Android: `adb -s <serial> shell dumpsys package com.lightningpiggy.app | grep -E "versionCode|versionName"`.
+
+Reading the latest build number from EAS without installing:
+
+[source,bash]
+----
+eas build:list --platform android --status finished --limit 1 \
+  | grep -E "^Version|^Build number"
+----
 
 ==== Cutting a release
 
@@ -529,8 +629,11 @@ The app uses custom Expo config plugins to modify native project settings during
 |===
 | Plugin | Purpose
 
+| `react-native-edge-to-edge`
+| Swaps AppTheme's parent to `Theme.EdgeToEdge` and attaches the root `WindowInsetsCompat` listener. Required on Android 15+ — without it, the system stops dispatching the IME inset to RN (every keyboard API silently reads 0), and the conversation composer stays hidden under the docked keyboard (#194). Paired with `<KeyboardProvider>` + RNKC's `KeyboardStickyView` in `ConversationScreen.tsx`.
+
 | `withAdjustResize`
-| Sets `android:windowSoftInputMode="adjustResize"` in AndroidManifest.xml. Required for bottom sheets to slide up correctly when the keyboard opens.
+| Sets `android:windowSoftInputMode="adjustResize"` in AndroidManifest.xml. Required for bottom sheets to slide up correctly when the keyboard opens. Retained alongside `react-native-edge-to-edge` because pre-Android-15 devices still use the classic resize path.
 
 | `withAmberQueries`
 | Adds the Amber signer package to the `<queries>` element in AndroidManifest.xml. Required on Android 11+ for the app to detect and communicate with Amber via NIP-55 intents.
@@ -555,6 +658,6 @@ Before releasing to production:
 * [ ] Prettier passes: `npm run format:check`
 * [ ] App tested on physical Android device
 * [ ] App tested on physical iOS device (if applicable)
-* [ ] Version number incremented in `app.config.ts`
+* [ ] New git tag chosen (`vX.Y.Z` or `vX.Y.Z-rcN`) — the release workflow writes it into `app.config.ts`; do NOT hand-edit the file
 * [ ] E2E tests pass: `maestro test tests/e2e/`
 * [ ] Git tag created for release version

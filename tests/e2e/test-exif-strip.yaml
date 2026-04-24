@@ -22,9 +22,14 @@ name: EXIF strip upload — #145 regression guard
       id: 'tab-home'
     timeout: 40000
 
-# Navigate: Home -> Account -> Edit Profile sheet
+# Navigate: Home -> drawer -> Profile sub-screen -> Edit Profile sheet
 - tapOn:
     id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- tapOn:
+    id: 'drawer-row-profile'
 - waitForAnimationToEnd:
     timeout: 3000
 

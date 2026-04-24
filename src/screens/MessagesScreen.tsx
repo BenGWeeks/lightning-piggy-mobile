@@ -1,5 +1,13 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Image, RefreshControl } from 'react-native';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  Image,
+  RefreshControl,
+  InteractionManager,
+} from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Users, Clock } from 'lucide-react-native';
@@ -79,9 +87,19 @@ const MessagesScreen: React.FC = () => {
     });
   }, []);
 
+  // Defer the refresh until the Messages tab's transition animation
+  // and first-paint have finished. The refresh itself (relay fetches
+  // + decrypt loop) holds the JS thread for 3-5 s; running it inside
+  // the focus-effect callback synchronously meant navigating away
+  // from Messages felt laggy because the NEXT tab's render queued
+  // behind it. InteractionManager yields to the scheduler and runs
+  // the work once the UI is idle. `.cancel()` in cleanup avoids
+  // firing the refresh on a focus that was already abandoned.
   useFocusEffect(
     useCallback(() => {
-      if (isLoggedIn) refreshDmInbox();
+      if (!isLoggedIn) return;
+      const handle = InteractionManager.runAfterInteractions(() => refreshDmInbox());
+      return () => handle.cancel();
     }, [isLoggedIn, refreshDmInbox]),
   );
 
@@ -127,9 +145,26 @@ const MessagesScreen: React.FC = () => {
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     // Pull-to-refresh is explicit user intent — force-bypass the 24h
-    // own-profile cache so renames published elsewhere surface now.
-    await Promise.all([refreshContacts(), refreshDmInbox(), refreshProfile({ force: true })]);
-    setRefreshing(false);
+    // own-profile cache so renames published elsewhere surface now,
+    // and also bypass the 30s DM-inbox TTL so the relay query actually
+    // runs (the TTL's default path is for useFocusEffect tab bounces).
+    //
+    // Important: `refreshContacts` must complete BEFORE
+    // `refreshDmInbox`. The DM refresh filters by the logged-in user's
+    // current follow set, and if we run them in parallel the DM query
+    // captures the stale closure before the new contacts state lands,
+    // so any new-since-last-refresh followers' messages get dropped
+    // by the follow gate. Profile refresh is independent and can run
+    // in parallel.
+    //
+    // try/finally so a relay timeout / decrypt throw doesn't leave the
+    // UI stuck in the "refreshing" spinner state.
+    try {
+      await Promise.all([refreshContacts(), refreshProfile({ force: true })]);
+      await refreshDmInbox({ force: true });
+    } finally {
+      setRefreshing(false);
+    }
   }, [refreshContacts, refreshDmInbox, refreshProfile]);
 
   const handleConversationPress = useCallback(
@@ -298,7 +333,7 @@ const MessagesScreen: React.FC = () => {
             </Text>
             <TouchableOpacity
               style={styles.connectButton}
-              onPress={() => navigation.navigate('Account')}
+              onPress={() => navigation.getParent()?.dispatch({ type: 'OPEN_DRAWER' })}
             >
               <Text style={styles.connectButtonText}>Go to Account</Text>
             </TouchableOpacity>

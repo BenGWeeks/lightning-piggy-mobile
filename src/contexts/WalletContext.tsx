@@ -32,7 +32,6 @@ export interface IncomingPayment {
   paymentHash: string | null;
 }
 
-const USER_NAME_KEY = 'user_display_name';
 const CURRENCY_KEY = 'user_fiat_currency';
 
 // The #P-tagged outgoing zap-receipt relay fetch is expensive (500-event
@@ -70,8 +69,6 @@ interface WalletContextType {
   isLoading: boolean;
 
   // User prefs
-  userName: string;
-  setUserName: (name: string) => Promise<void>;
   currency: FiatCurrency;
   setCurrency: (currency: FiatCurrency) => Promise<void>;
   btcPrice: number | null;
@@ -110,11 +107,15 @@ interface WalletContextType {
 
   // Payment actions (operate on active wallet)
   makeInvoice: (amount: number, memo?: string) => Promise<string>;
-  payInvoice: (bolt11: string) => Promise<{ preimage: string }>;
+  payInvoice: (bolt11: string, signal?: AbortSignal) => Promise<{ preimage: string }>;
 
   // Payment actions with explicit wallet ID (for sheets)
   makeInvoiceForWallet: (walletId: string, amount: number, memo?: string) => Promise<string>;
-  payInvoiceForWallet: (walletId: string, bolt11: string) => Promise<{ preimage: string }>;
+  payInvoiceForWallet: (
+    walletId: string,
+    bolt11: string,
+    signal?: AbortSignal,
+  ) => Promise<{ preimage: string }>;
   refreshBalanceForWallet: (walletId: string) => Promise<void>;
   fetchTransactionsForWallet: (walletId: string) => Promise<void>;
 
@@ -172,7 +173,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [activeWalletId, setActiveWalletId] = useState<string | null>(null);
   const [isOnboarded, setIsOnboarded] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [userName, setUserNameState] = useState('');
   const [currency, setCurrencyState] = useState<FiatCurrency>('USD');
   const [btcPrice, setBtcPrice] = useState<number | null>(null);
   const [lastIncomingPayment, setLastIncomingPayment] = useState<IncomingPayment | null>(null);
@@ -193,11 +193,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     activeWallet?.walletType === 'onchain' ? true : (activeWallet?.isConnected ?? false);
   const balance = activeWallet?.balance ?? null;
   const walletAlias = activeWallet?.walletAlias ?? activeWallet?.alias ?? null;
-
-  const setUserName = useCallback(async (name: string) => {
-    setUserNameState(name);
-    await AsyncStorage.setItem(USER_NAME_KEY, name);
-  }, []);
 
   const setCurrency = useCallback(async (cur: FiatCurrency) => {
     setCurrencyState(cur);
@@ -256,9 +251,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     (async () => {
       try {
         // Load user preferences
-        const savedName = await AsyncStorage.getItem(USER_NAME_KEY);
-        if (savedName) setUserNameState(savedName);
-
         const savedCurrency = await AsyncStorage.getItem(CURRENCY_KEY);
         const cur = (CURRENCIES as readonly string[]).includes(savedCurrency ?? '')
           ? (savedCurrency as FiatCurrency)
@@ -307,11 +299,20 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           setActiveWalletId(walletStates[0].id);
         }
 
-        // Connect wallets in parallel — each NWC handshake is ~5s of relay
-        // RTT, so serial init of N wallets was ~5N seconds. For typical
-        // installs (1-3 wallets) the relays handle concurrent connects
-        // fine; state updates are individual so per-wallet races are safe.
-        await Promise.all(
+        // Wallets are usable immediately with cached balance + tx
+        // history from AsyncStorage, so we can flip the app into
+        // "loaded" state BEFORE the (slow) NWC connect handshakes
+        // finish. Each handshake does `provider.enable()` with up to
+        // 3 retries × 2 s backoff + a 500 ms stabilise wait = 2-14 s
+        // per wallet. Serialising them behind the UI boot meant a
+        // user with 2 NWC wallets waited 10+ s on a pink screen.
+        // Kick connects off in parallel but DON'T await — state
+        // updates inside each `.then` patch the wallet individually
+        // as it comes online, and any `pay / makeInvoice / getBalance`
+        // call will auto-await the connect because `nwcService.connect`
+        // is idempotent and provider-map-keyed.
+        setIsLoading(false);
+        void Promise.all(
           walletList.map(async (wallet) => {
             try {
               if (wallet.walletType === 'onchain') {
@@ -366,7 +367,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         });
       } catch (error) {
         console.warn('Wallet startup failed:', error);
-      } finally {
+        // Safety net: if something threw BEFORE we reached the
+        // early `setIsLoading(false)` above, make sure the UI still
+        // unblocks. Idempotent; React bails on no-op state sets.
         setIsLoading(false);
       }
     })();
@@ -1173,9 +1176,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   const payInvoice = useCallback(
-    async (bolt11: string) => {
+    async (bolt11: string, signal?: AbortSignal) => {
       if (!activeWalletId) throw new Error('No active wallet');
-      return nwcService.payInvoice(activeWalletId, bolt11);
+      return nwcService.payInvoice(activeWalletId, bolt11, signal);
     },
     [activeWalletId],
   );
@@ -1187,9 +1190,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [],
   );
 
-  const payInvoiceForWallet = useCallback(async (walletId: string, bolt11: string) => {
-    return nwcService.payInvoice(walletId, bolt11);
-  }, []);
+  const payInvoiceForWallet = useCallback(
+    async (walletId: string, bolt11: string, signal?: AbortSignal) => {
+      return nwcService.payInvoice(walletId, bolt11, signal);
+    },
+    [],
+  );
 
   const getReceiveAddress = useCallback(async (walletId: string) => {
     return onchainService.getNextReceiveAddress(walletId);
@@ -1469,8 +1475,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         hasWallets,
         isOnboarded,
         isLoading,
-        userName,
-        setUserName,
         currency,
         setCurrency,
         btcPrice,

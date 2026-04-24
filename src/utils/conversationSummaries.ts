@@ -142,6 +142,11 @@ export function conversationPreview(s: ConversationSummary): string {
  * for legacy, 14 for NIP-17 chat, 15 for NIP-17 file.
  */
 export interface DmInboxEntry {
+  /** Event id (kind-4 event id, or kind-1059 wrap id for NIP-17). Load-
+   * bearing for inbox merge dedup — created_at is only second-resolution
+   * so two events from the same peer in the same second would collide
+   * on a (partnerPubkey, createdAt, wireKind) key. */
+  id: string;
   partnerPubkey: string;
   fromMe: boolean;
   createdAt: number;

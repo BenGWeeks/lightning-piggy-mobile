@@ -7,6 +7,7 @@ import {
   ScrollView,
   RefreshControl,
   ActivityIndicator,
+  InteractionManager,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
@@ -38,7 +39,6 @@ const HomeScreen: React.FC = () => {
     refreshActiveBalance,
     fetchTransactionsForWallet,
     setActiveWallet,
-    userName,
     btcPrice,
     currency,
   } = useWallet();
@@ -64,11 +64,16 @@ const HomeScreen: React.FC = () => {
   // fresh it short-circuits without hitting relays, so switching tabs
   // doesn't incur a network cost. Pull-to-refresh in MessagesScreen
   // passes `{ force: true }` for the explicit-user-intent path.
-  // (The greeting text itself reads from WalletContext's userName, not
-  // `profile` — aligning those is tracked separately under #150.)
   useFocusEffect(
     useCallback(() => {
-      if (isLoggedIn) refreshProfile();
+      if (!isLoggedIn) return;
+      // Defer to after the tab-transition animation finishes — same
+      // rationale as Friends/Messages: refreshProfile can hold the JS
+      // thread briefly while it walks the profile cache and (on miss)
+      // hits a relay, and running it during the focus callback
+      // synchronously makes the tab feel laggy.
+      const handle = InteractionManager.runAfterInteractions(() => refreshProfile());
+      return () => handle.cancel();
     }, [isLoggedIn, refreshProfile]),
   );
 
@@ -178,12 +183,17 @@ const HomeScreen: React.FC = () => {
     setSettingsWalletId(walletId);
   }, []);
 
-  const greetingName =
-    profile?.displayName?.trim() || profile?.name?.trim() || userName?.trim() || '';
+  const greetingName = profile?.displayName?.trim() || profile?.name?.trim() || 'Satoshi';
 
   const isOnchainWallet = activeWallet?.walletType === 'onchain';
   const isWatchOnly = isOnchainWallet && activeWallet?.onchainImportMethod !== 'mnemonic';
-  const hasActiveConnection = isOnchainWallet ? true : (activeWallet?.isConnected ?? false);
+  // Don't gate Send/Receive on the transient `isConnected` flag: post-PR-D
+  // NWC wallets land in state with `isConnected: false` and flip true in
+  // background, so gating here would dead-lock the buttons for the 2-14 s
+  // enable() window, or indefinitely if the WebSocket blips. `pay` /
+  // `makeInvoice` auto-await the in-flight connect, so "in state" is
+  // enough.
+  const hasActiveConnection = !!activeWallet;
   const canSend = hasActiveConnection && !isWatchOnly;
   // Transfer requires at least 1 wallet that can send + 1 other wallet
   const hasSendableWallet = wallets.some(

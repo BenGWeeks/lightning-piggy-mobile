@@ -11,7 +11,12 @@ on:
       platform:
         description: Platform(s) to release
         type: choice
-        default: ios   # flip to `all` once Google Play account + service account JSON are wired up via `eas credentials`
+        # iOS auto-submits to TestFlight (ASC API key on EAS). Android
+        # builds an APK that the `attach-android-apk` job downloads and
+        # attaches to the GitHub Release — no auto-submit to Play until
+        # a Google Play account + service-account JSON are wired up via
+        # `eas credentials` (see docs/DEPLOYMENT.adoc).
+        default: all
         options: [ios, android, all]
 
 concurrency:
@@ -78,17 +83,35 @@ jobs:
       - name: Resolve platform
         id: platform
         run: |
-          # On Release events the input is empty, so fall back to ios-only until
-          # we wire up Google Play credentials. Switch to 'all' when ready.
-          echo "value=${{ github.event.inputs.platform || 'ios' }}" >> "$GITHUB_OUTPUT"
+          # On Release events the input is empty, so default to building
+          # both platforms. iOS is auto-submitted to TestFlight; Android
+          # is built only (no Google Play submit until creds wired), then
+          # the attach-android-apk job downloads the APK and attaches it
+          # to the Release page for sideloading.
+          echo "value=${{ github.event.inputs.platform || 'all' }}" >> "$GITHUB_OUTPUT"
 
-      - name: EAS build + auto-submit
+      - name: EAS build — iOS (auto-submit to TestFlight)
+        if: steps.platform.outputs.value == 'ios' || steps.platform.outputs.value == 'all'
         run: |
           npx -p eas-cli@${{ env.EAS_CLI_VERSION }} eas build \
             --profile production \
-            --platform ${{ steps.platform.outputs.value }} \
+            --platform ios \
             --non-interactive \
             --auto-submit
+
+      - name: EAS build — Android (APK only, attached to Release)
+        # Deliberately no --auto-submit: Google Play credentials aren't
+        # wired yet (pending Play Developer account + service-account
+        # JSON). The APK produced here is downloaded by the
+        # `attach-android-apk` job below and attached to the Release.
+        # Add `--auto-submit` here once `eas submit --platform android`
+        # is configured in eas.json.
+        if: steps.platform.outputs.value == 'android' || steps.platform.outputs.value == 'all'
+        run: |
+          npx -p eas-cli@${{ env.EAS_CLI_VERSION }} eas build \
+            --profile production \
+            --platform android \
+            --non-interactive
 
   attach-android-apk:
     name: Attach Android APK to Release

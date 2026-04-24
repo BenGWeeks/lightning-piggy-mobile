@@ -30,10 +30,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   orientation: 'portrait',
   icon: './assets/icon.png',
   userInterfaceStyle: 'light',
+  // Splash screen: the pig + brand wordmark on brand-pink. Same asset
+  // IntroScreen uses so first-time users get a continuous pig → Home
+  // transition without the pink-spinner gap. `contain` leaves padding
+  // around the image so different device aspect ratios render cleanly.
   splash: {
-    image: './assets/splash-icon.png',
+    image: './assets/images/lightning-piggy-intro.png',
     resizeMode: 'contain',
-    backgroundColor: '#ffffff',
+    backgroundColor: '#e91e63',
   },
   scheme: 'lightningpiggy',
   ios: {
@@ -49,6 +53,22 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     },
   },
   plugins: [
+    // react-native-edge-to-edge — injects a `Theme.EdgeToEdge` parent
+    // that installs the `WindowInsetsCompat` root listener RN needs on
+    // Android 15+. Without it, `android:windowSoftInputMode="adjustResize"`
+    // is a no-op and every keyboard API (Keyboard.addListener,
+    // useAnimatedKeyboard, KeyboardAvoidingView, KeyboardStickyView)
+    // reports 0 height because the inset never propagates. See #194.
+    [
+      'react-native-edge-to-edge',
+      {
+        android: { parentTheme: 'Default', enforceNavigationBarContrast: false },
+      },
+    ],
+    // withAdjustResize becomes redundant once edge-to-edge is wired
+    // (RN handles adjustResize semantics itself via insets). Keeping
+    // the plugin during the fix so the sheets in the repo that rely
+    // on it don't regress — can remove once verified.
     './plugins/withAdjustResize',
     './plugins/withAmberQueries',
     'expo-secure-store',
