@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert, Platform } from 'react-native';
 import { Image } from 'expo-image';
 import {
@@ -7,6 +7,7 @@ import {
   Globe,
   Link as LinkIcon,
   Coins,
+  Palette as PaletteIcon,
   Info,
   LogOut,
   QrCode,
@@ -17,7 +18,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { DrawerContentComponentProps } from '@react-navigation/drawer';
 import { DrawerContentScrollView } from '@react-navigation/drawer';
 import { useNostr } from '../contexts/NostrContext';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
+import type { Palette } from '../styles/palettes';
 import { appVersion } from '../utils/appVersion';
 import type { AccountDrawerParamList } from '../navigation/types';
 
@@ -28,7 +30,7 @@ interface SectionRow {
   testID: string;
 }
 
-const SECTION_ROWS: SectionRow[] = [
+const buildSectionRows = (colors: Palette): SectionRow[] => [
   {
     name: 'AccountProfile',
     label: 'Profile',
@@ -60,6 +62,12 @@ const SECTION_ROWS: SectionRow[] = [
     testID: 'drawer-row-display',
   },
   {
+    name: 'AccountAppearance',
+    label: 'Appearance',
+    icon: <PaletteIcon size={22} color={colors.textBody} />,
+    testID: 'drawer-row-appearance',
+  },
+  {
     name: 'AccountAbout',
     label: 'About',
     icon: <Info size={22} color={colors.textBody} />,
@@ -73,6 +81,9 @@ const SECTION_ROWS: SectionRow[] = [
  * version footer. See issue #100 for the UX spec.
  */
 const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const sectionRows = useMemo(() => buildSectionRows(colors), [colors]);
   const insets = useSafeAreaInsets();
   const { isLoggedIn, profile, logout } = useNostr();
   const [signingOut, setSigningOut] = useState(false);
@@ -171,7 +182,7 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
         <View style={styles.divider} />
 
         {/* Section rows */}
-        {SECTION_ROWS.map((row) => (
+        {sectionRows.map((row) => (
           <TouchableOpacity
             key={row.name}
             style={styles.row}
@@ -191,7 +202,7 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
 
         {/* Sign Out — explicit row above the footer */}
         <TouchableOpacity
-          style={[styles.row, !isLoggedIn && styles.rowDisabled]}
+          style={[styles.row, (!isLoggedIn || signingOut) && styles.rowDisabled]}
           onPress={handleSignOut}
           disabled={!isLoggedIn || signingOut}
           accessibilityLabel="Sign Out"
@@ -230,105 +241,106 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.white,
-  },
-  scrollContent: {
-    paddingTop: 0,
-  },
-  header: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 20,
-    alignItems: 'flex-start',
-  },
-  avatarLarge: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(0,0,0,0.05)',
-    marginBottom: 12,
-  },
-  avatarImage: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-  },
-  avatarPlaceholder: {
-    backgroundColor: colors.background,
-  },
-  headerName: {
-    color: colors.textHeader,
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  nameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    alignSelf: 'stretch',
-  },
-  flex1: {
-    flex: 1,
-  },
-  signInButton: {
-    alignSelf: 'stretch',
-    height: 44,
-    borderRadius: 10,
-    backgroundColor: colors.brandPink,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  signInButtonText: {
-    color: colors.white,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  headerNpub: {
-    color: colors.textSupplementary,
-    fontSize: 12,
-    marginTop: 2,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-  },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.divider,
-    marginVertical: 8,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-  },
-  rowDisabled: {
-    opacity: 0.4,
-  },
-  rowIcon: {
-    width: 24,
-    alignItems: 'center',
-  },
-  rowLabel: {
-    color: colors.textBody,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  footer: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.divider,
-    paddingTop: 12,
-    paddingHorizontal: 20,
-    alignItems: 'center',
-  },
-  versionText: {
-    color: colors.textSupplementary,
-    fontSize: 12,
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.surface,
+    },
+    scrollContent: {
+      paddingTop: 0,
+    },
+    header: {
+      paddingHorizontal: 20,
+      paddingTop: 16,
+      paddingBottom: 20,
+      alignItems: 'flex-start',
+    },
+    avatarLarge: {
+      width: 72,
+      height: 72,
+      borderRadius: 36,
+      overflow: 'hidden',
+      backgroundColor: 'rgba(0,0,0,0.05)',
+      marginBottom: 12,
+    },
+    avatarImage: {
+      width: 72,
+      height: 72,
+      borderRadius: 36,
+    },
+    avatarPlaceholder: {
+      backgroundColor: colors.background,
+    },
+    headerName: {
+      color: colors.textHeader,
+      fontSize: 18,
+      fontWeight: '700',
+    },
+    nameRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      alignSelf: 'stretch',
+    },
+    flex1: {
+      flex: 1,
+    },
+    signInButton: {
+      alignSelf: 'stretch',
+      height: 44,
+      borderRadius: 10,
+      backgroundColor: colors.brandPink,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginTop: 4,
+    },
+    signInButtonText: {
+      color: colors.white,
+      fontSize: 15,
+      fontWeight: '700',
+    },
+    headerNpub: {
+      color: colors.textSupplementary,
+      fontSize: 12,
+      marginTop: 2,
+      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    },
+    divider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: colors.divider,
+      marginVertical: 8,
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 16,
+      paddingHorizontal: 20,
+      paddingVertical: 14,
+    },
+    rowDisabled: {
+      opacity: 0.4,
+    },
+    rowIcon: {
+      width: 24,
+      alignItems: 'center',
+    },
+    rowLabel: {
+      color: colors.textBody,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    footer: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.divider,
+      paddingTop: 12,
+      paddingHorizontal: 20,
+      alignItems: 'center',
+    },
+    versionText: {
+      color: colors.textSupplementary,
+      fontSize: 12,
+    },
+  });
 
 export default AccountDrawerContent;

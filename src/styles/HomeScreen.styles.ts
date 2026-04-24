@@ -60,7 +60,7 @@ export const createHomeScreenStyles = (colors: Palette) =>
     transactionsWrapper: {
       flex: 1,
       marginTop: -16,
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderTopLeftRadius: 24,
       borderTopRightRadius: 24,
       overflow: 'hidden',

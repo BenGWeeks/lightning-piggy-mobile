@@ -23,6 +23,7 @@ export type AccountDrawerParamList = {
   AccountNostr: undefined;
   AccountOnChain: undefined;
   AccountDisplay: undefined;
+  AccountAppearance: undefined;
   AccountAbout: undefined;
 };
 
