@@ -307,11 +307,20 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           setActiveWalletId(walletStates[0].id);
         }
 
-        // Connect wallets in parallel — each NWC handshake is ~5s of relay
-        // RTT, so serial init of N wallets was ~5N seconds. For typical
-        // installs (1-3 wallets) the relays handle concurrent connects
-        // fine; state updates are individual so per-wallet races are safe.
-        await Promise.all(
+        // Wallets are usable immediately with cached balance + tx
+        // history from AsyncStorage, so we can flip the app into
+        // "loaded" state BEFORE the (slow) NWC connect handshakes
+        // finish. Each handshake does `provider.enable()` with up to
+        // 3 retries × 2 s backoff + a 500 ms stabilise wait = 2-14 s
+        // per wallet. Serialising them behind the UI boot meant a
+        // user with 2 NWC wallets waited 10+ s on a pink screen.
+        // Kick connects off in parallel but DON'T await — state
+        // updates inside each `.then` patch the wallet individually
+        // as it comes online, and any `pay / makeInvoice / getBalance`
+        // call will auto-await the connect because `nwcService.connect`
+        // is idempotent and provider-map-keyed.
+        setIsLoading(false);
+        void Promise.all(
           walletList.map(async (wallet) => {
             try {
               if (wallet.walletType === 'onchain') {
@@ -366,7 +375,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         });
       } catch (error) {
         console.warn('Wallet startup failed:', error);
-      } finally {
+        // Safety net: if something threw BEFORE we reached the
+        // early `setIsLoading(false)` above, make sure the UI still
+        // unblocks. Idempotent; React bails on no-op state sets.
         setIsLoading(false);
       }
     })();
