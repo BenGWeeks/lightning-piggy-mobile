@@ -16,7 +16,7 @@ import {
   Linking,
   StyleSheet,
 } from 'react-native';
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+import { KeyboardStickyView } from 'react-native-keyboard-controller';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Zap, Send, Plus, MapPin, ArrowDown } from 'lucide-react-native';
 import { Image as ExpoImage } from 'expo-image';
@@ -1277,16 +1277,15 @@ const ConversationScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
 
-      {/* Keyboard-avoidance via react-native-keyboard-controller. Both
-          RN's `KeyboardAvoidingView` and Reanimated v4's (deprecated)
-          `useAnimatedKeyboard` failed to lift the composer on Pixel 8 /
-          Android 15 edge-to-edge (#194) — RN's classic API reports
-          stale IME heights and Reanimated's hook returns 0 on release
-          builds. RNKC's `KeyboardAvoidingView` reads the inset from
-          `WindowInsetsCompat.Type.ime()` through its native module and
-          lifts the contained flex container frame-for-frame with the
-          keyboard animation. */}
-      <KeyboardAvoidingView style={styles.flex} behavior="padding">
+      {/* KeyboardStickyView (below) floats the composer above the IME
+          on Android 15+ edge-to-edge. `react-native-edge-to-edge` (in
+          app.config.ts) installs the `WindowInsetsCompat` root listener
+          that makes the IME inset visible to RNKC in the first place —
+          without it every keyboard API silently reported 0 height on
+          Android 16 (#194 diagnosis). `offset.opened: -insets.bottom`
+          pulls the composer flush against the keyboard's top edge
+          (RNKC's canonical chat pattern). */}
+      <View style={styles.flex}>
         {loading ? (
           <View style={styles.loading}>
             <ActivityIndicator color={colors.brandPink} />
@@ -1356,46 +1355,48 @@ const ConversationScreen: React.FC = () => {
           </View>
         ) : null}
 
-        <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 8) }]}>
-          <TouchableOpacity
-            style={styles.composerAttachButton}
-            onPress={() => setAttachSheetOpen(true)}
-            disabled={!isLoggedIn || sending || sharingLocation || uploadingImage}
-            accessibilityLabel="Attach"
-            testID="conversation-attach"
-          >
-            {sharingLocation || uploadingImage ? (
-              <ActivityIndicator color={colors.brandPink} />
-            ) : (
-              <Plus size={22} color={colors.brandPink} />
-            )}
-          </TouchableOpacity>
-          <TextInput
-            style={styles.composerInput}
-            placeholder="Message"
-            placeholderTextColor={colors.textSupplementary}
-            value={draft}
-            onChangeText={setDraft}
-            multiline
-            editable={isLoggedIn && !sending}
-            accessibilityLabel="Message input"
-            testID="conversation-input"
-          />
-          <TouchableOpacity
-            style={styles.composerSendButton}
-            onPress={handleSend}
-            disabled={!draft.trim() || sending}
-            accessibilityLabel="Send message"
-            testID="conversation-send"
-          >
-            {sending ? (
-              <ActivityIndicator color={colors.white} />
-            ) : (
-              <Send size={20} color={colors.white} />
-            )}
-          </TouchableOpacity>
-        </View>
-      </KeyboardAvoidingView>
+        <KeyboardStickyView offset={{ closed: 0, opened: -insets.bottom }}>
+          <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+            <TouchableOpacity
+              style={styles.composerAttachButton}
+              onPress={() => setAttachSheetOpen(true)}
+              disabled={!isLoggedIn || sending || sharingLocation || uploadingImage}
+              accessibilityLabel="Attach"
+              testID="conversation-attach"
+            >
+              {sharingLocation || uploadingImage ? (
+                <ActivityIndicator color={colors.brandPink} />
+              ) : (
+                <Plus size={22} color={colors.brandPink} />
+              )}
+            </TouchableOpacity>
+            <TextInput
+              style={styles.composerInput}
+              placeholder="Message"
+              placeholderTextColor={colors.textSupplementary}
+              value={draft}
+              onChangeText={setDraft}
+              multiline
+              editable={isLoggedIn && !sending}
+              accessibilityLabel="Message input"
+              testID="conversation-input"
+            />
+            <TouchableOpacity
+              style={styles.composerSendButton}
+              onPress={handleSend}
+              disabled={!draft.trim() || sending}
+              accessibilityLabel="Send message"
+              testID="conversation-send"
+            >
+              {sending ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <Send size={20} color={colors.white} />
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardStickyView>
+      </View>
 
       <AttachSheet
         visible={attachSheetOpen}

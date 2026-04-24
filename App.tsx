@@ -6,6 +6,7 @@ import { StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import Toast, { BaseToast, ErrorToast, InfoToast } from 'react-native-toast-message';
 import { WalletProvider, useWallet } from './src/contexts/WalletContext';
@@ -82,24 +83,31 @@ export default function App() {
 
   return (
     <GestureHandlerRootView style={styles.container}>
-      {/* KeyboardProvider drives react-native-keyboard-controller. On
-          Android 15 edge-to-edge the classic RN Keyboard event API is
-          unreliable (issue #194); RNKC subscribes to the platform
-          IME inset via WindowInsetsCompat and exposes it to hooks
-          like useReanimatedKeyboardAnimation that the composer uses. */}
-      <KeyboardProvider>
-        <WalletProvider>
-          <NostrProvider>
-            <BottomSheetModalProvider>
-              <StatusBar style="light" />
-              <AppNavigator />
-            </BottomSheetModalProvider>
-            <Toast topOffset={60} config={toastConfig} />
-            <GlobalIncomingPaymentOverlay />
-          </NostrProvider>
-        </WalletProvider>
-        <BootSplash done={bootDone} />
-      </KeyboardProvider>
+      {/* SafeAreaProvider feeds `useSafeAreaInsets()` — without it all
+          insets silently return 0 and the composer's safe-area padding
+          (above the gesture bar) collapses. Needed company to the
+          react-native-edge-to-edge plugin so insets propagate end-to-end. */}
+      <SafeAreaProvider>
+        {/* KeyboardProvider drives react-native-keyboard-controller.
+            Paired with react-native-edge-to-edge (plugin in app.config.ts)
+            it subscribes to `WindowInsetsCompat.Type.ime()` and exposes
+            the IME inset to hooks + components like KeyboardStickyView.
+            Without edge-to-edge, Android 15+ silently reports 0 keyboard
+            height to every API (see #194 diagnosis). */}
+        <KeyboardProvider>
+          <WalletProvider>
+            <NostrProvider>
+              <BottomSheetModalProvider>
+                <StatusBar style="light" />
+                <AppNavigator />
+              </BottomSheetModalProvider>
+              <Toast topOffset={60} config={toastConfig} />
+              <GlobalIncomingPaymentOverlay />
+            </NostrProvider>
+          </WalletProvider>
+          <BootSplash done={bootDone} />
+        </KeyboardProvider>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }
