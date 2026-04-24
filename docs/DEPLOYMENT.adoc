@@ -140,6 +140,40 @@ Releases are cut by publishing a **GitHub Release** (which creates the tag serve
 3. Downloads the resulting Android APK and attaches it to the Release for sideloading.
 4. Regenerates `docs/TECHNICAL_SOLUTION_DOCUMENT.pdf` from the AsciiDoc sources and attaches that too.
 
+==== Version numbering
+
+Three separate numbers, maintained by three different actors — easy to confuse, so documenting the split explicitly:
+
+[cols="1,2,3", options="header"]
+|===
+| Number | Maintained by | Notes
+
+| `X.Y.Z` (user-visible version)
+| **Git tag**, applied by `.github/workflows/release.yml`
+| The workflow strips the leading `v` and any `-rcN` suffix from the tag, then writes the result into `version:` in `app.config.ts`. Tag `v1.0.0-rc1` → `version: '1.0.0'`. **Do NOT hand-edit `app.config.ts` before a release** — the workflow overwrites it.
+
+| Build number (iOS) / `versionCode` (Android)
+| **EAS**, via `"autoIncrement": true` in the `production` profile of `eas.json`
+| Auto-bumps on every production build. Monotonic integer, never reused, independent of `X.Y.Z`. Not tracked in-repo.
+
+| The in-repo `version:` field in `app.config.ts`
+| The last release workflow run
+| Between releases this is a stale snapshot of the most recent tag's `X.Y.Z` minus any RC suffix. Treat it as read-only; the tag is the source of truth.
+|===
+
+Reading the version of a running install:
+
+* iOS: *Settings → General → About → Lightning Piggy* shows `X.Y.Z (buildNumber)`.
+* Android: `adb -s <serial> shell dumpsys package com.lightningpiggy.app | grep -E "versionCode|versionName"`.
+
+Reading the latest build number from EAS without installing:
+
+[source,bash]
+----
+eas build:list --platform android --status finished --limit 1 \
+  | grep -E "^Version|^Build number"
+----
+
 ==== Cutting a release
 
 . Go to https://github.com/BenGWeeks/lightning-piggy-mobile/releases → *Draft a new release*.
@@ -624,6 +658,6 @@ Before releasing to production:
 * [ ] Prettier passes: `npm run format:check`
 * [ ] App tested on physical Android device
 * [ ] App tested on physical iOS device (if applicable)
-* [ ] Version number incremented in `app.config.ts`
+* [ ] New git tag chosen (`vX.Y.Z` or `vX.Y.Z-rcN`) — the release workflow writes it into `app.config.ts`; do NOT hand-edit the file
 * [ ] E2E tests pass: `maestro test tests/e2e/`
 * [ ] Git tag created for release version
