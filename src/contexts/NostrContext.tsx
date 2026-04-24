@@ -272,6 +272,16 @@ interface NostrContextType {
     plaintext: string,
   ) => Promise<{ success: boolean; error?: string }>;
   fetchConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
+  /**
+   * Read the persisted per-peer conversation cache synchronously-ish
+   * (AsyncStorage is actually async but single `getItem` is fast).
+   * Returns `[]` when no cache exists. Use this to paint a thread's
+   * cached messages instantly on mount, *before* awaiting the slower
+   * `fetchConversation` relay round-trip — Arcade's `db_only=true`
+   * pattern. The user sees the thread fill immediately, then a fresh
+   * merge replaces it once relay returns.
+   */
+  getCachedConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
   dmInbox: DmInboxEntry[];
   dmInboxLoading: boolean;
   /**
@@ -1159,6 +1169,23 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [pubkey],
   );
 
+  const getCachedConversation = useCallback(
+    async (otherPubkey: string): Promise<ConversationMessage[]> => {
+      if (!pubkey) return [];
+      const normalized = otherPubkey.trim().toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(normalized)) return [];
+      try {
+        const raw = await AsyncStorage.getItem(convCacheKey(pubkey, normalized));
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    },
+    [pubkey],
+  );
+
   const fetchConversation = useCallback(
     async (otherPubkey: string): Promise<ConversationMessage[]> => {
       if (!pubkey || !isLoggedIn) return [];
@@ -1888,6 +1915,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       addContact,
       sendDirectMessage,
       fetchConversation,
+      getCachedConversation,
       dmInbox,
       dmInboxLoading,
       refreshDmInbox,
@@ -1913,6 +1941,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       addContact,
       sendDirectMessage,
       fetchConversation,
+      getCachedConversation,
       dmInbox,
       dmInboxLoading,
       refreshDmInbox,
