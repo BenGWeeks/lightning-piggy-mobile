@@ -1,11 +1,12 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, type TextStyle } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ProfileIcon from './ProfileIcon';
 import { useNostr } from '../contexts/NostrContext';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
+import type { Palette } from '../styles/palettes';
 import type { MainTabParamList } from '../navigation/types';
 
 interface Props {
@@ -53,6 +54,8 @@ const TabHeader: React.FC<Props> = ({
   accessibilityLabel,
   titleStyle,
 }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList>>();
   const { profile } = useNostr();
@@ -84,34 +87,35 @@ const TabHeader: React.FC<Props> = ({
   );
 };
 
-const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 20,
-    paddingBottom: 16,
-  },
-  badge: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  title: {
-    color: colors.white,
-    // Slightly lighter than the previous per-screen 28/700 because Home's
-    // "Hello, <name>!" greeting reads better at a softer weight and the
-    // section titles (Messages / Friends / Learn) still look substantial.
-    fontSize: 24,
-    fontWeight: '600',
-    flexShrink: 1,
-  },
-  spacer: {
-    flex: 1,
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingHorizontal: 20,
+      paddingBottom: 16,
+    },
+    badge: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: 'rgba(255,255,255,0.9)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    title: {
+      color: colors.white,
+      // Slightly lighter than the previous per-screen 28/700 because Home's
+      // "Hello, <name>!" greeting reads better at a softer weight and the
+      // section titles (Messages / Friends / Learn) still look substantial.
+      fontSize: 24,
+      fontWeight: '600',
+      flexShrink: 1,
+    },
+    spacer: {
+      flex: 1,
+    },
+  });
 
 export default TabHeader;

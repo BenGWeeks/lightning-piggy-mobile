@@ -16,14 +16,14 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr } from '../contexts/NostrContext';
 import TabHeader from '../components/TabHeader';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
 import ContactListItem, { CONTACT_LIST_ITEM_HEIGHT } from '../components/ContactListItem';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import AddFriendSheet from '../components/AddFriendSheet';
 import SendSheet from '../components/SendSheet';
 import AlphabetBar from '../components/AlphabetBar';
 import { fetchPhoneContacts, PhoneContact, setLightningAddress } from '../services/contactsService';
-import { styles } from '../styles/FriendsScreen.styles';
+import { createFriendsScreenStyles } from '../styles/FriendsScreen.styles';
 import type { MainTabParamList, RootStackParamList } from '../navigation/types';
 
 type FriendsNavigation = CompositeNavigationProp<
@@ -45,6 +45,8 @@ interface ListItem {
 }
 
 const FriendsScreen: React.FC = () => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createFriendsScreenStyles(colors), [colors]);
   const navigation = useNavigation<FriendsNavigation>();
   const { isLoggedIn, profile, contacts, refreshContacts, refreshProfile, addContact } = useNostr();
   const [filter, setFilter] = useState<Filter>('all');

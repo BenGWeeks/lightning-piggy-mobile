@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 import Svg, { Path, Circle } from 'react-native-svg';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
+import type { Palette } from '../styles/palettes';
 import type { ConversationSummary } from '../utils/conversationSummaries';
 import { conversationPreview, formatConversationTimestamp } from '../utils/conversationSummaries';
 
@@ -12,6 +13,8 @@ interface Props {
 }
 
 const ConversationRow: React.FC<Props> = ({ summary, onPress }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [avatarError, setAvatarError] = useState(false);
   useEffect(() => {
     setAvatarError(false);
@@ -68,52 +71,53 @@ const ConversationRow: React.FC<Props> = ({ summary, onPress }) => {
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    gap: 12,
-  },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
-  avatarImage: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-  },
-  info: {
-    flex: 1,
-    minWidth: 0,
-  },
-  topRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 8,
-  },
-  name: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.textHeader,
-  },
-  timestamp: {
-    fontSize: 12,
-    color: colors.textSupplementary,
-  },
-  preview: {
-    fontSize: 13,
-    color: colors.textSupplementary,
-    marginTop: 2,
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    container: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 20,
+      paddingVertical: 12,
+      gap: 12,
+    },
+    avatar: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor: colors.background,
+      justifyContent: 'center',
+      alignItems: 'center',
+      overflow: 'hidden',
+    },
+    avatarImage: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+    },
+    info: {
+      flex: 1,
+      minWidth: 0,
+    },
+    topRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      gap: 8,
+    },
+    name: {
+      flex: 1,
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.textHeader,
+    },
+    timestamp: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+    },
+    preview: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+      marginTop: 2,
+    },
+  });
 
 export default React.memo(ConversationRow);

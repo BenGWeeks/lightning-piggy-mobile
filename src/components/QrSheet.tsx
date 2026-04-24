@@ -9,7 +9,8 @@ import {
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
 import { Copy } from 'lucide-react-native';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
+import type { Palette } from '../styles/palettes';
 
 interface Props {
   visible: boolean;
@@ -28,6 +29,8 @@ const QrSheet: React.FC<Props> = ({
   lightningAddress,
   defaultMode = 'npub',
 }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [mode, setMode] = useState<QrMode>(defaultMode);
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['55%'], []);
@@ -122,73 +125,74 @@ const QrSheet: React.FC<Props> = ({
   );
 };
 
-const styles = StyleSheet.create({
-  sheetBackground: {
-    backgroundColor: colors.white,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-  },
-  handleIndicator: {
-    backgroundColor: colors.divider,
-    width: 40,
-  },
-  content: {
-    flex: 1,
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingTop: 8,
-    paddingBottom: 40,
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.textHeader,
-    marginBottom: 16,
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    backgroundColor: colors.background,
-    borderRadius: 10,
-    padding: 3,
-    marginBottom: 20,
-  },
-  toggleTab: {
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  toggleTabActive: {
-    backgroundColor: colors.white,
-  },
-  toggleText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textSupplementary,
-  },
-  toggleTextActive: {
-    color: colors.brandPink,
-  },
-  qrContainer: {
-    padding: 16,
-    backgroundColor: colors.white,
-    borderRadius: 16,
-    marginBottom: 16,
-  },
-  valueRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: colors.background,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 10,
-  },
-  valueText: {
-    fontSize: 13,
-    color: colors.textSupplementary,
-    fontWeight: '500',
-    flex: 1,
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    sheetBackground: {
+      backgroundColor: colors.white,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+    },
+    handleIndicator: {
+      backgroundColor: colors.divider,
+      width: 40,
+    },
+    content: {
+      flex: 1,
+      alignItems: 'center',
+      paddingHorizontal: 24,
+      paddingTop: 8,
+      paddingBottom: 40,
+    },
+    title: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: colors.textHeader,
+      marginBottom: 16,
+    },
+    toggleRow: {
+      flexDirection: 'row',
+      backgroundColor: colors.background,
+      borderRadius: 10,
+      padding: 3,
+      marginBottom: 20,
+    },
+    toggleTab: {
+      paddingHorizontal: 20,
+      paddingVertical: 8,
+      borderRadius: 8,
+    },
+    toggleTabActive: {
+      backgroundColor: colors.white,
+    },
+    toggleText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.textSupplementary,
+    },
+    toggleTextActive: {
+      color: colors.brandPink,
+    },
+    qrContainer: {
+      padding: 16,
+      backgroundColor: colors.white,
+      borderRadius: 16,
+      marginBottom: 16,
+    },
+    valueRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: colors.background,
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderRadius: 10,
+    },
+    valueText: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+      fontWeight: '500',
+      flex: 1,
+    },
+  });
 
 export default QrSheet;

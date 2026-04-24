@@ -24,8 +24,8 @@ import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { useWallet } from '../contexts/WalletContext';
 import { walletLabel } from '../types/wallet';
 import { useNostr } from '../contexts/NostrContext';
-import { colors } from '../styles/theme';
-import { sendSheetStyles as styles } from '../styles/SendSheet.styles';
+import { useThemeColors } from '../contexts/ThemeContext';
+import { createSendSheetStyles } from '../styles/SendSheet.styles';
 import { satsToFiatString } from '../services/fiatService';
 import { ChevronUp, ChevronDown } from 'lucide-react-native';
 import { resolveLightningAddress, fetchInvoice, LnurlPayParams } from '../services/lnurlService';
@@ -98,6 +98,8 @@ const SendSheet: React.FC<Props> = ({
   recipientPubkey,
   recipientName,
 }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createSendSheetStyles(colors), [colors]);
   const {
     payInvoiceForWallet,
     refreshBalanceForWallet,

@@ -22,8 +22,8 @@ import * as SecureStore from 'expo-secure-store';
 import Toast from 'react-native-toast-message';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import { useWallet } from '../contexts/WalletContext';
-import { colors } from '../styles/theme';
-import { transferSheetStyles as styles } from '../styles/TransferSheet.styles';
+import { useThemeColors } from '../contexts/ThemeContext';
+import { createTransferSheetStyles } from '../styles/TransferSheet.styles';
 import { satsToFiatString } from '../services/fiatService';
 import { WalletState } from '../types/wallet';
 import * as onchainService from '../services/onchainService';
@@ -38,6 +38,8 @@ interface Props {
 type Step = 'main' | 'amount';
 
 const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createTransferSheetStyles(colors), [colors]);
   const {
     wallets,
     activeWalletId,

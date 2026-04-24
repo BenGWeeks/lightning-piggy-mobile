@@ -2,8 +2,8 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { ChevronLeft, Delete, ArrowUpDown } from 'lucide-react-native';
 import { useWallet } from '../contexts/WalletContext';
-import { colors } from '../styles/theme';
-import { amountEntryStyles as styles } from '../styles/AmountEntryScreen.styles';
+import { useThemeColors } from '../contexts/ThemeContext';
+import { createAmountEntryStyles } from '../styles/AmountEntryScreen.styles';
 import { satsToFiat, formatFiat } from '../services/fiatService';
 
 interface Props {
@@ -38,6 +38,8 @@ const AmountEntryScreen: React.FC<Props> = ({
   onConfirm,
   onBack,
 }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createAmountEntryStyles(colors), [colors]);
   const { btcPrice, currency } = useWallet();
 
   const [primaryUnit, setPrimaryUnit] = useState<Unit>('sats');

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { View, Text, Image, TouchableOpacity, ScrollView } from 'react-native';
 import TabHeader from '../components/TabHeader';
 import { useFocusEffect } from '@react-navigation/native';
@@ -10,8 +10,8 @@ import {
   isCourseComplete,
 } from '../services/learnProgressService';
 import { Check, GraduationCap } from 'lucide-react-native';
-import { colors } from '../styles/theme';
-import { styles } from '../styles/LearnScreen.styles';
+import { useThemeColors } from '../contexts/ThemeContext';
+import { createLearnScreenStyles } from '../styles/LearnScreen.styles';
 
 import { LearnNavigation } from '../navigation/types';
 
@@ -20,6 +20,8 @@ interface Props {
 }
 
 const LearnScreen: React.FC<Props> = ({ navigation }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createLearnScreenStyles(colors), [colors]);
   const [progress, setProgress] = useState<LearnProgress>({ completedMissions: [] });
 
   useFocusEffect(

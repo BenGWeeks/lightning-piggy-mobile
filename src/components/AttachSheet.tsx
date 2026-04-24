@@ -7,7 +7,8 @@ import {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import { MapPin, Zap, Receipt, UserRound, ImagePlus, Camera, Smile } from 'lucide-react-native';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
+import type { Palette } from '../styles/palettes';
 
 interface Props {
   visible: boolean;
@@ -32,6 +33,8 @@ const AttachSheet: React.FC<Props> = ({
   onTakePhoto,
   onSendGif,
 }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => {
     const rows =
@@ -223,53 +226,54 @@ const AttachSheet: React.FC<Props> = ({
   );
 };
 
-const styles = StyleSheet.create({
-  sheetBackground: {
-    backgroundColor: colors.white,
-  },
-  handleIndicator: {
-    backgroundColor: colors.divider,
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 24,
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.textHeader,
-    marginBottom: 12,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    paddingVertical: 12,
-  },
-  iconBadge: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: colors.brandPink,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rowText: {
-    flex: 1,
-  },
-  rowTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.textHeader,
-  },
-  rowSubtitle: {
-    fontSize: 13,
-    color: colors.textSupplementary,
-    marginTop: 2,
-    lineHeight: 18,
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    sheetBackground: {
+      backgroundColor: colors.white,
+    },
+    handleIndicator: {
+      backgroundColor: colors.divider,
+    },
+    content: {
+      flex: 1,
+      paddingHorizontal: 20,
+      paddingTop: 8,
+      paddingBottom: 24,
+    },
+    title: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: colors.textHeader,
+      marginBottom: 12,
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+      paddingVertical: 12,
+    },
+    iconBadge: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: colors.brandPink,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    rowText: {
+      flex: 1,
+    },
+    rowTitle: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.textHeader,
+    },
+    rowSubtitle: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+      marginTop: 2,
+      lineHeight: 18,
+    },
+  });
 
 export default AttachSheet;

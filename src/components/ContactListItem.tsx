@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { Zap } from 'lucide-react-native';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
+import type { Palette } from '../styles/palettes';
 
 interface Props {
   name: string;
@@ -14,6 +15,8 @@ interface Props {
 }
 
 const ContactListItem: React.FC<Props> = ({ name, picture, lightningAddress, onPress, onZap }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [avatarError, setAvatarError] = useState(false);
   const [avatarLoaded, setAvatarLoaded] = useState(false);
 
@@ -86,49 +89,50 @@ const ContactListItem: React.FC<Props> = ({ name, picture, lightningAddress, onP
 // references it).
 export const CONTACT_LIST_ITEM_HEIGHT = 72;
 
-const styles = StyleSheet.create({
-  container: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    gap: 12,
-  },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
-  avatarImage: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-  },
-  info: {
-    flex: 1,
-  },
-  name: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.textHeader,
-  },
-  address: {
-    fontSize: 13,
-    color: colors.textSupplementary,
-    marginTop: 2,
-  },
-  zapButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: colors.brandPinkLight,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    container: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 20,
+      paddingVertical: 14,
+      gap: 12,
+    },
+    avatar: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: colors.background,
+      justifyContent: 'center',
+      alignItems: 'center',
+      overflow: 'hidden',
+    },
+    avatarImage: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+    },
+    info: {
+      flex: 1,
+    },
+    name: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.textHeader,
+    },
+    address: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+      marginTop: 2,
+    },
+    zapButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: colors.brandPinkLight,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+  });
 
 export default React.memo(ContactListItem);

@@ -8,7 +8,8 @@ import {
 } from '@gorhom/bottom-sheet';
 import * as Clipboard from 'expo-clipboard';
 import { useWallet } from '../contexts/WalletContext';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
+import type { Palette } from '../styles/palettes';
 import { CardTheme } from '../types/wallet';
 import { themeList } from '../themes/cardThemes';
 import { MiniWalletCard } from './WalletCard';
@@ -20,6 +21,8 @@ interface Props {
 }
 
 const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { wallets, updateWalletSettings, removeWallet } = useWallet();
   const wallet = wallets.find((w) => w.id === walletId);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
@@ -251,91 +254,92 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   );
 };
 
-const styles = StyleSheet.create({
-  sheetBackground: {
-    backgroundColor: colors.white,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-  },
-  handle: {
-    backgroundColor: colors.divider,
-    width: 40,
-  },
-  content: {
-    padding: 24,
-    paddingBottom: 40,
-    gap: 8,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: colors.textHeader,
-    marginBottom: 16,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textBody,
-    marginBottom: 6,
-  },
-  input: {
-    backgroundColor: colors.background,
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    color: colors.textBody,
-  },
-  xpubText: {
-    backgroundColor: colors.background,
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 12,
-    color: colors.textSupplementary,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-  },
-  hintText: {
-    fontSize: 12,
-    color: colors.textSupplementary,
-    marginTop: 4,
-  },
-  copyHint: {
-    fontSize: 12,
-    color: colors.brandPink,
-    fontWeight: '600',
-    marginTop: 4,
-    textAlign: 'right',
-  },
-  themeGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    marginTop: 4,
-  },
-  saveButton: {
-    backgroundColor: colors.brandPink,
-    height: 52,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 20,
-  },
-  saveButtonText: {
-    color: colors.white,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  disconnectButton: {
-    height: 44,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  disconnectButtonText: {
-    color: colors.red,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    sheetBackground: {
+      backgroundColor: colors.white,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+    },
+    handle: {
+      backgroundColor: colors.divider,
+      width: 40,
+    },
+    content: {
+      padding: 24,
+      paddingBottom: 40,
+      gap: 8,
+    },
+    title: {
+      fontSize: 22,
+      fontWeight: '700',
+      color: colors.textHeader,
+      marginBottom: 16,
+    },
+    label: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.textBody,
+      marginBottom: 6,
+    },
+    input: {
+      backgroundColor: colors.background,
+      borderRadius: 12,
+      padding: 16,
+      fontSize: 16,
+      color: colors.textBody,
+    },
+    xpubText: {
+      backgroundColor: colors.background,
+      borderRadius: 12,
+      padding: 16,
+      fontSize: 12,
+      color: colors.textSupplementary,
+      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    },
+    hintText: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      marginTop: 4,
+    },
+    copyHint: {
+      fontSize: 12,
+      color: colors.brandPink,
+      fontWeight: '600',
+      marginTop: 4,
+      textAlign: 'right',
+    },
+    themeGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 12,
+      marginTop: 4,
+    },
+    saveButton: {
+      backgroundColor: colors.brandPink,
+      height: 52,
+      borderRadius: 12,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginTop: 20,
+    },
+    saveButtonText: {
+      color: colors.white,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    disconnectButton: {
+      height: 44,
+      borderRadius: 12,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginTop: 8,
+    },
+    disconnectButtonText: {
+      color: colors.red,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+  });
 
 export default WalletSettingsSheet;

@@ -9,6 +9,7 @@ import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import Toast, { BaseToast, ErrorToast, InfoToast } from 'react-native-toast-message';
 import { WalletProvider, useWallet } from './src/contexts/WalletContext';
 import { NostrProvider } from './src/contexts/NostrContext';
+import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
 
@@ -65,19 +66,28 @@ function GlobalIncomingPaymentOverlay() {
   );
 }
 
+// StatusBar needs to live inside ThemeProvider so its style flips with the
+// active scheme; splitting it out keeps the provider tree readable.
+function ThemedStatusBar() {
+  const { scheme } = useTheme();
+  return <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />;
+}
+
 export default function App() {
   return (
     <GestureHandlerRootView style={styles.container}>
-      <WalletProvider>
-        <NostrProvider>
-          <BottomSheetModalProvider>
-            <StatusBar style="light" />
-            <AppNavigator />
-          </BottomSheetModalProvider>
-          <Toast topOffset={60} config={toastConfig} />
-          <GlobalIncomingPaymentOverlay />
-        </NostrProvider>
-      </WalletProvider>
+      <ThemeProvider>
+        <WalletProvider>
+          <NostrProvider>
+            <BottomSheetModalProvider>
+              <ThemedStatusBar />
+              <AppNavigator />
+            </BottomSheetModalProvider>
+            <Toast topOffset={60} config={toastConfig} />
+            <GlobalIncomingPaymentOverlay />
+          </NostrProvider>
+        </WalletProvider>
+      </ThemeProvider>
     </GestureHandlerRootView>
   );
 }

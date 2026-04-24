@@ -1,6 +1,7 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useMemo } from 'react';
 import { View, Text, Image, TouchableOpacity, Animated } from 'react-native';
-import { styles } from '../styles/IntroScreen.styles';
+import { useThemeColors } from '../contexts/ThemeContext';
+import { createIntroScreenStyles } from '../styles/IntroScreen.styles';
 import { RootNavigation } from '../navigation/types';
 
 interface Props {
@@ -8,6 +9,8 @@ interface Props {
 }
 
 const IntroScreen: React.FC<Props> = ({ navigation }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createIntroScreenStyles(colors), [colors]);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
 

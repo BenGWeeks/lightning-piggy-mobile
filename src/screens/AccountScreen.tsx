@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   View,
@@ -21,9 +21,22 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
-import { colors } from '../styles/theme';
+import { useTheme } from '../contexts/ThemeContext';
+import type { Palette, ThemePreference } from '../styles/palettes';
 import { CURRENCIES } from '../services/fiatService';
-import { Trash2, Eye, EyeOff, ChevronUp, ChevronDown, Zap, Home, Copy } from 'lucide-react-native';
+import {
+  Trash2,
+  Eye,
+  EyeOff,
+  ChevronUp,
+  ChevronDown,
+  Zap,
+  Home,
+  Copy,
+  Sun,
+  Moon,
+  Smartphone,
+} from 'lucide-react-native';
 import {
   getElectrumServer,
   setElectrumServer,
@@ -64,6 +77,8 @@ const QrIcon: React.FC<{ size?: number; color?: string }> = ({ size = 20, color 
 const AccountScreen: React.FC = () => {
   const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList>>();
   const insets = useSafeAreaInsets();
+  const { colors, preference: themePreference, setPreference: setThemePreference } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const {
     userName,
     setUserName,
@@ -425,6 +440,38 @@ const AccountScreen: React.FC = () => {
           ))}
         </View>
 
+        {/* Appearance: light / dark / system */}
+        <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Appearance</Text>
+        <View style={styles.appearanceRow}>
+          {(
+            [
+              { key: 'light', label: 'Light', Icon: Sun },
+              { key: 'dark', label: 'Dark', Icon: Moon },
+              { key: 'system', label: 'System', Icon: Smartphone },
+            ] as { key: ThemePreference; label: string; Icon: typeof Sun }[]
+          ).map(({ key, label, Icon }) => {
+            const active = themePreference === key;
+            return (
+              <TouchableOpacity
+                key={key}
+                style={[styles.appearanceChip, active && styles.appearanceChipActive]}
+                onPress={() => setThemePreference(key)}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`${label} theme`}
+                testID={`appearance-${key}`}
+              >
+                <Icon size={16} color={active ? colors.brandPink : colors.white} />
+                <Text
+                  style={[styles.appearanceChipText, active && styles.appearanceChipTextActive]}
+                >
+                  {label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
         {/* Electrum Server */}
         {wallets.some((w) => w.walletType === 'onchain') && (
           <>
@@ -727,374 +774,400 @@ const AccountScreen: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.brandPink,
-  },
-  bgImage: {
-    position: 'absolute',
-    width: 420,
-    height: 420,
-    right: -60,
-    top: -20,
-    opacity: 0.15,
-  },
-  content: {
-    paddingHorizontal: 20,
-    paddingBottom: 40,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 24,
-  },
-  homeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  title: {
-    color: colors.white,
-    fontSize: 28,
-    fontWeight: '700',
-  },
-  // Nostr profile styles
-  profileSection: {
-    backgroundColor: colors.white,
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  banner: {
-    width: '100%',
-    height: 100,
-  },
-  profileRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    gap: 12,
-  },
-  profilePicture: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    borderWidth: 2,
-    borderColor: colors.divider,
-  },
-  profilePicturePlaceholder: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.background,
-  },
-  profileInfo: {
-    flex: 1,
-  },
-  profileName: {
-    color: colors.textHeader,
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  profileNip05: {
-    color: colors.textSupplementary,
-    fontSize: 13,
-    marginTop: 2,
-  },
-  npubRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-  },
-  npubCopy: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    flex: 1,
-  },
-  npubText: {
-    color: colors.textSupplementary,
-    fontSize: 12,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-  },
-  profileLnRow: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    gap: 4,
-  },
-  profileLn: {
-    color: colors.textBody,
-    fontSize: 14,
-  },
-  editProfileButton: {
-    margin: 16,
-    marginBottom: 0,
-    height: 44,
-    borderRadius: 10,
-    backgroundColor: colors.white,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: colors.brandPink,
-  },
-  editProfileButtonText: {
-    color: colors.brandPink,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  logoutButton: {
-    margin: 16,
-    marginTop: 8,
-    height: 44,
-    borderRadius: 10,
-    backgroundColor: colors.brandPink,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  logoutButtonText: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  connectButton: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    height: 52,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.4)',
-  },
-  connectButtonText: {
-    color: colors.white,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  // Existing styles
-  sectionLabel: {
-    color: colors.white,
-    fontSize: 18,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  textInput: {
-    backgroundColor: colors.white,
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    color: colors.textBody,
-    fontWeight: '600',
-  },
-  fieldHint: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 12,
-    marginTop: 4,
-  },
-  sslRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 8,
-    paddingHorizontal: 4,
-  },
-  sslLabel: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  sslToggle: {
-    width: 48,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.3)',
-    justifyContent: 'center',
-    paddingHorizontal: 2,
-  },
-  sslToggleActive: {
-    backgroundColor: '#4CAF50',
-  },
-  sslToggleThumb: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: colors.white,
-  },
-  sslToggleThumbActive: {
-    alignSelf: 'flex-end',
-  },
-  currencyRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  currencyChip: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingVertical: 10,
-    borderRadius: 8,
-    width: '23%',
-    alignItems: 'center',
-  },
-  currencyChipActive: {
-    backgroundColor: colors.white,
-  },
-  currencyChipText: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  currencyChipTextActive: {
-    color: colors.brandPink,
-  },
-  card: {
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    borderRadius: 16,
-    padding: 20,
-    gap: 12,
-  },
-  walletSummary: {
-    color: colors.white,
-    fontSize: 14,
-    opacity: 0.9,
-  },
-  walletRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  walletName: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: '600',
-    flex: 1,
-  },
-  walletBalance: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: '400',
-    opacity: 0.8,
-  },
-  walletActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  saveButton: {
-    backgroundColor: colors.white,
-    height: 52,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  saveButtonText: {
-    color: colors.brandPink,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  // Team profile card styles
-  teamCard: {
-    backgroundColor: colors.white,
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  teamBanner: {
-    width: '100%',
-    height: 80,
-  },
-  teamRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    gap: 12,
-  },
-  teamPicture: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    borderWidth: 2,
-    borderColor: colors.divider,
-  },
-  teamPicturePlaceholder: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: colors.background,
-  },
-  teamInfo: {
-    flex: 1,
-  },
-  teamName: {
-    color: colors.textHeader,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  teamAbout: {
-    color: colors.textSupplementary,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  teamButtonRow: {
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-    gap: 8,
-  },
-  zapButton: {
-    height: 44,
-    borderRadius: 10,
-    backgroundColor: colors.brandPink,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  zapButtonText: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  feedbackButton: {
-    height: 44,
-    borderRadius: 10,
-    backgroundColor: colors.white,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: colors.brandPink,
-  },
-  feedbackButtonText: {
-    color: colors.brandPink,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  teamFallbackText: {
-    color: colors.textSupplementary,
-    fontSize: 14,
-    padding: 20,
-    textAlign: 'center',
-  },
-  versionText: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 12,
-    textAlign: 'center',
-    paddingTop: 24,
-    paddingBottom: 0,
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.brandPink,
+    },
+    bgImage: {
+      position: 'absolute',
+      width: 420,
+      height: 420,
+      right: -60,
+      top: -20,
+      opacity: 0.15,
+    },
+    content: {
+      paddingHorizontal: 20,
+      paddingBottom: 40,
+    },
+    titleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      marginBottom: 24,
+    },
+    homeButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: 'rgba(255,255,255,0.9)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    title: {
+      color: colors.white,
+      fontSize: 28,
+      fontWeight: '700',
+    },
+    // Nostr profile styles
+    profileSection: {
+      backgroundColor: colors.white,
+      borderRadius: 16,
+      overflow: 'hidden',
+    },
+    banner: {
+      width: '100%',
+      height: 100,
+    },
+    profileRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: 16,
+      gap: 12,
+    },
+    profilePicture: {
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      borderWidth: 2,
+      borderColor: colors.divider,
+    },
+    profilePicturePlaceholder: {
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      backgroundColor: colors.background,
+    },
+    profileInfo: {
+      flex: 1,
+    },
+    profileName: {
+      color: colors.textHeader,
+      fontSize: 18,
+      fontWeight: '700',
+    },
+    profileNip05: {
+      color: colors.textSupplementary,
+      fontSize: 13,
+      marginTop: 2,
+    },
+    npubRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingHorizontal: 16,
+      paddingBottom: 8,
+    },
+    npubCopy: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      flex: 1,
+    },
+    npubText: {
+      color: colors.textSupplementary,
+      fontSize: 12,
+      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    },
+    profileLnRow: {
+      flexDirection: 'row' as const,
+      alignItems: 'center' as const,
+      paddingHorizontal: 16,
+      paddingBottom: 12,
+      gap: 4,
+    },
+    profileLn: {
+      color: colors.textBody,
+      fontSize: 14,
+    },
+    editProfileButton: {
+      margin: 16,
+      marginBottom: 0,
+      height: 44,
+      borderRadius: 10,
+      backgroundColor: colors.white,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 2,
+      borderColor: colors.brandPink,
+    },
+    editProfileButtonText: {
+      color: colors.brandPink,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    logoutButton: {
+      margin: 16,
+      marginTop: 8,
+      height: 44,
+      borderRadius: 10,
+      backgroundColor: colors.brandPink,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    logoutButtonText: {
+      color: colors.white,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    connectButton: {
+      backgroundColor: 'rgba(255,255,255,0.2)',
+      height: 52,
+      borderRadius: 12,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.4)',
+    },
+    connectButtonText: {
+      color: colors.white,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    // Existing styles
+    sectionLabel: {
+      color: colors.white,
+      fontSize: 18,
+      fontWeight: '700',
+      marginBottom: 8,
+    },
+    textInput: {
+      backgroundColor: colors.white,
+      borderRadius: 12,
+      padding: 16,
+      fontSize: 16,
+      color: colors.textBody,
+      fontWeight: '600',
+    },
+    fieldHint: {
+      color: 'rgba(255,255,255,0.6)',
+      fontSize: 12,
+      marginTop: 4,
+    },
+    sslRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginTop: 8,
+      paddingHorizontal: 4,
+    },
+    sslLabel: {
+      color: colors.white,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    sslToggle: {
+      width: 48,
+      height: 28,
+      borderRadius: 14,
+      backgroundColor: 'rgba(255,255,255,0.3)',
+      justifyContent: 'center',
+      paddingHorizontal: 2,
+    },
+    sslToggleActive: {
+      backgroundColor: '#4CAF50',
+    },
+    sslToggleThumb: {
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      backgroundColor: colors.white,
+    },
+    sslToggleThumbActive: {
+      alignSelf: 'flex-end',
+    },
+    currencyRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    currencyChip: {
+      backgroundColor: 'rgba(255,255,255,0.2)',
+      paddingVertical: 10,
+      borderRadius: 8,
+      width: '23%',
+      alignItems: 'center',
+    },
+    currencyChipActive: {
+      backgroundColor: colors.white,
+    },
+    currencyChipText: {
+      color: colors.white,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    currencyChipTextActive: {
+      color: colors.brandPink,
+    },
+    card: {
+      backgroundColor: 'rgba(255,255,255,0.15)',
+      borderRadius: 16,
+      padding: 20,
+      gap: 12,
+    },
+    walletSummary: {
+      color: colors.white,
+      fontSize: 14,
+      opacity: 0.9,
+    },
+    walletRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    statusDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+    },
+    walletName: {
+      color: colors.white,
+      fontSize: 14,
+      fontWeight: '600',
+      flex: 1,
+    },
+    walletBalance: {
+      color: colors.white,
+      fontSize: 14,
+      fontWeight: '400',
+      opacity: 0.8,
+    },
+    walletActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    saveButton: {
+      backgroundColor: colors.white,
+      height: 52,
+      borderRadius: 12,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginTop: 24,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 0 },
+      shadowOpacity: 0.15,
+      shadowRadius: 12,
+      elevation: 4,
+    },
+    saveButtonText: {
+      color: colors.brandPink,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    // Team profile card styles
+    teamCard: {
+      backgroundColor: colors.white,
+      borderRadius: 16,
+      overflow: 'hidden',
+    },
+    teamBanner: {
+      width: '100%',
+      height: 80,
+    },
+    teamRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: 16,
+      gap: 12,
+    },
+    teamPicture: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      borderWidth: 2,
+      borderColor: colors.divider,
+    },
+    teamPicturePlaceholder: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor: colors.background,
+    },
+    teamInfo: {
+      flex: 1,
+    },
+    teamName: {
+      color: colors.textHeader,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    teamAbout: {
+      color: colors.textSupplementary,
+      fontSize: 12,
+      marginTop: 2,
+    },
+    teamButtonRow: {
+      paddingHorizontal: 16,
+      paddingBottom: 16,
+      gap: 8,
+    },
+    zapButton: {
+      height: 44,
+      borderRadius: 10,
+      backgroundColor: colors.brandPink,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    zapButtonText: {
+      color: colors.white,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    feedbackButton: {
+      height: 44,
+      borderRadius: 10,
+      backgroundColor: colors.white,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 2,
+      borderColor: colors.brandPink,
+    },
+    feedbackButtonText: {
+      color: colors.brandPink,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    teamFallbackText: {
+      color: colors.textSupplementary,
+      fontSize: 14,
+      padding: 20,
+      textAlign: 'center',
+    },
+    versionText: {
+      color: 'rgba(255,255,255,0.6)',
+      fontSize: 12,
+      textAlign: 'center',
+      paddingTop: 24,
+      paddingBottom: 0,
+    },
+    appearanceRow: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    appearanceChip: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      backgroundColor: 'rgba(255,255,255,0.2)',
+      paddingVertical: 12,
+      borderRadius: 8,
+    },
+    appearanceChipActive: {
+      backgroundColor: colors.white,
+    },
+    appearanceChipText: {
+      color: colors.white,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    appearanceChipTextActive: {
+      color: colors.brandPink,
+    },
+  });
 
 export default AccountScreen;

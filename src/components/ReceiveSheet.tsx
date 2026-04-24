@@ -23,9 +23,9 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
+import { useThemeColors } from '../contexts/ThemeContext';
 import { walletLabel } from '../types/wallet';
-import { colors } from '../styles/theme';
-import { receiveSheetStyles as styles } from '../styles/ReceiveSheet.styles';
+import { createReceiveSheetStyles } from '../styles/ReceiveSheet.styles';
 import { satsToFiat, formatFiat } from '../services/fiatService';
 import AmountEntryScreen from './AmountEntryScreen';
 import FriendPickerSheet, { PickedFriend } from './FriendPickerSheet';
@@ -66,6 +66,8 @@ type Mode = 'address' | 'amount';
 type Step = 'main' | 'amount';
 
 const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createReceiveSheetStyles(colors), [colors]);
   const {
     makeInvoiceForWallet,
     refreshBalanceForWallet,

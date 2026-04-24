@@ -24,7 +24,9 @@ import Animated, {
 } from 'react-native-reanimated';
 import type { SharedValue } from 'react-native-reanimated';
 import { Check, X } from 'lucide-react-native';
-import { colors } from '../styles/theme';
+import { colors as staticColors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
+import type { Palette } from '../styles/palettes';
 
 export type PaymentProgressState = 'sending' | 'success' | 'error' | 'hidden';
 export type PaymentDirection = 'send' | 'receive';
@@ -44,9 +46,11 @@ const CONFETTI_COUNT = 135;
 // early bubbles are sparse and density ramps up rapidly toward the 5s mark.
 const FULL_DENSITY_MS = 5000;
 
-// On-brand confetti palette — Piggy pink plus blues and purples.
+// On-brand confetti palette — Piggy pink plus blues and purples. The
+// brand pink is identical in light and dark palettes, so the static
+// import is fine here.
 const CONFETTI_COLORS = [
-  colors.brandPink,
+  staticColors.brandPink,
   '#FF6BB7', // light pink
   '#7A5CFF', // violet
   '#5B8DEF', // blue
@@ -141,7 +145,13 @@ interface BubbleProps {
 }
 
 function Bubble({ spec, colorProgress, screenWidth, screenHeight }: BubbleProps) {
+  const colors = useThemeColors();
   const progress = useSharedValue(0);
+  // Reanimated worklets capture primitives by value, so freeze the
+  // endpoint colours at render time so the interpolation below sees
+  // stable string literals.
+  const bubbleStart = colors.brandPink;
+  const bubbleEnd = colors.green;
 
   useEffect(() => {
     progress.value = withDelay(
@@ -159,7 +169,7 @@ function Bubble({ spec, colorProgress, screenWidth, screenHeight }: BubbleProps)
       [0, 0.12, 0.85, 1],
       [0, spec.opacityPeak, spec.opacityPeak, 0],
     );
-    const bg = interpolateColor(colorProgress.value, [0, 1], [colors.brandPink, colors.green]);
+    const bg = interpolateColor(colorProgress.value, [0, 1], [bubbleStart, bubbleEnd]);
     return {
       transform: [{ translateX: xOffset }, { translateY: y }],
       opacity,
@@ -173,7 +183,7 @@ function Bubble({ spec, colorProgress, screenWidth, screenHeight }: BubbleProps)
     <Animated.View
       pointerEvents="none"
       style={[
-        styles.bubble,
+        sharedStyles.bubble,
         {
           width: spec.size,
           height: spec.size,
@@ -239,7 +249,7 @@ function Confetti({ spec, armed, originX, originY }: ConfettiProps) {
     <Animated.View
       pointerEvents="none"
       style={[
-        styles.confetti,
+        sharedStyles.confetti,
         {
           width: spec.width,
           height: spec.height,
@@ -261,6 +271,8 @@ export default function PaymentProgressOverlay({
   errorMessage,
   onDismiss,
 }: Props) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { width, height } = useWindowDimensions();
 
   // Keep the overlay mounted across `hidden` so bubbles don't flash
@@ -447,14 +459,10 @@ export default function PaymentProgressOverlay({
   );
 }
 
-const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: 'rgba(21, 23, 26, 0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
+// Colour-agnostic styles shared with the Bubble and Confetti subcomponents
+// so they don't need access to the themed styles created inside the main
+// component.
+const sharedStyles = StyleSheet.create({
   bubble: {
     position: 'absolute',
   },
@@ -462,59 +470,70 @@ const styles = StyleSheet.create({
     position: 'absolute',
     borderRadius: 2,
   },
-  card: {
-    backgroundColor: colors.white,
-    borderRadius: 28,
-    paddingVertical: 32,
-    paddingHorizontal: 28,
-    minWidth: 260,
-    maxWidth: 340,
-    alignItems: 'center',
-    gap: 14,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 24,
-    elevation: 12,
-  },
-  iconSlot: {
-    width: 72,
-    height: 72,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  successCircle: {
-    borderRadius: 36,
-    backgroundColor: colors.green,
-  },
-  errorCircle: {
-    borderRadius: 36,
-    backgroundColor: colors.red,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.textHeader,
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: 14,
-    color: colors.textSupplementary,
-    textAlign: 'center',
-  },
-  okButton: {
-    marginTop: 12,
-    alignSelf: 'stretch',
-    backgroundColor: colors.brandPink,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 14,
-    alignItems: 'center',
-  },
-  okButtonText: {
-    color: colors.white,
-    fontSize: 16,
-    fontWeight: '700',
-    letterSpacing: 0.3,
-  },
 });
+
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: 'rgba(21, 23, 26, 0.45)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 24,
+    },
+    card: {
+      backgroundColor: colors.white,
+      borderRadius: 28,
+      paddingVertical: 32,
+      paddingHorizontal: 28,
+      minWidth: 260,
+      maxWidth: 340,
+      alignItems: 'center',
+      gap: 14,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.2,
+      shadowRadius: 24,
+      elevation: 12,
+    },
+    iconSlot: {
+      width: 72,
+      height: 72,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    successCircle: {
+      borderRadius: 36,
+      backgroundColor: colors.green,
+    },
+    errorCircle: {
+      borderRadius: 36,
+      backgroundColor: colors.red,
+    },
+    title: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: colors.textHeader,
+      textAlign: 'center',
+    },
+    subtitle: {
+      fontSize: 14,
+      color: colors.textSupplementary,
+      textAlign: 'center',
+    },
+    okButton: {
+      marginTop: 12,
+      alignSelf: 'stretch',
+      backgroundColor: colors.brandPink,
+      paddingVertical: 12,
+      paddingHorizontal: 24,
+      borderRadius: 14,
+      alignItems: 'center',
+    },
+    okButtonText: {
+      color: colors.white,
+      fontSize: 16,
+      fontWeight: '700',
+      letterSpacing: 0.3,
+    },
+  });

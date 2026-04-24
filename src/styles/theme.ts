@@ -1,22 +1,12 @@
-export const colors = {
-  brandPink: '#EC008C',
-  brandPinkLight: '#FFF0F5',
-  white: '#FFFFFF',
-  background: '#F5F5F5',
-  textHeader: '#15171A',
-  textBody: '#333333',
-  textSupplementary: '#7C8B9A',
-  divider: '#DDE1E3',
-  green: '#4CAF50',
-  greenLight: '#E8F5E9',
-  greenDark: '#2E7D32',
-  red: '#F44336',
-  courseTeal: '#109AB8',
-  // Transaction-type badge palette.
-  bitcoinOrange: '#F7931A',
-  bitcoinOrangeLight: '#FFF1E0',
-  boltzNavy: '#232742',
-  // Shared zap colour for Lightning + Boltz badges — Boltz's brand yellow
-  // doubles nicely against the Lightning Piggy pink.
-  zapYellow: '#FFC107',
-};
+// Static colour constants for the light palette. New code should prefer
+// `useThemeColors()` from '../contexts/ThemeContext' so that components
+// respect the active light/dark/system preference. This export remains for
+// non-component call sites (utils, constants, initial StyleSheet defaults)
+// where accessing the React context isn't possible — those places will
+// always render in the light palette.
+import { lightPalette } from './palettes';
+
+export const colors = lightPalette;
+
+export type { Palette, ThemePreference, ResolvedScheme } from './palettes';
+export { lightPalette, darkPalette } from './palettes';

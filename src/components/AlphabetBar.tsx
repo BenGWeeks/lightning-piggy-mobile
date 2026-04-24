@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, GestureResponderEvent } from 'react-native';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
+import type { Palette } from '../styles/palettes';
 
 interface Props {
   letters: string[];
@@ -10,6 +11,8 @@ interface Props {
 
 const AlphabetBar: React.FC<Props> = React.memo(
   ({ letters, currentLetter, onLetterPress }) => {
+    const colors = useThemeColors();
+    const styles = useMemo(() => createStyles(colors), [colors]);
     const [tapped, setTapped] = useState<string | null>(null);
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const onPressRef = useRef(onLetterPress);
@@ -116,37 +119,38 @@ const AlphabetBar: React.FC<Props> = React.memo(
 );
 AlphabetBar.displayName = 'AlphabetBar';
 
-const styles = StyleSheet.create({
-  alphabetBar: {
-    flexDirection: 'column',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 12,
-    paddingBottom: 16,
-    width: 22,
-    marginLeft: 2,
-  },
-  alphabetLetterTouch: {
-    paddingHorizontal: 2,
-    paddingVertical: 1,
-    borderRadius: 8,
-    width: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  alphabetLetterActive: {
-    backgroundColor: colors.brandPink,
-    borderRadius: 8,
-  },
-  alphabetLetter: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.textSupplementary,
-    textAlign: 'center',
-  },
-  alphabetLetterTextActive: {
-    color: colors.white,
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    alphabetBar: {
+      flexDirection: 'column',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingTop: 12,
+      paddingBottom: 16,
+      width: 22,
+      marginLeft: 2,
+    },
+    alphabetLetterTouch: {
+      paddingHorizontal: 2,
+      paddingVertical: 1,
+      borderRadius: 8,
+      width: 18,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    alphabetLetterActive: {
+      backgroundColor: colors.brandPink,
+      borderRadius: 8,
+    },
+    alphabetLetter: {
+      fontSize: 10,
+      fontWeight: '700',
+      color: colors.textSupplementary,
+      textAlign: 'center',
+    },
+    alphabetLetterTextActive: {
+      color: colors.white,
+    },
+  });
 
 export default AlphabetBar;

@@ -22,7 +22,8 @@ import * as Clipboard from 'expo-clipboard';
 import Toast from 'react-native-toast-message';
 import { npubEncode, nprofileEncode, buildProfileRelayHints } from '../services/nostrService';
 import { useNostr } from '../contexts/NostrContext';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
+import type { Palette } from '../styles/palettes';
 import FriendPickerSheet, { PickedFriend } from './FriendPickerSheet';
 
 interface ContactData {
@@ -52,6 +53,8 @@ const ContactProfileSheet: React.FC<Props> = ({
   onMessage,
   onSetLightningAddress,
 }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['55%'], []);
   const { contacts, followContact, unfollowContact, sendDirectMessage, relays } = useNostr();
@@ -422,204 +425,205 @@ const ContactProfileSheet: React.FC<Props> = ({
   );
 };
 
-const styles = StyleSheet.create({
-  sheetBackground: {
-    backgroundColor: colors.white,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-  },
-  content: {
-    alignItems: 'center',
-    paddingBottom: 40,
-  },
-  handleOverlay: {
-    position: 'absolute',
-    top: 8,
-    left: 0,
-    right: 0,
-    zIndex: 1,
-    alignItems: 'center',
-  },
-  handleBar: {
-    width: 40,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: 'rgba(255,255,255,0.7)',
-  },
-  bannerContainer: {
-    width: '100%',
-    height: 120,
-    overflow: 'hidden',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-  },
-  bannerImage: {
-    width: '100%',
-    height: 120,
-  },
-  bannerPlaceholder: {
-    width: '100%',
-    height: 120,
-    backgroundColor: colors.brandPink,
-    opacity: 0.15,
-  },
-  avatarContainer: {
-    marginTop: -36,
-    borderRadius: 39,
-    borderWidth: 3,
-    borderColor: colors.white,
-    overflow: 'hidden',
-    backgroundColor: colors.background,
-  },
-  avatar: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-  },
-  avatarDefault: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  name: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.textHeader,
-    marginTop: 8,
-    paddingHorizontal: 24,
-    maxWidth: '100%',
-  },
-  nip05: {
-    fontSize: 13,
-    color: colors.brandPink,
-    marginTop: 2,
-  },
-  npubRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 6,
-    backgroundColor: colors.background,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  npubText: {
-    fontSize: 12,
-    color: colors.textSupplementary,
-    fontWeight: '500',
-  },
-  lightningAddress: {
-    fontSize: 13,
-    color: colors.textSupplementary,
-    marginTop: 4,
-    paddingHorizontal: 24,
-    maxWidth: '100%',
-  },
-  lnAddressRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 4,
-    paddingHorizontal: 24,
-  },
-  lnAddressEditRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 8,
-    paddingHorizontal: 24,
-  },
-  lnAddressInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: colors.brandPinkLight,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 14,
-    color: colors.textHeader,
-  },
-  lnAddressSaveButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: colors.brandPink,
-  },
-  lnAddressSaveText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.white,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 20,
-    paddingHorizontal: 16,
-  },
-  followButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: colors.brandPink,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  followingButton: {
-    backgroundColor: colors.brandPinkLight,
-    borderColor: colors.brandPinkLight,
-  },
-  followButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.brandPink,
-  },
-  followingButtonText: {
-    color: colors.brandPink,
-  },
-  zapButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 10,
-    backgroundColor: colors.brandPink,
-  },
-  zapButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.white,
-  },
-  messageButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 10,
-    backgroundColor: colors.brandPink,
-  },
-  messageButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.white,
-  },
-  iconButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: colors.brandPink,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    sheetBackground: {
+      backgroundColor: colors.white,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+    },
+    content: {
+      alignItems: 'center',
+      paddingBottom: 40,
+    },
+    handleOverlay: {
+      position: 'absolute',
+      top: 8,
+      left: 0,
+      right: 0,
+      zIndex: 1,
+      alignItems: 'center',
+    },
+    handleBar: {
+      width: 40,
+      height: 5,
+      borderRadius: 3,
+      backgroundColor: 'rgba(255,255,255,0.7)',
+    },
+    bannerContainer: {
+      width: '100%',
+      height: 120,
+      overflow: 'hidden',
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+    },
+    bannerImage: {
+      width: '100%',
+      height: 120,
+    },
+    bannerPlaceholder: {
+      width: '100%',
+      height: 120,
+      backgroundColor: colors.brandPink,
+      opacity: 0.15,
+    },
+    avatarContainer: {
+      marginTop: -36,
+      borderRadius: 39,
+      borderWidth: 3,
+      borderColor: colors.white,
+      overflow: 'hidden',
+      backgroundColor: colors.background,
+    },
+    avatar: {
+      width: 72,
+      height: 72,
+      borderRadius: 36,
+    },
+    avatarDefault: {
+      width: 72,
+      height: 72,
+      borderRadius: 36,
+      backgroundColor: colors.background,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    name: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: colors.textHeader,
+      marginTop: 8,
+      paddingHorizontal: 24,
+      maxWidth: '100%',
+    },
+    nip05: {
+      fontSize: 13,
+      color: colors.brandPink,
+      marginTop: 2,
+    },
+    npubRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginTop: 6,
+      backgroundColor: colors.background,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 8,
+    },
+    npubText: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      fontWeight: '500',
+    },
+    lightningAddress: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+      marginTop: 4,
+      paddingHorizontal: 24,
+      maxWidth: '100%',
+    },
+    lnAddressRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginTop: 4,
+      paddingHorizontal: 24,
+    },
+    lnAddressEditRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginTop: 8,
+      paddingHorizontal: 24,
+    },
+    lnAddressInput: {
+      flex: 1,
+      borderWidth: 1,
+      borderColor: colors.brandPinkLight,
+      borderRadius: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      fontSize: 14,
+      color: colors.textHeader,
+    },
+    lnAddressSaveButton: {
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: 8,
+      backgroundColor: colors.brandPink,
+    },
+    lnAddressSaveText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.white,
+    },
+    actionRow: {
+      flexDirection: 'row',
+      gap: 8,
+      marginTop: 20,
+      paddingHorizontal: 16,
+    },
+    followButton: {
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      borderRadius: 10,
+      borderWidth: 1.5,
+      borderColor: colors.brandPink,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    followingButton: {
+      backgroundColor: colors.brandPinkLight,
+      borderColor: colors.brandPinkLight,
+    },
+    followButtonText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.brandPink,
+    },
+    followingButtonText: {
+      color: colors.brandPink,
+    },
+    zapButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 4,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      borderRadius: 10,
+      backgroundColor: colors.brandPink,
+    },
+    zapButtonText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.white,
+    },
+    messageButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 4,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      borderRadius: 10,
+      backgroundColor: colors.brandPink,
+    },
+    messageButtonText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.white,
+    },
+    iconButton: {
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+      borderRadius: 10,
+      borderWidth: 1.5,
+      borderColor: colors.brandPink,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+  });
 
 export default ContactProfileSheet;

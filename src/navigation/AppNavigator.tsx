@@ -1,11 +1,11 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, ActivityIndicator, View, Platform } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Home, MessageCircle, GraduationCap, Users } from 'lucide-react-native';
 import { useWallet } from '../contexts/WalletContext';
-import { colors } from '../styles/theme';
+import { useTheme } from '../contexts/ThemeContext';
 import { RootStackParamList, LearnStackParamList, MainTabParamList } from './types';
 
 import IntroScreen from '../screens/IntroScreen';
@@ -34,13 +34,14 @@ function LearnStackNavigator() {
 }
 
 function HomeTabs() {
+  const { colors } = useTheme();
   return (
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
         freezeOnBlur: true,
         tabBarStyle: {
-          backgroundColor: colors.white,
+          backgroundColor: colors.surface,
           borderTopColor: colors.divider,
           height: Platform.OS === 'android' ? 80 : 70,
           paddingBottom: Platform.OS === 'android' ? 20 : 10,
@@ -112,35 +113,39 @@ function HomeTabs() {
 
 export default function AppNavigator() {
   const { isOnboarded, isLoading } = useWallet();
+  const { scheme, colors } = useTheme();
+
+  const navTheme = useMemo(
+    () => ({
+      dark: scheme === 'dark',
+      colors: {
+        primary: colors.brandPink,
+        background: colors.background,
+        card: colors.surface,
+        text: colors.textHeader,
+        border: colors.divider,
+        notification: colors.brandPink,
+      },
+      fonts: {
+        regular: { fontFamily: 'System', fontWeight: '400' as const },
+        medium: { fontFamily: 'System', fontWeight: '500' as const },
+        bold: { fontFamily: 'System', fontWeight: '700' as const },
+        heavy: { fontFamily: 'System', fontWeight: '900' as const },
+      },
+    }),
+    [scheme, colors],
+  );
 
   if (isLoading) {
     return (
-      <View style={styles.loadingContainer}>
+      <View style={[styles.loadingContainer, { backgroundColor: colors.brandPink }]}>
         <ActivityIndicator size="large" color={colors.white} />
       </View>
     );
   }
 
   return (
-    <NavigationContainer
-      theme={{
-        dark: false,
-        colors: {
-          primary: colors.brandPink,
-          background: colors.brandPink,
-          card: colors.white,
-          text: colors.textHeader,
-          border: colors.divider,
-          notification: colors.brandPink,
-        },
-        fonts: {
-          regular: { fontFamily: 'System', fontWeight: '400' },
-          medium: { fontFamily: 'System', fontWeight: '500' },
-          bold: { fontFamily: 'System', fontWeight: '700' },
-          heavy: { fontFamily: 'System', fontWeight: '900' },
-        },
-      }}
-    >
+    <NavigationContainer theme={navTheme}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {!isOnboarded ? (
           <>
@@ -161,7 +166,6 @@ export default function AppNavigator() {
 const styles = StyleSheet.create({
   loadingContainer: {
     flex: 1,
-    backgroundColor: colors.brandPink,
     justifyContent: 'center',
     alignItems: 'center',
   },
