@@ -1,13 +1,15 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
-import { Trash2, Eye, EyeOff, ChevronUp, ChevronDown } from 'lucide-react-native';
+import { Trash2, Eye, EyeOff, ChevronUp, ChevronDown, Plus } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
 import { sharedAccountStyles } from './sharedStyles';
+import AddWalletWizard from '../../components/AddWalletWizard';
 import { useWallet } from '../../contexts/WalletContext';
 import { colors } from '../../styles/theme';
 
 const WalletsScreen: React.FC = () => {
   const { wallets, removeWallet, updateWalletSettings, reorderWallet } = useWallet();
+  const [wizardOpen, setWizardOpen] = useState(false);
   const connectedCount = wallets.filter((w) =>
     w.walletType === 'onchain' ? w.balance !== null : w.isConnected,
   ).length;
@@ -17,7 +19,7 @@ const WalletsScreen: React.FC = () => {
       <View style={sharedAccountStyles.card}>
         <Text style={styles.walletSummary}>
           {wallets.length === 0
-            ? 'No wallets connected. Add one from the Home screen.'
+            ? 'No wallets connected. Add one to get started.'
             : `${wallets.length} wallet${wallets.length !== 1 ? 's' : ''} (${connectedCount} connected)`}
         </Text>
         {wallets.map((w, index) => (
@@ -105,7 +107,17 @@ const WalletsScreen: React.FC = () => {
             </View>
           </View>
         ))}
+        <TouchableOpacity
+          style={styles.addWalletButton}
+          onPress={() => setWizardOpen(true)}
+          accessibilityLabel="Add wallet"
+          testID="add-wallet-button"
+        >
+          <Plus size={18} color={colors.brandPink} />
+          <Text style={styles.addWalletText}>Add Wallet</Text>
+        </TouchableOpacity>
       </View>
+      <AddWalletWizard visible={wizardOpen} onClose={() => setWizardOpen(false)} />
     </AccountScreenLayout>
   );
 };
@@ -142,6 +154,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+  },
+  addWalletButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 12,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: colors.white,
+    borderWidth: 2,
+    borderColor: colors.brandPink,
+  },
+  addWalletText: {
+    color: colors.brandPink,
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
 

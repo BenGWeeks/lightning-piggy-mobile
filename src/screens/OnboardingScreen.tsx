@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   KeyboardAvoidingView,
@@ -17,27 +16,11 @@ import { CURRENCIES } from '../services/fiatService';
 import NostrLoginSheet from '../components/NostrLoginSheet';
 
 const OnboardingScreen: React.FC = () => {
-  const { setUserName, currency, setCurrency, completeOnboarding } = useWallet();
+  const { currency, setCurrency, completeOnboarding } = useWallet();
   const { isLoggedIn, profile, logout } = useNostr();
-  const [nameInput, setNameInput] = useState('');
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
 
-  // Auto-fill name from Nostr profile when it loads. Lightning Address is
-  // now set per-wallet (Wallet Settings → Lightning Address), so it's
-  // captured during the Add Wallet flow rather than at onboarding.
-  React.useEffect(() => {
-    if (profile) {
-      const nostrName = profile.displayName || profile.name;
-      if (nostrName) {
-        setNameInput(nostrName);
-      }
-    }
-  }, [profile]);
-
   const handleGetStarted = async () => {
-    if (nameInput.trim()) {
-      await setUserName(nameInput.trim());
-    }
     await completeOnboarding();
   };
 
@@ -62,7 +45,6 @@ const OnboardingScreen: React.FC = () => {
                   style: 'destructive',
                   onPress: () => {
                     logout();
-                    setNameInput('');
                   },
                 },
               ])
@@ -81,17 +63,6 @@ const OnboardingScreen: React.FC = () => {
             <Text style={styles.nostrButtonText}>Connect Nostr</Text>
           </TouchableOpacity>
         )}
-
-        <Text style={[styles.sectionLabel, { marginTop: 24 }]}>What's your name?</Text>
-        <TextInput
-          style={styles.textInput}
-          placeholder="Enter your name"
-          placeholderTextColor="rgba(255,255,255,0.5)"
-          value={nameInput}
-          onChangeText={setNameInput}
-          autoCapitalize="words"
-          autoCorrect={false}
-        />
 
         <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Preferred Currency</Text>
         <View style={styles.currencyRow}>

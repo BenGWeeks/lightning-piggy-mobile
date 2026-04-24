@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Alert } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import AccountScreenLayout from './AccountScreenLayout';
 import { sharedAccountStyles } from './sharedStyles';
@@ -9,11 +9,46 @@ import {
   DEFAULT_BLOSSOM_SERVER,
 } from '../../services/walletStorageService';
 import * as amberService from '../../services/amberService';
+import { DEFAULT_RELAYS, getRelayConnectionStatus } from '../../services/nostrService';
 import { useNostr } from '../../contexts/NostrContext';
 import { colors } from '../../styles/theme';
 
+type RelayRow = {
+  url: string;
+  source: 'user' | 'default' | 'both';
+  read: boolean;
+  write: boolean;
+  connected: boolean;
+};
+
 const NostrScreen: React.FC = () => {
-  const { profile, signerType, amberNip44Permission } = useNostr();
+  const { profile, signerType, amberNip44Permission, relays } = useNostr();
+  const [connStatus, setConnStatus] = useState<Map<string, boolean>>(new Map());
+
+  useEffect(() => {
+    const tick = () => setConnStatus(new Map(getRelayConnectionStatus()));
+    tick();
+    const id = setInterval(tick, 3000);
+    return () => clearInterval(id);
+  }, []);
+
+  const relayRows = useMemo<RelayRow[]>(() => {
+    const userMap = new Map(relays.map((r) => [r.url, r]));
+    const defaultSet = new Set<string>(DEFAULT_RELAYS);
+    const urls = new Set<string>([...userMap.keys(), ...defaultSet]);
+    return [...urls].map((url) => {
+      const u = userMap.get(url);
+      const inDefault = defaultSet.has(url);
+      const source: RelayRow['source'] = u && inDefault ? 'both' : u ? 'user' : 'default';
+      return {
+        url,
+        source,
+        read: u ? u.read : true,
+        write: u ? u.write : true,
+        connected: connStatus.get(url) === true,
+      };
+    });
+  }, [relays, connStatus]);
   const [blossomServer, setBlossomServerInput] = useState(DEFAULT_BLOSSOM_SERVER);
   const [amberNip17Enabled, setAmberNip17Enabled] = useState(false);
 
@@ -56,7 +91,41 @@ const NostrScreen: React.FC = () => {
 
   return (
     <AccountScreenLayout title="Nostr">
-      <Text style={sharedAccountStyles.sectionLabel}>Image Server (Blossom)</Text>
+      <Text style={sharedAccountStyles.sectionLabel}>Relays</Text>
+      <View style={styles.relayList}>
+        {relayRows.map((r) => {
+          const mode = r.read && r.write ? 'read/write' : r.write ? 'write' : 'read';
+          const sourceLabel =
+            r.source === 'both' ? 'NIP-65 + default' : r.source === 'user' ? 'NIP-65' : 'default';
+          return (
+            <View key={r.url} style={styles.relayRow}>
+              <View
+                style={[
+                  styles.statusDot,
+                  { backgroundColor: r.connected ? colors.green : colors.red },
+                ]}
+                accessibilityLabel={r.connected ? 'Connected' : 'Disconnected'}
+              />
+              <View style={styles.relayMain}>
+                <Text style={styles.relayUrl} numberOfLines={1} ellipsizeMode="middle">
+                  {r.url}
+                </Text>
+                <Text style={styles.relaySource}>{sourceLabel}</Text>
+              </View>
+              <Text style={styles.relayMode}>{mode}</Text>
+            </View>
+          );
+        })}
+      </View>
+      <Text style={sharedAccountStyles.fieldHint}>
+        Green dot = currently connected. NIP-65 relays come from your published kind-10002 list;
+        defaults are baked into the app and always tried as a fallback. Editing is not yet
+        supported in-app — update via another Nostr client for now.
+      </Text>
+
+      <Text style={[sharedAccountStyles.sectionLabel, { marginTop: 24 }]}>
+        Image Server (Blossom)
+      </Text>
       <TextInput
         style={sharedAccountStyles.textInput}
         value={blossomServer}
@@ -139,5 +208,46 @@ const NostrScreen: React.FC = () => {
     </AccountScreenLayout>
   );
 };
+
+const styles = StyleSheet.create({
+  relayList: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 10,
+    paddingVertical: 4,
+  },
+  relayRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    gap: 10,
+  },
+  statusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: colors.white,
+  },
+  relayMain: {
+    flex: 1,
+  },
+  relayUrl: {
+    color: colors.white,
+    fontSize: 13,
+  },
+  relaySource: {
+    color: colors.white,
+    fontSize: 10,
+    opacity: 0.6,
+    marginTop: 1,
+  },
+  relayMode: {
+    color: colors.white,
+    fontSize: 11,
+    opacity: 0.7,
+    fontWeight: '500',
+  },
+});
 
 export default NostrScreen;

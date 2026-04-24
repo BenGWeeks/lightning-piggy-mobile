@@ -6,8 +6,7 @@ import {
   Wallet,
   Globe,
   Link as LinkIcon,
-  Type,
-  HelpCircle,
+  Coins,
   Info,
   LogOut,
 } from 'lucide-react-native';
@@ -53,15 +52,9 @@ const SECTION_ROWS: SectionRow[] = [
   },
   {
     name: 'AccountDisplay',
-    label: 'Display',
-    icon: <Type size={22} color={colors.textBody} />,
+    label: 'Currency',
+    icon: <Coins size={22} color={colors.textBody} />,
     testID: 'drawer-row-display',
-  },
-  {
-    name: 'AccountSupport',
-    label: 'Support',
-    icon: <HelpCircle size={22} color={colors.textBody} />,
-    testID: 'drawer-row-support',
   },
   {
     name: 'AccountAbout',

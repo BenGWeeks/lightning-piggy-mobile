@@ -727,3 +727,7 @@ export function cleanup(): void {
   pool.close([...connectedRelays, ...DEFAULT_RELAYS]);
   connectedRelays.clear();
 }
+
+export function getRelayConnectionStatus(): Map<string, boolean> {
+  return pool.listConnectionStatus();
+}

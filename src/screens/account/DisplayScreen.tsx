@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
+import React from 'react';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import AccountScreenLayout from './AccountScreenLayout';
 import { sharedAccountStyles } from './sharedStyles';
 import { useWallet } from '../../contexts/WalletContext';
@@ -7,35 +7,11 @@ import { colors } from '../../styles/theme';
 import { CURRENCIES } from '../../services/fiatService';
 
 const DisplayScreen: React.FC = () => {
-  const { userName, setUserName, currency, setCurrency } = useWallet();
-  const [nameInput, setNameInput] = useState(userName);
-  const scrollRef = useRef<ScrollView>(null);
-
-  useEffect(() => {
-    setNameInput(userName);
-  }, [userName]);
-
-  const handleSave = async () => {
-    await setUserName(nameInput.trim());
-    Alert.alert('Saved', 'Your settings have been saved.');
-  };
+  const { currency, setCurrency } = useWallet();
 
   return (
-    <AccountScreenLayout title="Display" scrollRef={scrollRef}>
-      <Text style={sharedAccountStyles.sectionLabel}>Your Name</Text>
-      <TextInput
-        style={sharedAccountStyles.textInput}
-        placeholder="Enter your name"
-        placeholderTextColor="rgba(0,0,0,0.3)"
-        value={nameInput}
-        onChangeText={setNameInput}
-        autoCapitalize="words"
-        autoCorrect={false}
-        testID="display-name-input"
-        accessibilityLabel="Your name"
-      />
-
-      <Text style={[sharedAccountStyles.sectionLabel, { marginTop: 24 }]}>Currency</Text>
+    <AccountScreenLayout title="Currency">
+      <Text style={sharedAccountStyles.sectionLabel}>Currency</Text>
       <View style={styles.currencyRow}>
         {CURRENCIES.map((cur) => (
           <TouchableOpacity
@@ -53,15 +29,6 @@ const DisplayScreen: React.FC = () => {
           </TouchableOpacity>
         ))}
       </View>
-
-      <TouchableOpacity
-        style={sharedAccountStyles.saveButton}
-        onPress={handleSave}
-        accessibilityLabel="Save display settings"
-        testID="display-save-button"
-      >
-        <Text style={sharedAccountStyles.saveButtonText}>Save</Text>
-      </TouchableOpacity>
     </AccountScreenLayout>
   );
 };

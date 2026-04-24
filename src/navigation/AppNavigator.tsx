@@ -28,7 +28,6 @@ import WalletsScreen from '../screens/account/WalletsScreen';
 import NostrScreen from '../screens/account/NostrScreen';
 import OnChainScreen from '../screens/account/OnChainScreen';
 import DisplayScreen from '../screens/account/DisplayScreen';
-import SupportScreen from '../screens/account/SupportScreen';
 import AboutScreen from '../screens/account/AboutScreen';
 import AccountDrawerContent from '../components/AccountDrawerContent';
 
@@ -126,7 +125,7 @@ function MainDrawer() {
   const { width } = useWindowDimensions();
   // Drawer width sized to fit the menu comfortably (not a fixed 50%).
   // Capped so it still looks like a drawer on tablets.
-  const drawerWidth = Math.min(Math.max(280, width * 0.78), 360);
+  const drawerWidth = Math.min(Math.max(280, width * 0.65), 360);
 
   return (
     <AccountDrawer.Navigator
@@ -135,6 +134,7 @@ function MainDrawer() {
       screenOptions={{
         headerShown: false,
         drawerType: 'front',
+        drawerPosition: 'right',
         drawerStyle: { width: drawerWidth, backgroundColor: colors.white },
         swipeEdgeWidth: 32,
       }}
@@ -145,7 +145,6 @@ function MainDrawer() {
       <AccountDrawer.Screen name="AccountNostr" component={NostrScreen} />
       <AccountDrawer.Screen name="AccountOnChain" component={OnChainScreen} />
       <AccountDrawer.Screen name="AccountDisplay" component={DisplayScreen} />
-      <AccountDrawer.Screen name="AccountSupport" component={SupportScreen} />
       <AccountDrawer.Screen name="AccountAbout" component={AboutScreen} />
     </AccountDrawer.Navigator>
   );
