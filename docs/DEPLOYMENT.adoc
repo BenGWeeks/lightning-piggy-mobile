@@ -65,7 +65,7 @@ APP_VARIANT=development npx expo run:android
 npx expo run:android
 ----
 
-==== Dogfooding: local production build → owner's Pixel (fast loop)
+==== Dogfooding: local production build → physical Android device (fast loop)
 
 When you want to ship a working release to your own device **without**
 cutting a formal GitHub Release (TestFlight / Play are not yet wired,
