@@ -7,7 +7,6 @@ import {
   Pressable,
   Modal,
   FlatList,
-  KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
   RefreshControl,
@@ -15,6 +14,7 @@ import {
   AppState,
   Image,
   Linking,
+  Keyboard,
   StyleSheet,
 } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
@@ -231,8 +231,15 @@ const ConversationScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { pubkey, name, picture, lightningAddress } = route.params;
 
-  const { isLoggedIn, fetchConversation, sendDirectMessage, signEvent, contacts, relays } =
-    useNostr();
+  const {
+    isLoggedIn,
+    fetchConversation,
+    getCachedConversation,
+    sendDirectMessage,
+    signEvent,
+    contacts,
+    relays,
+  } = useNostr();
   const { wallets, activeWalletId, activeWallet } = useWallet();
 
   const [messages, setMessages] = useState<
@@ -247,6 +254,11 @@ const ConversationScreen: React.FC = () => {
   const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState(false);
   const [detailTx, setDetailTx] = useState<TransactionDetailData | null>(null);
+  // Keyboard height — tracked explicitly so we can push the composer
+  // up manually. KeyboardAvoidingView with `behavior="padding"` is
+  // unreliable on Android 15+ edge-to-edge where `adjustResize`
+  // doesn't shrink past the IME. Same pattern as SendSheet/ReceiveSheet.
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
   // Profiles resolved from `nostr:` contact references the other party
   // has shared in this conversation. Keyed by hex pubkey; a `null` value
@@ -353,26 +365,77 @@ const ConversationScreen: React.FC = () => {
     return withHeaders;
   }, [messages, zapItems]);
 
+  // Mount/unmount tracker so the async `load()` below can bail when
+  // the user navigates back mid-fetch. Without this, every back-press
+  // during the 6-12 s cold fetchConversation still runs the full
+  // decrypt + persist chain on the unmounted component, wasting JS
+  // thread time that could have been responding to input.
+  // Declared BEFORE `load` because `load`'s body closes over it.
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   const load = useCallback(
     async (showSpinner: boolean) => {
       if (!isLoggedIn) {
         setLoading(false);
         return;
       }
-      if (showSpinner) setLoading(true);
+      // Paint cached messages instantly if we have any — user sees a
+      // populated thread within one frame instead of "Loading…" for
+      // the 6-8 s relay round-trip. Arcade `db_only=true` pattern.
+      // Only show the spinner if the cache was empty (true cold open).
+      const cached = await getCachedConversation(pubkey);
+      if (isMountedRef.current && cached.length > 0) {
+        setMessages(cached);
+        setLoading(false);
+      } else if (isMountedRef.current && showSpinner) {
+        setLoading(true);
+      }
       try {
         const conv = await fetchConversation(pubkey);
-        setMessages(conv);
+        // If the user navigated away while the fetch was in flight,
+        // don't fire state updates — those would either trigger a
+        // re-render on an unmounted component (React warning) or land
+        // on the *next* thread that inherits this instance. Check the
+        // ref and bail.
+        if (isMountedRef.current) {
+          setMessages(conv);
+        }
       } finally {
-        if (showSpinner) setLoading(false);
+        if (isMountedRef.current) {
+          setLoading(false);
+        }
       }
     },
-    [isLoggedIn, fetchConversation, pubkey],
+    [isLoggedIn, fetchConversation, getCachedConversation, pubkey],
   );
 
   useEffect(() => {
     load(true);
   }, [load]);
+
+  // Track keyboard height so the composer sits above the IME on
+  // Android 15+ edge-to-edge, where KeyboardAvoidingView's built-in
+  // behaviors are unreliable. iOS uses `keyboardWillShow/Hide` for
+  // a smooth animated transition; Android uses `DidShow/Hide` because
+  // `WillShow` isn't emitted there.
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   // Jump to the newest message on first content load, and when the user is
   // already near the bottom and a new message arrives. The list is
@@ -1237,11 +1300,13 @@ const ConversationScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
 
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
-      >
+      {/* Use a plain View instead of KeyboardAvoidingView — on
+          Android 15+ edge-to-edge, neither the `padding` nor `height`
+          behaviors of KAV reliably lift content above the IME. We
+          track `keyboardHeight` via `Keyboard.addListener` above and
+          apply it as `paddingBottom` on the composer directly. Same
+          pattern as SendSheet / ReceiveSheet in this repo. */}
+      <View style={styles.flex}>
         {loading ? (
           <View style={styles.loading}>
             <ActivityIndicator color={colors.brandPink} />
@@ -1255,6 +1320,22 @@ const ConversationScreen: React.FC = () => {
             renderItem={renderItem}
             contentContainerStyle={styles.listContent}
             inverted
+            // Window the list so a thread with hundreds of messages
+            // doesn't mount every row up front — first-frame work goes
+            // from "render all N bubbles + avatars" to "render the
+            // 20 newest then lazy-mount as the user scrolls". These
+            // defaults are chosen for chat-style threads: one screen
+            // fits ~8-10 bubbles, so 20 covers the visible viewport
+            // plus one screen of pre-roll for smooth momentum scrolls.
+            //
+            // NOTE: `removeClippedSubviews` is deliberately OFF. It's
+            // broken with `inverted` on Android — breaks the contentOffset
+            // reporting so onScroll's `y < 200` check flips when the user
+            // is visually at the bottom, making the scroll-to-bottom FAB
+            // show spuriously. See facebook/react-native#30521 / #26061.
+            initialNumToRender={20}
+            maxToRenderPerBatch={10}
+            windowSize={10}
             ListEmptyComponent={
               <View style={styles.empty}>
                 <Text style={styles.emptyTitle}>No messages yet</Text>
@@ -1295,7 +1376,19 @@ const ConversationScreen: React.FC = () => {
           </View>
         ) : null}
 
-        <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+        <View
+          style={[
+            styles.composer,
+            {
+              // When the keyboard is up: push the composer up by its
+              // full height (no safe-area pad needed; the keyboard
+              // covers that region). When it's down: keep the usual
+              // bottom safe-area inset so the composer doesn't touch
+              // the gesture bar.
+              paddingBottom: keyboardHeight > 0 ? keyboardHeight : Math.max(insets.bottom, 8),
+            },
+          ]}
+        >
           <TouchableOpacity
             style={styles.composerAttachButton}
             onPress={() => setAttachSheetOpen(true)}
@@ -1334,7 +1427,7 @@ const ConversationScreen: React.FC = () => {
             )}
           </TouchableOpacity>
         </View>
-      </KeyboardAvoidingView>
+      </View>
 
       <AttachSheet
         visible={attachSheetOpen}
