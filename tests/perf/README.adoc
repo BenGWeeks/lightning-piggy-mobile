@@ -1,0 +1,71 @@
+= Perf scripts
+
+Maestro-driven timing harness for three user-visible perf surfaces:
+
+[cols="1,3"]
+|===
+|Script |Measures
+
+|`cold-launch.sh`
+|Force-stop → launch → Home visible. BootSplash dwell + WalletContext boot + first render.
+
+|`tab-nav.sh`
+|Home ↔ Messages ↔ Learn ↔ Friends transitions. Tap → content-visible latency per tab; logs GC pressure and `[Perf]` markers during the walk.
+
+|`thread-open.sh`
+|Cold-cache vs warm-cache conversation open. Reports `[Perf] fetchConversation` lines so you can confirm `hits`/`fresh` decrypt counters.
+
+|`run-all.sh`
+|Chains the three above.
+|===
+
+== Setup
+
+1. Install Maestro: `curl -Ls "https://get.maestro.mobile.dev" \| bash`
+2. Plug in an Android device OR start an emulator (iOS not wired up yet — `adb` is assumed throughout).
+3. Install the app and sign in. The scripts expect your test identity to be following at least one friend (default: `Little Piggy`).
+4. If you want `thread-open.sh` to find a message reliably, the thread needs to contain text matching `$SEED` (default `[seed-`, which matches the `scripts/seed-dms.mjs` rumors). For real-world DMs override e.g. `SEED='Hello'`.
+
+The canonical test identities are `Little Piggy` and `Big Piggy`. `Big Piggy` follows `Little Piggy` and vice-versa; both have 200 seeded DMs in their thread. Use Big Piggy as the logged-in user and `PEER='Little Piggy'` to exercise the inbound-decrypt path.
+
+== Usage
+
+[source,bash]
+----
+# Defaults: DEVICE=<first attached>, PKG=com.lightningpiggy.app, PEER="Little Piggy", GREETING="Hello", SEED="[seed-"
+bash tests/perf/run-all.sh
+
+# Override for a dev build
+PKG=com.lightningpiggy.app.dev bash tests/perf/tab-nav.sh
+
+# Different peer (must be visible in your Messages list)
+PEER="Alice" SEED="gm" bash tests/perf/thread-open.sh
+
+# Pin a specific device when you have multiple attached
+DEVICE=emulator-5554 bash tests/perf/cold-launch.sh
+----
+
+== Output
+
+Each step prints `<label> <elapsed ms> <OK|FAIL>`.
+
+`tab-nav.sh` and `thread-open.sh` additionally capture logcat and dump any `[Perf]` markers at the end. On a cold cache you should see:
+
+[source]
+----
+[Perf] fetchConversation(abcd1234): 2341ms, k4=5, k1059=50, hits=0, fresh=50, rendered=55
+----
+
+On a second open of the same thread:
+
+[source]
+----
+[Perf] fetchConversation(abcd1234): 38ms, k4=5, k1059=50, hits=50, fresh=0, rendered=55
+----
+
+== When a step FAILs
+
+The Maestro output is dumped to `/tmp/piggy-perf/_maestro.out` (override the dir with `LOGDIR=`). Typical failures:
+
+* `extendedWaitUntil timed out` — the app didn't reach the expected state within the budget. Usually means a regression (step took longer than 30 s) or the wrong text/testID is being waited on. Check whether the screen actually renders the text you're looking for.
+* `tapOn: element not visible` — the selector didn't match. Verify `$PEER` / `$GREETING` / `$SEED` match what's on-screen.
