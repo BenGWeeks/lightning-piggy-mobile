@@ -1293,20 +1293,57 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
       for (const m of orderedByIndex) if (m !== null) decrypted.push(m);
 
-      // NIP-17 — partner pubkey is hidden inside the encrypted rumor, so
-      // we can't peer-scope at the relay. Pull all gift wraps addressed to
-      // me, unwrap, keep only rumors whose partner matches the current
-      // peer. Amber path reuses the persistent wrap-id cache populated by
-      // refreshDmInbox so re-entering a thread doesn't re-round-trip.
-      // For NIP-17 gift-wraps we can't peer-scope at the relay (partner
-      // pubkey is inside the encrypted rumor), so we use the inbox-wide
-      // last-seen (not the per-peer one) to narrow the gift-wrap query.
-      // Reading the inbox last-seen is cheap; it's a few bytes of
-      // AsyncStorage.
-      const inboxLastSeenForWraps = await loadLastSeen(inboxLastSeenKey(pubkey));
-      const { kind1059 } = await nostrService.fetchInboxDmEvents(pubkey, readRelays, {
-        since: inboxLastSeenForWraps,
-      });
+      // NIP-17 — partner pubkey is hidden inside the encrypted rumor,
+      // so we can't peer-scope at the relay. `refreshDmInbox` (which
+      // the Messages tab fires on focus with a 30s TTL) already
+      // decrypts every wrap addressed to us and writes the plaintext
+      // keyed by wrap id to the persistent cache. Serve the NIP-17
+      // portion of THIS thread from that cache first — if the cache
+      // has ANY entries, we skip the expensive inbox-wide relay
+      // fetch entirely (#190).
+      //
+      // Cold-cache fallback: if the cache has no entries at all (first
+      // app run post-login, or just-logged-out-logged-back-in) we
+      // still hit the relay so the thread renders even before any
+      // refreshDmInbox has fired. Subsequent opens short-circuit.
+      //
+      // Staleness tradeoff: a wrap that arrived in the last <30s and
+      // hasn't been pulled by refreshDmInbox yet won't show until the
+      // next tab focus. For a chat UX that's a non-issue.
+      const signerWrapCacheKey =
+        signerType === 'nsec'
+          ? NSEC_NIP17_CACHE_KEY
+          : signerType === 'amber'
+            ? AMBER_NIP17_CACHE_KEY
+            : null;
+      const wrapCacheRaw = signerWrapCacheKey
+        ? await AsyncStorage.getItem(signerWrapCacheKey)
+        : null;
+      const wrapCache = safeParseRecord<Nip17CacheEntry>(wrapCacheRaw);
+      const cachedWrapEntries = Object.values(wrapCache);
+      let skippedInboxFetch = false;
+      if (cachedWrapEntries.length > 0) {
+        // Cache populated — serve peer-matching wraps directly, skip relay fetch.
+        for (const entry of cachedWrapEntries) {
+          nip17CacheHits++;
+          if (entry.partnerPubkey !== normalized) continue;
+          decrypted.push({
+            id: entry.wrapId,
+            fromMe: entry.fromMe,
+            text: entry.text,
+            createdAt: entry.createdAt,
+          });
+        }
+        skippedInboxFetch = true;
+      }
+      const inboxLastSeenForWraps = skippedInboxFetch
+        ? undefined
+        : await loadLastSeen(inboxLastSeenKey(pubkey));
+      const { kind1059 } = skippedInboxFetch
+        ? { kind1059: [] as Awaited<ReturnType<typeof nostrService.fetchInboxDmEvents>>['kind1059'] }
+        : await nostrService.fetchInboxDmEvents(pubkey, readRelays, {
+            since: inboxLastSeenForWraps,
+          });
       if (kind1059.length > 0) {
         const onSkip = (reason: string, wrapId: string) => {
           if (__DEV__) console.warn(`[Nostr] NIP-17 thread unwrap skip (${wrapId}): ${reason}`);
@@ -1439,7 +1476,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         `[Perf] fetchConversation(${normalized.slice(0, 8)}): ` +
           `${(performance.now() - perfStart).toFixed(0)}ms, ` +
           `k4=${kind4Events.length} (hits=${nip04CacheHits}, fresh=${nip04FreshDecrypts}), ` +
-          `k1059=${nip17CacheHits + nip17FreshDecrypts} (hits=${nip17CacheHits}, fresh=${nip17FreshDecrypts}), ` +
+          `k1059=${nip17CacheHits + nip17FreshDecrypts} (hits=${nip17CacheHits}, fresh=${nip17FreshDecrypts}, skippedFetch=${skippedInboxFetch}), ` +
           `since=${convLastSeen ?? 0}, ` +
           `cached=${cachedConv.length}, ` +
           `merged=${merged.length}`,
