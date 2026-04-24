@@ -1,5 +1,13 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Image, RefreshControl } from 'react-native';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  Image,
+  RefreshControl,
+  InteractionManager,
+} from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Users, Clock } from 'lucide-react-native';
@@ -77,9 +85,19 @@ const MessagesScreen: React.FC = () => {
     });
   }, []);
 
+  // Defer the refresh until the Messages tab's transition animation
+  // and first-paint have finished. The refresh itself (relay fetches
+  // + decrypt loop) holds the JS thread for 3-5 s; running it inside
+  // the focus-effect callback synchronously meant navigating away
+  // from Messages felt laggy because the NEXT tab's render queued
+  // behind it. InteractionManager yields to the scheduler and runs
+  // the work once the UI is idle. `.cancel()` in cleanup avoids
+  // firing the refresh on a focus that was already abandoned.
   useFocusEffect(
     useCallback(() => {
-      if (isLoggedIn) refreshDmInbox();
+      if (!isLoggedIn) return;
+      const handle = InteractionManager.runAfterInteractions(() => refreshDmInbox());
+      return () => handle.cancel();
     }, [isLoggedIn, refreshDmInbox]),
   );
 

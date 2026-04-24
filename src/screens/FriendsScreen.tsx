@@ -8,6 +8,7 @@ import {
   RefreshControl,
   Alert,
 } from 'react-native';
+import { InteractionManager } from 'react-native';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Users } from 'lucide-react-native';
@@ -96,9 +97,17 @@ const FriendsScreen: React.FC = () => {
   // Force-refresh the own-profile kind-0 on focus so the top-right
   // profile icon picks up external renames (e.g. via Amber or another
   // client) without waiting for the 24h cache to expire. See #148.
+  //
+  // Deferred via InteractionManager so the tab-transition animation
+  // and first-paint of the Friends list finish *before* the (3-5 s)
+  // refresh kicks off — otherwise the JS thread's busy on the refresh
+  // while React is trying to render, and navigating away then feels
+  // laggy until the refresh completes.
   useFocusEffect(
     useCallback(() => {
-      if (isLoggedIn) refreshProfile();
+      if (!isLoggedIn) return;
+      const handle = InteractionManager.runAfterInteractions(() => refreshProfile());
+      return () => handle.cancel();
     }, [isLoggedIn, refreshProfile]),
   );
 

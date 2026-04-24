@@ -7,6 +7,7 @@ import {
   ScrollView,
   RefreshControl,
   ActivityIndicator,
+  InteractionManager,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
@@ -66,7 +67,14 @@ const HomeScreen: React.FC = () => {
   // `profile` — aligning those is tracked separately under #150.)
   useFocusEffect(
     useCallback(() => {
-      if (isLoggedIn) refreshProfile();
+      if (!isLoggedIn) return;
+      // Defer to after the tab-transition animation finishes — same
+      // rationale as Friends/Messages: refreshProfile can hold the JS
+      // thread briefly while it walks the profile cache and (on miss)
+      // hits a relay, and running it during the focus callback
+      // synchronously makes the tab feel laggy.
+      const handle = InteractionManager.runAfterInteractions(() => refreshProfile());
+      return () => handle.cancel();
     }, [isLoggedIn, refreshProfile]),
   );
 
