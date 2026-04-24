@@ -5,6 +5,7 @@ import {
   finalizeEvent,
   type VerifiedEvent,
 } from 'nostr-tools/pure';
+import type { Filter } from 'nostr-tools/filter';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nip04 from 'nostr-tools/nip04';
 import * as nip59 from 'nostr-tools/nip59';
@@ -565,31 +566,37 @@ export async function fetchDirectMessageEvents(
   myPubkey: string,
   otherPubkey: string,
   relays: string[],
-  options: { limit?: number } = {},
+  options: { limit?: number; since?: number } = {},
 ): Promise<RawDmEvent[]> {
   const allRelays = [...new Set([...relays, ...DEFAULT_RELAYS])];
   trackRelays(allRelays);
   const limit = options.limit ?? 200;
+  // Damus's trick (SubscriptionManager.swift:293-300): pad `since` back
+  // by 2 minutes so relays with slightly-off clocks still return the
+  // last few events we might have missed on the previous fetch. On
+  // first fetch (no cached last-seen) the caller passes undefined, so
+  // the filter has no `since` and the relay returns full history.
+  const since = options.since !== undefined ? Math.max(0, options.since - 120) : undefined;
+  const fromMeFilter: Filter = {
+    kinds: [4],
+    authors: [myPubkey],
+    '#p': [otherPubkey],
+    limit,
+  };
+  const toMeFilter: Filter = {
+    kinds: [4],
+    authors: [otherPubkey],
+    '#p': [myPubkey],
+    limit,
+  };
+  if (since !== undefined) {
+    fromMeFilter.since = since;
+    toMeFilter.since = since;
+  }
   try {
     const [fromMe, toMe] = await Promise.all([
-      withTimeout(
-        pool.querySync(allRelays, {
-          kinds: [4],
-          authors: [myPubkey],
-          '#p': [otherPubkey],
-          limit,
-        }),
-        15000,
-      ),
-      withTimeout(
-        pool.querySync(allRelays, {
-          kinds: [4],
-          authors: [otherPubkey],
-          '#p': [myPubkey],
-          limit,
-        }),
-        15000,
-      ),
+      withTimeout(pool.querySync(allRelays, fromMeFilter), 15000),
+      withTimeout(pool.querySync(allRelays, toMeFilter), 15000),
     ]);
     const byId = new Map<string, RawDmEvent>();
     for (const ev of fromMe ?? []) byId.set(ev.id, ev as RawDmEvent);
@@ -631,16 +638,28 @@ export interface FetchedInboxEvents {
 export async function fetchInboxDmEvents(
   myPubkey: string,
   relays: string[],
-  options: { limit?: number } = {},
+  options: { limit?: number; since?: number } = {},
 ): Promise<FetchedInboxEvents> {
   const allRelays = [...new Set([...relays, ...DEFAULT_RELAYS])];
   trackRelays(allRelays);
   const limit = options.limit ?? 500;
+  // `since` shifted back 2 minutes (Damus clock-drift pad). All three
+  // inbox sub-queries share the same since floor: any relay that
+  // stamped an event slightly-in-our-past still returns it.
+  const since = options.since !== undefined ? Math.max(0, options.since - 120) : undefined;
+  const sentK4Filter: Filter = { kinds: [4], authors: [myPubkey], limit };
+  const recvK4Filter: Filter = { kinds: [4], '#p': [myPubkey], limit };
+  const wrapsFilter: Filter = { kinds: [1059], '#p': [myPubkey], limit };
+  if (since !== undefined) {
+    sentK4Filter.since = since;
+    recvK4Filter.since = since;
+    wrapsFilter.since = since;
+  }
   try {
     const [sentK4, receivedK4, wraps] = await Promise.all([
-      withTimeout(pool.querySync(allRelays, { kinds: [4], authors: [myPubkey], limit }), 15000),
-      withTimeout(pool.querySync(allRelays, { kinds: [4], '#p': [myPubkey], limit }), 15000),
-      withTimeout(pool.querySync(allRelays, { kinds: [1059], '#p': [myPubkey], limit }), 15000),
+      withTimeout(pool.querySync(allRelays, sentK4Filter), 15000),
+      withTimeout(pool.querySync(allRelays, recvK4Filter), 15000),
+      withTimeout(pool.querySync(allRelays, wrapsFilter), 15000),
     ]);
     const k4 = new Map<string, RawDmEvent>();
     for (const ev of sentK4 ?? []) k4.set(ev.id, ev as RawDmEvent);

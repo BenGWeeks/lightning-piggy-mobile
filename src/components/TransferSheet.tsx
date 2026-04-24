@@ -16,6 +16,7 @@ import {
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetScrollView,
+  BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import * as SecureStore from 'expo-secure-store';
 import Toast from 'react-native-toast-message';
@@ -643,16 +644,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       handleIndicatorStyle={styles.handleIndicator}
       backgroundStyle={styles.sheetBackground}
     >
-      <BottomSheetScrollView
-        ref={scrollRef}
-        style={styles.content}
-        contentContainerStyle={{
-          ...styles.innerContent,
-          paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40,
-        }}
-        keyboardShouldPersistTaps="handled"
-      >
-        {step === 'amount' ? (
+      {step === 'amount' ? (
+        <BottomSheetView style={styles.content}>
           <AmountEntryScreen
             initialSats={currentSats}
             title="Transfer amount"
@@ -669,7 +662,17 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
               setStep('main');
             }}
           />
-        ) : (
+        </BottomSheetView>
+      ) : (
+        <BottomSheetScrollView
+          ref={scrollRef}
+          style={styles.content}
+          contentContainerStyle={{
+            ...styles.innerContent,
+            paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40,
+          }}
+          keyboardShouldPersistTaps="handled"
+        >
           <>
             <Text style={styles.title}>Transfer</Text>
 
@@ -899,8 +902,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
               </>
             )}
           </>
-        )}
-      </BottomSheetScrollView>
+        </BottomSheetScrollView>
+      )}
     </BottomSheetModal>
   );
 };

@@ -44,10 +44,13 @@ const WalletCarousel: React.FC<WalletCarouselProps> = ({
       const index = viewableItems[0].index ?? 0;
       setCurrentIndex(index);
       const item = viewableItems[0].item as CarouselItem;
+      // Only track the active wallet when a real wallet card is in view.
+      // Swiping onto the trailing "Add wallet" card must not clear
+      // activeWalletId — doing so would disable Home's Send/Receive
+      // buttons even though the user's just-added wallet still reports
+      // isConnected: true (see #166).
       if (item.type === 'wallet') {
         onWalletChange(item.wallet.id);
-      } else {
-        onWalletChange(null);
       }
     },
     [onWalletChange],

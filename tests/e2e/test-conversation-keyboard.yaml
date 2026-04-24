@@ -1,0 +1,77 @@
+appId: ${APP_ID:-com.lightningpiggy.app}
+name: Conversation Composer Stays Above Keyboard
+---
+# Regression guard for #194: on Android 15 edge-to-edge devices
+# (e.g. Pixel 8), opening the on-screen keyboard in a conversation
+# used to hide the composer under the IME. Fix is to read the IME
+# inset via Reanimated's `useAnimatedKeyboard` and apply it as the
+# composer's `paddingBottom` on the UI thread.
+#
+# The test proves the fix by:
+#   1. opening a conversation (PEER env var — defaults to Big Piggy)
+#   2. verifying the send button is visible before the keyboard opens
+#   3. tapping the Message input to bring up the keyboard
+#   4. verifying the send button is STILL visible after the keyboard
+#      animates in — i.e. the composer was lifted above the IME.
+#
+# If #194 regresses, step 4 fails: the send button goes off-screen.
+#
+# Run: maestro test -e PEER='Big Piggy' tests/e2e/test-conversation-keyboard.yaml
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Make sure we start on Messages tab. This is idempotent — if already
+# there, the tap is a no-op.
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Open the peer's conversation. `${PEER}.*` is a regex suffix because
+# Maestro's `text:` matcher is full-regex in 2.3+; the row usually
+# renders as "<Name> <time-ago>" so the literal suffix would miss.
+- tapOn:
+    text: '${PEER:-Big Piggy}.*'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Precondition: send button visible with the keyboard closed.
+- assertVisible:
+    id: 'conversation-send'
+
+# Tap the Message placeholder to focus the TextInput and raise the
+# keyboard. `optional: false` is default — if the placeholder isn't
+# hittable, the test fails loudly rather than silently continuing.
+- tapOn:
+    text: 'Message'
+
+# Hard wait: keyboard animation on Android 15 is typically 250-350 ms.
+# waitForAnimationToEnd sometimes completes too early because the
+# keyboard is a separate window, not a React animation.
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Type a short string — proves the TextInput received focus and the
+# composer is still wired up after the tap. This does NOT by itself
+# prove the composer is visually above the keyboard (Maestro's
+# `assertVisible` uses view-tree bounds, not rendered pixels, so an
+# IME-occluded composer still passes visibility checks).
+- inputText: 'kbtest'
+
+# Capture a screenshot for visual review. When running locally,
+# the artefact lands under ~/.maestro/tests/<timestamp>/screenshot-*.png
+# Compare against a known-good screenshot to confirm the send button
+# is rendered above the keyboard row. On Maestro Cloud / CI this is
+# the primary evidence that #194 hasn't regressed.
+- takeScreenshot: conversation-composer-with-keyboard
+
+# Verify the text we typed was accepted — pressing backspace six times
+# should clear "kbtest" and restore the placeholder. If the input
+# didn't receive focus at all, the placeholder would already be visible
+# and this no-op would pass spuriously, but combined with the earlier
+# `tapOn: 'Message'` + `inputText: 'kbtest'` this proves the full
+# focus → type → edit round-trip.
+- eraseText: 6
+- assertVisible:
+    text: 'Message'

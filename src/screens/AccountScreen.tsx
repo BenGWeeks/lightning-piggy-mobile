@@ -69,8 +69,6 @@ const AccountScreen: React.FC = () => {
     setUserName,
     currency,
     setCurrency,
-    lightningAddress,
-    setLightningAddress,
     wallets,
     removeWallet,
     updateWalletSettings,
@@ -86,7 +84,6 @@ const AccountScreen: React.FC = () => {
     refreshProfile,
   } = useNostr();
   const [nameInput, setNameInput] = useState(userName);
-  const [lnAddressInput, setLnAddressInput] = useState(lightningAddress || '');
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [qrSheetOpen, setQrSheetOpen] = useState(false);
@@ -233,36 +230,22 @@ const AccountScreen: React.FC = () => {
     disconnectElectrum(); // Force reconnect to new server on next sync
   };
 
-  useEffect(() => {
-    setLnAddressInput(lightningAddress || '');
-  }, [lightningAddress]);
-
-  // Profile merge: when Nostr profile is loaded and has different values
-  // Only prompt once per unique profile values (persisted so it doesn't nag)
+  // Profile merge: when Nostr profile is loaded and the display name differs
+  // from the local one, offer to adopt it. Lightning Address is per-wallet
+  // (see Wallet Settings) so we no longer compare it here.
   useEffect(() => {
     if (!profile) return;
 
     const nostrName = profile.displayName || profile.name;
-    const nostrLn = profile.lud16;
-    const changes: string[] = [];
+    if (!nostrName || nostrName === userName) return;
 
-    if (nostrName && nostrName !== userName) {
-      changes.push(`Name: "${nostrName}"`);
-    }
-    if (nostrLn && nostrLn !== lightningAddress) {
-      changes.push(`Lightning Address: "${nostrLn}"`);
-    }
-
-    if (changes.length === 0) return;
-
-    // Check if we already prompted for these exact values
-    const profileHash = `${nostrName}|${nostrLn}`;
+    const profileHash = `name:${nostrName}`;
     AsyncStorage.getItem('dismissed_profile_merge').then((dismissed) => {
       if (dismissed === profileHash) return;
 
       Alert.alert(
         'Update from Nostr Profile?',
-        `Your Nostr profile has:\n${changes.join('\n')}\n\nWould you like to use these?`,
+        `Your Nostr profile has:\nName: "${nostrName}"\n\nWould you like to use it?`,
         [
           {
             text: 'Keep Current',
@@ -272,25 +255,19 @@ const AccountScreen: React.FC = () => {
           {
             text: 'Update',
             onPress: async () => {
-              if (nostrName && nostrName !== userName) {
-                await setUserName(nostrName);
-              }
-              if (nostrLn && nostrLn !== lightningAddress) {
-                await setLightningAddress(nostrLn);
-              }
+              await setUserName(nostrName);
               await AsyncStorage.setItem('dismissed_profile_merge', profileHash);
             },
           },
         ],
       );
     });
-    // Only trigger on profile change, not on userName/lightningAddress changes
+    // Only trigger on profile change, not on userName changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
   const handleSave = async () => {
     await setUserName(nameInput.trim());
-    await setLightningAddress(lnAddressInput.trim() || null);
     Alert.alert('Saved', 'Your settings have been saved.');
   };
 
@@ -648,36 +625,6 @@ const AccountScreen: React.FC = () => {
           ))}
         </View>
 
-        {/* Lightning Address */}
-        <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Lightning Address</Text>
-        <View style={styles.lnAddressRow}>
-          <TextInput
-            style={[styles.textInput, { flex: 1 }]}
-            placeholder="user@wallet.com"
-            placeholderTextColor={colors.textSupplementary}
-            value={lnAddressInput}
-            onChangeText={setLnAddressInput}
-            onFocus={() => {
-              setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
-              setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 500);
-            }}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="email-address"
-          />
-          {lnAddressInput.trim() && profile?.npub && (
-            <TouchableOpacity
-              style={styles.lnQrButton}
-              onPress={() => {
-                setQrDefaultMode('lightning');
-                setQrSheetOpen(true);
-              }}
-            >
-              <QrIcon size={22} color={colors.brandPink} />
-            </TouchableOpacity>
-          )}
-        </View>
-
         {/* Save button */}
         <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
           <Text style={styles.saveButtonText}>Save</Text>
@@ -755,7 +702,7 @@ const AccountScreen: React.FC = () => {
           visible={qrSheetOpen}
           onClose={() => setQrSheetOpen(false)}
           npub={profile.npub}
-          lightningAddress={profile.lud16 || lnAddressInput.trim() || null}
+          lightningAddress={profile.lud16 ?? null}
           defaultMode={qrDefaultMode}
         />
       )}
@@ -982,19 +929,6 @@ const styles = StyleSheet.create({
   },
   sslToggleThumbActive: {
     alignSelf: 'flex-end',
-  },
-  lnAddressRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  lnQrButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: colors.white,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   currencyRow: {
     flexDirection: 'row',

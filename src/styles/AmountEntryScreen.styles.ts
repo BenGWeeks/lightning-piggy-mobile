@@ -9,7 +9,11 @@ const SWAP_DIAMETER = 48;
 
 export const amountEntryStyles = StyleSheet.create({
   container: {
-    flex: 1,
+    // No `flex: 1` — when rendered inside a dynamic-sized
+    // BottomSheetScrollView (parent's height is derived from children's
+    // intrinsic height), `flex: 1` has nothing to fill against and
+    // collapses the container, clipping the keypad. Natural stacking
+    // lets the component declare its own height from its children.
     width: '100%',
   },
   headerRow: {
@@ -164,7 +168,10 @@ export const amountEntryStyles = StyleSheet.create({
     fontWeight: '700',
   },
   keypad: {
-    marginTop: 'auto',
+    // `marginTop: 'auto'` (push to bottom of a flexed parent) removed
+    // together with the container's `flex: 1` — stacking naturally
+    // after the confirm button so the sheet's dynamic sizing measures
+    // the full height correctly.
     backgroundColor: KEYPAD_BG,
     paddingHorizontal: 6,
     paddingTop: 6,

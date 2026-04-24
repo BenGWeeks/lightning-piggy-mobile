@@ -57,8 +57,24 @@ name: Nostr Login Test (dev variant)
 - waitForAnimationToEnd:
     timeout: 10000
 
+# "Update from Nostr Profile?" dialog — accept so tests use the
+# published profile (name/picture) instead of the local onboarding name.
+- tapOn:
+    text: 'UPDATE'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
 # Sheet dismisses on success; we should be back on Account
 - extendedWaitUntil:
     visible:
       text: 'Ben'
     timeout: 15000
+
+# Android contacts-access system dialog appears first time Friends tab is
+# opened after login. Accept it so Friends tab can import device contacts.
+- tapOn:
+    text: 'Allow'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
