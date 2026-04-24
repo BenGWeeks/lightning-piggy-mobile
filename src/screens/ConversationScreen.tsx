@@ -369,21 +369,43 @@ const ConversationScreen: React.FC = () => {
       // the 6-8 s relay round-trip. Arcade `db_only=true` pattern.
       // Only show the spinner if the cache was empty (true cold open).
       const cached = await getCachedConversation(pubkey);
-      if (cached.length > 0) {
+      if (isMountedRef.current && cached.length > 0) {
         setMessages(cached);
         setLoading(false);
-      } else if (showSpinner) {
+      } else if (isMountedRef.current && showSpinner) {
         setLoading(true);
       }
       try {
         const conv = await fetchConversation(pubkey);
-        setMessages(conv);
+        // If the user navigated away while the fetch was in flight,
+        // don't fire state updates — those would either trigger a
+        // re-render on an unmounted component (React warning) or land
+        // on the *next* thread that inherits this instance. Check the
+        // ref and bail.
+        if (isMountedRef.current) {
+          setMessages(conv);
+        }
       } finally {
-        setLoading(false);
+        if (isMountedRef.current) {
+          setLoading(false);
+        }
       }
     },
     [isLoggedIn, fetchConversation, getCachedConversation, pubkey],
   );
+
+  // Mount/unmount tracker so the async `load()` above can bail when
+  // the user navigates back mid-fetch. Without this, every back-press
+  // during the 6-12 s cold fetchConversation still runs the full
+  // decrypt + persist chain on the unmounted component, wasting JS
+  // thread time that could have been responding to input.
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     load(true);
