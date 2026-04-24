@@ -128,11 +128,16 @@ const MessagesScreen: React.FC = () => {
     // own-profile cache so renames published elsewhere surface now,
     // and also bypass the 30s DM-inbox TTL so the relay query actually
     // runs (the TTL's default path is for useFocusEffect tab bounces).
-    await Promise.all([
-      refreshContacts(),
-      refreshDmInbox({ force: true }),
-      refreshProfile({ force: true }),
-    ]);
+    //
+    // Important: `refreshContacts` must complete BEFORE
+    // `refreshDmInbox`. The DM refresh filters by the logged-in user's
+    // current follow set, and if we run them in parallel the DM query
+    // captures the stale closure before the new contacts state lands,
+    // so any new-since-last-refresh followers' messages get dropped
+    // by the follow gate. Profile refresh is independent and can run
+    // in parallel.
+    await Promise.all([refreshContacts(), refreshProfile({ force: true })]);
+    await refreshDmInbox({ force: true });
     setRefreshing(false);
   }, [refreshContacts, refreshDmInbox, refreshProfile]);
 
