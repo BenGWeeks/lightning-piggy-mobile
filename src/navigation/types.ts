@@ -26,11 +26,8 @@ export type AccountDrawerParamList = {
   AccountAbout: undefined;
 };
 
-// Root stack (pre-auth and post-auth)
+// Root stack
 export type RootStackParamList = {
-  Intro: undefined;
-  Onboarding: undefined;
-  Setup: undefined;
   Main: NavigatorScreenParams<AccountDrawerParamList>;
   Conversation: {
     pubkey: string;

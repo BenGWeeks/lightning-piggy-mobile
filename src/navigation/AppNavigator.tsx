@@ -14,8 +14,6 @@ import {
   AccountDrawerParamList,
 } from './types';
 
-import IntroScreen from '../screens/IntroScreen';
-import OnboardingScreen from '../screens/OnboardingScreen';
 import HomeScreen from '../screens/HomeScreen';
 import MessagesScreen from '../screens/MessagesScreen';
 import LearnScreen from '../screens/LearnScreen';
@@ -151,7 +149,7 @@ function MainDrawer() {
 }
 
 export default function AppNavigator() {
-  const { isOnboarded, isLoading } = useWallet();
+  const { isLoading } = useWallet();
 
   if (isLoading) {
     return (
@@ -182,17 +180,8 @@ export default function AppNavigator() {
       }}
     >
       <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {!isOnboarded ? (
-          <>
-            <Stack.Screen name="Intro" component={IntroScreen} />
-            <Stack.Screen name="Onboarding" component={OnboardingScreen} />
-          </>
-        ) : (
-          <>
-            <Stack.Screen name="Main" component={MainDrawer} />
-            <Stack.Screen name="Conversation" component={ConversationScreen} />
-          </>
-        )}
+        <Stack.Screen name="Main" component={MainDrawer} />
+        <Stack.Screen name="Conversation" component={ConversationScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

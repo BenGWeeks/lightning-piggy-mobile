@@ -51,7 +51,7 @@ const AccountScreenLayout: React.FC<Props> = ({ title, children, scrollRef, scro
         <View style={styles.titleRow}>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => navigation.navigate('MainTabs', { screen: 'Home' })}
+            onPress={() => navigation.goBack()}
             accessibilityLabel="Back"
             testID="account-back-button"
           >

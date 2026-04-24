@@ -14,6 +14,14 @@ name: Nostr Logout Test
 - waitForAnimationToEnd:
     timeout: 5000
 
+# Verify we're actually logged in before attempting Sign Out — the QR
+# icon next to the display name only renders when a Nostr profile is
+# connected, so its presence is a reliable logged-in precondition.
+- extendedWaitUntil:
+    visible:
+      id: 'drawer-npub-qr'
+    timeout: 5000
+
 # Sign out row lives at the bottom of the drawer
 - extendedWaitUntil:
     visible:

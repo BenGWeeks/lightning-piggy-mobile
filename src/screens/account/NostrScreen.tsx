@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
 import AccountScreenLayout from './AccountScreenLayout';
 import { sharedAccountStyles } from './sharedStyles';
 import {
@@ -25,12 +26,14 @@ const NostrScreen: React.FC = () => {
   const { profile, signerType, amberNip44Permission, relays } = useNostr();
   const [connStatus, setConnStatus] = useState<Map<string, boolean>>(new Map());
 
-  useEffect(() => {
-    const tick = () => setConnStatus(new Map(getRelayConnectionStatus()));
-    tick();
-    const id = setInterval(tick, 3000);
-    return () => clearInterval(id);
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      const tick = () => setConnStatus(new Map(getRelayConnectionStatus()));
+      tick();
+      const id = setInterval(tick, 3000);
+      return () => clearInterval(id);
+    }, []),
+  );
 
   const relayRows = useMemo<RelayRow[]>(() => {
     const userMap = new Map(relays.map((r) => [r.url, r]));
