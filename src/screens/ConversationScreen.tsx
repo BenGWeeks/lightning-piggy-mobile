@@ -14,9 +14,9 @@ import {
   AppState,
   Image,
   Linking,
-  Keyboard,
   StyleSheet,
 } from 'react-native';
+import { KeyboardStickyView } from 'react-native-keyboard-controller';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Zap, Send, Plus, MapPin, ArrowDown } from 'lucide-react-native';
 import { Image as ExpoImage } from 'expo-image';
@@ -254,11 +254,6 @@ const ConversationScreen: React.FC = () => {
   const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState(false);
   const [detailTx, setDetailTx] = useState<TransactionDetailData | null>(null);
-  // Keyboard height — tracked explicitly so we can push the composer
-  // up manually. KeyboardAvoidingView with `behavior="padding"` is
-  // unreliable on Android 15+ edge-to-edge where `adjustResize`
-  // doesn't shrink past the IME. Same pattern as SendSheet/ReceiveSheet.
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
   // Profiles resolved from `nostr:` contact references the other party
   // has shared in this conversation. Keyed by hex pubkey; a `null` value
@@ -418,24 +413,6 @@ const ConversationScreen: React.FC = () => {
   useEffect(() => {
     load(true);
   }, [load]);
-
-  // Track keyboard height so the composer sits above the IME on
-  // Android 15+ edge-to-edge, where KeyboardAvoidingView's built-in
-  // behaviors are unreliable. iOS uses `keyboardWillShow/Hide` for
-  // a smooth animated transition; Android uses `DidShow/Hide` because
-  // `WillShow` isn't emitted there.
-  useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const showSub = Keyboard.addListener(showEvent, (e) => {
-      setKeyboardHeight(e.endCoordinates.height);
-    });
-    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
-  }, []);
 
   // Jump to the newest message on first content load, and when the user is
   // already near the bottom and a new message arrives. The list is
@@ -1300,12 +1277,14 @@ const ConversationScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
 
-      {/* Use a plain View instead of KeyboardAvoidingView — on
-          Android 15+ edge-to-edge, neither the `padding` nor `height`
-          behaviors of KAV reliably lift content above the IME. We
-          track `keyboardHeight` via `Keyboard.addListener` above and
-          apply it as `paddingBottom` on the composer directly. Same
-          pattern as SendSheet / ReceiveSheet in this repo. */}
+      {/* KeyboardStickyView (below) floats the composer above the IME
+          on Android 15+ edge-to-edge. `react-native-edge-to-edge` (in
+          app.config.ts) installs the `WindowInsetsCompat` root listener
+          that makes the IME inset visible to RNKC in the first place —
+          without it every keyboard API silently reported 0 height on
+          Android 16 (#194 diagnosis). `offset.opened: -insets.bottom`
+          pulls the composer flush against the keyboard's top edge
+          (RNKC's canonical chat pattern). */}
       <View style={styles.flex}>
         {loading ? (
           <View style={styles.loading}>
@@ -1376,57 +1355,55 @@ const ConversationScreen: React.FC = () => {
           </View>
         ) : null}
 
-        <View
-          style={[
-            styles.composer,
-            {
-              // When the keyboard is up: push the composer up by its
-              // full height (no safe-area pad needed; the keyboard
-              // covers that region). When it's down: keep the usual
-              // bottom safe-area inset so the composer doesn't touch
-              // the gesture bar.
-              paddingBottom: keyboardHeight > 0 ? keyboardHeight : Math.max(insets.bottom, 8),
-            },
-          ]}
-        >
-          <TouchableOpacity
-            style={styles.composerAttachButton}
-            onPress={() => setAttachSheetOpen(true)}
-            disabled={!isLoggedIn || sending || sharingLocation || uploadingImage}
-            accessibilityLabel="Attach"
-            testID="conversation-attach"
-          >
-            {sharingLocation || uploadingImage ? (
-              <ActivityIndicator color={colors.brandPink} />
-            ) : (
-              <Plus size={22} color={colors.brandPink} />
-            )}
-          </TouchableOpacity>
-          <TextInput
-            style={styles.composerInput}
-            placeholder="Message"
-            placeholderTextColor={colors.textSupplementary}
-            value={draft}
-            onChangeText={setDraft}
-            multiline
-            editable={isLoggedIn && !sending}
-            accessibilityLabel="Message input"
-            testID="conversation-input"
-          />
-          <TouchableOpacity
-            style={styles.composerSendButton}
-            onPress={handleSend}
-            disabled={!draft.trim() || sending}
-            accessibilityLabel="Send message"
-            testID="conversation-send"
-          >
-            {sending ? (
-              <ActivityIndicator color={colors.white} />
-            ) : (
-              <Send size={20} color={colors.white} />
-            )}
-          </TouchableOpacity>
-        </View>
+        {/* Safe-area inset for the gesture bar is applied via the
+            sticky view's `closed` offset (lifts composer up by that
+            much when keyboard is closed) rather than via the
+            composer's `paddingBottom`. That way when the keyboard
+            opens, composer content sits flush against the keyboard's
+            top edge — no whitespace gap. Small fixed 8 px internal
+            pad for visual breathing room between the inputs and
+            the composer's own bottom border. */}
+        <KeyboardStickyView offset={{ closed: -Math.max(insets.bottom, 0), opened: 0 }}>
+          <View style={[styles.composer, { paddingBottom: 8 }]}>
+            <TouchableOpacity
+              style={styles.composerAttachButton}
+              onPress={() => setAttachSheetOpen(true)}
+              disabled={!isLoggedIn || sending || sharingLocation || uploadingImage}
+              accessibilityLabel="Attach"
+              testID="conversation-attach"
+            >
+              {sharingLocation || uploadingImage ? (
+                <ActivityIndicator color={colors.brandPink} />
+              ) : (
+                <Plus size={22} color={colors.brandPink} />
+              )}
+            </TouchableOpacity>
+            <TextInput
+              style={styles.composerInput}
+              placeholder="Message"
+              placeholderTextColor={colors.textSupplementary}
+              value={draft}
+              onChangeText={setDraft}
+              multiline
+              editable={isLoggedIn && !sending}
+              accessibilityLabel="Message input"
+              testID="conversation-input"
+            />
+            <TouchableOpacity
+              style={styles.composerSendButton}
+              onPress={handleSend}
+              disabled={!draft.trim() || sending}
+              accessibilityLabel="Send message"
+              testID="conversation-send"
+            >
+              {sending ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <Send size={20} color={colors.white} />
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardStickyView>
       </View>
 
       <AttachSheet
