@@ -1319,10 +1319,15 @@ const ConversationScreen: React.FC = () => {
             // defaults are chosen for chat-style threads: one screen
             // fits ~8-10 bubbles, so 20 covers the visible viewport
             // plus one screen of pre-roll for smooth momentum scrolls.
+            //
+            // NOTE: `removeClippedSubviews` is deliberately OFF. It's
+            // broken with `inverted` on Android — breaks the contentOffset
+            // reporting so onScroll's `y < 200` check flips when the user
+            // is visually at the bottom, making the scroll-to-bottom FAB
+            // show spuriously. See facebook/react-native#30521 / #26061.
             initialNumToRender={20}
             maxToRenderPerBatch={10}
             windowSize={10}
-            removeClippedSubviews
             ListEmptyComponent={
               <View style={styles.empty}>
                 <Text style={styles.emptyTitle}>No messages yet</Text>
