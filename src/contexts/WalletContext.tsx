@@ -32,7 +32,6 @@ export interface IncomingPayment {
   paymentHash: string | null;
 }
 
-const USER_NAME_KEY = 'user_display_name';
 const CURRENCY_KEY = 'user_fiat_currency';
 
 // The #P-tagged outgoing zap-receipt relay fetch is expensive (500-event
@@ -70,8 +69,6 @@ interface WalletContextType {
   isLoading: boolean;
 
   // User prefs
-  userName: string;
-  setUserName: (name: string) => Promise<void>;
   currency: FiatCurrency;
   setCurrency: (currency: FiatCurrency) => Promise<void>;
   btcPrice: number | null;
@@ -176,7 +173,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [activeWalletId, setActiveWalletId] = useState<string | null>(null);
   const [isOnboarded, setIsOnboarded] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [userName, setUserNameState] = useState('');
   const [currency, setCurrencyState] = useState<FiatCurrency>('USD');
   const [btcPrice, setBtcPrice] = useState<number | null>(null);
   const [lastIncomingPayment, setLastIncomingPayment] = useState<IncomingPayment | null>(null);
@@ -197,11 +193,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     activeWallet?.walletType === 'onchain' ? true : (activeWallet?.isConnected ?? false);
   const balance = activeWallet?.balance ?? null;
   const walletAlias = activeWallet?.walletAlias ?? activeWallet?.alias ?? null;
-
-  const setUserName = useCallback(async (name: string) => {
-    setUserNameState(name);
-    await AsyncStorage.setItem(USER_NAME_KEY, name);
-  }, []);
 
   const setCurrency = useCallback(async (cur: FiatCurrency) => {
     setCurrencyState(cur);
@@ -260,9 +251,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     (async () => {
       try {
         // Load user preferences
-        const savedName = await AsyncStorage.getItem(USER_NAME_KEY);
-        if (savedName) setUserNameState(savedName);
-
         const savedCurrency = await AsyncStorage.getItem(CURRENCY_KEY);
         const cur = (CURRENCIES as readonly string[]).includes(savedCurrency ?? '')
           ? (savedCurrency as FiatCurrency)
@@ -1487,8 +1475,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         hasWallets,
         isOnboarded,
         isLoading,
-        userName,
-        setUserName,
         currency,
         setCurrency,
         btcPrice,

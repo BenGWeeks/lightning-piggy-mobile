@@ -37,7 +37,6 @@ const HomeScreen: React.FC = () => {
     refreshActiveBalance,
     fetchTransactionsForWallet,
     setActiveWallet,
-    userName,
     btcPrice,
     currency,
   } = useWallet();
@@ -63,8 +62,6 @@ const HomeScreen: React.FC = () => {
   // fresh it short-circuits without hitting relays, so switching tabs
   // doesn't incur a network cost. Pull-to-refresh in MessagesScreen
   // passes `{ force: true }` for the explicit-user-intent path.
-  // (The greeting text itself reads from WalletContext's userName, not
-  // `profile` — aligning those is tracked separately under #150.)
   useFocusEffect(
     useCallback(() => {
       if (!isLoggedIn) return;
@@ -184,8 +181,7 @@ const HomeScreen: React.FC = () => {
     setSettingsWalletId(walletId);
   }, []);
 
-  const greetingName =
-    profile?.displayName?.trim() || profile?.name?.trim() || userName?.trim() || '';
+  const greetingName = profile?.displayName?.trim() || profile?.name?.trim() || 'Satoshi';
 
   const isOnchainWallet = activeWallet?.walletType === 'onchain';
   const isWatchOnly = isOnchainWallet && activeWallet?.onchainImportMethod !== 'mnemonic';

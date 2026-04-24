@@ -331,7 +331,7 @@ const MessagesScreen: React.FC = () => {
             </Text>
             <TouchableOpacity
               style={styles.connectButton}
-              onPress={() => navigation.navigate('Account')}
+              onPress={() => navigation.getParent()?.dispatch({ type: 'OPEN_DRAWER' })}
             >
               <Text style={styles.connectButtonText}>Go to Account</Text>
             </TouchableOpacity>
