@@ -21,7 +21,7 @@ appId: $PKG
     timeout: 30000
 - extendedWaitUntil:
     visible:
-      text: '$GREETING'
+      text: '${GREETING}.*'
     timeout: 30000
 EOF
 

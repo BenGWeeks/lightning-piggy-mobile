@@ -24,7 +24,7 @@ Maestro-driven timing harness for three user-visible perf surfaces:
 1. Install Maestro: `curl -Ls "https://get.maestro.mobile.dev" \| bash`
 2. Plug in an Android device OR start an emulator (iOS not wired up yet — `adb` is assumed throughout).
 3. Install the app and sign in. The scripts expect your test identity to be following at least one friend (default: `Little Piggy`).
-4. If you want `thread-open.sh` to find a message reliably, the thread needs to contain text matching `$SEED` (default `[seed-`, which matches the `scripts/seed-dms.mjs` rumors). For real-world DMs override e.g. `SEED='Hello'`.
+4. `thread-open.sh` waits for the conversation to render at least one message body. By default it matches any non-empty body (the thread just needs to have messages); override `SEED` with a regex fragment if you want to pin on a specific string, e.g. `SEED='Hello'`. Maestro 2.3's text matcher is full-regex, so escape `[`, `.`, etc. as needed.
 
 The canonical test identities are `Little Piggy` and `Big Piggy`. `Big Piggy` follows `Little Piggy` and vice-versa; both have 200 seeded DMs in their thread. Use Big Piggy as the logged-in user and `PEER='Little Piggy'` to exercise the inbound-decrypt path.
 

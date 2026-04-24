@@ -6,8 +6,10 @@
 #   PKG      - Android package id (default: com.lightningpiggy.app)
 #   PEER     - display name of a followed test peer, e.g. "Little Piggy"
 #   GREETING - text guaranteed to render on Home (e.g. "Hello" from greeting)
-#   SEED     - a substring unique to a message in the chosen thread
-#              (default "[seed-" — matches the in-repo seed-script rumors)
+#   SEED     - regex fragment matching text unique to a message body in
+#              the chosen thread (default empty → matches any rendered
+#              body). Must be regex-safe: Maestro 2.3's text matcher
+#              is full-regex, so escape `[`, `.`, etc. as needed.
 #
 # Requires: adb, maestro, awk, date(+%s%N).
 
@@ -17,7 +19,7 @@ DEVICE="${DEVICE:-$(adb devices | awk 'NR>1 && $2=="device" { print $1; exit }')
 PKG="${PKG:-com.lightningpiggy.app}"
 PEER="${PEER:-Little Piggy}"
 GREETING="${GREETING:-Hello}"
-SEED="${SEED:-[seed-}"
+SEED="${SEED:-}"
 
 if [ -z "$DEVICE" ]; then
   echo "No adb device attached. Plug in / start an emulator and retry." >&2

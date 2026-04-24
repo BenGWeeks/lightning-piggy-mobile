@@ -21,6 +21,8 @@ printf "\n%-22s  %-10s  %s\n" "STEP" "ELAPSED" "STATUS"
 printf "%-22s  %-10s  %s\n"   "----"  "-------"  "------"
 
 # Return the app to Home first so the walk starts from a known state.
+# Maestro 2.3 treats `text:` as a full-regex match (not substring), so
+# dynamic greetings like "Hello, <name>!" need a `.*` suffix.
 cat > "$LOGDIR/_home.yaml" <<EOF
 appId: $PKG
 ---
@@ -28,12 +30,14 @@ appId: $PKG
     id: 'tab-home'
 - extendedWaitUntil:
     visible:
-      text: '$GREETING'
+      text: '${GREETING}.*'
     timeout: 10000
 EOF
 time_step "reset → home"         "$LOGDIR/_home.yaml"
 
-for step in "messages:Messages" "learn:Learn" "friends:Friends" "messages:Messages" "home:$GREETING"; do
+# Each pair: tab-id : text-pattern (full-regex, so tab labels are exact
+# matches and the Home greeting gets a `.*`).
+for step in "messages:Messages" "learn:Learn" "friends:Friends" "messages:Messages" "home:${GREETING}.*"; do
   tab="${step%%:*}"
   text="${step##*:}"
   cat > "$LOGDIR/_t.yaml" <<EOF

@@ -17,6 +17,8 @@ LOG="$LOGDIR/thread-open.log"
 start_logcat "$PID" "$LOG"
 trap stop_logcat EXIT
 
+# Maestro 2.3 treats `text:` as a full-regex match, not substring, so
+# partner / seed markers get a `.*` suffix to match longer body text.
 # Navigate to Messages first (idempotent).
 cat > "$LOGDIR/_msgs.yaml" <<EOF
 appId: $PKG
@@ -25,7 +27,7 @@ appId: $PKG
     id: 'tab-messages'
 - extendedWaitUntil:
     visible:
-      text: '$PEER'
+      text: '${PEER}.*'
     timeout: 15000
 EOF
 time_step "goto messages" "$LOGDIR/_msgs.yaml"
@@ -34,10 +36,10 @@ cat > "$LOGDIR/_open.yaml" <<EOF
 appId: $PKG
 ---
 - tapOn:
-    text: '$PEER'
+    text: '${PEER}.*'
 - extendedWaitUntil:
     visible:
-      text: '$SEED'
+      text: '.*${SEED}.*'
     timeout: 60000
 EOF
 
