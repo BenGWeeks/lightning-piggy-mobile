@@ -69,4 +69,20 @@ Third-party packages used by the app. Updated when a dependency is added or its 
 | https://github.com/nicoll-douglas/react-native-svg[`react-native-svg`]
 | react-native-svg
 | SVG rendering for React Native — used for custom Lucide-style icons
+
+| https://github.com/paulmillr/noble-ciphers[`@noble/ciphers`]
+| paulmillr
+| Audited pure-JS symmetric ciphers — `aes.js` (CBC) powers `nostr-tools`' NIP-04 `nip04.decrypt` / `nip04.encrypt`. Dep of `nostr-tools`, listed here because the DM perf work in `src/contexts/NostrContext.tsx` leans on its throughput (~1 ms / decrypt on mid-range mobile) to keep batched parallel decrypt responsive.
+|===
+
+== Internal utilities (not packages)
+
+Small locally-authored modules where a third-party dep would be overkill or RN-incompatible:
+
+[cols="1,2", options="header"]
+|===
+| Path | Purpose
+
+| `src/utils/lru.ts`
+| ~25-line Map-backed LRU cache. Replaces the `lru-cache` npm package which pulls in `node:diagnostics_channel` at v11+ — Metro can't resolve that in React Native. Used for the module-level NIP-04 plaintext cache (max 1000 entries). API intentionally minimal (`get` / `set` / `delete` / `clear` / `size`) so it can be swapped for `react-native-mmkv` in future without touching callers.
 |===
