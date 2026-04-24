@@ -1,0 +1,36 @@
+appId: com.lightningpiggy.app.dev
+name: Home Send/Receive buttons stay enabled after swiping to Add card
+---
+# Covers #166. Swiping the wallet carousel onto the trailing "Add wallet"
+# card previously cleared activeWalletId to null, which disabled Home's
+# Send/Receive buttons even though the just-added wallet still showed
+# "Connected" on its card. Fix keeps activeWalletId on the last real
+# wallet while the add card is in view, so Receive remains tappable.
+#
+# Assumes at least one connected NWC wallet is present.
+
+- waitForAnimationToEnd: { timeout: 10000 }
+
+- tapOn: { id: 'tab-home' }
+- waitForAnimationToEnd: { timeout: 3000 }
+
+# Receive must be enabled on the wallet card.
+- tapOn: { id: 'btn-receive' }
+- waitForAnimationToEnd: { timeout: 3000 }
+# Close the sheet via hardware back.
+- pressKey: back
+- waitForAnimationToEnd: { timeout: 2000 }
+
+# Swipe the carousel to expose the "Add wallet" card.
+- scrollUntilVisible:
+    element:
+      id: 'add-wallet-card'
+    direction: RIGHT
+    timeout: 10000
+    speed: 40
+- waitForAnimationToEnd: { timeout: 1500 }
+
+# Receive should still open — activeWalletId must not have been nulled.
+- tapOn: { id: 'btn-receive' }
+- waitForAnimationToEnd: { timeout: 3000 }
+- assertVisible: { text: 'Receive' }

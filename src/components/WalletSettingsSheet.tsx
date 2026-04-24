@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert, Platform, Keyboard } from 'react-native';
 import {
   BottomSheetModal,
@@ -23,7 +23,10 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const { wallets, updateWalletSettings, removeWallet } = useWallet();
   const wallet = wallets.find((w) => w.id === walletId);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
-  // No explicit snapPoints — content-height only, not user-draggable.
+  // Pin the sheet to 85% of the screen — content (alias + LUD-16 + relay
+  // + full 8-card theme grid) is long enough that dynamic sizing pushed
+  // it to 100% and the handle was tight against the status bar.
+  const snapPoints = useMemo(() => ['85%'], []);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   // Canonical keyboard-height tracking — mirrors SendSheet / NostrLoginSheet.
@@ -47,6 +50,11 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const [xpubDisplay, setXpubDisplay] = useState<string | null>(null);
   const [relayUrl, setRelayUrl] = useState<string | null>(null);
 
+  // Populate fields ONCE when the sheet opens for a given walletId. Using
+  // `wallet` as a dep would re-fire on every `wallets` array update (balance
+  // polls, NWC reconnect pings, etc.), each time stomping the user's in-
+  // progress edits with the stored value — symptom: typing into Lightning
+  // Address makes characters disappear.
   useEffect(() => {
     if (wallet) {
       setAlias(wallet.alias);
@@ -75,7 +83,8 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         setRelayUrl(null);
       }
     }
-  }, [wallet, walletId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [walletId]);
 
   const handleSheetChange = useCallback(
     (index: number) => {
@@ -133,6 +142,13 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   return (
     <BottomSheetModal
       ref={bottomSheetRef}
+      snapPoints={snapPoints}
+      // v5 defaults `enableDynamicSizing` to true, which overrides
+      // `snapPoints`. Disable it explicitly so the sheet honours the
+      // 85% pin. See docs/TROUBLESHOOTING.adoc
+      // "v5 modal collapses to a thin strip when its
+      // BottomSheetTextInput is focused".
+      enableDynamicSizing={false}
       enablePanDownToClose
       onChange={handleSheetChange}
       backdropComponent={renderBackdrop}
@@ -174,6 +190,8 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="email-address"
+              testID="wallet-lightning-address-input"
+              accessibilityLabel="Lightning Address"
             />
             <Text style={styles.hintText}>
               LUD-16 address for receiving payments. Usually provided by the NWC connection.
@@ -216,7 +234,12 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
           ))}
         </View>
 
-        <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
+        <TouchableOpacity
+          style={styles.saveButton}
+          onPress={handleSave}
+          testID="wallet-settings-save"
+          accessibilityLabel="Save wallet settings"
+        >
           <Text style={styles.saveButtonText}>Save</Text>
         </TouchableOpacity>
 

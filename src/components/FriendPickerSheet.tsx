@@ -10,7 +10,6 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { X } from 'lucide-react-native';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
@@ -241,15 +240,6 @@ const FriendPickerSheet: React.FC<Props> = ({
               <Text style={styles.title}>{title}</Text>
               {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
             </View>
-            <TouchableOpacity
-              style={styles.closeButton}
-              onPress={onClose}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-              accessibilityLabel="Close"
-              testID="friend-picker-close"
-            >
-              <X size={22} color={colors.textSupplementary} />
-            </TouchableOpacity>
           </View>
           <BottomSheetTextInput
             style={styles.searchInput}
@@ -337,13 +327,6 @@ const styles = StyleSheet.create({
   },
   titleText: {
     flex: 1,
-  },
-  closeButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   header: {
     paddingHorizontal: 20,

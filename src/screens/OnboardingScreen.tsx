@@ -17,22 +17,19 @@ import { CURRENCIES } from '../services/fiatService';
 import NostrLoginSheet from '../components/NostrLoginSheet';
 
 const OnboardingScreen: React.FC = () => {
-  const { setUserName, setLightningAddress, currency, setCurrency, completeOnboarding } =
-    useWallet();
+  const { setUserName, currency, setCurrency, completeOnboarding } = useWallet();
   const { isLoggedIn, profile, logout } = useNostr();
   const [nameInput, setNameInput] = useState('');
-  const [lnAddressInput, setLnAddressInput] = useState('');
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
 
-  // Auto-fill from Nostr profile when it loads
+  // Auto-fill name from Nostr profile when it loads. Lightning Address is
+  // now set per-wallet (Wallet Settings → Lightning Address), so it's
+  // captured during the Add Wallet flow rather than at onboarding.
   React.useEffect(() => {
     if (profile) {
       const nostrName = profile.displayName || profile.name;
       if (nostrName) {
         setNameInput(nostrName);
-      }
-      if (profile.lud16) {
-        setLnAddressInput(profile.lud16);
       }
     }
   }, [profile]);
@@ -40,9 +37,6 @@ const OnboardingScreen: React.FC = () => {
   const handleGetStarted = async () => {
     if (nameInput.trim()) {
       await setUserName(nameInput.trim());
-    }
-    if (lnAddressInput.trim()) {
-      await setLightningAddress(lnAddressInput.trim());
     }
     await completeOnboarding();
   };
@@ -69,7 +63,6 @@ const OnboardingScreen: React.FC = () => {
                   onPress: () => {
                     logout();
                     setNameInput('');
-                    setLnAddressInput('');
                   },
                 },
               ])
@@ -98,18 +91,6 @@ const OnboardingScreen: React.FC = () => {
           onChangeText={setNameInput}
           autoCapitalize="words"
           autoCorrect={false}
-        />
-
-        <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Lightning Address</Text>
-        <TextInput
-          style={styles.textInput}
-          placeholder="user@wallet.com"
-          placeholderTextColor="rgba(255,255,255,0.5)"
-          value={lnAddressInput}
-          onChangeText={setLnAddressInput}
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="email-address"
         />
 
         <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Preferred Currency</Text>

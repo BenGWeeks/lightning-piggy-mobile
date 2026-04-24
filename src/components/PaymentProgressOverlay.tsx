@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Modal,
   View,
@@ -7,7 +7,9 @@ import {
   useWindowDimensions,
   ActivityIndicator,
   TouchableOpacity,
+  Platform,
 } from 'react-native';
+import { humanizePaymentError } from '../utils/paymentErrors';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -36,6 +38,10 @@ interface Props {
   recipientName?: string;
   errorMessage?: string;
   onDismiss: () => void;
+  /** If provided, a "Cancel" link renders beneath the spinner during
+   * the `sending` state. Used to abort long-running NWC payments when
+   * the relay is unreachable (see #175). */
+  onCancel?: () => void;
 }
 
 const BUBBLE_COUNT = 140;
@@ -260,6 +266,7 @@ export default function PaymentProgressOverlay({
   recipientName,
   errorMessage,
   onDismiss,
+  onCancel,
 }: Props) {
   const { width, height } = useWindowDimensions();
 
@@ -267,6 +274,14 @@ export default function PaymentProgressOverlay({
   // when state flips back to sending mid-flow. We drive the Modal's
   // `visible` from state.
   const visible = state !== 'hidden';
+
+  // Map the raw internal error onto a user-facing string; keep the
+  // original available for support via a "Show details" toggle (#175).
+  const humanizedError = useMemo(() => humanizePaymentError(errorMessage), [errorMessage]);
+  const [showDetails, setShowDetails] = useState(false);
+  useEffect(() => {
+    if (state !== 'error') setShowDetails(false);
+  }, [state]);
 
   const bubbleSpecs = useMemo(() => makeSpecs(BUBBLE_COUNT, height), [height]);
   const confettiSpecs = useMemo(() => makeConfettiSpecs(CONFETTI_COUNT), []);
@@ -361,7 +376,7 @@ export default function PaymentProgressOverlay({
         : undefined;
   } else if (state === 'error') {
     title = 'Payment failed';
-    subtitle = errorMessage || 'Please try again.';
+    subtitle = humanizedError.message;
   }
 
   // Android expects a stable `onRequestClose` for hardware-back behaviour
@@ -428,9 +443,39 @@ export default function PaymentProgressOverlay({
           <Text style={styles.title}>{title}</Text>
           {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
 
+          {/* Error detail toggle: the humanised subtitle is shown by
+           *  default; tapping "Show details" reveals the raw error for
+           *  dev / support, tapping "Hide details" collapses it again.
+           *  Only renders when the humaniser actually rewrote the
+           *  message — no point showing a toggle whose detail equals
+           *  the subtitle already on screen. */}
+          {state === 'error' &&
+          humanizedError.detail &&
+          humanizedError.detail !== humanizedError.message ? (
+            <>
+              {showDetails ? (
+                <Text style={styles.detailText} selectable testID="payment-overlay-error-detail">
+                  {humanizedError.detail}
+                </Text>
+              ) : null}
+              <TouchableOpacity
+                onPress={() => setShowDetails((prev) => !prev)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityLabel={showDetails ? 'Hide error details' : 'Show error details'}
+                testID="payment-overlay-details-toggle"
+              >
+                <Text style={styles.detailsToggle}>
+                  {showDetails ? 'Hide details' : 'Show details'}
+                </Text>
+              </TouchableOpacity>
+            </>
+          ) : null}
+
           {/* The user must acknowledge send/receive/error outcomes before
            *  we tear down the sheet — auto-dismiss can hide the fact the
-           *  money moved if they weren't looking. No button while sending. */}
+           *  money moved if they weren't looking. During `sending` we
+           *  optionally render a Cancel link so the user can bail out
+           *  when the relay is unreachable (#175). */}
           {state !== 'sending' ? (
             <TouchableOpacity
               style={styles.okButton}
@@ -439,6 +484,16 @@ export default function PaymentProgressOverlay({
               testID="payment-overlay-ok"
             >
               <Text style={styles.okButtonText}>{state === 'error' ? 'Dismiss' : 'OK'}</Text>
+            </TouchableOpacity>
+          ) : onCancel ? (
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={onCancel}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel="Cancel payment"
+              testID="payment-overlay-cancel"
+            >
+              <Text style={styles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
           ) : null}
         </Animated.View>
@@ -516,5 +571,29 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     letterSpacing: 0.3,
+  },
+  cancelButton: {
+    marginTop: 8,
+    alignSelf: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  cancelButtonText: {
+    color: colors.textSupplementary,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  detailsToggle: {
+    marginTop: -6,
+    fontSize: 12,
+    color: colors.textSupplementary,
+    textDecorationLine: 'underline',
+  },
+  detailText: {
+    marginTop: -6,
+    fontSize: 11,
+    color: colors.textSupplementary,
+    textAlign: 'center',
+    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
   },
 });

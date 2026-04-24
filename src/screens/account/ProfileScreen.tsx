@@ -10,7 +10,6 @@ import NostrLoginSheet from '../../components/NostrLoginSheet';
 import EditProfileSheet from '../../components/EditProfileSheet';
 import QrSheet from '../../components/QrSheet';
 import { useNostr } from '../../contexts/NostrContext';
-import { useWallet } from '../../contexts/WalletContext';
 import { colors } from '../../styles/theme';
 
 const QrIcon: React.FC<{ size?: number; color?: string }> = ({ size = 20, color = '#FFFFFF' }) => (
@@ -30,7 +29,6 @@ const QrIcon: React.FC<{ size?: number; color?: string }> = ({ size = 20, color 
 
 const ProfileScreen: React.FC = () => {
   const { isLoggedIn, profile, refreshProfile } = useNostr();
-  const { lightningAddress } = useWallet();
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [qrSheetOpen, setQrSheetOpen] = useState(false);
@@ -130,7 +128,7 @@ const ProfileScreen: React.FC = () => {
           visible={qrSheetOpen}
           onClose={() => setQrSheetOpen(false)}
           npub={profile.npub}
-          lightningAddress={profile.lud16 || lightningAddress || null}
+          lightningAddress={profile.lud16 ?? null}
           defaultMode={qrDefaultMode}
         />
       )}

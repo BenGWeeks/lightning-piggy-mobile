@@ -625,3 +625,95 @@ The app includes a safety tip on profile edit and account creation screens:
 > "Tip: You don't need to use your real name or photo for your profile."
 
 This is a gentle, non-intrusive reminder appropriate for a kids' app without requiring age verification.
+
+== Direct Messaging Performance Architecture (Issues #176, #177, #190)
+
+DMs are the most latency-sensitive surface in the app — they're opened repeatedly, and each open has historically required a relay round-trip plus a decrypt loop that could lock the JS thread for tens of seconds on large inboxes. The architecture below was developed over the perf sweep in PR #191 against a 986-message real-world Nostr inbox on a Pixel 8 on 4G. Target: no thread open ever feels "loading" after the first one.
+
+=== Caching layers
+
+The DM pipeline stacks four independent caches — each addressing a distinct failure mode from the pre-cache behaviour:
+
+[cols="1,1,2", options="header"]
+|===
+| Cache | Scope | What it stores / why
+
+| **NIP-04 plaintext LRU** (`src/utils/lru.ts`)
+| Module-level RAM, `max: 1000`
+| Event id → decrypted plaintext. Survives screen pops but not process kill. Refresh-then-reopen costs 0 NIP-04 decrypts. Keyed by event id (immutable) so no TTL needed.
+
+| **NIP-17 gift-wrap cache** (`AMBER_NIP17_CACHE_KEY` / `NSEC_NIP17_CACHE_KEY` in AsyncStorage)
+| Per-user pubkey, `max: 5000`, separate by signer type
+| Wrap id → `{partnerPubkey, fromMe, text, createdAt, wireKind}`. `refreshDmInbox` writes here for every successfully decrypted wrap; `fetchConversation` reads it to skip its own inbox-wide relay fetch (see "Fetch strategy" below).
+
+| **Persisted DM inbox** (`nostr_dm_inbox_v1_<user>`)
+| Per-user pubkey, `max: 1000` entries
+| Full `DmInboxEntry[]` painted INSTANTLY on Messages-tab mount; relay refresh merges fresh events in the background.
+
+| **Persisted per-peer conversation** (`nostr_dm_conv_v1_<user>_<peer>`)
+| Per (user, peer), `max: 500` messages
+| Full `ConversationMessage[]` painted within one frame on thread open; relay delta merges in the background.
+|===
+
+All four clear on logout (per-user caches are enumerated via `AsyncStorage.getAllKeys()` + prefix match). The plaintext LRU is module-level so its TTL is process lifetime; the AsyncStorage caches persist across cold starts.
+
+=== Fetch strategy
+
+Steady-state: every DM-relevant relay query carries `since = max(cached.created_at) - 120`. The `-120` is Damus's clock-drift pad (see https://github.com/damus-io/damus[`damus/Nostr/SubscriptionManager.swift`] L293-300): relays with slightly-off clocks still return the last 2 minutes of messages so we don't silently miss one. Cold cache (`max = 0`) sends no `since` filter — full history pulled.
+
+Per-peer `last_seen` is persisted alongside the conversation cache; inbox-wide `last_seen` is persisted alongside the inbox cache.
+
+`fetchConversation(peer)` also **skips `fetchInboxDmEvents` entirely** when the NIP-17 wrap cache is populated (#190). Since `refreshDmInbox` (fired on Messages-tab focus with 30s TTL) already pulls every gift-wrap and writes plaintext to the cache, re-entering a thread just filters cached entries to the peer. Removes the largest residual wall-clock cost from thread opens (~6 s → <1 s on the test inbox).
+
+=== Decrypt threading
+
+The serial `for-await` pattern was replaced with `Promise.all(batches of DECRYPT_YIELD_EVERY=15)` with explicit `setTimeout(0)` yields between batches (the `yieldToEventLoop()` helper). Rationale in `src/contexts/NostrContext.tsx`:
+
+[source,ts]
+----
+/** `await`ing an already-resolved promise only drains the microtask
+ *  queue, which still starves UI events — setTimeout(0) returns to
+ *  the task scheduler. Yield every DECRYPT_YIELD_EVERY *attempts*,
+ *  not successes, so a run of decrypt failures can't infinite-block.  */
+----
+
+For nsec, `nip04.decrypt` is pure-JS via `@noble/ciphers` (~1 ms per call on mid-range mobile), so 15 iterations is ≈1 frame's worth of JS. For Amber, each decrypt is an IPC round-trip that already yields implicitly; the explicit yield only adds scheduler respect, not raw throughput.
+
+=== Throttling & focus-defer
+
+- `refreshDmInbox` has a **30 s TTL** (`DM_INBOX_REFRESH_TTL_MS`): calls within the window are no-ops, unless the caller passes `{ force: true }` (pull-to-refresh). Protects against `useFocusEffect` tab-bouncing triggering a full relay + decrypt sweep on every return.
+- All three `useFocusEffect` refreshes (Home's `refreshProfile`, Messages' `refreshDmInbox`, Friends' `refreshProfile`) are wrapped in `InteractionManager.runAfterInteractions(...)` with `.cancel()` on cleanup so the tab-transition animation finishes before the refresh claims the JS thread.
+- `fetchConversation` checks an `isMountedRef` before firing `setMessages` / `setLoading` so back-press during a cold fetch doesn't commit state on an unmounted screen.
+
+=== Instant paint pattern
+
+ConversationScreen's `load()` callback reads the per-peer persisted cache FIRST, does `setMessages(cached)` synchronously (paint within a frame), `setLoading(false)`, THEN awaits the full `fetchConversation(peer)` which may spend seconds on a relay round-trip. Whichever result arrives first — cache or relay — is painted; the relay path overrides when it finishes.
+
+Cribbed from Arcade's `arclib/src/private.ts` + `DirectMessageScreen.tsx` `db_only=true` pattern.
+
+=== Relay coverage
+
+Every DM-relevant `fetch*` in `src/services/nostrService.ts` merges the user's own read-relays (from their kind-10002 NIP-65 event) with `DEFAULT_RELAYS`:
+
+[source,ts]
+----
+const allRelays = [...new Set([...relays, ...DEFAULT_RELAYS])];
+----
+
+This deliberately over-fetches so users with a sparse kind-10002 (e.g. a single-relay declaration) still see messages that landed on more popular relays. `DEFAULT_RELAYS` currently = `damus.io` / `nostr.band` / `nos.lol` / `primal.net`.
+
+=== Perf instrumentation
+
+Two log lines emitted unconditionally (not `__DEV__` gated) so they can be grepped from production APK logcat:
+
+- `[Perf] fetchConversation(<peerShort>): <ms>, k4=N (hits=A, fresh=B), k1059=M (hits=C, fresh=D, skippedFetch=bool), since=T, cached=X, merged=Y`
+- `[Perf] refreshDmInbox: <ms>, k4=N (hits=A, fresh=B), k1059=M, since=T, fresh=Z, merged=Y, rendered=R`
+
+Breakdown lets us confirm cache-hit behaviour on a real device without attaching a debugger.
+
+=== Known limitations / future work
+
+- A newly-arrived wrap that `refreshDmInbox` hasn't pulled yet (≤30 s ago) won't surface in `fetchConversation` until the next inbox refresh — acceptable for chat UX where "latest" rarely means "last second."
+- `pool.querySync` is still one-shot — real-time message arrival requires pull-to-refresh today. Filed as #188 (persistent relay subscription, architectural ~4 h).
+- BitmapFactory exception flood on unsupported avatar formats contributes to GC pressure on the Pixel. Filed as #189.
+- `react-native-mmkv` swap for the DM-cache AsyncStorage reads/writes would be ~100× faster at scale; marginal at current inbox sizes. Deferred.

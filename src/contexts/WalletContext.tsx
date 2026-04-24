@@ -34,7 +34,6 @@ export interface IncomingPayment {
 
 const USER_NAME_KEY = 'user_display_name';
 const CURRENCY_KEY = 'user_fiat_currency';
-const LIGHTNING_ADDRESS_KEY = 'lightning_address';
 
 // The #P-tagged outgoing zap-receipt relay fetch is expensive (500-event
 // filter). With local-storage attribution being the common path, this
@@ -76,8 +75,6 @@ interface WalletContextType {
   currency: FiatCurrency;
   setCurrency: (currency: FiatCurrency) => Promise<void>;
   btcPrice: number | null;
-  lightningAddress: string | null;
-  setLightningAddress: (address: string | null) => Promise<void>;
 
   // Wallet actions
   addNwcWallet: (
@@ -113,11 +110,15 @@ interface WalletContextType {
 
   // Payment actions (operate on active wallet)
   makeInvoice: (amount: number, memo?: string) => Promise<string>;
-  payInvoice: (bolt11: string) => Promise<{ preimage: string }>;
+  payInvoice: (bolt11: string, signal?: AbortSignal) => Promise<{ preimage: string }>;
 
   // Payment actions with explicit wallet ID (for sheets)
   makeInvoiceForWallet: (walletId: string, amount: number, memo?: string) => Promise<string>;
-  payInvoiceForWallet: (walletId: string, bolt11: string) => Promise<{ preimage: string }>;
+  payInvoiceForWallet: (
+    walletId: string,
+    bolt11: string,
+    signal?: AbortSignal,
+  ) => Promise<{ preimage: string }>;
   refreshBalanceForWallet: (walletId: string) => Promise<void>;
   fetchTransactionsForWallet: (walletId: string) => Promise<void>;
 
@@ -178,7 +179,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [userName, setUserNameState] = useState('');
   const [currency, setCurrencyState] = useState<FiatCurrency>('USD');
   const [btcPrice, setBtcPrice] = useState<number | null>(null);
-  const [lightningAddress, setLightningAddressState] = useState<string | null>(null);
   const [lastIncomingPayment, setLastIncomingPayment] = useState<IncomingPayment | null>(null);
   const priceInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   // Per-wallet baseline balances. Used to decide whether a balance
@@ -197,15 +197,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     activeWallet?.walletType === 'onchain' ? true : (activeWallet?.isConnected ?? false);
   const balance = activeWallet?.balance ?? null;
   const walletAlias = activeWallet?.walletAlias ?? activeWallet?.alias ?? null;
-
-  const setLightningAddress = useCallback(async (address: string | null) => {
-    setLightningAddressState(address);
-    if (address) {
-      await AsyncStorage.setItem(LIGHTNING_ADDRESS_KEY, address);
-    } else {
-      await AsyncStorage.removeItem(LIGHTNING_ADDRESS_KEY);
-    }
-  }, []);
 
   const setUserName = useCallback(async (name: string) => {
     setUserNameState(name);
@@ -272,9 +263,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const savedName = await AsyncStorage.getItem(USER_NAME_KEY);
         if (savedName) setUserNameState(savedName);
 
-        const savedAddress = await AsyncStorage.getItem(LIGHTNING_ADDRESS_KEY);
-        if (savedAddress) setLightningAddressState(savedAddress);
-
         const savedCurrency = await AsyncStorage.getItem(CURRENCY_KEY);
         const cur = (CURRENCIES as readonly string[]).includes(savedCurrency ?? '')
           ? (savedCurrency as FiatCurrency)
@@ -323,18 +311,20 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           setActiveWalletId(walletStates[0].id);
         }
 
-        // Connect wallets in parallel — each NWC handshake is ~5s of relay
-        // RTT, so serial init of N wallets was ~5N seconds. For typical
-        // installs (1-3 wallets) the relays handle concurrent connects
-        // fine; state updates are individual so per-wallet races are safe.
-        //
-        // Exception: the global lightning-address is a single-writer field
-        // racy under parallel connects — previously it was deterministic
-        // because connects were sequential. Claim it once here so the first
-        // wallet to resolve an address wins, and later wallets leave it
-        // alone.
-        let lightningAddressClaimed = Boolean(savedAddress);
-        await Promise.all(
+        // Wallets are usable immediately with cached balance + tx
+        // history from AsyncStorage, so we can flip the app into
+        // "loaded" state BEFORE the (slow) NWC connect handshakes
+        // finish. Each handshake does `provider.enable()` with up to
+        // 3 retries × 2 s backoff + a 500 ms stabilise wait = 2-14 s
+        // per wallet. Serialising them behind the UI boot meant a
+        // user with 2 NWC wallets waited 10+ s on a pink screen.
+        // Kick connects off in parallel but DON'T await — state
+        // updates inside each `.then` patch the wallet individually
+        // as it comes online, and any `pay / makeInvoice / getBalance`
+        // call will auto-await the connect because `nwcService.connect`
+        // is idempotent and provider-map-keyed.
+        setIsLoading(false);
+        void Promise.all(
           walletList.map(async (wallet) => {
             try {
               if (wallet.walletType === 'onchain') {
@@ -364,23 +354,16 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                           isConnected: true,
                           balance: result.balance ?? null,
                           walletAlias: info?.alias || null,
-                          lightningAddress: lud16 || info?.lud16 || w.lightningAddress,
+                          // Prefer any user-set / previously-persisted
+                          // address — a manual override in Wallet
+                          // Settings must survive every startup, even
+                          // when the NWC URL still carries a `lud16=`
+                          // that resolves to the provider's default.
+                          lightningAddress: w.lightningAddress || lud16 || info?.lud16 || null,
                         }
                       : w,
                   ),
                 );
-
-                if ((lud16 || info?.lud16) && !lightningAddressClaimed) {
-                  const addr = lud16 || info?.lud16 || null;
-                  if (addr) {
-                    // Claim synchronously before any await so the next
-                    // wallet in the Promise.all sees `lightningAddressClaimed`
-                    // as true and skips overwriting.
-                    lightningAddressClaimed = true;
-                    setLightningAddressState(addr);
-                    await AsyncStorage.setItem(LIGHTNING_ADDRESS_KEY, addr);
-                  }
-                }
               }
             } catch (error) {
               console.warn(`Failed to connect wallet ${wallet.alias} (${wallet.id}):`, error);
@@ -396,7 +379,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         });
       } catch (error) {
         console.warn('Wallet startup failed:', error);
-      } finally {
+        // Safety net: if something threw BEFORE we reached the
+        // early `setIsLoading(false)` above, make sure the UI still
+        // unblocks. Idempotent; React bails on no-op state sets.
         setIsLoading(false);
       }
     })();
@@ -871,7 +856,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const recipients: string[] = [];
       if (userPubkey) recipients.push(userPubkey);
       const lud16s = new Set<string>();
-      if (lightningAddress) lud16s.add(lightningAddress);
       const currentWallet = walletsRef.current.find((w) => w.id === walletId);
       if (currentWallet?.lightningAddress) lud16s.add(currentWallet.lightningAddress);
       for (const lud16 of lud16s) {
@@ -1159,7 +1143,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
       mergeResolverResults(walletId, resultsByIdx);
     },
-    [lightningAddress, resolveLud16ToNostrPubkey, mergeResolverResults],
+    [resolveLud16ToNostrPubkey, mergeResolverResults],
   );
 
   useEffect(() => {
@@ -1204,9 +1188,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   const payInvoice = useCallback(
-    async (bolt11: string) => {
+    async (bolt11: string, signal?: AbortSignal) => {
       if (!activeWalletId) throw new Error('No active wallet');
-      return nwcService.payInvoice(activeWalletId, bolt11);
+      return nwcService.payInvoice(activeWalletId, bolt11, signal);
     },
     [activeWalletId],
   );
@@ -1218,9 +1202,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [],
   );
 
-  const payInvoiceForWallet = useCallback(async (walletId: string, bolt11: string) => {
-    return nwcService.payInvoice(walletId, bolt11);
-  }, []);
+  const payInvoiceForWallet = useCallback(
+    async (walletId: string, bolt11: string, signal?: AbortSignal) => {
+      return nwcService.payInvoice(walletId, bolt11, signal);
+    },
+    [],
+  );
 
   const getReceiveAddress = useCallback(async (walletId: string) => {
     return onchainService.getNextReceiveAddress(walletId);
@@ -1505,8 +1492,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         currency,
         setCurrency,
         btcPrice,
-        lightningAddress,
-        setLightningAddress,
         addNwcWallet,
         addOnchainWallet,
         addHotWallet,
