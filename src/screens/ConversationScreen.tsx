@@ -14,9 +14,9 @@ import {
   AppState,
   Image,
   Linking,
-  Keyboard,
   StyleSheet,
 } from 'react-native';
+import Animated, { useAnimatedKeyboard, useAnimatedStyle } from 'react-native-reanimated';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Zap, Send, Plus, MapPin, ArrowDown } from 'lucide-react-native';
 import { Image as ExpoImage } from 'expo-image';
@@ -254,11 +254,13 @@ const ConversationScreen: React.FC = () => {
   const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState(false);
   const [detailTx, setDetailTx] = useState<TransactionDetailData | null>(null);
-  // Keyboard height — tracked explicitly so we can push the composer
-  // up manually. KeyboardAvoidingView with `behavior="padding"` is
-  // unreliable on Android 15+ edge-to-edge where `adjustResize`
-  // doesn't shrink past the IME. Same pattern as SendSheet/ReceiveSheet.
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  // Keyboard height (IME inset) — read directly from the platform via
+  // Reanimated's native module. On Android 15 edge-to-edge the RN
+  // `Keyboard.addListener` + `endCoordinates.height` pattern fires
+  // inconsistently and reports stale values (issue #194); reading the
+  // inset via `useAnimatedKeyboard` bypasses that by subscribing to
+  // `WindowInsetsCompat.Type.ime()` directly.
+  const animatedKeyboard = useAnimatedKeyboard();
   const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
   // Profiles resolved from `nostr:` contact references the other party
   // has shared in this conversation. Keyed by hex pubkey; a `null` value
@@ -419,23 +421,17 @@ const ConversationScreen: React.FC = () => {
     load(true);
   }, [load]);
 
-  // Track keyboard height so the composer sits above the IME on
-  // Android 15+ edge-to-edge, where KeyboardAvoidingView's built-in
-  // behaviors are unreliable. iOS uses `keyboardWillShow/Hide` for
-  // a smooth animated transition; Android uses `DidShow/Hide` because
-  // `WillShow` isn't emitted there.
-  useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const showSub = Keyboard.addListener(showEvent, (e) => {
-      setKeyboardHeight(e.endCoordinates.height);
-    });
-    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
-    return () => {
-      showSub.remove();
-      hideSub.remove();
+  // Keyboard-avoidance: pad the composer by the live IME inset so its
+  // visible content sits just above the keyboard. Falls back to the
+  // bottom safe-area inset (gesture bar) when the keyboard is closed.
+  // Runs on the UI thread — avoids the JS-thread jank that the old
+  // `Keyboard.addListener` + `setState` pattern caused during decrypts.
+  const composerKeyboardStyle = useAnimatedStyle(() => {
+    const h = animatedKeyboard.height.value;
+    return {
+      paddingBottom: h > 0 ? h : Math.max(insets.bottom, 8),
     };
-  }, []);
+  });
 
   // Jump to the newest message on first content load, and when the user is
   // already near the bottom and a new message arrives. The list is
@@ -1300,12 +1296,12 @@ const ConversationScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
 
-      {/* Use a plain View instead of KeyboardAvoidingView — on
-          Android 15+ edge-to-edge, neither the `padding` nor `height`
-          behaviors of KAV reliably lift content above the IME. We
-          track `keyboardHeight` via `Keyboard.addListener` above and
-          apply it as `paddingBottom` on the composer directly. Same
-          pattern as SendSheet / ReceiveSheet in this repo. */}
+      {/* Keyboard-avoidance via Reanimated's `useAnimatedKeyboard`
+          (see hook above). Plain `KeyboardAvoidingView` and the
+          `Keyboard.addListener` + `setState` pattern both failed on
+          Pixel 8 / Android 15 edge-to-edge (#194): the IME inset is
+          dispatched via WindowInsetsCompat, which Reanimated picks
+          up directly but the classic APIs don't. */}
       <View style={styles.flex}>
         {loading ? (
           <View style={styles.loading}>
@@ -1376,19 +1372,7 @@ const ConversationScreen: React.FC = () => {
           </View>
         ) : null}
 
-        <View
-          style={[
-            styles.composer,
-            {
-              // When the keyboard is up: push the composer up by its
-              // full height (no safe-area pad needed; the keyboard
-              // covers that region). When it's down: keep the usual
-              // bottom safe-area inset so the composer doesn't touch
-              // the gesture bar.
-              paddingBottom: keyboardHeight > 0 ? keyboardHeight : Math.max(insets.bottom, 8),
-            },
-          ]}
-        >
+        <Animated.View style={[styles.composer, composerKeyboardStyle]}>
           <TouchableOpacity
             style={styles.composerAttachButton}
             onPress={() => setAttachSheetOpen(true)}
@@ -1426,7 +1410,7 @@ const ConversationScreen: React.FC = () => {
               <Send size={20} color={colors.white} />
             )}
           </TouchableOpacity>
-        </View>
+        </Animated.View>
       </View>
 
       <AttachSheet
