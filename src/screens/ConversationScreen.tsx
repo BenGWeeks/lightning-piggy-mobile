@@ -1355,8 +1355,16 @@ const ConversationScreen: React.FC = () => {
           </View>
         ) : null}
 
-        <KeyboardStickyView offset={{ closed: 0, opened: -insets.bottom }}>
-          <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+        {/* Safe-area inset for the gesture bar is applied via the
+            sticky view's `closed` offset (lifts composer up by that
+            much when keyboard is closed) rather than via the
+            composer's `paddingBottom`. That way when the keyboard
+            opens, composer content sits flush against the keyboard's
+            top edge — no whitespace gap. Small fixed 8 px internal
+            pad for visual breathing room between the inputs and
+            the composer's own bottom border. */}
+        <KeyboardStickyView offset={{ closed: -Math.max(insets.bottom, 0), opened: 0 }}>
+          <View style={[styles.composer, { paddingBottom: 8 }]}>
             <TouchableOpacity
               style={styles.composerAttachButton}
               onPress={() => setAttachSheetOpen(true)}
