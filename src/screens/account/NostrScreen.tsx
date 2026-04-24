@@ -119,8 +119,8 @@ const NostrScreen: React.FC = () => {
       </View>
       <Text style={sharedAccountStyles.fieldHint}>
         Green dot = currently connected. NIP-65 relays come from your published kind-10002 list;
-        defaults are baked into the app and always tried as a fallback. Editing is not yet
-        supported in-app — update via another Nostr client for now.
+        defaults are baked into the app and always tried as a fallback. Editing is not yet supported
+        in-app — update via another Nostr client for now.
       </Text>
 
       <Text style={[sharedAccountStyles.sectionLabel, { marginTop: 24 }]}>

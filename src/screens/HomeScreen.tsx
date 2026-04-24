@@ -181,8 +181,7 @@ const HomeScreen: React.FC = () => {
     setSettingsWalletId(walletId);
   }, []);
 
-  const greetingName =
-    profile?.displayName?.trim() || profile?.name?.trim() || 'Satoshi';
+  const greetingName = profile?.displayName?.trim() || profile?.name?.trim() || 'Satoshi';
 
   const isOnchainWallet = activeWallet?.walletType === 'onchain';
   const isWatchOnly = isOnchainWallet && activeWallet?.onchainImportMethod !== 'mnemonic';
