@@ -1,0 +1,90 @@
+appId: com.lightningpiggy.app.dev
+name: Attach — send a gallery image to Little Piggy
+---
+# Opens the AttachPanel → Gallery tile → OS image picker → selects the
+# first image → uploads to Blossom → sends as a NIP-44 encrypted DM
+# with the imeta link → verifies the image bubble lands in the thread.
+#
+# Prerequisite: at least one image must exist in the emulator's
+# DCIM/Pictures so the OS picker has something to show. If the
+# emulator was just created the gallery is empty; push a fixture image
+# first:
+#
+#   adb -s emulator-5554 push tests/e2e/fixtures/sample-image.jpg /sdcard/Pictures/
+#   adb -s emulator-5554 shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Pictures/sample-image.jpg
+#
+# This test does NOT push a fixture itself — that's a one-time setup.
+# It assumes there's already at least one image in the gallery.
+#
+# KNOWN CAVEAT (#209): the Camera + Gallery tiles currently route
+# through the Amber signer activity instead of opening the OS picker.
+# This test will fail until #209 is resolved; once fixed it serves as
+# the regression guard.
+#
+# Run: maestro --device emulator-5554 test tests/e2e/test-attach-send-gallery.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
+- tapOn:
+    text: 'Little Piggy.*'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: 'attach-send-image'
+
+# First-run permission dialog for READ_MEDIA_IMAGES — accept whichever
+# variant Android shows (varies per API level).
+- tapOn:
+    text: 'Allow.*|Photos and videos|Selected photos|While using the app'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# OS image picker is open. The exact UI varies (Photo Picker vs. legacy
+# Documents UI vs. Gallery app) so we use a generic strategy: tap the
+# first image item that has a CHECKBOX or PHOTO content description.
+- tapOn:
+    text: '.*\\.(jpg|jpeg|png|webp|heic)'
+    optional: true
+- tapOn:
+    point: '50%,40%'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+# Confirm picker selection (Add / Done / Allow).
+- tapOn:
+    text: 'Add|Done|Use|Select'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# After Blossom upload + DM publish, the image bubble appears. We
+# assert the composer is back in idle state as a proxy for "the flow
+# completed cleanly" — the actual image bubble has no deterministic
+# text we can match.
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-input'
+    timeout: 30000

@@ -1,0 +1,76 @@
+appId: com.lightningpiggy.app.dev
+name: Attach — share a contact with Little Piggy
+---
+# Opens the AttachPanel → Contact tile → FriendPickerSheet → picks the
+# first available friend (alphabetically, by tapping the first row in
+# the friend list) → verifies the "CONTACT SHARED" bubble appears in
+# the Little Piggy thread.
+#
+# Safe to run repeatedly — the shared contact is published as a NIP-44
+# encrypted DM between Big Piggy and Little Piggy (both test fixtures).
+# The contact being shared can be any real Nostr peer present in Big
+# Piggy's follow list; we share their pubkey only, no PII risk.
+#
+# Run: maestro --device emulator-5554 test tests/e2e/test-attach-send-contact.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
+- tapOn:
+    text: 'Little Piggy.*'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: 'attach-share-contact'
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible:
+    id: 'friend-picker-search'
+
+# Type something into the search to bring up a deterministic single
+# friend. Searching for "p" hits Little Piggy's friend list which is
+# guaranteed to contain at least one peer (her test profile follows
+# the seed contacts). Then tap the first row in the list.
+- tapOn:
+    id: 'friend-picker-search'
+- inputText: 'p'
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn:
+    id: 'friend-picker-row-0'
+    optional: true
+# Fallback if the indexed testID isn't present — tap any rendered
+# friend row by its accessibility label prefix.
+- tapOn:
+    text: 'Send to .*'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# After the picker dismisses, the "CONTACT SHARED" bubble appears in
+# the conversation thread.
+- extendedWaitUntil:
+    visible:
+      text: 'CONTACT SHARED'
+    timeout: 15000

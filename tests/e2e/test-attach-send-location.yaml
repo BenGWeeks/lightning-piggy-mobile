@@ -1,0 +1,63 @@
+appId: com.lightningpiggy.app.dev
+name: Attach — send location to Little Piggy
+---
+# Sends the user's CURRENT location to Little Piggy as a NIP-44 DM and
+# verifies the "LOCATION SENT" bubble appears in the thread. Big Piggy
+# (signed-in user) → Little Piggy (peer) — both are test fixtures, so
+# this exchange is safe to run repeatedly.
+#
+# The first run on a fresh AVD will trigger ACCESS_FINE_LOCATION
+# permission. We tap "Allow" via a regex matcher because the dialog
+# can read either "Allow" or "Allow only while using the app" depending
+# on Android version. On subsequent runs the permission is already
+# granted and the flow goes straight through.
+#
+# Run: maestro --device emulator-5554 test tests/e2e/test-attach-send-location.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
+- tapOn:
+    text: 'Little Piggy.*'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Open the attach panel and fire the Location tile.
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: 'attach-share-location'
+
+# First-run permission dialog — accept whichever variant Android shows.
+# `optional: true` lets us no-op when the permission is already granted.
+- tapOn:
+    text: 'Allow.*|While using the app|Only this time'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# After geofencing + DM publish, the "LOCATION SENT" bubble appears in
+# the thread (extendedWaitUntil because the GPS fix on a fresh emulator
+# can take 5-10 s before the DM is published).
+- extendedWaitUntil:
+    visible:
+      text: 'LOCATION SENT'
+    timeout: 20000
