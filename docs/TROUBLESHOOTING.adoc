@@ -319,7 +319,14 @@ Similar quick-check before blaming the code: `grep -n '<property>' src/component
 *Fix:* edit the AVD config to remove the fake hardware keyboard, then **cold-boot** the emulator (the framework only reads `hw.keyboard` at boot — `adb reboot` is enough; you do not need to wipe data):
 [source,bash]
 ----
-sed -i 's/^hw\.keyboard=yes$/hw.keyboard=no/' ~/.android/avd/<AVD_NAME>.avd/config.ini
+# `sed -i` is portable across GNU (Linux) and BSD (macOS) sed only if
+# you branch on `uname` — BSD sed requires an explicit (possibly empty)
+# backup-suffix argument after `-i`, GNU sed forbids it.
+if [ "$(uname)" = "Darwin" ]; then
+  sed -i '' 's/^hw\.keyboard=yes$/hw.keyboard=no/' ~/.android/avd/<AVD_NAME>.avd/config.ini
+else
+  sed -i 's/^hw\.keyboard=yes$/hw.keyboard=no/' ~/.android/avd/<AVD_NAME>.avd/config.ini
+fi
 adb -s emulator-5554 emu kill
 $ANDROID_HOME/emulator/emulator -avd <AVD_NAME> -no-snapshot-load
 ----

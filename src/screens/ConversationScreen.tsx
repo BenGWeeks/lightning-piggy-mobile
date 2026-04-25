@@ -1509,7 +1509,7 @@ const ConversationScreen: React.FC = () => {
         visible={contactPickerOpen}
         onClose={() => {
           // Closing the picker with no selection also closes the
-          // AttachSheet underneath — the user has navigated away from
+          // AttachPanel underneath — the user has navigated away from
           // the attach flow, the parent is no longer relevant.
           setContactPickerOpen(false);
           setAttachPanelOpen(false);

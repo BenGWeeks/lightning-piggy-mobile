@@ -24,11 +24,12 @@ interface Tile {
 }
 
 /**
- * WhatsApp-style inline attachment panel — a flat 4-column grid that
- * occupies the same vertical slot as the soft keyboard. Sized + placed
- * by the parent (ConversationScreen) so it matches the cached keyboard
- * height. No sheet chrome, no backdrop, no rounded top corners — the
- * effect should feel like the keyboard *morphed* into icons.
+ * WhatsApp-style inline attachment panel — a flat 4-column grid sized
+ * intrinsically by its content and rendered above the composer by the
+ * parent (ConversationScreen). When opened, the parent dismisses the
+ * IME rather than sizing this panel to match a cached keyboard height.
+ * No sheet chrome, no backdrop, no rounded top corners — the effect
+ * should still feel like the keyboard *morphed* into icons.
  */
 const AttachPanel: React.FC<Props> = ({
   onShareLocation,

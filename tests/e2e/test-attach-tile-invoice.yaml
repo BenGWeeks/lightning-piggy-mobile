@@ -8,9 +8,12 @@ name: Attach tile — Invoice opens ReceiveSheet
 # Safety: ReceiveSheet only opens; no `Generate invoice` button is
 # tapped, so no real Lightning invoice is created and no DM is sent.
 #
-# This tile only renders when the active wallet supports invoicing
-# (lightningAddress / NWC). The test wraps the tile tap in
-# `runFlow when:` so it's a no-op for wallets that don't expose it.
+# ConversationScreen currently passes `onSendInvoice` unconditionally
+# to AttachPanel, so the Invoice tile is always present in the panel
+# today. The test still wraps the tile tap in `runFlow when:`
+# defensively, so it remains a no-op if a future build makes the tile
+# conditional (e.g. on lightningAddress / NWC support) or removes it
+# entirely.
 #
 # Run: maestro --device emulator-5554 test tests/e2e/test-attach-tile-invoice.yaml
 
