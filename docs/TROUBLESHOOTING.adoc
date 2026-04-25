@@ -312,4 +312,19 @@ Similar quick-check before blaming the code: `grep -n '<property>' src/component
 | Symptom: Maestro's `commands.json` confirms the target element was found at correct bounds with `clickable=true, enabled=true`, but the handler never runs (no `console.log` in Metro or logcat) and the UI doesn't change. Manual human taps on the same button work every time. +
 *Root cause:* a `TouchableWithoutFeedback onPress={Keyboard.dismiss}` wrapper around the sheet content swallows the UiAutomator accessibility click before it reaches the nested testID-bearing `TouchableOpacity`/`Pressable`. Real finger taps propagate through differently because they use the native touch pipeline, but UiAutomator / Maestro dispatches via accessibility events which the outer wrapper eats. +
 *Fix:* remove the `TouchableWithoutFeedback + Keyboard.dismiss` wrapper per rule (6) of the earlier "Bottom sheet doesn't slide up when keyboard opens" entry. The keyboard can still be dismissed via the hardware back key, the keyboard's own Done key, or by tapping any of the buttons (which close the sheet anyway). Confirmed on `ReceiveSheet.tsx` in the #96 / #106 debugging session — pulling the wrapper restored normal Maestro interaction.
+
+| Android emulator shows a tiny floating IME-switcher (mic / back / send / emoji / menu icons) instead of a docked Gboard at the bottom of the screen
+| Symptom: tapping any text input on the AVD opens a small vertical column of system-keyboard quick actions instead of the full QWERTY soft keyboard. `KeyboardAvoidingView` / `react-native-keyboard-controller` can't measure or react to the IME (its height stays 0), and Maestro tests that depend on the docked keyboard appearing all fail or give meaningless results. The same app on a physical Pixel works correctly. +
+*Root cause:* the AVD ships with `hw.keyboard=yes` in its `config.ini`, which advertises a virtual `qwerty2` hardware keyboard to `InputManagerService`. Android then assumes a real physical keyboard is present and suppresses the soft IME. The user-visible "Use on-screen keyboard" override (`Settings.Secure.show_ime_with_hard_keyboard=1`) is read lazily by Gboard at process start, so flipping it via `adb settings put` while LatinIME is already running does NOT take effect — even after disabling/re-enabling the IME, force-stopping the process, or backgrounding/foregrounding the app. +
+*Fix:* edit the AVD config to remove the fake hardware keyboard, then **cold-boot** the emulator (the framework only reads `hw.keyboard` at boot — `adb reboot` is enough; you do not need to wipe data):
+[source,bash]
+----
+sed -i 's/^hw\.keyboard=yes$/hw.keyboard=no/' ~/.android/avd/<AVD_NAME>.avd/config.ini
+adb -s emulator-5554 emu kill
+$ANDROID_HOME/emulator/emulator -avd <AVD_NAME> -no-snapshot-load
+----
+After cold boot, tapping a text input shows the full docked Gboard at the bottom and `react-native-keyboard-controller` reports the correct IME height. +
+*Side effect:* with `hw.keyboard=no`, the laptop keyboard no longer types into the emulator. For interactive development this is annoying; for Maestro tests it's actually preferable because Maestro's `inputText` action is the only intended path. +
+*Why the in-OS fixes don't work:* `dumpsys input_method` shows the IME is *bound* but its window is `View.GONE` / `NO_SURFACE` because LatinIME cached `hw.keyboard=true` at startup. Restarting just LatinIME (`am force-stop com.google.android.inputmethod.latin` or `ime disable/enable/set`) doesn't flush the cached decision because the IMM's host-side IME-binding state still reflects the boot-time value. Only a fresh boot makes the framework re-evaluate. +
+*Diagnostic to confirm before editing:* `grep hw.keyboard ~/.android/avd/<AVD_NAME>.avd/config.ini` should print `hw.keyboard=yes`. After the fix it should print `=no` and `adb shell dumpsys input | grep -i keyboard | head -3` should NOT mention `qwerty2`.
 |===
