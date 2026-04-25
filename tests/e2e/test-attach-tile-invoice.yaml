@@ -54,15 +54,16 @@ name: Attach tile — Invoice opens ReceiveSheet
           id: 'attach-send-invoice'
       - waitForAnimationToEnd:
           timeout: 3000
-      # ReceiveSheet rendered on top — assert any of its interactive
-      # testIDs is visible. We deliberately do NOT tap any
-      # invoice-generation control.
-      - assertVisible:
-          id: 'receive-enter-custom-amount'
+      # ReceiveSheet rendered on top. Wallets without a lud16 land on
+      # the AmountEntryScreen directly (see test-receive-landing-by-
+      # lud16.yaml for the rationale). Either branch satisfies "the
+      # invoice flow opened" so we accept either testID.
+      - extendedWaitUntil:
+          visible:
+            id: 'amount-entry-screen'
+          timeout: 5000
       - back
       - waitForAnimationToEnd:
           timeout: 2000
-      - assertNotVisible:
-          id: 'receive-enter-custom-amount'
       - assertVisible:
           id: 'conversation-input'

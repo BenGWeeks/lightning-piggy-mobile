@@ -1,4 +1,4 @@
-appId: ${APP_ID:-com.lightningpiggy.app}
+appId: com.lightningpiggy.app.dev
 name: Conversation Composer Stays Above Keyboard
 ---
 # Regression guard for #194: on Android 15 edge-to-edge devices

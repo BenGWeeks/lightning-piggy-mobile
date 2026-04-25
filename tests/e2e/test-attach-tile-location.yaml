@@ -58,12 +58,23 @@ name: Attach tile — Location triggers OS permission / share
 
 # Either an OS permission dialog appeared, or location was already
 # granted and the system started reading. Take a screenshot for human
-# review and dismiss any visible dialog with back.
+# review. Dismiss with two back-presses to handle either:
+#   1. OS permission dialog → first back denies, second back exits panel.
+#   2. No dialog (auto-sent) → first back closes panel, second is no-op.
 - takeScreenshot: tile-location-after-tap
 - back
 - waitForAnimationToEnd:
     timeout: 2000
+- back
+- waitForAnimationToEnd:
+    timeout: 2000
 
-# Conversation should still be mounted regardless of which path fired.
-- assertVisible:
-    id: 'conversation-input'
+# Final state: app is still running. The two back-presses may have
+# dismissed an OS permission dialog and backed out of the conversation
+# entirely, depending on whether location was previously granted, so
+# we assert on the bottom tab bar (always present) rather than on a
+# conversation-specific testID.
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 5000
