@@ -132,11 +132,17 @@ const AttachPanel: React.FC<Props> = ({
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
     panel: {
-      flex: 1,
+      // Intrinsic-sized: the 4-col grid drives the panel's height, so
+      // we don't have to guess a keyboard height to fit. Sits above
+      // the composer inside KeyboardStickyView; opening it dismisses
+      // the IME (handled in ConversationScreen) so the panel + composer
+      // stack never has to also accommodate the keyboard.
       backgroundColor: colors.surface,
       paddingHorizontal: 16,
       paddingTop: 16,
       paddingBottom: 8,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.divider,
     },
     grid: {
       flexDirection: 'row',

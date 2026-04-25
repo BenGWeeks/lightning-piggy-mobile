@@ -17,12 +17,7 @@ import {
   Linking,
   StyleSheet,
 } from 'react-native';
-import {
-  KeyboardController,
-  KeyboardStickyView,
-  useReanimatedKeyboardAnimation,
-} from 'react-native-keyboard-controller';
-import RAnimated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
+import { KeyboardController, KeyboardStickyView } from 'react-native-keyboard-controller';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Zap, Send, Plus, MapPin, ArrowDown } from 'lucide-react-native';
 import { Image as ExpoImage } from 'expo-image';
@@ -270,40 +265,23 @@ const ConversationScreen: React.FC = () => {
   const [sharedProfiles, setSharedProfiles] = useState<Record<string, NostrProfile | null>>({});
   const [attachPanelOpen, setAttachPanelOpen] = useState(false);
 
-  // WhatsApp-style "panel replaces keyboard" mechanics. We cache the
-  // last real keyboard height before dismissing the IME so the panel
-  // can slide into the *exact* slot the keyboard occupied. The
-  // `useReanimatedKeyboardAnimation` shared value drives the spacer
-  // height every frame; a max() clamp against `lastKbHeight` while
-  // the panel is open keeps the spacer pinned during the IME's
-  // dismiss animation, so the panel never flickers in.
-  const DEFAULT_PANEL_HEIGHT = 300;
-  const lastKbHeight = useSharedValue(DEFAULT_PANEL_HEIGHT);
-  const panelOpenSV = useSharedValue(false);
-  const { height: kbHeightSV } = useReanimatedKeyboardAnimation();
-
+  // Inline attach panel sits ABOVE the text input inside the same
+  // KeyboardStickyView. Opening dismisses the IME so we never have to
+  // stack panel + composer + keyboard. Closing happens on input focus
+  // (so the keyboard naturally takes back over) or hardware back.
+  // No height guessing — the 4-col grid is intrinsic-sized.
   const openAttachPanel = useCallback(() => {
-    const s = KeyboardController.state();
-    if (s?.height) lastKbHeight.value = s.height;
-    panelOpenSV.value = true;
     setAttachPanelOpen(true);
-    // Dismiss without `keepFocus`: we want the TextInput to fully drop
-    // focus so the next user tap re-fires its `onFocus` handler — which
-    // is what brings the keyboard back. With `keepFocus:true` the input
-    // stays focused-but-hidden, so re-tapping it is a no-op and the
-    // keyboard never reappears.
     KeyboardController.dismiss();
-  }, [lastKbHeight, panelOpenSV]);
+  }, []);
 
   const closeAttachPanel = useCallback(() => {
-    panelOpenSV.value = false;
     setAttachPanelOpen(false);
-  }, [panelOpenSV]);
+  }, []);
 
   // Android hardware-back: when the attach panel is open, swallow the
   // back press and close the panel instead of letting it bubble up to
-  // the navigator (which would exit the conversation entirely — see
-  // WhatsApp's behaviour).
+  // the navigator (which would exit the conversation entirely).
   useEffect(() => {
     if (!attachPanelOpen) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -312,12 +290,6 @@ const ConversationScreen: React.FC = () => {
     });
     return () => sub.remove();
   }, [attachPanelOpen, closeAttachPanel]);
-
-  const attachSpacerStyle = useAnimatedStyle(() => {
-    const kb = Math.abs(kbHeightSV.value);
-    const target = panelOpenSV.value ? Math.max(kb, lastKbHeight.value) : kb;
-    return { height: target };
-  });
   const [invoiceSheetOpen, setInvoiceSheetOpen] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
@@ -1422,6 +1394,44 @@ const ConversationScreen: React.FC = () => {
             pad for visual breathing room between the inputs and
             the composer's own bottom border. */}
         <KeyboardStickyView offset={{ closed: -Math.max(insets.bottom, 0), opened: 0 }}>
+          {/* Inline attach panel — renders ABOVE the composer row when
+              open. Its intrinsic height (4-col grid + paddings) drives
+              the sticky view's total height, so the composer + panel
+              together rise to sit at the screen bottom. Opening the
+              panel dismisses the IME (see openAttachPanel) so we never
+              have to stack panel + composer + keyboard. */}
+          {attachPanelOpen ? (
+            <AttachPanel
+              onShareLocation={handleShareLocation}
+              onSendImage={handlePickAndSendImage}
+              onTakePhoto={handleTakeAndSendPhoto}
+              onSendZap={
+                lightningAddress
+                  ? () => {
+                      closeAttachPanel();
+                      setSendSheetOpen(true);
+                    }
+                  : undefined
+              }
+              onSendInvoice={() => {
+                closeAttachPanel();
+                setInvoiceSheetOpen(true);
+              }}
+              onShareContact={() => {
+                // Picker opens over the conversation; don't close the
+                // panel until the user actually picks (or cancels).
+                setContactPickerOpen(true);
+              }}
+              onSendGif={
+                isGifConfigured()
+                  ? () => {
+                      // GifPickerSheet opens over the panel.
+                      setGifPickerOpen(true);
+                    }
+                  : undefined
+              }
+            />
+          ) : null}
           <View style={[styles.composer, { paddingBottom: 8 }]}>
             <TouchableOpacity
               style={styles.composerAttachButton}
@@ -1462,46 +1472,6 @@ const ConversationScreen: React.FC = () => {
               )}
             </TouchableOpacity>
           </View>
-          {/* WhatsApp-style attach panel — sits in the spacer below the
-              composer row inside the same KeyboardStickyView so it
-              animates as one unit. The spacer height is a Reanimated
-              max() of the live keyboard height and the cached panel
-              height, so swapping keyboard ↔ panel never collapses
-              and never flickers. */}
-          <RAnimated.View style={attachSpacerStyle}>
-            {attachPanelOpen ? (
-              <AttachPanel
-                onShareLocation={handleShareLocation}
-                onSendImage={handlePickAndSendImage}
-                onTakePhoto={handleTakeAndSendPhoto}
-                onSendZap={
-                  lightningAddress
-                    ? () => {
-                        closeAttachPanel();
-                        setSendSheetOpen(true);
-                      }
-                    : undefined
-                }
-                onSendInvoice={() => {
-                  closeAttachPanel();
-                  setInvoiceSheetOpen(true);
-                }}
-                onShareContact={() => {
-                  // Picker opens over the conversation; don't close the
-                  // panel until the user actually picks (or cancels).
-                  setContactPickerOpen(true);
-                }}
-                onSendGif={
-                  isGifConfigured()
-                    ? () => {
-                        // GifPickerSheet opens over the panel.
-                        setGifPickerOpen(true);
-                      }
-                    : undefined
-                }
-              />
-            ) : null}
-          </RAnimated.View>
         </KeyboardStickyView>
       </View>
       <GifPickerSheet
