@@ -270,7 +270,7 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
     sheetBackground: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
     },
     handleIndicator: {
       backgroundColor: colors.divider,
