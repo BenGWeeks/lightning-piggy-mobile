@@ -1583,7 +1583,7 @@ const createStyles = (colors: Palette) =>
       alignItems: 'center',
       paddingHorizontal: 12,
       paddingVertical: 10,
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.divider,
       gap: 10,
@@ -1686,7 +1686,7 @@ const createStyles = (colors: Palette) =>
       borderRadius: 16,
     },
     bubbleThem: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderBottomLeftRadius: 4,
     },
     bubbleMe: {
@@ -1738,7 +1738,7 @@ const createStyles = (colors: Palette) =>
       borderColor: colors.brandPink,
     },
     zapCardThem: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderColor: colors.zapYellow,
     },
     zapCardIconBadge: {
@@ -1817,7 +1817,7 @@ const createStyles = (colors: Palette) =>
       borderColor: colors.brandPink,
     },
     invoiceCardThem: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderColor: colors.zapYellow,
     },
     invoiceHeaderRow: {
@@ -1944,7 +1944,7 @@ const createStyles = (colors: Palette) =>
       borderColor: colors.brandPink,
     },
     contactCardThem: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderColor: colors.divider,
     },
     contactHeaderRow: {
@@ -2004,7 +2004,7 @@ const createStyles = (colors: Palette) =>
       paddingHorizontal: 10,
       paddingTop: 8,
       gap: 8,
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: colors.divider,
     },
@@ -2053,7 +2053,7 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.brandPink,
     },
     gifCardThem: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
     },
     gifImage: {
       // Concrete width matches the contact/location cards' `minWidth: 240`
@@ -2105,7 +2105,7 @@ const createStyles = (colors: Palette) =>
       borderColor: colors.brandPink,
     },
     locationCardThem: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderColor: colors.divider,
     },
     locationMap: {
@@ -2171,7 +2171,7 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.brandPink,
     },
     imageBubbleThem: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
     },
     imageBubbleImage: {
       width: 240,
