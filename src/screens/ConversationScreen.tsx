@@ -28,7 +28,8 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import * as nwcService from '../services/nwcService';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
+import type { Palette } from '../styles/palettes';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 import SendSheet from '../components/SendSheet';
 import AttachSheet from '../components/AttachSheet';
@@ -226,6 +227,8 @@ function formatRelativeFuture(epochMs: number): string {
 }
 
 const ConversationScreen: React.FC = () => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const navigation = useNavigation<ConversationNavigation>();
   const route = useRoute<ConversationRoute>();
   const insets = useSafeAreaInsets();
@@ -1204,7 +1207,7 @@ const ConversationScreen: React.FC = () => {
         </View>
       );
     },
-    [openLocation, isInvoicePaid, sharedProfiles, openSharedContact],
+    [openLocation, isInvoicePaid, sharedProfiles, openSharedContact, styles, colors],
   );
 
   const avatarNode =
@@ -1568,648 +1571,649 @@ const ConversationScreen: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  flex: { flex: 1 },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: colors.white,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.divider,
-    gap: 10,
-  },
-  backButton: {
-    padding: 4,
-  },
-  headerPeer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  headerAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.background,
-  },
-  headerAvatarFallback: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerName: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.textHeader,
-  },
-  listContent: {
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    gap: 6,
-    flexGrow: 1,
-  },
-  bubbleRow: {
-    flexDirection: 'row',
-    marginVertical: 2,
-  },
-  bubbleRowLeft: { justifyContent: 'flex-start' },
-  bubbleRowRight: { justifyContent: 'flex-end' },
-  dayHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingTop: 16,
-    paddingBottom: 6,
-    paddingHorizontal: 16,
-    gap: 12,
-  },
-  // Wrapper is a centered lane hovering above the composer; the FAB
-  // sits inside it so we can horizontally centre it without needing
-  // to know the FAB's width. `pointerEvents="box-none"` lets taps
-  // outside the button pass through to the message list below.
-  scrollToBottomWrap: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    // Lifts the FAB clear of the ~60 px composer by a comfortable gap
-    // so it doesn't visually crowd the message input.
-    bottom: 92,
-    alignItems: 'center',
-  },
-  scrollToBottomFab: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.brandPink,
-    // White ring keeps the FAB visible when it overlaps a pink bubble
-    // — otherwise the pink-on-pink blends into an invisible blob.
-    borderWidth: 2,
-    borderColor: colors.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  dayHeaderRule: {
-    flex: 1,
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.divider,
-  },
-  dayHeaderText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.textSupplementary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  bubble: {
-    maxWidth: '80%',
-    paddingHorizontal: 12,
-    paddingTop: 8,
-    // Match the 4 px bottom gap used by every other bubble/card so
-    // the time sits the same distance from the bubble edge regardless
-    // of message type.
-    paddingBottom: 4,
-    borderRadius: 16,
-  },
-  bubbleThem: {
-    backgroundColor: colors.white,
-    borderBottomLeftRadius: 4,
-  },
-  bubbleMe: {
-    backgroundColor: colors.brandPink,
-    borderBottomRightRadius: 4,
-  },
-  bubbleText: {
-    fontSize: 15,
-    color: colors.textBody,
-    lineHeight: 20,
-  },
-  bubbleTextMe: {
-    color: colors.white,
-  },
-  bubbleTime: {
-    fontSize: 10,
-    color: colors.textSupplementary,
-    marginTop: 4,
-    alignSelf: 'flex-end',
-  },
-  bubbleTimeMe: {
-    color: 'rgba(255,255,255,0.85)',
-  },
-  zapRow: {
-    flexDirection: 'row',
-    marginVertical: 4,
-  },
-  zapRowLeft: { justifyContent: 'flex-start' },
-  zapRowRight: { justifyContent: 'flex-end' },
-  zapCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    maxWidth: '85%',
-    minWidth: 240,
-    paddingTop: 12,
-    paddingBottom: 4,
-    paddingHorizontal: 14,
-    borderRadius: 14,
-    borderWidth: 1,
-    gap: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  zapCardMe: {
-    backgroundColor: colors.brandPink,
-    borderColor: colors.brandPink,
-  },
-  zapCardThem: {
-    backgroundColor: colors.white,
-    borderColor: colors.zapYellow,
-  },
-  zapCardIconBadge: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  zapCardIconBadgeMe: {
-    backgroundColor: colors.white,
-  },
-  zapCardIconBadgeThem: {
-    backgroundColor: colors.zapYellow,
-  },
-  zapCardBody: {
-    flex: 1,
-  },
-  zapCardHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  zapCardLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textSupplementary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  zapCardLabelMe: {
-    color: 'rgba(255,255,255,0.85)',
-  },
-  zapCardTime: {
-    fontSize: 10,
-    color: colors.textSupplementary,
-  },
-  zapCardTimeMe: {
-    color: 'rgba(255,255,255,0.85)',
-  },
-  zapCardAmount: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.textHeader,
-    marginTop: 2,
-  },
-  zapCardAmountMe: {
-    color: colors.white,
-  },
-  zapCardComment: {
-    fontSize: 14,
-    color: colors.textBody,
-    marginTop: 4,
-  },
-  zapCardCommentMe: {
-    color: colors.white,
-  },
-  invoiceCard: {
-    maxWidth: '85%',
-    minWidth: 240,
-    paddingTop: 12,
-    paddingBottom: 4,
-    paddingHorizontal: 14,
-    borderRadius: 14,
-    borderWidth: 1,
-    gap: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  invoiceCardMe: {
-    backgroundColor: colors.brandPink,
-    borderColor: colors.brandPink,
-  },
-  invoiceCardThem: {
-    backgroundColor: colors.white,
-    borderColor: colors.zapYellow,
-  },
-  invoiceHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  invoiceLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textSupplementary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  invoiceLabelMe: {
-    color: 'rgba(255,255,255,0.85)',
-  },
-  invoiceAmount: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.textHeader,
-    marginTop: 2,
-  },
-  invoiceAmountMe: {
-    color: colors.white,
-  },
-  invoiceMemo: {
-    fontSize: 14,
-    color: colors.textBody,
-    marginTop: 2,
-  },
-  invoiceMemoMe: {
-    color: 'rgba(255,255,255,0.9)',
-  },
-  invoiceExpiry: {
-    fontSize: 12,
-    color: colors.textSupplementary,
-    marginTop: 4,
-  },
-  invoiceExpiryMe: {
-    color: 'rgba(255,255,255,0.75)',
-  },
-  invoiceTagRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 6,
-  },
-  invoiceTag: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 10,
-    alignSelf: 'flex-start',
-  },
-  invoiceTagPaid: {
-    backgroundColor: '#2e7d32',
-  },
-  invoiceTagPaidText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#ffffff',
-    letterSpacing: 0.3,
-  },
-  invoiceTagUnpaid: {
-    backgroundColor: 'rgba(255,255,255,0.22)',
-  },
-  invoiceTagUnpaidText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#ffffff',
-    letterSpacing: 0.3,
-  },
-  invoiceTagExpired: {
-    backgroundColor: 'rgba(0,0,0,0.32)',
-  },
-  invoiceTagExpiredText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#ffffff',
-    letterSpacing: 0.3,
-  },
-  invoicePayButton: {
-    marginTop: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: colors.brandPink,
-  },
-  invoicePayButtonDisabled: {
-    backgroundColor: colors.divider,
-  },
-  invoicePayText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.white,
-  },
-  invoicePayExpiredText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.textSupplementary,
-  },
-  contactCard: {
-    maxWidth: '85%',
-    minWidth: 240,
-    paddingTop: 12,
-    paddingBottom: 4,
-    paddingHorizontal: 14,
-    borderRadius: 14,
-    borderWidth: 1,
-    gap: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  contactCardMe: {
-    backgroundColor: colors.brandPink,
-    borderColor: colors.brandPink,
-  },
-  contactCardThem: {
-    backgroundColor: colors.white,
-    borderColor: colors.divider,
-  },
-  contactHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  contactLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textSupplementary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  contactLabelMe: {
-    color: 'rgba(255,255,255,0.85)',
-  },
-  contactBodyRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  contactAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: colors.background,
-  },
-  contactAvatarFallback: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  contactInfo: {
-    flex: 1,
-    minWidth: 0,
-  },
-  contactName: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.textHeader,
-  },
-  contactNameMe: {
-    color: colors.white,
-  },
-  contactLn: {
-    fontSize: 13,
-    color: colors.textSupplementary,
-    marginTop: 2,
-  },
-  contactLnMe: {
-    color: 'rgba(255,255,255,0.9)',
-  },
-  composer: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingHorizontal: 10,
-    paddingTop: 8,
-    gap: 8,
-    backgroundColor: colors.white,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.divider,
-  },
-  composerInput: {
-    flex: 1,
-    minHeight: 40,
-    maxHeight: 120,
-    backgroundColor: colors.background,
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingTop: 10,
-    paddingBottom: 10,
-    fontSize: 15,
-    color: colors.textBody,
-  },
-  composerSendButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.brandPink,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  composerAttachButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.background,
-  },
-  gifCard: {
-    // Match contact / location / invoice card width so GIF bubbles don't
-    // look oddly narrow next to the other attachment types.
-    maxWidth: '85%',
-    minWidth: 240,
-    borderRadius: 14,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  gifCardMe: {
-    backgroundColor: colors.brandPink,
-  },
-  gifCardThem: {
-    backgroundColor: colors.white,
-  },
-  gifImage: {
-    // Concrete width matches the contact/location cards' `minWidth: 240`
-    // so the GIF card sizes to the same visual footprint as the other
-    // attachment types (text-driven content would otherwise leave the
-    // gifCard stretched to its `maxWidth` while contact cards sit near
-    // their minWidth).
-    width: 240,
-    height: 240,
-    backgroundColor: colors.background,
-  },
-  fullscreenBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.92)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  fullscreenImage: {
-    width: '100%',
-    height: '100%',
-  },
-  gifTime: {
-    fontSize: 10,
-    color: colors.textSupplementary,
-    alignSelf: 'flex-end',
-    // Align with the card-timestamp right inset used by invoice /
-    // contact / location / zap so every attachment type sits at the
-    // same distance from its card's right edge.
-    paddingHorizontal: 14,
-    paddingVertical: 4,
-  },
-  gifTimeMe: {
-    color: 'rgba(255,255,255,0.85)',
-  },
-  locationCard: {
-    maxWidth: '85%',
-    minWidth: 240,
-    borderRadius: 14,
-    borderWidth: 1,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  locationCardMe: {
-    backgroundColor: colors.brandPink,
-    borderColor: colors.brandPink,
-  },
-  locationCardThem: {
-    backgroundColor: colors.white,
-    borderColor: colors.divider,
-  },
-  locationMap: {
-    width: '100%',
-    height: 140,
-    backgroundColor: colors.background,
-  },
-  locationBody: {
-    paddingHorizontal: 14,
-    paddingTop: 10,
-    paddingBottom: 4,
-    gap: 2,
-  },
-  locationHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  locationLabelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  locationLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textSupplementary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  locationLabelMe: {
-    color: 'rgba(255,255,255,0.85)',
-  },
-  locationCoords: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.textHeader,
-    marginTop: 2,
-  },
-  locationCoordsMe: {
-    color: colors.white,
-  },
-  locationAccuracy: {
-    fontSize: 12,
-    color: colors.textSupplementary,
-  },
-  locationAccuracyMe: {
-    color: 'rgba(255,255,255,0.85)',
-  },
-  imageBubble: {
-    maxWidth: '85%',
-    minWidth: 240,
-    borderRadius: 14,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  imageBubbleMe: {
-    backgroundColor: colors.brandPink,
-  },
-  imageBubbleThem: {
-    backgroundColor: colors.white,
-  },
-  imageBubbleImage: {
-    width: 240,
-    height: 240,
-    backgroundColor: colors.background,
-  },
-  imageBubbleTime: {
-    fontSize: 10,
-    color: colors.textSupplementary,
-    alignSelf: 'flex-end',
-    paddingHorizontal: 14,
-    paddingVertical: 4,
-  },
-  imageBubbleTimeMe: {
-    color: 'rgba(255,255,255,0.85)',
-  },
-  loading: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  loadingText: {
-    color: colors.textSupplementary,
-    fontSize: 14,
-  },
-  empty: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 40,
-  },
-  emptyTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.textHeader,
-    marginBottom: 6,
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    color: colors.textSupplementary,
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    flex: { flex: 1 },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      backgroundColor: colors.surface,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.divider,
+      gap: 10,
+    },
+    backButton: {
+      padding: 4,
+    },
+    headerPeer: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    headerAvatar: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: colors.background,
+    },
+    headerAvatarFallback: {
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    headerName: {
+      flex: 1,
+      fontSize: 16,
+      fontWeight: '700',
+      color: colors.textHeader,
+    },
+    listContent: {
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+      gap: 6,
+      flexGrow: 1,
+    },
+    bubbleRow: {
+      flexDirection: 'row',
+      marginVertical: 2,
+    },
+    bubbleRowLeft: { justifyContent: 'flex-start' },
+    bubbleRowRight: { justifyContent: 'flex-end' },
+    dayHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingTop: 16,
+      paddingBottom: 6,
+      paddingHorizontal: 16,
+      gap: 12,
+    },
+    // Wrapper is a centered lane hovering above the composer; the FAB
+    // sits inside it so we can horizontally centre it without needing
+    // to know the FAB's width. `pointerEvents="box-none"` lets taps
+    // outside the button pass through to the message list below.
+    scrollToBottomWrap: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      // Lifts the FAB clear of the ~60 px composer by a comfortable gap
+      // so it doesn't visually crowd the message input.
+      bottom: 92,
+      alignItems: 'center',
+    },
+    scrollToBottomFab: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: colors.brandPink,
+      // White ring keeps the FAB visible when it overlaps a pink bubble
+      // — otherwise the pink-on-pink blends into an invisible blob.
+      borderWidth: 2,
+      borderColor: colors.white,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.2,
+      shadowRadius: 4,
+      elevation: 4,
+    },
+    dayHeaderRule: {
+      flex: 1,
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: colors.divider,
+    },
+    dayHeaderText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.textSupplementary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
+    bubble: {
+      maxWidth: '80%',
+      paddingHorizontal: 12,
+      paddingTop: 8,
+      // Match the 4 px bottom gap used by every other bubble/card so
+      // the time sits the same distance from the bubble edge regardless
+      // of message type.
+      paddingBottom: 4,
+      borderRadius: 16,
+    },
+    bubbleThem: {
+      backgroundColor: colors.surface,
+      borderBottomLeftRadius: 4,
+    },
+    bubbleMe: {
+      backgroundColor: colors.brandPink,
+      borderBottomRightRadius: 4,
+    },
+    bubbleText: {
+      fontSize: 15,
+      color: colors.textBody,
+      lineHeight: 20,
+    },
+    bubbleTextMe: {
+      color: colors.white,
+    },
+    bubbleTime: {
+      fontSize: 10,
+      color: colors.textSupplementary,
+      marginTop: 4,
+      alignSelf: 'flex-end',
+    },
+    bubbleTimeMe: {
+      color: 'rgba(255,255,255,0.85)',
+    },
+    zapRow: {
+      flexDirection: 'row',
+      marginVertical: 4,
+    },
+    zapRowLeft: { justifyContent: 'flex-start' },
+    zapRowRight: { justifyContent: 'flex-end' },
+    zapCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      maxWidth: '85%',
+      minWidth: 240,
+      paddingTop: 12,
+      paddingBottom: 4,
+      paddingHorizontal: 14,
+      borderRadius: 14,
+      borderWidth: 1,
+      gap: 12,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.05,
+      shadowRadius: 2,
+      elevation: 1,
+    },
+    zapCardMe: {
+      backgroundColor: colors.brandPink,
+      borderColor: colors.brandPink,
+    },
+    zapCardThem: {
+      backgroundColor: colors.surface,
+      borderColor: colors.zapYellow,
+    },
+    zapCardIconBadge: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    zapCardIconBadgeMe: {
+      backgroundColor: colors.white,
+    },
+    zapCardIconBadgeThem: {
+      backgroundColor: colors.zapYellow,
+    },
+    zapCardBody: {
+      flex: 1,
+    },
+    zapCardHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    zapCardLabel: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.textSupplementary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
+    },
+    zapCardLabelMe: {
+      color: 'rgba(255,255,255,0.85)',
+    },
+    zapCardTime: {
+      fontSize: 10,
+      color: colors.textSupplementary,
+    },
+    zapCardTimeMe: {
+      color: 'rgba(255,255,255,0.85)',
+    },
+    zapCardAmount: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: colors.textHeader,
+      marginTop: 2,
+    },
+    zapCardAmountMe: {
+      color: colors.white,
+    },
+    zapCardComment: {
+      fontSize: 14,
+      color: colors.textBody,
+      marginTop: 4,
+    },
+    zapCardCommentMe: {
+      color: colors.white,
+    },
+    invoiceCard: {
+      maxWidth: '85%',
+      minWidth: 240,
+      paddingTop: 12,
+      paddingBottom: 4,
+      paddingHorizontal: 14,
+      borderRadius: 14,
+      borderWidth: 1,
+      gap: 6,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.05,
+      shadowRadius: 2,
+      elevation: 1,
+    },
+    invoiceCardMe: {
+      backgroundColor: colors.brandPink,
+      borderColor: colors.brandPink,
+    },
+    invoiceCardThem: {
+      backgroundColor: colors.surface,
+      borderColor: colors.zapYellow,
+    },
+    invoiceHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    invoiceLabel: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.textSupplementary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
+    },
+    invoiceLabelMe: {
+      color: 'rgba(255,255,255,0.85)',
+    },
+    invoiceAmount: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: colors.textHeader,
+      marginTop: 2,
+    },
+    invoiceAmountMe: {
+      color: colors.white,
+    },
+    invoiceMemo: {
+      fontSize: 14,
+      color: colors.textBody,
+      marginTop: 2,
+    },
+    invoiceMemoMe: {
+      color: 'rgba(255,255,255,0.9)',
+    },
+    invoiceExpiry: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      marginTop: 4,
+    },
+    invoiceExpiryMe: {
+      color: 'rgba(255,255,255,0.75)',
+    },
+    invoiceTagRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginTop: 6,
+    },
+    invoiceTag: {
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 10,
+      alignSelf: 'flex-start',
+    },
+    invoiceTagPaid: {
+      backgroundColor: '#2e7d32',
+    },
+    invoiceTagPaidText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: '#ffffff',
+      letterSpacing: 0.3,
+    },
+    invoiceTagUnpaid: {
+      backgroundColor: 'rgba(255,255,255,0.22)',
+    },
+    invoiceTagUnpaidText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: '#ffffff',
+      letterSpacing: 0.3,
+    },
+    invoiceTagExpired: {
+      backgroundColor: 'rgba(0,0,0,0.32)',
+    },
+    invoiceTagExpiredText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: '#ffffff',
+      letterSpacing: 0.3,
+    },
+    invoicePayButton: {
+      marginTop: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      paddingVertical: 10,
+      borderRadius: 10,
+      backgroundColor: colors.brandPink,
+    },
+    invoicePayButtonDisabled: {
+      backgroundColor: colors.divider,
+    },
+    invoicePayText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.white,
+    },
+    invoicePayExpiredText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.textSupplementary,
+    },
+    contactCard: {
+      maxWidth: '85%',
+      minWidth: 240,
+      paddingTop: 12,
+      paddingBottom: 4,
+      paddingHorizontal: 14,
+      borderRadius: 14,
+      borderWidth: 1,
+      gap: 10,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.05,
+      shadowRadius: 2,
+      elevation: 1,
+    },
+    contactCardMe: {
+      backgroundColor: colors.brandPink,
+      borderColor: colors.brandPink,
+    },
+    contactCardThem: {
+      backgroundColor: colors.surface,
+      borderColor: colors.divider,
+    },
+    contactHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    contactLabel: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.textSupplementary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
+    },
+    contactLabelMe: {
+      color: 'rgba(255,255,255,0.85)',
+    },
+    contactBodyRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    contactAvatar: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: colors.background,
+    },
+    contactAvatarFallback: {
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    contactInfo: {
+      flex: 1,
+      minWidth: 0,
+    },
+    contactName: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: colors.textHeader,
+    },
+    contactNameMe: {
+      color: colors.white,
+    },
+    contactLn: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+      marginTop: 2,
+    },
+    contactLnMe: {
+      color: 'rgba(255,255,255,0.9)',
+    },
+    composer: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      paddingHorizontal: 10,
+      paddingTop: 8,
+      gap: 8,
+      backgroundColor: colors.surface,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.divider,
+    },
+    composerInput: {
+      flex: 1,
+      minHeight: 40,
+      maxHeight: 120,
+      backgroundColor: colors.background,
+      borderRadius: 20,
+      paddingHorizontal: 14,
+      paddingTop: 10,
+      paddingBottom: 10,
+      fontSize: 15,
+      color: colors.textBody,
+    },
+    composerSendButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: colors.brandPink,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    composerAttachButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.background,
+    },
+    gifCard: {
+      // Match contact / location / invoice card width so GIF bubbles don't
+      // look oddly narrow next to the other attachment types.
+      maxWidth: '85%',
+      minWidth: 240,
+      borderRadius: 14,
+      overflow: 'hidden',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.05,
+      shadowRadius: 2,
+      elevation: 1,
+    },
+    gifCardMe: {
+      backgroundColor: colors.brandPink,
+    },
+    gifCardThem: {
+      backgroundColor: colors.surface,
+    },
+    gifImage: {
+      // Concrete width matches the contact/location cards' `minWidth: 240`
+      // so the GIF card sizes to the same visual footprint as the other
+      // attachment types (text-driven content would otherwise leave the
+      // gifCard stretched to its `maxWidth` while contact cards sit near
+      // their minWidth).
+      width: 240,
+      height: 240,
+      backgroundColor: colors.background,
+    },
+    fullscreenBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.92)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    fullscreenImage: {
+      width: '100%',
+      height: '100%',
+    },
+    gifTime: {
+      fontSize: 10,
+      color: colors.textSupplementary,
+      alignSelf: 'flex-end',
+      // Align with the card-timestamp right inset used by invoice /
+      // contact / location / zap so every attachment type sits at the
+      // same distance from its card's right edge.
+      paddingHorizontal: 14,
+      paddingVertical: 4,
+    },
+    gifTimeMe: {
+      color: 'rgba(255,255,255,0.85)',
+    },
+    locationCard: {
+      maxWidth: '85%',
+      minWidth: 240,
+      borderRadius: 14,
+      borderWidth: 1,
+      overflow: 'hidden',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.05,
+      shadowRadius: 2,
+      elevation: 1,
+    },
+    locationCardMe: {
+      backgroundColor: colors.brandPink,
+      borderColor: colors.brandPink,
+    },
+    locationCardThem: {
+      backgroundColor: colors.surface,
+      borderColor: colors.divider,
+    },
+    locationMap: {
+      width: '100%',
+      height: 140,
+      backgroundColor: colors.background,
+    },
+    locationBody: {
+      paddingHorizontal: 14,
+      paddingTop: 10,
+      paddingBottom: 4,
+      gap: 2,
+    },
+    locationHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    locationLabelRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    locationLabel: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.textSupplementary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
+    },
+    locationLabelMe: {
+      color: 'rgba(255,255,255,0.85)',
+    },
+    locationCoords: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.textHeader,
+      marginTop: 2,
+    },
+    locationCoordsMe: {
+      color: colors.white,
+    },
+    locationAccuracy: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+    },
+    locationAccuracyMe: {
+      color: 'rgba(255,255,255,0.85)',
+    },
+    imageBubble: {
+      maxWidth: '85%',
+      minWidth: 240,
+      borderRadius: 14,
+      overflow: 'hidden',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.05,
+      shadowRadius: 2,
+      elevation: 1,
+    },
+    imageBubbleMe: {
+      backgroundColor: colors.brandPink,
+    },
+    imageBubbleThem: {
+      backgroundColor: colors.surface,
+    },
+    imageBubbleImage: {
+      width: 240,
+      height: 240,
+      backgroundColor: colors.background,
+    },
+    imageBubbleTime: {
+      fontSize: 10,
+      color: colors.textSupplementary,
+      alignSelf: 'flex-end',
+      paddingHorizontal: 14,
+      paddingVertical: 4,
+    },
+    imageBubbleTimeMe: {
+      color: 'rgba(255,255,255,0.85)',
+    },
+    loading: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+    },
+    loadingText: {
+      color: colors.textSupplementary,
+      fontSize: 14,
+    },
+    empty: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 40,
+    },
+    emptyTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: colors.textHeader,
+      marginBottom: 6,
+    },
+    emptySubtitle: {
+      fontSize: 14,
+      color: colors.textSupplementary,
+    },
+  });
 
 export default ConversationScreen;

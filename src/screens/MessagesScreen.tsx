@@ -23,7 +23,7 @@ import ContactProfileSheet from '../components/ContactProfileSheet';
 import FriendPickerSheet, { type PickedFriend } from '../components/FriendPickerSheet';
 import { MessageCircle } from 'lucide-react-native';
 import TabHeader from '../components/TabHeader';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
 import {
   buildConversationSummaries,
   buildDmSummaries,
@@ -31,7 +31,7 @@ import {
   mergeSummaries,
   type ConversationSummary,
 } from '../utils/conversationSummaries';
-import { styles } from '../styles/MessagesScreen.styles';
+import { createMessagesScreenStyles } from '../styles/MessagesScreen.styles';
 import type { MainTabParamList, RootStackParamList } from '../navigation/types';
 
 type MessagesNavigation = CompositeNavigationProp<
@@ -51,6 +51,8 @@ interface AnonContact {
 }
 
 const MessagesScreen: React.FC = () => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createMessagesScreenStyles(colors), [colors]);
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<MessagesNavigation>();
   const {

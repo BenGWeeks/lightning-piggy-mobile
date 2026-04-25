@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -19,7 +19,8 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import { useWallet } from '../contexts/WalletContext';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
+import type { Palette } from '../styles/palettes';
 import { CardTheme, WalletType } from '../types/wallet';
 import { themeList } from '../themes/cardThemes';
 import { MiniWalletCard } from './WalletCard';
@@ -36,6 +37,8 @@ interface Props {
 type Step = 'type' | 'url' | 'xpub' | 'mnemonic' | 'alias' | 'theme';
 
 const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { addNwcWallet, addOnchainWallet, addHotWallet } = useWallet();
   const [step, setStep] = useState<Step>('type');
   const [walletType, setWalletType] = useState<WalletType>('nwc');
@@ -619,150 +622,151 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   );
 };
 
-const styles = StyleSheet.create({
-  sheetBackground: {
-    backgroundColor: colors.white,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-  },
-  handle: {
-    backgroundColor: colors.divider,
-    width: 40,
-  },
-  content: {
-    flex: 1,
-    padding: 24,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: colors.textHeader,
-    marginBottom: 16,
-  },
-  stepContent: {
-    gap: 16,
-  },
-  description: {
-    fontSize: 14,
-    color: colors.textBody,
-    lineHeight: 20,
-  },
-  // --- Wallet type selection ---
-  typeCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.background,
-    borderRadius: 16,
-    padding: 20,
-    gap: 16,
-  },
-  typeCardIconWrapper: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  typeCardText: {
-    flex: 1,
-    gap: 4,
-  },
-  typeCardTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.textHeader,
-  },
-  typeCardDesc: {
-    fontSize: 13,
-    color: colors.textSupplementary,
-    lineHeight: 18,
-  },
-  // --- Inputs ---
-  nwcInput: {
-    backgroundColor: colors.background,
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 14,
-    color: colors.textBody,
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  aliasInput: {
-    backgroundColor: colors.background,
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    color: colors.textBody,
-  },
-  scannerContainer: {
-    alignItems: 'center',
-    gap: 12,
-  },
-  scanner: {
-    width: 260,
-    height: 260,
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  secondaryButton: {
-    backgroundColor: colors.background,
-    height: 48,
-    borderRadius: 12,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-  },
-  secondaryButtonRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  secondaryButtonHalf: {
-    flex: 1,
-  },
-  secondaryButtonText: {
-    color: colors.textBody,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  primaryButton: {
-    backgroundColor: colors.brandPink,
-    height: 52,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  primaryButtonText: {
-    color: colors.white,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  backButton: {
-    height: 52,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: colors.background,
-  },
-  backButtonText: {
-    color: colors.textBody,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  themeGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  errorText: {
-    color: colors.red,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    sheetBackground: {
+      backgroundColor: colors.surface,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+    },
+    handle: {
+      backgroundColor: colors.divider,
+      width: 40,
+    },
+    content: {
+      flex: 1,
+      padding: 24,
+    },
+    title: {
+      fontSize: 22,
+      fontWeight: '700',
+      color: colors.textHeader,
+      marginBottom: 16,
+    },
+    stepContent: {
+      gap: 16,
+    },
+    description: {
+      fontSize: 14,
+      color: colors.textBody,
+      lineHeight: 20,
+    },
+    // --- Wallet type selection ---
+    typeCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.background,
+      borderRadius: 16,
+      padding: 20,
+      gap: 16,
+    },
+    typeCardIconWrapper: {
+      width: 40,
+      height: 40,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    typeCardText: {
+      flex: 1,
+      gap: 4,
+    },
+    typeCardTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: colors.textHeader,
+    },
+    typeCardDesc: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+      lineHeight: 18,
+    },
+    // --- Inputs ---
+    nwcInput: {
+      backgroundColor: colors.background,
+      borderRadius: 12,
+      padding: 16,
+      fontSize: 14,
+      color: colors.textBody,
+      minHeight: 80,
+      textAlignVertical: 'top',
+    },
+    aliasInput: {
+      backgroundColor: colors.background,
+      borderRadius: 12,
+      padding: 16,
+      fontSize: 16,
+      color: colors.textBody,
+    },
+    scannerContainer: {
+      alignItems: 'center',
+      gap: 12,
+    },
+    scanner: {
+      width: 260,
+      height: 260,
+      borderRadius: 16,
+      overflow: 'hidden',
+    },
+    secondaryButton: {
+      backgroundColor: colors.background,
+      height: 48,
+      borderRadius: 12,
+      flexDirection: 'row',
+      justifyContent: 'center',
+      alignItems: 'center',
+      gap: 8,
+    },
+    secondaryButtonRow: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    secondaryButtonHalf: {
+      flex: 1,
+    },
+    secondaryButtonText: {
+      color: colors.textBody,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    primaryButton: {
+      backgroundColor: colors.brandPink,
+      height: 52,
+      borderRadius: 12,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    primaryButtonText: {
+      color: colors.white,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    buttonRow: {
+      flexDirection: 'row',
+      gap: 12,
+    },
+    backButton: {
+      height: 52,
+      paddingHorizontal: 20,
+      borderRadius: 12,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: colors.background,
+    },
+    backButtonText: {
+      color: colors.textBody,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    themeGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 12,
+    },
+    errorText: {
+      color: colors.red,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+  });
 
 export default AddWalletWizard;

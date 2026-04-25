@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -12,14 +12,15 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nip19 from 'nostr-tools/nip19';
 import AccountScreenLayout from './AccountScreenLayout';
-import { sharedAccountStyles } from './sharedStyles';
+import { createSharedAccountStyles } from './sharedStyles';
 import NostrLoginSheet from '../../components/NostrLoginSheet';
 import SendSheet from '../../components/SendSheet';
 import FeedbackSheet from '../../components/FeedbackSheet';
 import { createDmSender } from '../../utils/nostrDm';
 import { fetchProfile, DEFAULT_RELAYS } from '../../services/nostrService';
 import { useNostr } from '../../contexts/NostrContext';
-import { colors } from '../../styles/theme';
+import { useThemeColors } from '../../contexts/ThemeContext';
+import type { Palette } from '../../styles/palettes';
 import type { NostrProfile } from '../../types/nostr';
 import { LIGHTNING_PIGGY_TEAM_NPUB, dmRecipient } from '../../constants/npubs';
 import { appVersion } from '../../utils/appVersion';
@@ -27,6 +28,9 @@ import { appVersion } from '../../utils/appVersion';
 const TEAM_PROFILE_CACHE_KEY = 'team_profile_cache';
 
 const AboutScreen: React.FC = () => {
+  const colors = useThemeColors();
+  const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { isLoggedIn, signerType, sendDirectMessage } = useNostr();
 
   const [teamProfile, setTeamProfile] = useState<NostrProfile | null>(null);
@@ -200,116 +204,117 @@ const AboutScreen: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create({
-  teamCard: {
-    backgroundColor: colors.white,
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  teamBanner: {
-    width: '100%',
-    height: 80,
-  },
-  teamRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    gap: 12,
-  },
-  teamPicture: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    borderWidth: 2,
-    borderColor: colors.divider,
-  },
-  teamPicturePlaceholder: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: colors.background,
-  },
-  teamInfo: {
-    flex: 1,
-  },
-  teamName: {
-    color: colors.textHeader,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  teamAbout: {
-    color: colors.textSupplementary,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  teamButtonRow: {
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-    gap: 8,
-  },
-  zapButton: {
-    height: 44,
-    borderRadius: 10,
-    backgroundColor: colors.brandPink,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  zapButtonText: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  feedbackButton: {
-    height: 44,
-    borderRadius: 10,
-    backgroundColor: colors.white,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: colors.brandPink,
-  },
-  feedbackButtonText: {
-    color: colors.brandPink,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  teamFallbackText: {
-    color: colors.textSupplementary,
-    fontSize: 14,
-    padding: 20,
-    textAlign: 'center',
-  },
-  aboutTitle: {
-    color: colors.white,
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  aboutBody: {
-    color: colors.white,
-    fontSize: 14,
-    opacity: 0.9,
-    lineHeight: 20,
-  },
-  websiteLink: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: '600',
-    textDecorationLine: 'underline',
-    marginTop: 12,
-  },
-  versionText: {
-    color: colors.white,
-    fontSize: 16,
-    fontWeight: '600',
-    textAlign: 'center',
-    paddingTop: 32,
-  },
-  versionHint: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 12,
-    textAlign: 'center',
-    paddingTop: 4,
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    teamCard: {
+      backgroundColor: colors.surface,
+      borderRadius: 16,
+      overflow: 'hidden',
+    },
+    teamBanner: {
+      width: '100%',
+      height: 80,
+    },
+    teamRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: 16,
+      gap: 12,
+    },
+    teamPicture: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      borderWidth: 2,
+      borderColor: colors.divider,
+    },
+    teamPicturePlaceholder: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor: colors.background,
+    },
+    teamInfo: {
+      flex: 1,
+    },
+    teamName: {
+      color: colors.textHeader,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    teamAbout: {
+      color: colors.textSupplementary,
+      fontSize: 12,
+      marginTop: 2,
+    },
+    teamButtonRow: {
+      paddingHorizontal: 16,
+      paddingBottom: 16,
+      gap: 8,
+    },
+    zapButton: {
+      height: 44,
+      borderRadius: 10,
+      backgroundColor: colors.brandPink,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    zapButtonText: {
+      color: colors.white,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    feedbackButton: {
+      height: 44,
+      borderRadius: 10,
+      backgroundColor: colors.surface,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 2,
+      borderColor: colors.brandPink,
+    },
+    feedbackButtonText: {
+      color: colors.brandPink,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    teamFallbackText: {
+      color: colors.textSupplementary,
+      fontSize: 14,
+      padding: 20,
+      textAlign: 'center',
+    },
+    aboutTitle: {
+      color: colors.white,
+      fontSize: 20,
+      fontWeight: '700',
+    },
+    aboutBody: {
+      color: colors.white,
+      fontSize: 14,
+      opacity: 0.9,
+      lineHeight: 20,
+    },
+    websiteLink: {
+      color: colors.white,
+      fontSize: 14,
+      fontWeight: '600',
+      textDecorationLine: 'underline',
+      marginTop: 12,
+    },
+    versionText: {
+      color: colors.white,
+      fontSize: 16,
+      fontWeight: '600',
+      textAlign: 'center',
+      paddingTop: 32,
+    },
+    versionHint: {
+      color: 'rgba(255,255,255,0.6)',
+      fontSize: 12,
+      textAlign: 'center',
+      paddingTop: 4,
+    },
+  });
 
 export default AboutScreen;

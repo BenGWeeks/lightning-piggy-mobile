@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,8 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft } from 'lucide-react-native';
-import { colors } from '../../styles/theme';
+import { useThemeColors } from '../../contexts/ThemeContext';
+import type { Palette } from '../../styles/palettes';
 import type { AccountDrawerNavigation } from '../../navigation/types';
 
 interface Props {
@@ -29,6 +30,8 @@ interface Props {
  * Each section screen renders its content inside the ScrollView.
  */
 const AccountScreenLayout: React.FC<Props> = ({ title, children, scrollRef, scrollViewProps }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const navigation = useNavigation<AccountDrawerNavigation>();
   const insets = useSafeAreaInsets();
 
@@ -65,42 +68,43 @@ const AccountScreenLayout: React.FC<Props> = ({ title, children, scrollRef, scro
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.brandPink,
-  },
-  bgImage: {
-    position: 'absolute',
-    width: 420,
-    height: 420,
-    right: -60,
-    top: -20,
-    opacity: 0.15,
-  },
-  content: {
-    paddingHorizontal: 20,
-    paddingBottom: 40,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 24,
-  },
-  backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  title: {
-    color: colors.white,
-    fontSize: 28,
-    fontWeight: '700',
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.brandPink,
+    },
+    bgImage: {
+      position: 'absolute',
+      width: 420,
+      height: 420,
+      right: -60,
+      top: -20,
+      opacity: 0.15,
+    },
+    content: {
+      paddingHorizontal: 20,
+      paddingBottom: 40,
+    },
+    titleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      marginBottom: 24,
+    },
+    backButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: 'rgba(255,255,255,0.9)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    title: {
+      color: colors.white,
+      fontSize: 28,
+      fontWeight: '700',
+    },
+  });
 
 export default AccountScreenLayout;

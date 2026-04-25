@@ -11,6 +11,7 @@ import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import Toast, { BaseToast, ErrorToast, InfoToast } from 'react-native-toast-message';
 import { WalletProvider, useWallet } from './src/contexts/WalletContext';
 import { NostrProvider } from './src/contexts/NostrContext';
+import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
 import BootSplash from './src/components/BootSplash';
@@ -68,6 +69,13 @@ function GlobalIncomingPaymentOverlay() {
   );
 }
 
+// StatusBar needs to live inside ThemeProvider so its style flips with the
+// active scheme; splitting it out keeps the provider tree readable.
+function ThemedStatusBar() {
+  const { scheme } = useTheme();
+  return <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />;
+}
+
 export default function App() {
   // Boot splash — keeps the pig on screen from JS-mount for a minimum
   // 600 ms so the user never sees the plain-pink native-splash-to-JS
@@ -95,17 +103,19 @@ export default function App() {
             Without edge-to-edge, Android 15+ silently reports 0 keyboard
             height to every API (see #194 diagnosis). */}
         <KeyboardProvider>
-          <WalletProvider>
-            <NostrProvider>
-              <BottomSheetModalProvider>
-                <StatusBar style="light" />
-                <AppNavigator />
-              </BottomSheetModalProvider>
-              <Toast topOffset={60} config={toastConfig} />
-              <GlobalIncomingPaymentOverlay />
-            </NostrProvider>
-          </WalletProvider>
-          <BootSplash done={bootDone} />
+          <ThemeProvider>
+            <WalletProvider>
+              <NostrProvider>
+                <BottomSheetModalProvider>
+                  <ThemedStatusBar />
+                  <AppNavigator />
+                </BottomSheetModalProvider>
+                <Toast topOffset={60} config={toastConfig} />
+                <GlobalIncomingPaymentOverlay />
+              </NostrProvider>
+            </WalletProvider>
+            <BootSplash done={bootDone} />
+          </ThemeProvider>
         </KeyboardProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

@@ -1,0 +1,115 @@
+appId: com.lightningpiggy.app.dev
+name: Appearance Theme Toggle Test
+---
+# Exercises the light/dark/system theme toggle:
+#   1. Establishes a known baseline by tapping "System" first (this test
+#      doesn't depend on the device's pre-existing preference).
+#   2. Tapping "Dark" moves the check to the Dark row immediately.
+#   3. Navigating away (Home) and back into Appearance shows Dark still
+#      selected — proves the preference is held across screens.
+#   4. Killing + relaunching the app preserves Dark — proves the
+#      AsyncStorage persistence works.
+#   5. Reset to System so the test leaves the device in the default state.
+#
+# Run: maestro --device emulator-5554 test tests/e2e/test-appearance-theme.yaml
+
+# Cold-launch so the test starts on Home regardless of where the app
+# was last left.
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# --- 1. Open drawer → Appearance, establish baseline at "System" ---
+- tapOn:
+    id: 'tab-home'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'drawer-row-appearance'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# All three options render
+- assertVisible:
+    id: 'appearance-system'
+- assertVisible:
+    id: 'appearance-light'
+- assertVisible:
+    id: 'appearance-dark'
+
+# Tap System to establish a known baseline regardless of any persisted
+# preference left over from a prior run.
+- tapOn:
+    id: 'appearance-system'
+- waitForAnimationToEnd:
+    timeout: 1000
+- assertVisible:
+    id: 'appearance-system-check'
+- assertNotVisible:
+    id: 'appearance-dark-check'
+
+# --- 2. Tap Dark — selection moves immediately ---
+- tapOn:
+    id: 'appearance-dark'
+- waitForAnimationToEnd:
+    timeout: 1000
+- assertVisible:
+    id: 'appearance-dark-check'
+- assertNotVisible:
+    id: 'appearance-system-check'
+
+# --- 3. Navigate away (Home) and back — preference held ---
+- tapOn:
+    id: 'account-back-button'
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible:
+    id: 'tab-home'
+
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'drawer-row-appearance'
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible:
+    id: 'appearance-dark-check'
+
+# --- 4. Kill + relaunch — preference persists across cold start ---
+- stopApp
+- launchApp
+- waitForAnimationToEnd:
+    timeout: 15000
+- tapOn:
+    id: 'tab-home'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'drawer-row-appearance'
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible:
+    id: 'appearance-dark-check'
+
+# --- 5. Reset to System so the test leaves the device in default state ---
+- tapOn:
+    id: 'appearance-system'
+- waitForAnimationToEnd:
+    timeout: 1000
+- assertVisible:
+    id: 'appearance-system-check'
+- assertNotVisible:
+    id: 'appearance-dark-check'

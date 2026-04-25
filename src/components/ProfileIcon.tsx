@@ -2,7 +2,7 @@ import React from 'react';
 import { TouchableOpacity, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import Svg, { Path, Circle } from 'react-native-svg';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
 
 interface Props {
   uri?: string | null;
@@ -11,6 +11,7 @@ interface Props {
 }
 
 const ProfileIcon: React.FC<Props> = ({ uri, size = 36, onPress }) => {
+  const colors = useThemeColors();
   return (
     <TouchableOpacity
       onPress={onPress}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -15,7 +15,7 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
 import { Home } from 'lucide-react-native';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
 import ReceiveSheet from '../components/ReceiveSheet';
 import SendSheet from '../components/SendSheet';
 import TransferSheet from '../components/TransferSheet';
@@ -25,10 +25,12 @@ import AddWalletWizard from '../components/AddWalletWizard';
 import WalletSettingsSheet from '../components/WalletSettingsSheet';
 import TabHeader from '../components/TabHeader';
 import { ArrowDownIcon, ArrowUpIcon, ArrowLeftRightIcon } from '../components/icons/ArrowIcons';
-import { styles } from '../styles/HomeScreen.styles';
+import { createHomeScreenStyles } from '../styles/HomeScreen.styles';
 import type { MainTabParamList } from '../navigation/types';
 
 const HomeScreen: React.FC = () => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createHomeScreenStyles(colors), [colors]);
   const {
     wallets,
     activeWalletId,

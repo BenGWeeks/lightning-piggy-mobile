@@ -3,7 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'reac
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import AccountScreenLayout from './AccountScreenLayout';
-import { sharedAccountStyles } from './sharedStyles';
+import { createSharedAccountStyles } from './sharedStyles';
 import {
   getBlossomServer,
   setBlossomServer,
@@ -12,7 +12,8 @@ import {
 import * as amberService from '../../services/amberService';
 import { DEFAULT_RELAYS, getRelayConnectionStatus } from '../../services/nostrService';
 import { useNostr } from '../../contexts/NostrContext';
-import { colors } from '../../styles/theme';
+import { useThemeColors } from '../../contexts/ThemeContext';
+import type { Palette } from '../../styles/palettes';
 
 type RelayRow = {
   url: string;
@@ -23,6 +24,9 @@ type RelayRow = {
 };
 
 const NostrScreen: React.FC = () => {
+  const colors = useThemeColors();
+  const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { profile, signerType, amberNip44Permission, relays } = useNostr();
   const [connStatus, setConnStatus] = useState<Map<string, boolean>>(new Map());
 
@@ -212,45 +216,46 @@ const NostrScreen: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create({
-  relayList: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 10,
-    paddingVertical: 4,
-  },
-  relayRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    gap: 10,
-  },
-  statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    borderWidth: 1,
-    borderColor: colors.white,
-  },
-  relayMain: {
-    flex: 1,
-  },
-  relayUrl: {
-    color: colors.white,
-    fontSize: 13,
-  },
-  relaySource: {
-    color: colors.white,
-    fontSize: 10,
-    opacity: 0.6,
-    marginTop: 1,
-  },
-  relayMode: {
-    color: colors.white,
-    fontSize: 11,
-    opacity: 0.7,
-    fontWeight: '500',
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    relayList: {
+      backgroundColor: 'rgba(255,255,255,0.1)',
+      borderRadius: 10,
+      paddingVertical: 4,
+    },
+    relayRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      gap: 10,
+    },
+    statusDot: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+      borderWidth: 1,
+      borderColor: colors.white,
+    },
+    relayMain: {
+      flex: 1,
+    },
+    relayUrl: {
+      color: colors.white,
+      fontSize: 13,
+    },
+    relaySource: {
+      color: colors.white,
+      fontSize: 10,
+      opacity: 0.6,
+      marginTop: 1,
+    },
+    relayMode: {
+      color: colors.white,
+      fontSize: 11,
+      opacity: 0.7,
+      fontWeight: '500',
+    },
+  });
 
 export default NostrScreen;

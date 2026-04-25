@@ -15,7 +15,7 @@ import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as nwcService from '../services/nwcService';
-import { transactionDetailSheetStyles as styles } from '../styles/TransactionDetailSheet.styles';
+import { createTransactionDetailSheetStyles } from '../styles/TransactionDetailSheet.styles';
 import FeedbackSheet from './FeedbackSheet';
 import NostrLoginSheet from './NostrLoginSheet';
 import { createDmSender } from '../utils/nostrDm';
@@ -23,7 +23,7 @@ import { truncateMiddle, formatFriendlyDateTime } from '../utils/format';
 import { getTxCategory } from '../utils/txCategory';
 import TransactionTypeIcon from './TransactionTypeIcon';
 import type { ZapCounterpartyInfo } from '../types/wallet';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
 import { BOLTZ_SUPPORT_NPUB, dmRecipient } from '../constants/npubs';
 import { Copy, Zap, MessageCircle } from 'lucide-react-native';
 
@@ -86,26 +86,6 @@ type BoltzSwapView = {
 
 const BOLTZ_API = 'https://api.boltz.exchange/v2';
 
-const CopyRow: React.FC<{
-  label: string;
-  value: string;
-  onCopy: (label: string, value: string) => void;
-}> = ({ label, value, onCopy }) => (
-  <TouchableOpacity
-    style={styles.row}
-    onPress={() => onCopy(label, value)}
-    accessibilityLabel={`Copy ${label.toLowerCase()}`}
-  >
-    <Text style={styles.rowLabel}>{label}</Text>
-    <View style={styles.rowValueWrap}>
-      <Text style={[styles.rowValue, styles.rowValueMono]} numberOfLines={1}>
-        {truncateMiddle(value)}
-      </Text>
-      <Copy size={14} color={colors.textSupplementary} />
-    </View>
-  </TouchableOpacity>
-);
-
 const TransactionDetailSheet: React.FC<Props> = ({
   visible,
   tx,
@@ -114,6 +94,27 @@ const TransactionDetailSheet: React.FC<Props> = ({
   onZapCounterparty,
   onMessageCounterparty,
 }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createTransactionDetailSheetStyles(colors), [colors]);
+  const CopyRow: React.FC<{
+    label: string;
+    value: string;
+    onCopy: (label: string, value: string) => void;
+  }> = ({ label, value, onCopy }) => (
+    <TouchableOpacity
+      style={styles.row}
+      onPress={() => onCopy(label, value)}
+      accessibilityLabel={`Copy ${label.toLowerCase()}`}
+    >
+      <Text style={styles.rowLabel}>{label}</Text>
+      <View style={styles.rowValueWrap}>
+        <Text style={[styles.rowValue, styles.rowValueMono]} numberOfLines={1}>
+          {truncateMiddle(value)}
+        </Text>
+        <Copy size={14} color={colors.textSupplementary} />
+      </View>
+    </TouchableOpacity>
+  );
   const { btcPrice, currency, activeWallet } = useWallet();
   const { isLoggedIn, signerType, sendDirectMessage, contacts } = useNostr();
   const sheetRef = useRef<BottomSheetModal>(null);
