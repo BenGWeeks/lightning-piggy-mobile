@@ -1,4 +1,4 @@
-appId: ${APP_ID:-com.lightningpiggy.app}
+appId: com.lightningpiggy.app.dev
 name: Conversation Composer Stays Above Keyboard
 ---
 # Regression guard for #194: on Android 15 edge-to-edge devices
@@ -8,7 +8,7 @@ name: Conversation Composer Stays Above Keyboard
 # composer's `paddingBottom` on the UI thread.
 #
 # The test proves the fix by:
-#   1. opening a conversation (PEER env var — defaults to Big Piggy)
+#   1. opening the Big Piggy ↔ Little Piggy fixture conversation
 #   2. verifying the send button is visible before the keyboard opens
 #   3. tapping the Message input to bring up the keyboard
 #   4. verifying the send button is STILL visible after the keyboard
@@ -16,8 +16,10 @@ name: Conversation Composer Stays Above Keyboard
 #
 # If #194 regresses, step 4 fails: the send button goes off-screen.
 #
-# Run: maestro test -e PEER='Big Piggy' tests/e2e/test-conversation-keyboard.yaml
+# Run: maestro test tests/e2e/test-conversation-keyboard.yaml
 
+- launchApp:
+    clearState: false
 - waitForAnimationToEnd:
     timeout: 10000
 
@@ -28,11 +30,31 @@ name: Conversation Composer Stays Above Keyboard
 - waitForAnimationToEnd:
     timeout: 5000
 
-# Open the peer's conversation. `${PEER}.*` is a regex suffix because
+# Ensure the "All" filter is selected so the peer thread is visible
+# regardless of the user's last filter choice (e.g. "Following only"
+# can hide the test fixture).
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+# Open the peer's conversation. The `.*` suffix is a regex because
 # Maestro's `text:` matcher is full-regex in 2.3+; the row usually
 # renders as "<Name> <time-ago>" so the literal suffix would miss.
+# Hardcoded "Little Piggy" — Maestro's GraalJs evaluator trips on the
+# `${PEER:-...}` env-var default syntax (the same problem applies to
+# `${APP_ID:-...}` in test-login.yaml, which is why we have a separate
+# test-login-dev.yaml with the appId hardcoded). Keep the fixture peer
+# name explicit. Test fixture is signed in as Big Piggy → message
+# Little Piggy.
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
 - tapOn:
-    text: '${PEER:-Big Piggy}.*'
+    text: 'Little Piggy.*'
 - waitForAnimationToEnd:
     timeout: 10000
 

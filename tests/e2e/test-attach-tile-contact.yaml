@@ -1,0 +1,62 @@
+appId: com.lightningpiggy.app.dev
+name: Attach tile — Contact opens FriendPickerSheet
+---
+# Tap the Contact tile in the inline AttachPanel and verify the
+# FriendPickerSheet opens. Then dismiss with hardware back without
+# selecting any contact (no real DM is sent).
+#
+# Safety: peer is Little Piggy (test fixture), no payment flows
+# triggered, no messages sent.
+#
+# Run: maestro --device emulator-5554 test tests/e2e/test-attach-tile-contact.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
+- tapOn:
+    text: 'Little Piggy.*'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Open panel + assert
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible:
+    id: 'conversation-attach-panel'
+- assertVisible:
+    id: 'attach-share-contact'
+
+# Tap Contact → FriendPickerSheet opens
+- tapOn:
+    id: 'attach-share-contact'
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible:
+    id: 'friend-picker-search'
+
+# Dismiss without selecting → conversation still mounted
+- back
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertNotVisible:
+    id: 'friend-picker-search'
+- assertVisible:
+    id: 'conversation-input'

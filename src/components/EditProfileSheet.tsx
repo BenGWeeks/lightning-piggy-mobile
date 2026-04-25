@@ -20,6 +20,7 @@ import {
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
 import Svg, { Path, Circle } from 'react-native-svg';
+import { UserRound } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { useNostr } from '../contexts/NostrContext';
@@ -225,15 +226,7 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
             <Image source={{ uri: pictureUrl }} style={styles.avatarPreview} cachePolicy="none" />
           ) : (
             <View style={styles.avatarPlaceholder}>
-              <Svg width={32} height={32} viewBox="0 0 24 24" fill="none">
-                <Circle cx="12" cy="8" r="4" stroke={colors.textSupplementary} strokeWidth={2} />
-                <Path
-                  d="M4 20c0-3.3 3.6-6 8-6s8 2.7 8 6"
-                  stroke={colors.textSupplementary}
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                />
-              </Svg>
+              <UserRound size={36} color={colors.textBody} strokeWidth={1.75} />
               <Text style={styles.avatarPlaceholderText}>Tap</Text>
             </View>
           )}

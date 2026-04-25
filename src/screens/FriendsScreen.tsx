@@ -428,7 +428,7 @@ const FriendsScreen: React.FC = () => {
           </View>
         ) : (
           <View style={{ flex: 1, flexDirection: 'row' }}>
-            {availableLetters.length > 1 && (
+            {availableLetters.length > 0 && (
               <AlphabetBar
                 letters={availableLetters}
                 currentLetter={currentLetter}

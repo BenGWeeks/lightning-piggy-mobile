@@ -12,13 +12,19 @@ import {
   RefreshControl,
   Alert,
   AppState,
+  BackHandler,
   Image,
   Linking,
   StyleSheet,
 } from 'react-native';
-import { KeyboardStickyView } from 'react-native-keyboard-controller';
+import {
+  KeyboardController,
+  KeyboardStickyView,
+  useReanimatedKeyboardAnimation,
+} from 'react-native-keyboard-controller';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { Zap, Send, Plus, MapPin, ArrowDown } from 'lucide-react-native';
+import { Zap, Send, Plus, MapPin, ArrowDown, UserRound } from 'lucide-react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import * as ImagePicker from 'expo-image-picker';
@@ -32,7 +38,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 import SendSheet from '../components/SendSheet';
-import AttachSheet from '../components/AttachSheet';
+import AttachPanel from '../components/AttachPanel';
 import GifPickerSheet from '../components/GifPickerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
 import TransactionDetailSheet, {
@@ -232,6 +238,22 @@ const ConversationScreen: React.FC = () => {
   const navigation = useNavigation<ConversationNavigation>();
   const route = useRoute<ConversationRoute>();
   const insets = useSafeAreaInsets();
+  // Memoised so the FlatList's contentContainerStyle reference only
+  // changes when `attachPanelOpen` flips. Without this the array literal
+  // was re-created on every render (e.g. each keystroke as `draft`
+  // changes), causing extra FlatList layout work in a hot path.
+  // Drives the composer's animated paddingBottom: when keyboard is closed
+  // we add insets.bottom of dead space so the input row sits above the
+  // gesture bar; as the keyboard opens we shrink that to 0 so the input
+  // hugs the keyboard's top edge with no whitespace gap. This replaces
+  // the old `KeyboardStickyView offset.closed: -insets.bottom` shift,
+  // which left the composer visually overlapping the FlatList by
+  // insets.bottom dp (its layout box stayed at parent.bottom while the
+  // visual rendered shifted up).
+  const keyboard = useReanimatedKeyboardAnimation();
+  const composerSafeAreaStyle = useAnimatedStyle(() => ({
+    paddingBottom: 8 + Math.max(insets.bottom * (1 + keyboard.progress.value * -1), 0),
+  }));
   const { pubkey, name, picture, lightningAddress } = route.params;
 
   const {
@@ -262,7 +284,42 @@ const ConversationScreen: React.FC = () => {
   // has shared in this conversation. Keyed by hex pubkey; a `null` value
   // means we tried and the kind-0 lookup came back empty.
   const [sharedProfiles, setSharedProfiles] = useState<Record<string, NostrProfile | null>>({});
-  const [attachSheetOpen, setAttachSheetOpen] = useState(false);
+  const [attachPanelOpen, setAttachPanelOpen] = useState(false);
+  // Memoised here (not inline at the JSX site) so the FlatList's
+  // `contentContainerStyle` reference is stable across keystrokes —
+  // every render of ConversationScreen would otherwise re-create the
+  // array + inner object literal, forcing the FlatList to re-evaluate
+  // its content container layout in a hot path.
+  const listContentStyle = useMemo(
+    () => [styles.listContent, { paddingTop: attachPanelOpen ? 16 : 8 }],
+    [styles.listContent, attachPanelOpen],
+  );
+
+  // Inline attach panel sits ABOVE the text input inside the same
+  // KeyboardStickyView. Opening dismisses the IME so we never have to
+  // stack panel + composer + keyboard. Closing happens on input focus
+  // (so the keyboard naturally takes back over) or hardware back.
+  // No height guessing — the 4-col grid is intrinsic-sized.
+  const openAttachPanel = useCallback(() => {
+    setAttachPanelOpen(true);
+    KeyboardController.dismiss();
+  }, []);
+
+  const closeAttachPanel = useCallback(() => {
+    setAttachPanelOpen(false);
+  }, []);
+
+  // Android hardware-back: when the attach panel is open, swallow the
+  // back press and close the panel instead of letting it bubble up to
+  // the navigator (which would exit the conversation entirely).
+  useEffect(() => {
+    if (!attachPanelOpen) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      closeAttachPanel();
+      return true;
+    });
+    return () => sub.remove();
+  }, [attachPanelOpen, closeAttachPanel]);
   const [invoiceSheetOpen, setInvoiceSheetOpen] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
@@ -641,7 +698,7 @@ const ConversationScreen: React.FC = () => {
 
   const handleShareLocation = useCallback(async () => {
     if (sharingLocation) return;
-    setAttachSheetOpen(false);
+    setAttachPanelOpen(false);
     setSharingLocation(true);
     try {
       const result = await getCurrentLocation();
@@ -741,7 +798,7 @@ const ConversationScreen: React.FC = () => {
 
   const handlePickAndSendImage = useCallback(async () => {
     if (!isLoggedIn || uploadingImage || sending) return;
-    setAttachSheetOpen(false);
+    setAttachPanelOpen(false);
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       Alert.alert('Permission needed', 'Allow photo library access to send images.');
@@ -761,7 +818,7 @@ const ConversationScreen: React.FC = () => {
 
   const handleTakeAndSendPhoto = useCallback(async () => {
     if (!isLoggedIn || uploadingImage || sending) return;
-    setAttachSheetOpen(false);
+    setAttachPanelOpen(false);
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
       Alert.alert('Permission needed', 'Allow camera access to take and send photos.');
@@ -787,7 +844,7 @@ const ConversationScreen: React.FC = () => {
     async (friend: PickedFriend) => {
       // Dismiss both sheets in reverse stack order (top first).
       setContactPickerOpen(false);
-      setAttachSheetOpen(false);
+      setAttachPanelOpen(false);
       const readRelays = relays.filter((r) => r.read).map((r) => r.url);
       const relayHints = buildProfileRelayHints(friend.pubkey, contacts, readRelays);
       const nprofile = nprofileEncode(friend.pubkey, relayHints);
@@ -814,7 +871,7 @@ const ConversationScreen: React.FC = () => {
   const handleSendGif = useCallback(
     async (gif: Gif) => {
       setGifPickerOpen(false);
-      setAttachSheetOpen(false);
+      setAttachPanelOpen(false);
       const payload = gif.url;
       const result = await sendDirectMessage(pubkey, payload);
       if (!result.success) {
@@ -978,21 +1035,24 @@ const ConversationScreen: React.FC = () => {
                   {item.fromMe ? 'Contact shared' : 'Contact'}
                 </Text>
                 <View style={styles.contactBodyRow}>
-                  {prof?.picture ? (
-                    <Image source={{ uri: prof.picture }} style={styles.contactAvatar} />
-                  ) : (
-                    <View style={[styles.contactAvatar, styles.contactAvatarFallback]}>
-                      <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-                        <Circle cx="12" cy="8" r="4" fill={colors.textSupplementary} />
-                        <Path
-                          d="M4 20c0-3.314 3.582-6 8-6s8 2.686 8 6"
-                          stroke={colors.textSupplementary}
-                          strokeWidth={2}
-                          strokeLinecap="round"
-                        />
-                      </Svg>
-                    </View>
-                  )}
+                  {/* Always render the silhouette as the base layer so it
+                      shows whether `prof.picture` is missing OR the Image
+                      fails to load (broken URL, offline, etc). When
+                      `prof.picture` is set, the Image is z-stacked on top
+                      via absoluteFillObject and covers the silhouette
+                      once it loads. textBody (dark) is used for the icon
+                      to guarantee contrast against the light avatar BG —
+                      the previous inline SVG used textSupplementary
+                      (light grey on light grey → invisible). */}
+                  <View style={[styles.contactAvatar, styles.contactAvatarFallback]}>
+                    <UserRound size={26} color={colors.textBody} strokeWidth={1.75} />
+                    {prof?.picture ? (
+                      <Image
+                        source={{ uri: prof.picture }}
+                        style={[StyleSheet.absoluteFillObject, { borderRadius: 22 }]}
+                      />
+                    ) : null}
+                  </View>
                   <View style={styles.contactInfo}>
                     <Text
                       style={[styles.contactName, item.fromMe && styles.contactNameMe]}
@@ -1300,7 +1360,7 @@ const ConversationScreen: React.FC = () => {
             data={items}
             keyExtractor={(it) => it.id}
             renderItem={renderItem}
-            contentContainerStyle={styles.listContent}
+            contentContainerStyle={listContentStyle}
             inverted
             // Window the list so a thread with hundreds of messages
             // doesn't mount every row up front — first-frame work goes
@@ -1345,6 +1405,20 @@ const ConversationScreen: React.FC = () => {
           />
         )}
 
+        {/* Backdrop tap-to-close: when the attach panel is open, an
+            absolute transparent Pressable sits above the FlatList area.
+            Tapping anywhere on the messages closes the panel (matches
+            WhatsApp behaviour). Trade-off: you can't tap a message bubble
+            while the panel is open — close the panel first. */}
+        {attachPanelOpen ? (
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={closeAttachPanel}
+            accessibilityLabel="Close attachment panel"
+            testID="conversation-attach-backdrop"
+          />
+        ) : null}
+
         {!atBottom && !loading ? (
           <View style={styles.scrollToBottomWrap} pointerEvents="box-none">
             <TouchableOpacity
@@ -1358,19 +1432,55 @@ const ConversationScreen: React.FC = () => {
           </View>
         ) : null}
 
-        {/* Safe-area inset for the gesture bar is applied via the
-            sticky view's `closed` offset (lifts composer up by that
-            much when keyboard is closed) rather than via the
-            composer's `paddingBottom`. That way when the keyboard
-            opens, composer content sits flush against the keyboard's
-            top edge — no whitespace gap. Small fixed 8 px internal
-            pad for visual breathing room between the inputs and
-            the composer's own bottom border. */}
-        <KeyboardStickyView offset={{ closed: -Math.max(insets.bottom, 0), opened: 0 }}>
-          <View style={[styles.composer, { paddingBottom: 8 }]}>
+        {/* Composer sits inside KeyboardStickyView so it rides above the
+            IME on Android 15+. Both `closed` and `opened` offsets are 0
+            so the sticky view's layout box matches its visual position;
+            the gesture-bar inset is handled by an animated paddingBottom
+            on the composer itself (composerSafeAreaStyle), which goes
+            from 8 + insets.bottom (closed → above gesture bar) to 8
+            (open → flush against keyboard top, no whitespace gap). This
+            way the FlatList ends right where the composer begins, with
+            no inset overlap to compensate for. */}
+        <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
+          {/* Inline attach panel — renders ABOVE the composer row when
+              open. Its intrinsic height (4-col grid + paddings) drives
+              the sticky view's total height, so the composer + panel
+              together rise to sit at the screen bottom. Opening the
+              panel dismisses the IME (see openAttachPanel) so we never
+              have to stack panel + composer + keyboard. */}
+          {attachPanelOpen ? (
+            <AttachPanel
+              onShareLocation={handleShareLocation}
+              onSendImage={handlePickAndSendImage}
+              onTakePhoto={handleTakeAndSendPhoto}
+              onSendZap={() => {
+                closeAttachPanel();
+                setSendSheetOpen(true);
+              }}
+              zapDisabled={!lightningAddress}
+              onSendInvoice={() => {
+                closeAttachPanel();
+                setInvoiceSheetOpen(true);
+              }}
+              onShareContact={() => {
+                // Picker opens over the conversation; don't close the
+                // panel until the user actually picks (or cancels).
+                setContactPickerOpen(true);
+              }}
+              onSendGif={
+                isGifConfigured()
+                  ? () => {
+                      // GifPickerSheet opens over the panel.
+                      setGifPickerOpen(true);
+                    }
+                  : undefined
+              }
+            />
+          ) : null}
+          <Animated.View style={[styles.composer, composerSafeAreaStyle]}>
             <TouchableOpacity
               style={styles.composerAttachButton}
-              onPress={() => setAttachSheetOpen(true)}
+              onPress={() => (attachPanelOpen ? closeAttachPanel() : openAttachPanel())}
               disabled={!isLoggedIn || sending || sharingLocation || uploadingImage}
               accessibilityLabel="Attach"
               testID="conversation-attach"
@@ -1387,6 +1497,7 @@ const ConversationScreen: React.FC = () => {
               placeholderTextColor={colors.textSupplementary}
               value={draft}
               onChangeText={setDraft}
+              onFocus={closeAttachPanel}
               multiline
               editable={isLoggedIn && !sending}
               accessibilityLabel="Message input"
@@ -1405,54 +1516,14 @@ const ConversationScreen: React.FC = () => {
                 <Send size={20} color={colors.white} />
               )}
             </TouchableOpacity>
-          </View>
+          </Animated.View>
         </KeyboardStickyView>
       </View>
-
-      <AttachSheet
-        visible={attachSheetOpen}
-        onClose={() => setAttachSheetOpen(false)}
-        onShareLocation={handleShareLocation}
-        onSendImage={handlePickAndSendImage}
-        onTakePhoto={handleTakeAndSendPhoto}
-        onSendZap={
-          lightningAddress
-            ? () => {
-                setAttachSheetOpen(false);
-                setSendSheetOpen(true);
-              }
-            : undefined
-        }
-        onSendInvoice={() => {
-          setAttachSheetOpen(false);
-          setInvoiceSheetOpen(true);
-        }}
-        onShareContact={() => {
-          // Don't dismiss AttachSheet first — FriendPickerSheet has
-          // `stackBehavior="push"` and expects to layer *on top* of an
-          // already-presented parent. Dismissing AttachSheet + presenting
-          // FriendPickerSheet in the same render trips a gorhom race
-          // (see gorhom/react-native-bottom-sheet#1941) that leaves the
-          // child sheet at an invalid position when the keyboard opens —
-          // symptom we hit: the search-input focus collapsed the sheet
-          // to ~15 % of screen height.
-          setContactPickerOpen(true);
-        }}
-        onSendGif={
-          isGifConfigured()
-            ? () => {
-                // Same stack-without-dismiss pattern as FriendPickerSheet
-                // above — GifPickerSheet opens over the AttachSheet.
-                setGifPickerOpen(true);
-              }
-            : undefined
-        }
-      />
       <GifPickerSheet
         visible={gifPickerOpen}
         onClose={() => {
           setGifPickerOpen(false);
-          setAttachSheetOpen(false);
+          setAttachPanelOpen(false);
         }}
         onSelect={handleSendGif}
       />
@@ -1483,10 +1554,10 @@ const ConversationScreen: React.FC = () => {
         visible={contactPickerOpen}
         onClose={() => {
           // Closing the picker with no selection also closes the
-          // AttachSheet underneath — the user has navigated away from
+          // AttachPanel underneath — the user has navigated away from
           // the attach flow, the parent is no longer relevant.
           setContactPickerOpen(false);
-          setAttachSheetOpen(false);
+          setAttachPanelOpen(false);
         }}
         onSelect={handleShareContactPicked}
         title={`Share a contact with ${name}`}
@@ -1615,7 +1686,17 @@ const createStyles = (colors: Palette) =>
     },
     listContent: {
       paddingHorizontal: 12,
-      paddingVertical: 12,
+      // Inverted list: paddingTop becomes the *visual-bottom* padding.
+      // The composer (rendered inside KeyboardStickyView below) is a
+      // flex sibling, so the FlatList's bottom edge already ends where
+      // the composer's top begins — we don't need to clear the
+      // composer's height here, just a small breathing gap so the
+      // newest bubble doesn't visually hug the composer's top border.
+      // ConversationScreen overrides this inline (16 dp) when the
+      // attach panel is open. paddingBottom (= visual-top) keeps a
+      // small breathing gap above the day-header row.
+      paddingTop: 8,
+      paddingBottom: 12,
       gap: 6,
       flexGrow: 1,
     },

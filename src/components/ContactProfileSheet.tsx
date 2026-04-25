@@ -17,7 +17,7 @@ import {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { Zap, Copy, Share2 } from 'lucide-react-native';
+import { Zap, Copy, Share2, UserRound } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
 import Toast from 'react-native-toast-message';
 import { npubEncode, nprofileEncode, buildProfileRelayHints } from '../services/nostrService';
@@ -255,15 +255,7 @@ const ContactProfileSheet: React.FC<Props> = ({
             />
           ) : (
             <View style={styles.avatarDefault}>
-              <Svg width={32} height={32} viewBox="0 0 24 24" fill="none">
-                <Circle cx="12" cy="8" r="4" fill={colors.textSupplementary} />
-                <Path
-                  d="M4 20c0-3.314 3.582-6 8-6s8 2.686 8 6"
-                  stroke={colors.textSupplementary}
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                />
-              </Svg>
+              <UserRound size={40} color={colors.textBody} strokeWidth={1.5} />
             </View>
           )}
         </View>
