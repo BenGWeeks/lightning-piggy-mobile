@@ -12,6 +12,7 @@ import {
   RefreshControl,
   Alert,
   AppState,
+  BackHandler,
   Image,
   Linking,
   StyleSheet,
@@ -298,6 +299,19 @@ const ConversationScreen: React.FC = () => {
     panelOpenSV.value = false;
     setAttachPanelOpen(false);
   }, [panelOpenSV]);
+
+  // Android hardware-back: when the attach panel is open, swallow the
+  // back press and close the panel instead of letting it bubble up to
+  // the navigator (which would exit the conversation entirely — see
+  // WhatsApp's behaviour).
+  useEffect(() => {
+    if (!attachPanelOpen) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      closeAttachPanel();
+      return true;
+    });
+    return () => sub.remove();
+  }, [attachPanelOpen, closeAttachPanel]);
 
   const attachSpacerStyle = useAnimatedStyle(() => {
     const kb = Math.abs(kbHeightSV.value);

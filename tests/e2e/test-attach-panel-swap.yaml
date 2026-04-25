@@ -96,7 +96,7 @@ name: WhatsApp-style Attach Panel Swap Test
 - waitForAnimationToEnd:
     timeout: 5000
 - tapOn:
-    text: '${LITTLE_PIGGY_NAME:-Little Piggy}.*'
+    text: 'Little Piggy.*'
 - waitForAnimationToEnd:
     timeout: 10000
 
@@ -143,15 +143,14 @@ name: WhatsApp-style Attach Panel Swap Test
 - inputText: ' and more'
 - takeScreenshot: 03-keyboard-back
 
-# --- 4. Send the message ---
-- tapOn:
-    id: 'conversation-send'
-- waitForAnimationToEnd:
-    timeout: 5000
-- extendedWaitUntil:
-    visible:
-      text: 'hello from big piggy and more'
-    timeout: 10000
+# --- 4. SAFETY: do NOT tap conversation-send — that would publish a
+#         real Nostr DM. The draft is asserted in the next step
+#         instead, which proves the focus → type → swap → type chain
+#         worked end-to-end without any network side effect. Erase
+#         the draft so we leave the conversation clean.
+- assertVisible:
+    text: 'hello from big piggy and more'
+- eraseText: 50
 
 # --- 5. Idempotent toggle: tap "+" twice → opens, then closes ---
 - tapOn:
