@@ -38,7 +38,7 @@ export const createReceiveSheetStyles = (colors: Palette) =>
       borderRadius: 8,
     },
     tabActive: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
     },
     tabText: {
       fontSize: 14,
@@ -58,7 +58,7 @@ export const createReceiveSheetStyles = (colors: Palette) =>
       gap: 8,
     },
     amountInput: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderRadius: 8,
       paddingHorizontal: 12,
       paddingVertical: 8,
@@ -94,7 +94,7 @@ export const createReceiveSheetStyles = (colors: Palette) =>
       width: 220,
       height: 220,
       borderRadius: 24,
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       justifyContent: 'center',
       alignItems: 'center',
       borderWidth: 1,
@@ -145,7 +145,7 @@ export const createReceiveSheetStyles = (colors: Palette) =>
     actionButton: {
       flex: 1,
       minWidth: 0,
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       height: 52,
       paddingHorizontal: 12,
       borderRadius: 12,
@@ -187,7 +187,7 @@ export const createReceiveSheetStyles = (colors: Palette) =>
     walletDropdown: {
       flexDirection: 'row',
       alignItems: 'center',
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderRadius: 10,
       paddingHorizontal: 14,
       paddingVertical: 8,
@@ -210,7 +210,7 @@ export const createReceiveSheetStyles = (colors: Palette) =>
       left: 0,
       right: 0,
       marginTop: 4,
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderRadius: 10,
       borderWidth: 1,
       borderColor: colors.divider,
@@ -275,7 +275,7 @@ export const createReceiveSheetStyles = (colors: Palette) =>
     enterAmountButton: {
       alignSelf: 'center',
       marginTop: 16,
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       paddingHorizontal: 24,
       height: 52,
       borderRadius: 12,
@@ -294,7 +294,7 @@ export const createReceiveSheetStyles = (colors: Palette) =>
     },
     changeAmountButton: {
       marginTop: 8,
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       paddingHorizontal: 24,
       height: 52,
       borderRadius: 12,

@@ -42,7 +42,7 @@ export const createAmountEntryStyles = (colors: Palette) =>
     },
     card: {
       position: 'relative',
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderRadius: CARD_RADIUS,
       borderWidth: 1,
       borderColor: CARD_INNER_BG,
@@ -90,7 +90,7 @@ export const createAmountEntryStyles = (colors: Palette) =>
       backgroundColor: CARD_INNER_BG,
     },
     pillSecondary: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderWidth: 1,
       borderColor: CARD_INNER_BG,
     },
@@ -121,7 +121,7 @@ export const createAmountEntryStyles = (colors: Palette) =>
       width: SWAP_DIAMETER,
       height: SWAP_DIAMETER,
       borderRadius: SWAP_DIAMETER / 2,
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       alignItems: 'center',
       justifyContent: 'center',
       transform: [{ translateY: -SWAP_DIAMETER / 2 }],
@@ -191,7 +191,7 @@ export const createAmountEntryStyles = (colors: Palette) =>
       justifyContent: 'center',
     },
     keyFilled: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 1 },
       shadowOpacity: 0.25,

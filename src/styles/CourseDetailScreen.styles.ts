@@ -72,7 +72,7 @@ export const createCourseDetailScreenStyles = (colors: Palette) =>
       gap: 12,
     },
     missionCard: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderRadius: 16,
       padding: 12,
       flexDirection: 'row',

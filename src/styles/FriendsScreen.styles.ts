@@ -72,7 +72,7 @@ export const createFriendsScreenStyles = (colors: Palette) =>
     },
     content: {
       flex: 1,
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderTopLeftRadius: 24,
       borderTopRightRadius: 24,
       marginTop: -24,

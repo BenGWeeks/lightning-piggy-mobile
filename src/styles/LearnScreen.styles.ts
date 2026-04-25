@@ -33,7 +33,7 @@ export const createLearnScreenStyles = (colors: Palette) =>
     },
     courseCard: {
       width: '47%',
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderRadius: 12,
       overflow: 'hidden',
       paddingBottom: 14,

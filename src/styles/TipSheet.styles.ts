@@ -28,7 +28,7 @@ export const createTipSheetStyles = (colors: Palette) =>
       width: 240,
       height: 240,
       borderRadius: 16,
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       justifyContent: 'center',
       alignItems: 'center',
       padding: 20,
@@ -55,7 +55,7 @@ export const createTipSheetStyles = (colors: Palette) =>
       marginTop: 4,
     },
     actionButton: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       paddingHorizontal: 20,
       height: 40,
       borderRadius: 10,
@@ -80,7 +80,7 @@ export const createTipSheetStyles = (colors: Palette) =>
       marginTop: 4,
     },
     quizSection: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderRadius: 16,
       padding: 16,
       width: '100%',
@@ -131,7 +131,7 @@ export const createTipSheetStyles = (colors: Palette) =>
       textAlign: 'center',
     },
     closeButton: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       height: 52,
       paddingHorizontal: 40,
       borderRadius: 12,

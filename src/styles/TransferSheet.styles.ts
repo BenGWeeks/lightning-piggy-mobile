@@ -41,7 +41,7 @@ export const createTransferSheetStyles = (colors: Palette) =>
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderRadius: 12,
       paddingHorizontal: 14,
       paddingVertical: 12,
@@ -61,7 +61,7 @@ export const createTransferSheetStyles = (colors: Palette) =>
     },
     dropdownMenu: {
       marginTop: 4,
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderRadius: 12,
       borderWidth: 1,
       borderColor: colors.divider,
@@ -123,7 +123,7 @@ export const createTransferSheetStyles = (colors: Palette) =>
       gap: 8,
     },
     amountInput: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderRadius: 8,
       paddingHorizontal: 12,
       paddingVertical: 8,
@@ -242,7 +242,7 @@ export const createTransferSheetStyles = (colors: Palette) =>
       color: colors.white,
     },
     cancelButton: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       height: 52,
       paddingHorizontal: 30,
       borderRadius: 12,

@@ -38,7 +38,7 @@ export const createSendSheetStyles = (colors: Palette) =>
       borderRadius: 8,
     },
     tabActive: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
     },
     tabText: {
       fontSize: 14,
@@ -52,7 +52,7 @@ export const createSendSheetStyles = (colors: Palette) =>
       width: 240,
       height: 240,
       borderRadius: 24,
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       overflow: 'hidden',
       justifyContent: 'center',
       alignItems: 'center',
@@ -88,7 +88,7 @@ export const createSendSheetStyles = (colors: Palette) =>
       gap: 12,
     },
     pasteInput: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderRadius: 12,
       padding: 16,
       fontSize: 14,
@@ -130,7 +130,7 @@ export const createSendSheetStyles = (colors: Palette) =>
       fontWeight: '700',
     },
     detailsCard: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderRadius: 16,
       padding: 20,
       width: '100%',
@@ -280,7 +280,7 @@ export const createSendSheetStyles = (colors: Palette) =>
       gap: 20,
     },
     cancelButton: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       height: 52,
       paddingHorizontal: 30,
       borderRadius: 12,
@@ -298,7 +298,7 @@ export const createSendSheetStyles = (colors: Palette) =>
       fontWeight: '700',
     },
     sendButton: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       height: 52,
       paddingHorizontal: 30,
       borderRadius: 12,
@@ -330,7 +330,7 @@ export const createSendSheetStyles = (colors: Palette) =>
     walletDropdown: {
       flexDirection: 'row',
       alignItems: 'center',
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderRadius: 10,
       paddingHorizontal: 14,
       paddingVertical: 8,
@@ -353,7 +353,7 @@ export const createSendSheetStyles = (colors: Palette) =>
       left: 0,
       right: 0,
       marginTop: 4,
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderRadius: 10,
       borderWidth: 1,
       borderColor: colors.divider,

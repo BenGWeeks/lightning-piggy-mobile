@@ -110,7 +110,7 @@ export const createTransactionDetailSheetStyles = (colors: Palette) =>
       fontWeight: '700',
     },
     secondaryButton: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       paddingVertical: 14,
       borderRadius: 12,
       alignItems: 'center',
@@ -140,7 +140,7 @@ export const createTransactionDetailSheetStyles = (colors: Palette) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 12,
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       padding: 12,
       borderRadius: 12,
       borderWidth: 1,
