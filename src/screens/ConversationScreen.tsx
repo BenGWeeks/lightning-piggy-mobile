@@ -1327,7 +1327,7 @@ const ConversationScreen: React.FC = () => {
             data={items}
             keyExtractor={(it) => it.id}
             renderItem={renderItem}
-            contentContainerStyle={styles.listContent}
+            contentContainerStyle={[styles.listContent, { paddingTop: attachPanelOpen ? 16 : 96 }]}
             inverted
             // Window the list so a thread with hundreds of messages
             // doesn't mount every row up front — first-frame work goes
@@ -1642,11 +1642,12 @@ const createStyles = (colors: Palette) =>
     listContent: {
       paddingHorizontal: 12,
       // Inverted list: paddingTop becomes the *visual-bottom* padding.
-      // Bump it past the composer's resting height (input + paddings ≈
-      // 60 dp) so the latest message isn't tucked under the composer
+      // Bump it well past the composer's resting height (input +
+      // paddings ≈ 60 dp) so the latest message has comfortable
+      // breathing room and isn't visually hugging the composer's top
       // border. paddingBottom (= visual-top) keeps a small breathing
       // gap above the day-header row.
-      paddingTop: 72,
+      paddingTop: 96,
       paddingBottom: 12,
       gap: 6,
       flexGrow: 1,
