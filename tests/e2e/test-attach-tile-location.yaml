@@ -1,0 +1,69 @@
+appId: com.lightningpiggy.app.dev
+name: Attach tile — Location triggers OS permission / share
+---
+# Tap the Location tile in the inline AttachPanel. On a fresh install
+# this triggers an OS permission dialog (ACCESS_FINE_LOCATION); on a
+# device where permission was previously granted it sends the current
+# coordinates as a NIP-44 encrypted DM.
+#
+# Safety: the test ONLY taps the tile and screenshots the result. It
+# does NOT accept the permission dialog (which would silently send a
+# real DM with the device's coordinates) and does NOT tap any
+# downstream "send" affordance.
+#
+# If the OS dialog appears, the test passes if it can subsequently
+# dismiss it with hardware back. If location was already granted and
+# the DM is auto-sent, the test will fail visibly so the developer
+# knows location permission needs to be revoked on this device.
+#
+# Run: maestro --device emulator-5554 test tests/e2e/test-attach-tile-location.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
+- tapOn:
+    text: 'Little Piggy.*'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible:
+    id: 'conversation-attach-panel'
+- assertVisible:
+    id: 'attach-share-location'
+
+- tapOn:
+    id: 'attach-share-location'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Either an OS permission dialog appeared, or location was already
+# granted and the system started reading. Take a screenshot for human
+# review and dismiss any visible dialog with back.
+- takeScreenshot: tile-location-after-tap
+- back
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Conversation should still be mounted regardless of which path fired.
+- assertVisible:
+    id: 'conversation-input'

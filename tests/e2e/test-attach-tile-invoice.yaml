@@ -1,0 +1,68 @@
+appId: com.lightningpiggy.app.dev
+name: Attach tile — Invoice opens ReceiveSheet
+---
+# Tap the Invoice tile in the inline AttachPanel and verify the
+# ReceiveSheet opens (the bolt11 invoice creation flow). Dismiss
+# without generating an invoice.
+#
+# Safety: ReceiveSheet only opens; no `Generate invoice` button is
+# tapped, so no real Lightning invoice is created and no DM is sent.
+#
+# This tile only renders when the active wallet supports invoicing
+# (lightningAddress / NWC). The test wraps the tile tap in
+# `runFlow when:` so it's a no-op for wallets that don't expose it.
+#
+# Run: maestro --device emulator-5554 test tests/e2e/test-attach-tile-invoice.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
+- tapOn:
+    text: 'Little Piggy.*'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible:
+    id: 'conversation-attach-panel'
+
+- runFlow:
+    when:
+      visible:
+        id: 'attach-send-invoice'
+    commands:
+      - tapOn:
+          id: 'attach-send-invoice'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      # ReceiveSheet rendered on top — assert any of its interactive
+      # testIDs is visible. We deliberately do NOT tap any
+      # invoice-generation control.
+      - assertVisible:
+          id: 'receive-enter-custom-amount'
+      - back
+      - waitForAnimationToEnd:
+          timeout: 2000
+      - assertNotVisible:
+          id: 'receive-enter-custom-amount'
+      - assertVisible:
+          id: 'conversation-input'

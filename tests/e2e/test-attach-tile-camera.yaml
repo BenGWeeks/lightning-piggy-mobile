@@ -1,0 +1,61 @@
+appId: com.lightningpiggy.app.dev
+name: Attach tile — Camera triggers OS camera / permission
+---
+# Tap the Camera tile in the inline AttachPanel. On a fresh install
+# this triggers an OS camera-permission dialog; on a device where
+# permission was previously granted it launches the system camera.
+#
+# Safety: the test ONLY taps the tile and screenshots the result. It
+# does NOT take a photo, accept any permission, or upload anything to
+# Blossom.
+#
+# Because this tile depends on a system permission/picker flow, the
+# only assertion the test can reliably make is that the conversation
+# is still mounted after dismissing whatever the OS surfaced.
+#
+# Run: maestro --device emulator-5554 test tests/e2e/test-attach-tile-camera.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
+- tapOn:
+    text: 'Little Piggy.*'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible:
+    id: 'conversation-attach-panel'
+- assertVisible:
+    id: 'attach-take-photo'
+
+- tapOn:
+    id: 'attach-take-photo'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- takeScreenshot: tile-camera-after-tap
+- back
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible:
+    id: 'conversation-input'

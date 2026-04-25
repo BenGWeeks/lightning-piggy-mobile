@@ -95,6 +95,19 @@ name: WhatsApp-style Attach Panel Swap Test
     id: 'tab-messages'
 - waitForAnimationToEnd:
     timeout: 5000
+# Ensure the "All" filter is selected so Little Piggy is visible
+# regardless of the user's last filter choice.
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
 - tapOn:
     text: 'Little Piggy.*'
 - waitForAnimationToEnd:

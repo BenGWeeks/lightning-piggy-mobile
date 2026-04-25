@@ -1,0 +1,65 @@
+appId: com.lightningpiggy.app.dev
+name: Attach tile — GIF opens GifPickerSheet
+---
+# Tap the GIF tile in the inline AttachPanel and verify the
+# GifPickerSheet opens. Then dismiss with hardware back without
+# selecting any GIF.
+#
+# This tile only renders when EXPO_PUBLIC_GIPHY_API_KEY is configured
+# (see AttachPanel onSendGif prop wiring). The test wraps the GIF tap
+# in `runFlow when:` so it's a no-op when GIF isn't enabled — keeping
+# the test green regardless of dev vs prod build flags.
+#
+# Safety: no DM sent, no payment flow.
+#
+# Run: maestro --device emulator-5554 test tests/e2e/test-attach-tile-gif.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
+- tapOn:
+    text: 'Little Piggy.*'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible:
+    id: 'conversation-attach-panel'
+
+- runFlow:
+    when:
+      visible:
+        id: 'attach-send-gif'
+    commands:
+      - tapOn:
+          id: 'attach-send-gif'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - assertVisible:
+          id: 'gif-search-input'
+      - back
+      - waitForAnimationToEnd:
+          timeout: 2000
+      - assertNotVisible:
+          id: 'gif-search-input'
+      - assertVisible:
+          id: 'conversation-input'

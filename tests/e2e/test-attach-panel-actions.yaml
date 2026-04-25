@@ -37,6 +37,17 @@ name: Attach Panel — each tile opens its downstream sheet
 - waitForAnimationToEnd:
     timeout: 5000
 - tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
+- tapOn:
     text: 'Little Piggy.*'
 - waitForAnimationToEnd:
     timeout: 10000

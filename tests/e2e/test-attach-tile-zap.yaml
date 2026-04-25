@@ -1,0 +1,66 @@
+appId: com.lightningpiggy.app.dev
+name: Attach tile — Zap opens SendSheet
+---
+# Tap the Zap tile in the inline AttachPanel and verify the SendSheet
+# opens (the lightning send flow). Dismiss WITHOUT entering an amount
+# or tapping pay — no real Lightning payment is made.
+#
+# Safety: SendSheet only opens; no `Pay` button is tapped, so no real
+# Lightning zap is triggered.
+#
+# This tile only renders when the peer has a lightning address
+# (lud16). The test wraps the tile tap in `runFlow when:` so it's a
+# no-op when the peer doesn't expose one.
+#
+# Run: maestro --device emulator-5554 test tests/e2e/test-attach-tile-zap.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
+- tapOn:
+    text: 'Little Piggy.*'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible:
+    id: 'conversation-attach-panel'
+
+- runFlow:
+    when:
+      visible:
+        id: 'attach-send-zap'
+    commands:
+      - tapOn:
+          id: 'attach-send-zap'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      # SendSheet rendered. Use `assertVisible: text:` to detect any
+      # lightning-amount control without tying the test to a specific
+      # SendSheet testID that may shift between sheet states.
+      - assertVisible:
+          text: 'Send'
+      - back
+      - waitForAnimationToEnd:
+          timeout: 2000
+      - assertVisible:
+          id: 'conversation-input'

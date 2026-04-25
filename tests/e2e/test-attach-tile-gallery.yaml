@@ -1,0 +1,58 @@
+appId: com.lightningpiggy.app.dev
+name: Attach tile — Gallery triggers OS photo picker
+---
+# Tap the Gallery tile in the inline AttachPanel. Triggers Android's
+# system photo picker (PHOTO_LIBRARY action).
+#
+# Safety: the test ONLY taps the tile and screenshots the result. It
+# does NOT pick a photo, no Blossom upload is initiated.
+#
+# Like the Camera tile, this depends on a system picker so the only
+# assertion is that the conversation survives the round-trip.
+#
+# Run: maestro --device emulator-5554 test tests/e2e/test-attach-tile-gallery.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
+- tapOn:
+    text: 'Little Piggy.*'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible:
+    id: 'conversation-attach-panel'
+- assertVisible:
+    id: 'attach-send-image'
+
+- tapOn:
+    id: 'attach-send-image'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- takeScreenshot: tile-gallery-after-tap
+- back
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible:
+    id: 'conversation-input'
