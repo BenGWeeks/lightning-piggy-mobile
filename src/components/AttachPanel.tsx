@@ -6,7 +6,11 @@ import type { Palette } from '../styles/palettes';
 
 interface Props {
   onShareLocation: () => void;
-  onSendZap?: () => void;
+  // `onSendZap` is always wired up; `zapDisabled` greys the tile out
+  // (and disables the press) when the peer has no Lightning Address,
+  // so users still see the option exists rather than the tile vanishing.
+  onSendZap: () => void;
+  zapDisabled?: boolean;
   onSendInvoice?: () => void;
   onShareContact?: () => void;
   onSendImage?: () => void;
@@ -21,6 +25,7 @@ interface Tile {
   onPress: () => void;
   testID: string;
   accessibilityLabel: string;
+  disabled?: boolean;
 }
 
 /**
@@ -34,6 +39,7 @@ interface Tile {
 const AttachPanel: React.FC<Props> = ({
   onShareLocation,
   onSendZap,
+  zapDisabled,
   onSendInvoice,
   onShareContact,
   onSendImage,
@@ -43,10 +49,12 @@ const AttachPanel: React.FC<Props> = ({
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
-  // Build the visible tile list in display order. Optional props that
-  // weren't provided (e.g. zap when the contact has no lightning
-  // address) are filtered out so the grid stays compact rather than
-  // showing greyed-out placeholders.
+  // Build the visible tile list in display order. Tiles whose callback
+  // wasn't provided (because the feature is unavailable in this build)
+  // are filtered out. Tiles whose feature is conditional on peer state
+  // (currently: Zap requires a Lightning Address) always render but
+  // grey out via the `disabled` flag so users can see the capability
+  // exists.
   const tiles: Tile[] = (
     [
       onTakePhoto && {
@@ -81,13 +89,16 @@ const AttachPanel: React.FC<Props> = ({
         testID: 'attach-share-location',
         accessibilityLabel: 'Share your current location',
       },
-      onSendZap && {
+      {
         key: 'zap',
         label: 'Zap',
         icon: <Zap size={26} color={colors.white} fill={colors.white} />,
         onPress: onSendZap,
         testID: 'attach-send-zap',
-        accessibilityLabel: 'Send a zap',
+        accessibilityLabel: zapDisabled
+          ? 'Send a zap (unavailable — peer has no Lightning Address)'
+          : 'Send a zap',
+        disabled: zapDisabled,
       },
       onSendInvoice && {
         key: 'invoice',
@@ -114,9 +125,11 @@ const AttachPanel: React.FC<Props> = ({
         {tiles.map((tile) => (
           <TouchableOpacity
             key={tile.key}
-            style={styles.tile}
+            style={[styles.tile, tile.disabled && styles.tileDisabled]}
             onPress={tile.onPress}
+            disabled={tile.disabled}
             accessibilityLabel={tile.accessibilityLabel}
+            accessibilityState={{ disabled: !!tile.disabled }}
             testID={tile.testID}
           >
             <View style={styles.iconCircle}>{tile.icon}</View>
@@ -157,6 +170,9 @@ const createStyles = (colors: Palette) =>
       alignItems: 'center',
       marginBottom: 16,
       gap: 6,
+    },
+    tileDisabled: {
+      opacity: 0.4,
     },
     iconCircle: {
       width: 56,

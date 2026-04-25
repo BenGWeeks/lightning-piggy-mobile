@@ -3,12 +3,14 @@ name: Conversation — latest message clears the composer
 ---
 # Regression guard: the FlatList that renders messages in
 # ConversationScreen is `inverted`, so its `paddingTop` is the
-# *visual-bottom* padding. The resting layout currently uses 96 dp
-# here to clear the composer's height; when the attach panel is open,
-# ConversationScreen overrides that value (currently 16 dp) so the
-# panel sits flush against the latest message. Without enough bottom
-# padding the latest bubble's bottom edge would be tucked under the
-# composer's top border.
+# *visual-bottom* padding. The composer is a flex sibling of the
+# FlatList (rendered inside KeyboardStickyView), so the FlatList's
+# bottom edge already ends where the composer's top begins — we only
+# need a small breathing gap (currently 8 dp resting, 16 dp when the
+# attach panel is open) so the latest bubble doesn't visually hug the
+# composer/panel's top border. If this padding goes to 0 the latest
+# bubble's bottom edge would touch the composer with no breathing
+# room.
 #
 # Safety: peer is always Little Piggy (controlled test fixture).
 # Test types one character + erases — NO real DM is sent, no payment

@@ -1,0 +1,75 @@
+appId: com.lightningpiggy.app.dev
+name: Friends tab — alphabet bar shows A–Z
+---
+# Regression guard: same as test-friend-picker-alphabet.yaml but for
+# the standalone Friends tab. The alphabet sidebar must show every
+# letter A through Z (plus `#`) regardless of which letters have
+# friends. Letters with no contacts are greyed out, not omitted.
+#
+# testIDs come from AlphabetBar.tsx (`alphabet-{letter}`).
+#
+# Run: maestro --device emulator-5554 test tests/e2e/test-friends-tab-alphabet.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+
+- tapOn:
+    id: 'tab-friends'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Assert every A–Z letter is present in the sidebar.
+- assertVisible:
+    id: 'alphabet-A'
+- assertVisible:
+    id: 'alphabet-B'
+- assertVisible:
+    id: 'alphabet-C'
+- assertVisible:
+    id: 'alphabet-D'
+- assertVisible:
+    id: 'alphabet-E'
+- assertVisible:
+    id: 'alphabet-F'
+- assertVisible:
+    id: 'alphabet-G'
+- assertVisible:
+    id: 'alphabet-H'
+- assertVisible:
+    id: 'alphabet-I'
+- assertVisible:
+    id: 'alphabet-J'
+- assertVisible:
+    id: 'alphabet-K'
+- assertVisible:
+    id: 'alphabet-L'
+- assertVisible:
+    id: 'alphabet-M'
+- assertVisible:
+    id: 'alphabet-N'
+- assertVisible:
+    id: 'alphabet-O'
+- assertVisible:
+    id: 'alphabet-P'
+- assertVisible:
+    id: 'alphabet-Q'
+- assertVisible:
+    id: 'alphabet-R'
+- assertVisible:
+    id: 'alphabet-S'
+- assertVisible:
+    id: 'alphabet-T'
+- assertVisible:
+    id: 'alphabet-U'
+- assertVisible:
+    id: 'alphabet-V'
+- assertVisible:
+    id: 'alphabet-W'
+- assertVisible:
+    id: 'alphabet-X'
+- assertVisible:
+    id: 'alphabet-Y'
+- assertVisible:
+    id: 'alphabet-Z'

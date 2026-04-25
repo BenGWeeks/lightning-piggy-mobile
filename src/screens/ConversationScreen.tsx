@@ -17,9 +17,14 @@ import {
   Linking,
   StyleSheet,
 } from 'react-native';
-import { KeyboardController, KeyboardStickyView } from 'react-native-keyboard-controller';
+import {
+  KeyboardController,
+  KeyboardStickyView,
+  useReanimatedKeyboardAnimation,
+} from 'react-native-keyboard-controller';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { Zap, Send, Plus, MapPin, ArrowDown } from 'lucide-react-native';
+import { Zap, Send, Plus, MapPin, ArrowDown, UserRound } from 'lucide-react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import * as ImagePicker from 'expo-image-picker';
@@ -233,6 +238,18 @@ const ConversationScreen: React.FC = () => {
   const navigation = useNavigation<ConversationNavigation>();
   const route = useRoute<ConversationRoute>();
   const insets = useSafeAreaInsets();
+  // Drives the composer's animated paddingBottom: when keyboard is closed
+  // we add insets.bottom of dead space so the input row sits above the
+  // gesture bar; as the keyboard opens we shrink that to 0 so the input
+  // hugs the keyboard's top edge with no whitespace gap. This replaces
+  // the old `KeyboardStickyView offset.closed: -insets.bottom` shift,
+  // which left the composer visually overlapping the FlatList by
+  // insets.bottom dp (its layout box stayed at parent.bottom while the
+  // visual rendered shifted up).
+  const keyboard = useReanimatedKeyboardAnimation();
+  const composerSafeAreaStyle = useAnimatedStyle(() => ({
+    paddingBottom: 8 + Math.max(insets.bottom * (1 + keyboard.progress.value * -1), 0),
+  }));
   const { pubkey, name, picture, lightningAddress } = route.params;
 
   const {
@@ -1005,21 +1022,24 @@ const ConversationScreen: React.FC = () => {
                   {item.fromMe ? 'Contact shared' : 'Contact'}
                 </Text>
                 <View style={styles.contactBodyRow}>
-                  {prof?.picture ? (
-                    <Image source={{ uri: prof.picture }} style={styles.contactAvatar} />
-                  ) : (
-                    <View style={[styles.contactAvatar, styles.contactAvatarFallback]}>
-                      <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-                        <Circle cx="12" cy="8" r="4" fill={colors.textSupplementary} />
-                        <Path
-                          d="M4 20c0-3.314 3.582-6 8-6s8 2.686 8 6"
-                          stroke={colors.textSupplementary}
-                          strokeWidth={2}
-                          strokeLinecap="round"
-                        />
-                      </Svg>
-                    </View>
-                  )}
+                  {/* Always render the silhouette as the base layer so it
+                      shows whether `prof.picture` is missing OR the Image
+                      fails to load (broken URL, offline, etc). When
+                      `prof.picture` is set, the Image is z-stacked on top
+                      via absoluteFillObject and covers the silhouette
+                      once it loads. textBody (dark) is used for the icon
+                      to guarantee contrast against the light avatar BG —
+                      the previous inline SVG used textSupplementary
+                      (light grey on light grey → invisible). */}
+                  <View style={[styles.contactAvatar, styles.contactAvatarFallback]}>
+                    <UserRound size={26} color={colors.textBody} strokeWidth={1.75} />
+                    {prof?.picture ? (
+                      <Image
+                        source={{ uri: prof.picture }}
+                        style={[StyleSheet.absoluteFillObject, { borderRadius: 22 }]}
+                      />
+                    ) : null}
+                  </View>
                   <View style={styles.contactInfo}>
                     <Text
                       style={[styles.contactName, item.fromMe && styles.contactNameMe]}
@@ -1327,7 +1347,7 @@ const ConversationScreen: React.FC = () => {
             data={items}
             keyExtractor={(it) => it.id}
             renderItem={renderItem}
-            contentContainerStyle={[styles.listContent, { paddingTop: attachPanelOpen ? 16 : 96 }]}
+            contentContainerStyle={[styles.listContent, { paddingTop: attachPanelOpen ? 16 : 8 }]}
             inverted
             // Window the list so a thread with hundreds of messages
             // doesn't mount every row up front — first-frame work goes
@@ -1372,6 +1392,20 @@ const ConversationScreen: React.FC = () => {
           />
         )}
 
+        {/* Backdrop tap-to-close: when the attach panel is open, an
+            absolute transparent Pressable sits above the FlatList area.
+            Tapping anywhere on the messages closes the panel (matches
+            WhatsApp behaviour). Trade-off: you can't tap a message bubble
+            while the panel is open — close the panel first. */}
+        {attachPanelOpen ? (
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={closeAttachPanel}
+            accessibilityLabel="Close attachment panel"
+            testID="conversation-attach-backdrop"
+          />
+        ) : null}
+
         {!atBottom && !loading ? (
           <View style={styles.scrollToBottomWrap} pointerEvents="box-none">
             <TouchableOpacity
@@ -1385,15 +1419,16 @@ const ConversationScreen: React.FC = () => {
           </View>
         ) : null}
 
-        {/* Safe-area inset for the gesture bar is applied via the
-            sticky view's `closed` offset (lifts composer up by that
-            much when keyboard is closed) rather than via the
-            composer's `paddingBottom`. That way when the keyboard
-            opens, composer content sits flush against the keyboard's
-            top edge — no whitespace gap. Small fixed 8 px internal
-            pad for visual breathing room between the inputs and
-            the composer's own bottom border. */}
-        <KeyboardStickyView offset={{ closed: -Math.max(insets.bottom, 0), opened: 0 }}>
+        {/* Composer sits inside KeyboardStickyView so it rides above the
+            IME on Android 15+. Both `closed` and `opened` offsets are 0
+            so the sticky view's layout box matches its visual position;
+            the gesture-bar inset is handled by an animated paddingBottom
+            on the composer itself (composerSafeAreaStyle), which goes
+            from 8 + insets.bottom (closed → above gesture bar) to 8
+            (open → flush against keyboard top, no whitespace gap). This
+            way the FlatList ends right where the composer begins, with
+            no inset overlap to compensate for. */}
+        <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
           {/* Inline attach panel — renders ABOVE the composer row when
               open. Its intrinsic height (4-col grid + paddings) drives
               the sticky view's total height, so the composer + panel
@@ -1405,14 +1440,11 @@ const ConversationScreen: React.FC = () => {
               onShareLocation={handleShareLocation}
               onSendImage={handlePickAndSendImage}
               onTakePhoto={handleTakeAndSendPhoto}
-              onSendZap={
-                lightningAddress
-                  ? () => {
-                      closeAttachPanel();
-                      setSendSheetOpen(true);
-                    }
-                  : undefined
-              }
+              onSendZap={() => {
+                closeAttachPanel();
+                setSendSheetOpen(true);
+              }}
+              zapDisabled={!lightningAddress}
               onSendInvoice={() => {
                 closeAttachPanel();
                 setInvoiceSheetOpen(true);
@@ -1432,7 +1464,7 @@ const ConversationScreen: React.FC = () => {
               }
             />
           ) : null}
-          <View style={[styles.composer, { paddingBottom: 8 }]}>
+          <Animated.View style={[styles.composer, composerSafeAreaStyle]}>
             <TouchableOpacity
               style={styles.composerAttachButton}
               onPress={() => (attachPanelOpen ? closeAttachPanel() : openAttachPanel())}
@@ -1471,7 +1503,7 @@ const ConversationScreen: React.FC = () => {
                 <Send size={20} color={colors.white} />
               )}
             </TouchableOpacity>
-          </View>
+          </Animated.View>
         </KeyboardStickyView>
       </View>
       <GifPickerSheet
@@ -1642,12 +1674,15 @@ const createStyles = (colors: Palette) =>
     listContent: {
       paddingHorizontal: 12,
       // Inverted list: paddingTop becomes the *visual-bottom* padding.
-      // Bump it well past the composer's resting height (input +
-      // paddings ≈ 60 dp) so the latest message has comfortable
-      // breathing room and isn't visually hugging the composer's top
-      // border. paddingBottom (= visual-top) keeps a small breathing
-      // gap above the day-header row.
-      paddingTop: 96,
+      // The composer (rendered inside KeyboardStickyView below) is a
+      // flex sibling, so the FlatList's bottom edge already ends where
+      // the composer's top begins — we don't need to clear the
+      // composer's height here, just a small breathing gap so the
+      // newest bubble doesn't visually hug the composer's top border.
+      // ConversationScreen overrides this inline (16 dp) when the
+      // attach panel is open. paddingBottom (= visual-top) keeps a
+      // small breathing gap above the day-header row.
+      paddingTop: 8,
       paddingBottom: 12,
       gap: 6,
       flexGrow: 1,

@@ -9,7 +9,7 @@ import {
   Platform,
 } from 'react-native';
 import { Image } from 'expo-image';
-import Svg, { Circle, Path } from 'react-native-svg';
+import { UserRound } from 'lucide-react-native';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
@@ -177,21 +177,20 @@ const FriendPickerSheet: React.FC<Props> = ({
         testID={`friend-picker-${item.pubkey.slice(0, 8)}`}
       >
         <View style={styles.avatar}>
+          {/* Always render the silhouette so it shows whether `picture`
+              is missing OR the Image fails to load (broken URL, offline,
+              etc). When `picture` is set, the Image stacks on top via
+              absoluteFill and covers the silhouette once it loads. */}
+          <View style={styles.avatarFallback}>
+            <UserRound size={22} color={colors.textBody} strokeWidth={1.75} />
+          </View>
           {item.picture ? (
-            <Image source={{ uri: item.picture }} style={styles.avatarImage} cachePolicy="disk" />
-          ) : (
-            <View style={styles.avatarFallback}>
-              <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-                <Circle cx="12" cy="8" r="4" fill={colors.textSupplementary} />
-                <Path
-                  d="M4 20c0-3.314 3.582-6 8-6s8 2.686 8 6"
-                  stroke={colors.textSupplementary}
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                />
-              </Svg>
-            </View>
-          )}
+            <Image
+              source={{ uri: item.picture }}
+              style={[StyleSheet.absoluteFillObject, styles.avatarImage]}
+              cachePolicy="disk"
+            />
+          ) : null}
         </View>
         <View style={styles.info}>
           <Text style={styles.name} numberOfLines={1}>
@@ -256,7 +255,7 @@ const FriendPickerSheet: React.FC<Props> = ({
           />
         </View>
         <View style={styles.listWithBar}>
-          {availableLetters.length > 1 ? (
+          {availableLetters.length > 0 ? (
             <AlphabetBar
               letters={availableLetters}
               currentLetter={currentLetter}

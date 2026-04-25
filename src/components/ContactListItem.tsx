@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
-import Svg, { Path, Circle } from 'react-native-svg';
-import { Zap } from 'lucide-react-native';
+import { UserRound, Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 
@@ -52,15 +51,7 @@ const ContactListItem: React.FC<Props> = ({ name, picture, lightningAddress, onP
             onLoad={() => setAvatarLoaded(true)}
           />
         ) : (
-          <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-            <Circle cx="12" cy="8" r="4" fill={colors.textSupplementary} />
-            <Path
-              d="M4 20c0-3.314 3.582-6 8-6s8 2.686 8 6"
-              stroke={colors.textSupplementary}
-              strokeWidth={2}
-              strokeLinecap="round"
-            />
-          </Svg>
+          <UserRound size={22} color={colors.textBody} strokeWidth={1.75} />
         )}
       </View>
       <View style={styles.info}>

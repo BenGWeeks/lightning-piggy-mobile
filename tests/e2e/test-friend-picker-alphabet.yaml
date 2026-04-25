@@ -1,0 +1,116 @@
+appId: com.lightningpiggy.app.dev
+name: FriendPicker — alphabet bar shows A–Z
+---
+# Regression guard: the FriendPickerSheet's alphabet sidebar must show
+# every letter A through Z (plus `#` for non-Latin names) regardless of
+# whether the user has friends starting with each letter. Letters with
+# no contacts are rendered greyed-out via `accessibilityState.disabled`
+# rather than omitted, so users can see the index covers the whole
+# alphabet (per #?? — the previous behaviour omitted V/W/X/Y/Z when no
+# friends started with those letters and looked like the bar was
+# truncated off the bottom of the bottom sheet).
+#
+# Each alphabet letter has testID `alphabet-{letter}` (see
+# AlphabetBar.tsx). This test opens a conversation, opens the inline
+# AttachPanel, taps the Contact tile to surface the FriendPickerSheet,
+# then asserts every A–Z letter is present in the view hierarchy.
+#
+# Run: maestro --device emulator-5554 test tests/e2e/test-friend-picker-alphabet.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
+- tapOn:
+    text: 'Little Piggy.*'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Open the AttachPanel and tap Contact to surface the picker.
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: 'attach-share-contact'
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible:
+    id: 'friend-picker-search'
+
+# Assert every letter A–Z is present. `#` is also rendered (for
+# non-Latin first chars) but isn't part of the user's "A to Z"
+# expectation, so we don't fail if it's absent.
+- assertVisible:
+    id: 'alphabet-A'
+- assertVisible:
+    id: 'alphabet-B'
+- assertVisible:
+    id: 'alphabet-C'
+- assertVisible:
+    id: 'alphabet-D'
+- assertVisible:
+    id: 'alphabet-E'
+- assertVisible:
+    id: 'alphabet-F'
+- assertVisible:
+    id: 'alphabet-G'
+- assertVisible:
+    id: 'alphabet-H'
+- assertVisible:
+    id: 'alphabet-I'
+- assertVisible:
+    id: 'alphabet-J'
+- assertVisible:
+    id: 'alphabet-K'
+- assertVisible:
+    id: 'alphabet-L'
+- assertVisible:
+    id: 'alphabet-M'
+- assertVisible:
+    id: 'alphabet-N'
+- assertVisible:
+    id: 'alphabet-O'
+- assertVisible:
+    id: 'alphabet-P'
+- assertVisible:
+    id: 'alphabet-Q'
+- assertVisible:
+    id: 'alphabet-R'
+- assertVisible:
+    id: 'alphabet-S'
+- assertVisible:
+    id: 'alphabet-T'
+- assertVisible:
+    id: 'alphabet-U'
+- assertVisible:
+    id: 'alphabet-V'
+- assertVisible:
+    id: 'alphabet-W'
+- assertVisible:
+    id: 'alphabet-X'
+- assertVisible:
+    id: 'alphabet-Y'
+- assertVisible:
+    id: 'alphabet-Z'
+
+# Dismiss picker + panel cleanly.
+- back
+- waitForAnimationToEnd:
+    timeout: 2000

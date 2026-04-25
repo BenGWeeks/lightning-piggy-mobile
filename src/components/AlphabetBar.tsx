@@ -4,10 +4,47 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 
 interface Props {
+  // Letters that have content (friends/contacts) — tappable. Letters NOT
+  // in this list still render in the bar but are greyed out and
+  // non-interactive (so the user sees the full A-Z index instead of a
+  // truncated subset).
   letters: string[];
   currentLetter: string | null;
   onLetterPress: (letter: string) => void;
 }
+
+// `#` covers names that don't start with a Latin A-Z letter (digits,
+// emoji, non-Latin scripts — see firstAlpha() in FriendPickerSheet /
+// FriendsScreen).
+const FULL_ALPHABET = [
+  '#',
+  'A',
+  'B',
+  'C',
+  'D',
+  'E',
+  'F',
+  'G',
+  'H',
+  'I',
+  'J',
+  'K',
+  'L',
+  'M',
+  'N',
+  'O',
+  'P',
+  'Q',
+  'R',
+  'S',
+  'T',
+  'U',
+  'V',
+  'W',
+  'X',
+  'Y',
+  'Z',
+];
 
 const AlphabetBar: React.FC<Props> = React.memo(
   ({ letters, currentLetter, onLetterPress }) => {
@@ -77,6 +114,8 @@ const AlphabetBar: React.FC<Props> = React.memo(
       timerRef.current = setTimeout(() => setTapped(null), 1500);
     }, []);
 
+    const availableSet = useMemo(() => new Set(letters), [letters]);
+
     return (
       <View
         ref={barRef}
@@ -90,19 +129,29 @@ const AlphabetBar: React.FC<Props> = React.memo(
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       >
-        {letters.map((letter) => {
-          const isActive = tapped === letter || (tapped === null && currentLetter === letter);
+        {FULL_ALPHABET.map((letter) => {
+          const enabled = availableSet.has(letter);
+          const isActive =
+            enabled && (tapped === letter || (tapped === null && currentLetter === letter));
           return (
             <TouchableOpacity
               key={letter}
               style={[styles.alphabetLetterTouch, isActive && styles.alphabetLetterActive]}
-              activeOpacity={0.7}
-              onPress={() => handlePress(letter)}
+              activeOpacity={enabled ? 0.7 : 1}
+              onPress={() => enabled && handlePress(letter)}
+              disabled={!enabled}
               accessibilityRole="button"
-              accessibilityLabel={`Jump to ${letter}`}
+              accessibilityLabel={enabled ? `Jump to ${letter}` : `${letter} (no contacts)`}
+              accessibilityState={{ disabled: !enabled }}
               testID={`alphabet-${letter}`}
             >
-              <Text style={[styles.alphabetLetter, isActive && styles.alphabetLetterTextActive]}>
+              <Text
+                style={[
+                  styles.alphabetLetter,
+                  !enabled && styles.alphabetLetterDisabled,
+                  isActive && styles.alphabetLetterTextActive,
+                ]}
+              >
                 {letter}
               </Text>
             </TouchableOpacity>
@@ -147,6 +196,12 @@ const createStyles = (colors: Palette) =>
       fontWeight: '700',
       color: colors.textSupplementary,
       textAlign: 'center',
+    },
+    alphabetLetterDisabled: {
+      // Greyed-out letter for buckets with no contacts. Faded enough to
+      // read as inactive but still legible so the user can verify the
+      // index spans the whole alphabet.
+      opacity: 0.3,
     },
     alphabetLetterTextActive: {
       color: colors.white,
