@@ -238,6 +238,10 @@ const ConversationScreen: React.FC = () => {
   const navigation = useNavigation<ConversationNavigation>();
   const route = useRoute<ConversationRoute>();
   const insets = useSafeAreaInsets();
+  // Memoised so the FlatList's contentContainerStyle reference only
+  // changes when `attachPanelOpen` flips. Without this the array literal
+  // was re-created on every render (e.g. each keystroke as `draft`
+  // changes), causing extra FlatList layout work in a hot path.
   // Drives the composer's animated paddingBottom: when keyboard is closed
   // we add insets.bottom of dead space so the input row sits above the
   // gesture bar; as the keyboard opens we shrink that to 0 so the input
@@ -281,6 +285,15 @@ const ConversationScreen: React.FC = () => {
   // means we tried and the kind-0 lookup came back empty.
   const [sharedProfiles, setSharedProfiles] = useState<Record<string, NostrProfile | null>>({});
   const [attachPanelOpen, setAttachPanelOpen] = useState(false);
+  // Memoised here (not inline at the JSX site) so the FlatList's
+  // `contentContainerStyle` reference is stable across keystrokes —
+  // every render of ConversationScreen would otherwise re-create the
+  // array + inner object literal, forcing the FlatList to re-evaluate
+  // its content container layout in a hot path.
+  const listContentStyle = useMemo(
+    () => [styles.listContent, { paddingTop: attachPanelOpen ? 16 : 8 }],
+    [styles.listContent, attachPanelOpen],
+  );
 
   // Inline attach panel sits ABOVE the text input inside the same
   // KeyboardStickyView. Opening dismisses the IME so we never have to
@@ -1347,7 +1360,7 @@ const ConversationScreen: React.FC = () => {
             data={items}
             keyExtractor={(it) => it.id}
             renderItem={renderItem}
-            contentContainerStyle={[styles.listContent, { paddingTop: attachPanelOpen ? 16 : 8 }]}
+            contentContainerStyle={listContentStyle}
             inverted
             // Window the list so a thread with hundreds of messages
             // doesn't mount every row up front — first-frame work goes

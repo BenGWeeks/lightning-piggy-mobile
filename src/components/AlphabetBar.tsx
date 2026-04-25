@@ -75,18 +75,36 @@ const AlphabetBar: React.FC<Props> = React.memo(
       }, 1500);
     }, []);
 
+    const availableSet = useMemo(() => new Set(letters), [letters]);
+
     const getLetterFromY = useCallback(
       (pageY: number) => {
+        // The rendered bar always shows FULL_ALPHABET (27 buckets), so
+        // map the touch y-position against FULL_ALPHABET.length, not the
+        // (possibly smaller) `letters` subset — otherwise dragging
+        // jumps because the visual letter under the finger doesn't
+        // match the index the math computes. Then if the letter we
+        // landed on is disabled (no contacts in that bucket), snap to
+        // the nearest enabled letter so the user always sees feedback.
         const { y, height } = barLayout.current;
         if (height === 0 || letters.length === 0) return null;
         const relY = pageY - y;
         const idx = Math.max(
           0,
-          Math.min(Math.floor((relY / height) * letters.length), letters.length - 1),
+          Math.min(Math.floor((relY / height) * FULL_ALPHABET.length), FULL_ALPHABET.length - 1),
         );
-        return letters[idx];
+        const target = FULL_ALPHABET[idx];
+        if (availableSet.has(target)) return target;
+        // Snap to the nearest enabled letter (search outward from idx).
+        for (let off = 1; off < FULL_ALPHABET.length; off++) {
+          const before = FULL_ALPHABET[idx - off];
+          if (before && availableSet.has(before)) return before;
+          const after = FULL_ALPHABET[idx + off];
+          if (after && availableSet.has(after)) return after;
+        }
+        return null;
       },
-      [letters],
+      [letters, availableSet],
     );
 
     const handleTouchStart = useCallback((e: GestureResponderEvent) => {
@@ -113,8 +131,6 @@ const AlphabetBar: React.FC<Props> = React.memo(
       lastDragLetter.current = null;
       timerRef.current = setTimeout(() => setTapped(null), 1500);
     }, []);
-
-    const availableSet = useMemo(() => new Set(letters), [letters]);
 
     return (
       <View
