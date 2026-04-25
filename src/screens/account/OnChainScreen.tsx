@@ -1,13 +1,16 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity } from 'react-native';
 import AccountScreenLayout from './AccountScreenLayout';
-import { sharedAccountStyles } from './sharedStyles';
+import { createSharedAccountStyles } from './sharedStyles';
+import { useThemeColors } from '../../contexts/ThemeContext';
 import { getElectrumServer, setElectrumServer } from '../../services/walletStorageService';
 import { disconnectElectrum } from '../../services/onchainService';
 
 const DEFAULT_ELECTRUM = 'electrum.blockstream.info:50002';
 
 const OnChainScreen: React.FC = () => {
+  const colors = useThemeColors();
+  const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const [electrumHostPort, setElectrumHostPort] = useState(DEFAULT_ELECTRUM);
   const [electrumSSL, setElectrumSSL] = useState(true);
 

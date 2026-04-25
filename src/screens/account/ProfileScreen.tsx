@@ -1,16 +1,17 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, Alert, Platform } from 'react-native';
 import Svg, { Rect, Path as SvgPath } from 'react-native-svg';
 import * as Clipboard from 'expo-clipboard';
 import { useFocusEffect } from '@react-navigation/native';
 import { Copy, Zap } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
-import { sharedAccountStyles } from './sharedStyles';
+import { createSharedAccountStyles } from './sharedStyles';
 import NostrLoginSheet from '../../components/NostrLoginSheet';
 import EditProfileSheet from '../../components/EditProfileSheet';
 import QrSheet from '../../components/QrSheet';
 import { useNostr } from '../../contexts/NostrContext';
-import { colors } from '../../styles/theme';
+import { useThemeColors } from '../../contexts/ThemeContext';
+import type { Palette } from '../../styles/palettes';
 
 const QrIcon: React.FC<{ size?: number; color?: string }> = ({ size = 20, color = '#FFFFFF' }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -28,6 +29,9 @@ const QrIcon: React.FC<{ size?: number; color?: string }> = ({ size = 20, color 
 );
 
 const ProfileScreen: React.FC = () => {
+  const colors = useThemeColors();
+  const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { isLoggedIn, profile, refreshProfile } = useNostr();
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
@@ -136,107 +140,108 @@ const ProfileScreen: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create({
-  profileSection: {
-    backgroundColor: colors.white,
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  banner: {
-    width: '100%',
-    height: 100,
-  },
-  profileRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    gap: 12,
-  },
-  profilePicture: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    borderWidth: 2,
-    borderColor: colors.divider,
-  },
-  profilePicturePlaceholder: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.background,
-  },
-  profileInfo: {
-    flex: 1,
-  },
-  profileName: {
-    color: colors.textHeader,
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  profileNip05: {
-    color: colors.textSupplementary,
-    fontSize: 13,
-    marginTop: 2,
-  },
-  npubRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-  },
-  npubCopy: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    flex: 1,
-  },
-  npubText: {
-    color: colors.textSupplementary,
-    fontSize: 12,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-  },
-  profileLnRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    gap: 4,
-  },
-  profileLn: {
-    color: colors.textBody,
-    fontSize: 14,
-  },
-  editProfileButton: {
-    margin: 16,
-    marginBottom: 16,
-    height: 44,
-    borderRadius: 10,
-    backgroundColor: colors.white,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: colors.brandPink,
-  },
-  editProfileButtonText: {
-    color: colors.brandPink,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  connectButton: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    height: 52,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.4)',
-  },
-  connectButtonText: {
-    color: colors.white,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    profileSection: {
+      backgroundColor: colors.surface,
+      borderRadius: 16,
+      overflow: 'hidden',
+    },
+    banner: {
+      width: '100%',
+      height: 100,
+    },
+    profileRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: 16,
+      gap: 12,
+    },
+    profilePicture: {
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      borderWidth: 2,
+      borderColor: colors.divider,
+    },
+    profilePicturePlaceholder: {
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      backgroundColor: colors.background,
+    },
+    profileInfo: {
+      flex: 1,
+    },
+    profileName: {
+      color: colors.textHeader,
+      fontSize: 18,
+      fontWeight: '700',
+    },
+    profileNip05: {
+      color: colors.textSupplementary,
+      fontSize: 13,
+      marginTop: 2,
+    },
+    npubRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingHorizontal: 16,
+      paddingBottom: 8,
+    },
+    npubCopy: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      flex: 1,
+    },
+    npubText: {
+      color: colors.textSupplementary,
+      fontSize: 12,
+      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    },
+    profileLnRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+      paddingBottom: 12,
+      gap: 4,
+    },
+    profileLn: {
+      color: colors.textBody,
+      fontSize: 14,
+    },
+    editProfileButton: {
+      margin: 16,
+      marginBottom: 16,
+      height: 44,
+      borderRadius: 10,
+      backgroundColor: colors.surface,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 2,
+      borderColor: colors.brandPink,
+    },
+    editProfileButtonText: {
+      color: colors.brandPink,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    connectButton: {
+      backgroundColor: 'rgba(255,255,255,0.2)',
+      height: 52,
+      borderRadius: 12,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.4)',
+    },
+    connectButtonText: {
+      color: colors.white,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+  });
 
 export default ProfileScreen;
