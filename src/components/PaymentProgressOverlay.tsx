@@ -26,9 +26,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import type { SharedValue } from 'react-native-reanimated';
 import { Check, X } from 'lucide-react-native';
-import { colors as staticColors } from '../styles/theme';
 import { useThemeColors } from '../contexts/ThemeContext';
-import type { Palette } from '../styles/palettes';
+import { lightPalette, type Palette } from '../styles/palettes';
 
 export type PaymentProgressState = 'sending' | 'success' | 'error' | 'hidden';
 export type PaymentDirection = 'send' | 'receive';
@@ -53,10 +52,10 @@ const CONFETTI_COUNT = 135;
 const FULL_DENSITY_MS = 5000;
 
 // On-brand confetti palette — Piggy pink plus blues and purples. The
-// brand pink is identical in light and dark palettes, so the static
-// import is fine here.
+// brand pink is identical in light and dark palettes, so reading from
+// `lightPalette` at module scope is fine.
 const CONFETTI_COLORS = [
-  staticColors.brandPink,
+  lightPalette.brandPink,
   '#FF6BB7', // light pink
   '#7A5CFF', // violet
   '#5B8DEF', // blue

@@ -1,5 +1,5 @@
 import { StyleSheet, Platform } from 'react-native';
-import { lightPalette, type Palette } from '../../styles/palettes';
+import type { Palette } from '../../styles/palettes';
 
 /**
  * Styles shared across every AccountStack sub-screen. Theme-aware factory:
@@ -88,10 +88,3 @@ export const createSharedAccountStyles = (colors: Palette) =>
       fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     },
   });
-
-/**
- * Light-palette snapshot for non-React consumers and screens not yet
- * converted to the theme-aware factory. New code should use
- * `createSharedAccountStyles(useThemeColors())` so it flips with dark mode.
- */
-export const sharedAccountStyles = createSharedAccountStyles(lightPalette);

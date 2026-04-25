@@ -16,7 +16,14 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Image, StyleSheet, View, Text } from 'react-native';
-import { colors } from '../styles/theme';
+import { lightPalette } from '../styles/palettes';
+
+// BootSplash is brand-fixed (only ever shows over the native pink splash
+// during the JS-mount → first-paint window) so it pulls from the shared
+// palette directly rather than via `useThemeColors()`. brandPink is
+// identical in both palettes; this keeps the legacy `colors` import
+// out of the file.
+const colors = lightPalette;
 
 interface Props {
   /** When true, fade out over 250ms and unmount. */

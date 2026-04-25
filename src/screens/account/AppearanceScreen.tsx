@@ -11,31 +11,36 @@ const AppearanceScreen: React.FC = () => {
   const sharedAccountStyles = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createStyles(colors), [colors]);
 
-  const options: {
-    value: ThemePreference;
-    label: string;
-    description: string;
-    icon: React.ReactNode;
-  }[] = [
+  const options = useMemo<
     {
-      value: 'system',
-      label: 'System',
-      description: 'Follow your device setting',
-      icon: <Smartphone size={20} color={colors.white} />,
-    },
-    {
-      value: 'light',
-      label: 'Light',
-      description: 'Always light theme',
-      icon: <Sun size={20} color={colors.white} />,
-    },
-    {
-      value: 'dark',
-      label: 'Dark',
-      description: 'Always dark theme',
-      icon: <Moon size={20} color={colors.white} />,
-    },
-  ];
+      value: ThemePreference;
+      label: string;
+      description: string;
+      icon: React.ReactNode;
+    }[]
+  >(
+    () => [
+      {
+        value: 'system',
+        label: 'System',
+        description: 'Follow your device setting',
+        icon: <Smartphone size={20} color={colors.white} />,
+      },
+      {
+        value: 'light',
+        label: 'Light',
+        description: 'Always light theme',
+        icon: <Sun size={20} color={colors.white} />,
+      },
+      {
+        value: 'dark',
+        label: 'Dark',
+        description: 'Always dark theme',
+        icon: <Moon size={20} color={colors.white} />,
+      },
+    ],
+    [colors],
+  );
 
   return (
     <AccountScreenLayout title="Appearance">
@@ -58,7 +63,11 @@ const AppearanceScreen: React.FC = () => {
                 <Text style={styles.optionLabel}>{opt.label}</Text>
                 <Text style={styles.optionDescription}>{opt.description}</Text>
               </View>
-              {selected && <Check size={20} color={colors.white} />}
+              {selected && (
+                <View testID={`appearance-${opt.value}-check`}>
+                  <Check size={20} color={colors.white} />
+                </View>
+              )}
             </TouchableOpacity>
           );
         })}
