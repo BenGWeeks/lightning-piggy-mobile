@@ -103,14 +103,14 @@ const QrSheet: React.FC<Props> = ({
           </View>
         )}
 
-        {/* QR Code */}
+        {/* QR Code — always black-on-white for maximum scan reliability,
+            regardless of light/dark theme. Themed colors (colors.textHeader
+            on colors.white) make the QR render light-grey-on-white in dark
+            mode, which scanners struggle with. The QR is visually wrapped
+            in styles.qrContainer (a white card with padding) so the white
+            BG plays nicely with both themes. */}
         <View style={styles.qrContainer}>
-          <QRCode
-            value={qrValue}
-            size={200}
-            backgroundColor={colors.white}
-            color={colors.textHeader}
-          />
+          <QRCode value={qrValue} size={200} backgroundColor="#FFFFFF" color="#000000" />
         </View>
 
         {/* Value + copy */}
