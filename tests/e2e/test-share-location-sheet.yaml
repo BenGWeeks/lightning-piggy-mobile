@@ -62,6 +62,8 @@ name: Share Location sheet opens from conversation composer
       id: 'attach-share-location'
     timeout: 5000
 
-# Also verify the human-readable label exists for a11y
+# Also verify the human-readable label exists for a11y. Post-PR-204
+# the label is the short tile name "Location" (was "Share location"
+# in the old AttachSheet bottom-sheet).
 - assertVisible:
-    text: 'Share location'
+    text: 'Location'
