@@ -1,0 +1,211 @@
+appId: com.lightningpiggy.app.dev
+name: WhatsApp-style Attach Panel Swap Test
+---
+# Verifies the new inline attachment panel that replaces the keyboard at
+# the same height (vs. the old bottom-sheet AttachSheet). Specifically:
+#
+#   1. Open a conversation and tap the "Message" input → IME visible.
+#   2. Type something → text input is alive (focus + key events working).
+#   3. Tap "+" → IME slides away, attach panel slides into the SAME slot.
+#      Composer (input + send) stays exactly where it was.
+#   4. Tap the input → panel slides away, IME slides back into the same
+#      slot. We type more text to prove focus was preserved through the
+#      swap.
+#   5. Send the message → it appears in the thread.
+#   6. Tap "+" again → panel reopens (toggle behaviour).
+#   7. Tap "+" once more → panel closes (idempotent toggle).
+#
+# Maestro can't directly assert "the IME is exactly N px tall" — for the
+# pixel-perfect height match this test takes screenshots at the
+# keyboard / panel transitions so a human reviewer (or an image-diff
+# tool) can verify the swap is jump-free. The functional assertions
+# (panel visible / not visible, input still focusable, message sent)
+# guard the structural correctness.
+#
+# Setup:
+#   - Sign out, sign in as Big Piggy via ${BIG_PIGGY_NSEC} so the test
+#     starts from a known account.
+#   - Big Piggy must have a previous DM thread with Little Piggy (so
+#     ${LITTLE_PIGGY_NAME} appears in the Messages list).
+#   - On teardown, sign out + sign back in with ${MAESTRO_NSEC} so the
+#     device is left in the same state it started in for subsequent
+#     tests.
+#
+# Run:
+#   source .env
+#   maestro --device emulator-5554 test \
+#     -e BIG_PIGGY_NSEC="$MAESTRO_NSEC2" \
+#     -e LITTLE_PIGGY_NAME='Little Piggy' \
+#     -e MAESTRO_NSEC="$MAESTRO_NSEC" \
+#     tests/e2e/test-attach-panel-swap.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# --- Setup: sign out (if signed in) and sign in as Big Piggy ---
+- tapOn:
+    id: 'tab-home'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'drawer-sign-out'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    text: 'Sign Out'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- tapOn:
+    id: 'profile-icon'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'drawer-sign-in'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'nsec-input'
+- inputText: ${BIG_PIGGY_NSEC}
+- hideKeyboard
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: 'login-button'
+- waitForAnimationToEnd:
+    timeout: 10000
+- tapOn:
+    text: 'UPDATE'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# --- Open Little Piggy's conversation ---
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: '${LITTLE_PIGGY_NAME:-Little Piggy}.*'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Composer is visible and alive (preconditions for the swap test).
+- assertVisible:
+    id: 'conversation-input'
+- assertVisible:
+    id: 'conversation-send'
+- assertVisible:
+    id: 'conversation-attach'
+
+# Panel must NOT be visible at this point.
+- assertNotVisible:
+    id: 'conversation-attach-panel'
+
+# --- 1. Tap input → IME comes up. Type to prove focus + keys work. ---
+- tapOn:
+    id: 'conversation-input'
+- waitForAnimationToEnd:
+    timeout: 2000
+- inputText: 'hello from big piggy'
+- takeScreenshot: 01-keyboard-up
+
+# --- 2. Tap "+" → panel replaces keyboard at the same slot ---
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible:
+    id: 'conversation-attach-panel'
+- assertVisible:
+    id: 'conversation-input'
+- assertVisible:
+    id: 'conversation-send'
+- takeScreenshot: 02-panel-replaces-keyboard
+
+# --- 3. Tap input → keyboard replaces panel at the same slot ---
+- tapOn:
+    id: 'conversation-input'
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertNotVisible:
+    id: 'conversation-attach-panel'
+- inputText: ' and more'
+- takeScreenshot: 03-keyboard-back
+
+# --- 4. Send the message ---
+- tapOn:
+    id: 'conversation-send'
+- waitForAnimationToEnd:
+    timeout: 5000
+- extendedWaitUntil:
+    visible:
+      text: 'hello from big piggy and more'
+    timeout: 10000
+
+# --- 5. Idempotent toggle: tap "+" twice → opens, then closes ---
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible:
+    id: 'conversation-attach-panel'
+
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertNotVisible:
+    id: 'conversation-attach-panel'
+
+# --- Teardown: sign out, sign back in as the default user ---
+- tapOn:
+    id: 'tab-home'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'drawer-sign-out'
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    text: 'Sign Out'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- tapOn:
+    id: 'profile-icon'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'drawer-sign-in'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'nsec-input'
+- inputText: ${MAESTRO_NSEC}
+- hideKeyboard
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: 'login-button'
+- waitForAnimationToEnd:
+    timeout: 10000
+- tapOn:
+    text: 'UPDATE'
+    optional: true

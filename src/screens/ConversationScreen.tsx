@@ -16,7 +16,12 @@ import {
   Linking,
   StyleSheet,
 } from 'react-native';
-import { KeyboardStickyView } from 'react-native-keyboard-controller';
+import {
+  KeyboardController,
+  KeyboardStickyView,
+  useReanimatedKeyboardAnimation,
+} from 'react-native-keyboard-controller';
+import RAnimated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Zap, Send, Plus, MapPin, ArrowDown } from 'lucide-react-native';
 import { Image as ExpoImage } from 'expo-image';
@@ -32,7 +37,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 import SendSheet from '../components/SendSheet';
-import AttachSheet from '../components/AttachSheet';
+import AttachPanel from '../components/AttachPanel';
 import GifPickerSheet from '../components/GifPickerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
 import TransactionDetailSheet, {
@@ -262,7 +267,43 @@ const ConversationScreen: React.FC = () => {
   // has shared in this conversation. Keyed by hex pubkey; a `null` value
   // means we tried and the kind-0 lookup came back empty.
   const [sharedProfiles, setSharedProfiles] = useState<Record<string, NostrProfile | null>>({});
-  const [attachSheetOpen, setAttachSheetOpen] = useState(false);
+  const [attachPanelOpen, setAttachPanelOpen] = useState(false);
+
+  // WhatsApp-style "panel replaces keyboard" mechanics. We cache the
+  // last real keyboard height before dismissing the IME so the panel
+  // can slide into the *exact* slot the keyboard occupied. The
+  // `useReanimatedKeyboardAnimation` shared value drives the spacer
+  // height every frame; a max() clamp against `lastKbHeight` while
+  // the panel is open keeps the spacer pinned during the IME's
+  // dismiss animation, so the panel never flickers in.
+  const DEFAULT_PANEL_HEIGHT = 300;
+  const lastKbHeight = useSharedValue(DEFAULT_PANEL_HEIGHT);
+  const panelOpenSV = useSharedValue(false);
+  const { height: kbHeightSV } = useReanimatedKeyboardAnimation();
+
+  const openAttachPanel = useCallback(() => {
+    const s = KeyboardController.state();
+    if (s?.height) lastKbHeight.value = s.height;
+    panelOpenSV.value = true;
+    setAttachPanelOpen(true);
+    // Dismiss without `keepFocus`: we want the TextInput to fully drop
+    // focus so the next user tap re-fires its `onFocus` handler — which
+    // is what brings the keyboard back. With `keepFocus:true` the input
+    // stays focused-but-hidden, so re-tapping it is a no-op and the
+    // keyboard never reappears.
+    KeyboardController.dismiss();
+  }, [lastKbHeight, panelOpenSV]);
+
+  const closeAttachPanel = useCallback(() => {
+    panelOpenSV.value = false;
+    setAttachPanelOpen(false);
+  }, [panelOpenSV]);
+
+  const attachSpacerStyle = useAnimatedStyle(() => {
+    const kb = Math.abs(kbHeightSV.value);
+    const target = panelOpenSV.value ? Math.max(kb, lastKbHeight.value) : kb;
+    return { height: target };
+  });
   const [invoiceSheetOpen, setInvoiceSheetOpen] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
@@ -641,7 +682,7 @@ const ConversationScreen: React.FC = () => {
 
   const handleShareLocation = useCallback(async () => {
     if (sharingLocation) return;
-    setAttachSheetOpen(false);
+    setAttachPanelOpen(false);
     setSharingLocation(true);
     try {
       const result = await getCurrentLocation();
@@ -741,7 +782,7 @@ const ConversationScreen: React.FC = () => {
 
   const handlePickAndSendImage = useCallback(async () => {
     if (!isLoggedIn || uploadingImage || sending) return;
-    setAttachSheetOpen(false);
+    setAttachPanelOpen(false);
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       Alert.alert('Permission needed', 'Allow photo library access to send images.');
@@ -761,7 +802,7 @@ const ConversationScreen: React.FC = () => {
 
   const handleTakeAndSendPhoto = useCallback(async () => {
     if (!isLoggedIn || uploadingImage || sending) return;
-    setAttachSheetOpen(false);
+    setAttachPanelOpen(false);
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
       Alert.alert('Permission needed', 'Allow camera access to take and send photos.');
@@ -787,7 +828,7 @@ const ConversationScreen: React.FC = () => {
     async (friend: PickedFriend) => {
       // Dismiss both sheets in reverse stack order (top first).
       setContactPickerOpen(false);
-      setAttachSheetOpen(false);
+      setAttachPanelOpen(false);
       const readRelays = relays.filter((r) => r.read).map((r) => r.url);
       const relayHints = buildProfileRelayHints(friend.pubkey, contacts, readRelays);
       const nprofile = nprofileEncode(friend.pubkey, relayHints);
@@ -814,7 +855,7 @@ const ConversationScreen: React.FC = () => {
   const handleSendGif = useCallback(
     async (gif: Gif) => {
       setGifPickerOpen(false);
-      setAttachSheetOpen(false);
+      setAttachPanelOpen(false);
       const payload = gif.url;
       const result = await sendDirectMessage(pubkey, payload);
       if (!result.success) {
@@ -1370,7 +1411,7 @@ const ConversationScreen: React.FC = () => {
           <View style={[styles.composer, { paddingBottom: 8 }]}>
             <TouchableOpacity
               style={styles.composerAttachButton}
-              onPress={() => setAttachSheetOpen(true)}
+              onPress={() => (attachPanelOpen ? closeAttachPanel() : openAttachPanel())}
               disabled={!isLoggedIn || sending || sharingLocation || uploadingImage}
               accessibilityLabel="Attach"
               testID="conversation-attach"
@@ -1387,6 +1428,7 @@ const ConversationScreen: React.FC = () => {
               placeholderTextColor={colors.textSupplementary}
               value={draft}
               onChangeText={setDraft}
+              onFocus={closeAttachPanel}
               multiline
               editable={isLoggedIn && !sending}
               accessibilityLabel="Message input"
@@ -1406,53 +1448,53 @@ const ConversationScreen: React.FC = () => {
               )}
             </TouchableOpacity>
           </View>
+          {/* WhatsApp-style attach panel — sits in the spacer below the
+              composer row inside the same KeyboardStickyView so it
+              animates as one unit. The spacer height is a Reanimated
+              max() of the live keyboard height and the cached panel
+              height, so swapping keyboard ↔ panel never collapses
+              and never flickers. */}
+          <RAnimated.View style={attachSpacerStyle}>
+            {attachPanelOpen ? (
+              <AttachPanel
+                onShareLocation={handleShareLocation}
+                onSendImage={handlePickAndSendImage}
+                onTakePhoto={handleTakeAndSendPhoto}
+                onSendZap={
+                  lightningAddress
+                    ? () => {
+                        closeAttachPanel();
+                        setSendSheetOpen(true);
+                      }
+                    : undefined
+                }
+                onSendInvoice={() => {
+                  closeAttachPanel();
+                  setInvoiceSheetOpen(true);
+                }}
+                onShareContact={() => {
+                  // Picker opens over the conversation; don't close the
+                  // panel until the user actually picks (or cancels).
+                  setContactPickerOpen(true);
+                }}
+                onSendGif={
+                  isGifConfigured()
+                    ? () => {
+                        // GifPickerSheet opens over the panel.
+                        setGifPickerOpen(true);
+                      }
+                    : undefined
+                }
+              />
+            ) : null}
+          </RAnimated.View>
         </KeyboardStickyView>
       </View>
-
-      <AttachSheet
-        visible={attachSheetOpen}
-        onClose={() => setAttachSheetOpen(false)}
-        onShareLocation={handleShareLocation}
-        onSendImage={handlePickAndSendImage}
-        onTakePhoto={handleTakeAndSendPhoto}
-        onSendZap={
-          lightningAddress
-            ? () => {
-                setAttachSheetOpen(false);
-                setSendSheetOpen(true);
-              }
-            : undefined
-        }
-        onSendInvoice={() => {
-          setAttachSheetOpen(false);
-          setInvoiceSheetOpen(true);
-        }}
-        onShareContact={() => {
-          // Don't dismiss AttachSheet first — FriendPickerSheet has
-          // `stackBehavior="push"` and expects to layer *on top* of an
-          // already-presented parent. Dismissing AttachSheet + presenting
-          // FriendPickerSheet in the same render trips a gorhom race
-          // (see gorhom/react-native-bottom-sheet#1941) that leaves the
-          // child sheet at an invalid position when the keyboard opens —
-          // symptom we hit: the search-input focus collapsed the sheet
-          // to ~15 % of screen height.
-          setContactPickerOpen(true);
-        }}
-        onSendGif={
-          isGifConfigured()
-            ? () => {
-                // Same stack-without-dismiss pattern as FriendPickerSheet
-                // above — GifPickerSheet opens over the AttachSheet.
-                setGifPickerOpen(true);
-              }
-            : undefined
-        }
-      />
       <GifPickerSheet
         visible={gifPickerOpen}
         onClose={() => {
           setGifPickerOpen(false);
-          setAttachSheetOpen(false);
+          setAttachPanelOpen(false);
         }}
         onSelect={handleSendGif}
       />
@@ -1486,7 +1528,7 @@ const ConversationScreen: React.FC = () => {
           // AttachSheet underneath — the user has navigated away from
           // the attach flow, the parent is no longer relevant.
           setContactPickerOpen(false);
-          setAttachSheetOpen(false);
+          setAttachPanelOpen(false);
         }}
         onSelect={handleShareContactPicked}
         title={`Share a contact with ${name}`}
@@ -1615,7 +1657,13 @@ const createStyles = (colors: Palette) =>
     },
     listContent: {
       paddingHorizontal: 12,
-      paddingVertical: 12,
+      // Inverted list: paddingTop becomes the *visual-bottom* padding.
+      // Bump it past the composer's resting height (input + paddings ≈
+      // 60 dp) so the latest message isn't tucked under the composer
+      // border. paddingBottom (= visual-top) keeps a small breathing
+      // gap above the day-header row.
+      paddingTop: 72,
+      paddingBottom: 12,
       gap: 6,
       flexGrow: 1,
     },
