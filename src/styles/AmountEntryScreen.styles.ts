@@ -1,8 +1,6 @@
 import { StyleSheet } from 'react-native';
 import type { Palette } from './palettes';
 
-const KEYPAD_BG = '#D1D3D9';
-const CARD_INNER_BG = '#F5F5F5';
 const CARD_RADIUS = 24;
 const INNER_RADIUS_BOTTOM = 20;
 const SWAP_DIAMETER = 48;
@@ -45,7 +43,7 @@ export const createAmountEntryStyles = (colors: Palette) =>
       backgroundColor: colors.surface,
       borderRadius: CARD_RADIUS,
       borderWidth: 1,
-      borderColor: CARD_INNER_BG,
+      borderColor: colors.background,
       overflow: 'visible',
     },
     primarySection: {
@@ -59,7 +57,7 @@ export const createAmountEntryStyles = (colors: Palette) =>
     secondarySection: {
       marginHorizontal: 8,
       marginBottom: 8,
-      backgroundColor: CARD_INNER_BG,
+      backgroundColor: colors.background,
       paddingTop: 14,
       paddingBottom: 18,
       paddingHorizontal: 16,
@@ -87,12 +85,12 @@ export const createAmountEntryStyles = (colors: Palette) =>
       alignItems: 'center',
     },
     pillPrimary: {
-      backgroundColor: CARD_INNER_BG,
+      backgroundColor: colors.background,
     },
     pillSecondary: {
       backgroundColor: colors.surface,
       borderWidth: 1,
-      borderColor: CARD_INNER_BG,
+      borderColor: colors.background,
     },
     pillText: {
       fontSize: 14,
@@ -173,7 +171,7 @@ export const createAmountEntryStyles = (colors: Palette) =>
       // together with the container's `flex: 1` — stacking naturally
       // after the confirm button so the sheet's dynamic sizing measures
       // the full height correctly.
-      backgroundColor: KEYPAD_BG,
+      backgroundColor: colors.divider,
       paddingHorizontal: 6,
       paddingTop: 6,
       paddingBottom: 8,
@@ -201,7 +199,7 @@ export const createAmountEntryStyles = (colors: Palette) =>
     keyDigit: {
       fontSize: 25,
       fontWeight: '400',
-      color: '#000',
+      color: colors.textHeader,
       textAlign: 'center',
       includeFontPadding: false,
       lineHeight: 28,
@@ -209,7 +207,7 @@ export const createAmountEntryStyles = (colors: Palette) =>
     keyLetters: {
       fontSize: 9,
       fontWeight: '700',
-      color: '#000',
+      color: colors.textHeader,
       letterSpacing: 1.6,
       textAlign: 'center',
       marginTop: 0,
