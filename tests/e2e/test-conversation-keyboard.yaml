@@ -18,6 +18,8 @@ name: Conversation Composer Stays Above Keyboard
 #
 # Run: maestro test -e PEER='Big Piggy' tests/e2e/test-conversation-keyboard.yaml
 
+- launchApp:
+    clearState: false
 - waitForAnimationToEnd:
     timeout: 10000
 
@@ -28,11 +30,29 @@ name: Conversation Composer Stays Above Keyboard
 - waitForAnimationToEnd:
     timeout: 5000
 
-# Open the peer's conversation. `${PEER}.*` is a regex suffix because
+# Ensure the "All" filter is selected so the peer thread is visible
+# regardless of the user's last filter choice (e.g. "Following only"
+# can hide the test fixture).
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+# Open the peer's conversation. The `.*` suffix is a regex because
 # Maestro's `text:` matcher is full-regex in 2.3+; the row usually
 # renders as "<Name> <time-ago>" so the literal suffix would miss.
+# Hardcoded "Little Piggy" — the documented `${PEER:-...}` env-var
+# default trips Maestro's GraalJs evaluator (see CLAUDE.md notes on
+# the same bug for `${APP_ID:-...}`). The test fixture is signed in
+# as Big Piggy → message Little Piggy.
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
 - tapOn:
-    text: '${PEER:-Big Piggy}.*'
+    text: 'Little Piggy.*'
 - waitForAnimationToEnd:
     timeout: 10000
 
