@@ -537,7 +537,7 @@ const createStyles = (colors: Palette) =>
       padding: 24,
     },
     card: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderRadius: 28,
       paddingVertical: 32,
       paddingHorizontal: 28,

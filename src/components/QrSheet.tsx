@@ -128,7 +128,7 @@ const QrSheet: React.FC<Props> = ({
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
     sheetBackground: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderTopLeftRadius: 24,
       borderTopRightRadius: 24,
     },

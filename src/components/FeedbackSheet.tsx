@@ -247,7 +247,7 @@ const createStyles = (colors: Palette) =>
       textAlign: 'center',
     },
     textInput: {
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       borderRadius: 12,
       padding: 16,
       fontSize: 14,
@@ -269,7 +269,7 @@ const createStyles = (colors: Palette) =>
       flex: 1,
       height: 48,
       borderRadius: 12,
-      backgroundColor: colors.white,
+      backgroundColor: colors.surface,
       justifyContent: 'center',
       alignItems: 'center',
       borderWidth: 1,
