@@ -15,7 +15,7 @@
  * doesn't intercept touch events.
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Image, StyleSheet, View, Text } from 'react-native';
+import { Animated, Easing, Image, StyleSheet } from 'react-native';
 import { lightPalette } from '../styles/palettes';
 
 // BootSplash is brand-fixed (only ever shows over the native pink splash
@@ -30,7 +30,7 @@ interface Props {
   done: boolean;
 }
 
-const FADE_MS = 250;
+const FADE_MS = 450;
 
 const BootSplash: React.FC<Props> = ({ done }) => {
   const opacity = useRef(new Animated.Value(1)).current;
@@ -38,9 +38,14 @@ const BootSplash: React.FC<Props> = ({ done }) => {
 
   useEffect(() => {
     if (done) {
+      // Cubic-out easing so the fade decelerates as it nears 0 — feels
+      // gentler than linear or default ease-in-out, which read as a
+      // sudden snap at the end. 450 ms (was 250 ms) gives the user a
+      // moment to register the brand before the next screen takes over.
       Animated.timing(opacity, {
         toValue: 0,
         duration: FADE_MS,
+        easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }).start(() => setUnmounted(true));
     }
@@ -50,19 +55,24 @@ const BootSplash: React.FC<Props> = ({ done }) => {
 
   return (
     <Animated.View style={[styles.root, { opacity }]} pointerEvents={done ? 'none' : 'auto'}>
+      {/* Pig artwork is decorative — the wordmark below is the
+          canonical "Lightning Piggy" announcement, so we mark this
+          image hidden to screen readers to avoid the brand being
+          read twice. */}
       <Image
         source={require('../../assets/images/lightning-piggy-intro.png')}
         style={styles.pig}
         resizeMode="contain"
+        accessible={false}
+        accessibilityElementsHidden
+        importantForAccessibility="no"
       />
-      <View style={styles.brandRow}>
-        <Image
-          source={require('../../assets/images/lightning-piggy-logo.png')}
-          style={styles.logo}
-          resizeMode="contain"
-        />
-        <Text style={styles.brandText}>LIGHTNING PIGGY</Text>
-      </View>
+      <Image
+        source={require('../../assets/images/lightning-piggy-logo.png')}
+        style={styles.logo}
+        resizeMode="contain"
+        accessibilityLabel="Lightning Piggy"
+      />
     </Animated.View>
   );
 };
@@ -81,21 +91,16 @@ const styles = StyleSheet.create({
     width: '80%',
     height: '50%',
   },
-  brandRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginTop: 24,
-  },
   logo: {
-    width: 32,
-    height: 32,
-    tintColor: '#fff',
-  },
-  brandText: {
-    color: '#fff',
-    fontSize: 24,
-    fontWeight: '800',
-    letterSpacing: 1.5,
+    // The logo PNG (177×86 native, ~2:1) is the wordmark — yellow
+    // lightning bolt + white "Lightning Piggy" text baked in. Render
+    // it at a readable size (60% of the splash width) instead of the
+    // previous 32×32 squished icon. accessibilityLabel preserves the
+    // brand announcement for screen readers; the previous separate
+    // <Text>LIGHTNING PIGGY</Text> was duplicating what the image
+    // already says (#215).
+    width: '60%',
+    aspectRatio: 177 / 86,
+    marginTop: 24,
   },
 });
