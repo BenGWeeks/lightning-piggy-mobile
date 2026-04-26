@@ -141,6 +141,35 @@ export const createAmountEntryStyles = (colors: Palette) =>
       textAlign: 'center',
       marginTop: 6,
     },
+    suggestedRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'center',
+      gap: 8,
+      marginTop: 12,
+      marginBottom: 4,
+      paddingHorizontal: 16,
+    },
+    suggestedPill: {
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderRadius: 20,
+      backgroundColor: colors.brandPinkLight,
+      borderWidth: 1,
+      borderColor: 'transparent',
+    },
+    suggestedPillActive: {
+      backgroundColor: colors.brandPink,
+      borderColor: colors.brandPink,
+    },
+    suggestedPillText: {
+      color: colors.brandPink,
+      fontWeight: '600',
+      fontSize: 14,
+    },
+    suggestedPillTextActive: {
+      color: colors.white,
+    },
     confirmButton: {
       marginTop: 16,
       marginHorizontal: 16,

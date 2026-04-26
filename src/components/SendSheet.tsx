@@ -43,6 +43,15 @@ interface Props {
   initialPicture?: string;
   recipientPubkey?: string;
   recipientName?: string;
+  /**
+   * Optional preset amount pills rendered above the amount input.
+   * Tapping one fills both sats + fiat. Used today only by the
+   * "Zap the Team" button on AboutScreen so kids can tap a sensible
+   * amount instead of typing one and accidentally sending too much.
+   * Other call sites omit the prop and the amount input renders as
+   * before — pure additive surface.
+   */
+  suggestedAmounts?: number[];
 }
 
 type InputMode = 'scan' | 'paste';
@@ -97,6 +106,7 @@ const SendSheet: React.FC<Props> = ({
   initialPicture,
   recipientPubkey,
   recipientName,
+  suggestedAmounts,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createSendSheetStyles(colors), [colors]);
@@ -653,6 +663,7 @@ const SendSheet: React.FC<Props> = ({
               minSats={amountMinSats}
               maxSats={amountMaxSats}
               confirmLabel="Done"
+              suggestedAmounts={suggestedAmounts}
               onBack={() => setStep('main')}
               onConfirm={(sats) => {
                 setSatsValue(String(sats));
