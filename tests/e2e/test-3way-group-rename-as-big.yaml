@@ -1,0 +1,42 @@
+appId: com.lightningpiggy.app.dev
+name: 3-way group chat — Big Piggy renames "Triad" → "Triad-renamed"
+---
+# Phase 4. Logs back in as Big Piggy (MAESTRO_NSEC), opens "Triad",
+# triggers the rename sheet, saves "Triad-renamed", verifies the new
+# title in the header. Final sign-out so phase 5 can log in.
+
+- runFlow: _subflow-login-as.yaml
+
+- tapOn:
+    id: 'tab-friends'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'groups-button'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- tapOn:
+    text: 'Triad'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- tapOn:
+    id: 'rename-group-button'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    id: 'rename-group-input'
+- eraseText
+- inputText: 'Triad-renamed'
+- hideKeyboard
+- tapOn:
+    id: 'rename-group-save'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- assertVisible:
+    text: 'Triad-renamed'
+
+- runFlow: test-logout.yaml

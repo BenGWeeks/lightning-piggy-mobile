@@ -1,12 +1,23 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, FlatList, Image, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  FlatList,
+  Image,
+  Alert,
+  InteractionManager,
+} from 'react-native';
 import Svg, { Path } from 'react-native-svg';
+import { Users } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { useGroups } from '../contexts/GroupsContext';
+import { useNostr } from '../contexts/NostrContext';
 import CreateGroupSheet from '../components/CreateGroupSheet';
 import type { RootStackParamList } from '../navigation/types';
 import type { Group } from '../types/groups';
@@ -18,8 +29,21 @@ const GroupsScreen: React.FC = () => {
   const navigation = useNavigation<GroupsNavigation>();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { groups, deleteGroup } = useGroups();
+  const { visibleGroups, deleteGroup, followingOnly, setFollowingOnly, devMode } = useGroups();
+  const { isLoggedIn, refreshDmInbox } = useNostr();
   const [createVisible, setCreateVisible] = useState(false);
+
+  // On focus, refresh the DM inbox so any new kind-1059 wraps get pulled
+  // and the NIP-17 decrypt loop can route group rumors into the local
+  // group store. Mirrors MessagesScreen's pattern (deferred via
+  // InteractionManager so the tab transition stays smooth).
+  useFocusEffect(
+    useCallback(() => {
+      if (!isLoggedIn) return;
+      const handle = InteractionManager.runAfterInteractions(() => refreshDmInbox({ force: true }));
+      return () => handle.cancel();
+    }, [isLoggedIn, refreshDmInbox]),
+  );
 
   const openGroup = useCallback(
     (group: Group) => {
@@ -114,7 +138,39 @@ const GroupsScreen: React.FC = () => {
       </View>
 
       <View style={styles.content}>
-        {groups.length === 0 ? (
+        <View style={styles.filterChipRow}>
+          {devMode ? (
+            <TouchableOpacity
+              style={followingOnly ? styles.filterChip : styles.filterChipOff}
+              onPress={() => setFollowingOnly(!followingOnly)}
+              accessibilityLabel={
+                followingOnly
+                  ? 'Following-only filter on. Tap to show all groups.'
+                  : 'Following-only filter off. Tap to filter to followed members only.'
+              }
+              accessibilityRole="button"
+              testID="groups-follows-toggle"
+            >
+              <Users
+                size={14}
+                color={followingOnly ? colors.brandPink : colors.textSupplementary}
+              />
+              <Text style={followingOnly ? styles.filterChipText : styles.filterChipTextOff}>
+                {followingOnly ? 'Following only' : 'All groups (dev)'}
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            <View
+              style={styles.filterChip}
+              accessibilityLabel="Showing groups with at least one followed member"
+              testID="groups-follows-indicator"
+            >
+              <Users size={14} color={colors.brandPink} />
+              <Text style={styles.filterChipText}>Following only</Text>
+            </View>
+          )}
+        </View>
+        {visibleGroups.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>No groups yet</Text>
             <Text style={styles.emptySubtitle}>
@@ -131,7 +187,7 @@ const GroupsScreen: React.FC = () => {
           </View>
         ) : (
           <FlatList
-            data={groups}
+            data={visibleGroups}
             keyExtractor={(item) => item.id}
             renderItem={renderItem}
             contentContainerStyle={styles.listContent}
@@ -199,6 +255,43 @@ const createStyles = (colors: Palette) =>
       borderTopLeftRadius: 24,
       borderTopRightRadius: 24,
       marginTop: -24,
+    },
+    filterChipRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginTop: 12,
+      marginLeft: 16,
+    },
+    filterChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 14,
+      backgroundColor: 'rgba(229, 34, 120, 0.1)',
+    },
+    filterChipOff: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 14,
+      backgroundColor: 'rgba(0, 0, 0, 0.05)',
+      borderWidth: 1,
+      borderColor: 'rgba(0, 0, 0, 0.1)',
+    },
+    filterChipText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.brandPink,
+    },
+    filterChipTextOff: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.textSupplementary,
     },
     listContent: {
       paddingTop: 12,

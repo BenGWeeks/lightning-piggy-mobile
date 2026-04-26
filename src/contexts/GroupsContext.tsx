@@ -1,6 +1,16 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Group } from '../types/groups';
 import { createGroupId, loadGroups, saveGroups } from '../services/groupsStorageService';
+import { setKnownGroups } from '../services/groupRoutingRegistry';
 import { useNostr } from './NostrContext';
 import {
   DEFAULT_RELAYS,
@@ -8,8 +18,25 @@ import {
   subscribeGroupStateForViewer,
 } from '../services/nostrService';
 
+const FOLLOWING_ONLY_KEY = 'groups_following_only';
+
 interface GroupsContextType {
   groups: Group[];
+  /**
+   * Groups filtered by the friend-graph "Following only" rule plus the
+   * (dev-mode-only) user toggle. This is what GroupsScreen renders by
+   * default — see `followingOnly` / `setFollowingOnly`.
+   */
+  visibleGroups: Group[];
+  /**
+   * If true, only groups that include at least one OTHER member from the
+   * current user's follow list are shown. Default true; in dev_mode the
+   * user can toggle it off via the chip on GroupsScreen.
+   */
+  followingOnly: boolean;
+  setFollowingOnly: (next: boolean) => void;
+  /** Mirrors AsyncStorage `dev_mode`. Controls whether the chip is interactive. */
+  devMode: boolean;
   loading: boolean;
   createGroup: (name: string, memberPubkeys: string[]) => Promise<Group>;
   renameGroup: (groupId: string, newName: string) => Promise<boolean>;
@@ -34,7 +61,9 @@ const GroupsContext = createContext<GroupsContextType | undefined>(undefined);
 export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
-  const { publishGroupState, pubkey, relays, isLoggedIn } = useNostr();
+  const [followingOnly, setFollowingOnlyState] = useState(true);
+  const [devMode, setDevMode] = useState(false);
+  const { publishGroupState, pubkey, relays, isLoggedIn, contacts } = useNostr();
   // Track the latest reconciler in a ref so the subscription effect can
   // call it without re-subscribing on every group state change.
   const reconcilerRef = useRef<
@@ -53,6 +82,45 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       .then((loaded) => setGroups(loaded))
       .finally(() => setLoading(false));
   }, []);
+
+  // Load persisted user preferences for the chip + dev-mode escape hatch.
+  // dev_mode is shared with AboutScreen's hidden-tap unlock so the same
+  // override surfaces across the app.
+  useEffect(() => {
+    AsyncStorage.getItem(FOLLOWING_ONLY_KEY).then((v) => {
+      // Default ON; only flip OFF if the user explicitly persisted false.
+      if (v === 'false') setFollowingOnlyState(false);
+    });
+    AsyncStorage.getItem('dev_mode').then((v) => setDevMode(v === 'true'));
+  }, []);
+
+  const setFollowingOnly = useCallback((next: boolean) => {
+    setFollowingOnlyState(next);
+    AsyncStorage.setItem(FOLLOWING_ONLY_KEY, next ? 'true' : 'false').catch(() => {});
+  }, []);
+
+  // Keep the module-level routing registry in lock-step with React state
+  // so NostrContext's NIP-17 decrypt loop can resolve which group an
+  // inbound rumor belongs to without going through context.
+  useEffect(() => {
+    setKnownGroups(groups);
+  }, [groups]);
+
+  const followPubkeys = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of contacts) set.add(c.pubkey.toLowerCase());
+    return set;
+  }, [contacts]);
+
+  // Anti-spam: a group is visible only if at least one OTHER member is
+  // in the viewer's follow list. Mirror's the 1:1 "Following only" rule
+  // at MessagesScreen.tsx:128-143. Locked-on outside dev_mode; in
+  // dev_mode the user can flip it via the chip on GroupsScreen.
+  const visibleGroups = useMemo(() => {
+    const enforce = followingOnly || !devMode;
+    if (!enforce) return groups;
+    return groups.filter((g) => g.memberPubkeys.some((pk) => followPubkeys.has(pk.toLowerCase())));
+  }, [groups, followPubkeys, followingOnly, devMode]);
 
   const persist = useCallback(async (next: Group[]) => {
     setGroups(next);
@@ -130,8 +198,19 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // Look up by id; if missing, create from the event. createdAt on
       // the event is in seconds (nostr convention); local state uses ms.
       const evMs = input.createdAt * 1000;
+      const senderLc = input.senderPubkey.toLowerCase();
       const idx = groups.findIndex((g) => g.id === input.groupId);
       if (idx === -1) {
+        // New group: persist regardless of friend-graph here. Anti-spam
+        // is enforced at *render time* by the `visibleGroups` filter
+        // (which requires at least one OTHER member to be followed).
+        // Doing the check at render time means we don't have to race
+        // the contact-list refresh — kind:30200 events frequently land
+        // BEFORE the kind:3 fetch that populates `followPubkeys`, so a
+        // strict drop here loses real groups to a transient empty
+        // follow set. Storage cost is bounded by the relay subscription
+        // (`#p`-tagged at the viewer) so a spammer can only inflate
+        // disk if they specifically address the viewer.
         const group: Group = {
           id: input.groupId,
           name: input.name,
@@ -146,6 +225,20 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // than what we have locally.
       const existing = groups[idx];
       if (evMs <= existing.updatedAt) return false;
+      // Creator-trust gate for updates: only accept renames/membership
+      // changes from publishers already in the local member set (the
+      // creator is implicitly there too — they were merged in via the
+      // first event). Prevents a non-member from hijacking a group's
+      // name on the viewer's device.
+      const trustedPublishers = new Set(existing.memberPubkeys.map((pk) => pk.toLowerCase()));
+      if (!trustedPublishers.has(senderLc)) {
+        if (__DEV__) {
+          console.log(
+            `[Groups] dropping update to ${input.groupId} from non-member ${senderLc.slice(0, 8)}...`,
+          );
+        }
+        return false;
+      }
       const updated: Group = {
         ...existing,
         name: input.name,
@@ -209,6 +302,10 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     <GroupsContext.Provider
       value={{
         groups,
+        visibleGroups,
+        followingOnly,
+        setFollowingOnly,
+        devMode,
         loading,
         createGroup,
         renameGroup,

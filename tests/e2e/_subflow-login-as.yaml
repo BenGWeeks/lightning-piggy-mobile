@@ -1,0 +1,103 @@
+appId: com.lightningpiggy.app.dev
+name: Internal — login as the nsec passed via MAESTRO_NSEC
+---
+# Like test-login-dev.yaml but with no hardcoded "Ben" post-login
+# assertion (Big/Middle/Little Piggy share the same login flow but
+# render different display names). Used by the 3-way group-chat suite.
+
+# Force-stop+launch ensures a clean nav stack between phases (no system
+# pickers / sub-screens left over from the previous phase). This is the
+# only reliable way to recover from system-level activities Maestro can't
+# tap to dismiss.
+- launchApp:
+    appId: com.lightningpiggy.app.dev
+    stopApp: true
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'tab-home'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Sign out if a previous session is still active
+- tapOn:
+    id: 'drawer-sign-out'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    text: 'Sign Out'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Re-open drawer → Profile
+- tapOn:
+    id: 'profile-icon'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'drawer-row-profile'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Connect Nostr
+- tapOn:
+    id: 'connect-nostr'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+- tapOn:
+    id: 'nsec-input'
+- inputText: ${MAESTRO_NSEC}
+- hideKeyboard
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    id: 'login-button'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    text: 'UPDATE'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Verify we're logged in via the always-present QR icon next to the
+# display name (drawer-npub-qr renders for any signed-in account).
+- extendedWaitUntil:
+    visible:
+      id: 'drawer-npub-qr'
+    timeout: 15000
+    optional: true
+
+- tapOn:
+    text: 'Allow'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# After Connect Nostr, the app remains on the Profile sub-screen. Pop
+# back to MainTabs so the bottom tab bar (tab-home/messages/learn/friends)
+# becomes the next-action surface for the calling flow.
+- tapOn:
+    id: 'tab-home'
+    optional: true
+- back:
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: 'tab-home'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000

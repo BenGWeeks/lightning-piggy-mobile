@@ -1,0 +1,43 @@
+appId: com.lightningpiggy.app.dev
+name: 3-way group chat — Little Piggy joins
+---
+# Phase 3 of the 3-way group-chat test. Logs in as Little Piggy
+# (MAESTRO_NSEC2), waits for "Triad" to appear from the kind-30200
+# reconciliation, sends "hi from little", and signs out.
+
+- runFlow:
+    file: _subflow-login-as.yaml
+    env:
+      MAESTRO_NSEC: ${MAESTRO_NSEC2}
+
+- tapOn:
+    id: 'tab-friends'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'groups-button'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- extendedWaitUntil:
+    visible:
+      text: 'Triad'
+    timeout: 30000
+
+- tapOn:
+    text: 'Triad'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- tapOn:
+    id: 'group-message-input'
+- inputText: 'hi from little'
+- hideKeyboard
+- tapOn:
+    id: 'group-send-button'
+- waitForAnimationToEnd:
+    timeout: 4000
+- assertVisible:
+    text: 'hi from little'
+
+- runFlow: test-logout.yaml

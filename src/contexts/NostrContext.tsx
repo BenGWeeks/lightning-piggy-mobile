@@ -17,7 +17,15 @@ import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
 import type { NostrProfile, NostrContact, RelayConfig, SignerType } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
-import { partnerFromRumor, unwrapWrapNsec, unwrapWrapViaNip44 } from '../utils/nip17Unwrap';
+import {
+  classifyRumor,
+  partnerFromRumor,
+  unwrapWrapNsec,
+  unwrapWrapViaNip44,
+  type DecodedRumor,
+} from '../utils/nip17Unwrap';
+import { findGroupForParticipants } from '../services/groupRoutingRegistry';
+import { appendGroupMessage, type GroupMessage } from '../services/groupMessagesStorageService';
 
 /**
  * Module-level LRU cache for NIP-04 plaintext keyed by event id. Keeps
@@ -68,6 +76,74 @@ const AMBER_NIP17_ENABLED_KEY = 'amber_nip17_enabled';
 /** Persistent wrap-id → DmInboxEntry cache. Only ever contains rumors
  * from followed senders — see refreshDmInbox's filter gate. */
 type Nip17CacheEntry = DmInboxEntry & { wrapId: string };
+
+/**
+ * Tiny pub/sub for inbound group messages. NostrContext fires
+ * `notifyGroupMessage` after persisting a decrypted group rumor so
+ * GroupConversationScreen can re-load its in-memory list without
+ * polling. Listeners are scoped to (groupId) so an open thread doesn't
+ * re-render on unrelated traffic.
+ */
+type GroupMessageListener = (groupId: string, message: GroupMessage) => void;
+const groupMessageListeners = new Set<GroupMessageListener>();
+function notifyGroupMessage(groupId: string, message: GroupMessage): void {
+  for (const l of groupMessageListeners) {
+    try {
+      l(groupId, message);
+    } catch (e) {
+      if (__DEV__) console.warn('[Nostr] group message listener threw:', e);
+    }
+  }
+}
+export function subscribeGroupMessages(listener: GroupMessageListener): () => void {
+  groupMessageListeners.add(listener);
+  return () => {
+    groupMessageListeners.delete(listener);
+  };
+}
+
+/**
+ * Try to route a decoded kind-14 rumor as a group message. Returns true
+ * if it was persisted to group storage and the caller should SKIP the
+ * 1:1 inbox path. Returns false for DMs (caller proceeds as normal),
+ * for malformed rumors, or for group-shaped rumors whose participant set
+ * doesn't match any locally-known group.
+ *
+ * Side-effects on success:
+ *  - Appends to groupMessagesStorageService keyed by group.id
+ *  - Fires the in-process group-message listener so an open thread
+ *    refreshes immediately
+ */
+async function tryRouteGroupRumor(
+  rumor: DecodedRumor,
+  viewerPubkey: string,
+  wrapId: string,
+): Promise<boolean> {
+  const cls = classifyRumor(rumor, viewerPubkey);
+  if (!cls || cls.type !== 'group') return false;
+  const group = findGroupForParticipants(cls.otherParticipants);
+  if (!group) {
+    // Group-shaped rumor with no matching local group. Could be a brand-
+    // new group whose kind-30200 hasn't propagated yet, or a spammer.
+    // Drop on the floor for v1 — once GroupsContext reconciles the
+    // 30200 the next refresh will pick this rumor up via the cache.
+    return false;
+  }
+  const message: GroupMessage = {
+    id: wrapId,
+    senderPubkey: rumor.pubkey.toLowerCase(),
+    text: rumor.content,
+    createdAt: rumor.created_at,
+  };
+  try {
+    await appendGroupMessage(group.id, message);
+    notifyGroupMessage(group.id, message);
+  } catch (e) {
+    if (__DEV__) console.warn('[Nostr] appendGroupMessage failed:', e);
+    return false;
+  }
+  return true;
+}
 
 /** Parse an AsyncStorage JSON blob into an object-keyed record, falling
  * back to `{}` if the value is missing, not valid JSON, or not an
@@ -1534,6 +1610,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               const rumor = unwrapWrapNsec(wrap, secretKey, onSkip);
               if (++nip17Decrypted % DECRYPT_YIELD_EVERY === 0) await yieldToEventLoop();
               if (!rumor) continue;
+              // If this is a multi-recipient group rumor, route it to
+              // the group store and skip 1:1 caching. Opening a DM
+              // thread shouldn't backfill group rumors into the 1:1
+              // cache — they belong to GroupConversationScreen.
+              const routed = await tryRouteGroupRumor(rumor, pubkey, wrap.id);
+              if (routed) continue;
               const partnership = partnerFromRumor(rumor, pubkey);
               if (!partnership) continue;
               // Cache every successfully decrypted wrap, even if it
@@ -1595,6 +1677,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   onSkip,
                 );
                 if (!rumor) continue;
+                // Multi-recipient (group) rumors: route to group storage
+                // and skip the 1:1 thread.
+                const routed = await tryRouteGroupRumor(rumor, pubkey, wrap.id);
+                if (routed) continue;
                 const partnership = partnerFromRumor(rumor, pubkey);
                 if (!partnership || partnership.partnerPubkey !== normalized) continue;
                 decrypted.push({
@@ -1721,10 +1807,19 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setDmInbox(filteredCache);
           }
 
+          // For pull-to-refresh / force refresh, skip the `since` filter
+          // entirely. NIP-59 wraps have a randomised `created_at` (up to
+          // 2 days back), so a `since` cutoff is unreliable for catching
+          // freshly-published wraps — the relay will drop wraps whose
+          // randomised stamp falls behind the cutoff. The wrap-id cache
+          // dedupes the re-fetched bytes, so the cost of dropping the
+          // floor is just the relay round-trip, not re-decrypt. Group
+          // messages especially benefit since GroupsScreen / GroupConv
+          // open with `force: true` to chase newly-arrived rumors.
           const { kind4, kind1059 } = await nostrService.fetchInboxDmEvents(
             refreshForPubkey,
             readRelays,
-            { since: lastSeen },
+            opts?.force ? {} : { since: lastSeen },
           );
           const entries: DmInboxEntry[] = [];
 
@@ -1842,6 +1937,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 const rumor = unwrapWrapNsec(wrap, secretKey, onSkip);
                 if (++nip17Decrypted % DECRYPT_YIELD_EVERY === 0) await yieldToEventLoop();
                 if (!rumor) continue;
+                // Multi-recipient (group) rumors: route to group storage
+                // and short-circuit the DM-inbox path. The 1:1 inbox
+                // never sees group messages — they belong to a different
+                // surface (GroupConversationScreen).
+                const routed = await tryRouteGroupRumor(rumor, refreshForPubkey, wrap.id);
+                if (routed) continue;
                 const partnership = partnerFromRumor(rumor, refreshForPubkey);
                 if (!partnership) continue;
                 // B1 — drop non-follows at the data layer. No caching, no
@@ -1912,6 +2013,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 try {
                   const rumor = await unwrapWrapViaNip44(wrap, amberNip44DecryptSilent, onSkip);
                   if (!rumor) continue;
+                  // Multi-recipient (group) rumors: route to group storage
+                  // and short-circuit the DM-inbox path.
+                  const routed = await tryRouteGroupRumor(rumor, refreshForPubkey, wrap.id);
+                  if (routed) continue;
                   const partnership = partnerFromRumor(rumor, refreshForPubkey);
                   if (!partnership) continue;
                   // B1 — never cache rumors from non-followed senders. The

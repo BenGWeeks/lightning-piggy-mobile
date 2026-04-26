@@ -19,7 +19,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { useGroups } from '../contexts/GroupsContext';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostr, subscribeGroupMessages } from '../contexts/NostrContext';
 import RenameGroupSheet from '../components/RenameGroupSheet';
 import {
   appendGroupMessage,
@@ -46,7 +46,7 @@ const GroupConversationScreen: React.FC = () => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { getGroup, deleteGroup } = useGroups();
-  const { contacts, sendGroupMessage, pubkey: myPubkey } = useNostr();
+  const { contacts, sendGroupMessage, pubkey: myPubkey, refreshDmInbox } = useNostr();
   const [renameVisible, setRenameVisible] = useState(false);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -76,6 +76,33 @@ const GroupConversationScreen: React.FC = () => {
       cancelled = true;
     };
   }, [group]);
+
+  // Live updates: NostrContext fires `subscribeGroupMessages` when an
+  // inbound NIP-17 wrap decrypts to a kind-14 rumor that matches this
+  // group's roster. Re-load from storage so we pick up the appended
+  // entry (cheap — capped at 500 messages per group). We could be
+  // smarter and merge in-memory, but file-of-truth simplicity wins.
+  useEffect(() => {
+    if (!group) return;
+    const unsubscribe = subscribeGroupMessages((groupId) => {
+      if (groupId !== group.id) return;
+      loadGroupMessages(group.id).then((loaded) => {
+        setMessages(loaded);
+        setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 0);
+      });
+    });
+    return unsubscribe;
+  }, [group]);
+
+  // Force-refresh the DM inbox on mount so the NIP-17 decrypt loop runs
+  // and routes any pending kind-14 group rumors into local storage. The
+  // `subscribeGroupMessages` hook above will then pick them up live.
+  // Force-mode skips the `since` filter (NIP-59 wraps have a randomised
+  // created_at — see refreshDmInbox's comment).
+  useEffect(() => {
+    if (!group) return;
+    refreshDmInbox({ force: true }).catch(() => {});
+  }, [group, refreshDmInbox]);
 
   const members: MemberRow[] = useMemo(() => {
     if (!group) return [];
