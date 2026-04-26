@@ -46,12 +46,30 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
   // thumbnails. This keeps a 24-result search from hammering the
   // device with 24 simultaneous GIF downloads + decodes (#224).
   const [visibleIds, setVisibleIds] = useState<Set<string>>(new Set());
+  // Diff against the previous set so we only call setVisibleIds when
+  // membership actually changed — `onViewableItemsChanged` fires on
+  // every scroll tick, and a no-op re-render of all tiles during
+  // momentum scroll is exactly the kind of jank this PR exists to
+  // avoid.
+  const visibleIdsRef = useRef<Set<string>>(visibleIds);
+  visibleIdsRef.current = visibleIds;
   const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: Array<{ key?: string; item?: Gif }> }) => {
       const next = new Set<string>();
       for (const v of viewableItems) {
         const id = v.item?.id ?? v.key;
         if (id) next.add(id);
+      }
+      const prev = visibleIdsRef.current;
+      if (prev.size === next.size) {
+        let same = true;
+        for (const id of next) {
+          if (!prev.has(id)) {
+            same = false;
+            break;
+          }
+        }
+        if (same) return;
       }
       setVisibleIds(next);
     },
@@ -86,10 +104,14 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
     if (visible) {
       // Clear everything so the next open starts on a fresh trending
       // fetch rather than briefly flashing the previous session's
-      // results while the new request is in flight.
+      // results while the new request is in flight. Also reset
+      // `visibleIds` so stale tile IDs from the prior session don't
+      // mark current tiles as visible (they wouldn't ever match the
+      // freshly-fetched IDs, but explicit reset keeps state honest).
       setSearch('');
       setDebouncedSearch('');
       setResults([]);
+      setVisibleIds(new Set());
       setError(null);
       setLoading(configured);
       sheetRef.current?.present();
@@ -97,6 +119,14 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
       sheetRef.current?.dismiss();
     }
   }, [visible, configured]);
+
+  // When `results` flips (trending → search, search query change), the
+  // previous `visibleIds` reference IDs from the prior dataset. Reset
+  // so the next viewability tick can populate from the fresh items
+  // rather than carrying ghosts forward.
+  useEffect(() => {
+    setVisibleIds(new Set());
+  }, [results]);
 
   // Debounce the outbound search. 250 ms is short enough to feel live
   // while the user pauses between words but long enough to collapse a
