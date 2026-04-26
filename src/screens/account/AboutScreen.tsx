@@ -173,14 +173,13 @@ const AboutScreen: React.FC = () => {
       <TouchableOpacity
         onPress={handleVersionTap}
         activeOpacity={1}
-        accessibilityLabel="App version — triple-tap to toggle developer mode"
+        accessibilityLabel={`App version ${appVersion}`}
       >
         <Text style={styles.versionText} testID="version-text">
           v{appVersion}
           {devMode ? ' (dev)' : ''}
         </Text>
       </TouchableOpacity>
-      <Text style={styles.versionHint}>Triple-tap the version to toggle Developer Mode.</Text>
 
       {teamProfile?.lud16 && (
         <SendSheet
@@ -308,12 +307,6 @@ const createStyles = (colors: Palette) =>
       fontWeight: '600',
       textAlign: 'center',
       paddingTop: 32,
-    },
-    versionHint: {
-      color: 'rgba(255,255,255,0.6)',
-      fontSize: 12,
-      textAlign: 'center',
-      paddingTop: 4,
     },
   });
 
