@@ -26,9 +26,12 @@ import RenameGroupSheet from '../components/RenameGroupSheet';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import AttachPanel from '../components/AttachPanel';
 import GifPickerSheet from '../components/GifPickerSheet';
+import ReceiveSheet from '../components/ReceiveSheet';
+import FriendPickerSheet, { PickedFriend } from '../components/FriendPickerSheet';
 import { isConfigured as isGifConfigured, type Gif } from '../services/giphyService';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 import { getCurrentLocation, formatGeoMessage } from '../services/locationService';
+import { nprofileEncode, buildProfileRelayHints } from '../services/nostrService';
 import {
   appendGroupMessage,
   loadGroupMessages,
@@ -54,7 +57,14 @@ const GroupConversationScreen: React.FC = () => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { getGroup, deleteGroup } = useGroups();
-  const { contacts, sendGroupMessage, pubkey: myPubkey, refreshDmInbox, signEvent } = useNostr();
+  const {
+    contacts,
+    sendGroupMessage,
+    pubkey: myPubkey,
+    refreshDmInbox,
+    signEvent,
+    relays,
+  } = useNostr();
   const [renameVisible, setRenameVisible] = useState(false);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -63,6 +73,8 @@ const GroupConversationScreen: React.FC = () => {
   const [selectedMemberPubkey, setSelectedMemberPubkey] = useState<string | null>(null);
   const [attachPanelOpen, setAttachPanelOpen] = useState(false);
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
+  const [invoiceSheetOpen, setInvoiceSheetOpen] = useState(false);
+  const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [sharingLocation, setSharingLocation] = useState(false);
   const listRef = useRef<FlatList<GroupMessage>>(null);
@@ -274,6 +286,58 @@ const GroupConversationScreen: React.FC = () => {
     [closeAttachPanel, sendText],
   );
 
+  // Share another contact's Nostr profile into the group. Mirrors the 1:1
+  // path (ConversationScreen.handleShareContactPicked): "Shared contact:
+  // <name>\nnostr:nprofile…" lets other Nostr clients render a tappable
+  // profile mention. We send via the group's own sendText so the message
+  // shows up in the group thread (not as a DM to the picked contact).
+  const handleShareContactPicked = useCallback(
+    async (friend: PickedFriend) => {
+      setContactPickerOpen(false);
+      closeAttachPanel();
+      const readRelays = relays.filter((r) => r.read).map((r) => r.url);
+      const relayHints = buildProfileRelayHints(friend.pubkey, contacts, readRelays);
+      const nprofile = nprofileEncode(friend.pubkey, relayHints);
+      const label = friend.name || 'a contact';
+      await sendText(`Shared contact: ${label}\nnostr:${nprofile}`);
+    },
+    [closeAttachPanel, contacts, relays, sendText],
+  );
+
+  // ReceiveSheet hands us the bolt11 via `onSendToGroup`. We post it
+  // directly via sendGroupMessage (NOT sendText) because sendText raises
+  // its own Alert on failure — ReceiveSheet shows a Toast on failure as
+  // well, and stacking both reads as a bug. Optimistic local append
+  // mirrors what sendText does so the invoice shows up in the thread.
+  const handleSendInvoiceToGroup = useCallback(
+    async (payload: string): Promise<{ success: boolean; error?: string }> => {
+      if (!group || !myPubkey) return { success: false, error: 'Group unavailable.' };
+      const result = await sendGroupMessage({
+        groupId: group.id,
+        subject: group.name,
+        memberPubkeys: group.memberPubkeys,
+        text: payload,
+      });
+      if (!result.success) return { success: false, error: result.error ?? 'Send failed' };
+      const local: GroupMessage = {
+        id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        senderPubkey: myPubkey,
+        text: payload,
+        createdAt: Math.floor(Date.now() / 1000),
+      };
+      try {
+        const next = await appendGroupMessage(group.id, local);
+        setMessages(next);
+        notifyGroupMessage(group.id, local);
+        setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 0);
+      } catch (err) {
+        if (__DEV__) console.warn('[GroupConversationScreen] appendGroupMessage failed:', err);
+      }
+      return { success: true };
+    },
+    [group, myPubkey, sendGroupMessage],
+  );
+
   if (!group) {
     return (
       <View style={styles.container}>
@@ -471,6 +535,19 @@ const GroupConversationScreen: React.FC = () => {
             onSendImage={handlePickAndSendImage}
             onTakePhoto={handleTakeAndSendPhoto}
             onSendGif={isGifConfigured() ? () => setGifPickerOpen(true) : undefined}
+            // Zap renders but stays disabled — there's no single recipient
+            // to zap in a group, but hiding the tile entirely confused
+            // users who expected the same set as 1:1 (#237).
+            onSendZap={() => {}}
+            zapDisabled
+            onSendInvoice={() => {
+              closeAttachPanel();
+              setInvoiceSheetOpen(true);
+            }}
+            onShareContact={() => {
+              // Picker opens over the panel; close on cancel/select.
+              setContactPickerOpen(true);
+            }}
           />
         ) : null}
 
@@ -563,6 +640,26 @@ const GroupConversationScreen: React.FC = () => {
         visible={gifPickerOpen}
         onClose={() => setGifPickerOpen(false)}
         onSelect={handleSendGif}
+      />
+
+      <FriendPickerSheet
+        visible={contactPickerOpen}
+        onClose={() => {
+          // Closing the picker (cancel or pick) also closes the
+          // AttachPanel underneath — same behaviour as 1:1 chats.
+          setContactPickerOpen(false);
+          setAttachPanelOpen(false);
+        }}
+        onSelect={handleShareContactPicked}
+        title={`Share a contact with ${group.name}`}
+        subtitle="They'll see it as a Nostr profile card they can open."
+      />
+
+      <ReceiveSheet
+        visible={invoiceSheetOpen}
+        onClose={() => setInvoiceSheetOpen(false)}
+        presetGroup={{ id: group.id, name: group.name }}
+        onSendToGroup={handleSendInvoiceToGroup}
       />
     </KeyboardAvoidingView>
   );

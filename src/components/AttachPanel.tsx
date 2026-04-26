@@ -6,10 +6,13 @@ import type { Palette } from '../styles/palettes';
 
 interface Props {
   onShareLocation: () => void;
-  // `onSendZap` greys out (instead of vanishing) when the peer has no
-  // Lightning Address, so 1:1 users still see the option exists. Group
-  // chats omit the prop entirely — the tile then disappears, since
-  // "zap the group" isn't a meaningful 1:1-style action.
+  // `onSendZap` greys out (instead of vanishing) when `zapDisabled` is
+  // set — used in two cases: (1) 1:1 chats where the peer has no
+  // Lightning Address, and (2) group chats where there's no single
+  // recipient to zap. In both, surfacing-but-disabled reads better than
+  // a missing tile, since users expect parity across chat types (#237).
+  // Callers that genuinely don't want the tile (no zap support at all)
+  // can still omit `onSendZap` to make it disappear.
   onSendZap?: () => void;
   zapDisabled?: boolean;
   onSendInvoice?: () => void;
@@ -96,9 +99,7 @@ const AttachPanel: React.FC<Props> = ({
         icon: <Zap size={26} color={colors.white} fill={colors.white} />,
         onPress: onSendZap,
         testID: 'attach-send-zap',
-        accessibilityLabel: zapDisabled
-          ? 'Send a zap (unavailable — peer has no Lightning Address)'
-          : 'Send a zap',
+        accessibilityLabel: zapDisabled ? 'Send a zap (unavailable)' : 'Send a zap',
         disabled: zapDisabled,
       },
       onSendInvoice && {
