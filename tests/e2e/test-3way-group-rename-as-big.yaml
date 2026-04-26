@@ -21,20 +21,42 @@ name: 3-way group chat — Big Piggy renames "Triad" → "Triad-renamed"
 - waitForAnimationToEnd:
     timeout: 3000
 
+# Cross-member receive assertion: by the time Big logs back in here,
+# Middle (Phase 2) and Little (Phase 3) have each posted to Triad.
+# Big should see both messages once the NIP-17 inbox refresh completes.
+# Use extendedWaitUntil with a generous timeout so a slow relay fetch
+# doesn't fail the phase, but make the asserts non-optional so a true
+# regression in the multi-recipient receive routing fails the suite.
+- extendedWaitUntil:
+    visible:
+      text: 'hi from middle'
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      text: 'hi from little'
+    timeout: 30000
+
+# Post-#227 the standalone rename-group-button was removed; the title
+# row (testID `group-title`) is now the only rename trigger.
 - tapOn:
-    id: 'rename-group-button'
+    id: 'group-title'
 - waitForAnimationToEnd:
     timeout: 2000
 
-- tapOn:
-    id: 'rename-group-input'
-- eraseText
+# BottomSheetTextInput's testID doesn't propagate; tap by
+# accessibilityLabel ("Group name") instead. Also drop `hideKeyboard`
+# (can hang inside the bottom sheet's keyboard capture) — the Save
+# tap dismisses the IME on its own.
+- tapOn: 'Group name'
+- eraseText:
+    charactersToErase: 100
 - inputText: 'Triad-renamed'
-- hideKeyboard
+- waitForAnimationToEnd:
+    timeout: 1500
 - tapOn:
     id: 'rename-group-save'
 - waitForAnimationToEnd:
-    timeout: 3000
+    timeout: 4000
 
 - assertVisible:
     text: 'Triad-renamed'

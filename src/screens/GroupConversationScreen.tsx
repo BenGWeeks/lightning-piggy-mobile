@@ -13,6 +13,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
+import { LogOut } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -214,18 +215,27 @@ const GroupConversationScreen: React.FC = () => {
     );
   }
 
-  const handleDelete = () => {
-    Alert.alert('Delete group', `Are you sure you want to delete "${group.name}"?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          await deleteGroup(group.id);
-          navigation.goBack();
+  // "Leave" not "Delete": this only removes the group from THIS device.
+  // We don't publish a kind-30200 deletion event (and other members keep
+  // the group in their local stores). True multi-party delete would
+  // require either a NIP-09 event the receivers honour, or a kind-30200
+  // tombstone — tracked as a follow-up.
+  const handleLeave = () => {
+    Alert.alert(
+      'Leave group',
+      `Remove "${group.name}" from this device? Other members will keep the group; you can be re-added if they message you again.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Leave',
+          style: 'destructive',
+          onPress: async () => {
+            await deleteGroup(group.id);
+            navigation.goBack();
+          },
         },
-      },
-    ]);
+      ],
+    );
   };
 
   const renderMessage = ({ item }: { item: GroupMessage }) => {
@@ -292,36 +302,12 @@ const GroupConversationScreen: React.FC = () => {
           </TouchableOpacity>
           <View style={{ flex: 1 }} />
           <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => setRenameVisible(true)}
-            accessibilityLabel="Rename group"
-            testID="rename-group-button"
-          >
-            <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"
-                stroke={colors.white}
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </Svg>
-          </TouchableOpacity>
-          <TouchableOpacity
             style={[styles.actionButton, styles.deleteIconButton]}
-            onPress={handleDelete}
-            accessibilityLabel="Delete group"
-            testID="delete-group-button"
+            onPress={handleLeave}
+            accessibilityLabel="Leave group"
+            testID="leave-group-button"
           >
-            <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14Z"
-                stroke={colors.white}
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </Svg>
+            <LogOut size={18} color={colors.white} strokeWidth={2} />
           </TouchableOpacity>
         </View>
         <Text style={styles.memberCount}>

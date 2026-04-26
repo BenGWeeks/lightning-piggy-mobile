@@ -42,13 +42,30 @@ const GroupRow: React.FC<Props> = ({ summary, onPress }) => {
     return `${who}: ${activity.lastText}`;
   }, [activity, contacts, myPubkey, group.memberPubkeys.length]);
 
-  // Avatar pubkeys: prefer recent senders; if no messages yet, fall back
-  // to the first 3 group members so the row still renders something
-  // meaningful instead of just the letter avatar.
-  const avatarPubkeys =
-    activity.recentSenderPubkeys.length > 0
-      ? activity.recentSenderPubkeys
-      : group.memberPubkeys.slice(0, 3);
+  // Avatar pubkeys: lead with recent senders so the people who've been
+  // talking show up first. Top up with non-sender members until we have
+  // up to 3 slots filled — otherwise a group where only the viewer has
+  // posted would render a single placeholder (the viewer isn't in
+  // their own follow list, so we have no kind:0 picture for them).
+  const avatarPubkeys = useMemo(() => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const pk of activity.recentSenderPubkeys) {
+      const lc = pk.toLowerCase();
+      if (seen.has(lc)) continue;
+      seen.add(lc);
+      out.push(lc);
+      if (out.length === 3) return out;
+    }
+    for (const pk of group.memberPubkeys) {
+      const lc = pk.toLowerCase();
+      if (seen.has(lc)) continue;
+      seen.add(lc);
+      out.push(lc);
+      if (out.length === 3) break;
+    }
+    return out;
+  }, [activity.recentSenderPubkeys, group.memberPubkeys]);
 
   return (
     <TouchableOpacity

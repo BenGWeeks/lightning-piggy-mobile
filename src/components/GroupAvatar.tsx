@@ -73,16 +73,19 @@ interface SingleAvatarProps {
 const SingleAvatar: React.FC<SingleAvatarProps> = ({ picture, colors, innerSize }) => {
   const [errored, setErrored] = useState(false);
   const showImage = !!picture && !errored;
+  // Picture avatars sit cleanly against the surface, no separator needed.
+  // Placeholder avatars (just the icon on the surface tint) get a thin
+  // white ring so the placeholder reads as a distinct circle in the
+  // stacked cluster instead of blending into the row background.
   const ringStyle = {
     width: innerSize,
     height: innerSize,
     borderRadius: innerSize / 2,
     backgroundColor: colors.background,
-    borderWidth: 1.5,
-    borderColor: colors.white,
     justifyContent: 'center' as const,
     alignItems: 'center' as const,
     overflow: 'hidden' as const,
+    ...(showImage ? {} : { borderWidth: 1.5, borderColor: colors.white }),
   };
   return (
     <View style={ringStyle}>
