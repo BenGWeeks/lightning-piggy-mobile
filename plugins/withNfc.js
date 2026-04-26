@@ -61,11 +61,19 @@ function withNfcAndroid(config) {
           );
 
           if (!hasNdefFilter) {
-            // NDEF discovered intent filter for NFC tags
+            // NDEF discovered intent filter for NFC tags. The writer
+            // in this PR (`writeNpubToTag`) creates a `Ndef.uriRecord`
+            // with payload `nostr:npub1…`, so the receiver-side filter
+            // matches the URI scheme rather than a `text/plain` MIME
+            // type — `text/plain` would silently miss every tag we
+            // write ourselves.
             filters.push({
               action: [{ $: { 'android:name': 'android.nfc.action.NDEF_DISCOVERED' } }],
-              category: [{ $: { 'android:name': 'android.intent.category.DEFAULT' } }],
-              data: [{ $: { 'android:mimeType': 'text/plain' } }],
+              category: [
+                { $: { 'android:name': 'android.intent.category.DEFAULT' } },
+                { $: { 'android:name': 'android.intent.category.BROWSABLE' } },
+              ],
+              data: [{ $: { 'android:scheme': 'nostr' } }],
             });
           }
 
@@ -99,16 +107,15 @@ function withNfcIos(config) {
   config = withInfoPlist(config, (config) => {
     config.modResults.NFCReaderUsageDescription =
       'Lightning Piggy uses NFC to read and write Lightning payment data and Nostr identities.';
-
-    // Register NDEF tag reader session format
-    if (!config.modResults['com.apple.developer.nfc.readersession.formats']) {
-      config.modResults['com.apple.developer.nfc.readersession.formats'] = ['NDEF'];
-    }
-
+    // NOTE: do NOT also set `com.apple.developer.nfc.readersession.formats`
+    // here — that's an ENTITLEMENT key, not an Info.plist key. Apple's
+    // build chain ignores it from Info.plist (and earlier versions
+    // would warn). The same key is set correctly via
+    // `withEntitlementsPlist` below.
     return config;
   });
 
-  // Add NFC entitlement
+  // Add NFC entitlement (correct location for readersession.formats).
   config = withEntitlementsPlist(config, (config) => {
     if (!config.modResults['com.apple.developer.nfc.readersession.formats']) {
       config.modResults['com.apple.developer.nfc.readersession.formats'] = ['NDEF'];

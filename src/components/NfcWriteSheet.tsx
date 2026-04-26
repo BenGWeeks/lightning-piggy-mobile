@@ -261,7 +261,10 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.greenLight,
     },
     errorIcon: {
-      backgroundColor: '#FFEBEE',
+      // Theme-aware error tint — `redLight` is a tuned light/dark
+      // pair in the palette so the dark-theme variant doesn't
+      // produce eye-burn against the dark surface.
+      backgroundColor: colors.redLight,
     },
     checkmark: {
       fontSize: 48,

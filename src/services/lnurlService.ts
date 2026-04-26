@@ -138,8 +138,15 @@ export function decodeLnurl(lnurl: string): string {
     throw new Error('Invalid LNURL: decoded value is not a valid URL');
   }
 
-  if (parsed.protocol !== 'https:' && !parsed.hostname.endsWith('.onion')) {
-    throw new Error('Invalid LNURL: URL must use HTTPS');
+  // LNURL spec: HTTPS required, except `.onion` may use HTTP
+  // (Tor provides equivalent transport security). Older check only
+  // gated on HTTPS exclusion; the .onion exception was permissive of
+  // any protocol (e.g. ftp://x.onion would pass) — tighten to require
+  // either https: anywhere or http: on a .onion host specifically.
+  const isHttps = parsed.protocol === 'https:';
+  const isHttpOnion = parsed.protocol === 'http:' && parsed.hostname.endsWith('.onion');
+  if (!isHttps && !isHttpOnion) {
+    throw new Error('Invalid LNURL: must be HTTPS, or HTTP on a .onion host');
   }
 
   return url;
