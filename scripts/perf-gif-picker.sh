@@ -19,10 +19,14 @@
 #
 # Output (in /tmp/perf-gif-$LABEL/):
 #   gfxinfo-before.txt    snapshot of the dev app's render stats
+#   net-before.txt        snapshot of `adb shell ip -s link` before the run
+#   maestro.log           full Maestro flow output (look here on failures)
 #   t0500.png  t1000.png  t2000.png  t3000.png   (delays after picker open)
 #   gfxinfo-after.txt     snapshot after the picker has been open ~3 s
-#   netstats.txt          adb shell ip -s link diff (bytes per interface)
-#   summary.txt           one-line summary (jank% delta, time-to-content)
+#   net-after.txt         snapshot of `adb shell ip -s link` after the run
+#   summary.txt           one-line summary (jank counts only — net diff
+#                         + time-to-content are read by hand from the
+#                         net-*.txt files and the screenshots respectively)
 
 set -u
 
