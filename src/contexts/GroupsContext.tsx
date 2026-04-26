@@ -208,9 +208,20 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return groups.filter((g) => g.memberPubkeys.some((pk) => followPubkeys.has(pk.toLowerCase())));
   }, [groups, followPubkeys, followingOnly, devMode]);
 
-  const persist = useCallback(async (next: Group[]) => {
-    setGroups(next);
-    await saveGroups(next);
+  // `persist` runs the mutation inside the React setState callback so it
+  // always sees the latest committed groups list — even if a concurrent
+  // mutator (e.g. an inbound 30200 reconcile firing while the user taps
+  // Create) lands between this call's invocation and its setState run.
+  // Returns the post-mutation array so the caller can also pass it to
+  // saveGroups + downstream side effects without re-reading state.
+  const persist = useCallback(async (mutate: (curr: Group[]) => Group[]): Promise<Group[]> => {
+    let after: Group[] = [];
+    setGroups((curr) => {
+      after = mutate(curr);
+      return after;
+    });
+    await saveGroups(after);
+    return after;
   }, []);
 
   const createGroup = useCallback(
@@ -223,7 +234,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         createdAt: now,
         updatedAt: now,
       };
-      await persist([group, ...groups]);
+      await persist((curr) => [group, ...curr]);
       // Best-effort: publish the kind-30200 group-state event so other
       // members can pick the group up. Failures are non-fatal — local
       // state is the source of truth, and we'll re-publish on rename.
@@ -236,36 +247,41 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       return group;
     },
-    [groups, persist, publishGroupState],
+    [persist, publishGroupState],
   );
 
   const renameGroup = useCallback(
     async (groupId: string, newName: string): Promise<boolean> => {
       const trimmed = newName.trim();
       if (!trimmed) return false;
-      const idx = groups.findIndex((g) => g.id === groupId);
-      if (idx === -1) return false;
-      const updated: Group = { ...groups[idx], name: trimmed, updatedAt: Date.now() };
-      const next = [...groups];
-      next[idx] = updated;
-      await persist(next);
+      let updated: Group | null = null;
+      await persist((curr) => {
+        const idx = curr.findIndex((g) => g.id === groupId);
+        if (idx === -1) return curr;
+        updated = { ...curr[idx], name: trimmed, updatedAt: Date.now() };
+        const next = [...curr];
+        next[idx] = updated;
+        return next;
+      });
+      if (!updated) return false;
+      const finalUpdated: Group = updated;
       publishGroupState({
-        groupId: updated.id,
-        name: updated.name,
-        memberPubkeys: updated.memberPubkeys,
+        groupId: finalUpdated.id,
+        name: finalUpdated.name,
+        memberPubkeys: finalUpdated.memberPubkeys,
       }).catch((e) => {
         if (__DEV__) console.warn('[Groups] publishGroupState (rename) failed:', e);
       });
       return true;
     },
-    [groups, persist, publishGroupState],
+    [persist, publishGroupState],
   );
 
   const deleteGroup = useCallback(
     async (groupId: string): Promise<void> => {
-      await persist(groups.filter((g) => g.id !== groupId));
+      await persist((curr) => curr.filter((g) => g.id !== groupId));
     },
-    [groups, persist],
+    [persist],
   );
 
   const getGroup = useCallback(
@@ -285,58 +301,66 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // the event is in seconds (nostr convention); local state uses ms.
       const evMs = input.createdAt * 1000;
       const senderLc = input.senderPubkey.toLowerCase();
-      const idx = groups.findIndex((g) => g.id === input.groupId);
-      if (idx === -1) {
-        // New group: persist regardless of friend-graph here. Anti-spam
-        // is enforced at *render time* by the `visibleGroups` filter
-        // (which requires at least one OTHER member to be followed).
-        // Doing the check at render time means we don't have to race
-        // the contact-list refresh — kind:30200 events frequently land
-        // BEFORE the kind:3 fetch that populates `followPubkeys`, so a
-        // strict drop here loses real groups to a transient empty
-        // follow set. Storage cost is bounded by the relay subscription
-        // (`#p`-tagged at the viewer) so a spammer can only inflate
-        // disk if they specifically address the viewer.
-        const group: Group = {
-          id: input.groupId,
+      // Read+write inside the persist mutation so we always see the
+      // committed state (avoids racing concurrent createGroup/reconcile).
+      let applied = false;
+      await persist((curr) => {
+        const idx = curr.findIndex((g) => g.id === input.groupId);
+        if (idx === -1) {
+          // New group: persist regardless of friend-graph here. Anti-spam
+          // is enforced at *render time* by the `visibleGroups` filter
+          // (which requires at least one OTHER member to be followed).
+          // Doing the check at render time means we don't have to race
+          // the contact-list refresh — kind:30200 events frequently land
+          // BEFORE the kind:3 fetch that populates `followPubkeys`, so a
+          // strict drop here loses real groups to a transient empty
+          // follow set. Storage cost is bounded by the relay subscription
+          // (`#p`-tagged at the viewer) so a spammer can only inflate
+          // disk if they specifically address the viewer.
+          const group: Group = {
+            id: input.groupId,
+            name: input.name,
+            memberPubkeys: [...new Set(input.memberPubkeys)],
+            createdAt: evMs,
+            updatedAt: evMs,
+          };
+          applied = true;
+          return [group, ...curr];
+        }
+        // Conflict-resolution: only apply if the incoming event is
+        // newer than what we have locally.
+        const existing = curr[idx];
+        if (evMs <= existing.updatedAt) return curr;
+        // Creator-trust gate for updates: only accept renames/membership
+        // changes from publishers already in the local member set OR from
+        // the viewer themselves (cross-device sync — viewer.pubkey is
+        // intentionally absent from `existing.memberPubkeys` because the
+        // member-list excludes self by convention). Prevents a non-member
+        // from hijacking a group's name on the viewer's device.
+        const trustedPublishers = new Set(existing.memberPubkeys.map((pk) => pk.toLowerCase()));
+        if (pubkey) trustedPublishers.add(pubkey.toLowerCase());
+        if (!trustedPublishers.has(senderLc)) {
+          if (__DEV__) {
+            console.log(
+              `[Groups] dropping update to ${input.groupId} from non-member ${senderLc.slice(0, 8)}...`,
+            );
+          }
+          return curr;
+        }
+        const updated: Group = {
+          ...existing,
           name: input.name,
           memberPubkeys: [...new Set(input.memberPubkeys)],
-          createdAt: evMs,
           updatedAt: evMs,
         };
-        await persist([group, ...groups]);
-        return true;
-      }
-      // Conflict-resolution: only apply if the incoming event is newer
-      // than what we have locally.
-      const existing = groups[idx];
-      if (evMs <= existing.updatedAt) return false;
-      // Creator-trust gate for updates: only accept renames/membership
-      // changes from publishers already in the local member set (the
-      // creator is implicitly there too — they were merged in via the
-      // first event). Prevents a non-member from hijacking a group's
-      // name on the viewer's device.
-      const trustedPublishers = new Set(existing.memberPubkeys.map((pk) => pk.toLowerCase()));
-      if (!trustedPublishers.has(senderLc)) {
-        if (__DEV__) {
-          console.log(
-            `[Groups] dropping update to ${input.groupId} from non-member ${senderLc.slice(0, 8)}...`,
-          );
-        }
-        return false;
-      }
-      const updated: Group = {
-        ...existing,
-        name: input.name,
-        memberPubkeys: [...new Set(input.memberPubkeys)],
-        updatedAt: evMs,
-      };
-      const next = [...groups];
-      next[idx] = updated;
-      await persist(next);
-      return true;
+        const next = [...curr];
+        next[idx] = updated;
+        applied = true;
+        return next;
+      });
+      return applied;
     },
-    [groups, persist],
+    [persist, pubkey],
   );
 
   // Keep the reconciler ref pointing at the latest closure.

@@ -71,12 +71,23 @@ const RenameGroupSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
       return;
     }
     setSaving(true);
-    const ok = await renameGroup(groupId, trimmed);
-    setSaving(false);
-    if (ok) {
-      onClose();
-    } else {
-      Alert.alert('Error', 'Failed to rename group.');
+    try {
+      const ok = await renameGroup(groupId, trimmed);
+      if (ok) {
+        onClose();
+      } else {
+        Alert.alert('Error', 'Failed to rename group.');
+      }
+    } catch (err) {
+      // AsyncStorage write failure. Without try/finally `saving` would
+      // stick true and the Save button would stay disabled.
+      if (__DEV__) console.warn('[RenameGroupSheet] renameGroup failed:', err);
+      Alert.alert(
+        'Could not rename group',
+        'Failed to save the new name locally. Try again or restart the app.',
+      );
+    } finally {
+      setSaving(false);
     }
   };
 

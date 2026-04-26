@@ -739,10 +739,14 @@ export function getRelayConnectionStatus(): Map<string, boolean> {
  * Tags:
  *  - ["d", group.id]            unique group identifier
  *  - ["name", group.name]       human-readable display name
- *  - ["p", memberPubkey] ...    one entry per member (excluding creator)
+ *  - ["p", memberPubkey] ...    one entry per member (excluding the signer)
  *
- * Signed by the group creator. Receivers reconcile against the latest
- * created_at they've seen for a given (creator, d) tuple.
+ * Signed by ANY current group member, not only the original creator.
+ * The receiver-side trust gate (GroupsContext.reconcileFromGroupStateEvent)
+ * accepts updates from any sender who's already in the local member set
+ * for that group (plus the viewer themselves for cross-device sync).
+ * Receivers reconcile against the latest created_at they've seen for
+ * a given groupId.
  */
 export const GROUP_STATE_KIND = 30200;
 

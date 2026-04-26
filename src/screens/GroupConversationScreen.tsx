@@ -144,9 +144,17 @@ const GroupConversationScreen: React.FC = () => {
       Alert.alert('Send failed', result.error ?? 'Unknown error');
       return;
     }
-    // Optimistically append locally — inbound NIP-17 routing for groups
-    // is tracked as a follow-up; for now the sender's own copy is the
-    // source of truth on this device.
+    // Optimistically append locally with a `local_…` id. This will
+    // duplicate against the inbound self-wrap (NIP-17 wrapManyEvents
+    // includes a self-wrap so the sender can sync across devices) when
+    // the wrap arrives — wrap.id is the dedup key in
+    // appendGroupMessage but the local id will never match it.
+    // Tracked as a follow-up — proper fix is either to dedup on
+    // (senderPubkey, createdAt~window, text) at append time, or to
+    // skip the optimistic write and let the inbound self-wrap be the
+    // source of truth (loses sub-second UX feedback). For now the
+    // duplicate window is small (one extra render after the relay
+    // round-trip resolves) and only affects the sender's own device.
     const local: GroupMessage = {
       id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       senderPubkey: myPubkey,

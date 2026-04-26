@@ -94,10 +94,22 @@ const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
       return;
     }
     setSaving(true);
-    const group = await createGroup(trimmed, Array.from(selected));
-    setSaving(false);
-    onCreated?.(group);
-    onClose();
+    try {
+      const group = await createGroup(trimmed, Array.from(selected));
+      onCreated?.(group);
+      onClose();
+    } catch (err) {
+      // AsyncStorage write failure (e.g. quota exhausted). Without
+      // try/finally `saving` would stick true and the Create button
+      // would stay disabled — the user has no way to recover.
+      if (__DEV__) console.warn('[CreateGroupSheet] createGroup failed:', err);
+      Alert.alert(
+        'Could not create group',
+        'Failed to save the group locally. Try again or restart the app.',
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   const canCreate = name.trim().length > 0 && selected.size > 0 && !saving;

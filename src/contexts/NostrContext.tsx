@@ -103,13 +103,23 @@ export function subscribeGroupMessages(listener: GroupMessageListener): () => vo
 }
 
 /**
- * Try to route a decoded kind-14 rumor as a group message. Returns true
- * if it was persisted to group storage and the caller should SKIP the
- * 1:1 inbox path. Returns false for DMs (caller proceeds as normal),
- * for malformed rumors, or for group-shaped rumors whose participant set
- * doesn't match any locally-known group.
+ * Outcome of attempting to route a kind-14 rumor as a group message.
  *
- * Side-effects on success:
+ * The 1:1 fallthrough path uses `partnerFromRumor`, which for a
+ * multi-recipient rumor would arbitrarily pick the FIRST p tag and
+ * mis-catalogue the rumor as a 1:1 DM with that pubkey. Callers must
+ * therefore distinguish "not a group" (safe to fall through to DM)
+ * from "group-shaped, no local match" (must NOT fall through).
+ */
+type GroupRouteResult =
+  | { kind: 'routed' } // appended to a known group
+  | { kind: 'group-no-match' } // group-shaped but no matching local group
+  | { kind: 'not-group' }; // 1:1 DM (or malformed) — safe to use the DM path
+
+/**
+ * Try to route a decoded kind-14 rumor as a group message.
+ *
+ * Side-effects on `routed`:
  *  - Appends to groupMessagesStorageService keyed by group.id
  *  - Fires the in-process group-message listener so an open thread
  *    refreshes immediately
@@ -118,9 +128,9 @@ async function tryRouteGroupRumor(
   rumor: DecodedRumor,
   viewerPubkey: string,
   wrapId: string,
-): Promise<boolean> {
+): Promise<GroupRouteResult> {
   const cls = classifyRumor(rumor, viewerPubkey);
-  if (!cls || cls.type !== 'group') return false;
+  if (!cls || cls.type !== 'group') return { kind: 'not-group' };
   const group = findGroupForParticipants(cls.otherParticipants);
   if (!group) {
     // Group-shaped rumor with no matching local group. Could be a brand-
@@ -137,7 +147,7 @@ async function tryRouteGroupRumor(
         `[Nostr] dropped group-shaped rumor (no matching group): participants=[${fp}${all.length > 3 ? ',...' : ''}] sender=${rumor.pubkey.slice(0, 8)}`,
       );
     }
-    return false;
+    return { kind: 'group-no-match' };
   }
   const message: GroupMessage = {
     id: wrapId,
@@ -150,9 +160,12 @@ async function tryRouteGroupRumor(
     notifyGroupMessage(group.id, message);
   } catch (e) {
     if (__DEV__) console.warn('[Nostr] appendGroupMessage failed:', e);
-    return false;
+    // Storage write failed — don't fall through to the DM path either,
+    // it's still a group rumor. The wrap stays in the cache for re-try
+    // on next inbox refresh.
+    return { kind: 'group-no-match' };
   }
-  return true;
+  return { kind: 'routed' };
 }
 
 /** Parse an AsyncStorage JSON blob into an object-keyed record, falling
@@ -1633,8 +1646,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               // the group store and skip 1:1 caching. Opening a DM
               // thread shouldn't backfill group rumors into the 1:1
               // cache — they belong to GroupConversationScreen.
-              const routed = await tryRouteGroupRumor(rumor, pubkey, wrap.id);
-              if (routed) continue;
+              const routeResult = await tryRouteGroupRumor(rumor, pubkey, wrap.id);
+              if (routeResult.kind !== 'not-group') continue;
               const partnership = partnerFromRumor(rumor, pubkey);
               if (!partnership) continue;
               // Cache every successfully decrypted wrap, even if it
@@ -1698,8 +1711,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 if (!rumor) continue;
                 // Multi-recipient (group) rumors: route to group storage
                 // and skip the 1:1 thread.
-                const routed = await tryRouteGroupRumor(rumor, pubkey, wrap.id);
-                if (routed) continue;
+                const routeResult = await tryRouteGroupRumor(rumor, pubkey, wrap.id);
+                if (routeResult.kind !== 'not-group') continue;
                 const partnership = partnerFromRumor(rumor, pubkey);
                 if (!partnership || partnership.partnerPubkey !== normalized) continue;
                 decrypted.push({
@@ -1960,8 +1973,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 // and short-circuit the DM-inbox path. The 1:1 inbox
                 // never sees group messages — they belong to a different
                 // surface (GroupConversationScreen).
-                const routed = await tryRouteGroupRumor(rumor, refreshForPubkey, wrap.id);
-                if (routed) continue;
+                const routeResult = await tryRouteGroupRumor(rumor, refreshForPubkey, wrap.id);
+                if (routeResult.kind !== 'not-group') continue;
                 const partnership = partnerFromRumor(rumor, refreshForPubkey);
                 if (!partnership) continue;
                 // B1 — drop non-follows at the data layer. No caching, no
@@ -2034,8 +2047,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   if (!rumor) continue;
                   // Multi-recipient (group) rumors: route to group storage
                   // and short-circuit the DM-inbox path.
-                  const routed = await tryRouteGroupRumor(rumor, refreshForPubkey, wrap.id);
-                  if (routed) continue;
+                  const routeResult = await tryRouteGroupRumor(rumor, refreshForPubkey, wrap.id);
+                  if (routeResult.kind !== 'not-group') continue;
                   const partnership = partnerFromRumor(rumor, refreshForPubkey);
                   if (!partnership) continue;
                   // B1 — never cache rumors from non-followed senders. The
