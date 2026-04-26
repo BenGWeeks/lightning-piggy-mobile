@@ -1,4 +1,5 @@
 import { ImageStyle } from 'react-native';
+import type { CardTheme } from '../../types/wallet';
 import { bgStyle as albyStyle } from './alby';
 import { bgStyle as bitcoinStyle } from './bitcoin';
 import { bgStyle as defaultStyle } from './default';
@@ -15,7 +16,11 @@ import { bgStyle as primalStyle } from './primal';
 import { bgStyle as revolutStyle } from './revolut';
 import { bgStyle as xapoStyle } from './xapo';
 
-const cardBgStyles: Record<string, ImageStyle> = {
+// Typed as `Record<CardTheme | 'default', ...>` so adding a new theme
+// to the `CardTheme` union forces a corresponding entry here at
+// compile time. `'default'` lives outside `CardTheme` because it's
+// the fallback when no theme is selected, not a user-pickable option.
+const cardBgStyles: Record<CardTheme | 'default', ImageStyle> = {
   default: defaultStyle.full,
   'lightning-bee': lightningBeeStyle.full,
   'lightning-cat': lightningCatStyle.full,
@@ -33,6 +38,9 @@ const cardBgStyles: Record<string, ImageStyle> = {
   xapo: xapoStyle.full,
 };
 
-export function getCardBgStyle(styleName: string | undefined, _mini: boolean): ImageStyle {
-  return cardBgStyles[styleName || 'default'] || cardBgStyles.default;
+export function getCardBgStyle(
+  styleName: CardTheme | undefined,
+  _mini: boolean,
+): ImageStyle {
+  return cardBgStyles[styleName ?? 'default'] ?? cardBgStyles.default;
 }
