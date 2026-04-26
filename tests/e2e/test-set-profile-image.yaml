@@ -1,0 +1,97 @@
+appId: com.lightningpiggy.app.dev
+name: Set Big Piggy's profile image via EditProfileSheet
+---
+# Pushes the BP fixture image into the emulator's gallery, opens the
+# Profile drawer → Edit Profile → taps the avatar to open the OS
+# image picker, picks the BP fixture, confirms upload, and saves the
+# kind:0 metadata event with the new picture URL.
+#
+# Result: Big Piggy now has a profile picture (pink "BP" square) so
+# the avatar fallback in ConversationRow / FriendPickerSheet shows
+# her actual avatar instead of the UserRound silhouette.
+#
+# PREREQUISITE — run BEFORE this Maestro flow (Maestro can't push
+# files itself). Without this the OS picker has nothing to show:
+#
+#   adb -s emulator-5554 push tests/e2e/fixtures/big-piggy-avatar.png /sdcard/Pictures/big-piggy-avatar.png
+#   adb -s emulator-5554 shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE \
+#       -d file:///sdcard/Pictures/big-piggy-avatar.png
+#
+# Run: maestro --device emulator-5554 test tests/e2e/test-set-profile-image.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# Open Profile drawer → Profile sub-screen
+- tapOn:
+    id: 'tab-home'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'drawer-row-profile'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Tap "Edit Profile" — accessibilityLabel based, since the button
+# text is the visible label.
+- tapOn:
+    text: 'Edit Profile'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Tap the avatar to open the OS image picker (testID from
+# EditProfileSheet line 221).
+- tapOn:
+    id: 'edit-picture-picker'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# First-run permission dialog for READ_MEDIA_IMAGES — accept whichever
+# variant Android shows.
+- tapOn:
+    text: 'Allow.*|Photos and videos|Selected photos|While using the app'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 4000
+
+# OS image picker is open. Tap the first picture-looking item — try
+# the file name first, then a centre-screen fallback. The pre-pushed
+# BP avatar should be the most recent image and appear top-left of
+# the grid.
+- tapOn:
+    text: 'big-piggy-avatar.*'
+    optional: true
+- tapOn:
+    point: '15%,30%'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Confirm picker selection (Add / Done / Allow / Use this photo).
+- tapOn:
+    text: 'Add|Done|Use|Select|Use this photo|Choose'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 8000
+
+# After Blossom upload completes, the avatar preview in EditProfileSheet
+# updates. Tap Save to publish the kind:0 metadata event.
+- tapOn:
+    id: 'save-profile'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Sheet dismisses on save. We should be back on the Profile sub-screen.
+# Verify by checking for the Profile screen header text or the Edit
+# Profile button (which means the save sheet closed cleanly).
+- extendedWaitUntil:
+    visible:
+      text: 'Edit Profile'
+    timeout: 10000

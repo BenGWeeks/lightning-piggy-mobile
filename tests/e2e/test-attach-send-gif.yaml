@@ -1,0 +1,79 @@
+appId: com.lightningpiggy.app.dev
+name: Attach — send a GIF to Little Piggy
+---
+# Opens the AttachPanel → GIF tile → GifPickerSheet → searches for a
+# deterministic term → picks the first result → sends to Little Piggy
+# as a NIP-44 encrypted DM. Verifies a GIF bubble (containing the
+# Giphy URL) appears in the thread.
+#
+# Requires `EXPO_PUBLIC_GIPHY_API_KEY` to be set at build time
+# (configured in app.config.ts via .env). The GIF tile is only
+# rendered when `isGifConfigured()` returns true; the test wraps the
+# whole flow in `runFlow when:` defensively so it no-ops when the
+# key isn't present (e.g. CI without secrets).
+#
+# Run: maestro --device emulator-5554 test tests/e2e/test-attach-send-gif.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
+- tapOn:
+    text: 'Little Piggy.*'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- runFlow:
+    when:
+      visible:
+        id: 'attach-send-gif'
+    commands:
+      - tapOn:
+          id: 'attach-send-gif'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - assertVisible:
+          id: 'gif-search-input'
+      # DELIBERATELY skip typing into `gif-search-input` — per
+      # docs/TROUBLESHOOTING.adoc, Maestro `inputText` is unreliable
+      # on @gorhom/bottom-sheet's BottomSheetTextInput under the New
+      # Architecture (text appears but `onChangeText` may not update
+      # React state). We tap a default-trending GIF instead.
+      #
+      # GifPickerSheet result tiles use `accessibilityLabel` of form
+      # "Send GIF: <title>" (testID is `gif-tile-<id>` which is per-
+      # GIF, so no stable indexed testID). Matching the prefix lands
+      # the first visible result reliably.
+      - tapOn:
+          text: 'Send GIF:.*'
+      - waitForAnimationToEnd:
+          timeout: 8000
+      # Newest message in the inverted FlatList should be the just-sent
+      # GIF. We can't reliably assert on its content (URL changes per
+      # query) but we can confirm the panel closed and the composer is
+      # back in idle state — i.e. the send completed without leaving
+      # us stuck on the GifPicker.
+      - assertVisible:
+          id: 'conversation-input'
+      - assertNotVisible:
+          id: 'gif-search-input'

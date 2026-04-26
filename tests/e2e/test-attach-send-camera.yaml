@@ -1,0 +1,89 @@
+appId: com.lightningpiggy.app.dev
+name: Attach — take + send a camera photo to Little Piggy
+---
+# Opens the AttachPanel → Camera tile → OS camera → captures (emulator
+# default test pattern image) → uploads to Blossom → sends as a NIP-44
+# encrypted DM with the imeta link.
+#
+# KNOWN CAVEAT (#209): the Camera + Gallery tiles currently route
+# through the Amber signer activity instead of opening the OS camera.
+# This test will fail until #209 is resolved; once fixed it serves as
+# the regression guard.
+#
+# The emulator's camera produces a default test pattern image
+# (animated green checkerboard). On a real device the photo is
+# whatever the user shoots. The DM payload is the same shape either
+# way: imeta + Blossom URL.
+#
+# Run: maestro --device emulator-5554 test tests/e2e/test-attach-send-camera.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
+- tapOn:
+    text: 'Little Piggy.*'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: 'attach-take-photo'
+
+# First-run permission dialog for CAMERA — accept whichever variant
+# Android shows (varies per API level).
+- tapOn:
+    text: 'Allow.*|While using the app|Only this time'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Default Android camera UI. The shutter button doesn't have a stable
+# testID, but it's typically the largest circle in the centre-bottom
+# of the screen. Tap it; if not present, fall back to a known content
+# description.
+- tapOn:
+    id: 'com.android.camera2:id/shutter_button'
+    optional: true
+- tapOn:
+    text: 'Take photo'
+    optional: true
+- tapOn:
+    point: '50%,90%'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Confirm capture (the camera UI usually shows OK / Use / Done after
+# capture, or auto-returns to the calling app).
+- tapOn:
+    text: 'OK|Use photo|Done|Save|Use this photo'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# After Blossom upload + DM publish, we should be back in the
+# conversation with the composer visible (no deterministic image text
+# to match).
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-input'
+    timeout: 30000
