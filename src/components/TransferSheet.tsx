@@ -65,9 +65,18 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [handedOff, setHandedOff] = useState(false);
   // Set when the background reverse-swap task errors (usually an NWC relay
   // timeout leaving the LN payment state unknown). Drives the "Retry now"
-  // button + the updated progress message in the progress view.
+  // button + the updated progress message in the progress view. Once the
+  // retry succeeds we keep the error reference (so the spinner stays
+  // suppressed in the post-retry state) and flip `recoveryAcked` to swap
+  // the message + hide the Retry button.
   const [backgroundError, setBackgroundError] = useState<string | null>(null);
   const [retryingRecovery, setRetryingRecovery] = useState(false);
+  const [recoveryAcked, setRecoveryAcked] = useState(false);
+  // Synchronous re-entrancy guard for the Retry button. React's
+  // setRetryingRecovery is async, so a fast double-tap can fire two
+  // concurrent recoverPendingSwaps() calls before `disabled` flips. The
+  // ref is checked + set synchronously inside the onPress closure.
+  const retryInFlightRef = useRef(false);
   const [feeEstimate, setFeeEstimate] = useState<string | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
@@ -211,6 +220,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       setProgressMsg(null);
       setBackgroundError(null);
       setRetryingRecovery(false);
+      setRecoveryAcked(false);
+      retryInFlightRef.current = false;
       setFeeEstimate(null);
       setSourceDropdownOpen(false);
       setDestDropdownOpen(false);
@@ -724,13 +735,24 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                   </Text>
                 )}
                 <View style={styles.progressContainer}>
+                  {/* Hide spinner whenever the background errored — even
+                      after the retry succeeded. Re-enabling it would
+                      misrepresent the "Recovery retried" state as still
+                      running. */}
                   {!backgroundError && <ActivityIndicator size="small" color={colors.brandPink} />}
                   <Text style={styles.progressText}>{progressMsg}</Text>
                 </View>
-                {backgroundError && (
+                {backgroundError && !recoveryAcked && (
                   <TouchableOpacity
-                    style={styles.closeButton}
+                    style={[styles.closeButton, retryingRecovery && styles.closeButtonDisabled]}
                     onPress={async () => {
+                      // Synchronous re-entrancy guard. A fast double-tap
+                      // can fire two onPress callbacks before React
+                      // applies setRetryingRecovery(true) + the disabled
+                      // prop — the ref check + set is atomic in JS, so
+                      // the second tap returns immediately.
+                      if (retryInFlightRef.current) return;
+                      retryInFlightRef.current = true;
                       const retrySession = sessionRef.current;
                       setRetryingRecovery(true);
                       try {
@@ -743,7 +765,10 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                           visibilityTime: 6000,
                         });
                         if (sessionRef.current === retrySession) {
-                          setBackgroundError(null);
+                          // Keep `backgroundError` set so the spinner
+                          // stays suppressed; flip `recoveryAcked` to
+                          // swap the message + hide the Retry button.
+                          setRecoveryAcked(true);
                           setProgressMsg(
                             'Recovery retried — check transaction history for the final status.',
                           );
@@ -758,6 +783,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                           visibilityTime: 8000,
                         });
                       } finally {
+                        retryInFlightRef.current = false;
                         if (sessionRef.current === retrySession) {
                           setRetryingRecovery(false);
                         }
