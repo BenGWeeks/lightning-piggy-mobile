@@ -135,6 +135,12 @@ jobs:
 
       - name: Resolve latest finished Android APK URL
         id: find
+        env:
+          # Suppress Node `(node:NNN) [DEPxxxx] DeprecationWarning: ...`
+          # lines that eas-cli emits to stdout, which would otherwise
+          # poison the JSON pipe to jq with `Invalid numeric literal`.
+          # See #207 for the v1.0.0-rc2 release where this manifested.
+          NODE_NO_WARNINGS: '1'
         run: |
           # Pick the most recent FINISHED Android production build (the one we just submitted).
           # Filter by the git commit of the Release tag so we don't accidentally grab an
