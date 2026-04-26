@@ -85,7 +85,14 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   // work (background swap IIFE, Retry handler) captures the value at start and
   // skips component-state setters if it has changed — otherwise a late callback
   // from a previous transfer can leak error/progress state into a new one.
+  // Bumped via `useMemo` keyed on `visible` so the increment lands
+  // SYNCHRONOUSLY during render (before any IIFE this render kicks off
+  // captures it), not in an effect that runs post-commit and could let a
+  // late microtask from the previous session pass the stale-session check.
   const sessionRef = useRef(0);
+  useMemo(() => {
+    sessionRef.current += 1;
+  }, [visible]);
   // No explicit snapPoints — content-height only, not user-draggable.
 
   const currentSats = parseInt(satsValue) || 0;
@@ -221,14 +228,16 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       setBackgroundError(null);
       setRetryingRecovery(false);
       setRecoveryAcked(false);
-      retryInFlightRef.current = false;
+      // NOTE: don't clear `retryInFlightRef` on visible-toggle. If the
+      // user closes mid-retry + reopens fast enough that the IIFE is
+      // still running, the in-flight ref must stay true so a second
+      // tap is correctly rejected — the ref is cleared by the IIFE's
+      // own finally block when its work actually completes.
       setFeeEstimate(null);
       setSourceDropdownOpen(false);
       setDestDropdownOpen(false);
-      sessionRef.current += 1;
       bottomSheetRef.current?.present();
     } else {
-      sessionRef.current += 1;
       bottomSheetRef.current?.dismiss();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -447,7 +456,13 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             // the session token so a late failure from a previous transfer
             // cannot paint error state onto a new one.
             if (sessionRef.current === iifeSession) {
-              setBackgroundError(msg);
+              // Coerce empty Error.message to a generic non-empty string
+              // so the `backgroundError === null` check downstream behaves
+              // consistently — Error.message can be empty in practice
+              // (some SDK throws produce blank-message errors) and we need
+              // a non-null sentinel to drive the spinner-suppression +
+              // Retry-button render paths.
+              setBackgroundError(msg || 'Background step failed');
               setProgressMsg(
                 'Background step failed — the LN payment reply may have been dropped ' +
                   'by the relay. Your funds are safe; tap "Retry now" to re-check ' +
@@ -738,11 +753,16 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                   {/* Hide spinner whenever the background errored — even
                       after the retry succeeded. Re-enabling it would
                       misrepresent the "Recovery retried" state as still
-                      running. */}
-                  {!backgroundError && <ActivityIndicator size="small" color={colors.brandPink} />}
+                      running. Explicit `=== null` rather than `!x`
+                      because Error.message can be empty string and we
+                      want to suppress the spinner whenever the error
+                      slot is set, regardless of message length. */}
+                  {backgroundError === null && (
+                    <ActivityIndicator size="small" color={colors.brandPink} />
+                  )}
                   <Text style={styles.progressText}>{progressMsg}</Text>
                 </View>
-                {backgroundError && !recoveryAcked && (
+                {backgroundError !== null && !recoveryAcked && (
                   <TouchableOpacity
                     style={[styles.closeButton, retryingRecovery && styles.closeButtonDisabled]}
                     onPress={async () => {
