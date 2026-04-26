@@ -195,10 +195,12 @@ const createStyles = (colors: Palette) =>
       // the sidebar (the per-letter `flex: 1` below uses the
       // stretched height to distribute 27 letters proportionally).
       flexDirection: 'column',
-      // `space-around` (vs `space-between`) gives the first/last letters
-      // (`#` at top, `Z` at bottom) the same vertical breathing as the
-      // inter-letter gap. With `space-between` the bar packed letters
-      // tight against the top + bottom edges (#216).
+      // The visible top/bottom breathing comes from this container's
+      // padding, while the per-letter `flex: 1` buckets below consume
+      // the remaining height and centre each letter within its bucket.
+      // `space-around` is kept defensively in case a future change
+      // removes `flex: 1` from the touches; with `flex: 1` it has no
+      // material effect because the buckets fill all free space.
       justifyContent: 'space-around',
       alignItems: 'center',
       paddingTop: 8,
@@ -225,11 +227,10 @@ const createStyles = (colors: Palette) =>
       borderRadius: 8,
     },
     alphabetLetter: {
-      // Tight font size so 27 buckets fit into FriendPickerSheet's
-      // 75% bottom sheet on smaller AVDs without the trailing letters
-      // getting clipped. Each rendered letter ends up ~12-14 dp tall
-      // including its line-box, so 27 × ~13 = ~350 dp comfortably fits
-      // in any reasonable sidebar height.
+      // Keep the text compact so the full A-Z index is more likely to
+      // remain visible in constrained layouts such as
+      // FriendPickerSheet, reducing the chance that trailing letters
+      // get clipped on smaller screens.
       fontSize: 9,
       lineHeight: 11,
       fontWeight: '700',
