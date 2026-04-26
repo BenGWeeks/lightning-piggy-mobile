@@ -23,6 +23,7 @@ import ConversationRow from '../components/ConversationRow';
 import GroupRow from '../components/GroupRow';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import FriendPickerSheet, { type PickedFriend } from '../components/FriendPickerSheet';
+import CreateGroupSheet from '../components/CreateGroupSheet';
 import type { GroupSummary } from '../types/groups';
 import { MessageCircle } from 'lucide-react-native';
 import TabHeader from '../components/TabHeader';
@@ -74,6 +75,7 @@ const MessagesScreen: React.FC = () => {
   const searchInputRef = useRef<TextInput>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [pickerVisible, setPickerVisible] = useState(false);
+  const [createGroupVisible, setCreateGroupVisible] = useState(false);
   const [anonSheetContact, setAnonSheetContact] = useState<AnonContact | null>(null);
   const [windowDays, setWindowDays] = useState<30 | 90>(30);
 
@@ -417,6 +419,19 @@ const MessagesScreen: React.FC = () => {
         onClose={() => setPickerVisible(false)}
         onSelect={handlePickerSelect}
         title="Start a conversation"
+        onNewGroup={() => {
+          setPickerVisible(false);
+          setCreateGroupVisible(true);
+        }}
+      />
+
+      <CreateGroupSheet
+        visible={createGroupVisible}
+        onClose={() => setCreateGroupVisible(false)}
+        onCreated={(group) => {
+          setCreateGroupVisible(false);
+          navigation.navigate('GroupConversation', { groupId: group.id });
+        }}
       />
 
       <ContactProfileSheet

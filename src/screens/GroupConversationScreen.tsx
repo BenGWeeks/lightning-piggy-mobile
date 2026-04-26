@@ -12,8 +12,9 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import Svg, { Path, Circle } from 'react-native-svg';
-import { LogOut } from 'lucide-react-native';
+import { LogOut, Plus } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -22,6 +23,12 @@ import type { Palette } from '../styles/palettes';
 import { useGroups } from '../contexts/GroupsContext';
 import { useNostr, subscribeGroupMessages, notifyGroupMessage } from '../contexts/NostrContext';
 import RenameGroupSheet from '../components/RenameGroupSheet';
+import ContactProfileSheet from '../components/ContactProfileSheet';
+import AttachPanel from '../components/AttachPanel';
+import GifPickerSheet from '../components/GifPickerSheet';
+import { isConfigured as isGifConfigured, type Gif } from '../services/giphyService';
+import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
+import { getCurrentLocation, formatGeoMessage } from '../services/locationService';
 import {
   appendGroupMessage,
   loadGroupMessages,
@@ -47,12 +54,17 @@ const GroupConversationScreen: React.FC = () => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { getGroup, deleteGroup } = useGroups();
-  const { contacts, sendGroupMessage, pubkey: myPubkey, refreshDmInbox } = useNostr();
+  const { contacts, sendGroupMessage, pubkey: myPubkey, refreshDmInbox, signEvent } = useNostr();
   const [renameVisible, setRenameVisible] = useState(false);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [messages, setMessages] = useState<GroupMessage[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(true);
+  const [selectedMemberPubkey, setSelectedMemberPubkey] = useState<string | null>(null);
+  const [attachPanelOpen, setAttachPanelOpen] = useState(false);
+  const [gifPickerOpen, setGifPickerOpen] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [sharingLocation, setSharingLocation] = useState(false);
   const listRef = useRef<FlatList<GroupMessage>>(null);
 
   const group = getGroup(route.params.groupId);
@@ -129,58 +141,138 @@ const GroupConversationScreen: React.FC = () => {
     return map;
   }, [members, myPubkey]);
 
+  // Single send-text path used by both the composer Send button and the
+  // attach-panel actions (image-URL, location, GIF, etc.). Returns true
+  // on success so callers can sequence post-send UI changes.
+  const sendText = useCallback(
+    async (text: string): Promise<boolean> => {
+      if (!group || !myPubkey) return false;
+      const trimmed = text.trim();
+      if (!trimmed) return false;
+      setSending(true);
+      const result = await sendGroupMessage({
+        groupId: group.id,
+        subject: group.name,
+        memberPubkeys: group.memberPubkeys,
+        text: trimmed,
+      });
+      setSending(false);
+      if (!result.success) {
+        Alert.alert('Send failed', result.error ?? 'Unknown error');
+        return false;
+      }
+      // Optimistically append locally with a `local_…` id. Duplicate
+      // window vs the inbound self-wrap is documented as a known
+      // follow-up (see PR #227 round-2 review thread).
+      const local: GroupMessage = {
+        id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        senderPubkey: myPubkey,
+        text: trimmed,
+        createdAt: Math.floor(Date.now() / 1000),
+      };
+      try {
+        const next = await appendGroupMessage(group.id, local);
+        setMessages(next);
+        notifyGroupMessage(group.id, local);
+        setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 0);
+        return true;
+      } catch (err) {
+        if (__DEV__) console.warn('[GroupConversationScreen] appendGroupMessage failed:', err);
+        Alert.alert(
+          'Saved on relay, not on device',
+          'Your message was sent, but we could not save it locally. Try again to refresh, or restart the app.',
+        );
+        return false;
+      }
+    },
+    [group, myPubkey, sendGroupMessage],
+  );
+
   const handleSend = useCallback(async () => {
-    if (!group || !myPubkey) return;
-    const text = draft.trim();
-    if (!text) return;
-    setSending(true);
-    const result = await sendGroupMessage({
-      groupId: group.id,
-      subject: group.name,
-      memberPubkeys: group.memberPubkeys,
-      text,
-    });
-    setSending(false);
-    if (!result.success) {
-      Alert.alert('Send failed', result.error ?? 'Unknown error');
+    const ok = await sendText(draft);
+    if (ok) setDraft('');
+  }, [draft, sendText]);
+
+  // Attach-panel actions. Each ends by closing the panel and (on
+  // success) appending an optimistic local message via sendText. Image
+  // and Photo go through the existing imageUploadService (Blossom →
+  // URL) and send the URL as the message body — same as the 1:1 path.
+  const closeAttachPanel = useCallback(() => setAttachPanelOpen(false), []);
+
+  const uploadAndSend = useCallback(
+    async (localUri: string, base64?: string | null) => {
+      setUploadingImage(true);
+      try {
+        const scrubbed = await stripImageMetadata(localUri, base64);
+        const url = await uploadImage(scrubbed.uri, signEvent, scrubbed.base64);
+        await sendText(url);
+      } catch (err) {
+        Alert.alert('Upload failed', err instanceof Error ? err.message : 'Please try again.');
+      } finally {
+        setUploadingImage(false);
+      }
+    },
+    [sendText, signEvent],
+  );
+
+  const handlePickAndSendImage = useCallback(async () => {
+    if (uploadingImage || sending) return;
+    closeAttachPanel();
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission needed', 'Allow photo library access to send images.');
       return;
     }
-    // Optimistically append locally with a `local_…` id. This will
-    // duplicate against the inbound self-wrap (NIP-17 wrapManyEvents
-    // includes a self-wrap so the sender can sync across devices) when
-    // the wrap arrives — wrap.id is the dedup key in
-    // appendGroupMessage but the local id will never match it.
-    // Tracked as a follow-up — proper fix is either to dedup on
-    // (senderPubkey, createdAt~window, text) at append time, or to
-    // skip the optimistic write and let the inbound self-wrap be the
-    // source of truth (loses sub-second UX feedback). For now the
-    // duplicate window is small (one extra render after the relay
-    // round-trip resolves) and only affects the sender's own device.
-    const local: GroupMessage = {
-      id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      senderPubkey: myPubkey,
-      text,
-      createdAt: Math.floor(Date.now() / 1000),
-    };
-    try {
-      const next = await appendGroupMessage(group.id, local);
-      setMessages(next);
-      setDraft('');
-      // Fire the same listener inbound rumors fire so GroupsContext bumps
-      // this group's activity rollup (drives ordering on the Messages tab).
-      notifyGroupMessage(group.id, local);
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 0);
-    } catch (err) {
-      // Storage write failed (e.g. quota exhausted). The relay copy still
-      // went out — nothing to undo there. Restore the draft so the user
-      // can retry rather than losing what they typed.
-      if (__DEV__) console.warn('[GroupConversationScreen] appendGroupMessage failed:', err);
-      Alert.alert(
-        'Saved on relay, not on device',
-        'Your message was sent, but we could not save it locally. Try again to refresh, or restart the app.',
-      );
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 1,
+      base64: true,
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+    await uploadAndSend(result.assets[0].uri, result.assets[0].base64);
+  }, [uploadingImage, sending, closeAttachPanel, uploadAndSend]);
+
+  const handleTakeAndSendPhoto = useCallback(async () => {
+    if (uploadingImage || sending) return;
+    closeAttachPanel();
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission needed', 'Allow camera access to take and send photos.');
+      return;
     }
-  }, [draft, group, myPubkey, sendGroupMessage]);
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images'],
+      quality: 1,
+      base64: true,
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+    await uploadAndSend(result.assets[0].uri, result.assets[0].base64);
+  }, [uploadingImage, sending, closeAttachPanel, uploadAndSend]);
+
+  const handleShareLocation = useCallback(async () => {
+    if (sharingLocation) return;
+    closeAttachPanel();
+    setSharingLocation(true);
+    try {
+      const result = await getCurrentLocation();
+      if (!result.ok) {
+        Alert.alert('Could not share location', result.message);
+        return;
+      }
+      await sendText(formatGeoMessage(result.location));
+    } finally {
+      setSharingLocation(false);
+    }
+  }, [sharingLocation, closeAttachPanel, sendText]);
+
+  const handleSendGif = useCallback(
+    async (gif: Gif) => {
+      setGifPickerOpen(false);
+      closeAttachPanel();
+      await sendText(gif.url);
+    },
+    [closeAttachPanel, sendText],
+  );
 
   if (!group) {
     return (
@@ -323,7 +415,12 @@ const GroupConversationScreen: React.FC = () => {
             data={members}
             keyExtractor={(item) => item.pubkey}
             renderItem={({ item }) => (
-              <View style={styles.memberChip} testID={`member-chip-${item.pubkey.slice(0, 12)}`}>
+              <TouchableOpacity
+                style={styles.memberChip}
+                onPress={() => setSelectedMemberPubkey(item.pubkey)}
+                accessibilityLabel={`Open profile for ${item.name}`}
+                testID={`member-chip-${item.pubkey.slice(0, 12)}`}
+              >
                 <View style={styles.memberAvatar}>
                   {item.picture ? (
                     <Image source={{ uri: item.picture }} style={styles.memberAvatarImage} />
@@ -342,7 +439,7 @@ const GroupConversationScreen: React.FC = () => {
                 <Text style={styles.memberChipName} numberOfLines={1}>
                   {item.name}
                 </Text>
-              </View>
+              </TouchableOpacity>
             )}
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -368,13 +465,36 @@ const GroupConversationScreen: React.FC = () => {
           />
         )}
 
+        {attachPanelOpen ? (
+          <AttachPanel
+            onShareLocation={handleShareLocation}
+            onSendImage={handlePickAndSendImage}
+            onTakePhoto={handleTakeAndSendPhoto}
+            onSendGif={isGifConfigured() ? () => setGifPickerOpen(true) : undefined}
+          />
+        ) : null}
+
         <View style={[styles.composer, { paddingBottom: insets.bottom + 8 }]}>
+          <TouchableOpacity
+            style={styles.attachButton}
+            onPress={() => setAttachPanelOpen((v) => !v)}
+            disabled={sending || sharingLocation || uploadingImage}
+            accessibilityLabel="Attach"
+            testID="group-attach-button"
+          >
+            {sharingLocation || uploadingImage ? (
+              <ActivityIndicator color={colors.brandPink} />
+            ) : (
+              <Plus size={22} color={colors.brandPink} />
+            )}
+          </TouchableOpacity>
           <TextInput
             style={styles.input}
             placeholder="Type a message…"
             placeholderTextColor={colors.textSupplementary}
             value={draft}
             onChangeText={setDraft}
+            onFocus={closeAttachPanel}
             multiline
             accessibilityLabel="Group message input"
             testID="group-message-input"
@@ -408,6 +528,41 @@ const GroupConversationScreen: React.FC = () => {
         visible={renameVisible}
         groupId={group.id}
         onClose={() => setRenameVisible(false)}
+      />
+
+      {/* Tap a member chip to open their profile sheet. The contact lookup
+          uses the existing `contacts` (kind:3 follow list); for members we
+          haven't yet fetched a profile for, the sheet falls back to a
+          short-pubkey placeholder. */}
+      <ContactProfileSheet
+        visible={selectedMemberPubkey !== null}
+        onClose={() => setSelectedMemberPubkey(null)}
+        contact={
+          selectedMemberPubkey
+            ? (() => {
+                const c = contacts.find((x) => x.pubkey === selectedMemberPubkey);
+                return {
+                  pubkey: selectedMemberPubkey,
+                  name:
+                    c?.profile?.displayName ||
+                    c?.profile?.name ||
+                    c?.petname ||
+                    `${selectedMemberPubkey.slice(0, 8)}…`,
+                  picture: c?.profile?.picture ?? null,
+                  banner: c?.profile?.banner ?? null,
+                  nip05: c?.profile?.nip05 ?? null,
+                  lightningAddress: c?.profile?.lud16 ?? null,
+                  source: 'nostr' as const,
+                };
+              })()
+            : null
+        }
+      />
+
+      <GifPickerSheet
+        visible={gifPickerOpen}
+        onClose={() => setGifPickerOpen(false)}
+        onSelect={handleSendGif}
       />
     </KeyboardAvoidingView>
   );
@@ -567,6 +722,13 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.surface,
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: colors.divider,
+    },
+    attachButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      justifyContent: 'center',
+      alignItems: 'center',
     },
     input: {
       flex: 1,
