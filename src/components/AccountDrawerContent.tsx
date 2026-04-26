@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, Alert, Platform } from 'react
 import { Image } from 'expo-image';
 import {
   User,
+  UserRound,
   Wallet,
   Globe,
   Link as LinkIcon,
@@ -131,7 +132,9 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
                 cachePolicy="disk"
               />
             ) : (
-              <View style={[styles.avatarImage, styles.avatarPlaceholder]} />
+              <View style={[styles.avatarImage, styles.avatarPlaceholder]}>
+                <UserRound size={40} color={colors.textBody} strokeWidth={1.75} />
+              </View>
             )}
           </View>
           {isLoggedIn ? (
@@ -271,6 +274,8 @@ const createStyles = (colors: Palette) =>
     },
     avatarPlaceholder: {
       backgroundColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     headerName: {
       color: colors.textHeader,
