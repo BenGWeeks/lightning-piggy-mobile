@@ -187,17 +187,34 @@ AlphabetBar.displayName = 'AlphabetBar';
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
     alphabetBar: {
+      // The parent (`listWithBar` in both FriendsScreen and
+      // FriendPickerSheet) is `flexDirection: 'row'` so the default
+      // `alignItems: 'stretch'` already gives this bar the parent's
+      // full column height. We rely on that — do NOT set `flex: 1`
+      // here, which would claim row WIDTH instead and visibly bloat
+      // the sidebar (the per-letter `flex: 1` below uses the
+      // stretched height to distribute 27 letters proportionally).
       flexDirection: 'column',
-      justifyContent: 'space-between',
+      // `space-around` (vs `space-between`) gives the first/last letters
+      // (`#` at top, `Z` at bottom) the same vertical breathing as the
+      // inter-letter gap. With `space-between` the bar packed letters
+      // tight against the top + bottom edges (#216).
+      justifyContent: 'space-around',
       alignItems: 'center',
-      paddingTop: 12,
-      paddingBottom: 16,
+      paddingTop: 8,
+      paddingBottom: 8,
       width: 22,
       marginLeft: 2,
     },
     alphabetLetterTouch: {
+      // `flex: 1` distributes the 27 letter buckets proportionally
+      // across the bar's height, so they never overflow the container
+      // (which would clip the trailing letters — V-Z were getting
+      // hidden in FriendPickerSheet's bottom sheet on smaller AVDs
+      // when items kept their intrinsic heights via `space-between`/
+      // `space-around`). Each bucket gets ~containerHeight/27.
+      flex: 1,
       paddingHorizontal: 2,
-      paddingVertical: 1,
       borderRadius: 8,
       width: 18,
       justifyContent: 'center',
@@ -208,7 +225,13 @@ const createStyles = (colors: Palette) =>
       borderRadius: 8,
     },
     alphabetLetter: {
-      fontSize: 10,
+      // Tight font size so 27 buckets fit into FriendPickerSheet's
+      // 75% bottom sheet on smaller AVDs without the trailing letters
+      // getting clipped. Each rendered letter ends up ~12-14 dp tall
+      // including its line-box, so 27 × ~13 = ~350 dp comfortably fits
+      // in any reasonable sidebar height.
+      fontSize: 9,
+      lineHeight: 11,
       fontWeight: '700',
       color: colors.textSupplementary,
       textAlign: 'center',
