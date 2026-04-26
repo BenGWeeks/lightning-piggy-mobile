@@ -36,38 +36,46 @@ Lightning Piggy Mobile implements the following open standards. See [docs/STANDA
 
 ### Bitcoin Improvement Proposals (BIPs)
 
-| Standard | Name |
-| --- | --- |
-| [BIP-21](https://github.com/bitcoin/bips/blob/master/bip-0021.mediawiki) | URI Scheme (`bitcoin:` with `?amount=`) |
-| [BIP-32](https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki) | Hierarchical Deterministic Wallets |
-| [BIP-39](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki) | Mnemonic Seed Phrases |
-| [BIP-84](https://github.com/bitcoin/bips/blob/master/bip-0084.mediawiki) | Native SegWit HD Wallets (`bc1q...`) |
-| [BIP-327](https://github.com/bitcoin/bips/blob/master/bip-0327.mediawiki) | MuSig2 Schnorr Key Aggregation |
-| [BIP-340](https://github.com/bitcoin/bips/blob/master/bip-0340.mediawiki) | Schnorr Signatures |
-| [BIP-341](https://github.com/bitcoin/bips/blob/master/bip-0341.mediawiki) | Taproot (SegWit v1) |
+| Standard                                                                  | Name                                    |
+| ------------------------------------------------------------------------- | --------------------------------------- |
+| [BIP-21](https://github.com/bitcoin/bips/blob/master/bip-0021.mediawiki)  | URI Scheme (`bitcoin:` with `?amount=`) |
+| [BIP-32](https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki)  | Hierarchical Deterministic Wallets      |
+| [BIP-39](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki)  | Mnemonic Seed Phrases                   |
+| [BIP-84](https://github.com/bitcoin/bips/blob/master/bip-0084.mediawiki)  | Native SegWit HD Wallets (`bc1q...`)    |
+| [BIP-327](https://github.com/bitcoin/bips/blob/master/bip-0327.mediawiki) | MuSig2 Schnorr Key Aggregation          |
+| [BIP-340](https://github.com/bitcoin/bips/blob/master/bip-0340.mediawiki) | Schnorr Signatures                      |
+| [BIP-341](https://github.com/bitcoin/bips/blob/master/bip-0341.mediawiki) | Taproot (SegWit v1)                     |
 
 ### Nostr Implementation Possibilities (NIPs)
 
-| Standard | Name |
-| --- | --- |
-| [NIP-01](https://github.com/nostr-protocol/nips/blob/master/01.md) | Basic Protocol (relays, events, subscriptions) |
-| [NIP-04](https://github.com/nostr-protocol/nips/blob/master/04.md) | Encrypted Direct Messages |
-| [NIP-05](https://github.com/nostr-protocol/nips/blob/master/05.md) | DNS Identity Verification |
-| [NIP-19](https://github.com/nostr-protocol/nips/blob/master/19.md) | Bech32-encoded Entities (`npub`, `nsec`) |
-| [NIP-20](https://github.com/nostr-protocol/nips/blob/master/20.md) | Command Results (OK messages) |
-| [NIP-21](https://github.com/nostr-protocol/nips/blob/master/21.md) | `nostr:` URI Scheme |
-| [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md) | Nostr Wallet Connect (NWC) |
-| [NIP-55](https://github.com/nostr-protocol/nips/blob/master/55.md) | Android Signer (Amber) |
-| [NIP-57](https://github.com/nostr-protocol/nips/blob/master/57.md) | Lightning Zaps |
-| [NIP-65](https://github.com/nostr-protocol/nips/blob/master/65.md) | Relay List Metadata |
-| [NIP-94](https://github.com/nostr-protocol/nips/blob/master/94.md) | File Metadata |
+| Standard                                                           | Name                                                          |
+| ------------------------------------------------------------------ | ------------------------------------------------------------- |
+| [NIP-01](https://github.com/nostr-protocol/nips/blob/master/01.md) | Basic Protocol (relays, events, subscriptions)                |
+| [NIP-04](https://github.com/nostr-protocol/nips/blob/master/04.md) | Encrypted Direct Messages                                     |
+| [NIP-05](https://github.com/nostr-protocol/nips/blob/master/05.md) | DNS Identity Verification                                     |
+| [NIP-14](https://github.com/nostr-protocol/nips/blob/master/14.md) | Subject Tag (used as group-chat name)                         |
+| [NIP-17](https://github.com/nostr-protocol/nips/blob/master/17.md) | Private Direct Messages (sealed + multi-recipient group chat) |
+| [NIP-19](https://github.com/nostr-protocol/nips/blob/master/19.md) | Bech32-encoded Entities (`npub`, `nsec`)                      |
+| [NIP-20](https://github.com/nostr-protocol/nips/blob/master/20.md) | Command Results (OK messages)                                 |
+| [NIP-21](https://github.com/nostr-protocol/nips/blob/master/21.md) | `nostr:` URI Scheme                                           |
+| [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) | Encrypted Payloads v2 (used by NIP-17 sealing)                |
+| [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md) | Nostr Wallet Connect (NWC)                                    |
+| [NIP-55](https://github.com/nostr-protocol/nips/blob/master/55.md) | Android Signer (Amber)                                        |
+| [NIP-57](https://github.com/nostr-protocol/nips/blob/master/57.md) | Lightning Zaps                                                |
+| [NIP-59](https://github.com/nostr-protocol/nips/blob/master/59.md) | Gift Wrap (used by NIP-17 to mask sender + metadata)          |
+| [NIP-65](https://github.com/nostr-protocol/nips/blob/master/65.md) | Relay List Metadata                                           |
+| [NIP-94](https://github.com/nostr-protocol/nips/blob/master/94.md) | File Metadata                                                 |
+
+Group state for client-side group chat is propagated via a parameterised-replaceable
+`kind:30200` event (custom to this client; receivers reconcile by `groupId` + `created_at`).
+Not a NIP — see `src/services/nostrService.ts` (`GROUP_STATE_KIND`) for the schema.
 
 ### Lightning Standards
 
-| Standard | Name |
-| --- | --- |
-| [BOLT-11](https://github.com/lightning/bolts/blob/master/11-payment-encoding.md) | Lightning Invoice Encoding |
-| [LNURL / LUD-16](https://github.com/lnurl/luds/blob/luds/16.md) | Lightning Address Protocol (`user@domain`) |
+| Standard                                                                         | Name                                       |
+| -------------------------------------------------------------------------------- | ------------------------------------------ |
+| [BOLT-11](https://github.com/lightning/bolts/blob/master/11-payment-encoding.md) | Lightning Invoice Encoding                 |
+| [LNURL / LUD-16](https://github.com/lnurl/luds/blob/luds/16.md)                  | Lightning Address Protocol (`user@domain`) |
 
 On top of these, Lightning Piggy Mobile uses the [Boltz v2](https://docs.boltz.exchange) submarine swap API for trustless Lightning ↔ on-chain transfers.
 

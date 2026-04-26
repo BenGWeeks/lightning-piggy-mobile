@@ -57,6 +57,9 @@ A glossary of key terms used throughout this document.
 | **Expo**
 | A framework and platform for React Native applications. Lightning Piggy uses Expo SDK 55 with a custom dev client for native module support.
 
+| **FAB**
+| Floating Action Button — a circular button that hovers above the content of a screen, typically anchored bottom-right, used for the screen's primary action. In Lightning Piggy, the pink "+" button on the Messages tab opens the Start-a-conversation friend picker.
+
 | **FlashList**
 | `@shopify/flash-list` — a high-performance list component that uses cell recycling for 5-10x faster rendering than FlatList. Used for the contacts list on the Friends screen.
 

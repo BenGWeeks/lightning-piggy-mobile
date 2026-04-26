@@ -1,0 +1,96 @@
+appId: com.lightningpiggy.app.dev
+name: 3-way group chat — Big Piggy creates "Triad"
+---
+# Phase 1 of the 3-way group-chat test (PR #227). Logs in as Big Piggy
+# (MAESTRO_NSEC), navigates to the Friends tab → Groups → New Group,
+# selects Little Piggy + Middle Piggy, names the group "Triad", sends
+# "hi from big" into the thread, then signs out so the next phase can
+# log in as Middle Piggy.
+#
+# Run via the runner: scripts/test-3way-group-chat.sh
+
+- runFlow: _subflow-login-as.yaml
+
+# Reach Friends tab → Groups
+- tapOn:
+    id: 'tab-friends'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'groups-button'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Trigger the create-group sheet (covers both empty-list and populated paths).
+- tapOn:
+    id: 'create-first-group'
+    optional: true
+- tapOn:
+    id: 'create-group-button'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Name the group. NOTE: tapOn the placeholder text rather than the
+# testID — `BottomSheetTextInput` from @gorhom/bottom-sheet doesn't
+# propagate `testID` to the underlying native view in a way Maestro
+# can match (same caveat is documented in docs/TROUBLESHOOTING.adoc
+# for `friend-picker-search` / `gif-search-input`). The placeholder
+# is unique within this sheet so it's a reliable hit.
+- tapOn:
+    text: 'e.g. Family'
+- inputText: 'Triad'
+# `hideKeyboard` hangs forever inside @gorhom's BottomSheetTextInput
+# because the sheet captures the blur event. `pressKey: back` reliably
+# closes the IME without dismissing the sheet itself.
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1500
+
+# Select Little Piggy + Middle Piggy from the friends list. We address
+# them by member-row testID (slice of pubkey hex) — see CreateGroupSheet.
+# scrollUntilVisible because Big follows ~50+ accounts and Little/Middle
+# are deep in the alphabetical list.
+- scrollUntilVisible:
+    element:
+      id: 'member-row-d9b33280ba73'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 50
+- tapOn:
+    id: 'member-row-d9b33280ba73'
+- scrollUntilVisible:
+    element:
+      id: 'member-row-4b2fcb4e3c30'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 50
+- tapOn:
+    id: 'member-row-4b2fcb4e3c30'
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- tapOn:
+    id: 'create-group-submit'
+- waitForAnimationToEnd:
+    timeout: 4000
+
+# We should land in the GroupConversationScreen with title "Triad".
+- assertVisible:
+    text: 'Triad'
+
+# Send the first message
+- tapOn:
+    id: 'group-message-input'
+- inputText: 'hi from big'
+- hideKeyboard
+- tapOn:
+    id: 'group-send-button'
+- waitForAnimationToEnd:
+    timeout: 4000
+
+- assertVisible:
+    text: 'hi from big'
+
+# Sign out so the next phase logs in as another piggy
+- runFlow: test-logout.yaml

@@ -1,0 +1,55 @@
+appId: com.lightningpiggy.app.dev
+name: Rename a group via the GroupConversationScreen header
+---
+# Standalone test for the rename flow (not part of the 3-way suite).
+# Assumes the user is already signed in and has at least one group with
+# a name starting with "TestGroup-" (or change RENAME_TARGET below).
+#
+# Drives the post-#227 single-pencil header (the standalone
+# rename-group-button was removed; the title row is the rename trigger).
+#
+# Run:
+#   source .env && maestro test \
+#     -e MAESTRO_NSEC=$MAESTRO_NSEC \
+#     -e RENAME_TARGET='TestGroup-15:08:38' \
+#     -e RENAME_NEW_NAME='Renamed-by-test' \
+#     tests/e2e/test-rename-group.yaml
+
+- runFlow: _subflow-login-as.yaml
+
+- tapOn: 'Messages tab'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- tapOn:
+    text: ${RENAME_TARGET}
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# The title row is the rename trigger (testID `group-title`). Tapping
+# the title opens the RenameGroupSheet.
+- tapOn:
+    id: 'group-title'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# RenameGroupSheet uses BottomSheetTextInput, whose testID doesn't
+# propagate to the native view. Tap by accessibilityLabel instead
+# ("Group name" mirrors what's set on the input).
+- tapOn: 'Group name'
+- eraseText:
+    charactersToErase: 100
+- inputText: ${RENAME_NEW_NAME}
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- tapOn:
+    id: 'rename-group-save'
+- waitForAnimationToEnd:
+    timeout: 4000
+
+# After save the sheet dismisses and the header re-renders with the
+# new name. assertVisible without `optional` so a broken save fails
+# the test loudly.
+- assertVisible:
+    text: ${RENAME_NEW_NAME}

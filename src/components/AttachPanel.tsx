@@ -6,10 +6,11 @@ import type { Palette } from '../styles/palettes';
 
 interface Props {
   onShareLocation: () => void;
-  // `onSendZap` is always wired up; `zapDisabled` greys the tile out
-  // (and disables the press) when the peer has no Lightning Address,
-  // so users still see the option exists rather than the tile vanishing.
-  onSendZap: () => void;
+  // `onSendZap` greys out (instead of vanishing) when the peer has no
+  // Lightning Address, so 1:1 users still see the option exists. Group
+  // chats omit the prop entirely — the tile then disappears, since
+  // "zap the group" isn't a meaningful 1:1-style action.
+  onSendZap?: () => void;
   zapDisabled?: boolean;
   onSendInvoice?: () => void;
   onShareContact?: () => void;
@@ -89,7 +90,7 @@ const AttachPanel: React.FC<Props> = ({
         testID: 'attach-share-location',
         accessibilityLabel: 'Share your current location',
       },
-      {
+      onSendZap && {
         key: 'zap',
         label: 'Zap',
         icon: <Zap size={26} color={colors.white} fill={colors.white} />,

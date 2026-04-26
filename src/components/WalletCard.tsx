@@ -207,7 +207,11 @@ export const MiniWalletCard: React.FC<MiniCardProps> = ({ theme, selected, onPre
 };
 
 const WalletCard: React.FC<WalletCardProps> = ({ wallet, btcPrice, currency, onSettingsPress }) => {
-  const theme = cardThemes[wallet.theme];
+  // Defensive fallback: persisted wallets may carry a theme key that has
+  // been renamed/removed in subsequent releases. Without a fallback the
+  // app crashes on `theme.gradientColors` of undefined on boot — see the
+  // group-messaging branch test runs.
+  const theme = cardThemes[wallet.theme] ?? cardThemes['lightning-piggy'];
 
   return (
     <View

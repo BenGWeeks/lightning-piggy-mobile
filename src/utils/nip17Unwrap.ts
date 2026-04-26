@@ -207,3 +207,59 @@ export function partnerFromRumor(
   }
   return { partnerPubkey: rumor.pubkey, fromMe: false };
 }
+
+/**
+ * Extract the full set of pubkeys participating in a kind-14 rumor.
+ * Includes the sender (`rumor.pubkey`) plus every well-formed `p` tag
+ * value, lowercased and deduplicated.
+ *
+ * Used by the group-routing path: a kind-14 rumor with two-or-more
+ * pubkeys-other-than-the-viewer is a group message — we match the
+ * resulting set against the locally-known group rosters.
+ */
+export function participantsFromRumor(rumor: DecodedRumor): Set<string> {
+  const set = new Set<string>();
+  if (HEX64.test(rumor.pubkey)) set.add(rumor.pubkey.toLowerCase());
+  for (const tag of rumor.tags) {
+    if (tag[0] !== 'p') continue;
+    const v = tag[1]?.toLowerCase();
+    if (v && HEX64.test(v)) set.add(v);
+  }
+  return set;
+}
+
+/**
+ * Classify a kind-14 rumor as either a 1:1 DM or a group message.
+ * Returns null if the rumor is malformed (e.g. no resolvable partner).
+ *
+ *  - DM: exactly one OTHER participant (the viewer plus one peer).
+ *  - Group: two or more OTHER participants. Caller is responsible for
+ *    looking up which group the participant set matches.
+ *
+ * `fromMe` reflects whether the viewer is the sender. The set of
+ * `otherParticipants` always EXCLUDES the viewer.
+ */
+export function classifyRumor(
+  rumor: DecodedRumor,
+  viewerPubkey: string,
+):
+  | { type: 'dm'; partnerPubkey: string; fromMe: boolean }
+  | { type: 'group'; otherParticipants: Set<string>; fromMe: boolean }
+  | null {
+  const me = viewerPubkey.toLowerCase();
+  const all = participantsFromRumor(rumor);
+  if (all.size === 0) return null;
+  const others = new Set<string>(all);
+  others.delete(me);
+  const fromMe = rumor.pubkey.toLowerCase() === me;
+  if (others.size === 0) {
+    // Self-talk wraps shouldn't happen in practice — bail rather than
+    // miscategorise as a DM with `partnerPubkey === me`.
+    return null;
+  }
+  if (others.size === 1) {
+    const partnerPubkey = Array.from(others)[0];
+    return { type: 'dm', partnerPubkey, fromMe };
+  }
+  return { type: 'group', otherParticipants: others, fromMe };
+}
