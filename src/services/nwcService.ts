@@ -188,6 +188,10 @@ export function disconnect(walletId: string): void {
     } catch {}
     providers.delete(walletId);
   }
+  // Drop the failed-lookup LRU for this wallet so cache memory follows
+  // wallet lifecycle (a removed wallet shouldn't keep its terminal-miss
+  // entries pinned for the JS-runtime lifetime).
+  clearFailedLookupCache(walletId);
 }
 
 export async function getBalance(walletId: string): Promise<number | null> {
@@ -469,19 +473,49 @@ export function isValidPaymentHash(hash: string | null | undefined): hash is str
 // INTERNAL / RATE_LIMITED) are intentionally NOT cached so paid-status
 // polling (ConversationScreen) and expectPayment detection
 // (WalletContext) still settle when conditions recover.
-const failedLookupCache = new Map<string, Set<string>>();
+// Per-wallet bounded LRU. Without a cap the cache grows monotonically
+// for the JS-runtime lifetime — one user opening many tx-detail
+// sheets, or a noisy backend returning many distinct terminal misses,
+// could leak unbounded memory and permanently suppress lookups for
+// those hashes until app restart. Per-wallet cap keeps total worst-
+// case memory bounded by N_wallets × FAILED_LOOKUP_CAP entries.
+const FAILED_LOOKUP_CAP = 500;
+// Map iteration order is insertion order in JS, so we evict the
+// oldest entry by deleting + re-inserting on access (LRU touch).
+const failedLookupCache = new Map<string, Map<string, true>>();
 
 function hasFailedLookup(walletId: string, paymentHash: string): boolean {
-  return failedLookupCache.get(walletId)?.has(paymentHash) ?? false;
+  const cache = failedLookupCache.get(walletId);
+  if (!cache) return false;
+  if (!cache.has(paymentHash)) return false;
+  // LRU touch: re-insert so this entry moves to the tail.
+  cache.delete(paymentHash);
+  cache.set(paymentHash, true);
+  return true;
 }
 
 function recordFailedLookup(walletId: string, paymentHash: string): void {
-  let set = failedLookupCache.get(walletId);
-  if (!set) {
-    set = new Set();
-    failedLookupCache.set(walletId, set);
+  let cache = failedLookupCache.get(walletId);
+  if (!cache) {
+    cache = new Map();
+    failedLookupCache.set(walletId, cache);
   }
-  set.add(paymentHash);
+  // If already present, refresh its position (LRU touch).
+  if (cache.has(paymentHash)) cache.delete(paymentHash);
+  cache.set(paymentHash, true);
+  // Evict oldest while over cap. Map.keys() yields in insertion order
+  // so the first key is the oldest.
+  while (cache.size > FAILED_LOOKUP_CAP) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+}
+
+/** Drop the cache entry for a wallet — call from disconnect / wallet
+ * removal so cache memory follows wallet lifecycle. */
+export function clearFailedLookupCache(walletId: string): void {
+  failedLookupCache.delete(walletId);
 }
 
 // Errors that mean "this hash isn't coming back from this backend".
