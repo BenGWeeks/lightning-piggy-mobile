@@ -12,6 +12,8 @@ import { bgStyle as lnbitsStyle } from './lnbits';
 import { bgStyle as nostrichStyle } from './nostrich';
 import { bgStyle as coinosStyle } from './coinos';
 import { bgStyle as primalStyle } from './primal';
+import { bgStyle as revolutStyle } from './revolut';
+import { bgStyle as xapoStyle } from './xapo';
 
 const cardBgStyles: Record<string, ImageStyle> = {
   default: defaultStyle.full,
@@ -27,6 +29,8 @@ const cardBgStyles: Record<string, ImageStyle> = {
   lnbits: lnbitsStyle.full,
   primal: primalStyle.full,
   coinos: coinosStyle.full,
+  revolut: revolutStyle.full,
+  xapo: xapoStyle.full,
 };
 
 export function getCardBgStyle(styleName: string | undefined, _mini: boolean): ImageStyle {

@@ -1,0 +1,199 @@
+appId: com.lightningpiggy.app.dev
+name: Add Revolut + Xapo themed on-chain wallets (visual check)
+---
+# Manual screenshot helper for PR feat/revolut-xapo-wallet-cards.
+# Adds two watch-only on-chain wallets using known test xpubs,
+# selecting the Revolut theme on one and the Xapo theme on the other.
+# Run with the same MAESTRO_XPUB1 / MAESTRO_XPUB2 values used by the
+# existing add-onchain E2E test:
+#   source .env && maestro --device emulator-5554 test \
+#     -e MAESTRO_XPUB1="$MAESTRO_XPUB1" -e MAESTRO_XPUB2="$MAESTRO_XPUB2" \
+#     tests/e2e/test-revolut-xapo-cards.yaml
+# Take screenshots of the resulting Home cards via:
+#   adb -s emulator-5554 exec-out screencap -p > /tmp/<file>.png
+
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 40000
+
+- tapOn:
+    id: 'tab-home'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# --- Wallet 1: Revolut ---
+# Swipe the wallet card carousel right-to-left to expose Add wallet card.
+- swipe:
+    from:
+      id: 'wallet-card-nwc'
+    direction: LEFT
+    duration: 600
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    id: 'add-wallet-card'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- swipe:
+    start: 50%, 80%
+    end: 50%, 50%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- tapOn:
+    id: 'wallet-type-onchain'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    id: 'xpub-input'
+- tapOn:
+    id: 'xpub-input'
+- eraseText:
+    charactersToErase: 500
+- inputText: ${MAESTRO_XPUB1}
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- tapOn:
+    text: 'Next'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    id: 'wallet-alias-input'
+- tapOn:
+    id: 'wallet-alias-input'
+- eraseText:
+    charactersToErase: 100
+- inputText: 'Revolut'
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- tapOn:
+    text: 'Next'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Scroll the theme grid to find Revolut tile (added at the end of the list)
+- scrollUntilVisible:
+    element:
+      text: 'Revolut'
+    direction: DOWN
+    timeout: 10000
+    speed: 30
+- tapOn:
+    text: 'Revolut'
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- swipe:
+    start: 50%, 80%
+    end: 50%, 30%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- tapOn:
+    id: 'wizard-connect-button'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- extendedWaitUntil:
+    visible:
+      text: 'Revolut'
+    timeout: 30000
+
+# --- Wallet 2: Xapo ---
+# Active wallet after Revolut add is the new on-chain card; swipe LEFT once
+# more to expose the add-wallet card.
+- swipe:
+    from:
+      id: 'wallet-card-onchain'
+    direction: LEFT
+    duration: 600
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    id: 'add-wallet-card'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- swipe:
+    start: 50%, 80%
+    end: 50%, 50%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- tapOn:
+    id: 'wallet-type-onchain'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    id: 'xpub-input'
+- tapOn:
+    id: 'xpub-input'
+- eraseText:
+    charactersToErase: 500
+- inputText: ${MAESTRO_XPUB2}
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- tapOn:
+    text: 'Next'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    id: 'wallet-alias-input'
+- tapOn:
+    id: 'wallet-alias-input'
+- eraseText:
+    charactersToErase: 100
+- inputText: 'Xapo'
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- tapOn:
+    text: 'Next'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- scrollUntilVisible:
+    element:
+      text: 'Xapo'
+    direction: DOWN
+    timeout: 10000
+    speed: 30
+- tapOn:
+    text: 'Xapo'
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- swipe:
+    start: 50%, 80%
+    end: 50%, 30%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- tapOn:
+    id: 'wizard-connect-button'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- extendedWaitUntil:
+    visible:
+      text: 'Xapo'
+    timeout: 30000

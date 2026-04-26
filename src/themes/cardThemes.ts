@@ -120,6 +120,24 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
     backgroundImage: require('../../assets/images/coinos-logo.png'),
     backgroundImageStyle: 'coinos',
   },
+  revolut: {
+    id: 'revolut',
+    name: 'Revolut',
+    gradientColors: ['#1A1A2E', '#000000'],
+    textColor: '#FFFFFF',
+    accentColor: '#A57DFF',
+    backgroundImage: require('../../assets/images/revolut-logo.png'),
+    backgroundImageStyle: 'revolut',
+  },
+  xapo: {
+    id: 'xapo',
+    name: 'Xapo',
+    gradientColors: ['#0030B0', '#001440'],
+    textColor: '#FFFFFF',
+    accentColor: '#4D8DFF',
+    backgroundImage: require('../../assets/images/xapo-logo.png'),
+    backgroundImageStyle: 'xapo',
+  },
 };
 
 export const themeList = Object.values(cardThemes);
