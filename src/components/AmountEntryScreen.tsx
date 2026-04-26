@@ -17,9 +17,8 @@ interface Props {
   /**
    * Optional preset sats amounts. When provided, a row of pill buttons
    * renders between the input card and the confirm button. Tapping one
-   * fills both the sats and fiat text. Used today only by the
-   * "Zap the Team" entry on AboutScreen so kids can tap a sensible
-   * amount instead of typing one and accidentally sending too much.
+   * fills both the sats and fiat text. Useful when the calling flow
+   * has a small set of sensible defaults the user is likely to pick.
    */
   suggestedAmounts?: number[];
 }

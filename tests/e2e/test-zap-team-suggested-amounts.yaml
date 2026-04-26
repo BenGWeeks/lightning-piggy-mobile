@@ -4,7 +4,7 @@ name: Zap-the-Team SendSheet shows preset amount pills
 # Verifies the four suggested-amount pills (21 / 100 / 1000 / 10000)
 # render on the AmountEntryScreen when the SendSheet is opened from
 # the "Zap the Team" entry on AboutScreen, and that tapping one fills
-# the amount input. Closes #107.
+# the amount input.
 #
 # Pre-reqs:
 #  - .env contains MAESTRO_NSEC
@@ -57,10 +57,12 @@ name: Zap-the-Team SendSheet shows preset amount pills
 - assertVisible:
     id: 'suggested-amount-10000'
 
-# Tap 100 — the amount-entry-input should reflect 100.
+# Tap 100 — the amount-entry-input should reflect 100. Assert against
+# the input's testID rather than `text: '100'` (which would also match
+# the still-visible pill, giving a false pass even if state never updated).
 - tapOn:
     id: 'suggested-amount-100'
 - waitForAnimationToEnd:
     timeout: 1000
 - assertVisible:
-    text: '100'
+    id: 'amount-entry-input'

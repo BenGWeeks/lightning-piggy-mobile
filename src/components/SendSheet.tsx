@@ -44,12 +44,10 @@ interface Props {
   recipientPubkey?: string;
   recipientName?: string;
   /**
-   * Optional preset amount pills rendered above the amount input.
-   * Tapping one fills both sats + fiat. Used today only by the
-   * "Zap the Team" button on AboutScreen so kids can tap a sensible
-   * amount instead of typing one and accidentally sending too much.
-   * Other call sites omit the prop and the amount input renders as
-   * before — pure additive surface.
+   * Optional preset amount pills forwarded to AmountEntryScreen.
+   * Tapping one fills both sats + fiat. Useful when the calling flow
+   * has a small set of sensible defaults the user is likely to pick.
+   * Call sites that omit the prop render the amount step unchanged.
    */
   suggestedAmounts?: number[];
 }

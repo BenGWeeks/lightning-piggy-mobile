@@ -190,7 +190,7 @@ const AboutScreen: React.FC = () => {
           recipientPubkey={teamProfile.pubkey}
           // Preset amount pills on the amount-entry step so kids can tap
           // a sensible team-zap value (21 / 100 / 1k / 10k sats) instead
-          // of typing one and accidentally sending too much. Closes #107.
+          // of typing one and accidentally sending too much.
           suggestedAmounts={[21, 100, 1000, 10000]}
         />
       )}
