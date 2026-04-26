@@ -113,7 +113,12 @@ export function BrandedAlertHost(): React.ReactElement | null {
 
   if (!payload) return null;
 
-  const cancelable = payload.options?.cancelable ?? true;
+  // Default to NON-cancelable to match RN's `Alert.alert` semantics —
+  // that API is non-cancelable unless the caller explicitly opts in via
+  // `{ cancelable: true }`. Defaulting `true` here would silently
+  // dismiss alerts on stray backdrop / back-button taps that the
+  // original code expected the user to acknowledge.
+  const cancelable = payload.options?.cancelable ?? false;
 
   // Icon treatment mirrors PaymentProgressOverlay: a 72x72 solid-colour
   // circle with a white glyph, so alerts and payment toasts feel like

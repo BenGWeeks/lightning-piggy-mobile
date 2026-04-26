@@ -119,7 +119,8 @@ export default function App() {
                   <GlobalIncomingPaymentOverlay />
                   {/* BrandedAlertHost: portal target for the on-brand
                       BrandedAlert dialog. Sits at the root so any sheet /
-                      screen that calls `BrandedAlert.show(...)` renders
+                      screen that calls `Alert.alert(...)` (the BrandedAlert
+                      drop-in re-export, NOT the system Alert) renders
                       above the rest of the UI without z-index gymnastics. */}
                   <BrandedAlertHost />
                 </GroupsProvider>
