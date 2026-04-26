@@ -8,7 +8,9 @@ export interface CardThemeConfig {
   textColor: string;
   accentColor: string;
   backgroundImage?: ImageSourcePropType;
-  backgroundImageStyle?: string;
+  // Tighter than `string`: must be one of the registered cards/* style
+  // names so a typo doesn't silently fall back to the default style.
+  backgroundImageStyle?: CardTheme;
 }
 
 export const cardThemes: Record<CardTheme, CardThemeConfig> = {
@@ -119,6 +121,30 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
     accentColor: '#CCCCCC',
     backgroundImage: require('../../assets/images/coinos-logo.png'),
     backgroundImageStyle: 'coinos',
+  },
+  revolut: {
+    id: 'revolut',
+    name: 'Revolut',
+    gradientColors: ['#1A1A2E', '#000000'],
+    textColor: '#FFFFFF',
+    accentColor: '#A57DFF',
+    // TODO: revolut-logo.png is a PLACEHOLDER (ImageMagick-rendered
+    // DejaVu-Sans-Bold "Revolut" wordmark — revolut.com aggressively
+    // blocks bot fetches so we couldn't pull the real asset). Swap in
+    // an officially-sourced wordmark before any wide distribution; the
+    // geometry (white text, 100×60dp, opacity 0.85) is correct so the
+    // PNG can be replaced in-place without other code changes.
+    backgroundImage: require('../../assets/images/revolut-logo.png'),
+    backgroundImageStyle: 'revolut',
+  },
+  xapo: {
+    id: 'xapo',
+    name: 'Xapo',
+    gradientColors: ['#0030B0', '#001440'],
+    textColor: '#FFFFFF',
+    accentColor: '#4D8DFF',
+    backgroundImage: require('../../assets/images/xapo-logo.png'),
+    backgroundImageStyle: 'xapo',
   },
 };
 
