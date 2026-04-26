@@ -105,13 +105,16 @@ name: Add Revolut + Xapo themed on-chain wallets (visual check)
 - waitForAnimationToEnd:
     timeout: 1000
 
-- swipe:
-    start: 50%, 80%
-    end: 50%, 30%
-    duration: 300
-- waitForAnimationToEnd:
-    timeout: 1000
-
+# `scrollUntilVisible` rather than a single fixed-distance swipe so the
+# theme-step's grid-position + device-height combinations don't leave
+# the connect button still off-screen — same robustness pattern used
+# in tests/e2e/test-add-onchain-wallet.yaml.
+- scrollUntilVisible:
+    element:
+      id: 'wizard-connect-button'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 50
 - tapOn:
     id: 'wizard-connect-button'
 - waitForAnimationToEnd:
@@ -193,13 +196,16 @@ name: Add Revolut + Xapo themed on-chain wallets (visual check)
 - waitForAnimationToEnd:
     timeout: 1000
 
-- swipe:
-    start: 50%, 80%
-    end: 50%, 30%
-    duration: 300
-- waitForAnimationToEnd:
-    timeout: 1000
-
+# `scrollUntilVisible` rather than a single fixed-distance swipe so the
+# theme-step's grid-position + device-height combinations don't leave
+# the connect button still off-screen — same robustness pattern used
+# in tests/e2e/test-add-onchain-wallet.yaml.
+- scrollUntilVisible:
+    element:
+      id: 'wizard-connect-button'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 50
 - tapOn:
     id: 'wizard-connect-button'
 - waitForAnimationToEnd:
