@@ -18,6 +18,9 @@ import {
 } from '@gorhom/bottom-sheet';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Zap, Copy, Share2, UserRound } from 'lucide-react-native';
+import NfcIcon from './icons/NfcIcon';
+import NfcWriteSheet from './NfcWriteSheet';
+import { isNfcSupported } from '../services/nfcService';
 import * as Clipboard from 'expo-clipboard';
 import Toast from 'react-native-toast-message';
 import { npubEncode, nprofileEncode, buildProfileRelayHints } from '../services/nostrService';
@@ -66,6 +69,22 @@ const ContactProfileSheet: React.FC<Props> = ({
   const [lnAddressDraft, setLnAddressDraft] = useState('');
   const [shareOpen, setShareOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [nfcWriteVisible, setNfcWriteVisible] = useState(false);
+  const [nfcSupported, setNfcSupported] = useState(false);
+  // Probe device NFC capability once when the sheet opens. Hide the
+  // NFC tile entirely if the hardware isn't there (or expo-go's NFC
+  // shim returns false in dev) — no point teasing a feature that
+  // can't fire on this device.
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    isNfcSupported().then((ok) => {
+      if (!cancelled) setNfcSupported(ok);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible]);
 
   // Timeout: if image hasn't loaded in 8s, show fallback
   useEffect(() => {
@@ -404,7 +423,29 @@ const ContactProfileSheet: React.FC<Props> = ({
               </Svg>
             </TouchableOpacity>
           )}
+          {contact.pubkey && nfcSupported && (
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={() => setNfcWriteVisible(true)}
+              accessibilityLabel="Write to NFC tag"
+              testID="contact-nfc-write-button"
+            >
+              <NfcIcon size={18} color={colors.brandPink} />
+            </TouchableOpacity>
+          )}
         </View>
+        {/* Write the friend's npub (nostr:-prefixed) to a physical NFC
+            tag. The friend can then tap the tag against another device
+            to be added on Nostr — same payload as the existing share
+            flow but routed through hardware. */}
+        {contact.pubkey && (
+          <NfcWriteSheet
+            visible={nfcWriteVisible}
+            onClose={() => setNfcWriteVisible(false)}
+            npub={npubEncode(contact.pubkey)}
+            displayName={contact.name}
+          />
+        )}
       </BottomSheetView>
       <FriendPickerSheet
         visible={shareOpen}
