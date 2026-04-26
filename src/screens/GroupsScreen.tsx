@@ -1,18 +1,11 @@
-import React, { useCallback, useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  FlatList,
-  Image,
-  Alert,
-} from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, FlatList, Image, Alert } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
+import type { Palette } from '../styles/palettes';
 import { useGroups } from '../contexts/GroupsContext';
 import CreateGroupSheet from '../components/CreateGroupSheet';
 import type { RootStackParamList } from '../navigation/types';
@@ -23,6 +16,8 @@ type GroupsNavigation = NativeStackNavigationProp<RootStackParamList, 'Groups'>;
 const GroupsScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<GroupsNavigation>();
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { groups, deleteGroup } = useGroups();
   const [createVisible, setCreateVisible] = useState(false);
 
@@ -70,7 +65,7 @@ const GroupsScreen: React.FC = () => {
         </View>
       </TouchableOpacity>
     ),
-    [openGroup, handleLongPress],
+    [openGroup, handleLongPress, styles],
   );
 
   return (
@@ -153,122 +148,123 @@ const GroupsScreen: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.brandPink,
-  },
-  bgImage: {
-    position: 'absolute',
-    width: '120%',
-    height: 420,
-    right: -40,
-    top: -20,
-    opacity: 0.15,
-  },
-  header: {
-    paddingHorizontal: 20,
-    paddingBottom: 40,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 16,
-  },
-  backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  addButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  title: {
-    color: colors.white,
-    fontSize: 28,
-    fontWeight: '700',
-  },
-  content: {
-    flex: 1,
-    backgroundColor: colors.white,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    marginTop: -24,
-  },
-  listContent: {
-    paddingTop: 12,
-    paddingBottom: 20,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    gap: 12,
-  },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: colors.brandPinkLight,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  avatarLetter: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.brandPink,
-  },
-  info: {
-    flex: 1,
-  },
-  name: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.textHeader,
-  },
-  subtitle: {
-    fontSize: 13,
-    color: colors.textSupplementary,
-    marginTop: 2,
-  },
-  emptyState: {
-    padding: 40,
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 40,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.textHeader,
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    color: colors.textSupplementary,
-    textAlign: 'center',
-  },
-  emptyButton: {
-    backgroundColor: colors.brandPink,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 10,
-    marginTop: 8,
-  },
-  emptyButtonText: {
-    color: colors.white,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.brandPink,
+    },
+    bgImage: {
+      position: 'absolute',
+      width: '120%',
+      height: 420,
+      right: -40,
+      top: -20,
+      opacity: 0.15,
+    },
+    header: {
+      paddingHorizontal: 20,
+      paddingBottom: 40,
+    },
+    titleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      marginBottom: 16,
+    },
+    backButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: 'rgba(255,255,255,0.9)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    addButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: 'rgba(255,255,255,0.2)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    title: {
+      color: colors.white,
+      fontSize: 28,
+      fontWeight: '700',
+    },
+    content: {
+      flex: 1,
+      backgroundColor: colors.white,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      marginTop: -24,
+    },
+    listContent: {
+      paddingTop: 12,
+      paddingBottom: 20,
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 20,
+      paddingVertical: 14,
+      gap: 12,
+    },
+    avatar: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: colors.brandPinkLight,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    avatarLetter: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: colors.brandPink,
+    },
+    info: {
+      flex: 1,
+    },
+    name: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.textHeader,
+    },
+    subtitle: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+      marginTop: 2,
+    },
+    emptyState: {
+      padding: 40,
+      alignItems: 'center',
+      gap: 8,
+      marginTop: 40,
+    },
+    emptyTitle: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: colors.textHeader,
+    },
+    emptySubtitle: {
+      fontSize: 14,
+      color: colors.textSupplementary,
+      textAlign: 'center',
+    },
+    emptyButton: {
+      backgroundColor: colors.brandPink,
+      paddingHorizontal: 24,
+      paddingVertical: 12,
+      borderRadius: 10,
+      marginTop: 8,
+    },
+    emptyButtonText: {
+      color: colors.white,
+      fontSize: 15,
+      fontWeight: '700',
+    },
+  });
 
 export default GroupsScreen;

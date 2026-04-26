@@ -23,7 +23,6 @@ import FriendsScreen from '../screens/FriendsScreen';
 import ConversationScreen from '../screens/ConversationScreen';
 import GroupsScreen from '../screens/GroupsScreen';
 import GroupConversationScreen from '../screens/GroupConversationScreen';
-import FriendsIcon from '../components/icons/FriendsIcon';
 import ProfileScreen from '../screens/account/ProfileScreen';
 import WalletsScreen from '../screens/account/WalletsScreen';
 import NostrScreen from '../screens/account/NostrScreen';

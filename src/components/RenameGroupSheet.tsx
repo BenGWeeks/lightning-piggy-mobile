@@ -14,7 +14,8 @@ import {
   BottomSheetView,
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
+import type { Palette } from '../styles/palettes';
 import { useGroups } from '../contexts/GroupsContext';
 
 interface Props {
@@ -24,6 +25,8 @@ interface Props {
 }
 
 const RenameGroupSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { getGroup, renameGroup } = useGroups();
   const group = groupId ? getGroup(groupId) : undefined;
   const [name, setName] = useState('');
@@ -125,58 +128,59 @@ const RenameGroupSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
   );
 };
 
-const styles = StyleSheet.create({
-  sheetBackground: {
-    backgroundColor: colors.white,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-  },
-  handleIndicator: {
-    backgroundColor: colors.divider,
-    width: 40,
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 8,
-    paddingBottom: 40,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: colors.textHeader,
-    marginBottom: 16,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textSupplementary,
-    marginBottom: 6,
-  },
-  input: {
-    backgroundColor: colors.background,
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 15,
-    color: colors.textBody,
-    fontWeight: '500',
-    marginBottom: 24,
-  },
-  saveButton: {
-    backgroundColor: colors.brandPink,
-    height: 52,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  saveButtonText: {
-    color: colors.white,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  disabled: {
-    opacity: 0.5,
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    sheetBackground: {
+      backgroundColor: colors.white,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+    },
+    handleIndicator: {
+      backgroundColor: colors.divider,
+      width: 40,
+    },
+    content: {
+      flex: 1,
+      paddingHorizontal: 24,
+      paddingTop: 8,
+      paddingBottom: 40,
+    },
+    title: {
+      fontSize: 22,
+      fontWeight: '700',
+      color: colors.textHeader,
+      marginBottom: 16,
+    },
+    label: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.textSupplementary,
+      marginBottom: 6,
+    },
+    input: {
+      backgroundColor: colors.background,
+      borderRadius: 12,
+      padding: 14,
+      fontSize: 15,
+      color: colors.textBody,
+      fontWeight: '500',
+      marginBottom: 24,
+    },
+    saveButton: {
+      backgroundColor: colors.brandPink,
+      height: 52,
+      borderRadius: 12,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    saveButtonText: {
+      color: colors.white,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    disabled: {
+      opacity: 0.5,
+    },
+  });
 
 export default RenameGroupSheet;

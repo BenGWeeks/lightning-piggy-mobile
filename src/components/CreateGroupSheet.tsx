@@ -17,7 +17,8 @@ import {
   BottomSheetScrollView,
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
+import type { Palette } from '../styles/palettes';
 import { useNostr } from '../contexts/NostrContext';
 import { useGroups } from '../contexts/GroupsContext';
 import type { Group } from '../types/groups';
@@ -29,6 +30,8 @@ interface Props {
 }
 
 const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { contacts } = useNostr();
   const { createGroup } = useGroups();
   const [name, setName] = useState('');
@@ -131,13 +134,9 @@ const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
           testID="create-group-name"
         />
 
-        <Text style={styles.label}>
-          Members {selected.size > 0 ? `(${selected.size})` : ''}
-        </Text>
+        <Text style={styles.label}>Members {selected.size > 0 ? `(${selected.size})` : ''}</Text>
         {sortedContacts.length === 0 ? (
-          <Text style={styles.emptyText}>
-            Add Nostr friends first to include them in a group.
-          </Text>
+          <Text style={styles.emptyText}>Add Nostr friends first to include them in a group.</Text>
         ) : (
           <View>
             {sortedContacts.map((c) => {
@@ -211,106 +210,107 @@ const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
   );
 };
 
-const styles = StyleSheet.create({
-  sheetBackground: {
-    backgroundColor: colors.white,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-  },
-  handleIndicator: {
-    backgroundColor: colors.divider,
-    width: 40,
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 8,
-  },
-  contentContainer: {
-    paddingBottom: 60,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: colors.textHeader,
-    marginBottom: 16,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textSupplementary,
-    marginBottom: 6,
-    marginTop: 12,
-  },
-  input: {
-    backgroundColor: colors.background,
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 15,
-    color: colors.textBody,
-    fontWeight: '500',
-  },
-  emptyText: {
-    fontSize: 14,
-    color: colors.textSupplementary,
-    fontStyle: 'italic',
-    paddingVertical: 16,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    gap: 12,
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
-  avatarImage: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-  },
-  rowName: {
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.textHeader,
-  },
-  checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: colors.divider,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  checkboxActive: {
-    backgroundColor: colors.brandPink,
-    borderColor: colors.brandPink,
-  },
-  createButton: {
-    backgroundColor: colors.brandPink,
-    height: 52,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 24,
-  },
-  createButtonText: {
-    color: colors.white,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  disabled: {
-    opacity: 0.5,
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    sheetBackground: {
+      backgroundColor: colors.white,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+    },
+    handleIndicator: {
+      backgroundColor: colors.divider,
+      width: 40,
+    },
+    content: {
+      flex: 1,
+      paddingHorizontal: 24,
+      paddingTop: 8,
+    },
+    contentContainer: {
+      paddingBottom: 60,
+    },
+    title: {
+      fontSize: 22,
+      fontWeight: '700',
+      color: colors.textHeader,
+      marginBottom: 16,
+    },
+    label: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.textSupplementary,
+      marginBottom: 6,
+      marginTop: 12,
+    },
+    input: {
+      backgroundColor: colors.background,
+      borderRadius: 12,
+      padding: 14,
+      fontSize: 15,
+      color: colors.textBody,
+      fontWeight: '500',
+    },
+    emptyText: {
+      fontSize: 14,
+      color: colors.textSupplementary,
+      fontStyle: 'italic',
+      paddingVertical: 16,
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 10,
+      gap: 12,
+    },
+    avatar: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: colors.background,
+      justifyContent: 'center',
+      alignItems: 'center',
+      overflow: 'hidden',
+    },
+    avatarImage: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+    },
+    rowName: {
+      flex: 1,
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.textHeader,
+    },
+    checkbox: {
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      borderWidth: 2,
+      borderColor: colors.divider,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    checkboxActive: {
+      backgroundColor: colors.brandPink,
+      borderColor: colors.brandPink,
+    },
+    createButton: {
+      backgroundColor: colors.brandPink,
+      height: 52,
+      borderRadius: 12,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginTop: 24,
+    },
+    createButtonText: {
+      color: colors.white,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    disabled: {
+      opacity: 0.5,
+    },
+  });
 
 export default CreateGroupSheet;

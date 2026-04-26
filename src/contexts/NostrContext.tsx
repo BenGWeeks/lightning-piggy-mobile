@@ -261,6 +261,8 @@ async function readCachedWithTtl<T>(
 interface NostrContextType {
   isLoggedIn: boolean;
   isLoggingIn: boolean;
+  /** Logged-in user's hex pubkey, or null when logged out. */
+  pubkey: string | null;
   profile: NostrProfile | null;
   contacts: NostrContact[];
   relays: RelayConfig[];
@@ -302,6 +304,28 @@ interface NostrContextType {
     recipientPubkey: string,
     plaintext: string,
   ) => Promise<{ success: boolean; error?: string }>;
+  /**
+   * Send a NIP-17 group chat message to multiple recipients. Builds one
+   * kind-14 rumor with `subject` + `p` tags for every member, then NIP-59
+   * seal+wraps it once per recipient (including the sender for cross-device
+   * visibility). NSEC-only — Amber group send is a follow-up. See PR #227.
+   */
+  sendGroupMessage: (input: {
+    groupId: string;
+    subject: string;
+    memberPubkeys: string[];
+    text: string;
+  }) => Promise<{ success: boolean; wrapsPublished?: number; error?: string }>;
+  /**
+   * Publish a parameterised-replaceable kind-30200 group-state event for
+   * client-side group consensus. Idempotent on (creator, d-tag) — relays
+   * keep only the latest per the NIP-33 spec.
+   */
+  publishGroupState: (input: {
+    groupId: string;
+    name: string;
+    memberPubkeys: string[];
+  }) => Promise<{ success: boolean; error?: string }>;
   fetchConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
   /**
    * Read the persisted per-peer conversation cache synchronously-ish
@@ -1157,6 +1181,91 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
 
   /**
+   * NIP-17 multi-recipient send. NSEC-only path — for Amber, returns an
+   * error and leaves the per-event signing flow as a follow-up.
+   */
+  const sendGroupMessage = useCallback(
+    async (input: {
+      groupId: string;
+      subject: string;
+      memberPubkeys: string[];
+      text: string;
+    }): Promise<{ success: boolean; wrapsPublished?: number; error?: string }> => {
+      if (!pubkey || !isLoggedIn) return { success: false, error: 'Not logged in' };
+      if (signerType !== 'nsec') {
+        return {
+          success: false,
+          error: 'Group messages currently require an nsec login (Amber not yet supported)',
+        };
+      }
+      const text = input.text.trim();
+      if (!text) return { success: false, error: 'Empty message' };
+      const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+      const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
+      try {
+        const nsec = await SecureStore.getItemAsync(NSEC_KEY);
+        if (!nsec) return { success: false, error: 'Key not found' };
+        const { secretKey } = nostrService.decodeNsec(nsec);
+        const rumor = nostrService.createGroupChatRumor({
+          senderPubkey: pubkey,
+          subject: input.subject,
+          memberPubkeys: input.memberPubkeys,
+          content: text,
+        });
+        const result = await nostrService.sendNip17ToManyWithNsec({
+          senderSecretKey: secretKey,
+          rumor,
+          recipientPubkeys: input.memberPubkeys,
+          relays: targetRelays,
+        });
+        if (result.wrapsPublished === 0) {
+          return { success: false, error: result.errors[0] ?? 'No wraps published' };
+        }
+        return { success: true, wrapsPublished: result.wrapsPublished };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to send group message';
+        return { success: false, error: message };
+      }
+    },
+    [pubkey, isLoggedIn, signerType, relays],
+  );
+
+  /**
+   * Publish a kind-30200 group-state event. Same signing-path constraints
+   * as sendGroupMessage (nsec-only for now).
+   */
+  const publishGroupState = useCallback(
+    async (input: {
+      groupId: string;
+      name: string;
+      memberPubkeys: string[];
+    }): Promise<{ success: boolean; error?: string }> => {
+      if (!pubkey || !isLoggedIn) return { success: false, error: 'Not logged in' };
+      if (signerType !== 'nsec') {
+        return { success: false, error: 'Group state publish currently requires nsec login' };
+      }
+      const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+      const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
+      try {
+        const nsec = await SecureStore.getItemAsync(NSEC_KEY);
+        if (!nsec) return { success: false, error: 'Key not found' };
+        const { secretKey } = nostrService.decodeNsec(nsec);
+        const event = nostrService.createGroupStateEvent({
+          groupId: input.groupId,
+          name: input.name,
+          memberPubkeys: input.memberPubkeys,
+        });
+        await nostrService.signAndPublishEvent(event, secretKey, targetRelays);
+        return { success: true };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to publish group state';
+        return { success: false, error: message };
+      }
+    },
+    [pubkey, isLoggedIn, signerType, relays],
+  );
+
+  /**
    * Decrypt one NIP-04 payload with whichever signer is active. Returns
    * null (not throw) on failure so batch callers don't abort the whole
    * loop on one bad event.
@@ -1962,6 +2071,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     () => ({
       isLoggedIn,
       isLoggingIn,
+      pubkey,
       profile,
       contacts,
       relays,
@@ -1977,6 +2087,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       unfollowContact,
       addContact,
       sendDirectMessage,
+      sendGroupMessage,
+      publishGroupState,
       fetchConversation,
       getCachedConversation,
       dmInbox,
@@ -1988,6 +2100,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [
       isLoggedIn,
       isLoggingIn,
+      pubkey,
       profile,
       contacts,
       relays,
@@ -2003,6 +2116,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       unfollowContact,
       addContact,
       sendDirectMessage,
+      sendGroupMessage,
+      publishGroupState,
       fetchConversation,
       getCachedConversation,
       dmInbox,
