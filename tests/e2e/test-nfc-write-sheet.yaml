@@ -11,11 +11,16 @@ name: NFC write sheet opens from Profile + ContactProfile
 # instructional text the `ready` state shows ("Hold your phone against
 # an NFC tag") and cancels.
 #
-# Skips entirely on devices without NFC support — the NFC buttons are
-# hidden via `isNfcSupported()`. The sheet-open assertions are
-# `optional: true` for that reason; the BUTTON assertion before each
-# tap is non-optional so a true regression where the button vanishes
-# from a supported device fails the test loudly.
+# NFC-LESS DEVICES: the NFC buttons are correctly hidden by
+# `isNfcSupported()`, and EVERY step that touches them is
+# `optional: true` — so the test passes as a no-op on emulators
+# rather than failing every CI run. Trade-off: the test cannot
+# detect the case where the NFC button vanishes from a supported
+# device (the optional matchers skip there too). A real-NFC-device
+# CI lane is the right home for a strict-non-optional assertion;
+# until that lane exists, this test mainly guards the navigation
+# paths + the sheet's `ready` instruction text against silent
+# breakage on devices where NFC IS available.
 #
 # Pre-reqs:
 #  - .env contains MAESTRO_NSEC

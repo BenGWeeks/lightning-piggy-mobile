@@ -197,7 +197,9 @@ export function parseNfcContent(raw: string): NfcTagContent {
  */
 export async function scanNfcTag(): Promise<NfcTagContent> {
   try {
-    await ensureNfcStarted();
+    if (!(await ensureNfcStarted())) {
+      throw new Error('NFC unavailable on this device');
+    }
     await NfcManager.requestTechnology(NfcTech.Ndef);
     const tag = await NfcManager.getTag();
 
@@ -231,7 +233,9 @@ export async function writeNpubToTag(npub: string, onTagDetected?: () => void): 
   const uri = `nostr:${npub}`;
 
   try {
-    await ensureNfcStarted();
+    if (!(await ensureNfcStarted())) {
+      throw new Error('NFC unavailable on this device');
+    }
     await NfcManager.requestTechnology(NfcTech.Ndef);
 
     const tag = await NfcManager.getTag();

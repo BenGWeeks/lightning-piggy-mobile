@@ -55,45 +55,27 @@ function withNfcAndroid(config) {
           }
           const filters = mainActivity['intent-filter'];
 
-          // Check existing intent filters to avoid duplicates
-          const hasNdefFilter = filters.some((f) =>
-            f.action?.some((a) => a.$?.['android:name'] === 'android.nfc.action.NDEF_DISCOVERED'),
-          );
-
-          if (!hasNdefFilter) {
-            // NDEF discovered intent filter for NFC tags. The writer
-            // in this PR (`writeNpubToTag`) creates a `Ndef.uriRecord`
-            // with payload `nostr:npub1…`, so the receiver-side filter
-            // matches the URI scheme rather than a `text/plain` MIME
-            // type — `text/plain` would silently miss every tag we
-            // write ourselves.
-            filters.push({
-              action: [{ $: { 'android:name': 'android.nfc.action.NDEF_DISCOVERED' } }],
-              category: [
-                { $: { 'android:name': 'android.intent.category.DEFAULT' } },
-                { $: { 'android:name': 'android.intent.category.BROWSABLE' } },
-              ],
-              data: [{ $: { 'android:scheme': 'nostr' } }],
-            });
-          }
-
-          // Add lightning: scheme handler
-          const hasLightningScheme = filters.some(
-            (f) =>
-              f.data?.some((d) => d.$?.['android:scheme'] === 'lightning') &&
-              f.action?.some((a) => a.$?.['android:name'] === 'android.intent.action.VIEW'),
-          );
-
-          if (!hasLightningScheme) {
-            filters.push({
-              action: [{ $: { 'android:name': 'android.intent.action.VIEW' } }],
-              category: [
-                { $: { 'android:name': 'android.intent.category.DEFAULT' } },
-                { $: { 'android:name': 'android.intent.category.BROWSABLE' } },
-              ],
-              data: [{ $: { 'android:scheme': 'lightning' } }],
-            });
-          }
+          // INTENT FILTERS DELIBERATELY NOT REGISTERED IN THIS PR.
+          //
+          // The original PR registered:
+          //   - NDEF_DISCOVERED `android:scheme="nostr"` — for tag taps
+          //     to launch the app on a `nostr:npub1…` payload.
+          //   - VIEW + BROWSABLE `android:scheme="lightning"` — for
+          //     deep-linked Lightning URIs (`lightning:lnbc…`).
+          //
+          // Both register the app as a HANDLER, but the JS side has no
+          // `Linking` URL listener / NavigationContainer `linking`
+          // config to route the incoming intent yet. Result on a
+          // shipping build: tapping a tag / following a `lightning:`
+          // link launches the app to a blank Home screen and silently
+          // does nothing — and worse, may intercept the URL away from
+          // the user's preferred handler. Adding scan/route is
+          // tracked as the deferred follow-up to PR #231.
+          //
+          // When that lands, restore the intent-filter registrations
+          // here. Until then, NFC WRITE works fine without them
+          // (writeNpubToTag drives the NfcManager session directly,
+          // no intent involved).
         }
       }
     }
