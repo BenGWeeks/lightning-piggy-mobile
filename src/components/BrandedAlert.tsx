@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, View, Text, Pressable, StyleSheet } from 'react-native';
 import { AlertCircle, Check, Info, X } from 'lucide-react-native';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
+import type { Palette } from '../styles/palettes';
 
 export type BrandedAlertButtonStyle = 'default' | 'cancel' | 'destructive';
 
@@ -70,6 +71,8 @@ export const Alert = { alert: alertImpl };
 export const alert = alertImpl;
 
 export function BrandedAlertHost(): React.ReactElement | null {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [payload, setPayload] = useState<AlertPayload | null>(null);
   const mountedRef = useRef(true);
 
@@ -193,89 +196,93 @@ export function BrandedAlertHost(): React.ReactElement | null {
 }
 
 // Styles mirror PaymentProgressOverlay so send/receive confirmations and
-// system alerts feel like siblings from the same family.
-const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: 'rgba(21, 23, 26, 0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  card: {
-    backgroundColor: colors.white,
-    borderRadius: 28,
-    paddingVertical: 32,
-    paddingHorizontal: 28,
-    minWidth: 260,
-    maxWidth: 340,
-    alignItems: 'center',
-    gap: 14,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 24,
-    elevation: 12,
-  },
-  iconSlot: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.textHeader,
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: 14,
-    color: colors.textSupplementary,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    alignSelf: 'stretch',
-    gap: 10,
-    marginTop: 6,
-  },
-  buttonColumn: {
-    flexDirection: 'column-reverse',
-  },
-  button: {
-    flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primaryButton: {
-    backgroundColor: colors.brandPink,
-  },
-  destructiveButton: {
-    backgroundColor: colors.red,
-  },
-  cancelButton: {
-    backgroundColor: colors.background,
-  },
-  buttonPressed: {
-    opacity: 0.75,
-  },
-  buttonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    letterSpacing: 0.3,
-  },
-  actionButtonText: {
-    color: colors.white,
-  },
-  cancelButtonText: {
-    color: colors.textBody,
-  },
-});
+// system alerts feel like siblings from the same family. Factory shape
+// (rather than module-level `StyleSheet.create`) so the dialog reads
+// the live theme palette via `useThemeColors()` — light/dark switch
+// applies without restart.
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: 'rgba(21, 23, 26, 0.45)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 24,
+    },
+    card: {
+      backgroundColor: colors.surface,
+      borderRadius: 28,
+      paddingVertical: 32,
+      paddingHorizontal: 28,
+      minWidth: 260,
+      maxWidth: 340,
+      alignItems: 'center',
+      gap: 14,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.2,
+      shadowRadius: 24,
+      elevation: 12,
+    },
+    iconSlot: {
+      width: 72,
+      height: 72,
+      borderRadius: 36,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    title: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: colors.textHeader,
+      textAlign: 'center',
+    },
+    subtitle: {
+      fontSize: 14,
+      color: colors.textSupplementary,
+      textAlign: 'center',
+      lineHeight: 20,
+    },
+    buttonRow: {
+      flexDirection: 'row',
+      alignSelf: 'stretch',
+      gap: 10,
+      marginTop: 6,
+    },
+    buttonColumn: {
+      flexDirection: 'column-reverse',
+    },
+    button: {
+      flex: 1,
+      paddingVertical: 12,
+      paddingHorizontal: 24,
+      borderRadius: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    primaryButton: {
+      backgroundColor: colors.brandPink,
+    },
+    destructiveButton: {
+      backgroundColor: colors.red,
+    },
+    cancelButton: {
+      backgroundColor: colors.background,
+    },
+    buttonPressed: {
+      opacity: 0.75,
+    },
+    buttonText: {
+      fontSize: 16,
+      fontWeight: '700',
+      letterSpacing: 0.3,
+    },
+    actionButtonText: {
+      color: colors.white,
+    },
+    cancelButtonText: {
+      color: colors.textBody,
+    },
+  });
 
 export default Alert;
