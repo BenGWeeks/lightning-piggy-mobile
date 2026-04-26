@@ -83,17 +83,23 @@ function activityFromMessages(
   group: Group,
   messages: { senderPubkey: string; text: string; createdAt: number }[],
 ): GroupActivity {
+  const groupCreatedAtSec = Math.floor(group.createdAt / 1000);
   if (messages.length === 0) {
     return {
-      lastActivityAt: Math.floor(group.createdAt / 1000),
+      lastActivityAt: groupCreatedAtSec,
       lastText: '',
       lastSenderPubkey: null,
       recentSenderPubkeys: [],
     };
   }
   const last = messages[messages.length - 1];
+  // Math.max guards against the (rare) case where a relay returns a
+  // message with `createdAt` earlier than the local group's
+  // `createdAt` — clock skew or an event back-dated via NIP-59 wrap
+  // randomisation. Honours the docstring invariant in
+  // `types/groups.ts:GroupActivity.lastActivityAt`.
   return {
-    lastActivityAt: last.createdAt,
+    lastActivityAt: Math.max(last.createdAt, groupCreatedAtSec),
     lastText: last.text,
     lastSenderPubkey: last.senderPubkey.toLowerCase(),
     recentSenderPubkeys: computeRecentSenders(messages),

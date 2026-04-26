@@ -115,6 +115,18 @@ const MessagesScreen: React.FC = () => {
     return set;
   }, [contacts]);
 
+  // Build a single pubkey → picture-URL lookup for the screen, shared
+  // by all group rows so each `GroupAvatar` doesn't iterate the contacts
+  // list per row. Cost is O(contacts) once per render of MessagesScreen
+  // instead of O(rows × contacts).
+  const contactPictureMap = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const c of contacts) {
+      map.set(c.pubkey.toLowerCase(), c.profile?.picture ?? null);
+    }
+    return map;
+  }, [contacts]);
+
   const conversationSummaries = useMemo(() => {
     const zap = buildConversationSummaries(wallets, contacts);
     // Pass followPubkeys as a defence-in-depth filter. NostrContext's
@@ -257,9 +269,15 @@ const MessagesScreen: React.FC = () => {
           />
         );
       }
-      return <GroupRow summary={item.summary} onPress={() => handleGroupPress(item.summary)} />;
+      return (
+        <GroupRow
+          summary={item.summary}
+          onPress={() => handleGroupPress(item.summary)}
+          contactPictureMap={contactPictureMap}
+        />
+      );
     },
-    [handleConversationPress, handleGroupPress],
+    [handleConversationPress, handleGroupPress, contactPictureMap],
   );
 
   return (

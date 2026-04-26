@@ -135,8 +135,13 @@ async function tryRouteGroupRumor(
   if (!group) {
     // Group-shaped rumor with no matching local group. Could be a brand-
     // new group whose kind-30200 hasn't propagated yet, or a spammer.
-    // Drop on the floor for v1 — once GroupsContext reconciles the
-    // 30200 the next refresh will pick this rumor up via the cache.
+    // Drop on the floor for v1 — these wraps are NOT written into the
+    // persistent NIP-17 wrap cache (the caller's `continue` happens
+    // before the cache write), so retry only happens via a relay
+    // re-fetch on the next force-refresh. Caveat: NIP-59 wraps use
+    // randomised `created_at` so non-force refreshes (which apply a
+    // `since:` filter) may miss them. Buffering pending-group-wraps
+    // for replay after a 30200 lands is tracked as a follow-up.
     if (__DEV__) {
       const all = Array.from(cls.otherParticipants);
       const fp = all
@@ -161,8 +166,10 @@ async function tryRouteGroupRumor(
   } catch (e) {
     if (__DEV__) console.warn('[Nostr] appendGroupMessage failed:', e);
     // Storage write failed — don't fall through to the DM path either,
-    // it's still a group rumor. The wrap stays in the cache for re-try
-    // on next inbox refresh.
+    // it's still a group rumor. Same caveat as the no-match branch
+    // above: this wrap is not in the persistent NIP-17 cache, so retry
+    // requires a relay re-fetch. A force-refresh from the next focus
+    // tick is the practical recovery path; no automatic replay today.
     return { kind: 'group-no-match' };
   }
   return { kind: 'routed' };

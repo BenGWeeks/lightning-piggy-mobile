@@ -10,6 +10,12 @@ import { formatConversationTimestamp } from '../utils/conversationSummaries';
 interface Props {
   summary: GroupSummary;
   onPress?: () => void;
+  /**
+   * Optional precomputed pubkey → picture-URL map shared with sibling
+   * rows by the parent screen. Forwarded to GroupAvatar so the avatar
+   * cluster doesn't rebuild a contacts map per row.
+   */
+  contactPictureMap?: Map<string, string | null>;
 }
 
 /** Resolve a friendly display name for a sender pubkey (kind-0 displayName
@@ -25,7 +31,7 @@ function senderName(pubkey: string, contacts: ReturnType<typeof useNostr>['conta
   );
 }
 
-const GroupRow: React.FC<Props> = ({ summary, onPress }) => {
+const GroupRow: React.FC<Props> = ({ summary, onPress, contactPictureMap }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { contacts, pubkey: myPubkey } = useNostr();
@@ -75,7 +81,12 @@ const GroupRow: React.FC<Props> = ({ summary, onPress }) => {
       accessibilityLabel={`Open group ${group.name}`}
       testID={`group-row-${group.id}`}
     >
-      <GroupAvatar pubkeys={avatarPubkeys} groupName={group.name} size={48} />
+      <GroupAvatar
+        pubkeys={avatarPubkeys}
+        groupName={group.name}
+        size={48}
+        contactPictureMap={contactPictureMap}
+      />
       <View style={styles.info}>
         <View style={styles.topRow}>
           <Text style={styles.name} numberOfLines={1}>

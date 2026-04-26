@@ -17,28 +17,43 @@ interface Props {
   groupName: string;
   /** Diameter of the outer container. Inner avatars scale to ~62%. */
   size?: number;
+  /**
+   * Optional precomputed pubkey → picture-URL map. When the row is
+   * rendered inside a list (`MessagesScreen` / `GroupsScreen`), the
+   * parent builds this once from `useNostr().contacts` and passes the
+   * same instance to every row, so we don't iterate the contacts list
+   * O(rows × avatars × contacts) per render. Standalone usages
+   * (without a parent map) fall back to the internal lookup.
+   */
+  contactPictureMap?: Map<string, string | null>;
 }
 
 const MAX_AVATARS = 3;
 
-const GroupAvatar: React.FC<Props> = ({ pubkeys, groupName, size = 48 }) => {
+const GroupAvatar: React.FC<Props> = ({ pubkeys, groupName, size = 48, contactPictureMap }) => {
   const colors = useThemeColors();
   const { contacts } = useNostr();
   const styles = useMemo(() => createStyles(colors, size), [colors, size]);
 
-  // Map each pubkey to a profile picture lookup ahead of time so the row
-  // re-renders only when contacts/pubkeys actually change. Each entry is
-  // null when we have no kind-0 profile for that pubkey yet.
+  // Use the parent's precomputed map when provided; otherwise build a
+  // local one from the contacts list (only `null` until kind-0 lands).
+  // The internal-build path stays for non-list call sites (e.g. a
+  // future GroupConversationScreen header avatar).
   const items = useMemo(() => {
-    const byPubkey = new Map<string, string | null>();
-    for (const c of contacts) {
-      byPubkey.set(c.pubkey.toLowerCase(), c.profile?.picture ?? null);
+    let lookup: Map<string, string | null>;
+    if (contactPictureMap) {
+      lookup = contactPictureMap;
+    } else {
+      lookup = new Map<string, string | null>();
+      for (const c of contacts) {
+        lookup.set(c.pubkey.toLowerCase(), c.profile?.picture ?? null);
+      }
     }
     return pubkeys.slice(0, MAX_AVATARS).map((pk) => ({
       pubkey: pk,
-      picture: byPubkey.get(pk.toLowerCase()) ?? null,
+      picture: lookup.get(pk.toLowerCase()) ?? null,
     }));
-  }, [pubkeys, contacts]);
+  }, [pubkeys, contacts, contactPictureMap]);
 
   if (items.length === 0) {
     // No-message fallback: brand-pink letter avatar matches GroupsScreen.
