@@ -55,11 +55,17 @@ const BootSplash: React.FC<Props> = ({ done }) => {
 
   return (
     <Animated.View style={[styles.root, { opacity }]} pointerEvents={done ? 'none' : 'auto'}>
+      {/* Pig artwork is decorative — the wordmark below is the
+          canonical "Lightning Piggy" announcement, so we mark this
+          image hidden to screen readers to avoid the brand being
+          read twice. */}
       <Image
         source={require('../../assets/images/lightning-piggy-intro.png')}
         style={styles.pig}
         resizeMode="contain"
-        accessibilityLabel="Lightning Piggy"
+        accessible={false}
+        accessibilityElementsHidden
+        importantForAccessibility="no"
       />
       <Image
         source={require('../../assets/images/lightning-piggy-logo.png')}
