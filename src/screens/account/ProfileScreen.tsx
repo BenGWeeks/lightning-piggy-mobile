@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, Alert, Platform } from 'react-native';
 import Svg, { Rect, Path as SvgPath } from 'react-native-svg';
 import * as Clipboard from 'expo-clipboard';
@@ -9,6 +9,9 @@ import { createSharedAccountStyles } from './sharedStyles';
 import NostrLoginSheet from '../../components/NostrLoginSheet';
 import EditProfileSheet from '../../components/EditProfileSheet';
 import QrSheet from '../../components/QrSheet';
+import NfcIcon from '../../components/icons/NfcIcon';
+import NfcWriteSheet from '../../components/NfcWriteSheet';
+import { isNfcSupported } from '../../services/nfcService';
 import { useNostr } from '../../contexts/NostrContext';
 import { useThemeColors } from '../../contexts/ThemeContext';
 import type { Palette } from '../../styles/palettes';
@@ -37,6 +40,20 @@ const ProfileScreen: React.FC = () => {
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [qrSheetOpen, setQrSheetOpen] = useState(false);
   const [qrDefaultMode, setQrDefaultMode] = useState<'npub' | 'lightning'>('npub');
+  const [nfcWriteVisible, setNfcWriteVisible] = useState(false);
+  const [nfcSupported, setNfcSupported] = useState(false);
+  // Probe device NFC capability once on mount. Hide the NFC button on
+  // devices without the hardware (or on iOS without the entitlement)
+  // so we don't tease a feature that can't fire.
+  useEffect(() => {
+    let cancelled = false;
+    isNfcSupported().then((ok) => {
+      if (!cancelled) setNfcSupported(ok);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -93,6 +110,15 @@ const ProfileScreen: React.FC = () => {
             >
               <QrIcon size={22} color={colors.textSupplementary} />
             </TouchableOpacity>
+            {nfcSupported && (
+              <TouchableOpacity
+                onPress={() => setNfcWriteVisible(true)}
+                accessibilityLabel="Write npub to NFC tag"
+                testID="profile-npub-nfc"
+              >
+                <NfcIcon size={22} color={colors.textSupplementary} />
+              </TouchableOpacity>
+            )}
           </View>
 
           {profile.lud16 && (
@@ -136,6 +162,14 @@ const ProfileScreen: React.FC = () => {
           npub={profile.npub}
           lightningAddress={profile.lud16 ?? null}
           defaultMode={qrDefaultMode}
+        />
+      )}
+      {profile?.npub && (
+        <NfcWriteSheet
+          visible={nfcWriteVisible}
+          onClose={() => setNfcWriteVisible(false)}
+          npub={profile.npub}
+          displayName={profile.displayName || profile.name || 'You'}
         />
       )}
     </AccountScreenLayout>
