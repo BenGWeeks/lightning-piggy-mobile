@@ -1,0 +1,217 @@
+appId: com.lightningpiggy.app.dev
+name: Add Revolut + Xapo themed on-chain wallets (visual check)
+---
+# Manual screenshot helper for PR feat/revolut-xapo-wallet-cards.
+# Adds two watch-only on-chain wallets using known test xpubs,
+# selecting the Revolut theme on one and the Xapo theme on the other.
+#
+# NOTE: targets the DEV variant (com.lightningpiggy.app.dev) on
+# purpose — this flow assumes test xpubs from .env (MAESTRO_XPUB1/2)
+# which only the dev build is wired to import without prompting. For
+# the production build use the standard add-onchain flow with a real
+# xpub. Other E2E tests that target `com.lightningpiggy.app` (the
+# production variant) cover production-build behaviour.
+#
+# Run with the same MAESTRO_XPUB1 / MAESTRO_XPUB2 values used by the
+# existing add-onchain E2E test:
+#   source .env && maestro --device emulator-5554 test \
+#     -e MAESTRO_XPUB1="$MAESTRO_XPUB1" -e MAESTRO_XPUB2="$MAESTRO_XPUB2" \
+#     tests/e2e/test-revolut-xapo-cards.yaml
+# Take screenshots of the resulting Home cards via:
+#   adb -s emulator-5554 exec-out screencap -p > /tmp/<file>.png
+
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 40000
+
+- tapOn:
+    id: 'tab-home'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# --- Wallet 1: Revolut ---
+# Locate the Add wallet card via scrollUntilVisible rather than swiping
+# from a wallet-type-specific id — `wallet-card-nwc` may not exist on a
+# fresh install (no NWC wallet imported yet) or when the active wallet
+# is on-chain. scrollUntilVisible finds it regardless of carousel state.
+- scrollUntilVisible:
+    element:
+      id: 'add-wallet-card'
+    direction: RIGHT
+    timeout: 8000
+    visibilityPercentage: 50
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- tapOn:
+    id: 'add-wallet-card'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- swipe:
+    start: 50%, 80%
+    end: 50%, 50%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- tapOn:
+    id: 'wallet-type-onchain'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    id: 'xpub-input'
+- tapOn:
+    id: 'xpub-input'
+- eraseText:
+    charactersToErase: 500
+- inputText: ${MAESTRO_XPUB1}
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- tapOn:
+    text: 'Next'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    id: 'wallet-alias-input'
+- tapOn:
+    id: 'wallet-alias-input'
+- eraseText:
+    charactersToErase: 100
+- inputText: 'Revolut'
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- tapOn:
+    text: 'Next'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Scroll the theme grid to find Revolut tile (added at the end of the list)
+- scrollUntilVisible:
+    element:
+      text: 'Revolut'
+    direction: DOWN
+    timeout: 10000
+    speed: 30
+- tapOn:
+    text: 'Revolut'
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# `scrollUntilVisible` rather than a single fixed-distance swipe so the
+# theme-step's grid-position + device-height combinations don't leave
+# the connect button still off-screen — same robustness pattern used
+# in tests/e2e/test-add-onchain-wallet.yaml.
+- scrollUntilVisible:
+    element:
+      id: 'wizard-connect-button'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 50
+- tapOn:
+    id: 'wizard-connect-button'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- extendedWaitUntil:
+    visible:
+      text: 'Revolut'
+    timeout: 30000
+
+# --- Wallet 2: Xapo ---
+# Same robust scroll-to-find-add-wallet-card pattern as Wallet 1.
+- scrollUntilVisible:
+    element:
+      id: 'add-wallet-card'
+    direction: RIGHT
+    timeout: 8000
+    visibilityPercentage: 50
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- tapOn:
+    id: 'add-wallet-card'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- swipe:
+    start: 50%, 80%
+    end: 50%, 50%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- tapOn:
+    id: 'wallet-type-onchain'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    id: 'xpub-input'
+- tapOn:
+    id: 'xpub-input'
+- eraseText:
+    charactersToErase: 500
+- inputText: ${MAESTRO_XPUB2}
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- tapOn:
+    text: 'Next'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    id: 'wallet-alias-input'
+- tapOn:
+    id: 'wallet-alias-input'
+- eraseText:
+    charactersToErase: 100
+- inputText: 'Xapo'
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- tapOn:
+    text: 'Next'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- scrollUntilVisible:
+    element:
+      text: 'Xapo'
+    direction: DOWN
+    timeout: 10000
+    speed: 30
+- tapOn:
+    text: 'Xapo'
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# `scrollUntilVisible` rather than a single fixed-distance swipe so the
+# theme-step's grid-position + device-height combinations don't leave
+# the connect button still off-screen — same robustness pattern used
+# in tests/e2e/test-add-onchain-wallet.yaml.
+- scrollUntilVisible:
+    element:
+      id: 'wizard-connect-button'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 50
+- tapOn:
+    id: 'wizard-connect-button'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- extendedWaitUntil:
+    visible:
+      text: 'Xapo'
+    timeout: 30000
