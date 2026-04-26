@@ -205,7 +205,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [contacts]);
 
   // Anti-spam: a group is visible only if at least one OTHER member is
-  // in the viewer's follow list. Mirror's the 1:1 "Following only" rule
+  // in the viewer's follow list. Mirrors the 1:1 "Following only" rule
   // at MessagesScreen.tsx:128-143. Locked-on outside dev_mode; in
   // dev_mode the user can flip it via the chip on GroupsScreen.
   const visibleGroups = useMemo(() => {
@@ -405,12 +405,24 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const dTag = ev.tags.find((t) => t[0] === 'd')?.[1];
         const nameTag = ev.tags.find((t) => t[0] === 'name')?.[1];
         if (!dTag || !nameTag) return;
+        // Validate every p-tag value as a 64-hex pubkey before
+        // reconciling — a malformed/malicious 30200 (e.g. relays
+        // returning corrupted tags, or a spammer publishing junk)
+        // could otherwise persist invalid strings into local member
+        // lists and break NIP-17 wrap construction on subsequent
+        // sends. The sender is also validated by the same regex —
+        // ev.pubkey from a verified event is always 64-hex, but be
+        // defensive in case the verifier ever changes.
+        const HEX64 = /^[0-9a-f]{64}$/i;
         const memberPubkeys = ev.tags
-          .filter((t) => t[0] === 'p' && typeof t[1] === 'string')
-          .map((t) => t[1].toLowerCase());
+          .filter((t): t is [string, string] => t[0] === 'p' && typeof t[1] === 'string')
+          .map((t) => t[1].toLowerCase())
+          .filter((pk) => HEX64.test(pk));
         // Include the sender (creator) plus all p-tagged members. The
         // creator is implicit per the spec — they sign the event.
-        const allMembers = Array.from(new Set([ev.pubkey.toLowerCase(), ...memberPubkeys])).filter(
+        const senderLc = ev.pubkey.toLowerCase();
+        if (!HEX64.test(senderLc)) return;
+        const allMembers = Array.from(new Set([senderLc, ...memberPubkeys])).filter(
           (pk) => pk !== pubkey.toLowerCase(),
         );
         reconcilerRef
