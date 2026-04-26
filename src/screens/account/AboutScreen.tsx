@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nip19 from 'nostr-tools/nip19';
+import { UserRound } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
 import { createSharedAccountStyles } from './sharedStyles';
 import NostrLoginSheet from '../../components/NostrLoginSheet';
@@ -116,7 +117,9 @@ const AboutScreen: React.FC = () => {
               {teamProfile.picture ? (
                 <Image source={{ uri: teamProfile.picture }} style={styles.teamPicture} />
               ) : (
-                <View style={styles.teamPicturePlaceholder} />
+                <View style={styles.teamPicturePlaceholder}>
+                  <UserRound size={28} color={colors.textBody} strokeWidth={1.75} />
+                </View>
               )}
               <View style={styles.teamInfo}>
                 <Text style={styles.teamName}>
@@ -232,6 +235,8 @@ const createStyles = (colors: Palette) =>
       height: 48,
       borderRadius: 24,
       backgroundColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     teamInfo: {
       flex: 1,

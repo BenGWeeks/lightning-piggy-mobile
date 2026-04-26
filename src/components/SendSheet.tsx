@@ -399,7 +399,7 @@ const SendSheet: React.FC<Props> = ({
         }
       } else if (isLightningAddress(invoiceData)) {
         if (!lnurlParams) {
-          Alert.alert('Error', 'Lightning address not resolved yet. Please wait.');
+          Alert.alert('Error', 'Payment details not resolved yet. Please wait.');
           setSending(false);
           return;
         }
