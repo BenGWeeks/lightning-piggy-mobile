@@ -9,7 +9,7 @@ import {
   Platform,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { UserRound } from 'lucide-react-native';
+import { UserRound, UsersRound } from 'lucide-react-native';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
@@ -45,6 +45,12 @@ interface Props {
   onSelect: (friend: PickedFriend) => void;
   title?: string;
   subtitle?: string;
+  // Optional. When provided, renders a "New group" affordance at the top
+  // of the list (above the friend rows). Tapping it dismisses the sheet
+  // and calls `onNewGroup` so the caller can open CreateGroupSheet. Lets
+  // the Messages-tab "+" FAB surface group creation alongside 1:1 — see
+  // PR #227.
+  onNewGroup?: () => void;
 }
 
 const FriendPickerSheet: React.FC<Props> = ({
@@ -53,6 +59,7 @@ const FriendPickerSheet: React.FC<Props> = ({
   onSelect,
   title = 'Send to friend',
   subtitle,
+  onNewGroup,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -62,7 +69,7 @@ const FriendPickerSheet: React.FC<Props> = ({
   // generic constraints; any-ref keeps the call site clean.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const listRef = useRef<any>(null);
-  const snapPoints = useMemo(() => ['75%', '90%'], []);
+  const snapPoints = useMemo(() => ['85%'], []);
   // Keep the drag handle clear of Android's notification-shade trigger
   // zone (<48 DP from the top) while still letting the sheet grow past
   // the 75% snap when `keyboardBehavior="interactive"` lifts it up to
@@ -182,7 +189,7 @@ const FriendPickerSheet: React.FC<Props> = ({
               etc). When `picture` is set, the Image stacks on top via
               absoluteFill and covers the silhouette once it loads. */}
           <View style={styles.avatarFallback}>
-            <UserRound size={22} color={colors.textBody} strokeWidth={1.75} />
+            <UserRound size={28} color={colors.textBody} strokeWidth={1.75} />
           </View>
           {item.picture ? (
             <Image
@@ -267,6 +274,23 @@ const FriendPickerSheet: React.FC<Props> = ({
             data={friends}
             keyExtractor={(f: PickedFriend) => f.pubkey}
             renderItem={renderItem}
+            ListHeaderComponent={
+              onNewGroup ? (
+                <TouchableOpacity
+                  style={styles.row}
+                  onPress={onNewGroup}
+                  accessibilityLabel="Create a new group"
+                  testID="friend-picker-new-group"
+                >
+                  <View style={styles.newGroupIcon}>
+                    <UsersRound size={28} color={colors.brandPink} />
+                  </View>
+                  <View style={styles.info}>
+                    <Text style={styles.newGroupName}>New group</Text>
+                  </View>
+                </TouchableOpacity>
+              ) : null
+            }
             contentContainerStyle={[
               styles.listContent,
               { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
@@ -394,6 +418,19 @@ const createStyles = (colors: Palette) =>
       fontSize: 16,
       fontWeight: '600',
       color: colors.textHeader,
+    },
+    newGroupIcon: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: colors.brandPinkLight,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    newGroupName: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.brandPink,
     },
     address: {
       fontSize: 13,

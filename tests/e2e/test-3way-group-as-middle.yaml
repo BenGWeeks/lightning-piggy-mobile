@@ -1,0 +1,46 @@
+appId: com.lightningpiggy.app.dev
+name: 3-way group chat — Middle Piggy joins
+---
+# Phase 2 of the 3-way group-chat test. Logs in as Middle Piggy
+# (MAESTRO_NSEC3) and verifies the "Triad" group has appeared via the
+# kind-30200 reconciliation path. Sends "hi from middle" then signs out.
+
+- runFlow:
+    file: _subflow-login-as.yaml
+    env:
+      MAESTRO_NSEC: ${MAESTRO_NSEC3}
+
+- tapOn:
+    id: 'tab-friends'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'groups-button'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Wait up to 30s for the inbound 30200 event to land.
+- extendedWaitUntil:
+    visible:
+      text: 'Triad'
+    timeout: 30000
+
+- tapOn:
+    text: 'Triad'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Inbound NIP-17 receive-side group routing is a follow-up — for now we
+# only verify the local send works after group reconciliation.
+- tapOn:
+    id: 'group-message-input'
+- inputText: 'hi from middle'
+- hideKeyboard
+- tapOn:
+    id: 'group-send-button'
+- waitForAnimationToEnd:
+    timeout: 4000
+- assertVisible:
+    text: 'hi from middle'
+
+- runFlow: test-logout.yaml

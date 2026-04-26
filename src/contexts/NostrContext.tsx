@@ -17,7 +17,15 @@ import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
 import type { NostrProfile, NostrContact, RelayConfig, SignerType } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
-import { partnerFromRumor, unwrapWrapNsec, unwrapWrapViaNip44 } from '../utils/nip17Unwrap';
+import {
+  classifyRumor,
+  partnerFromRumor,
+  unwrapWrapNsec,
+  unwrapWrapViaNip44,
+  type DecodedRumor,
+} from '../utils/nip17Unwrap';
+import { findGroupForParticipants } from '../services/groupRoutingRegistry';
+import { appendGroupMessage, type GroupMessage } from '../services/groupMessagesStorageService';
 
 /**
  * Module-level LRU cache for NIP-04 plaintext keyed by event id. Keeps
@@ -68,6 +76,104 @@ const AMBER_NIP17_ENABLED_KEY = 'amber_nip17_enabled';
 /** Persistent wrap-id → DmInboxEntry cache. Only ever contains rumors
  * from followed senders — see refreshDmInbox's filter gate. */
 type Nip17CacheEntry = DmInboxEntry & { wrapId: string };
+
+/**
+ * Tiny pub/sub for inbound group messages. NostrContext fires
+ * `notifyGroupMessage` after persisting a decrypted group rumor so
+ * GroupConversationScreen can re-load its in-memory list without
+ * polling. Listeners are scoped to (groupId) so an open thread doesn't
+ * re-render on unrelated traffic.
+ */
+type GroupMessageListener = (groupId: string, message: GroupMessage) => void;
+const groupMessageListeners = new Set<GroupMessageListener>();
+export function notifyGroupMessage(groupId: string, message: GroupMessage): void {
+  for (const l of groupMessageListeners) {
+    try {
+      l(groupId, message);
+    } catch (e) {
+      if (__DEV__) console.warn('[Nostr] group message listener threw:', e);
+    }
+  }
+}
+export function subscribeGroupMessages(listener: GroupMessageListener): () => void {
+  groupMessageListeners.add(listener);
+  return () => {
+    groupMessageListeners.delete(listener);
+  };
+}
+
+/**
+ * Outcome of attempting to route a kind-14 rumor as a group message.
+ *
+ * The 1:1 fallthrough path uses `partnerFromRumor`, which for a
+ * multi-recipient rumor would arbitrarily pick the FIRST p tag and
+ * mis-catalogue the rumor as a 1:1 DM with that pubkey. Callers must
+ * therefore distinguish "not a group" (safe to fall through to DM)
+ * from "group-shaped, no local match" (must NOT fall through).
+ */
+type GroupRouteResult =
+  | { kind: 'routed' } // appended to a known group
+  | { kind: 'group-no-match' } // group-shaped but no matching local group
+  | { kind: 'not-group' }; // 1:1 DM (or malformed) — safe to use the DM path
+
+/**
+ * Try to route a decoded kind-14 rumor as a group message.
+ *
+ * Side-effects on `routed`:
+ *  - Appends to groupMessagesStorageService keyed by group.id
+ *  - Fires the in-process group-message listener so an open thread
+ *    refreshes immediately
+ */
+async function tryRouteGroupRumor(
+  rumor: DecodedRumor,
+  viewerPubkey: string,
+  wrapId: string,
+): Promise<GroupRouteResult> {
+  const cls = classifyRumor(rumor, viewerPubkey);
+  if (!cls || cls.type !== 'group') return { kind: 'not-group' };
+  const group = findGroupForParticipants(cls.otherParticipants);
+  if (!group) {
+    // Group-shaped rumor with no matching local group. Could be a brand-
+    // new group whose kind-30200 hasn't propagated yet, or a spammer.
+    // Drop on the floor for v1 — these wraps are NOT written into the
+    // persistent NIP-17 wrap cache (the caller's `continue` happens
+    // before the cache write), so retry only happens via a relay
+    // re-fetch on the next force-refresh. Caveat: NIP-59 wraps use
+    // randomised `created_at` so non-force refreshes (which apply a
+    // `since:` filter) may miss them. Buffering pending-group-wraps
+    // for replay after a 30200 lands is tracked as a follow-up.
+    if (__DEV__) {
+      const all = Array.from(cls.otherParticipants);
+      const fp = all
+        .slice(0, 3)
+        .map((p) => p.slice(0, 8))
+        .join(',');
+      console.log(
+        `[Nostr] dropped group-shaped rumor (no matching group): participants=[${fp}${all.length > 3 ? ',...' : ''}] sender=${rumor.pubkey.slice(0, 8)}`,
+      );
+    }
+    return { kind: 'group-no-match' };
+  }
+  const message: GroupMessage = {
+    id: wrapId,
+    senderPubkey: rumor.pubkey.toLowerCase(),
+    text: rumor.content,
+    createdAt: rumor.created_at,
+  };
+  try {
+    await appendGroupMessage(group.id, message);
+    notifyGroupMessage(group.id, message);
+  } catch (e) {
+    if (__DEV__) console.warn('[Nostr] appendGroupMessage failed:', e);
+    // Storage write failed — don't fall through to the DM path either,
+    // it's still a group rumor. Same caveat as the no-match branch
+    // above: this wrap is not in the persistent NIP-17 cache, so retry
+    // requires a relay re-fetch. A force-refresh from the next focus
+    // tick is the practical recovery path; no automatic replay today.
+    return { kind: 'group-no-match' };
+  }
+  return { kind: 'routed' };
+}
 
 /** Parse an AsyncStorage JSON blob into an object-keyed record, falling
  * back to `{}` if the value is missing, not valid JSON, or not an
@@ -261,6 +367,8 @@ async function readCachedWithTtl<T>(
 interface NostrContextType {
   isLoggedIn: boolean;
   isLoggingIn: boolean;
+  /** Logged-in user's hex pubkey, or null when logged out. */
+  pubkey: string | null;
   profile: NostrProfile | null;
   contacts: NostrContact[];
   relays: RelayConfig[];
@@ -302,6 +410,28 @@ interface NostrContextType {
     recipientPubkey: string,
     plaintext: string,
   ) => Promise<{ success: boolean; error?: string }>;
+  /**
+   * Send a NIP-17 group chat message to multiple recipients. Builds one
+   * kind-14 rumor with `subject` + `p` tags for every member, then NIP-59
+   * seal+wraps it once per recipient (including the sender for cross-device
+   * visibility). NSEC-only — Amber group send is a follow-up. See PR #227.
+   */
+  sendGroupMessage: (input: {
+    groupId: string;
+    subject: string;
+    memberPubkeys: string[];
+    text: string;
+  }) => Promise<{ success: boolean; wrapsPublished?: number; error?: string }>;
+  /**
+   * Publish a parameterised-replaceable kind-30200 group-state event for
+   * client-side group consensus. Idempotent on (creator, d-tag) — relays
+   * keep only the latest per the NIP-33 spec.
+   */
+  publishGroupState: (input: {
+    groupId: string;
+    name: string;
+    memberPubkeys: string[];
+  }) => Promise<{ success: boolean; error?: string }>;
   fetchConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
   /**
    * Read the persisted per-peer conversation cache synchronously-ish
@@ -829,6 +959,15 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       for (const k of allKeys) {
         if (k.startsWith(convPrefix) || k.startsWith(lastSeenPrefix)) toRemove.push(k);
       }
+      // Group state + per-group message logs are NOT yet account-scoped
+      // (single-account today; per-account namespacing is a follow-up).
+      // Clear them on logout so the next signed-in identity can't see
+      // the previous identity's groups or thread history.
+      const allKeysForGroups = allKeys; // already fetched above
+      toRemove.push('nostr_groups');
+      for (const k of allKeysForGroups) {
+        if (k.startsWith('group_messages_')) toRemove.push(k);
+      }
     }
     await AsyncStorage.multiRemove(toRemove);
 
@@ -1157,6 +1296,91 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
 
   /**
+   * NIP-17 multi-recipient send. NSEC-only path — for Amber, returns an
+   * error and leaves the per-event signing flow as a follow-up.
+   */
+  const sendGroupMessage = useCallback(
+    async (input: {
+      groupId: string;
+      subject: string;
+      memberPubkeys: string[];
+      text: string;
+    }): Promise<{ success: boolean; wrapsPublished?: number; error?: string }> => {
+      if (!pubkey || !isLoggedIn) return { success: false, error: 'Not logged in' };
+      if (signerType !== 'nsec') {
+        return {
+          success: false,
+          error: 'Group messages currently require an nsec login (Amber not yet supported)',
+        };
+      }
+      const text = input.text.trim();
+      if (!text) return { success: false, error: 'Empty message' };
+      const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+      const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
+      try {
+        const nsec = await SecureStore.getItemAsync(NSEC_KEY);
+        if (!nsec) return { success: false, error: 'Key not found' };
+        const { secretKey } = nostrService.decodeNsec(nsec);
+        const rumor = nostrService.createGroupChatRumor({
+          senderPubkey: pubkey,
+          subject: input.subject,
+          memberPubkeys: input.memberPubkeys,
+          content: text,
+        });
+        const result = await nostrService.sendNip17ToManyWithNsec({
+          senderSecretKey: secretKey,
+          rumor,
+          recipientPubkeys: input.memberPubkeys,
+          relays: targetRelays,
+        });
+        if (result.wrapsPublished === 0) {
+          return { success: false, error: result.errors[0] ?? 'No wraps published' };
+        }
+        return { success: true, wrapsPublished: result.wrapsPublished };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to send group message';
+        return { success: false, error: message };
+      }
+    },
+    [pubkey, isLoggedIn, signerType, relays],
+  );
+
+  /**
+   * Publish a kind-30200 group-state event. Same signing-path constraints
+   * as sendGroupMessage (nsec-only for now).
+   */
+  const publishGroupState = useCallback(
+    async (input: {
+      groupId: string;
+      name: string;
+      memberPubkeys: string[];
+    }): Promise<{ success: boolean; error?: string }> => {
+      if (!pubkey || !isLoggedIn) return { success: false, error: 'Not logged in' };
+      if (signerType !== 'nsec') {
+        return { success: false, error: 'Group state publish currently requires nsec login' };
+      }
+      const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+      const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
+      try {
+        const nsec = await SecureStore.getItemAsync(NSEC_KEY);
+        if (!nsec) return { success: false, error: 'Key not found' };
+        const { secretKey } = nostrService.decodeNsec(nsec);
+        const event = nostrService.createGroupStateEvent({
+          groupId: input.groupId,
+          name: input.name,
+          memberPubkeys: input.memberPubkeys,
+        });
+        await nostrService.signAndPublishEvent(event, secretKey, targetRelays);
+        return { success: true };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to publish group state';
+        return { success: false, error: message };
+      }
+    },
+    [pubkey, isLoggedIn, signerType, relays],
+  );
+
+  /**
    * Decrypt one NIP-04 payload with whichever signer is active. Returns
    * null (not throw) on failure so batch callers don't abort the whole
    * loop on one bad event.
@@ -1425,6 +1649,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               const rumor = unwrapWrapNsec(wrap, secretKey, onSkip);
               if (++nip17Decrypted % DECRYPT_YIELD_EVERY === 0) await yieldToEventLoop();
               if (!rumor) continue;
+              // If this is a multi-recipient group rumor, route it to
+              // the group store and skip 1:1 caching. Opening a DM
+              // thread shouldn't backfill group rumors into the 1:1
+              // cache — they belong to GroupConversationScreen.
+              const routeResult = await tryRouteGroupRumor(rumor, pubkey, wrap.id);
+              if (routeResult.kind !== 'not-group') continue;
               const partnership = partnerFromRumor(rumor, pubkey);
               if (!partnership) continue;
               // Cache every successfully decrypted wrap, even if it
@@ -1486,6 +1716,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   onSkip,
                 );
                 if (!rumor) continue;
+                // Multi-recipient (group) rumors: route to group storage
+                // and skip the 1:1 thread.
+                const routeResult = await tryRouteGroupRumor(rumor, pubkey, wrap.id);
+                if (routeResult.kind !== 'not-group') continue;
                 const partnership = partnerFromRumor(rumor, pubkey);
                 if (!partnership || partnership.partnerPubkey !== normalized) continue;
                 decrypted.push({
@@ -1612,10 +1846,19 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setDmInbox(filteredCache);
           }
 
+          // For pull-to-refresh / force refresh, skip the `since` filter
+          // entirely. NIP-59 wraps have a randomised `created_at` (up to
+          // 2 days back), so a `since` cutoff is unreliable for catching
+          // freshly-published wraps — the relay will drop wraps whose
+          // randomised stamp falls behind the cutoff. The wrap-id cache
+          // dedupes the re-fetched bytes, so the cost of dropping the
+          // floor is just the relay round-trip, not re-decrypt. Group
+          // messages especially benefit since GroupsScreen / GroupConv
+          // open with `force: true` to chase newly-arrived rumors.
           const { kind4, kind1059 } = await nostrService.fetchInboxDmEvents(
             refreshForPubkey,
             readRelays,
-            { since: lastSeen },
+            opts?.force ? {} : { since: lastSeen },
           );
           const entries: DmInboxEntry[] = [];
 
@@ -1733,6 +1976,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 const rumor = unwrapWrapNsec(wrap, secretKey, onSkip);
                 if (++nip17Decrypted % DECRYPT_YIELD_EVERY === 0) await yieldToEventLoop();
                 if (!rumor) continue;
+                // Multi-recipient (group) rumors: route to group storage
+                // and short-circuit the DM-inbox path. The 1:1 inbox
+                // never sees group messages — they belong to a different
+                // surface (GroupConversationScreen).
+                const routeResult = await tryRouteGroupRumor(rumor, refreshForPubkey, wrap.id);
+                if (routeResult.kind !== 'not-group') continue;
                 const partnership = partnerFromRumor(rumor, refreshForPubkey);
                 if (!partnership) continue;
                 // B1 — drop non-follows at the data layer. No caching, no
@@ -1803,6 +2052,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 try {
                   const rumor = await unwrapWrapViaNip44(wrap, amberNip44DecryptSilent, onSkip);
                   if (!rumor) continue;
+                  // Multi-recipient (group) rumors: route to group storage
+                  // and short-circuit the DM-inbox path.
+                  const routeResult = await tryRouteGroupRumor(rumor, refreshForPubkey, wrap.id);
+                  if (routeResult.kind !== 'not-group') continue;
                   const partnership = partnerFromRumor(rumor, refreshForPubkey);
                   if (!partnership) continue;
                   // B1 — never cache rumors from non-followed senders. The
@@ -1962,6 +2215,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     () => ({
       isLoggedIn,
       isLoggingIn,
+      pubkey,
       profile,
       contacts,
       relays,
@@ -1977,6 +2231,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       unfollowContact,
       addContact,
       sendDirectMessage,
+      sendGroupMessage,
+      publishGroupState,
       fetchConversation,
       getCachedConversation,
       dmInbox,
@@ -1988,6 +2244,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [
       isLoggedIn,
       isLoggingIn,
+      pubkey,
       profile,
       contacts,
       relays,
@@ -2003,6 +2260,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       unfollowContact,
       addContact,
       sendDirectMessage,
+      sendGroupMessage,
+      publishGroupState,
       fetchConversation,
       getCachedConversation,
       dmInbox,

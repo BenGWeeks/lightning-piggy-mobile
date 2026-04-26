@@ -589,6 +589,103 @@ A single-flight guard (`useRef<Promise>`) coalesces overlapping `refreshDmInbox`
 
 The 30 / 90-day chip on MessagesScreen filters summaries by `lastActivityAt` at render time. It's user-selectable and persists via `AsyncStorage.messages_window_days`. The fetch itself isn't time-bounded (relays return the most recent 500 matching events); the chip just narrows what's displayed.
 
+== Group Chat (NIP-17 multi-recipient + kind:30200, PR #227)
+
+Client-side group chat layered on top of the existing NIP-17 DM pipeline. No relay-side support is required — every group is just a set of recipients sharing a name, agreed on by the participating clients.
+
+=== Protocol stack
+
+[cols="1,4", options="header"]
+|===
+| Spec | Role
+
+| https://github.com/nostr-protocol/nips/blob/master/17.md[NIP-17] | Sealed gift-wrapped DMs. The same `nip59.wrapManyEvents` helper sends to N recipients in one call (the helper also wraps a self-copy so the sender syncs across their own devices).
+| https://github.com/nostr-protocol/nips/blob/master/14.md[NIP-14] | `subject` tag on the inner kind-14 rumor carries the human-readable group name so the receiver can render it without round-tripping the kind-30200.
+| `kind:30200` (custom) | Parameterised-replaceable group-state event. Tags: `["d", groupId]`, `["name", groupName]`, `["p", member]…`. Signed by ANY current group member, not only the original creator. Receivers reconcile by `groupId` + `created_at`. Not a NIP — see `nostrService.ts:GROUP_STATE_KIND` for the schema.
+|===
+
+NIP-29 (relay-enforced groups) and NIP-104 (MLS) were both considered. NIP-29 was rejected because it requires opt-in relay support for every member's read relay; NIP-104/MLS deferred until a maintained RN-friendly MLS library lands.
+
+=== Send path
+
+`sendGroupMessage()` in `NostrContext`:
+
+1. Build a kind-14 rumor with `subject = group.name`, one `p` tag per recipient, content = message text.
+2. Call `nip59.wrapManyEvents(rumor, senderSecret, [...recipients])` — produces N+1 wraps (one per recipient + a self-wrap for cross-device sync).
+3. `Promise.all(pool.publish(...wraps))` to the union of read+write relays.
+4. Optimistically `appendGroupMessage()` locally with a `local_…` id and fire `notifyGroupMessage()` so `GroupsContext` bumps the activity rollup that drives Messages-tab ordering.
+
+NSEC-only path. Amber path requires per-event `signEvent` IPC which the NIP-59 helpers don't expose; tracked as a follow-up.
+
+=== Receive path
+
+The existing NIP-17 decrypt loop (`refreshDmInbox` + per-thread inline decrypt) calls `tryRouteGroupRumor()` for every kind-14 rumor BEFORE the 1:1 DM cache path:
+
+[cols="1,4", options="header"]
+|===
+| Result | Caller behaviour
+
+| `routed` | Persisted to `groupMessagesStorageService` keyed by `group.id`; `notifyGroupMessage()` fires; caller continues to the next wrap.
+| `group-no-match` | Group-shaped rumor (≥2 OTHER participants) but no locally-known group whose roster matches the participant set. Dropped; caller continues. CRITICAL: caller must NOT fall through to `partnerFromRumor`, which would arbitrarily pick the first p-tag and bucket the rumor as a 1:1 DM.
+| `not-group` | 1:1 DM (or malformed). Caller proceeds with the existing `partnerFromRumor` + cache path.
+|===
+
+Routing happens via `groupRoutingRegistry.findGroupForParticipants(otherParticipants)` — a module-level set kept in lock-step with `GroupsContext.groups` so the synchronous decrypt loop can resolve membership without going through React context.
+
+=== Group state subscription (kind:30200)
+
+`subscribeGroupStateForViewer` opens TWO concurrent filters on the user's relays:
+
+* `{ kinds: [30200], '#p': [viewerPubkey] }` — groups OTHERS published that include the viewer.
+* `{ kinds: [30200], authors: [viewerPubkey] }` — groups the VIEWER published themselves (the kind-30200 builder excludes the signer from `p` tags by spec convention, so a viewer-authored event won't match the p-filter).
+
+Together these cover every kind-30200 the viewer needs to see, including their own renames syncing across devices.
+
+`reconcileFromGroupStateEvent` enforces:
+
+* Conflict resolution by `created_at`: the newer event wins for a given `groupId`.
+* Trust gate: only senders already in the group's local `memberPubkeys` (or the viewer themselves) can update an existing group. Prevents a non-member from hijacking the name on the viewer's device.
+* New groups (no local entry for the `groupId`) bypass the trust gate and persist regardless of friend-graph — the friend-graph filter applies at *render time* (`visibleGroups`) so kind-30200 events that land before the kind:3 follow-list refresh aren't lost.
+
+The reconciler runs inside React's `setGroups` callback so concurrent inbound 30200 events and local `createGroup` calls don't clobber each other.
+
+=== Friend-graph anti-spam filter (`visibleGroups`)
+
+A group is rendered only if at least ONE other member is in the viewer's follow list (`useNostr().contacts`). Mirrors the 1:1 "Following only" rule. Locked-on outside dev-mode; inside dev-mode the user can flip it via the chip on `GroupsScreen`. See `GroupsContext.visibleGroups`.
+
+Anti-spam check happens at render, not at write — kind-30200 events still persist regardless of friend-graph (see above). Storage cost is bounded by the relay subscription's `#p:viewer` filter, so a spammer can only inflate the viewer's local store if they specifically address the viewer.
+
+=== Leave semantics ("Delete group" button)
+
+The Leave action only removes the group from the viewer's local AsyncStorage:
+
+* No kind:30200 deletion / tombstone is published.
+* Other members have NO signal that the viewer left.
+* If a remaining member subsequently publishes a kind-30200 that p-tags the viewer (e.g. a rename, or membership change), the viewer's `subscribeGroupStateForViewer` will receive it via the `#p:viewer` filter, the reconciler will see no local entry for the `groupId`, and a fresh local entry will be CREATED — re-adding the viewer.
+* If a remaining member just sends a group MESSAGE (kind-14 rumor) without publishing a fresh state event, the viewer's `tryRouteGroupRumor` returns `group-no-match` and the rumor is dropped. So messages alone don't re-add the viewer; only state events do.
+
+This is why the UI says "Leave" rather than "Delete" — it's local-only and other members can still pull the viewer back in via fresh state events. Multi-party deletion would require either a NIP-09 event the receivers honour or a kind-30200 tombstone — tracked as a follow-up.
+
+=== Account scoping caveat
+
+`nostr_groups` and per-group `group_messages_${groupId}` keys are NOT yet namespaced per-account. Cross-account leak on the same device is prevented at logout: `NostrContext.logout` removes `nostr_groups` and scans for keys starting with `group_messages_` to multi-remove them. Per-account namespacing (`nostr_groups_${pubkey}` etc.) is still needed before multi-account switching without a logout in between can ship — tracked as a follow-up.
+
+=== Inbox surfacing
+
+`MessagesScreen` merges `groupSummaries` (from `GroupsContext`) with the existing zap + DM summaries into one list, sorted by `lastActivityAt`. Group rows render via `GroupRow` with a stacked-3 avatar cluster (most-recent posters; falls back to first 3 members for empty groups). Same row height as `ConversationRow` so the inbox reads as one list.
+
+=== Key files
+
+* `src/contexts/GroupsContext.tsx` — group state, activity rollup, reconciler, anti-spam filter.
+* `src/services/nostrService.ts` — `createGroupStateEvent`, `createGroupChatRumor`, `sendNip17ToManyWithNsec`, `subscribeGroupStateForViewer`, `GROUP_STATE_KIND`.
+* `src/services/groupsStorageService.ts` — AsyncStorage for the group roster.
+* `src/services/groupMessagesStorageService.ts` — AsyncStorage for per-group message logs (capped at 500 / group).
+* `src/services/groupRoutingRegistry.ts` — module-level routing map for the synchronous decrypt loop.
+* `src/utils/nip17Unwrap.ts` — `classifyRumor` distinguishing 1:1 vs multi-recipient.
+* `src/contexts/NostrContext.tsx` — `tryRouteGroupRumor`, `notifyGroupMessage`, `subscribeGroupMessages`, `sendGroupMessage`, logout cleanup.
+* `src/components/GroupAvatar.tsx`, `GroupRow.tsx`, `CreateGroupSheet.tsx`, `RenameGroupSheet.tsx` — UI surfaces.
+* `src/screens/GroupConversationScreen.tsx`, `GroupsScreen.tsx` — screens.
+
 == Deep Linking
 
 - Contact profiles link to Primal via `https://primal.net/p/{npub}`

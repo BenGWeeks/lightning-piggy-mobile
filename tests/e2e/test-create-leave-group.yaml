@@ -1,0 +1,108 @@
+appId: com.lightningpiggy.app.dev
+name: Create a group, then leave it (assert it's gone)
+---
+# Standalone test for the create + leave round-trip on a single account.
+# Does NOT verify cross-member visibility — leave is local-only by design
+# (see docs/SOLUTION_DESIGN.adoc § "Leave semantics"); other members keep
+# the group, and any subsequent kind:30200 they publish that p-tags the
+# viewer will re-add it. The 3-way suite covers that re-add path.
+#
+# Pre-reqs:
+#  - .env contains MAESTRO_NSEC (defaults to Big Piggy)
+#  - The signed-in account has at least one followed friend (the create
+#    sheet requires picking ≥1 member)
+#
+# Run:
+#   source .env && maestro test \
+#     -e MAESTRO_NSEC=$MAESTRO_NSEC \
+#     -e GROUP_NAME='LeaveTest-1' \
+#     -e MEMBER_PUBKEY_PREFIX='d9b33280ba73' \
+#     tests/e2e/test-create-leave-group.yaml
+#
+# MEMBER_PUBKEY_PREFIX is the first-12-hex-chars of one followed friend's
+# pubkey (matches the testID pattern `member-row-<prefix>` set in
+# CreateGroupSheet.tsx). Defaults below assume Big Piggy + Little Piggy.
+
+- runFlow: _subflow-login-as.yaml
+
+# === Create the group ===
+- tapOn:
+    id: 'tab-friends'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'groups-button'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Trigger the create sheet (covers both empty-list and populated paths).
+- tapOn:
+    id: 'create-first-group'
+    optional: true
+- tapOn:
+    id: 'create-group-button'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Name the group. Tap the placeholder text rather than the testID
+# (BottomSheetTextInput's testID doesn't propagate; same caveat as
+# the Connect Nostr nsec field — see docs/TROUBLESHOOTING.adoc).
+- tapOn:
+    text: 'e.g. Family'
+- inputText: ${GROUP_NAME}
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1500
+
+# Pick one member. scrollUntilVisible because Big follows ~50+ accounts.
+- scrollUntilVisible:
+    element:
+      id: 'member-row-${MEMBER_PUBKEY_PREFIX}'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 50
+- tapOn:
+    id: 'member-row-${MEMBER_PUBKEY_PREFIX}'
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- tapOn:
+    id: 'create-group-submit'
+- waitForAnimationToEnd:
+    timeout: 4000
+
+# Should land on GroupConversationScreen with the new title.
+- assertVisible:
+    text: ${GROUP_NAME}
+
+# === Leave the group ===
+- tapOn:
+    id: 'leave-group-button'
+- waitForAnimationToEnd:
+    timeout: 1500
+# Confirmation dialog — destructive style. Tap the "Leave" action.
+- tapOn:
+    text: 'Leave'
+- waitForAnimationToEnd:
+    timeout: 4000
+
+# After leaving we navigate back. The group should NOT be visible
+# anywhere we'd see it: not in the Friends → Groups list, not in the
+# Messages tab.
+- tapOn: 'Messages tab'
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertNotVisible:
+    text: ${GROUP_NAME}
+
+# Also confirm in the dedicated Groups list (Friends → Groups).
+- tapOn: 'Friends tab'
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: 'groups-button'
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertNotVisible:
+    text: ${GROUP_NAME}

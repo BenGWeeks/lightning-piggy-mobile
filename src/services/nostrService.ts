@@ -731,3 +731,172 @@ export function cleanup(): void {
 export function getRelayConnectionStatus(): Map<string, boolean> {
   return pool.listConnectionStatus();
 }
+
+/**
+ * Parameterised-replaceable group-state event kind used by Lightning Piggy
+ * for client-side group consensus. See PR #227.
+ *
+ * Tags:
+ *  - ["d", group.id]            unique group identifier
+ *  - ["name", group.name]       human-readable display name
+ *  - ["p", memberPubkey] ...    one entry per member (excluding the signer)
+ *
+ * Signed by ANY current group member, not only the original creator.
+ * The receiver-side trust gate (GroupsContext.reconcileFromGroupStateEvent)
+ * accepts updates from any sender who's already in the local member set
+ * for that group (plus the viewer themselves for cross-device sync).
+ * Receivers reconcile against the latest created_at they've seen for
+ * a given groupId.
+ */
+export const GROUP_STATE_KIND = 30200;
+
+export interface GroupStateEventInput {
+  groupId: string;
+  name: string;
+  memberPubkeys: string[];
+}
+
+/**
+ * Build (unsigned) the kind-30200 group-state event. Caller is responsible
+ * for signing + publishing — same pattern as createDirectMessageEvent.
+ */
+export function createGroupStateEvent(input: GroupStateEventInput): {
+  kind: number;
+  created_at: number;
+  tags: string[][];
+  content: string;
+} {
+  const tags: string[][] = [
+    ['d', input.groupId],
+    ['name', input.name],
+  ];
+  for (const pk of input.memberPubkeys) {
+    tags.push(['p', pk]);
+  }
+  return {
+    kind: GROUP_STATE_KIND,
+    created_at: Math.floor(Date.now() / 1000),
+    tags,
+    content: '',
+  };
+}
+
+/**
+ * Build the inner kind-14 chat rumor for a group message. Mirrors the
+ * NIP-17 spec: the inner rumor carries the human-visible content + a
+ * `subject` tag (NIP-14) for the group name + one `p` tag per recipient
+ * so members can detect they share a thread.
+ *
+ * Returned event is unsigned; pass it to nip59 wrap helpers per recipient.
+ */
+export function createGroupChatRumor(input: {
+  senderPubkey: string;
+  subject: string;
+  memberPubkeys: string[];
+  content: string;
+}): { kind: number; created_at: number; tags: string[][]; content: string; pubkey: string } {
+  const tags: string[][] = [['subject', input.subject]];
+  for (const pk of input.memberPubkeys) {
+    tags.push(['p', pk]);
+  }
+  return {
+    pubkey: input.senderPubkey,
+    kind: 14,
+    created_at: Math.floor(Date.now() / 1000),
+    tags,
+    content: input.content,
+  };
+}
+
+/**
+ * NIP-17 multi-recipient send via nostr-tools `wrapManyEvents`. Builds a
+ * kind-14 rumor once, then seal+wraps it for each recipient (the helper
+ * spec-conformantly re-wraps for the sender as well so they see their own
+ * message on other devices). All wraps are then published in parallel.
+ *
+ * NSEC-only path. Amber path requires per-event signEvent IPC which the
+ * NIP-59 helpers don't support out of the box; tracked as a follow-up.
+ */
+export async function sendNip17ToManyWithNsec(input: {
+  senderSecretKey: Uint8Array;
+  rumor: { kind: number; created_at: number; tags: string[][]; content: string };
+  recipientPubkeys: string[];
+  relays: string[];
+}): Promise<{ wrapsPublished: number; errors: string[] }> {
+  trackRelays(input.relays);
+  // Dedup recipients (sender is included by wrapManyEvents internally).
+  const dedupedRecipients = Array.from(new Set(input.recipientPubkeys.map((p) => p.toLowerCase())));
+  const wraps = nip59.wrapManyEvents(
+    input.rumor as Parameters<typeof nip59.wrapManyEvents>[0],
+    input.senderSecretKey,
+    dedupedRecipients,
+  );
+  const errors: string[] = [];
+  let published = 0;
+  await Promise.all(
+    wraps.map(async (wrap) => {
+      try {
+        await Promise.any(pool.publish(input.relays, wrap as VerifiedEvent));
+        published++;
+      } catch (e) {
+        errors.push((e as Error)?.message ?? 'publish failed');
+      }
+    }),
+  );
+  return { wrapsPublished: published, errors };
+}
+
+/**
+ * Subscribe to inbound kind-30200 group-state events relevant to the
+ * viewer. Two filters are OR-ed together so the viewer sees:
+ *
+ *  - groups OTHER members published that p-tag the viewer (`#p: [self]`)
+ *  - groups the VIEWER authored themselves (`authors: [self]`)
+ *
+ * The second filter exists because `createGroupStateEvent` excludes the
+ * author from the `p` tags (spec convention — the signer is implicit),
+ * so a viewer-authored event wouldn't match the p-tag filter and the
+ * group wouldn't sync across the viewer's own devices.
+ *
+ * Returns an unsubscribe function. Dedup / reconciliation is the
+ * caller's job (callback receives every matching event; caller compares
+ * created_at).
+ */
+export function subscribeGroupStateForViewer(input: {
+  viewerPubkey: string;
+  relays: string[];
+  onEvent: (ev: {
+    id: string;
+    pubkey: string;
+    kind: number;
+    created_at: number;
+    tags: string[][];
+    content: string;
+  }) => void;
+}): () => void {
+  trackRelays(input.relays);
+  const onevent = (ev: Parameters<typeof input.onEvent>[0]): void => {
+    input.onEvent(ev);
+  };
+  // Two separate filters (subscribeMany takes a single Filter): one for
+  // events that p-tag the viewer, one for events the viewer authored.
+  const subPtag = pool.subscribeMany(
+    input.relays,
+    { kinds: [GROUP_STATE_KIND], '#p': [input.viewerPubkey] } as Filter,
+    { onevent },
+  );
+  const subAuthored = pool.subscribeMany(
+    input.relays,
+    { kinds: [GROUP_STATE_KIND], authors: [input.viewerPubkey] } as Filter,
+    { onevent },
+  );
+  return () => {
+    for (const s of [subPtag, subAuthored]) {
+      try {
+        s.close();
+      } catch {
+        // best-effort
+      }
+    }
+  };
+}

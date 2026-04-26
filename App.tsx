@@ -11,6 +11,7 @@ import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import Toast, { BaseToast, ErrorToast, InfoToast } from 'react-native-toast-message';
 import { WalletProvider, useWallet } from './src/contexts/WalletContext';
 import { NostrProvider } from './src/contexts/NostrContext';
+import { GroupsProvider } from './src/contexts/GroupsContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
@@ -106,12 +107,16 @@ export default function App() {
           <ThemeProvider>
             <WalletProvider>
               <NostrProvider>
-                <BottomSheetModalProvider>
-                  <ThemedStatusBar />
-                  <AppNavigator />
-                </BottomSheetModalProvider>
-                <Toast topOffset={60} config={toastConfig} />
-                <GlobalIncomingPaymentOverlay />
+                {/* GroupsProvider sits inside Nostr so groups can subscribe
+                    to multi-recipient gift wraps using the active signer. */}
+                <GroupsProvider>
+                  <BottomSheetModalProvider>
+                    <ThemedStatusBar />
+                    <AppNavigator />
+                  </BottomSheetModalProvider>
+                  <Toast topOffset={60} config={toastConfig} />
+                  <GlobalIncomingPaymentOverlay />
+                </GroupsProvider>
               </NostrProvider>
             </WalletProvider>
             <BootSplash done={bootDone} />
