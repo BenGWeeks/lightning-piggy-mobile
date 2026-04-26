@@ -87,9 +87,7 @@ function extractNdefText(tag: TagEvent): string | null {
       // Well-Known type
       const typeArr = record.type;
       const typeStr =
-        typeof typeArr === 'string'
-          ? typeArr
-          : String.fromCharCode(...(typeArr as number[]));
+        typeof typeArr === 'string' ? typeArr : String.fromCharCode(...(typeArr as number[]));
 
       if (typeStr === 'U') {
         // URI record: first byte is URI identifier code
@@ -206,10 +204,7 @@ export async function scanNfcTag(): Promise<NfcTagContent> {
  * @param npub - The npub string to write
  * @param onTagDetected - Optional callback fired when a tag is detected (before write)
  */
-export async function writeNpubToTag(
-  npub: string,
-  onTagDetected?: () => void,
-): Promise<void> {
+export async function writeNpubToTag(npub: string, onTagDetected?: () => void): Promise<void> {
   if (!npub.startsWith('npub1')) {
     throw new Error('Invalid npub format');
   }

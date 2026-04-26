@@ -152,7 +152,8 @@ export function decodeLnurl(lnurl: string): string {
 export async function resolveLnurl(
   lnurl: string,
 ): Promise<
-  { tag: 'payRequest'; params: LnurlPayParams } | { tag: 'withdrawRequest'; params: LnurlWithdrawParams }
+  | { tag: 'payRequest'; params: LnurlPayParams }
+  | { tag: 'withdrawRequest'; params: LnurlWithdrawParams }
 > {
   const url = decodeLnurl(lnurl); // decodeLnurl validates HTTPS
   const response = await fetch(url);
