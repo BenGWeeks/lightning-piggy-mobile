@@ -1,0 +1,68 @@
+appId: com.lightningpiggy.app.dev
+name: Attach — share a contact with Little Piggy
+---
+# Opens the AttachPanel → Contact tile → FriendPickerSheet → picks the
+# first available friend (alphabetically, by tapping the first row in
+# the friend list) → verifies the "CONTACT SHARED" bubble appears in
+# the Little Piggy thread.
+#
+# Safe to run repeatedly — the shared contact is published as a NIP-44
+# encrypted DM between Big Piggy and Little Piggy (both test fixtures).
+# The contact being shared can be any real Nostr peer present in Big
+# Piggy's follow list; we share their pubkey only, no PII risk.
+#
+# Run: maestro --device emulator-5554 test tests/e2e/test-attach-send-contact.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
+- tapOn:
+    text: 'Little Piggy.*'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: 'attach-share-contact'
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible:
+    id: 'friend-picker-search'
+
+# Tap any rendered friend row by its accessibilityLabel prefix.
+# DELIBERATELY NOT typing into `friend-picker-search` first: per
+# docs/TROUBLESHOOTING.adoc, Maestro `inputText` is unreliable on
+# @gorhom/bottom-sheet's BottomSheetTextInput under the New
+# Architecture (the text appears but `onChangeText` may not update
+# React state, so the search filter never narrows). Tapping a row by
+# its `Send to <name>` accessibility label is deterministic.
+- tapOn:
+    text: 'Send to .*'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# After the picker dismisses, the "Contact shared" bubble appears in
+# the conversation thread (title-case label per ConversationScreen).
+- extendedWaitUntil:
+    visible:
+      text: 'Contact shared'
+    timeout: 15000
