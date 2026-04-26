@@ -118,7 +118,7 @@ const AboutScreen: React.FC = () => {
                 <Image source={{ uri: teamProfile.picture }} style={styles.teamPicture} />
               ) : (
                 <View style={styles.teamPicturePlaceholder}>
-                  <UserRound size={28} color={colors.textSupplementary} strokeWidth={1.75} />
+                  <UserRound size={28} color={colors.textBody} strokeWidth={1.75} />
                 </View>
               )}
               <View style={styles.teamInfo}>
