@@ -30,10 +30,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   orientation: 'portrait',
   icon: './assets/icon.png',
   userInterfaceStyle: 'light',
+  // Splash screen: the pig + brand wordmark on brand-pink. Same asset
+  // IntroScreen uses so first-time users get a continuous pig → Home
+  // transition without the pink-spinner gap. `contain` leaves padding
+  // around the image so different device aspect ratios render cleanly.
   splash: {
-    image: './assets/splash-icon.png',
+    image: './assets/images/lightning-piggy-intro.png',
     resizeMode: 'contain',
-    backgroundColor: '#ffffff',
+    backgroundColor: '#e91e63',
   },
   scheme: 'lightningpiggy',
   ios: {
@@ -49,6 +53,22 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     },
   },
   plugins: [
+    // react-native-edge-to-edge — injects a `Theme.EdgeToEdge` parent
+    // that installs the `WindowInsetsCompat` root listener RN needs on
+    // Android 15+. Without it, `android:windowSoftInputMode="adjustResize"`
+    // is a no-op and every keyboard API (Keyboard.addListener,
+    // useAnimatedKeyboard, KeyboardAvoidingView, KeyboardStickyView)
+    // reports 0 height because the inset never propagates. See #194.
+    [
+      'react-native-edge-to-edge',
+      {
+        android: { parentTheme: 'Default', enforceNavigationBarContrast: false },
+      },
+    ],
+    // withAdjustResize becomes redundant once edge-to-edge is wired
+    // (RN handles adjustResize semantics itself via insets). Keeping
+    // the plugin during the fix so the sheets in the repo that rely
+    // on it don't regress — can remove once verified.
     './plugins/withAdjustResize',
     './plugins/withAmberQueries',
     'expo-secure-store',
@@ -56,13 +76,23 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       'expo-image-picker',
       {
         photosPermission:
-          'Allow Lightning Piggy to access your photos to set your profile picture.',
+          'Allow Lightning Piggy to access your photos to set your profile picture and send images in conversations.',
+        cameraPermission:
+          'Allow Lightning Piggy to use your camera to take and send photos in conversations.',
       },
     ],
     [
       'expo-contacts',
       {
         contactsPermission: 'Allow Lightning Piggy to access your contacts to find friends.',
+      },
+    ],
+    [
+      'expo-location',
+      {
+        locationWhenInUsePermission:
+          'Allow Lightning Piggy to access your location so you can share it in a private message.',
+        isAndroidBackgroundLocationEnabled: false,
       },
     ],
   ],
@@ -83,6 +113,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     eas: {
       projectId: 'b01d6b21-2f80-40af-b58c-c40e4302fa65',
     },
+    // GIPHY API key for the conversation GIF picker. Build-time only —
+    // picker silently omits itself from the Attach menu when the key is
+    // absent. See `src/services/giphyService.ts` and README for setup.
+    giphyApiKey: process.env.EXPO_PUBLIC_GIPHY_API_KEY ?? null,
   },
   owner: 'bengweeks',
 });

@@ -1,5 +1,6 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { View, Text, Image, TouchableOpacity, ScrollView } from 'react-native';
+import TabHeader from '../components/TabHeader';
 import { useFocusEffect } from '@react-navigation/native';
 import { courses } from '../data/learnContent';
 import {
@@ -8,8 +9,9 @@ import {
   getCourseCompletedCount,
   isCourseComplete,
 } from '../services/learnProgressService';
-import { Check } from 'lucide-react-native';
-import { styles } from '../styles/LearnScreen.styles';
+import { Check, GraduationCap } from 'lucide-react-native';
+import { useThemeColors } from '../contexts/ThemeContext';
+import { createLearnScreenStyles } from '../styles/LearnScreen.styles';
 
 import { LearnNavigation } from '../navigation/types';
 
@@ -18,6 +20,8 @@ interface Props {
 }
 
 const LearnScreen: React.FC<Props> = ({ navigation }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createLearnScreenStyles(colors), [colors]);
   const [progress, setProgress] = useState<LearnProgress>({ completedMissions: [] });
 
   useFocusEffect(
@@ -36,17 +40,7 @@ const LearnScreen: React.FC<Props> = ({ navigation }) => {
           resizeMode="cover"
         />
         <View style={styles.headerOverlay} />
-        <TouchableOpacity
-          style={styles.homeButton}
-          onPress={() => navigation.getParent()?.navigate('Home')}
-        >
-          <Image
-            source={require('../../assets/images/Home.png')}
-            style={styles.homeIcon}
-            resizeMode="contain"
-          />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Learn</Text>
+        <TabHeader title="Learn" icon={<GraduationCap size={20} color={colors.brandPink} />} />
       </View>
 
       {/* Course grid */}

@@ -1,0 +1,54 @@
+appId: com.lightningpiggy.app.dev
+name: Receive landing depends on wallet's lud16
+---
+# Covers #168/#169. The active wallet's `lightningAddress` drives which
+# screen Receive opens onto:
+#
+#   A) lightningAddress is null → AmountEntryScreen (no Address tab, no
+#      "Enter an amount to generate invoice" placeholder).
+#   B) lightningAddress is set  → main view with Address + Amount tabs,
+#      Address selected by default.
+#
+# This script exercises branch A against the currently-active wallet. It
+# assumes the wallet was added from an NWC URL without `lud16=` in the
+# query string AND nobody has manually set one via Wallet Settings. The
+# test-add-nwc-wallet-dev.yaml flow leaves wallets in that state.
+#
+# Branch B should be covered by whatever test adds a wallet with a
+# lud16 present — `test-set-lightning-address.yaml` sets one via Wallet
+# Settings, and after that run this test would fail (and a follow-up
+# assertion of branch B would succeed). Kept narrow here because
+# BottomSheetTextInput + Maestro inputText doesn't reliably write to
+# the Lightning Address input (see TROUBLESHOOTING.adoc entry
+# "Maestro inputText doesn't update React state in
+# BottomSheetTextInput") — so a test that flips branches live is
+# fragile without a Paste-button workaround on that input.
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'tab-home'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- tapOn:
+    id: 'btn-receive'
+
+# Must land on the AmountEntryScreen directly — not on the main Receive
+# view with the "Enter an amount to generate invoice" placeholder. (The
+# earlier Address/Amount tab bar was removed, so asserting on its ids
+# would be a no-op; we assert on the screen container and the main-view
+# placeholder instead.)
+- extendedWaitUntil:
+    visible:
+      id: 'amount-entry-screen'
+    timeout: 5000
+- assertNotVisible: 'Enter an amount to generate invoice'
+
+# Back arrow must NOT render — for a wallet without a lud16 there's no
+# meaningful place to navigate back to (the main view we'd return to
+# is the useless "Enter an amount..." placeholder). Hardware back and
+# swipe-down still dismiss the sheet.
+- assertNotVisible:
+    id: 'amount-entry-back'

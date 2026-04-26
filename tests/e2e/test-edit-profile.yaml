@@ -8,7 +8,7 @@ name: Edit Profile Test
 - waitForAnimationToEnd:
     timeout: 15000
 
-# Navigate to Account
+# Open drawer → Profile sub-screen
 - tapOn:
     text: 'Home tab'
     optional: true
@@ -18,6 +18,10 @@ name: Edit Profile Test
     id: 'profile-icon'
 - waitForAnimationToEnd:
     timeout: 5000
+- tapOn:
+    id: 'drawer-row-profile'
+- waitForAnimationToEnd:
+    timeout: 3000
 
 # Tap Edit Profile
 - tapOn:

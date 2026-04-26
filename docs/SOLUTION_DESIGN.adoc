@@ -471,13 +471,123 @@ Loading 500+ contacts with profiles requires careful optimization:
 
 == Image Upload
 
-Profile pictures and banners are uploaded via the nostr.build API:
+Used by three flows: profile picture / banner (EditProfileSheet), chat image attachments (ConversationScreen). All three funnel through the same helper chain in `src/services/imageUploadService.ts`.
 
-- **Endpoint**: `POST https://nostr.build/api/v2/upload/files`
-- **Method**: multipart/form-data with `file` field
-- **Auth**: Anonymous (no NIP-98 required)
-- **Response**: NIP-94 event with `url` tag containing the hosted image URL
-- **Image picker**: `expo-image-picker` with 1:1 crop for avatars, 3:1 for banners
+=== Pipeline (ordered)
+
+1. **Pick & crop** — `expo-image-picker` with `allowsEditing: true`, `quality: 1`, 1:1 aspect for avatars, 3:1 for banners.
+2. **Strip EXIF metadata** — `stripImageMetadata()` re-encodes the image through `expo-image-manipulator` at `compress: 0.9`, `format: JPEG`, `base64: true`. Re-encoding drops every EXIF chunk (GPS coordinates, capture timestamp, camera Make/Model, Software, …) — no tag-by-tag allowlist needed; the fresh JPEG has no metadata segments at all. Quality is `1` at the picker (not `0.8`) so the manipulator's `0.9` is the only lossy step. Returns `{ uri, base64 }`. Privacy rationale: issue #145.
+3. **Upload** — `uploadImage(uri, signer, base64)`:
+** **Signed in (nsec or Amber)** → `uploadToBlossom(uri, server, signer, base64)`. Blossom PUT with a BUD-02 signed auth event (`kind: 24242`). Server is user-configurable (`getBlossomServer()`), defaults to the Lightning Piggy–hosted instance. See BUD-01 / BUD-02 at https://github.com/hzrd149/blossom.
+** **Not signed in (public key only / hot wallet)** → `uploadToNostrBuild(uri)`. Anonymous `POST https://nostr.build/api/v2/upload/files` with multipart/form-data. Fallback only; no kind-0 publish path hits this branch because profile edits require signing.
+
+=== Why base64 is forwarded inline
+
+`uploadToBlossom` requires the image bytes. Reading `file://` URIs via `fetch` / `XHR` is flaky on Android React Native (encoding lossage, race with `AsyncStorage` locking). The picker's `base64: true` / manipulator's `base64: true` outputs bypass that by passing the bytes in memory as a base64 string; `blossomService.ts` then `Buffer.from(base64, 'base64')` to get the raw `Uint8Array` for the PUT body. Issue #141 regressed because a prior refactor dropped this forwarding.
+
+=== Key files
+
+- `src/services/imageUploadService.ts` — `stripImageMetadata`, `uploadImage`, `uploadToNostrBuild`.
+- `src/services/blossomService.ts` — Blossom BUD-02 signing (`kind: 24242`, 5-min expiration), XHR binary PUT, response parsing. Logs `[Blossom] uploaded <url>` on success — grepped by `scripts/verify_exif_strip.sh`.
+- `src/components/EditProfileSheet.tsx` `pickAndUpload` — profile flow.
+- `src/screens/ConversationScreen.tsx` `uploadAndSendImage` — chat flow.
+
+=== Verification
+
+- `tests/e2e/test-edit-profile-picture.yaml` — drives the UI, asserts no `Upload Failed` alert (#141 regression guard).
+- `tests/e2e/test-exif-strip.yaml` + `scripts/verify_exif_strip.sh` — two-stage check: Maestro drives upload, shell wrapper seeds a JPEG with known GPS / Make / Model / DateTimeOriginal / Software tags, greps logcat for the Blossom URL, downloads the uploaded bytes, and asserts `exiftool` sees none of the seeded tags. Exits 3 on privacy regression.
+
+== Direct Messages (NIP-04 + NIP-17)
+
+The Messages tab is a conversations inbox backed by two Nostr DM specs running side-by-side.
+
+=== Protocols
+
+- **https://github.com/nostr-protocol/nips/blob/master/04.md[NIP-04] — legacy.**
+  Single kind-4 event with AES-256-CBC content. Sender pubkey, recipient `p` tag, and `created_at` are all plaintext on the wire — the spec notes this leaks metadata. Deprecated by the spec text itself in favour of NIP-17.
+- **https://github.com/nostr-protocol/nips/blob/master/17.md[NIP-17] — the modern form.**
+  Three layers: kind-14 *rumor* (unsigned plaintext message) → kind-13 *seal* (NIP-44-encrypted, signed by the real sender) → kind-1059 *gift wrap* (NIP-44-encrypted to the recipient, signed by a disposable ephemeral key). Only the outermost wrap hits relays. Visible fields on the wrap: random `pubkey`, randomized `created_at` (up to 2 days in the past), `kind: 1059`, and a `p` tag for the recipient. Sender identity, message kind, tags, and true send time are all hidden inside the payload.
+- **https://github.com/nostr-protocol/nips/blob/master/44.md[NIP-44] — the cipher.**
+  secp256k1 ECDH + HKDF + ChaCha20 + HMAC-SHA256. The encryption primitive that NIP-17 uses at both layers. Not a DM spec on its own; appears in this codebase only as the tool NIP-17 calls for sealing.
+
+The app accepts both inbound formats and currently sends only NIP-04. Migrating outbound to NIP-17 is tracked under the send-side NIP-17 issue; the inbox work here is explicitly the read-side.
+
+=== Data flow (inbox list)
+
+[source]
+----
+refreshDmInbox(NostrContext)
+  │
+  ├─ fetchInboxDmEvents(myPubkey, relays)
+  │    three parallel pool.querySync calls:
+  │      {kinds:[4],    authors:[me], limit:500}
+  │      {kinds:[4],    #p:[me],      limit:500}
+  │      {kinds:[1059], #p:[me],      limit:500}
+  │
+  ├─ per kind-4 event:
+  │    1. derive partner = fromMe ? p-tag : ev.pubkey
+  │    2. if partner not in followPubkeys → skip (no decrypt)        ←── follow filter
+  │    3. decryptNip04ViaSigner(partner, ev.content)  (nsec or Amber)
+  │    4. push DmInboxEntry
+  │
+  ├─ per kind-1059 event (Amber path):
+  │    0. if NIP-17 toggle off → skip whole block
+  │    1. cache.get(wrap.id) → if present and partner still followed, push
+  │    2. unwrapWrapViaNip44(wrap, amberNip44DecryptSilent)
+  │       - verifyEvent(wrap) sig check
+  │       - layer 1: Amber silent nip44_decrypt → seal JSON
+  │       - parseSeal runtime validator (kind === 13, fields typed)
+  │       - layer 2: Amber silent nip44_decrypt → rumor JSON
+  │       - parseRumor runtime validator
+  │       - require rumor.pubkey === seal.pubkey (NIP-17 spec)
+  │    3. partnerFromRumor(rumor, myPubkey)
+  │    4. if partner not in followPubkeys → drop (no cache write)     ←── follow filter
+  │    5. cache.set(wrap.id, entry); push DmInboxEntry
+  │    6. on PERMISSION_NOT_GRANTED: set amberNip44Permission='denied'
+  │       and stop iterating (no dialog flood)
+  │
+  ├─ per kind-1059 event (nsec path):
+  │    same shape but via unwrapWrapNsec → nip59.unwrapEvent
+  │
+  └─ setDmInbox(entries) — identity-change guard first
+----
+
+The `followPubkeys` gate is a data-layer invariant: plaintext for non-followed senders never enters `dmInbox` React state or the persistent `amber_nip17_cache_v1` AsyncStorage map. `buildDmSummaries` re-applies the same filter when materialising summaries so that unfollowing a contact removes their rows on the next render even before the cache is next re-fetched.
+
+=== Amber silent-path for NIP-17
+
+Amber's `com.greenart7c3.nostrsigner` provider exposes two ways to call `nip44_decrypt`:
+
+1. **ContentResolver fast-path** (silent) — used by our `nip44DecryptSilent` binding. Resolves only if the user has granted blanket permission for the op; rejects with `PERMISSION_NOT_GRANTED` otherwise.
+2. **Intent fallback** (dialog) — used by the normal `requestNip44Decrypt` binding. Shows an approval dialog on every call unless the user previously ticked "Remember my choice".
+
+The inbox refresh uses (1) exclusively so we never fan out one dialog per gift wrap when the user toggles NIP-17 support on for the first time. A failed silent call is caught, the denial is surfaced as `amberNip44Permission === 'denied'`, and Account shows a single grant-permission button that fires a one-off encrypt+decrypt probe round-trip through (2) — one dialog, user taps "Remember my choice", subsequent refreshes are silent.
+
+`ConversationScreen`'s per-thread `fetchConversation` falls back to the Intent path for uncached wraps because that screen is user-initiated and the volume is small.
+
+=== Persistent wrap-id cache
+
+`amber_nip17_cache_v1` in AsyncStorage maps `wrap.id` → decrypted `DmInboxEntry`. Only rumors from followed senders ever land here. Capped at 5000 entries, trimmed by newest `createdAt`. Cleared on logout along with the `amber_nip17_enabled` toggle flag.
+
+A single-flight guard (`useRef<Promise>`) coalesces overlapping `refreshDmInbox` calls so the `useFocusEffect` firing on tab focus doesn't race a pull-to-refresh on the same cache.
+
+=== Shared helpers
+
+- `src/utils/nip17Unwrap.ts` owns the two-layer decrypt pipeline used by both `refreshDmInbox` and `fetchConversation`. Runtime type-guards (`parseSeal`, `parseRumor`) reject malformed payloads; `verifyWrapSig` runs `verifyEvent` before trusting the wrap's `pubkey` / `content`. `unwrapWrapViaNip44(wrap, decryptNip44Callback)` works for any signer; `unwrapWrapNsec(wrap, secretKey)` is the nsec-specialised fast path.
+- `partnerFromRumor(rumor, viewerPubkey)` centralises the "fromMe vs incoming" determination.
+- `getMemoisedSecretKey(pubkey)` in `NostrContext` reads + bech32-decodes the nsec from SecureStore once per session; cleared on logout.
+
+=== Following-only filter
+
+"Following only" is treated as a safety boundary for the kids-oriented UX: DMs from strangers are hidden from the inbox, the cache, and the thread view. The filter is enforced in three places:
+
+1. `refreshDmInbox` — gates decrypt attempts (NIP-04) or cache writes + state commits (NIP-17).
+2. `buildDmSummaries` — re-applies when summaries are built from state, so unfollowing is immediately reflected without waiting for the next fetch.
+3. `MessagesScreen` — defence-in-depth filter for zap-only rows and any stale state.
+
+=== Time window
+
+The 30 / 90-day chip on MessagesScreen filters summaries by `lastActivityAt` at render time. It's user-selectable and persists via `AsyncStorage.messages_window_days`. The fetch itself isn't time-bounded (relays return the most recent 500 matching events); the chip just narrows what's displayed.
 
 == Deep Linking
 
@@ -503,6 +613,9 @@ E2E tests use Maestro with accessibility labels (never coordinates):
 | `test-alphabet-m.yaml` | Alphabet sidebar navigation (M, S, A)
 | `test-keyboard-sheet.yaml` | Bottom sheet slides up with keyboard
 | `test-login-perf.yaml` | Login to Friends tab responsiveness
+| `test-amber-import-key.yaml` | Amber cold-start: key import + permissions mode
+| `test-login-amber.yaml` | Amber-signer login end-to-end
+| `test-messages-search.yaml` | Messages inbox search filters by preview text
 |===
 
 == Safety
@@ -512,3 +625,95 @@ The app includes a safety tip on profile edit and account creation screens:
 > "Tip: You don't need to use your real name or photo for your profile."
 
 This is a gentle, non-intrusive reminder appropriate for a kids' app without requiring age verification.
+
+== Direct Messaging Performance Architecture (Issues #176, #177, #190)
+
+DMs are the most latency-sensitive surface in the app — they're opened repeatedly, and each open has historically required a relay round-trip plus a decrypt loop that could lock the JS thread for tens of seconds on large inboxes. The architecture below was developed over the perf sweep in PR #191 against a 986-message real-world Nostr inbox on a Pixel 8 on 4G. Target: no thread open ever feels "loading" after the first one.
+
+=== Caching layers
+
+The DM pipeline stacks four independent caches — each addressing a distinct failure mode from the pre-cache behaviour:
+
+[cols="1,1,2", options="header"]
+|===
+| Cache | Scope | What it stores / why
+
+| **NIP-04 plaintext LRU** (`src/utils/lru.ts`)
+| Module-level RAM, `max: 1000`
+| Event id → decrypted plaintext. Survives screen pops but not process kill. Refresh-then-reopen costs 0 NIP-04 decrypts. Keyed by event id (immutable) so no TTL needed.
+
+| **NIP-17 gift-wrap cache** (`AMBER_NIP17_CACHE_KEY` / `NSEC_NIP17_CACHE_KEY` in AsyncStorage)
+| Per-user pubkey, `max: 5000`, separate by signer type
+| Wrap id → `{partnerPubkey, fromMe, text, createdAt, wireKind}`. `refreshDmInbox` writes here for every successfully decrypted wrap; `fetchConversation` reads it to skip its own inbox-wide relay fetch (see "Fetch strategy" below).
+
+| **Persisted DM inbox** (`nostr_dm_inbox_v1_<user>`)
+| Per-user pubkey, `max: 1000` entries
+| Full `DmInboxEntry[]` painted INSTANTLY on Messages-tab mount; relay refresh merges fresh events in the background.
+
+| **Persisted per-peer conversation** (`nostr_dm_conv_v1_<user>_<peer>`)
+| Per (user, peer), `max: 500` messages
+| Full `ConversationMessage[]` painted within one frame on thread open; relay delta merges in the background.
+|===
+
+All four clear on logout (per-user caches are enumerated via `AsyncStorage.getAllKeys()` + prefix match). The plaintext LRU is module-level so its TTL is process lifetime; the AsyncStorage caches persist across cold starts.
+
+=== Fetch strategy
+
+Steady-state: every DM-relevant relay query carries `since = max(cached.created_at) - 120`. The `-120` is Damus's clock-drift pad (see https://github.com/damus-io/damus[`damus/Nostr/SubscriptionManager.swift`] L293-300): relays with slightly-off clocks still return the last 2 minutes of messages so we don't silently miss one. Cold cache (`max = 0`) sends no `since` filter — full history pulled.
+
+Per-peer `last_seen` is persisted alongside the conversation cache; inbox-wide `last_seen` is persisted alongside the inbox cache.
+
+`fetchConversation(peer)` also **skips `fetchInboxDmEvents` entirely** when the NIP-17 wrap cache is populated (#190). Since `refreshDmInbox` (fired on Messages-tab focus with 30s TTL) already pulls every gift-wrap and writes plaintext to the cache, re-entering a thread just filters cached entries to the peer. Removes the largest residual wall-clock cost from thread opens (~6 s → <1 s on the test inbox).
+
+=== Decrypt threading
+
+The serial `for-await` pattern was replaced with `Promise.all(batches of DECRYPT_YIELD_EVERY=15)` with explicit `setTimeout(0)` yields between batches (the `yieldToEventLoop()` helper). Rationale in `src/contexts/NostrContext.tsx`:
+
+[source,ts]
+----
+/** `await`ing an already-resolved promise only drains the microtask
+ *  queue, which still starves UI events — setTimeout(0) returns to
+ *  the task scheduler. Yield every DECRYPT_YIELD_EVERY *attempts*,
+ *  not successes, so a run of decrypt failures can't infinite-block.  */
+----
+
+For nsec, `nip04.decrypt` is pure-JS via `@noble/ciphers` (~1 ms per call on mid-range mobile), so 15 iterations is ≈1 frame's worth of JS. For Amber, each decrypt is an IPC round-trip that already yields implicitly; the explicit yield only adds scheduler respect, not raw throughput.
+
+=== Throttling & focus-defer
+
+- `refreshDmInbox` has a **30 s TTL** (`DM_INBOX_REFRESH_TTL_MS`): calls within the window are no-ops, unless the caller passes `{ force: true }` (pull-to-refresh). Protects against `useFocusEffect` tab-bouncing triggering a full relay + decrypt sweep on every return.
+- All three `useFocusEffect` refreshes (Home's `refreshProfile`, Messages' `refreshDmInbox`, Friends' `refreshProfile`) are wrapped in `InteractionManager.runAfterInteractions(...)` with `.cancel()` on cleanup so the tab-transition animation finishes before the refresh claims the JS thread.
+- `fetchConversation` checks an `isMountedRef` before firing `setMessages` / `setLoading` so back-press during a cold fetch doesn't commit state on an unmounted screen.
+
+=== Instant paint pattern
+
+ConversationScreen's `load()` callback reads the per-peer persisted cache FIRST, does `setMessages(cached)` synchronously (paint within a frame), `setLoading(false)`, THEN awaits the full `fetchConversation(peer)` which may spend seconds on a relay round-trip. Whichever result arrives first — cache or relay — is painted; the relay path overrides when it finishes.
+
+Cribbed from Arcade's `arclib/src/private.ts` + `DirectMessageScreen.tsx` `db_only=true` pattern.
+
+=== Relay coverage
+
+Every DM-relevant `fetch*` in `src/services/nostrService.ts` merges the user's own read-relays (from their kind-10002 NIP-65 event) with `DEFAULT_RELAYS`:
+
+[source,ts]
+----
+const allRelays = [...new Set([...relays, ...DEFAULT_RELAYS])];
+----
+
+This deliberately over-fetches so users with a sparse kind-10002 (e.g. a single-relay declaration) still see messages that landed on more popular relays. `DEFAULT_RELAYS` currently = `damus.io` / `nostr.band` / `nos.lol` / `primal.net`.
+
+=== Perf instrumentation
+
+Two log lines emitted unconditionally (not `__DEV__` gated) so they can be grepped from production APK logcat:
+
+- `[Perf] fetchConversation(<peerShort>): <ms>, k4=N (hits=A, fresh=B), k1059=M (hits=C, fresh=D, skippedFetch=bool), since=T, cached=X, merged=Y`
+- `[Perf] refreshDmInbox: <ms>, k4=N (hits=A, fresh=B), k1059=M, since=T, fresh=Z, merged=Y, rendered=R`
+
+Breakdown lets us confirm cache-hit behaviour on a real device without attaching a debugger.
+
+=== Known limitations / future work
+
+- A newly-arrived wrap that `refreshDmInbox` hasn't pulled yet (≤30 s ago) won't surface in `fetchConversation` until the next inbox refresh — acceptable for chat UX where "latest" rarely means "last second."
+- `pool.querySync` is still one-shot — real-time message arrival requires pull-to-refresh today. Filed as #188 (persistent relay subscription, architectural ~4 h).
+- BitmapFactory exception flood on unsupported avatar formats contributes to GC pressure on the Pixel. Filed as #189.
+- `react-native-mmkv` swap for the DM-cache AsyncStorage reads/writes would be ~100× faster at scale; marginal at current inbox sizes. Deferred.

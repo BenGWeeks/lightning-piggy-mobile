@@ -39,6 +39,15 @@ Example path format: `~/.cache/dotslash/cb/<hash>/React Native DevTools-linux-x6
 | App shows black screen or "Unable to load script" after force-stop
 | The Metro bundler connection can break when force-stopping the app. Fix: (1) Kill Metro with `pkill -f "expo start"`, (2) restart with `npm start` (or `npx expo start --clear` to also clear cache), (3) run `adb reverse tcp:8081 tcp:8081` again, (4) relaunch the app. If still black, do a full rebuild with `npx expo run:android`.
 
+| Red-screen "Failed to compile / None of these files exist" pointing at a deleted module after a pull or merge
+| Metro's transform cache keys on **file path**, not file hash. When you `git pull` (or merge) a branch that deletes or renames a module, the old transformer entries still resolve — so the next rebuild happily re-emits a phantom `require('./icons/ZapIcon')` even though the source has already been migrated (e.g. to `lucide-react-native`). The source view in the red-screen is the NEW file; the resolver is chasing the OLD graph. Restart Metro with `--clear` to wipe `$TMPDIR/metro-cache/*`: +
+[source,bash]
+----
+pkill -9 -f "expo start"
+npx expo start --dev-client --clear
+----
+Always follow merges that add/remove icon or asset files with a `--clear` restart. Seen on 2026-04-21 after merging PR #96 (lucide icon migration deleted `icons/{Zap,Copy,Share}Icon.tsx`).
+
 | Claude Code warns "image exceeds the dimension limit for many-image requests (2000px)"
 | Screenshots captured with `adb exec-out screencap -p` can exceed 2000px on high-DPI devices. Before sending to Claude, resize: `adb exec-out screencap -p > /tmp/screen.png && convert /tmp/screen.png -resize 1200x1200\> /tmp/screen_small.png`. Or run `/compact` to clear old images from context, or start a new conversation.
 
@@ -169,6 +178,28 @@ The fix script (`apply_nip20_fix.py`) patches `router.py` to send `["OK", event_
 | EAS auto-registers only the *production* bundle ID on first iOS build. The preview / dev variants need manual registration the first time they're built. +
 *Fix:* at https://developer.apple.com/account/resources/identifiers → *+* → App IDs → App → Explicit Bundle ID → `com.lightningpiggy.app.preview` (or `.dev`). Then re-run the build.
 
+| In-app feature reads `process.env.EXPO_PUBLIC_*` as `undefined` on a release/preview build even though the emulator (Metro) has it, e.g. GIF picker shows *"The GIPHY API key hasn't been set for this build"* on the installed APK but works fine in dev
+| `EXPO_PUBLIC_*` values are **inlined into the JS bundle at build time** by Metro — they are not read at runtime. The local `.env` file is only consulted by `expo start` / `npm start`; EAS builds (cloud or `--local`) don't read it. Every `EXPO_PUBLIC_*` variable the app depends on must be registered on the matching EAS environment before `eas build` runs, or it ends up undefined in the bundle. +
+*Diagnosis:* the build log contains the smoking-gun line: +
+`No environment variables with visibility "Plain text" and "Sensitive" found for the "<profile>" environment on EAS.` +
+*Fix (one-time per variable, covers all three profiles in one command):* +
+[source,bash]
+----
+eas env:create \
+  --environment production --environment preview --environment development \
+  --name EXPO_PUBLIC_GIPHY_API_KEY \
+  --value "<paste value from .env>" \
+  --visibility plaintext \
+  --scope project \
+  --type string \
+  --non-interactive
+# verify (one env at a time)
+eas env:list --environment production
+----
+*Visibility:* `plaintext` is correct for `EXPO_PUBLIC_*` — the value is already embedded in the client bundle by design, so "sensitive/secret" is the wrong protection model. Server-only secrets that must never land in a client bundle should **not** be prefixed `EXPO_PUBLIC_`. +
+*Timing caveat:* EAS fetches env at build start, not at submission. For a build that's already `IN_PROGRESS`, setting the var won't apply — you need another build. For a build still `IN_QUEUE` at the time you set the var, it will pick up the new value when gradle starts. +
+*Docs:* `docs/DEPLOYMENT.adoc` → "Secrets" section keeps a living table of required `EXPO_PUBLIC_*` vars. Extend it when adding a new one and run `eas env:create` for all three environments before the next release, otherwise the dependent feature ships broken. Seen on 2026-04-23: `versionCode=10` Pixel APK shipped without `EXPO_PUBLIC_GIPHY_API_KEY` while the emulator build via `npm start` had it.
+
 | iOS build installs but the app won't launch — *"Developer Mode required"*
 | iOS 16+ requires Developer Mode to be explicitly enabled before sideloaded / ad-hoc / dev-signed apps will run. +
 *Fix on the iPhone:* tap the just-installed app icon once so iOS recognises a dev-signed app is present → *Settings → Privacy & Security → Developer Mode* → toggle on → Restart → after reboot, *"Turn On Developer Mode?"* dialog → passcode. The row doesn't appear in Settings until iOS detects a dev-signed app.
@@ -224,8 +255,86 @@ The fix script (`apply_nip20_fix.py`) patches `router.py` to send `["OK", event_
 *Fresh install wipes data:* `adb uninstall com.lightningpiggy.app.dev && adb install app-debug.apk` — the data is gone and you're back at the IntroScreen. +
 This also hits `expo run:android` flows if the APK signatures don't match between old and new (e.g. switching between dev-client builds and production builds with different signing keys) — Android refuses to replace-install across signing keys, so Expo falls back to uninstall + install, wiping data.
 
+| Location-share preview shows a blank rectangle (image never loads)
+| The `staticmap.openstreetmap.de` host (not an official OSM subdomain — it was a German community volunteer's stitcher) stopped resolving (NXDOMAIN) some time before 2026-04. There is no longer a no-API-key static-map stitching service on the `openstreetmap.org` namespace — the original `Static Maps API` was deprecated in 2012 per the https://wiki.openstreetmap.org/wiki/Static_map_images[OSM wiki]. Wikimedia Maps (`maps.wikimedia.org`) also returns 403 to third-party apps. +
+*Fix:* fetch a single slippy-map tile from the official OSMF tile server at `https://tile.openstreetmap.org/{z}/{x}/{y}.png`, computed from (lat,lon,zoom) via the standard slippy-map formula. One 256×256 PNG per unique location, disk-cached by `expo-image` — fits the https://operations.osmfoundation.org/policies/tiles/[OSMF tile usage policy]'s "acceptable use" bar. Two required policy items: (1) cache aggressively (disk cache in expo-image), (2) send a specific identifying `User-Agent` via `source.headers` — the generic RN / OkHttp UA is not acceptable. See `buildStaticMapUrl()` + `USER_AGENT` in `src/services/locationService.ts`. +
+*Trade-off:* single tile = no centered marker (the point can be anywhere inside the tile). The location card's `MapPin` icon and coord text carry the "where" information; the image is scene-setting. If you need a centered marker later, switch `buildStaticMapUrl` to a keyed provider (MapTiler / Geoapify) behind the same interface.
+
+| `expo-location` `getCurrentPositionAsync` throws `ERR_CURRENT_LOCATION_IS_UNAVAILABLE` on Android emulator even with location services on
+| On Android, `getCurrentPositionAsync` goes through `FusedLocationProviderClient`, which returns the *cached* fix and throws `ERR_CURRENT_LOCATION_IS_UNAVAILABLE` if the cache is empty — it does not block waiting for a GNSS fix. On emulators the cache is empty until something is actively listening. +
+Symptoms reproduce even after: granting `ACCESS_FINE_LOCATION` (`pm grant com.lightningpiggy.app.dev android.permission.ACCESS_FINE_LOCATION`), enabling location services (`settings get secure location_mode` returns `3`), pushing a one-shot fix (`adb emu geo fix <lon> <lat>`), and loading + playing a route in Android Studio's *Extended Controls → Location* panel. The "route playing" UI doesn't prime the fused cache reliably either. +
+*Diagnosis:* the native JS catch swallows the error. Add a temporary `console.error('[locationService] getCurrentPositionAsync threw:', e)` in the catch and grep logcat filtered to `--pid=$(adb shell pidof <package>)` for `ReactNativeJS`. If you see `ERR_CURRENT_LOCATION_IS_UNAVAILABLE`, it's this issue, not a permission / settings problem. +
+*Fix (in the app):* don't call `getCurrentPositionAsync` alone, and don't use `Accuracy.Balanced`. Use a fallback chain: (1) `getLastKnownPositionAsync({ maxAge: 60_000 })` — cheap cached read; (2) `getCurrentPositionAsync({ accuracy: Location.Accuracy.High })` — actively demands GPS; (3) `watchPositionAsync` wrapped in a `Promise` with a ~15 s timeout that resolves on the first callback and then `subscription.remove()`s. See `src/services/locationService.ts` `getCurrentLocation()` for the canonical shape. +
+*Why `Accuracy.High` matters:* on Android, `Accuracy.Balanced` maps to `PRIORITY_BALANCED_POWER_ACCURACY`, which prefers the *network* provider (wifi/cell). AVDs typically have only `gps` in `settings get secure location_providers_allowed`, so Balanced has nothing to satisfy the request and throws on empty cache. `High` = `PRIORITY_HIGH_ACCURACY` actively demands GPS and returns the active fix from a playing route in Extended Controls → Location. Confirmed 2026-04-21: after swapping Balanced → High, `getCurrentPositionAsync` hits in ~4.5 s with a route playing; prior attempts with Balanced threw `ERR_CURRENT_LOCATION_IS_UNAVAILABLE` regardless of the route. +
+*Emulator setup:* (a) `pm grant com.<package> android.permission.ACCESS_FINE_LOCATION`, (b) Extended Controls → Location → load a route → Play (continuous ticks, not a one-shot Set), (c) tap the feature in the app.
+
+| `@gorhom/bottom-sheet` v5 modal collapses to a thin strip when its `BottomSheetTextInput` is focused (keyboard opens)
+| Symptom: the sheet presents correctly at its snap point (e.g. 75%), but the moment the user taps a search input and the Android keyboard opens, the sheet animates down to ~15% — just enough to show the header + input — with the inner list/content cut off. `keyboardBehavior="interactive"` + `android:windowSoftInputMode="adjustResize"` + the canonical `Keyboard.addListener` padding pattern all correctly applied. Happens both when the sheet is presented alone and when it's stacked on another `BottomSheetModal`. +
+*Root cause:* **v5 defaults `enableDynamicSizing` to `true`** — the sheet's height tracks its content's intrinsic height rather than honouring `snapPoints`. When the keyboard opens, Android's `adjustResize` shrinks the window; the sheet's `BottomSheetFlatList` is a flex-child that collapses to ~0 in the shrunk window; dynamic sizing then re-measures and snaps the sheet down to "header-height". See https://github.com/gorhom/react-native-bottom-sheet/issues/1602[gorhom#1602]. v4 defaulted this to `false`, so sheets ported from v4 code inherit the bug silently after upgrading. +
+*Fix:* set `enableDynamicSizing={false}` explicitly on any `BottomSheetModal` that has fixed `snapPoints` (percent or absolute). Without dynamic sizing, the sheet locks to its snap, ignores content measurement, and the keyboard-open behaviour falls back to `keyboardBehavior` as intended. Confirmed on `FriendPickerSheet.tsx` 2026-04-21 — flipping `enableDynamicSizing={false}` fully resolved the collapse. +
+*Also check:* any `BottomSheet` subtree that wraps a scrollable list inside a `View` (rather than `BottomSheetScrollView`) is likely to have the same footgun waiting; add the explicit `enableDynamicSizing={false}` when the PR migrates to v5 or when copying v4 patterns forward.
+
+| A fixed-layout step inside a dynamic-sized `BottomSheetModal` renders with its bottom rows clipped (e.g. keypad last row or confirm button cut off)
+| Symptom: the step opens at a reasonable height but the last few rows are below the sheet's bottom edge. The same component renders fine in isolation. Attempts that don't help: bumping `snapPoints`, setting `maxDynamicContentSize`, or restoring `flex: 1` + `marginTop: 'auto'` on the screen container. +
+*Root cause:* with `enableDynamicSizing=true` (the v5 default) the sheet measures its height from its children's intrinsic content height. If the step is wrapped in a `BottomSheetScrollView`, the ScrollView's content size and the sheet's height form a circular dependency — the sheet asks the ScrollView for a height, the ScrollView reports the height its parent allows, and the layout settles below the true intrinsic height, clipping the last rows. `flex: 1` inside the screen collapses for the same reason (no minimum height to fill against). +
+*Fix:* for any step whose content has a known fixed layout (card + button + keypad, no scrolling needed), render it inside a plain `BottomSheetView` (not `BottomSheetScrollView`). That lets the sheet measure the component's true intrinsic height so the full content fits. Keep `BottomSheetScrollView` only for steps that actually need to scroll (long forms, tx lists). Applied on `SendSheet.tsx` and `TransferSheet.tsx` for the `step === 'amount'` branch (AmountEntryScreen); `ReceiveSheet.tsx` already used `BottomSheetView` for the same step. Canonical pattern:
+[source,tsx]
+----
+{step === 'amount' ? (
+  <BottomSheetView style={styles.content}>
+    <AmountEntryScreen ... />
+  </BottomSheetView>
+) : (
+  <BottomSheetScrollView ...>{/* scrollable form */}</BottomSheetScrollView>
+)}
+----
+Verified via screenshot at Home > Send > Amount and Friends > <contact> > Zap > Change Amount. The test assertion `assertVisible` alone is not sufficient — Maestro reports accessibility bounds, not pixel visibility, so a clipped keypad still asserts visible. Always eyeball the screenshot when verifying a layout fix.
+
+| Bottom sheet still looks / behaves like it has the old `snapPoints` after editing the source
+| Metro fast-refresh reliably reloads function bodies and JSX children, but **removing a top-level prop from a `<BottomSheetModal>` (e.g. deleting `snapPoints={snapPoints}`)** sometimes leaves the sheet rendering with the prior prop still in effect — the sheet opens at the old 85%/75% snap and is still user-draggable even though the source no longer sets a snap. Common trap when applying the uniform snap policy across sheets (see `ReceiveSheet.tsx`, `TransferSheet.tsx`, etc). +
+*Fix:* cold-restart the app so Metro serves a fresh bundle: +
+[source,bash]
+----
+adb shell am force-stop com.lightningpiggy.app.dev
+adb shell monkey -p com.lightningpiggy.app.dev -c android.intent.category.LAUNCHER 1
+----
+A Metro `r`-`r` reload from the dev menu usually also works; `--clear` is only needed if the transformer cache is also stale (see the "red-screen after merge" entry). Confirmed 2026-04-22 during the uniform-snap-policy sweep: the 10 sheets edited in one pass looked unchanged until a cold restart. +
+*Why it happens:* Fast-refresh preserves component state by re-executing the function body on top of the live fiber. When a prop is *added* or *removed*, the JSX tree is re-reconciled and the prop diff is re-applied; but for `BottomSheetModal`'s imperative internals (the gorhom animated position, `useMemo`'d layout values held on the fiber), the stale value can persist on the existing instance until the modal is unmounted and re-mounted. Cold restart guarantees unmount.
+Similar quick-check before blaming the code: `grep -n '<property>' src/components/<Sheet>.tsx` to confirm the edit actually landed, then restart.
+
+| Characters "disappear" mid-typing in a bottom-sheet form input, with no IME animation glitch
+| Distinct from the "characters dropped" entry above (that one is about `TextInput` vs `BottomSheetTextInput` + reanimated). This one is a state-reset race: a `useEffect` that populates local `useState` fields from a context object re-fires on every context re-render (balance poll, relay reconnect, contact cache refresh) and overwrites the user's in-progress edit with the stored value. Symptom: the first keystroke you type lands, but within 1–10 seconds (next poll tick) the input resets and any further typing "disappears" on each tick. +
+*Root cause:* `useEffect(() => { setField(ctx.value); }, [ctx])` — where `ctx` is an object returned by `useNostr()` / `useWallet()` / derived via `wallets.find(...)`. Context objects get a new identity on every provider re-render, not just when the form-relevant fields change. Each identity-change fires the effect and clobbers state. +
+*Fix:* narrow the dep array to a primitive trigger — usually `[visible]` (fire once per sheet open) or `[walletId]` / `[pubkey]` (fire once per identity switch). Keep an `eslint-disable-next-line react-hooks/exhaustive-deps` comment since the setters inside still read the latest context value at effect time. Examples: `WalletSettingsSheet.tsx` (`[walletId]`), `EditProfileSheet.tsx` (`[visible]`). +
+*Audit pattern to grep for:* `useEffect(..., [profile, ...])`, `useEffect(..., [wallet, ...])`, `useEffect(..., [contact, ...])` inside any `*Sheet*.tsx`. If the effect body calls `setX(ctx.field)` for an `<Input value={x}/>` elsewhere in the file, it likely needs this fix.
+
 | Bottom-sheet inner buttons work when tapped manually but Maestro `tapOn id:...` reports COMPLETED without firing `onPress`
 | Symptom: Maestro's `commands.json` confirms the target element was found at correct bounds with `clickable=true, enabled=true`, but the handler never runs (no `console.log` in Metro or logcat) and the UI doesn't change. Manual human taps on the same button work every time. +
 *Root cause:* a `TouchableWithoutFeedback onPress={Keyboard.dismiss}` wrapper around the sheet content swallows the UiAutomator accessibility click before it reaches the nested testID-bearing `TouchableOpacity`/`Pressable`. Real finger taps propagate through differently because they use the native touch pipeline, but UiAutomator / Maestro dispatches via accessibility events which the outer wrapper eats. +
 *Fix:* remove the `TouchableWithoutFeedback + Keyboard.dismiss` wrapper per rule (6) of the earlier "Bottom sheet doesn't slide up when keyboard opens" entry. The keyboard can still be dismissed via the hardware back key, the keyboard's own Done key, or by tapping any of the buttons (which close the sheet anyway). Confirmed on `ReceiveSheet.tsx` in the #96 / #106 debugging session — pulling the wrapper restored normal Maestro interaction.
+
+| Android emulator shows a tiny floating IME-switcher (mic / back / send / emoji / menu icons) instead of a docked Gboard at the bottom of the screen
+| Symptom: tapping any text input on the AVD opens a small vertical column of system-keyboard quick actions instead of the full QWERTY soft keyboard. `KeyboardAvoidingView` / `react-native-keyboard-controller` can't measure or react to the IME (its height stays 0), and Maestro tests that depend on the docked keyboard appearing all fail or give meaningless results. The same app on a physical Pixel works correctly. +
+*Root cause:* the AVD config option `hw.keyboard=yes` advertises a virtual `qwerty2` hardware keyboard to `InputManagerService`, which makes Android suppress the soft IME. Setting `hw.keyboard=no` removes that flag from the AVD's reported hardware spec, BUT — and this is the gotcha — QEMU still attaches a generic `AT Translated Set 2 keyboard` device to the VM regardless. So Android's `InputManagerService` ALWAYS sees a "physical keyboard". The settings override (`Settings.Secure.show_ime_with_hard_keyboard=1`) is supposed to force Gboard despite that, but in practice this is intermittent on the Pixel-8 / Android 16 system image — Gboard reads the setting lazily and the IMM caches its IME-binding state across IME process restarts, so toggling the setting while the system is running often does nothing. +
+*Initial fix (works briefly):* edit the AVD config to drop the explicit hw-keyboard flag, then **cold-boot** the emulator and ensure the override is set BEFORE the first input focus:
+[source,bash]
+----
+# `sed -i` is portable across GNU (Linux) and BSD (macOS) sed only if
+# you branch on `uname` — BSD sed requires an explicit (possibly empty)
+# backup-suffix argument after `-i`, GNU sed forbids it.
+if [ "$(uname)" = "Darwin" ]; then
+  sed -i '' 's/^hw\.keyboard=yes$/hw.keyboard=no/' ~/.android/avd/<AVD_NAME>.avd/config.ini
+else
+  sed -i 's/^hw\.keyboard=yes$/hw.keyboard=no/' ~/.android/avd/<AVD_NAME>.avd/config.ini
+fi
+adb -s emulator-5554 emu kill
+$ANDROID_HOME/emulator/emulator -avd <AVD_NAME> -no-snapshot-load &
+adb wait-for-device
+adb shell settings put secure show_ime_with_hard_keyboard 1
+----
+After cold boot, tapping a text input shows the full docked Gboard at the bottom and `react-native-keyboard-controller` reports the correct IME height. +
+*Important: this is NOT a permanent fix.* `adb shell dumpsys input` after cold boot still shows `Device 2: AT Translated Set 2 keyboard` regardless of the AVD setting — QEMU always attaches a virtual PS/2 keyboard. Over the life of an emulator session the floating IME chooser will return after some combination of: re-launching the app, switching IMEs, running Maestro tests that programmatically inject input, or simply re-focusing an input after backgrounding. When this happens, you have to cold-boot again — `adb reboot`, force-stopping LatinIME, re-toggling `show_ime_with_hard_keyboard`, and `am force-stop` of the system UI all fail to recover the docked keyboard once the IMM has cached the suppressed state. +
+*Side effect:* with `hw.keyboard=no`, the laptop keyboard no longer types into the emulator. For interactive development this is annoying — your two paths are: (a) tap-input via mouse on the emulator window and use Gboard, or (b) inject text from the host CLI with `adb -s emulator-5554 shell input text "your%smessage"` (`%s` = space). For Maestro tests, prefer the `inputText` action which doesn't depend on a visible IME. +
+*Workaround when neither approach works:* if you need both laptop typing AND a working IME, run on a real device. For Maestro tests run inside CI, use `inputText` exclusively and never assert on the keyboard's visible bounds — only on the visibility / position of the composer above where the IME *would* be. +
+*Diagnostic:* after cold boot `adb shell dumpsys input_method | grep mInputShown` should be `true` while focused, and `adb shell dumpsys input | grep -E "AT Translated|qwerty"` will always show the AT keyboard regardless. The reliable test is whether tapping an input renders the docked Gboard pixels — there is no clean adb signal for "Gboard is rendered vs the floating chooser is rendered".
 |===

@@ -1,0 +1,124 @@
+appId: com.lightningpiggy.app.dev
+name: Attach Panel — each tile opens its downstream sheet
+---
+# Verifies that each tile in the inline AttachPanel actually wires up
+# to the right downstream sheet (rather than being a dead button).
+#
+# Safety constraints:
+#   - Conversation peer is always Little Piggy (controlled test
+#     fixture). The current user is assumed to be Big Piggy (set up
+#     by the suite's fixture step or by signing in manually with
+#     MAESTRO_NSEC2 before this test). NO messages are sent to real
+#     Nostr accounts.
+#   - Skips Camera / Gallery / Location (system permission prompts
+#     are non-deterministic).
+#   - Skips Invoice and Zap tiles entirely — they create real Lightning
+#     invoices / zaps and we explicitly do NOT trigger payment flows
+#     in tests.
+#
+# Covers:
+#   - Tap "+" → assert panel + non-payment tiles visible
+#   - Tap Contact → FriendPickerSheet opens (asserts friend-picker-search)
+#   - Dismiss picker via hardware back
+#   - Re-open panel, tap GIF (only if configured) → GifPickerSheet opens
+#   - Dismiss + close panel
+#
+# Run:
+#   maestro --device emulator-5554 test tests/e2e/test-attach-panel-actions.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# Navigate to Messages → Little Piggy thread.
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
+- tapOn:
+    text: 'Little Piggy.*'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Composer + attach button visible
+- assertVisible:
+    id: 'conversation-attach'
+- assertVisible:
+    id: 'conversation-input'
+- assertNotVisible:
+    id: 'conversation-attach-panel'
+
+# --- Open the panel ---
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible:
+    id: 'conversation-attach-panel'
+
+# All in-app tiles render. (Camera/Gallery/Location depend on system
+# perms; skip the ones that fire OS prompts — assert the in-app ones
+# that go to a JS sheet.)
+- assertVisible:
+    id: 'attach-share-contact'
+- assertVisible:
+    id: 'attach-share-location'
+
+# --- Tap Contact → FriendPickerSheet opens ---
+- tapOn:
+    id: 'attach-share-contact'
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible:
+    id: 'friend-picker-search'
+
+# Dismiss picker via hardware back
+- back
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertNotVisible:
+    id: 'friend-picker-search'
+
+# --- Re-open panel and tap GIF (only if GIF is configured — the
+# tile only renders when a GIPHY API key is present) ---
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible:
+    id: 'conversation-attach-panel'
+
+- runFlow:
+    when:
+      visible:
+        id: 'attach-send-gif'
+    commands:
+      - tapOn:
+          id: 'attach-send-gif'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - assertVisible:
+          id: 'gif-search-input'
+      - back
+      - waitForAnimationToEnd:
+          timeout: 2000
+
+# --- Done. (No final close-toggle assertion — the GIF runFlow above
+#         can leave the panel either open or closed depending on
+#         whether the GIF tile was rendered, which makes a hard
+#         assertion here flaky. The conversation-attach-back test
+#         covers panel toggle behaviour explicitly.)
+- assertVisible:
+    id: 'conversation-attach'

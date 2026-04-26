@@ -20,9 +20,11 @@ import {
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
 import Svg, { Path, Circle } from 'react-native-svg';
-import { colors } from '../styles/theme';
+import { UserRound } from 'lucide-react-native';
+import { useThemeColors } from '../contexts/ThemeContext';
+import type { Palette } from '../styles/palettes';
 import { useNostr } from '../contexts/NostrContext';
-import { uploadToNostrBuild } from '../services/imageUploadService';
+import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 
 interface Props {
   visible: boolean;
@@ -30,7 +32,9 @@ interface Props {
 }
 
 const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
-  const { profile, publishProfile } = useNostr();
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const { profile, publishProfile, signEvent, isLoggedIn } = useNostr();
   const [displayName, setDisplayName] = useState('');
   const [pictureUrl, setPictureUrl] = useState('');
   const [bannerUrl, setBannerUrl] = useState('');
@@ -42,8 +46,14 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const sheetRef = useRef<BottomSheetModal>(null);
   const scrollRef = useRef<any>(null);
-  const snapPoints = useMemo(() => ['85%'], []);
+  // No explicit snapPoints — content-height only, not user-draggable.
 
+  // Populate fields ONCE per open. Keying on `visible` alone: if `profile`
+  // were in the deps, every NostrContext re-render (contact sync, cache
+  // refresh, relay reconnect) would re-fire this effect and stomp the
+  // user's in-progress edits — symptom: typing into Display Name /
+  // Lightning Address / About makes characters "disappear" on every
+  // context tick. See the matching fix in WalletSettingsSheet.
   useEffect(() => {
     if (visible) {
       setDisplayName(profile?.displayName || profile?.name || '');
@@ -55,7 +65,8 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
     } else {
       sheetRef.current?.dismiss();
     }
-  }, [visible, profile]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
 
   useEffect(() => {
     if (!visible) return;
@@ -96,14 +107,25 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
       mediaTypes: ['images'],
       allowsEditing: true,
       aspect,
-      quality: 0.8,
+      quality: 1,
+      // `stripImageMetadata` re-encodes the picked image through
+      // expo-image-manipulator at `compress: 0.9` and produces fresh
+      // base64 (see #145). Picking at quality 1 here avoids a double
+      // JPEG encode.
+      // `base64: true` feeds the GIF passthrough branch in
+      // stripImageMetadata (expo-image-manipulator has no animated
+      // output). In practice the OS crop editor from `allowsEditing`
+      // flattens GIFs to JPEG before we see them, so the GIF branch
+      // rarely fires here — set for consistency with chat paths.
+      base64: true,
     });
 
     if (result.canceled || !result.assets?.[0]) return;
 
     setUploading(true);
     try {
-      const url = await uploadToNostrBuild(result.assets[0].uri);
+      const scrubbed = await stripImageMetadata(result.assets[0].uri, result.assets[0].base64);
+      const url = await uploadImage(scrubbed.uri, isLoggedIn ? signEvent : null, scrubbed.base64);
       setUrl(url);
     } catch (error) {
       Alert.alert('Upload Failed', error instanceof Error ? error.message : 'Please try again.');
@@ -134,7 +156,6 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
   return (
     <BottomSheetModal
       ref={sheetRef}
-      snapPoints={snapPoints}
       onDismiss={onClose}
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}
@@ -205,15 +226,7 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
             <Image source={{ uri: pictureUrl }} style={styles.avatarPreview} cachePolicy="none" />
           ) : (
             <View style={styles.avatarPlaceholder}>
-              <Svg width={32} height={32} viewBox="0 0 24 24" fill="none">
-                <Circle cx="12" cy="8" r="4" stroke={colors.textSupplementary} strokeWidth={2} />
-                <Path
-                  d="M4 20c0-3.3 3.6-6 8-6s8 2.7 8 6"
-                  stroke={colors.textSupplementary}
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                />
-              </Svg>
+              <UserRound size={36} color={colors.textBody} strokeWidth={1.75} />
               <Text style={styles.avatarPlaceholderText}>Tap</Text>
             </View>
           )}
@@ -277,116 +290,117 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
   );
 };
 
-const styles = StyleSheet.create({
-  sheetBackground: {
-    backgroundColor: colors.white,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-  },
-  handleIndicator: {
-    backgroundColor: colors.divider,
-    width: 40,
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 8,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: colors.textHeader,
-    marginBottom: 4,
-  },
-  safetyTip: {
-    fontSize: 13,
-    color: colors.textSupplementary,
-    marginBottom: 16,
-    fontStyle: 'italic',
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textSupplementary,
-    marginBottom: 6,
-    marginTop: 12,
-  },
-  input: {
-    backgroundColor: colors.background,
-    borderRadius: 12,
-    padding: 14,
-    fontSize: 15,
-    color: colors.textBody,
-    fontWeight: '500',
-  },
-  textArea: {
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  bannerPicker: {
-    height: 100,
-    borderRadius: 12,
-    backgroundColor: colors.background,
-    overflow: 'hidden',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  bannerPreview: {
-    width: '100%',
-    height: '100%',
-  },
-  avatarPicker: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: colors.background,
-    overflow: 'hidden',
-    justifyContent: 'center',
-    alignItems: 'center',
-    alignSelf: 'center',
-  },
-  avatarPreview: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-  },
-  avatarPlaceholder: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 2,
-    width: 80,
-    height: 80,
-  },
-  avatarPlaceholderText: {
-    fontSize: 10,
-    color: colors.textSupplementary,
-    textAlign: 'center',
-  },
-  placeholderContent: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 4,
-  },
-  placeholderText: {
-    fontSize: 12,
-    color: colors.textSupplementary,
-  },
-  saveButton: {
-    backgroundColor: colors.brandPink,
-    height: 52,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 24,
-  },
-  saveButtonText: {
-    color: colors.white,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  disabled: {
-    opacity: 0.5,
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    sheetBackground: {
+      backgroundColor: colors.surface,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+    },
+    handleIndicator: {
+      backgroundColor: colors.divider,
+      width: 40,
+    },
+    content: {
+      flex: 1,
+      paddingHorizontal: 24,
+      paddingTop: 8,
+    },
+    title: {
+      fontSize: 22,
+      fontWeight: '700',
+      color: colors.textHeader,
+      marginBottom: 4,
+    },
+    safetyTip: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+      marginBottom: 16,
+      fontStyle: 'italic',
+    },
+    label: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.textSupplementary,
+      marginBottom: 6,
+      marginTop: 12,
+    },
+    input: {
+      backgroundColor: colors.background,
+      borderRadius: 12,
+      padding: 14,
+      fontSize: 15,
+      color: colors.textBody,
+      fontWeight: '500',
+    },
+    textArea: {
+      minHeight: 80,
+      textAlignVertical: 'top',
+    },
+    bannerPicker: {
+      height: 100,
+      borderRadius: 12,
+      backgroundColor: colors.background,
+      overflow: 'hidden',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    bannerPreview: {
+      width: '100%',
+      height: '100%',
+    },
+    avatarPicker: {
+      width: 80,
+      height: 80,
+      borderRadius: 40,
+      backgroundColor: colors.background,
+      overflow: 'hidden',
+      justifyContent: 'center',
+      alignItems: 'center',
+      alignSelf: 'center',
+    },
+    avatarPreview: {
+      width: 80,
+      height: 80,
+      borderRadius: 40,
+    },
+    avatarPlaceholder: {
+      justifyContent: 'center',
+      alignItems: 'center',
+      gap: 2,
+      width: 80,
+      height: 80,
+    },
+    avatarPlaceholderText: {
+      fontSize: 10,
+      color: colors.textSupplementary,
+      textAlign: 'center',
+    },
+    placeholderContent: {
+      justifyContent: 'center',
+      alignItems: 'center',
+      gap: 4,
+    },
+    placeholderText: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+    },
+    saveButton: {
+      backgroundColor: colors.brandPink,
+      height: 52,
+      borderRadius: 12,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginTop: 24,
+    },
+    saveButtonText: {
+      color: colors.white,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    disabled: {
+      opacity: 0.5,
+    },
+  });
 
 export default EditProfileSheet;

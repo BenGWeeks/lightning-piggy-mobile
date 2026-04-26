@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { View, Text, Image, TouchableOpacity, ScrollView, Linking, Alert } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { courses } from '../data/learnContent';
@@ -10,8 +10,8 @@ import {
   LearnProgress,
 } from '../services/learnProgressService';
 import { ChevronLeft, ChevronRight, Check } from 'lucide-react-native';
-import { styles } from '../styles/MissionDetailScreen.styles';
-import { colors } from '../styles/theme';
+import { createMissionDetailScreenStyles } from '../styles/MissionDetailScreen.styles';
+import { useThemeColors } from '../contexts/ThemeContext';
 import { extractYouTubeId } from '../utils/youtube';
 
 import { LearnNavigation, MissionDetailRoute } from '../navigation/types';
@@ -22,6 +22,8 @@ interface Props {
 }
 
 const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createMissionDetailScreenStyles(colors), [colors]);
   const { courseId, missionId } = route.params;
   const course = courses.find((c) => c.id === courseId);
   const mission = course?.missions.find((m) => m.id === missionId);

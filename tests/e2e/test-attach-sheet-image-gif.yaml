@@ -1,0 +1,69 @@
+appId: com.lightningpiggy.app.dev
+name: AttachSheet exposes both Send image and Send GIF rows
+env:
+  FRIEND_NAME: Isaac Weeks
+  FRIEND_LETTER: I
+---
+# Opens a conversation with FRIEND_NAME and verifies the composer's [+]
+# attach button surfaces BOTH the "Send image" row (Blossom upload) and
+# the "Send GIF" row (GIPHY picker). This is the regression guard for the
+# claude/add-image-sending-kYtqU ↔ main merge: the two features must
+# coexist in AttachSheet.
+#
+# Run:
+#   maestro test tests/e2e/test-attach-sheet-image-gif.yaml
+# Override friend:
+#   maestro -e FRIEND_NAME="Isolabellart" -e FRIEND_LETTER="I" \
+#     test tests/e2e/test-attach-sheet-image-gif.yaml
+
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 40000
+
+- tapOn:
+    id: 'tab-friends'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    id: 'alphabet-${FRIEND_LETTER}'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- scrollUntilVisible:
+    element:
+      text: ${FRIEND_NAME}
+    direction: DOWN
+    timeout: 10000
+    speed: 40
+    visibilityPercentage: 60
+
+- tapOn: ${FRIEND_NAME}
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-input'
+    timeout: 10000
+
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+# Both rows must be present. If either is missing, the merge lost a feature.
+- extendedWaitUntil:
+    visible:
+      id: 'attach-send-image'
+    timeout: 5000
+- assertVisible:
+    id: 'attach-send-gif'
+
+# Post-PR-204 these are short tile labels in the inline AttachPanel
+# instead of long row titles in the old AttachSheet bottom-sheet.
+- assertVisible:
+    text: 'Gallery'
+- assertVisible:
+    text: 'GIF'

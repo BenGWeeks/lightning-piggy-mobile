@@ -1,11 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
+import type { Palette } from '../styles/palettes';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet } from '../contexts/WalletContext';
+import { useNostr } from '../contexts/NostrContext';
 import TransactionDetailSheet, {
   TransactionDetailData,
   CounterpartyContact,
@@ -87,14 +89,71 @@ function txKey(tx: WalletTransaction, fallbackIndex: number): string {
 }
 
 const TransactionList: React.FC<Props> = ({ transactions }) => {
-  const { btcPrice, currency } = useWallet();
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const { btcPrice, currency, activeWalletId } = useWallet();
+  const { contacts } = useNostr();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  // When contacts' profiles refresh, we want transaction rows to pick up
+  // the newer name/picture immediately. Tx's embedded `zapCounterparty`
+  // is a snapshot from when the zap was attributed, so we layer a live
+  // lookup on top by pubkey.
+  const contactProfileByPubkey = useMemo(() => {
+    const m = new Map<string, ZapCounterpartyInfo['profile']>();
+    for (const c of contacts) {
+      if (c.profile) {
+        m.set(c.pubkey, {
+          npub: c.profile.npub ?? '',
+          name: c.profile.name ?? null,
+          displayName: c.profile.displayName ?? null,
+          picture: c.profile.picture ?? null,
+          nip05: c.profile.nip05 ?? null,
+        });
+      }
+    }
+    return m;
+  }, [contacts]);
+  // Non-zap transactions (plain outgoing pays to a friend's lightning
+  // address, incoming LNURL-pays) never get a zapCounterparty, so the
+  // row's avatar falls back to the type icon even though the description
+  // often *is* the counterparty's lud16. Build a side-index keyed on the
+  // normalized lightning address so we can still surface the contact's
+  // picture + name (#167).
+  const contactByLud16 = useMemo(() => {
+    const m = new Map<string, (typeof contacts)[number]>();
+    for (const c of contacts) {
+      const lud = c.profile?.lud16?.trim().toLowerCase();
+      if (lud) m.set(lud, c);
+    }
+    return m;
+  }, [contacts]);
+
+  // Extract a lightning address from a tx description. NWC/LNbits ledger
+  // entries frequently encode the counterparty as `user@host`, either as
+  // the whole string or embedded in a longer memo like
+  // "Zap from alice@primal.net - nice work!".
+  const findLud16InDescription = (desc: string | undefined): string | null => {
+    if (!desc) return null;
+    const match = desc.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+    return match ? match[0].toLowerCase() : null;
+  };
   const [showAll, setShowAll] = useState(false);
   const [detail, setDetail] = useState<TransactionDetailData | null>(null);
   const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
   const [zapContact, setZapContact] = useState<CounterpartyContact | null>(null);
 
-  React.useEffect(() => setShowAll(false), [transactions]);
+  // Collapse the list back to the initial N rows when the active wallet
+  // changes, but NOT on every transactions-array update. WalletContext
+  // polls balances/transactions every few seconds and emits a new array
+  // reference each time; keying the reset on `transactions` meant the
+  // effect fired on every poll and immediately undid the user's "Show
+  // all N" tap (symptom: tap appeared to expand for a split second and
+  // then collapse). HomeScreen renders TransactionList without a `key`
+  // so it doesn't remount on wallet switch — we reset explicitly here
+  // instead.
+  useEffect(() => {
+    setShowAll(false);
+  }, [activeWalletId]);
 
   if (transactions.length === 0) {
     return (
@@ -149,10 +208,28 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
         const amountSats = Math.abs(item.amount);
         const ts = item.settled_at || item.created_at;
         const isPending = !ts && !item.blockHeight;
-        const zapCp = item.zapCounterparty ?? undefined;
+        const zapCpRaw = item.zapCounterparty ?? undefined;
+        // Prefer the live profile from contacts (which refreshes when the
+        // profile cache updates) over the snapshot embedded in the tx.
+        const liveProfile = zapCpRaw?.pubkey
+          ? contactProfileByPubkey.get(zapCpRaw.pubkey)
+          : undefined;
+        const zapCp = zapCpRaw
+          ? { ...zapCpRaw, profile: liveProfile ?? zapCpRaw.profile }
+          : undefined;
 
-        // Primary label: counterparty name if attributed; else URL host or
-        // raw description; else "Received" / "Sent".
+        // For non-zap transactions, attempt to resolve the counterparty
+        // via a lightning-address in the description. Keyed in
+        // `contactByLud16` off the user's contacts, so it only promotes
+        // people they follow (same source Friends tab reads from).
+        const lud16FromDescription = !zapCp ? findLud16InDescription(item.description) : null;
+        const descriptionContact = lud16FromDescription
+          ? contactByLud16.get(lud16FromDescription)
+          : undefined;
+
+        // Primary label: counterparty name if attributed; else contact-by-
+        // lud16 name; else URL host or raw description; else
+        // "Received" / "Sent".
         let primary: string;
         let subtitle: string | null = null;
         if (isPending) {
@@ -160,6 +237,12 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
         } else if (zapCp) {
           primary = zapCounterpartyLabel(zapCp);
           subtitle = zapCp.comment?.trim() || null;
+        } else if (descriptionContact) {
+          primary =
+            descriptionContact.profile?.displayName ??
+            descriptionContact.profile?.name ??
+            lud16FromDescription ??
+            (isIncoming ? 'Received' : 'Sent');
         } else if (item.description) {
           const split = splitDescription(item.description);
           primary = split.primary;
@@ -169,7 +252,8 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
         }
 
         const timeStr = ts ? formatTime(ts) : '';
-        const counterpartyAvatar = zapCp?.profile?.picture ?? null;
+        const counterpartyAvatar =
+          zapCp?.profile?.picture ?? descriptionContact?.profile?.picture ?? null;
         const fiatStr = satsToFiatString(amountSats, btcPrice, currency);
 
         return (
@@ -245,6 +329,19 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
           setDetail(null);
           setProfileContact(contact);
         }}
+        onZapCounterparty={(contact) => {
+          setDetail(null);
+          setZapContact(contact);
+        }}
+        onMessageCounterparty={(contact) => {
+          setDetail(null);
+          navigation.navigate('Conversation', {
+            pubkey: contact.pubkey,
+            name: contact.name,
+            picture: contact.picture,
+            lightningAddress: contact.lightningAddress,
+          });
+        }}
       />
       <ContactProfileSheet
         visible={profileContact !== null}
@@ -288,123 +385,124 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
 
 const AVATAR_SIZE = 40;
 
-const styles = StyleSheet.create({
-  list: {
-    flex: 1,
-  },
-  emptyContainer: {
-    padding: 40,
-    alignItems: 'center',
-  },
-  emptyText: {
-    color: colors.textSupplementary,
-    fontSize: 16,
-  },
-  dayHeader: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.textSupplementary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 6,
-  },
-  item: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    gap: 12,
-  },
-  avatarWrap: {
-    width: AVATAR_SIZE,
-    height: AVATAR_SIZE,
-  },
-  avatar: {
-    width: AVATAR_SIZE,
-    height: AVATAR_SIZE,
-    borderRadius: AVATAR_SIZE / 2,
-    backgroundColor: colors.background,
-  },
-  avatarPlaceholder: {
-    width: AVATAR_SIZE,
-    height: AVATAR_SIZE,
-    borderRadius: AVATAR_SIZE / 2,
-    backgroundColor: colors.brandPinkLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarPlaceholderIcon: {
-    fontSize: 20,
-    color: colors.brandPink,
-  },
-  centerCol: {
-    flex: 1,
-    minWidth: 0,
-  },
-  centerLine: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-  },
-  primary: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.textHeader,
-    flexShrink: 1,
-  },
-  time: {
-    fontSize: 12,
-    color: colors.textSupplementary,
-    marginLeft: 4,
-  },
-  subtitle: {
-    fontSize: 12,
-    color: colors.textSupplementary,
-    marginTop: 2,
-  },
-  rightCol: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  amountsColumn: {
-    alignItems: 'flex-end',
-  },
-  amount: {
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  arrow: {
-    fontSize: 22,
-    fontWeight: '700',
-  },
-  fiat: {
-    fontSize: 11,
-    color: colors.textSupplementary,
-    marginTop: 1,
-  },
-  showMore: {
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  showMoreText: {
-    color: colors.brandPink,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  incoming: {
-    color: colors.green,
-  },
-  outgoing: {
-    color: colors.red,
-  },
-  itemPending: {
-    opacity: 0.5,
-  },
-  pendingText: {
-    color: colors.textSupplementary,
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    list: {
+      flex: 1,
+    },
+    emptyContainer: {
+      padding: 40,
+      alignItems: 'center',
+    },
+    emptyText: {
+      color: colors.textSupplementary,
+      fontSize: 16,
+    },
+    dayHeader: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.textSupplementary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+      paddingHorizontal: 16,
+      paddingTop: 16,
+      paddingBottom: 6,
+    },
+    item: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+      gap: 12,
+    },
+    avatarWrap: {
+      width: AVATAR_SIZE,
+      height: AVATAR_SIZE,
+    },
+    avatar: {
+      width: AVATAR_SIZE,
+      height: AVATAR_SIZE,
+      borderRadius: AVATAR_SIZE / 2,
+      backgroundColor: colors.background,
+    },
+    avatarPlaceholder: {
+      width: AVATAR_SIZE,
+      height: AVATAR_SIZE,
+      borderRadius: AVATAR_SIZE / 2,
+      backgroundColor: colors.brandPinkLight,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    avatarPlaceholderIcon: {
+      fontSize: 20,
+      color: colors.brandPink,
+    },
+    centerCol: {
+      flex: 1,
+      minWidth: 0,
+    },
+    centerLine: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+    },
+    primary: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: colors.textHeader,
+      flexShrink: 1,
+    },
+    time: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      marginLeft: 4,
+    },
+    subtitle: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      marginTop: 2,
+    },
+    rightCol: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    amountsColumn: {
+      alignItems: 'flex-end',
+    },
+    amount: {
+      fontSize: 15,
+      fontWeight: '700',
+    },
+    arrow: {
+      fontSize: 22,
+      fontWeight: '700',
+    },
+    fiat: {
+      fontSize: 11,
+      color: colors.textSupplementary,
+      marginTop: 1,
+    },
+    showMore: {
+      paddingVertical: 16,
+      alignItems: 'center',
+    },
+    showMoreText: {
+      color: colors.brandPink,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    incoming: {
+      color: colors.green,
+    },
+    outgoing: {
+      color: colors.red,
+    },
+    itemPending: {
+      opacity: 0.5,
+    },
+    pendingText: {
+      color: colors.textSupplementary,
+    },
+  });
 
 export default TransactionList;

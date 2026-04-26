@@ -1,0 +1,26 @@
+appId: com.lightningpiggy.app.dev
+name: Receive skips straight to AmountEntryScreen without a lud16
+---
+# Covers #168 / #169. When the selected wallet has no lightningAddress
+# (the NWC URL carries no `lud16=` and the user hasn't set one manually),
+# the Receive sheet must skip the main receive/address view entirely
+# and land directly on AmountEntryScreen — no "Enter custom amount" CTA
+# to tap first.
+#
+# Assumes a wallet without a Lightning Address is already the active
+# one. Pair with test-add-nwc-wallet.yaml using an NWC URL that has no
+# `lud16` query param, or clear the address via Wallet Settings first.
+
+- waitForAnimationToEnd: { timeout: 10000 }
+
+- tapOn: { id: 'tab-home' }
+- waitForAnimationToEnd: { timeout: 3000 }
+
+- tapOn: { id: 'btn-receive' }
+
+# Must land on AmountEntryScreen directly. The main-view CTA must NOT be
+# present because the main view is skipped entirely.
+- extendedWaitUntil:
+    visible: { id: 'amount-entry-screen' }
+    timeout: 5000
+- assertNotVisible: { id: 'receive-enter-custom-amount' }

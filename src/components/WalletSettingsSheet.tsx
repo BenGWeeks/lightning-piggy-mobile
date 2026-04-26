@@ -1,9 +1,15 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Platform } from 'react-native';
-import { BottomSheetModal, BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, Platform, Keyboard } from 'react-native';
+import {
+  BottomSheetModal,
+  BottomSheetBackdrop,
+  BottomSheetScrollView,
+  BottomSheetTextInput,
+} from '@gorhom/bottom-sheet';
 import * as Clipboard from 'expo-clipboard';
 import { useWallet } from '../contexts/WalletContext';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
+import type { Palette } from '../styles/palettes';
 import { CardTheme } from '../types/wallet';
 import { themeList } from '../themes/cardThemes';
 import { MiniWalletCard } from './WalletCard';
@@ -15,10 +21,31 @@ interface Props {
 }
 
 const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { wallets, updateWalletSettings, removeWallet } = useWallet();
   const wallet = wallets.find((w) => w.id === walletId);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
+  // Pin the sheet to 85% of the screen — content (alias + LUD-16 + relay
+  // + full 8-card theme grid) is long enough that dynamic sizing pushed
+  // it to 100% and the handle was tight against the status bar.
   const snapPoints = useMemo(() => ['85%'], []);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  // Canonical keyboard-height tracking — mirrors SendSheet / NostrLoginSheet.
+  // Rule 5 of docs/TROUBLESHOOTING.adoc "Bottom sheet doesn't slide up…".
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   const [alias, setAlias] = useState('');
   const [lnAddress, setLnAddress] = useState('');
@@ -26,6 +53,11 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const [xpubDisplay, setXpubDisplay] = useState<string | null>(null);
   const [relayUrl, setRelayUrl] = useState<string | null>(null);
 
+  // Populate fields ONCE when the sheet opens for a given walletId. Using
+  // `wallet` as a dep would re-fire on every `wallets` array update (balance
+  // polls, NWC reconnect pings, etc.), each time stomping the user's in-
+  // progress edits with the stored value — symptom: typing into Lightning
+  // Address makes characters disappear.
   useEffect(() => {
     if (wallet) {
       setAlias(wallet.alias);
@@ -54,7 +86,8 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         setRelayUrl(null);
       }
     }
-  }, [wallet, walletId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [walletId]);
 
   const handleSheetChange = useCallback(
     (index: number) => {
@@ -113,17 +146,32 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
     <BottomSheetModal
       ref={bottomSheetRef}
       snapPoints={snapPoints}
+      // v5 defaults `enableDynamicSizing` to true, which overrides
+      // `snapPoints`. Disable it explicitly so the sheet honours the
+      // 85% pin. See docs/TROUBLESHOOTING.adoc
+      // "v5 modal collapses to a thin strip when its
+      // BottomSheetTextInput is focused".
+      enableDynamicSizing={false}
       enablePanDownToClose
       onChange={handleSheetChange}
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}
       handleIndicatorStyle={styles.handle}
+      keyboardBehavior="interactive"
+      keyboardBlurBehavior="restore"
+      android_keyboardInputMode="adjustResize"
     >
-      <BottomSheetScrollView contentContainerStyle={styles.content}>
+      <BottomSheetScrollView
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
+        ]}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={styles.title}>Wallet Settings</Text>
 
         <Text style={styles.label}>Alias</Text>
-        <TextInput
+        <BottomSheetTextInput
           style={styles.input}
           value={alias}
           onChangeText={setAlias}
@@ -136,7 +184,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         {wallet.walletType === 'nwc' && (
           <>
             <Text style={[styles.label, { marginTop: 20 }]}>Lightning Address</Text>
-            <TextInput
+            <BottomSheetTextInput
               style={styles.input}
               value={lnAddress}
               onChangeText={setLnAddress}
@@ -145,6 +193,8 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="email-address"
+              testID="wallet-lightning-address-input"
+              accessibilityLabel="Lightning Address"
             />
             <Text style={styles.hintText}>
               LUD-16 address for receiving payments. Usually provided by the NWC connection.
@@ -187,7 +237,12 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
           ))}
         </View>
 
-        <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
+        <TouchableOpacity
+          style={styles.saveButton}
+          onPress={handleSave}
+          testID="wallet-settings-save"
+          accessibilityLabel="Save wallet settings"
+        >
           <Text style={styles.saveButtonText}>Save</Text>
         </TouchableOpacity>
 
@@ -199,91 +254,92 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   );
 };
 
-const styles = StyleSheet.create({
-  sheetBackground: {
-    backgroundColor: colors.white,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-  },
-  handle: {
-    backgroundColor: colors.divider,
-    width: 40,
-  },
-  content: {
-    padding: 24,
-    paddingBottom: 40,
-    gap: 8,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: colors.textHeader,
-    marginBottom: 16,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textBody,
-    marginBottom: 6,
-  },
-  input: {
-    backgroundColor: colors.background,
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    color: colors.textBody,
-  },
-  xpubText: {
-    backgroundColor: colors.background,
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 12,
-    color: colors.textSupplementary,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-  },
-  hintText: {
-    fontSize: 12,
-    color: colors.textSupplementary,
-    marginTop: 4,
-  },
-  copyHint: {
-    fontSize: 12,
-    color: colors.brandPink,
-    fontWeight: '600',
-    marginTop: 4,
-    textAlign: 'right',
-  },
-  themeGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    marginTop: 4,
-  },
-  saveButton: {
-    backgroundColor: colors.brandPink,
-    height: 52,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 20,
-  },
-  saveButtonText: {
-    color: colors.white,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  disconnectButton: {
-    height: 44,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  disconnectButtonText: {
-    color: colors.red,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    sheetBackground: {
+      backgroundColor: colors.surface,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+    },
+    handle: {
+      backgroundColor: colors.divider,
+      width: 40,
+    },
+    content: {
+      padding: 24,
+      paddingBottom: 40,
+      gap: 8,
+    },
+    title: {
+      fontSize: 22,
+      fontWeight: '700',
+      color: colors.textHeader,
+      marginBottom: 16,
+    },
+    label: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.textBody,
+      marginBottom: 6,
+    },
+    input: {
+      backgroundColor: colors.background,
+      borderRadius: 12,
+      padding: 16,
+      fontSize: 16,
+      color: colors.textBody,
+    },
+    xpubText: {
+      backgroundColor: colors.background,
+      borderRadius: 12,
+      padding: 16,
+      fontSize: 12,
+      color: colors.textSupplementary,
+      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    },
+    hintText: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      marginTop: 4,
+    },
+    copyHint: {
+      fontSize: 12,
+      color: colors.brandPink,
+      fontWeight: '600',
+      marginTop: 4,
+      textAlign: 'right',
+    },
+    themeGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 12,
+      marginTop: 4,
+    },
+    saveButton: {
+      backgroundColor: colors.brandPink,
+      height: 52,
+      borderRadius: 12,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginTop: 20,
+    },
+    saveButtonText: {
+      color: colors.white,
+      fontSize: 16,
+      fontWeight: '700',
+    },
+    disconnectButton: {
+      height: 44,
+      borderRadius: 12,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginTop: 8,
+    },
+    disconnectButtonText: {
+      color: colors.red,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+  });
 
 export default WalletSettingsSheet;

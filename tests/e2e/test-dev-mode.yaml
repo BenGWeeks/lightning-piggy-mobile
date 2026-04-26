@@ -1,16 +1,16 @@
 appId: com.lightningpiggy.app
 name: Enable Developer Mode Test
 ---
-# Enables developer mode by triple-tapping the version number in Account settings.
-# Verifies the "Import Seed Phrase (Beta)" option appears in Add Wallet wizard.
+# Enables developer mode by triple-tapping the version number in the About
+# account screen. Verifies the "Import Seed Phrase (Beta)" option then
+# appears in the Add Wallet wizard.
 # Run: maestro test tests/e2e/test-dev-mode.yaml
 
 # Wait for app to be ready
 - waitForAnimationToEnd:
     timeout: 5000
 
-# Navigate to Account screen (works from any screen)
-# First try Home tab, then profile icon. If already on Account, just scroll.
+# Open drawer → About sub-screen
 - tapOn:
     id: 'tab-home'
     optional: true
@@ -21,20 +21,10 @@ name: Enable Developer Mode Test
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000
-
-# Scroll to the bottom to find the version number
-- swipe:
-    start: 50%, 80%
-    end: 50%, 20%
-    duration: 300
+- tapOn:
+    id: 'drawer-row-about'
 - waitForAnimationToEnd:
-    timeout: 1000
-- swipe:
-    start: 50%, 80%
-    end: 50%, 20%
-    duration: 300
-- waitForAnimationToEnd:
-    timeout: 1000
+    timeout: 3000
 
 # Triple-tap the version number to toggle dev mode
 - tapOn:

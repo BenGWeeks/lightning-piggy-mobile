@@ -25,6 +25,10 @@ This document lists the Bitcoin, Lightning, and Nostr standards implemented by L
 | Native SegWit HD Wallets
 | Derivation path `m/84'/0'/0'` for `bc1q...` address generation; zpub/ypub to xpub conversion (`onchainService`)
 
+| https://github.com/bitcoin/bips/blob/master/bip-0327.mediawiki[BIP-327]
+| MuSig2 Schnorr Key Aggregation
+| Taproot internal key aggregation (Boltz pubkey + app claim pubkey) for Boltz v2 swap claims (`boltzService`)
+
 | https://github.com/bitcoin/bips/blob/master/bip-0340.mediawiki[BIP-340]
 | Schnorr Signatures
 | Taproot script-path signing for Boltz swap claim transactions (`boltzService`)

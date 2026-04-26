@@ -1,8 +1,12 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
+import type { Palette } from '../styles/palettes';
 
 const EarnScreen: React.FC = () => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Earn</Text>
@@ -11,24 +15,25 @@ const EarnScreen: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.brandPink,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  title: {
-    color: colors.white,
-    fontSize: 28,
-    fontWeight: '700',
-    marginBottom: 12,
-  },
-  subtitle: {
-    color: colors.white,
-    fontSize: 16,
-    opacity: 0.8,
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.brandPink,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    title: {
+      color: colors.white,
+      fontSize: 28,
+      fontWeight: '700',
+      marginBottom: 12,
+    },
+    subtitle: {
+      color: colors.white,
+      fontSize: 16,
+      opacity: 0.8,
+    },
+  });
 
 export default EarnScreen;

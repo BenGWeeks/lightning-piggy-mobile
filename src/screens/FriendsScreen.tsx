@@ -8,21 +8,23 @@ import {
   RefreshControl,
   Alert,
 } from 'react-native';
+import { InteractionManager } from 'react-native';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation, CompositeNavigationProp } from '@react-navigation/native';
+import { Users } from 'lucide-react-native';
+import { useNavigation, CompositeNavigationProp, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr } from '../contexts/NostrContext';
-import ProfileIcon from '../components/ProfileIcon';
-import ContactListItem from '../components/ContactListItem';
+import TabHeader from '../components/TabHeader';
+import { useThemeColors } from '../contexts/ThemeContext';
+import ContactListItem, { CONTACT_LIST_ITEM_HEIGHT } from '../components/ContactListItem';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import AddFriendSheet from '../components/AddFriendSheet';
 import SendSheet from '../components/SendSheet';
 import AlphabetBar from '../components/AlphabetBar';
 import { fetchPhoneContacts, PhoneContact, setLightningAddress } from '../services/contactsService';
-import { styles } from '../styles/FriendsScreen.styles';
+import { createFriendsScreenStyles } from '../styles/FriendsScreen.styles';
 import type { MainTabParamList, RootStackParamList } from '../navigation/types';
 
 type FriendsNavigation = CompositeNavigationProp<
@@ -44,9 +46,10 @@ interface ListItem {
 }
 
 const FriendsScreen: React.FC = () => {
-  const insets = useSafeAreaInsets();
+  const colors = useThemeColors();
+  const styles = useMemo(() => createFriendsScreenStyles(colors), [colors]);
   const navigation = useNavigation<FriendsNavigation>();
-  const { isLoggedIn, profile, contacts, refreshContacts, addContact } = useNostr();
+  const { isLoggedIn, profile, contacts, refreshContacts, refreshProfile, addContact } = useNostr();
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
   const [searchExpanded, setSearchExpanded] = useState(false);
@@ -92,6 +95,23 @@ const FriendsScreen: React.FC = () => {
       .then(setPhoneContacts)
       .catch(() => {});
   }, []);
+
+  // Force-refresh the own-profile kind-0 on focus so the top-right
+  // profile icon picks up external renames (e.g. via Amber or another
+  // client) without waiting for the 24h cache to expire. See #148.
+  //
+  // Deferred via InteractionManager so the tab-transition animation
+  // and first-paint of the Friends list finish *before* the (3-5 s)
+  // refresh kicks off — otherwise the JS thread's busy on the refresh
+  // while React is trying to render, and navigating away then feels
+  // laggy until the refresh completes.
+  useFocusEffect(
+    useCallback(() => {
+      if (!isLoggedIn) return;
+      const handle = InteractionManager.runAfterInteractions(() => refreshProfile());
+      return () => handle.cancel();
+    }, [isLoggedIn, refreshProfile]),
+  );
 
   const combinedList = useMemo(() => {
     const items: ListItem[] = [];
@@ -165,14 +185,26 @@ const FriendsScreen: React.FC = () => {
     return Array.from(letters).sort();
   }, [combinedList]);
 
-  // Approximate item height for scroll-position letter tracking only (not used for layout)
-  const ITEM_HEIGHT = 72;
+  // Row height comes from ContactListItem (44 avatar + 14×2 padding).
+  // Imported rather than duplicated so a future avatar-size change only
+  // needs updating in one place. Used below to compute deterministic
+  // alphabet-tap offsets — scrollToIndex could silently no-op on
+  // warm-cache devices when the target row hadn't been virtualised yet
+  // (see #178). FlashList v2 auto-measures, so there's no size-hint API
+  // to give it (overrideItemLayout in v2 only controls column span).
+  //
+  // LIST_PADDING_TOP must match styles.listContent.paddingTop — the
+  // FlashList's contentContainerStyle shifts row 0 down by that amount,
+  // so any offset math needs to add it back to land on the right row.
+  // If you change styles.listContent.paddingTop, update this too.
+  const ITEM_HEIGHT = CONTACT_LIST_ITEM_HEIGHT;
+  const LIST_PADDING_TOP = 12;
 
   const handleScroll = useCallback(
     (e: { nativeEvent: { contentOffset: { y: number } } }) => {
       if (scrollTrackingPaused.current) return;
       const offsetY = e.nativeEvent.contentOffset.y;
-      const index = Math.floor(offsetY / ITEM_HEIGHT);
+      const index = Math.floor(Math.max(0, offsetY - LIST_PADDING_TOP) / ITEM_HEIGHT);
       if (index >= 0 && index < combinedList.length) {
         const first = combinedList[index].name.charAt(0).toUpperCase();
         const letter = /[A-Z]/.test(first) ? first : '#';
@@ -196,7 +228,14 @@ const FriendsScreen: React.FC = () => {
         // Pause scroll tracking to prevent currentLetter flashing during scroll
         scrollTrackingPaused.current = true;
         setCurrentLetter(letter);
-        flatListRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0 });
+        // Use scrollToOffset with the pinned row height instead of
+        // scrollToIndex. On a warm cache, offscreen rows haven't been
+        // measured yet and scrollToIndex can no-op leaving the viewport
+        // blank (see #178). Offset math is O(1) given the uniform height.
+        flatListRef.current?.scrollToOffset({
+          offset: LIST_PADDING_TOP + index * ITEM_HEIGHT,
+          animated: false,
+        });
         setTimeout(() => {
           scrollTrackingPaused.current = false;
         }, 500);
@@ -266,27 +305,8 @@ const FriendsScreen: React.FC = () => {
         style={styles.bgImage}
         resizeMode="contain"
       />
-      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-        <View style={styles.titleRow}>
-          <TouchableOpacity
-            style={styles.homeButton}
-            onPress={() => navigation.navigate('Home', {})}
-          >
-            <Image
-              source={require('../../assets/images/Home.png')}
-              style={styles.homeIcon}
-              resizeMode="contain"
-            />
-          </TouchableOpacity>
-          <Text style={styles.title}>Friends</Text>
-          <View style={{ flex: 1 }} />
-          <ProfileIcon
-            uri={profile?.picture}
-            size={36}
-            onPress={() => navigation.navigate('Account')}
-          />
-        </View>
-
+      <TabHeader title="Friends" icon={<Users size={20} color={colors.brandPink} />} />
+      <View style={styles.headerExtras}>
         {/* Filter chips + search toggle */}
         <View style={styles.chipRow}>
           {searchExpanded ? (
@@ -423,14 +443,14 @@ const FriendsScreen: React.FC = () => {
             </Text>
             <TouchableOpacity
               style={styles.connectButton}
-              onPress={() => navigation.navigate('Account')}
+              onPress={() => navigation.getParent()?.dispatch({ type: 'OPEN_DRAWER' })}
             >
               <Text style={styles.connectButtonText}>Go to Account</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <View style={{ flex: 1, flexDirection: 'row' }}>
-            {availableLetters.length > 1 && (
+            {availableLetters.length > 0 && (
               <AlphabetBar
                 letters={availableLetters}
                 currentLetter={currentLetter}
@@ -455,7 +475,11 @@ const FriendsScreen: React.FC = () => {
                 }
                 contentContainerStyle={styles.listContent}
                 onScroll={handleScroll}
-                scrollEventThrottle={250}
+                // 32ms ≈ 2 frames at 60fps — keeps the alphabet-bar
+                // highlight in sync with fast flings without firing the
+                // handler every frame. The previous 250ms made the
+                // highlight lag visibly on momentum scrolls.
+                scrollEventThrottle={32}
               />
             </Profiler>
           </View>

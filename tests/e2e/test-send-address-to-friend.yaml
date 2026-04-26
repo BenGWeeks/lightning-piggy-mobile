@@ -1,12 +1,15 @@
 appId: com.lightningpiggy.app.dev
 name: Send Lightning Address to Friend (dev)
 ---
-# Opens the Receive sheet in Address mode (no wallet needed — just a
-# lightning address on the Account profile), then taps the Friend button
-# and verifies the FriendPickerSheet presents. Narrower than the full
-# invoice flow, but it isolates the original Maestro-onPress hypothesis
-# (issue #106) — did removing the TouchableWithoutFeedback wrapper let
-# UiAutomator clicks reach the nested testID?
+# Opens the Receive sheet in Address mode (requires an NWC wallet with
+# a lightning address — post-#169 Lightning Address is per-wallet, so
+# pair this with test-add-nwc-wallet + test-set-lightning-address or
+# use an NWC URL that already carries `lud16=` in its query string),
+# then taps the Friend button and verifies the FriendPickerSheet
+# presents. Narrower than the full invoice flow, but it isolates the
+# original Maestro-onPress hypothesis (issue #106) — did removing the
+# TouchableWithoutFeedback wrapper let UiAutomator clicks reach the
+# nested testID?
 
 - waitForAnimationToEnd: { timeout: 10000 }
 
@@ -14,14 +17,11 @@ name: Send Lightning Address to Friend (dev)
 - waitForAnimationToEnd: { timeout: 3000 }
 
 - tapOn: { id: 'btn-receive' }
-- extendedWaitUntil:
-    visible: { id: 'receive-tab-address' }
-    timeout: 10000
-
-# Stay on Address tab (default) — friendShareValue = lightningAddress
+# Address/Amount tabs were removed; wallets with a lud16 land directly
+# on the lud16 QR view (friendShareValue = lightningAddress).
 - extendedWaitUntil:
     visible: { text: 'test@getalby.com' }
-    timeout: 5000
+    timeout: 10000
 
 # Tap Friend
 - tapOn: { id: 'receive-send-to-friend' }

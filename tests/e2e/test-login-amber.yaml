@@ -1,0 +1,84 @@
+appId: com.lightningpiggy.app.dev
+name: Nostr Login via Amber
+---
+# Tests logging into Lightning Piggy via Amber. Assumes:
+#   1. Amber is installed with a key imported (run test-amber-import-key.yaml first).
+#   2. The app is already foregrounded on any screen.
+#
+# If the user is already logged in, we sign them out first so the
+# Connect Nostr path is reachable.
+#
+# Run: maestro test tests/e2e/test-login-amber.yaml
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Open the account drawer
+- tapOn:
+    id: 'profile-icon'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Sign out first if already logged in, to make this script idempotent
+- tapOn:
+    id: 'drawer-sign-out'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- tapOn:
+    text: 'Sign Out'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Re-open drawer → Profile
+- tapOn:
+    id: 'profile-icon'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: 'drawer-row-profile'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Open the Nostr login sheet
+- tapOn:
+    id: 'connect-nostr'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Tap "Use Amber Signer" — this kicks off the Amber Intent
+- tapOn:
+    id: 'amber-button'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Amber opens with its connection-grant screen showing our app name,
+# the chosen identity, and two options — "Approve basic actions"
+# (default, auto-approves common ops) vs "Manually approve each
+# permission". Amber may stack an inner "Notifications are needed"
+# dialog on top on first connection; dismiss it before tapping
+# Connect.
+- tapOn:
+    text: 'Deny'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- tapOn:
+    text: 'Connect'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# We should be back in Lightning Piggy. Reopen the drawer and verify
+# the Sign Out row is available (means login succeeded).
+- tapOn:
+    id: 'profile-icon'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+- extendedWaitUntil:
+    visible:
+      id: 'drawer-sign-out'
+    timeout: 20000

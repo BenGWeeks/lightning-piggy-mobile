@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { View, Text, Image, TouchableOpacity, ScrollView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
@@ -11,9 +11,9 @@ import {
   isCourseComplete,
 } from '../services/learnProgressService';
 import { ChevronLeft, Check } from 'lucide-react-native';
-import { styles } from '../styles/CourseDetailScreen.styles';
+import { createCourseDetailScreenStyles } from '../styles/CourseDetailScreen.styles';
 import { getYouTubeThumbnail } from '../utils/youtube';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
 import { LearnNavigation, CourseDetailRoute } from '../navigation/types';
 
 interface Props {
@@ -22,6 +22,8 @@ interface Props {
 }
 
 const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createCourseDetailScreenStyles(colors), [colors]);
   const { courseId } = route.params;
   const course = courses.find((c) => c.id === courseId);
   const [progress, setProgress] = useState<LearnProgress>({ completedMissions: [] });

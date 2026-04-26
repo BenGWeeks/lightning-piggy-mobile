@@ -1,8 +1,15 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, BackHandler } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  BackHandler,
+  Keyboard,
+  Platform,
+} from 'react-native';
 import { Image } from 'expo-image';
-import Svg, { Circle, Path } from 'react-native-svg';
-import { X } from 'lucide-react-native';
+import { UserRound } from 'lucide-react-native';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
@@ -11,7 +18,8 @@ import {
   BottomSheetFlatList,
 } from '@gorhom/bottom-sheet';
 import { useNostr } from '../contexts/NostrContext';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
+import type { Palette } from '../styles/palettes';
 import AlphabetBar from './AlphabetBar';
 
 export interface PickedFriend {
@@ -46,13 +54,15 @@ const FriendPickerSheet: React.FC<Props> = ({
   title = 'Send to friend',
   subtitle,
 }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
   // BottomSheetFlatList's ref exposes the wrapped FlatList's scrollToIndex
   // (and other imperative helpers). Typing it precisely runs into @gorhom's
   // generic constraints; any-ref keeps the call site clean.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const listRef = useRef<any>(null);
-  const snapPoints = useMemo(() => ['75%'], []);
+  const snapPoints = useMemo(() => ['75%', '90%'], []);
   // Keep the drag handle clear of Android's notification-shade trigger
   // zone (<48 DP from the top) while still letting the sheet grow past
   // the 75% snap when `keyboardBehavior="interactive"` lifts it up to
@@ -63,6 +73,11 @@ const FriendPickerSheet: React.FC<Props> = ({
   const { contacts } = useNostr();
   const [search, setSearch] = useState('');
   const [currentLetter, setCurrentLetter] = useState<string | null>(null);
+  // Canonical bottom-sheet + keyboard pattern from TROUBLESHOOTING.adoc
+  // (see NostrLoginSheet.tsx): track keyboard height and pad the list's
+  // contentContainerStyle dynamically. Without it, the list content
+  // hides behind the keyboard or the sheet appears to collapse.
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   // Drive the expensive filter off a deferred copy of `search`. Android's
   // IME can drop characters if the synchronous work triggered by each
   // keystroke (re-sorting the list + re-rendering every FlatList row)
@@ -87,6 +102,19 @@ const FriendPickerSheet: React.FC<Props> = ({
     });
     return () => sub.remove();
   }, [visible, onClose]);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   const friends = useMemo<PickedFriend[]>(() => {
     const list: PickedFriend[] = contacts.map((c) => ({
@@ -149,21 +177,20 @@ const FriendPickerSheet: React.FC<Props> = ({
         testID={`friend-picker-${item.pubkey.slice(0, 8)}`}
       >
         <View style={styles.avatar}>
+          {/* Always render the silhouette so it shows whether `picture`
+              is missing OR the Image fails to load (broken URL, offline,
+              etc). When `picture` is set, the Image stacks on top via
+              absoluteFill and covers the silhouette once it loads. */}
+          <View style={styles.avatarFallback}>
+            <UserRound size={22} color={colors.textBody} strokeWidth={1.75} />
+          </View>
           {item.picture ? (
-            <Image source={{ uri: item.picture }} style={styles.avatarImage} cachePolicy="disk" />
-          ) : (
-            <View style={styles.avatarFallback}>
-              <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-                <Circle cx="12" cy="8" r="4" fill={colors.textSupplementary} />
-                <Path
-                  d="M4 20c0-3.314 3.582-6 8-6s8 2.686 8 6"
-                  stroke={colors.textSupplementary}
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                />
-              </Svg>
-            </View>
-          )}
+            <Image
+              source={{ uri: item.picture }}
+              style={[StyleSheet.absoluteFillObject, styles.avatarImage]}
+              cachePolicy="disk"
+            />
+          ) : null}
         </View>
         <View style={styles.info}>
           <Text style={styles.name} numberOfLines={1}>
@@ -192,6 +219,11 @@ const FriendPickerSheet: React.FC<Props> = ({
       android_keyboardInputMode="adjustResize"
       enableContentPanningGesture={false}
       enableOverDrag={false}
+      // v5 defaults `enableDynamicSizing` to true → sheet height tracks
+      // content height, which collapses to ~0 when Android `adjustResize`
+      // shrinks the window as the keyboard opens (gorhom#1602). Turning
+      // it off locks the sheet to its explicit snap point.
+      enableDynamicSizing={false}
       topInset={topInset}
       // Stack on top of the ReceiveSheet rather than dismissing it —
       // @gorhom's default "switch" makes the parent modal dismiss, which
@@ -210,15 +242,6 @@ const FriendPickerSheet: React.FC<Props> = ({
               <Text style={styles.title}>{title}</Text>
               {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
             </View>
-            <TouchableOpacity
-              style={styles.closeButton}
-              onPress={onClose}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-              accessibilityLabel="Close"
-              testID="friend-picker-close"
-            >
-              <X size={22} color={colors.textSupplementary} />
-            </TouchableOpacity>
           </View>
           <BottomSheetTextInput
             style={styles.searchInput}
@@ -232,7 +255,7 @@ const FriendPickerSheet: React.FC<Props> = ({
           />
         </View>
         <View style={styles.listWithBar}>
-          {availableLetters.length > 1 ? (
+          {availableLetters.length > 0 ? (
             <AlphabetBar
               letters={availableLetters}
               currentLetter={currentLetter}
@@ -244,9 +267,27 @@ const FriendPickerSheet: React.FC<Props> = ({
             data={friends}
             keyExtractor={(f: PickedFriend) => f.pubkey}
             renderItem={renderItem}
-            contentContainerStyle={styles.listContent}
+            contentContainerStyle={[
+              styles.listContent,
+              { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
+            ]}
             keyboardShouldPersistTaps="handled"
             style={styles.list}
+            onScrollToIndexFailed={(info: {
+              index: number;
+              highestMeasuredFrameIndex: number;
+              averageItemLength: number;
+            }) => {
+              const offset = info.averageItemLength * info.index;
+              listRef.current?.scrollToOffset?.({ offset, animated: false });
+              setTimeout(() => {
+                listRef.current?.scrollToIndex?.({
+                  index: info.index,
+                  animated: false,
+                  viewPosition: 0,
+                });
+              }, 50);
+            }}
             ListEmptyComponent={
               <View style={styles.empty}>
                 <Text style={styles.emptyText}>
@@ -265,115 +306,109 @@ const FriendPickerSheet: React.FC<Props> = ({
   );
 };
 
-const styles = StyleSheet.create({
-  sheetBackground: {
-    backgroundColor: colors.white,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-  },
-  container: {
-    flex: 1,
-  },
-  listWithBar: {
-    flex: 1,
-    flexDirection: 'row',
-    overflow: 'hidden',
-  },
-  list: {
-    flex: 1,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  titleText: {
-    flex: 1,
-  },
-  closeButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  header: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.divider,
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.textHeader,
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: 13,
-    color: colors.textSupplementary,
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  searchInput: {
-    marginTop: 12,
-    backgroundColor: colors.background,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
-    color: colors.textHeader,
-  },
-  listContent: {
-    paddingVertical: 8,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    gap: 12,
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    overflow: 'hidden',
-    backgroundColor: colors.background,
-  },
-  avatarImage: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-  },
-  avatarFallback: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  info: {
-    flex: 1,
-  },
-  name: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.textHeader,
-  },
-  address: {
-    fontSize: 13,
-    color: colors.textSupplementary,
-    marginTop: 2,
-  },
-  empty: {
-    padding: 24,
-    alignItems: 'center',
-  },
-  emptyText: {
-    fontSize: 14,
-    color: colors.textSupplementary,
-    textAlign: 'center',
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    sheetBackground: {
+      backgroundColor: colors.surface,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+    },
+    container: {
+      flex: 1,
+    },
+    listWithBar: {
+      flex: 1,
+      flexDirection: 'row',
+      overflow: 'hidden',
+    },
+    list: {
+      flex: 1,
+    },
+    titleRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+    },
+    titleText: {
+      flex: 1,
+    },
+    header: {
+      paddingHorizontal: 20,
+      paddingTop: 8,
+      paddingBottom: 12,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.divider,
+    },
+    title: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: colors.textHeader,
+      textAlign: 'center',
+    },
+    subtitle: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+      marginTop: 4,
+      textAlign: 'center',
+    },
+    searchInput: {
+      marginTop: 12,
+      backgroundColor: colors.background,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      fontSize: 15,
+      color: colors.textHeader,
+    },
+    listContent: {
+      paddingVertical: 8,
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 10,
+      paddingHorizontal: 20,
+      gap: 12,
+    },
+    avatar: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      overflow: 'hidden',
+      backgroundColor: colors.background,
+    },
+    avatarImage: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+    },
+    avatarFallback: {
+      width: 40,
+      height: 40,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    info: {
+      flex: 1,
+    },
+    name: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.textHeader,
+    },
+    address: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+      marginTop: 2,
+    },
+    empty: {
+      padding: 24,
+      alignItems: 'center',
+    },
+    emptyText: {
+      fontSize: 14,
+      color: colors.textSupplementary,
+      textAlign: 'center',
+    },
+  });
 
 export default FriendPickerSheet;

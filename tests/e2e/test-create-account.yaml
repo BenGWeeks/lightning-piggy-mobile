@@ -15,7 +15,7 @@ name: Create Nostr Account Test
     text: 'UPDATE'
     optional: true
 - tapOn:
-    id: 'account-home-button'
+    id: 'account-back-button'
     optional: true
 - tapOn:
     text: 'Home tab'
@@ -23,28 +23,32 @@ name: Create Nostr Account Test
 - waitForAnimationToEnd:
     timeout: 3000
 
-# Navigate to Account
+# Open drawer
 - tapOn:
     id: 'profile-icon'
 - waitForAnimationToEnd:
     timeout: 5000
 
-# Logout if already logged in
+# Sign out if already logged in
 - tapOn:
-    id: 'logout-button'
+    id: 'drawer-sign-out'
     optional: true
 - waitForAnimationToEnd:
     timeout: 2000
 - tapOn:
-    text: 'Logout'
+    text: 'Sign Out'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000
 
-# Re-navigate to Account
+# Re-open drawer and go to Profile
 - tapOn:
     id: 'profile-icon'
     optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'drawer-row-profile'
 - waitForAnimationToEnd:
     timeout: 3000
 
@@ -127,14 +131,19 @@ name: Create Nostr Account Test
 - waitForAnimationToEnd:
     timeout: 3000
 
-# Logout the test account to clean up (if logged in)
+# Sign out the test account to clean up (if logged in)
 - tapOn:
-    id: 'logout-button'
+    id: 'profile-icon'
     optional: true
 - waitForAnimationToEnd:
     timeout: 2000
 - tapOn:
-    text: 'Logout'
+    id: 'drawer-sign-out'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    text: 'Sign Out'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000

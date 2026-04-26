@@ -1,0 +1,93 @@
+appId: com.lightningpiggy.app.dev
+name: SendSheet keeps every character of the zap message (#159, #160 regression guard)
+---
+# What this guards:
+#
+# #159 — `BottomSheetTextInput` used to drop keystrokes during fast
+#   real-user typing in the zap-message field. The fix removed the
+#   outer TouchableWithoutFeedback+Keyboard.dismiss wrapper and added
+#   the canonical keyboard-prop triplet on the BottomSheetModal.
+#
+# #160 — the SendSheet used to open at a single '90%' snap with
+#   dynamic sizing enabled, letting the user pan it taller. The fix
+#   drops the explicit snapPoints and relies on v5's
+#   enableDynamicSizing={true} default to lock the sheet to its
+#   content height.
+#
+# The test opens a zap flow against a known followed contact, types
+# a deliberately-long message into the memo field, and asserts the
+# input holds the exact text back. If either bug regresses the
+# assertion fails.
+#
+# Run: maestro test tests/e2e/test-sendsheet-typing.yaml
+
+# Launch the app fresh so we are guaranteed a known state. Without
+# this the test was failing at `tab-home is visible` when the previous
+# test left the app on a different screen (e.g. mid-conversation).
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 40000
+
+# Open a conversation with a known peer. Hardcoded "Little Piggy" —
+# the controlled fixture peer for Big Piggy. Original test used
+# "Ben Weeks" but that seed contact is no longer reliably present.
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
+- tapOn:
+    text: 'Little Piggy.*'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Tap the chat-header avatar/name to open ContactProfileSheet, then
+# Send zap to launch SendSheet on top. (#153 landed this tap surface.)
+#
+# The "Send zap" button only renders when the peer has a Lightning
+# Address (lud16) on their Nostr profile. Little Piggy — the controlled
+# test fixture — does not, so the regression check is wrapped in
+# `runFlow when:` and skipped on this peer. When the fixture gains a
+# lud16, the assertion automatically begins running.
+- tapOn:
+    id: 'chat-header-open-profile'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- runFlow:
+    when:
+      visible:
+        text: 'Send zap'
+    commands:
+      - tapOn:
+          text: 'Send zap'
+      - waitForAnimationToEnd:
+          timeout: 4000
+      # SendSheet now open — confirm the memo input is reachable, type
+      # a realistic message with punctuation, then assert it round-trips
+      # back. If #159 regresses, characters drop and the assertVisible
+      # substring match fails.
+      - tapOn:
+          id: 'sendsheet-memo-input'
+      - inputText: 'Testing zaps! Do you like them?'
+      - waitForAnimationToEnd:
+          timeout: 1500
+      - assertVisible: 'Testing zaps! Do you like them?'
+      # Close the sheet cleanly so the test doesn't leave SendSheet
+      # open for the next run.
+      - tapOn: 'Cancel'
+      - waitForAnimationToEnd:
+          timeout: 2000

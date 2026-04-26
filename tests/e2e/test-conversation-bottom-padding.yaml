@@ -1,0 +1,93 @@
+appId: com.lightningpiggy.app.dev
+name: Conversation — latest message clears the composer
+---
+# Regression guard: the FlatList that renders messages in
+# ConversationScreen is `inverted`, so its `paddingTop` is the
+# *visual-bottom* padding. The composer is a flex sibling of the
+# FlatList (rendered inside KeyboardStickyView), so the FlatList's
+# bottom edge already ends where the composer's top begins — we only
+# need a small breathing gap (currently 8 dp resting, 16 dp when the
+# attach panel is open) so the latest bubble doesn't visually hug the
+# composer/panel's top border. If this padding goes to 0 the latest
+# bubble's bottom edge would touch the composer with no breathing
+# room.
+#
+# Safety: peer is always Little Piggy (controlled test fixture).
+# Test types one character + erases — NO real DM is sent, no payment
+# flows triggered.
+#
+# Maestro can't measure pixel-perfect overlap, but it can:
+#   - Assert the composer is visible.
+#   - Assert at least one known message bubble is visible after
+#     scrolling to the most recent.
+#   - Take a screenshot for visual review.
+#
+# Run:
+#   maestro --device emulator-5554 test tests/e2e/test-conversation-bottom-padding.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# Navigate to Messages → open Little Piggy thread.
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
+- tapOn:
+    text: 'Little Piggy.*'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Composer is visible and idle (no keyboard, no panel).
+- assertVisible:
+    id: 'conversation-input'
+- assertVisible:
+    id: 'conversation-send'
+- assertVisible:
+    id: 'conversation-attach'
+- assertNotVisible:
+    id: 'conversation-attach-panel'
+
+# Scroll to the most recent message (inverted list: scroll-to-bottom
+# = scroll offset 0). The scroll-to-bottom FAB only appears when the
+# user is NOT at the bottom; tapping it is a no-op when we're already
+# there. Either way it gets us into a deterministic scroll position.
+- runFlow:
+    when:
+      visible:
+        id: 'conversation-scroll-to-bottom'
+    commands:
+      - tapOn:
+          id: 'conversation-scroll-to-bottom'
+      - waitForAnimationToEnd:
+          timeout: 2000
+
+# Capture for human / image-diff review. The screenshot is the
+# primary evidence that the latest bubble's bottom edge is fully
+# visible above the composer (Maestro's `assertVisible` only checks
+# view-tree bounds, not rendered position).
+- takeScreenshot: bottom-padding-clears-composer
+
+# Sanity: tapping the composer input still works after scroll — proves
+# the input wasn't accidentally pushed off-screen by the padding bump.
+- tapOn:
+    id: 'conversation-input'
+- waitForAnimationToEnd:
+    timeout: 2000
+- inputText: 'x'
+- assertVisible:
+    text: 'x'
+- eraseText: 1

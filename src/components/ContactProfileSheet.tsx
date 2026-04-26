@@ -17,11 +17,14 @@ import {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { Zap, Copy } from 'lucide-react-native';
+import { Zap, Copy, Share2, UserRound } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
-import { npubEncode } from '../services/nostrService';
+import Toast from 'react-native-toast-message';
+import { npubEncode, nprofileEncode, buildProfileRelayHints } from '../services/nostrService';
 import { useNostr } from '../contexts/NostrContext';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
+import type { Palette } from '../styles/palettes';
+import FriendPickerSheet, { PickedFriend } from './FriendPickerSheet';
 
 interface ContactData {
   pubkey: string | null;
@@ -50,15 +53,19 @@ const ContactProfileSheet: React.FC<Props> = ({
   onMessage,
   onSetLightningAddress,
 }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['55%'], []);
-  const { contacts, followContact, unfollowContact } = useNostr();
+  const { contacts, followContact, unfollowContact, sendDirectMessage, relays } = useNostr();
   const [following, setFollowing] = useState(false);
   const [loadingFollow, setLoadingFollow] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
   const [avatarLoaded, setAvatarLoaded] = useState(false);
   const [editingLnAddress, setEditingLnAddress] = useState(false);
   const [lnAddressDraft, setLnAddressDraft] = useState('');
+  const [shareOpen, setShareOpen] = useState(false);
+  const [sharing, setSharing] = useState(false);
 
   // Timeout: if image hasn't loaded in 8s, show fallback
   useEffect(() => {
@@ -144,6 +151,53 @@ const ContactProfileSheet: React.FC<Props> = ({
     await Clipboard.setStringAsync(npubEncode(contact.pubkey));
   };
 
+  const handleShare = useCallback(() => {
+    if (!contact?.pubkey) return;
+    setShareOpen(true);
+  }, [contact?.pubkey]);
+
+  const handleShareToFriend = useCallback(
+    async (friend: PickedFriend) => {
+      if (!contact?.pubkey || sharing) return;
+      setSharing(true);
+      setShareOpen(false);
+      try {
+        // NIP-19 nprofile includes relay hints so the receiving client can
+        // find the shared person's profile without searching every relay.
+        // Prefixing with `nostr:` (NIP-21) means any conforming client
+        // — Damus, Amethyst, Primal, Coracle, 0xchat — renders it as a
+        // clickable profile mention. The human-readable first line is a
+        // fallback for clients that don't unfurl the URI.
+        const readRelays = relays.filter((r) => r.read).map((r) => r.url);
+        const relayHints = buildProfileRelayHints(contact.pubkey, contacts, readRelays);
+        const nprofile = nprofileEncode(contact.pubkey, relayHints);
+        const label = contact.name || 'a contact';
+        const payload = `Shared contact: ${label}\nnostr:${nprofile}`;
+        const result = await sendDirectMessage(friend.pubkey, payload);
+        if (!result.success) {
+          Toast.show({
+            type: 'error',
+            text1: 'Share failed',
+            text2: result.error ?? 'Could not share contact.',
+            position: 'top',
+            visibilityTime: 4000,
+          });
+          return;
+        }
+        Toast.show({
+          type: 'success',
+          text1: `${label} shared with ${friend.name}`,
+          position: 'top',
+          visibilityTime: 2500,
+        });
+        onClose();
+      } finally {
+        setSharing(false);
+      }
+    },
+    [contact?.pubkey, contact?.name, sharing, sendDirectMessage, onClose, contacts, relays],
+  );
+
   const handleViewProfile = useCallback(async () => {
     if (!contact?.pubkey) return;
     const npub = npubEncode(contact.pubkey);
@@ -201,15 +255,7 @@ const ContactProfileSheet: React.FC<Props> = ({
             />
           ) : (
             <View style={styles.avatarDefault}>
-              <Svg width={32} height={32} viewBox="0 0 24 24" fill="none">
-                <Circle cx="12" cy="8" r="4" fill={colors.textSupplementary} />
-                <Path
-                  d="M4 20c0-3.314 3.582-6 8-6s8 2.686 8 6"
-                  stroke={colors.textSupplementary}
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                />
-              </Svg>
+              <UserRound size={40} color={colors.textBody} strokeWidth={1.5} />
             </View>
           )}
         </View>
@@ -330,7 +376,23 @@ const ContactProfileSheet: React.FC<Props> = ({
             </TouchableOpacity>
           )}
           {contact.pubkey && (
-            <TouchableOpacity style={styles.viewProfileButton} onPress={handleViewProfile}>
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={handleShare}
+              disabled={sharing}
+              accessibilityLabel="Share contact"
+              testID="contact-share-button"
+            >
+              <Share2 size={18} color={colors.brandPink} />
+            </TouchableOpacity>
+          )}
+          {contact.pubkey && (
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={handleViewProfile}
+              accessibilityLabel="Open in external client"
+              testID="contact-view-profile-button"
+            >
               <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
                 <Path
                   d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3"
@@ -344,208 +406,216 @@ const ContactProfileSheet: React.FC<Props> = ({
           )}
         </View>
       </BottomSheetView>
+      <FriendPickerSheet
+        visible={shareOpen}
+        onClose={() => setShareOpen(false)}
+        onSelect={handleShareToFriend}
+        title={`Share ${contact.name || 'contact'}`}
+        subtitle="They'll receive an encrypted Nostr DM with a person card."
+      />
     </BottomSheetModal>
   );
 };
 
-const styles = StyleSheet.create({
-  sheetBackground: {
-    backgroundColor: colors.white,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-  },
-  content: {
-    alignItems: 'center',
-    paddingBottom: 40,
-  },
-  handleOverlay: {
-    position: 'absolute',
-    top: 8,
-    left: 0,
-    right: 0,
-    zIndex: 1,
-    alignItems: 'center',
-  },
-  handleBar: {
-    width: 40,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: 'rgba(255,255,255,0.7)',
-  },
-  bannerContainer: {
-    width: '100%',
-    height: 120,
-    overflow: 'hidden',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-  },
-  bannerImage: {
-    width: '100%',
-    height: 120,
-  },
-  bannerPlaceholder: {
-    width: '100%',
-    height: 120,
-    backgroundColor: colors.brandPink,
-    opacity: 0.15,
-  },
-  avatarContainer: {
-    marginTop: -36,
-    borderRadius: 39,
-    borderWidth: 3,
-    borderColor: colors.white,
-    overflow: 'hidden',
-    backgroundColor: colors.background,
-  },
-  avatar: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-  },
-  avatarDefault: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: colors.background,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  name: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.textHeader,
-    marginTop: 8,
-    paddingHorizontal: 24,
-    maxWidth: '100%',
-  },
-  nip05: {
-    fontSize: 13,
-    color: colors.brandPink,
-    marginTop: 2,
-  },
-  npubRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 6,
-    backgroundColor: colors.background,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  npubText: {
-    fontSize: 12,
-    color: colors.textSupplementary,
-    fontWeight: '500',
-  },
-  lightningAddress: {
-    fontSize: 13,
-    color: colors.textSupplementary,
-    marginTop: 4,
-    paddingHorizontal: 24,
-    maxWidth: '100%',
-  },
-  lnAddressRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 4,
-    paddingHorizontal: 24,
-  },
-  lnAddressEditRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 8,
-    paddingHorizontal: 24,
-  },
-  lnAddressInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: colors.brandPinkLight,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 14,
-    color: colors.textHeader,
-  },
-  lnAddressSaveButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: colors.brandPink,
-  },
-  lnAddressSaveText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.white,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 20,
-    paddingHorizontal: 16,
-  },
-  followButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: colors.brandPink,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  followingButton: {
-    backgroundColor: colors.brandPinkLight,
-    borderColor: colors.brandPinkLight,
-  },
-  followButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.brandPink,
-  },
-  followingButtonText: {
-    color: colors.brandPink,
-  },
-  zapButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 10,
-    backgroundColor: colors.brandPink,
-  },
-  zapButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.white,
-  },
-  messageButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 10,
-    backgroundColor: colors.brandPink,
-  },
-  messageButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.white,
-  },
-  viewProfileButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: colors.brandPink,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-});
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    sheetBackground: {
+      backgroundColor: colors.surface,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+    },
+    content: {
+      alignItems: 'center',
+      paddingBottom: 40,
+    },
+    handleOverlay: {
+      position: 'absolute',
+      top: 8,
+      left: 0,
+      right: 0,
+      zIndex: 1,
+      alignItems: 'center',
+    },
+    handleBar: {
+      width: 40,
+      height: 5,
+      borderRadius: 3,
+      backgroundColor: 'rgba(255,255,255,0.7)',
+    },
+    bannerContainer: {
+      width: '100%',
+      height: 120,
+      overflow: 'hidden',
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+    },
+    bannerImage: {
+      width: '100%',
+      height: 120,
+    },
+    bannerPlaceholder: {
+      width: '100%',
+      height: 120,
+      backgroundColor: colors.brandPink,
+      opacity: 0.15,
+    },
+    avatarContainer: {
+      marginTop: -36,
+      borderRadius: 39,
+      borderWidth: 3,
+      borderColor: colors.white,
+      overflow: 'hidden',
+      backgroundColor: colors.background,
+    },
+    avatar: {
+      width: 72,
+      height: 72,
+      borderRadius: 36,
+    },
+    avatarDefault: {
+      width: 72,
+      height: 72,
+      borderRadius: 36,
+      backgroundColor: colors.background,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    name: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: colors.textHeader,
+      marginTop: 8,
+      paddingHorizontal: 24,
+      maxWidth: '100%',
+    },
+    nip05: {
+      fontSize: 13,
+      color: colors.brandPink,
+      marginTop: 2,
+    },
+    npubRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginTop: 6,
+      backgroundColor: colors.background,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 8,
+    },
+    npubText: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      fontWeight: '500',
+    },
+    lightningAddress: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+      marginTop: 4,
+      paddingHorizontal: 24,
+      maxWidth: '100%',
+    },
+    lnAddressRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginTop: 4,
+      paddingHorizontal: 24,
+    },
+    lnAddressEditRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginTop: 8,
+      paddingHorizontal: 24,
+    },
+    lnAddressInput: {
+      flex: 1,
+      borderWidth: 1,
+      borderColor: colors.brandPinkLight,
+      borderRadius: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      fontSize: 14,
+      color: colors.textHeader,
+    },
+    lnAddressSaveButton: {
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: 8,
+      backgroundColor: colors.brandPink,
+    },
+    lnAddressSaveText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.white,
+    },
+    actionRow: {
+      flexDirection: 'row',
+      gap: 8,
+      marginTop: 20,
+      paddingHorizontal: 16,
+    },
+    followButton: {
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      borderRadius: 10,
+      borderWidth: 1.5,
+      borderColor: colors.brandPink,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    followingButton: {
+      backgroundColor: colors.brandPinkLight,
+      borderColor: colors.brandPinkLight,
+    },
+    followButtonText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.brandPink,
+    },
+    followingButtonText: {
+      color: colors.brandPink,
+    },
+    zapButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 4,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      borderRadius: 10,
+      backgroundColor: colors.brandPink,
+    },
+    zapButtonText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.white,
+    },
+    messageButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 4,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      borderRadius: 10,
+      backgroundColor: colors.brandPink,
+    },
+    messageButtonText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.white,
+    },
+    iconButton: {
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+      borderRadius: 10,
+      borderWidth: 1.5,
+      borderColor: colors.brandPink,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+  });
 
 export default ContactProfileSheet;

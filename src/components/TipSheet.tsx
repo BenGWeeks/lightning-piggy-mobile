@@ -18,10 +18,10 @@ import {
 import QRCode from 'react-native-qrcode-svg';
 import { Check } from 'lucide-react-native';
 import { useWallet } from '../contexts/WalletContext';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
 import { satsToFiatString } from '../services/fiatService';
 import { Course } from '../data/learnContent';
-import { styles } from '../styles/TipSheet.styles';
+import { createTipSheetStyles } from '../styles/TipSheet.styles';
 
 interface Props {
   visible: boolean;
@@ -30,6 +30,8 @@ interface Props {
 }
 
 const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createTipSheetStyles(colors), [colors]);
   const { makeInvoice, refreshActiveBalance, balance, btcPrice, currency } = useWallet();
   const [invoice, setInvoice] = useState('');
   const [loading, setLoading] = useState(false);

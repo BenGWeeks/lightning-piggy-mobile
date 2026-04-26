@@ -17,6 +17,8 @@ class AmberSignerModule : Module() {
         private const val REQUEST_CODE_SIGN_EVENT = 1002
         private const val REQUEST_CODE_NIP04_ENCRYPT = 1003
         private const val REQUEST_CODE_NIP04_DECRYPT = 1004
+        private const val REQUEST_CODE_NIP44_ENCRYPT = 1005
+        private const val REQUEST_CODE_NIP44_DECRYPT = 1006
         private const val AMBER_PACKAGE = "com.greenart7c3.nostrsigner"
         private const val AMBER_AUTHORITY = "com.greenart7c3.nostrsigner"
     }
@@ -55,7 +57,9 @@ class AmberSignerModule : Module() {
                     ))
                 }
                 REQUEST_CODE_NIP04_ENCRYPT,
-                REQUEST_CODE_NIP04_DECRYPT -> {
+                REQUEST_CODE_NIP04_DECRYPT,
+                REQUEST_CODE_NIP44_ENCRYPT,
+                REQUEST_CODE_NIP44_DECRYPT -> {
                     val result = data?.getStringExtra("result")
                         ?: data?.getStringExtra("signature")
                         ?: ""
@@ -131,6 +135,49 @@ class AmberSignerModule : Module() {
                 requestCode = REQUEST_CODE_NIP04_DECRYPT,
                 promise = promise,
             )
+        }
+
+        AsyncFunction("nip44Encrypt") { plaintext: String, pubkey: String, currentUser: String, promise: Promise ->
+            handleCryptoOp(
+                type = "nip44_encrypt",
+                authority = "$AMBER_AUTHORITY.NIP44_ENCRYPT",
+                payload = plaintext,
+                pubkey = pubkey,
+                currentUser = currentUser,
+                requestCode = REQUEST_CODE_NIP44_ENCRYPT,
+                promise = promise,
+            )
+        }
+
+        AsyncFunction("nip44Decrypt") { ciphertext: String, pubkey: String, currentUser: String, promise: Promise ->
+            handleCryptoOp(
+                type = "nip44_decrypt",
+                authority = "$AMBER_AUTHORITY.NIP44_DECRYPT",
+                payload = ciphertext,
+                pubkey = pubkey,
+                currentUser = currentUser,
+                requestCode = REQUEST_CODE_NIP44_DECRYPT,
+                promise = promise,
+            )
+        }
+
+        // Silent-only variant — only uses the ContentResolver fast-path and
+        // rejects if Amber hasn't pre-approved the op. Used by the inbox
+        // unwrap path so we never surface a dialog per wrap on tab focus;
+        // permission is granted once via the Account toggle and subsequent
+        // calls resolve silently.
+        AsyncFunction("nip44DecryptSilent") { ciphertext: String, pubkey: String, currentUser: String, promise: Promise ->
+            val resolverResult = queryContentProvider(
+                authority = "$AMBER_AUTHORITY.NIP44_DECRYPT",
+                projection = arrayOf(ciphertext, pubkey, currentUser),
+                eventColumn = null,
+                signatureColumn = "result",
+            )
+            if (resolverResult != null) {
+                promise.resolve(mapOf("result" to (resolverResult["result"] ?: "")))
+            } else {
+                promise.reject(CodedException("PERMISSION_NOT_GRANTED", "Amber nip44_decrypt not pre-approved", null))
+            }
         }
 
         AsyncFunction("isInstalled") { promise: Promise ->

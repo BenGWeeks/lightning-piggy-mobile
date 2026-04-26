@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Link2, Zap } from 'lucide-react-native';
-import { colors } from '../styles/theme';
+import { useThemeColors } from '../contexts/ThemeContext';
 import type { TxCategory } from '../utils/txCategory';
 
 interface Props {
@@ -10,6 +10,7 @@ interface Props {
 }
 
 const TransactionTypeIcon: React.FC<Props> = ({ category, size = 40 }) => {
+  const colors = useThemeColors();
   const radius = size / 2;
   const glyphSize = Math.round(size * 0.5);
 

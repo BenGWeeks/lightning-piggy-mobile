@@ -1,0 +1,37 @@
+appId: com.lightningpiggy.app.dev
+name: PERF — open the GIF picker (no assertions)
+---
+# Companion to scripts/perf-gif-picker.sh — drives the navigation
+# from launch → conversation → AttachPanel → GIF tile open. The
+# wrapper script handles screen-capping at fixed delays after this
+# flow returns. No assertions: this is a measurement aid, not a
+# regression test.
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 8000
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+# Tap the first row in the messages list — perf measurement doesn't
+# care WHICH peer, just that we land in a conversation. Each row
+# has accessibilityLabel `Conversation with <name>` per the
+# ConversationRow component.
+- tapOn:
+    text: 'Conversation with .*'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 1500
+# t=0: tap the GIF tile to open the picker.
+- tapOn:
+    id: 'attach-send-gif'

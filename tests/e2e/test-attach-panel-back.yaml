@@ -1,0 +1,86 @@
+appId: com.lightningpiggy.app.dev
+name: Attach Panel — Android hardware back closes panel, stays on conversation
+---
+# When the inline AttachPanel is open, pressing the Android hardware
+# back button should close the PANEL only — not exit the conversation.
+# A second back press then exits the conversation as normal.
+#
+# Safety: peer is always Little Piggy (controlled test fixture).
+# Test types into the draft input but NEVER sends. No payments
+# triggered.
+#
+# Guards against the regression where back would bubble all the way
+# up to the navigator and unmount the conversation, losing draft text
+# and forcing the user to re-enter the thread.
+#
+# Run:
+#   maestro --device emulator-5554 test tests/e2e/test-attach-panel-back.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# Navigate to Messages → Little Piggy thread.
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
+- tapOn:
+    text: 'Little Piggy.*'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Type a draft so we can prove it's still there after the back press.
+- tapOn:
+    id: 'conversation-input'
+- waitForAnimationToEnd:
+    timeout: 2000
+- inputText: 'draft to survive back'
+
+# Open the panel
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible:
+    id: 'conversation-attach-panel'
+
+# --- Press hardware back: panel closes, conversation stays ---
+- back
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertNotVisible:
+    id: 'conversation-attach-panel'
+
+# Conversation chrome still visible
+- assertVisible:
+    id: 'conversation-input'
+- assertVisible:
+    id: 'conversation-send'
+- assertVisible:
+    id: 'conversation-attach'
+
+# Draft survived (would be gone if conversation had unmounted)
+- assertVisible:
+    text: 'draft to survive back'
+
+# --- Second back press: exits the conversation back to Messages ---
+- back
+- waitForAnimationToEnd:
+    timeout: 3000
+- assertVisible:
+    id: 'tab-messages'
+- assertNotVisible:
+    id: 'conversation-input'

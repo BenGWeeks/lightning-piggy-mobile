@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,12 +7,15 @@ import {
   ScrollView,
   RefreshControl,
   ActivityIndicator,
+  InteractionManager,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
+import { Home } from 'lucide-react-native';
+import { useThemeColors } from '../contexts/ThemeContext';
 import ReceiveSheet from '../components/ReceiveSheet';
 import SendSheet from '../components/SendSheet';
 import TransferSheet from '../components/TransferSheet';
@@ -20,12 +23,14 @@ import TransactionList from '../components/TransactionList';
 import WalletCarousel from '../components/WalletCarousel';
 import AddWalletWizard from '../components/AddWalletWizard';
 import WalletSettingsSheet from '../components/WalletSettingsSheet';
-import ProfileIcon from '../components/ProfileIcon';
+import TabHeader from '../components/TabHeader';
 import { ArrowDownIcon, ArrowUpIcon, ArrowLeftRightIcon } from '../components/icons/ArrowIcons';
-import { styles } from '../styles/HomeScreen.styles';
+import { createHomeScreenStyles } from '../styles/HomeScreen.styles';
 import type { MainTabParamList } from '../navigation/types';
 
 const HomeScreen: React.FC = () => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createHomeScreenStyles(colors), [colors]);
   const {
     wallets,
     activeWalletId,
@@ -34,11 +39,10 @@ const HomeScreen: React.FC = () => {
     refreshActiveBalance,
     fetchTransactionsForWallet,
     setActiveWallet,
-    userName,
     btcPrice,
     currency,
   } = useWallet();
-  const { profile } = useNostr();
+  const { isLoggedIn, profile, refreshProfile } = useNostr();
   const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList, 'Home'>>();
   const route = useRoute<RouteProp<MainTabParamList, 'Home'>>();
   const insets = useSafeAreaInsets();
@@ -53,6 +57,25 @@ const HomeScreen: React.FC = () => {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [settingsWalletId, setSettingsWalletId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Refresh the own-profile kind-0 on focus so the top-right profile
+  // icon picks up external renames (e.g. via Amber or another client).
+  // The call is cache-respecting: if the 24h kind-0 cache is still
+  // fresh it short-circuits without hitting relays, so switching tabs
+  // doesn't incur a network cost. Pull-to-refresh in MessagesScreen
+  // passes `{ force: true }` for the explicit-user-intent path.
+  useFocusEffect(
+    useCallback(() => {
+      if (!isLoggedIn) return;
+      // Defer to after the tab-transition animation finishes — same
+      // rationale as Friends/Messages: refreshProfile can hold the JS
+      // thread briefly while it walks the profile cache and (on miss)
+      // hits a relay, and running it during the focus callback
+      // synchronously makes the tab feel laggy.
+      const handle = InteractionManager.runAfterInteractions(() => refreshProfile());
+      return () => handle.cancel();
+    }, [isLoggedIn, refreshProfile]),
+  );
 
   // Handle sendToAddress from navigation params (e.g., from Friends tab zap)
   useEffect(() => {
@@ -160,9 +183,17 @@ const HomeScreen: React.FC = () => {
     setSettingsWalletId(walletId);
   }, []);
 
+  const greetingName = profile?.displayName?.trim() || profile?.name?.trim() || 'Satoshi';
+
   const isOnchainWallet = activeWallet?.walletType === 'onchain';
   const isWatchOnly = isOnchainWallet && activeWallet?.onchainImportMethod !== 'mnemonic';
-  const hasActiveConnection = isOnchainWallet ? true : (activeWallet?.isConnected ?? false);
+  // Don't gate Send/Receive on the transient `isConnected` flag: post-PR-D
+  // NWC wallets land in state with `isConnected: false` and flip true in
+  // background, so gating here would dead-lock the buttons for the 2-14 s
+  // enable() window, or indefinitely if the WebSocket blips. `pay` /
+  // `makeInvoice` auto-await the in-flight connect, so "in state" is
+  // enough.
+  const hasActiveConnection = !!activeWallet;
   const canSend = hasActiveConnection && !isWatchOnly;
   // Transfer requires at least 1 wallet that can send + 1 other wallet
   const hasSendableWallet = wallets.some(
@@ -175,21 +206,21 @@ const HomeScreen: React.FC = () => {
   return (
     <View style={styles.container}>
       {/* Header area with brand background + faded pig behind carousel */}
-      <View style={[styles.headerBackground, { paddingTop: insets.top + 12 }]}>
+      <View style={styles.headerBackground}>
         <Image
           source={require('../../assets/images/lightning-piggy-intro.png')}
           style={styles.bgPigImage}
           resizeMode="contain"
         />
 
-        <View style={styles.headerRow}>
-          <Text style={styles.hello}>Hello{userName ? `, ${userName}` : ''}!</Text>
-          <ProfileIcon
-            uri={profile?.picture}
-            size={36}
-            onPress={() => navigation.navigate('Account')}
-          />
-        </View>
+        <TabHeader
+          title={`Hello${greetingName ? `, ${greetingName}` : ''}!`}
+          // Keep Home's greeting at its pre-#139 lighter weight + smaller
+          // size; section titles (Messages/Friends/Learn) stay bolder to
+          // read as section labels.
+          titleStyle={{ fontSize: 22, fontWeight: '400' }}
+          icon={<Home size={20} color={colors.brandPink} />}
+        />
 
         <WalletCarousel
           wallets={wallets}
