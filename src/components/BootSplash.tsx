@@ -15,7 +15,7 @@
  * doesn't intercept touch events.
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Image, StyleSheet } from 'react-native';
+import { Animated, Easing, Image, StyleSheet } from 'react-native';
 import { lightPalette } from '../styles/palettes';
 
 // BootSplash is brand-fixed (only ever shows over the native pink splash
@@ -30,7 +30,7 @@ interface Props {
   done: boolean;
 }
 
-const FADE_MS = 250;
+const FADE_MS = 450;
 
 const BootSplash: React.FC<Props> = ({ done }) => {
   const opacity = useRef(new Animated.Value(1)).current;
@@ -38,9 +38,14 @@ const BootSplash: React.FC<Props> = ({ done }) => {
 
   useEffect(() => {
     if (done) {
+      // Cubic-out easing so the fade decelerates as it nears 0 — feels
+      // gentler than linear or default ease-in-out, which read as a
+      // sudden snap at the end. 450 ms (was 250 ms) gives the user a
+      // moment to register the brand before the next screen takes over.
       Animated.timing(opacity, {
         toValue: 0,
         duration: FADE_MS,
+        easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }).start(() => setUnmounted(true));
     }
