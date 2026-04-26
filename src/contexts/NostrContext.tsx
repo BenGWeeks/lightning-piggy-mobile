@@ -127,6 +127,16 @@ async function tryRouteGroupRumor(
     // new group whose kind-30200 hasn't propagated yet, or a spammer.
     // Drop on the floor for v1 — once GroupsContext reconciles the
     // 30200 the next refresh will pick this rumor up via the cache.
+    if (__DEV__) {
+      const all = Array.from(cls.otherParticipants);
+      const fp = all
+        .slice(0, 3)
+        .map((p) => p.slice(0, 8))
+        .join(',');
+      console.log(
+        `[Nostr] dropped group-shaped rumor (no matching group): participants=[${fp}${all.length > 3 ? ',...' : ''}] sender=${rumor.pubkey.slice(0, 8)}`,
+      );
+    }
     return false;
   }
   const message: GroupMessage = {
@@ -928,6 +938,15 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const lastSeenPrefix = DM_CONV_LAST_SEEN_PREFIX + loggedOutPubkey + '_';
       for (const k of allKeys) {
         if (k.startsWith(convPrefix) || k.startsWith(lastSeenPrefix)) toRemove.push(k);
+      }
+      // Group state + per-group message logs are NOT yet account-scoped
+      // (single-account today; per-account namespacing is a follow-up).
+      // Clear them on logout so the next signed-in identity can't see
+      // the previous identity's groups or thread history.
+      const allKeysForGroups = allKeys; // already fetched above
+      toRemove.push('nostr_groups');
+      for (const k of allKeysForGroups) {
+        if (k.startsWith('group_messages_')) toRemove.push(k);
       }
     }
     await AsyncStorage.multiRemove(toRemove);

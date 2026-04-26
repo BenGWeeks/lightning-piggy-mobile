@@ -11,12 +11,17 @@ export interface GroupMessage {
   id: string;
   /** Pubkey of the sender (lowercase hex). */
   senderPubkey: string;
-  /** Lowercased text payload (or empty for system events). */
+  /** Text payload as authored (preserves casing); empty for system events. */
   text: string;
   /** Unix seconds — same convention as nostr `created_at`. */
   createdAt: number;
 }
 
+// Account scoping: keyed only by groupId, not by viewer pubkey. Cross-
+// account leak is prevented at logout by NostrContext.logout, which
+// scans AsyncStorage for keys starting with `group_messages_` and
+// removes them. Per-account namespacing tracked as a follow-up
+// alongside multi-account switching.
 const KEY = (groupId: string): string => `group_messages_${groupId}`;
 const CAP = 500;
 

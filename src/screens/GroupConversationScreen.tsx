@@ -144,7 +144,6 @@ const GroupConversationScreen: React.FC = () => {
       Alert.alert('Send failed', result.error ?? 'Unknown error');
       return;
     }
-    setDraft('');
     // Optimistically append locally — inbound NIP-17 routing for groups
     // is tracked as a follow-up; for now the sender's own copy is the
     // source of truth on this device.
@@ -154,12 +153,24 @@ const GroupConversationScreen: React.FC = () => {
       text,
       createdAt: Math.floor(Date.now() / 1000),
     };
-    const next = await appendGroupMessage(group.id, local);
-    setMessages(next);
-    // Fire the same listener inbound rumors fire so GroupsContext bumps
-    // this group's activity rollup (drives ordering on the Messages tab).
-    notifyGroupMessage(group.id, local);
-    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 0);
+    try {
+      const next = await appendGroupMessage(group.id, local);
+      setMessages(next);
+      setDraft('');
+      // Fire the same listener inbound rumors fire so GroupsContext bumps
+      // this group's activity rollup (drives ordering on the Messages tab).
+      notifyGroupMessage(group.id, local);
+      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 0);
+    } catch (err) {
+      // Storage write failed (e.g. quota exhausted). The relay copy still
+      // went out — nothing to undo there. Restore the draft so the user
+      // can retry rather than losing what they typed.
+      if (__DEV__) console.warn('[GroupConversationScreen] appendGroupMessage failed:', err);
+      Alert.alert(
+        'Saved on relay, not on device',
+        'Your message was sent, but we could not save it locally. Try again to refresh, or restart the app.',
+      );
+    }
   }, [draft, group, myPubkey, sendGroupMessage]);
 
   if (!group) {

@@ -77,13 +77,15 @@ name: Internal — login as the nsec passed via MAESTRO_NSEC
 - waitForAnimationToEnd:
     timeout: 3000
 
-# Verify we're logged in via the always-present QR icon next to the
-# display name (drawer-npub-qr renders for any signed-in account).
+# Verify we're logged in. After a successful Connect Nostr the sheet
+# dismisses and ProfileScreen swaps the "Connect Nostr" CTA for the
+# "Edit Profile" button (signed-in code path). Non-optional so a broken
+# login fails the sub-flow loudly instead of letting a phase that
+# follows act on a logged-out state.
 - extendedWaitUntil:
     visible:
-      id: 'drawer-npub-qr'
+      text: 'Edit Profile'
     timeout: 15000
-    optional: true
 
 - tapOn:
     text: 'Allow'

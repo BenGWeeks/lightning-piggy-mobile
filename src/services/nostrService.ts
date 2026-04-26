@@ -843,11 +843,20 @@ export async function sendNip17ToManyWithNsec(input: {
 }
 
 /**
- * Subscribe to inbound kind-30200 group-state events that `p`-tag the
- * current user. Returns an unsubscribe function.
+ * Subscribe to inbound kind-30200 group-state events relevant to the
+ * viewer. Two filters are OR-ed together so the viewer sees:
  *
- * Out-of-scope for this PR: dedup / reconciliation is the caller's job
- * (callback receives every matching event; caller compares created_at).
+ *  - groups OTHER members published that p-tag the viewer (`#p: [self]`)
+ *  - groups the VIEWER authored themselves (`authors: [self]`)
+ *
+ * The second filter exists because `createGroupStateEvent` excludes the
+ * author from the `p` tags (spec convention — the signer is implicit),
+ * so a viewer-authored event wouldn't match the p-tag filter and the
+ * group wouldn't sync across the viewer's own devices.
+ *
+ * Returns an unsubscribe function. Dedup / reconciliation is the
+ * caller's job (callback receives every matching event; caller compares
+ * created_at).
  */
 export function subscribeGroupStateForViewer(input: {
   viewerPubkey: string;
@@ -862,20 +871,28 @@ export function subscribeGroupStateForViewer(input: {
   }) => void;
 }): () => void {
   trackRelays(input.relays);
-  const sub = pool.subscribeMany(
+  const onevent = (ev: Parameters<typeof input.onEvent>[0]): void => {
+    input.onEvent(ev);
+  };
+  // Two separate filters (subscribeMany takes a single Filter): one for
+  // events that p-tag the viewer, one for events the viewer authored.
+  const subPtag = pool.subscribeMany(
     input.relays,
     { kinds: [GROUP_STATE_KIND], '#p': [input.viewerPubkey] } as Filter,
-    {
-      onevent(ev) {
-        input.onEvent(ev);
-      },
-    },
+    { onevent },
+  );
+  const subAuthored = pool.subscribeMany(
+    input.relays,
+    { kinds: [GROUP_STATE_KIND], authors: [input.viewerPubkey] } as Filter,
+    { onevent },
   );
   return () => {
-    try {
-      sub.close();
-    } catch {
-      // best-effort
+    for (const s of [subPtag, subAuthored]) {
+      try {
+        s.close();
+      } catch {
+        // best-effort
+      }
     }
   };
 }
