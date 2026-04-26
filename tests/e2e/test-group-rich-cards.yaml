@@ -25,12 +25,28 @@ name: Group chat — rich content (contact / invoice / location) renders as card
 #     account) but the test never opens the contact sheet either.
 #   - Location is a fixed coordinate string; no GPS permission needed.
 #
-# Run: maestro --device emulator-5554 test tests/e2e/test-group-rich-cards.yaml
+# Run (after a user is signed in and the Triad fixture exists):
+#   maestro --device emulator-5554 test tests/e2e/test-group-rich-cards.yaml
+#
+# This flow does NOT log in — it assumes the user is already signed
+# in. Pair it with `_subflow-login-as.yaml` or run after the 3-way
+# group suite. We skip self-login here because the bundle's cold-start
+# pulls 5–8 s on dev builds, which races the login subflow's
+# profile-icon tap. Keeping login out of this test keeps it
+# rendering-focused.
 
-- runFlow:
-    file: _subflow-login-as.yaml
-    env:
-      MAESTRO_NSEC: ${MAESTRO_NSEC}
+- launchApp:
+    appId: com.lightningpiggy.app.dev
+    stopApp: false
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# If the app cold-started, give the JS bundle time to materialise the
+# tab bar before we start tapping it.
+- extendedWaitUntil:
+    visible:
+      id: 'tab-friends'
+    timeout: 30000
 
 - tapOn:
     id: 'tab-friends'
