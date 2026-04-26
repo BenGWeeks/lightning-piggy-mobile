@@ -41,6 +41,25 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
   const snapPoints = useMemo(() => ['75%', '90%'], []);
   const topInset = 60;
 
+  // IDs of GIF tiles currently in the viewport. Animated previews
+  // are rendered ONLY for these — the rest stay on cheap static
+  // thumbnails. This keeps a 24-result search from hammering the
+  // device with 24 simultaneous GIF downloads + decodes (#224).
+  const [visibleIds, setVisibleIds] = useState<Set<string>>(new Set());
+  const onViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: Array<{ key?: string; item?: Gif }> }) => {
+      const next = new Set<string>();
+      for (const v of viewableItems) {
+        const id = v.item?.id ?? v.key;
+        if (id) next.add(id);
+      }
+      setVisibleIds(next);
+    },
+  ).current;
+  // 50% visible counts as "in viewport" — generous enough that mid-
+  // scroll a tile starts loading its animated preview before settling.
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
+
   const [search, setSearch] = useState('');
   // Debounced mirror — `useDeferredValue` only defers renders, not the
   // outbound GIPHY request. A 250 ms setTimeout debounce keeps a fast
@@ -156,25 +175,34 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
   );
 
   const renderItem = useCallback(
-    ({ item }: { item: Gif }) => (
-      <TouchableOpacity
-        onPress={() => onSelect(item)}
-        activeOpacity={0.8}
-        style={[styles.tile, { width: tileWidth, height: TILE_HEIGHT }]}
-        accessibilityLabel={`Send GIF: ${item.title || 'reaction'}`}
-        testID={`gif-tile-${item.id}`}
-      >
-        <ExpoImage
-          source={{ uri: item.previewUrl }}
-          style={styles.tileImage}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-          transition={150}
-          accessibilityIgnoresInvertColors
-        />
-      </TouchableOpacity>
-    ),
-    [onSelect, tileWidth],
+    ({ item }: { item: Gif }) => {
+      // Pick animated GIF only for tiles currently visible in the
+      // viewport (per `onViewableItemsChanged` above). Off-screen
+      // tiles use the ~10× cheaper static thumbnail. Both URLs share
+      // the same expo-image cache, so once a tile has been visible
+      // the animated frames are already on disk for next time.
+      const visible = visibleIds.has(item.id);
+      const uri = visible ? item.previewUrl : item.previewStillUrl;
+      return (
+        <TouchableOpacity
+          onPress={() => onSelect(item)}
+          activeOpacity={0.8}
+          style={[styles.tile, { width: tileWidth, height: TILE_HEIGHT }]}
+          accessibilityLabel={`Send GIF: ${item.title || 'reaction'}`}
+          testID={`gif-tile-${item.id}`}
+        >
+          <ExpoImage
+            source={{ uri }}
+            style={styles.tileImage}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            transition={150}
+            accessibilityIgnoresInvertColors
+          />
+        </TouchableOpacity>
+      );
+    },
+    [onSelect, tileWidth, visibleIds],
   );
 
   return (
@@ -261,6 +289,8 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
             )
           }
           ListFooterComponent={<Text style={styles.attribution}>Powered by GIPHY</Text>}
+          onViewableItemsChanged={onViewableItemsChanged}
+          viewabilityConfig={viewabilityConfig}
         />
       )}
     </BottomSheetModal>

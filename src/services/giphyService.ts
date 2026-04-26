@@ -17,8 +17,18 @@ export interface Gif {
   id: string;
   /** Direct `.gif` URL suitable for `<Image>`/`<ExpoImage>` and for sharing in a DM. */
   url: string;
-  /** Smaller preview used in the picker grid. */
+  /**
+   * Animated preview used in the picker grid for tiles currently
+   * visible in the viewport. ~50–200 KB per GIF + on-device decode.
+   */
   previewUrl: string;
+  /**
+   * Static single-frame thumbnail for the picker grid. Rendered for
+   * off-screen tiles so the picker scrolls smoothly without paying the
+   * download + decode cost for hundreds of GIFs the user may never see.
+   * ~5–15 KB per image, near-instant.
+   */
+  previewStillUrl: string;
   title: string;
 }
 
@@ -72,7 +82,7 @@ function normalize(result: GiphyResult): Gif | null {
     'downsized',
     'original',
   ]);
-  // Preview-order: smallest first — the picker grid only needs a thumb.
+  // Animated preview (rendered only for visible tiles in the picker).
   const preview = pickFormat(result.images, [
     'fixed_width_small',
     'fixed_height_small',
@@ -80,11 +90,23 @@ function normalize(result: GiphyResult): Gif | null {
     'fixed_width',
     'original',
   ]);
+  // Static-frame thumbnail (rendered for off-screen tiles + fast scrolls).
+  // GIPHY exposes `*_still` siblings of every animated variant.
+  const previewStill = pickFormat(result.images, [
+    'fixed_width_small_still',
+    'fixed_height_small_still',
+    'fixed_width_still',
+    'fixed_height_still',
+    'original_still',
+  ]);
   if (!send?.url || !preview?.url) return null;
   return {
     id: result.id,
     url: send.url,
     previewUrl: preview.url,
+    // Fall back to the animated preview if no still variant is offered
+    // (older GIPHY entries occasionally lack the `_still` images).
+    previewStillUrl: previewStill?.url || preview.url,
     title: result.title || '',
   };
 }
