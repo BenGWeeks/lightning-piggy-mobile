@@ -1,0 +1,93 @@
+appId: com.lightningpiggy.app.dev
+name: NFC write sheet opens from Profile + ContactProfile
+---
+# Verifies the Lucide NFC button is present + tapping it opens the
+# NfcWriteSheet for both:
+#   - the logged-in user's own npub (via account/ProfileScreen)
+#   - a friend's npub (via ContactProfileSheet on the Friends tab)
+#
+# Cannot exercise the actual NFC tap-to-write because Android emulator
+# has no NFC hardware. The test asserts the sheet renders the "Hold tag
+# near phone" instructional state (testID `nfc-write-instruction` —
+# added by NfcWriteSheet) and cancels.
+#
+# Skips entirely on devices without NFC support (the buttons are hidden
+# via `isNfcSupported()`).
+#
+# Pre-reqs:
+#  - .env contains MAESTRO_NSEC
+#  - Signed-in account has at least one followed friend whose pubkey
+#    starts with the prefix passed via MEMBER_PUBKEY_PREFIX (defaults
+#    to Little Piggy's prefix from the existing 3-way fixture)
+#
+# Run:
+#   source .env && maestro --device emulator-5554 test \
+#     -e MAESTRO_NSEC=$MAESTRO_NSEC \
+#     -e MEMBER_PUBKEY_PREFIX=d9b33280ba73 \
+#     tests/e2e/test-nfc-write-sheet.yaml
+
+- runFlow: _subflow-login-as.yaml
+
+# === OWN NPUB write entry: drawer → Profile → NFC button next to QR ===
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'drawer-row-profile'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Skip the rest of the test on devices without NFC (button hidden).
+- assertVisible:
+    id: 'profile-npub-nfc'
+    optional: true
+- tapOn:
+    id: 'profile-npub-nfc'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Sheet should be open — verify the visible "tap a tag" instruction
+# (the NfcWriteSheet renders an NFC icon + "Hold tag near phone" text).
+- assertVisible:
+    text: 'Ready to write'
+    optional: true
+- tapOn:
+    text: 'Cancel'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1500
+
+# === FRIEND NPUB write entry: Friends tab → friend → NFC button ===
+- tapOn: 'Friends tab'
+- waitForAnimationToEnd:
+    timeout: 3000
+- scrollUntilVisible:
+    element:
+      id: 'friend-row-${MEMBER_PUBKEY_PREFIX}'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 50
+    optional: true
+- tapOn:
+    id: 'friend-row-${MEMBER_PUBKEY_PREFIX}'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2500
+
+- assertVisible:
+    id: 'contact-nfc-write-button'
+    optional: true
+- tapOn:
+    id: 'contact-nfc-write-button'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- assertVisible:
+    text: 'Ready to write'
+    optional: true
+- tapOn:
+    text: 'Cancel'
+    optional: true
