@@ -8,10 +8,11 @@ import React, {
   useState,
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Group } from '../types/groups';
+import type { Group, GroupActivity, GroupSummary } from '../types/groups';
 import { createGroupId, loadGroups, saveGroups } from '../services/groupsStorageService';
 import { setKnownGroups } from '../services/groupRoutingRegistry';
-import { useNostr } from './NostrContext';
+import { loadGroupMessages } from '../services/groupMessagesStorageService';
+import { useNostr, subscribeGroupMessages } from './NostrContext';
 import {
   DEFAULT_RELAYS,
   GROUP_STATE_KIND,
@@ -54,6 +55,49 @@ interface GroupsContextType {
     memberPubkeys: string[];
     createdAt: number;
   }) => Promise<boolean>;
+  /**
+   * `visibleGroups` joined with their per-group activity (last message,
+   * recent senders), sorted newest-first. This is what the Messages tab
+   * renders so groups appear inline with 1:1 DMs.
+   */
+  groupSummaries: GroupSummary[];
+}
+
+const RECENT_SENDERS_CAP = 3;
+
+function computeRecentSenders(messages: { senderPubkey: string; createdAt: number }[]): string[] {
+  // Walk newest-first, dedup by pubkey, take up to N. Storage already
+  // sorts by createdAt asc, so iterate from the tail.
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (let i = messages.length - 1; i >= 0 && out.length < RECENT_SENDERS_CAP; i--) {
+    const pk = messages[i].senderPubkey.toLowerCase();
+    if (seen.has(pk)) continue;
+    seen.add(pk);
+    out.push(pk);
+  }
+  return out;
+}
+
+function activityFromMessages(
+  group: Group,
+  messages: { senderPubkey: string; text: string; createdAt: number }[],
+): GroupActivity {
+  if (messages.length === 0) {
+    return {
+      lastActivityAt: Math.floor(group.createdAt / 1000),
+      lastText: '',
+      lastSenderPubkey: null,
+      recentSenderPubkeys: [],
+    };
+  }
+  const last = messages[messages.length - 1];
+  return {
+    lastActivityAt: last.createdAt,
+    lastText: last.text,
+    lastSenderPubkey: last.senderPubkey.toLowerCase(),
+    recentSenderPubkeys: computeRecentSenders(messages),
+  };
 }
 
 const GroupsContext = createContext<GroupsContextType | undefined>(undefined);
@@ -63,6 +107,10 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [loading, setLoading] = useState(true);
   const [followingOnly, setFollowingOnlyState] = useState(true);
   const [devMode, setDevMode] = useState(false);
+  // Per-group activity rollup (last message + recent senders). Populated
+  // on mount from AsyncStorage and kept fresh by the inbound-message
+  // listener below + a local hook from GroupConversationScreen sends.
+  const [activityByGroup, setActivityByGroup] = useState<Record<string, GroupActivity>>({});
   const { publishGroupState, pubkey, relays, isLoggedIn, contacts } = useNostr();
   // Track the latest reconciler in a ref so the subscription effect can
   // call it without re-subscribing on every group state change.
@@ -104,6 +152,44 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // inbound rumor belongs to without going through context.
   useEffect(() => {
     setKnownGroups(groups);
+  }, [groups]);
+
+  // Populate activity for any group we don't yet have a rollup for. Runs
+  // after the initial loadGroups() resolves and again whenever a new
+  // group is created/reconciled. We only load groups whose key isn't in
+  // the map yet, so this stays cheap on subsequent renders.
+  useEffect(() => {
+    let cancelled = false;
+    const missing = groups.filter((g) => !activityByGroup[g.id]);
+    if (missing.length === 0) return;
+    (async () => {
+      const updates: Record<string, GroupActivity> = {};
+      for (const g of missing) {
+        const msgs = await loadGroupMessages(g.id);
+        updates[g.id] = activityFromMessages(g, msgs);
+      }
+      if (!cancelled && Object.keys(updates).length > 0) {
+        setActivityByGroup((prev) => ({ ...prev, ...updates }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [groups, activityByGroup]);
+
+  // Inbound group messages are persisted by NostrContext's NIP-17 routing
+  // loop; we just need to refresh the activity rollup for the affected
+  // group so the Messages tab re-sorts. The listener fires after the
+  // append, so a fresh load reflects the new tail.
+  useEffect(() => {
+    const unsub = subscribeGroupMessages((groupId) => {
+      const g = groups.find((x) => x.id === groupId);
+      if (!g) return;
+      loadGroupMessages(groupId).then((msgs) => {
+        setActivityByGroup((prev) => ({ ...prev, [groupId]: activityFromMessages(g, msgs) }));
+      });
+    });
+    return unsub;
   }, [groups]);
 
   const followPubkeys = useMemo(() => {
@@ -298,6 +384,24 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return unsubscribe;
   }, [isLoggedIn, pubkey, relays]);
 
+  // Join visibleGroups × activity. Groups that haven't loaded yet get a
+  // placeholder activity (createdAt-based) so they still render without
+  // shifting position once the load resolves.
+  const groupSummaries = useMemo<GroupSummary[]>(() => {
+    const list = visibleGroups.map((g) => ({
+      group: g,
+      activity:
+        activityByGroup[g.id] ??
+        ({
+          lastActivityAt: Math.floor(g.createdAt / 1000),
+          lastText: '',
+          lastSenderPubkey: null,
+          recentSenderPubkeys: [],
+        } satisfies GroupActivity),
+    }));
+    return list.sort((a, b) => b.activity.lastActivityAt - a.activity.lastActivityAt);
+  }, [visibleGroups, activityByGroup]);
+
   return (
     <GroupsContext.Provider
       value={{
@@ -312,6 +416,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         deleteGroup,
         getGroup,
         reconcileFromGroupStateEvent,
+        groupSummaries,
       }}
     >
       {children}

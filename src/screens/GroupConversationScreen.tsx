@@ -19,7 +19,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { useGroups } from '../contexts/GroupsContext';
-import { useNostr, subscribeGroupMessages } from '../contexts/NostrContext';
+import { useNostr, subscribeGroupMessages, notifyGroupMessage } from '../contexts/NostrContext';
 import RenameGroupSheet from '../components/RenameGroupSheet';
 import {
   appendGroupMessage,
@@ -156,6 +156,9 @@ const GroupConversationScreen: React.FC = () => {
     };
     const next = await appendGroupMessage(group.id, local);
     setMessages(next);
+    // Fire the same listener inbound rumors fire so GroupsContext bumps
+    // this group's activity rollup (drives ordering on the Messages tab).
+    notifyGroupMessage(group.id, local);
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 0);
   }, [draft, group, myPubkey, sendGroupMessage]);
 

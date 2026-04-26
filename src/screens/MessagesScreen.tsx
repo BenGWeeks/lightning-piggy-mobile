@@ -18,9 +18,12 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
+import { useGroups } from '../contexts/GroupsContext';
 import ConversationRow from '../components/ConversationRow';
+import GroupRow from '../components/GroupRow';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import FriendPickerSheet, { type PickedFriend } from '../components/FriendPickerSheet';
+import type { GroupSummary } from '../types/groups';
 import { MessageCircle } from 'lucide-react-native';
 import TabHeader from '../components/TabHeader';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -65,6 +68,7 @@ const MessagesScreen: React.FC = () => {
     refreshDmInbox,
   } = useNostr();
   const { wallets } = useWallet();
+  const { groupSummaries } = useGroups();
   const [search, setSearch] = useState('');
   const [searchExpanded, setSearchExpanded] = useState(false);
   const searchInputRef = useRef<TextInput>(null);
@@ -124,23 +128,41 @@ const MessagesScreen: React.FC = () => {
   // enforcement lives inside buildDmSummaries + refreshDmInbox. This memo
   // applies the user-selectable time window + search, plus a defensive
   // follow check for pubkey'd zap rows so non-followed zap counterparties
-  // don't slip in.
-  const filteredSummaries = useMemo(() => {
+  // don't slip in. Groups go through their own follow gate inside
+  // GroupsContext.visibleGroups, so we just merge the result here.
+  type InboxRow =
+    | { kind: 'dm'; summary: ConversationSummary; sortKey: number }
+    | { kind: 'group'; summary: GroupSummary; sortKey: number };
+
+  const filteredRows = useMemo<InboxRow[]>(() => {
     const cutoff = Math.floor(Date.now() / 1000) - windowDays * 86400;
-    let list = conversationSummaries.filter((s) => {
-      if (s.lastActivityAt < cutoff) return false;
-      if (s.pubkey && !followPubkeys.has(s.pubkey.toLowerCase())) return false;
-      return true;
-    });
-    if (!search.trim()) return list;
-    const lower = search.toLowerCase();
-    list = list.filter(
-      (s) =>
-        s.name.toLowerCase().includes(lower) ||
-        conversationPreview(s).toLowerCase().includes(lower),
-    );
-    return list;
-  }, [conversationSummaries, search, followPubkeys, windowDays]);
+    const lower = search.trim().toLowerCase();
+
+    const dmRows: InboxRow[] = conversationSummaries
+      .filter((s) => {
+        if (s.lastActivityAt < cutoff) return false;
+        if (s.pubkey && !followPubkeys.has(s.pubkey.toLowerCase())) return false;
+        if (!lower) return true;
+        return (
+          s.name.toLowerCase().includes(lower) ||
+          conversationPreview(s).toLowerCase().includes(lower)
+        );
+      })
+      .map((s) => ({ kind: 'dm', summary: s, sortKey: s.lastActivityAt }));
+
+    const groupRows: InboxRow[] = groupSummaries
+      .filter((g) => {
+        if (g.activity.lastActivityAt < cutoff) return false;
+        if (!lower) return true;
+        return (
+          g.group.name.toLowerCase().includes(lower) ||
+          g.activity.lastText.toLowerCase().includes(lower)
+        );
+      })
+      .map((g) => ({ kind: 'group', summary: g, sortKey: g.activity.lastActivityAt }));
+
+    return [...dmRows, ...groupRows].sort((a, b) => b.sortKey - a.sortKey);
+  }, [conversationSummaries, groupSummaries, search, followPubkeys, windowDays]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -216,11 +238,26 @@ const MessagesScreen: React.FC = () => {
     [navigation],
   );
 
+  const handleGroupPress = useCallback(
+    (g: GroupSummary) => {
+      navigation.navigate('GroupConversation', { groupId: g.group.id });
+    },
+    [navigation],
+  );
+
   const renderItem = useCallback(
-    ({ item }: { item: ConversationSummary }) => (
-      <ConversationRow summary={item} onPress={() => handleConversationPress(item)} />
-    ),
-    [handleConversationPress],
+    ({ item }: { item: InboxRow }) => {
+      if (item.kind === 'dm') {
+        return (
+          <ConversationRow
+            summary={item.summary}
+            onPress={() => handleConversationPress(item.summary)}
+          />
+        );
+      }
+      return <GroupRow summary={item.summary} onPress={() => handleGroupPress(item.summary)} />;
+    },
+    [handleConversationPress, handleGroupPress],
   );
 
   return (
@@ -340,8 +377,10 @@ const MessagesScreen: React.FC = () => {
           </View>
         ) : (
           <FlashList
-            data={filteredSummaries}
-            keyExtractor={(item) => item.id}
+            data={filteredRows}
+            keyExtractor={(item) =>
+              item.kind === 'dm' ? `dm:${item.summary.id}` : `group:${item.summary.group.id}`
+            }
             renderItem={renderItem}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
             ListEmptyComponent={

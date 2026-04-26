@@ -86,7 +86,7 @@ type Nip17CacheEntry = DmInboxEntry & { wrapId: string };
  */
 type GroupMessageListener = (groupId: string, message: GroupMessage) => void;
 const groupMessageListeners = new Set<GroupMessageListener>();
-function notifyGroupMessage(groupId: string, message: GroupMessage): void {
+export function notifyGroupMessage(groupId: string, message: GroupMessage): void {
   for (const l of groupMessageListeners) {
     try {
       l(groupId, message);
