@@ -3,7 +3,7 @@ import { View, Text, Image, TouchableOpacity, StyleSheet, Alert, Platform } from
 import Svg, { Rect, Path as SvgPath } from 'react-native-svg';
 import * as Clipboard from 'expo-clipboard';
 import { useFocusEffect } from '@react-navigation/native';
-import { Copy, Zap } from 'lucide-react-native';
+import { Copy, UserRound, Zap } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
 import { createSharedAccountStyles } from './sharedStyles';
 import NostrLoginSheet from '../../components/NostrLoginSheet';
@@ -83,7 +83,9 @@ const ProfileScreen: React.FC = () => {
             {profile.picture ? (
               <Image source={{ uri: profile.picture }} style={styles.profilePicture} />
             ) : (
-              <View style={styles.profilePicturePlaceholder} />
+              <View style={styles.profilePicturePlaceholder}>
+                <UserRound size={28} color={colors.textBody} strokeWidth={1.75} />
+              </View>
             )}
             <View style={styles.profileInfo}>
               <Text style={styles.profileName}>
@@ -203,6 +205,8 @@ const createStyles = (colors: Palette) =>
       height: 56,
       borderRadius: 28,
       backgroundColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     profileInfo: {
       flex: 1,
