@@ -31,18 +31,40 @@ name: 3-way group chat — Big Piggy creates "Triad"
 - waitForAnimationToEnd:
     timeout: 2000
 
-# Name the group
+# Name the group. NOTE: tapOn the placeholder text rather than the
+# testID — `BottomSheetTextInput` from @gorhom/bottom-sheet doesn't
+# propagate `testID` to the underlying native view in a way Maestro
+# can match (same caveat is documented in docs/TROUBLESHOOTING.adoc
+# for `friend-picker-search` / `gif-search-input`). The placeholder
+# is unique within this sheet so it's a reliable hit.
 - tapOn:
-    id: 'create-group-name'
+    text: 'e.g. Family'
 - inputText: 'Triad'
-- hideKeyboard
+# `hideKeyboard` hangs forever inside @gorhom's BottomSheetTextInput
+# because the sheet captures the blur event. `pressKey: back` reliably
+# closes the IME without dismissing the sheet itself.
+- pressKey: back
 - waitForAnimationToEnd:
-    timeout: 1000
+    timeout: 1500
 
 # Select Little Piggy + Middle Piggy from the friends list. We address
 # them by member-row testID (slice of pubkey hex) — see CreateGroupSheet.
+# scrollUntilVisible because Big follows ~50+ accounts and Little/Middle
+# are deep in the alphabetical list.
+- scrollUntilVisible:
+    element:
+      id: 'member-row-d9b33280ba73'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 50
 - tapOn:
     id: 'member-row-d9b33280ba73'
+- scrollUntilVisible:
+    element:
+      id: 'member-row-4b2fcb4e3c30'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 50
 - tapOn:
     id: 'member-row-4b2fcb4e3c30'
 - waitForAnimationToEnd:
