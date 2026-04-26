@@ -54,10 +54,20 @@ name: Attach — send location to Little Piggy
 - waitForAnimationToEnd:
     timeout: 5000
 
-# After geofencing + DM publish, the "LOCATION SENT" bubble appears in
-# the thread (extendedWaitUntil because the GPS fix on a fresh emulator
-# can take 5-10 s before the DM is published).
+# In-app confirmation Alert ("Share location with …?" → Cancel/Share)
+# fires after the GPS fix and BEFORE the DM publishes. Tap Share to
+# proceed; without this the test would hang waiting for a bubble that
+# never gets sent.
+- tapOn:
+    text: 'Share'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# After DM publish, the "Location sent" bubble appears in the thread
+# (title-case label per ConversationScreen — NOT all-caps).
+# extendedWaitUntil because the GPS fix on a fresh emulator can take
+# 5-10 s before the DM is published.
 - extendedWaitUntil:
     visible:
-      text: 'LOCATION SENT'
+      text: 'Location sent'
     timeout: 20000

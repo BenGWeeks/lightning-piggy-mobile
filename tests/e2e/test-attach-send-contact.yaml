@@ -48,29 +48,21 @@ name: Attach — share a contact with Little Piggy
 - assertVisible:
     id: 'friend-picker-search'
 
-# Type something into the search to bring up a deterministic single
-# friend. Searching for "p" hits Little Piggy's friend list which is
-# guaranteed to contain at least one peer (her test profile follows
-# the seed contacts). Then tap the first row in the list.
-- tapOn:
-    id: 'friend-picker-search'
-- inputText: 'p'
-- waitForAnimationToEnd:
-    timeout: 1500
-- tapOn:
-    id: 'friend-picker-row-0'
-    optional: true
-# Fallback if the indexed testID isn't present — tap any rendered
-# friend row by its accessibility label prefix.
+# Tap any rendered friend row by its accessibilityLabel prefix.
+# DELIBERATELY NOT typing into `friend-picker-search` first: per
+# docs/TROUBLESHOOTING.adoc, Maestro `inputText` is unreliable on
+# @gorhom/bottom-sheet's BottomSheetTextInput under the New
+# Architecture (the text appears but `onChangeText` may not update
+# React state, so the search filter never narrows). Tapping a row by
+# its `Send to <name>` accessibility label is deterministic.
 - tapOn:
     text: 'Send to .*'
-    optional: true
 - waitForAnimationToEnd:
     timeout: 5000
 
-# After the picker dismisses, the "CONTACT SHARED" bubble appears in
-# the conversation thread.
+# After the picker dismisses, the "Contact shared" bubble appears in
+# the conversation thread (title-case label per ConversationScreen).
 - extendedWaitUntil:
     visible:
-      text: 'CONTACT SHARED'
+      text: 'Contact shared'
     timeout: 15000

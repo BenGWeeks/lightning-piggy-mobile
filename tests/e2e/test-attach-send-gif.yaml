@@ -54,21 +54,18 @@ name: Attach — send a GIF to Little Piggy
           timeout: 3000
       - assertVisible:
           id: 'gif-search-input'
-      # Search for "pig" — usually returns plenty of results regardless
-      # of region / Giphy ranking changes.
+      # DELIBERATELY skip typing into `gif-search-input` — per
+      # docs/TROUBLESHOOTING.adoc, Maestro `inputText` is unreliable
+      # on @gorhom/bottom-sheet's BottomSheetTextInput under the New
+      # Architecture (text appears but `onChangeText` may not update
+      # React state). We tap a default-trending GIF instead.
+      #
+      # GifPickerSheet result tiles use `accessibilityLabel` of form
+      # "Send GIF: <title>" (testID is `gif-tile-<id>` which is per-
+      # GIF, so no stable indexed testID). Matching the prefix lands
+      # the first visible result reliably.
       - tapOn:
-          id: 'gif-search-input'
-      - inputText: 'pig'
-      - waitForAnimationToEnd:
-          timeout: 4000
-      # Tap the first GIF result. Different builds may use either an
-      # indexed testID or a generic "gif-result" — try both.
-      - tapOn:
-          id: 'gif-result-0'
-          optional: true
-      - tapOn:
-          id: 'gif-result'
-          optional: true
+          text: 'Send GIF:.*'
       - waitForAnimationToEnd:
           timeout: 8000
       # Newest message in the inverted FlatList should be the just-sent

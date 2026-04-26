@@ -10,8 +10,8 @@ name: Attach — send a gallery image to Little Piggy
 # emulator was just created the gallery is empty; push a fixture image
 # first:
 #
-#   adb -s emulator-5554 push tests/e2e/fixtures/sample-image.jpg /sdcard/Pictures/
-#   adb -s emulator-5554 shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Pictures/sample-image.jpg
+#   adb -s emulator-5554 push tests/e2e/fixtures/big-piggy-avatar.png /sdcard/Pictures/
+#   adb -s emulator-5554 shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Pictures/big-piggy-avatar.png
 #
 # This test does NOT push a fixture itself — that's a one-time setup.
 # It assumes there's already at least one image in the gallery.
