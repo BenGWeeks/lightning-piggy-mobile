@@ -93,18 +93,17 @@ name: Internal — login as the nsec passed via MAESTRO_NSEC
 - waitForAnimationToEnd:
     timeout: 2000
 
-# After Connect Nostr, the app remains on the Profile sub-screen. Pop
-# back to MainTabs so the bottom tab bar (tab-home/messages/learn/friends)
-# becomes the next-action surface for the calling flow.
-- tapOn:
-    id: 'tab-home'
-    optional: true
-- back:
-    optional: true
+# After Connect Nostr, the app remains on the AccountProfile screen
+# inside the AccountDrawer. The system `back` keyevent doesn't reliably
+# pop out of the drawer stack here (it goes to the navigator's
+# beforeRemove handler with no current popable screen), so tap the
+# in-app back affordance — the "<" button in the Profile header
+# carries accessibilityLabel="Back". Then assert the MainTabs bottom
+# bar is back so the calling flow can rely on it.
+- tapOn: 'Back'
 - waitForAnimationToEnd:
-    timeout: 2000
-- tapOn:
-    id: 'tab-home'
-    optional: true
-- waitForAnimationToEnd:
-    timeout: 2000
+    timeout: 1500
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 8000
