@@ -10,10 +10,6 @@
 #  - .env contains MAESTRO_NSEC, MAESTRO_NSEC2, MAESTRO_NSEC3
 #  - All three accounts follow each other (use scripts/add-nostr-contact.mjs
 #    if needed) and Middle Piggy has a kind-0 profile.
-#  - Wayland session with `wl-copy` available (Linux). The host clipboard
-#    is forwarded to the emulator's clipboard, which the in-app Paste
-#    button reads — see docs/TROUBLESHOOTING.adoc for why we paste
-#    instead of using Maestro's `inputText` for nsec entry.
 #
 # Run:
 #   scripts/test-3way-group-chat.sh
@@ -34,24 +30,10 @@ if [[ -z "${MAESTRO_NSEC:-}" || -z "${MAESTRO_NSEC2:-}" || -z "${MAESTRO_NSEC3:-
   exit 1
 fi
 
-if ! command -v wl-copy >/dev/null 2>&1; then
-  echo "wl-copy not found — install wl-clipboard (or adapt this script for xclip)." >&2
-  exit 1
-fi
-
-# Each phase logs in as a specific piggy. The login sub-flow taps the
-# in-app Paste button, which reads the device clipboard (forwarded from
-# the host clipboard by the emulator's clipboard sync). Seed the right
-# nsec before each `maestro test` invocation.
 run() {
-  local name="$1"; local nsec="$2"; shift 2
+  local name="$1"; shift
   echo
   echo "=== ${name} ==="
-  # Seed the host clipboard with the phase's nsec so the in-app Paste
-  # button picks it up via the emulator's clipboard-sync. All three
-  # env vars are still passed through because the phase YAMLs reference
-  # ${MAESTRO_NSEC2} / ${MAESTRO_NSEC3} directly when calling the sub-flow.
-  printf '%s' "${nsec}" | wl-copy
   maestro --device "${DEVICE}" test \
     -e "MAESTRO_NSEC=${MAESTRO_NSEC}" \
     -e "MAESTRO_NSEC2=${MAESTRO_NSEC2}" \
@@ -59,11 +41,11 @@ run() {
     "$@"
 }
 
-run "Phase 1 — Big creates Triad"   "${MAESTRO_NSEC}"  tests/e2e/test-3way-group-create-as-big.yaml
-run "Phase 2 — Middle joins"        "${MAESTRO_NSEC3}" tests/e2e/test-3way-group-as-middle.yaml
-run "Phase 3 — Little joins"        "${MAESTRO_NSEC2}" tests/e2e/test-3way-group-as-little.yaml
-run "Phase 4 — Big renames"         "${MAESTRO_NSEC}"  tests/e2e/test-3way-group-rename-as-big.yaml
-run "Phase 5 — Middle sees rename"  "${MAESTRO_NSEC3}" tests/e2e/test-3way-group-rename-confirm-as-middle.yaml
+run "Phase 1 — Big creates Triad" tests/e2e/test-3way-group-create-as-big.yaml
+run "Phase 2 — Middle joins"       tests/e2e/test-3way-group-as-middle.yaml
+run "Phase 3 — Little joins"       tests/e2e/test-3way-group-as-little.yaml
+run "Phase 4 — Big renames"        tests/e2e/test-3way-group-rename-as-big.yaml
+run "Phase 5 — Middle sees rename" tests/e2e/test-3way-group-rename-confirm-as-middle.yaml
 
 echo
 echo "All 3-way group-chat phases passed."

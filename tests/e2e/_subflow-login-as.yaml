@@ -54,15 +54,17 @@ name: Internal — login as the nsec passed via MAESTRO_NSEC
 - waitForAnimationToEnd:
     timeout: 5000
 
-# Paste rather than `inputText`. Per docs/TROUBLESHOOTING.adoc, @gorhom's
-# BottomSheetTextInput drops characters from Maestro's `inputText` under
-# the New Architecture (same root cause as wizard-nwc-paste in
-# AddWalletWizard). The wrapper script seeds the Android clipboard with
-# the right nsec via `wl-copy` before each phase.
+# `inputText` works on this BottomSheetTextInput (verified with the
+# 63-char nsec). The TROUBLESHOOTING.adoc note about needing the paste
+# pattern is specific to AddWalletWizard's NWC URL field; the Connect
+# Nostr nsec field handles inputText fine. Important: do NOT add
+# `hideKeyboard` here — it can hang inside the bottom sheet's keyboard
+# capture. The login-button tap dismisses the IME on its own.
 - tapOn:
-    id: 'paste-nsec'
+    id: 'nsec-input'
+- inputText: ${MAESTRO_NSEC}
 - waitForAnimationToEnd:
-    timeout: 2000
+    timeout: 1500
 
 - tapOn:
     id: 'login-button'
