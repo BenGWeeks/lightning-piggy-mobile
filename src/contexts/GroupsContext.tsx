@@ -214,18 +214,33 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return groups.filter((g) => g.memberPubkeys.some((pk) => followPubkeys.has(pk.toLowerCase())));
   }, [groups, followPubkeys, followingOnly, devMode]);
 
-  // `persist` runs the mutation inside the React setState callback so it
-  // always sees the latest committed groups list — even if a concurrent
-  // mutator (e.g. an inbound 30200 reconcile firing while the user taps
-  // Create) lands between this call's invocation and its setState run.
-  // Returns the post-mutation array so the caller can also pass it to
-  // saveGroups + downstream side effects without re-reading state.
+  // Synchronous mirror of the `groups` state used as the read source
+  // for `persist` so concurrent mutators serialise correctly without
+  // depending on React's setState batching/timing.
+  //
+  // Why this exists: the earlier "compute inside setGroups callback"
+  // pattern still raced because the `await saveGroups(after)` line
+  // could resolve before React processed the queued setter (in
+  // unbatched async paths the setter runs synchronously, but in
+  // batched paths it runs at flush time — so `after` could still hold
+  // its initial `[]` when the AsyncStorage write started). Reading +
+  // writing this ref synchronously inside `persist` guarantees that
+  // (a) the next concurrent caller sees the latest committed mutation
+  // immediately, and (b) `saveGroups` always serialises the post-
+  // mutation array.
+  const groupsRef = useRef<Group[]>([]);
+  useEffect(() => {
+    groupsRef.current = groups;
+  }, [groups]);
+
   const persist = useCallback(async (mutate: (curr: Group[]) => Group[]): Promise<Group[]> => {
-    let after: Group[] = [];
-    setGroups((curr) => {
-      after = mutate(curr);
-      return after;
-    });
+    const after = mutate(groupsRef.current);
+    // Update the ref BEFORE setGroups so a concurrent caller scheduled
+    // immediately after this one reads the fresh array — otherwise
+    // both callers' mutates would run against the same `curr` and the
+    // second's write would clobber the first's.
+    groupsRef.current = after;
+    setGroups(after);
     await saveGroups(after);
     return after;
   }, []);
