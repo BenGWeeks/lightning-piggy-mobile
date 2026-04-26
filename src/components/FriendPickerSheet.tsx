@@ -69,7 +69,7 @@ const FriendPickerSheet: React.FC<Props> = ({
   // generic constraints; any-ref keeps the call site clean.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const listRef = useRef<any>(null);
-  const snapPoints = useMemo(() => ['75%', '90%'], []);
+  const snapPoints = useMemo(() => ['85%'], []);
   // Keep the drag handle clear of Android's notification-shade trigger
   // zone (<48 DP from the top) while still letting the sheet grow past
   // the 75% snap when `keyboardBehavior="interactive"` lifts it up to
@@ -189,7 +189,7 @@ const FriendPickerSheet: React.FC<Props> = ({
               etc). When `picture` is set, the Image stacks on top via
               absoluteFill and covers the silhouette once it loads. */}
           <View style={styles.avatarFallback}>
-            <UserRound size={22} color={colors.textBody} strokeWidth={1.75} />
+            <UserRound size={28} color={colors.textBody} strokeWidth={1.75} />
           </View>
           {item.picture ? (
             <Image
@@ -283,7 +283,7 @@ const FriendPickerSheet: React.FC<Props> = ({
                   testID="friend-picker-new-group"
                 >
                   <View style={styles.newGroupIcon}>
-                    <UsersRound size={22} color={colors.brandPink} />
+                    <UsersRound size={28} color={colors.brandPink} />
                   </View>
                   <View style={styles.info}>
                     <Text style={styles.newGroupName}>New group</Text>
