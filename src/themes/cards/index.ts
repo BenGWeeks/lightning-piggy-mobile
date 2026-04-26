@@ -38,9 +38,6 @@ const cardBgStyles: Record<CardTheme | 'default', ImageStyle> = {
   xapo: xapoStyle.full,
 };
 
-export function getCardBgStyle(
-  styleName: CardTheme | undefined,
-  _mini: boolean,
-): ImageStyle {
+export function getCardBgStyle(styleName: CardTheme | undefined, _mini: boolean): ImageStyle {
   return cardBgStyles[styleName ?? 'default'] ?? cardBgStyles.default;
 }
