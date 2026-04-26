@@ -61,7 +61,7 @@ interface Props {
   // `onSendToGroup` instead of DM'd to a single peer. Mutually exclusive
   // with `presetFriend` (presetFriend wins if both are supplied — guard
   // against that at the call site).
-  presetGroup?: { id: string; name: string };
+  presetGroup?: { name: string };
   onSendToGroup?: (payload: string) => Promise<{ success: boolean; error?: string }>;
   // Fired after a successful DM send with the exact text that was sent.
   // The conversation view uses this to append the outgoing message

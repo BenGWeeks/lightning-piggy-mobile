@@ -182,6 +182,11 @@ const ConversationScreen: React.FC = () => {
   // has shared in this conversation. Keyed by hex pubkey; a `null` value
   // means we tried and the kind-0 lookup came back empty.
   const [sharedProfiles, setSharedProfiles] = useState<Record<string, NostrProfile | null>>({});
+  // Tracks which pubkeys have already been scheduled for a kind-0 fetch
+  // so the batch-fetch effect deps can be [messages] only, without needing
+  // sharedProfiles in the array (which would cause an extra cycle after
+  // every fetch batch writes the state).
+  const scheduledProfilePubkeys = useRef(new Set<string>());
   const [attachPanelOpen, setAttachPanelOpen] = useState(false);
   // Memoised here (not inline at the JSX site) so the FlatList's
   // `contentContainerStyle` reference is stable across keystrokes —
@@ -523,20 +528,23 @@ const ConversationScreen: React.FC = () => {
     for (const m of messages) {
       const ref = extractSharedContact(m.text);
       if (!ref) continue;
-      if (ref.pubkey in sharedProfiles) continue;
+      if (scheduledProfilePubkeys.current.has(ref.pubkey)) continue;
       const set = byPubkey.get(ref.pubkey) ?? new Set<string>();
       for (const r of ref.relays) set.add(r);
       byPubkey.set(ref.pubkey, set);
     }
     if (byPubkey.size === 0) return;
+    // Mark all found pubkeys as scheduled before the async work starts so
+    // a second messages-update doesn't re-queue the same fetches.
+    for (const pk of byPubkey.keys()) scheduledProfilePubkeys.current.add(pk);
     let cancelled = false;
     (async () => {
       const updates: Record<string, NostrProfile | null> = {};
       await Promise.all(
         [...byPubkey.entries()].map(async ([pk, relaySet]) => {
-          const relays = [...new Set([...DEFAULT_RELAYS, ...relaySet])];
+          const mergedRelays = [...new Set([...DEFAULT_RELAYS, ...relaySet])];
           try {
-            updates[pk] = await fetchProfile(pk, relays);
+            updates[pk] = await fetchProfile(pk, mergedRelays);
           } catch {
             updates[pk] = null;
           }
@@ -549,7 +557,7 @@ const ConversationScreen: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [messages, sharedProfiles]);
+  }, [messages]);
 
   const openSharedContact = useCallback((pk: string, profile: NostrProfile | null) => {
     const name = profile?.displayName || profile?.name || `${pk.slice(0, 8)}…`;
