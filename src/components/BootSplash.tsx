@@ -15,7 +15,7 @@
  * doesn't intercept touch events.
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Image, StyleSheet, View, Text } from 'react-native';
+import { Animated, Image, StyleSheet } from 'react-native';
 import { lightPalette } from '../styles/palettes';
 
 // BootSplash is brand-fixed (only ever shows over the native pink splash
@@ -54,15 +54,14 @@ const BootSplash: React.FC<Props> = ({ done }) => {
         source={require('../../assets/images/lightning-piggy-intro.png')}
         style={styles.pig}
         resizeMode="contain"
+        accessibilityLabel="Lightning Piggy"
       />
-      <View style={styles.brandRow}>
-        <Image
-          source={require('../../assets/images/lightning-piggy-logo.png')}
-          style={styles.logo}
-          resizeMode="contain"
-        />
-        <Text style={styles.brandText}>LIGHTNING PIGGY</Text>
-      </View>
+      <Image
+        source={require('../../assets/images/lightning-piggy-logo.png')}
+        style={styles.logo}
+        resizeMode="contain"
+        accessibilityLabel="Lightning Piggy"
+      />
     </Animated.View>
   );
 };
@@ -81,21 +80,16 @@ const styles = StyleSheet.create({
     width: '80%',
     height: '50%',
   },
-  brandRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginTop: 24,
-  },
   logo: {
-    width: 32,
-    height: 32,
-    tintColor: '#fff',
-  },
-  brandText: {
-    color: '#fff',
-    fontSize: 24,
-    fontWeight: '800',
-    letterSpacing: 1.5,
+    // The logo PNG (177×86 native, ~2:1) is the wordmark — yellow
+    // lightning bolt + white "Lightning Piggy" text baked in. Render
+    // it at a readable size (60% of the splash width) instead of the
+    // previous 32×32 squished icon. accessibilityLabel preserves the
+    // brand announcement for screen readers; the previous separate
+    // <Text>LIGHTNING PIGGY</Text> was duplicating what the image
+    // already says (#215).
+    width: '60%',
+    aspectRatio: 177 / 86,
+    marginTop: 24,
   },
 });
