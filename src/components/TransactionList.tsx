@@ -76,7 +76,7 @@ function formatTime(ts: number): string {
 
 const BATCH_SIZE = 20;
 
-type ItemRow = { kind: 'tx'; tx: WalletTransaction; key: string };
+type ItemRow = { kind: 'tx'; tx: WalletTransaction; key: string; index: number };
 type HeaderRow = { kind: 'header'; label: string; key: string };
 type Row = ItemRow | HeaderRow;
 
@@ -178,7 +178,7 @@ const TransactionList = forwardRef<TransactionListHandle, Props>(({ transactions
       });
       currentDayKey = dayKey;
     }
-    rows.push({ kind: 'tx', tx, key: txKey(tx, fallbackIndex) });
+    rows.push({ kind: 'tx', tx, key: txKey(tx, fallbackIndex), index: fallbackIndex });
   });
 
   return (
@@ -233,6 +233,7 @@ const TransactionList = forwardRef<TransactionListHandle, Props>(({ transactions
             style={[styles.item, isPending && styles.itemPending]}
             onPress={() => setDetail(item as TransactionDetailData)}
             accessibilityLabel={`Open details for ${primary}`}
+            testID={`transaction-row-${row.index}`}
           >
             <View style={styles.avatarWrap}>
               {counterpartyAvatar ? (

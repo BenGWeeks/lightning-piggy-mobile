@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  LayoutChangeEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
@@ -190,10 +191,26 @@ const HomeScreen: React.FC = () => {
   // from above-threshold to below-threshold triggers exactly one loadMore().
   // Revealing a batch grows contentSize and pushes the user back above the
   // threshold, clearing the latch so the next pull fires again.
+  //
+  // `onScroll` alone isn't enough on large screens / small lists where the
+  // initial 20 rows fit without overflow — the user can't scroll, so the
+  // remaining cached rows would be unreachable. We also fire loadMore on
+  // `onContentSizeChange` whenever content height is within threshold of
+  // the visible layout height; loadMore is a no-op once visibleCount equals
+  // the cached total, so the cascade self-terminates.
   const txListRef = useRef<TransactionListHandle>(null);
   const nearBottomRef = useRef(false);
+  const scrollLayoutHeightRef = useRef(0);
+
+  // Reset the near-bottom latch when switching wallets so the first
+  // bottom-zone entry on the new list still fires a loadMore.
+  useEffect(() => {
+    nearBottomRef.current = false;
+  }, [activeWalletId]);
+
   const handleTransactionsScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+    scrollLayoutHeightRef.current = layoutMeasurement.height;
     const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
     const nearBottom = distanceFromBottom < INFINITE_SCROLL_THRESHOLD;
     if (nearBottom && !nearBottomRef.current) {
@@ -201,6 +218,20 @@ const HomeScreen: React.FC = () => {
     }
     nearBottomRef.current = nearBottom;
   }, []);
+
+  const handleTransactionsLayout = useCallback((e: LayoutChangeEvent) => {
+    scrollLayoutHeightRef.current = e.nativeEvent.layout.height;
+  }, []);
+
+  const handleTransactionsContentSizeChange = useCallback(
+    (_contentWidth: number, contentHeight: number) => {
+      const layoutHeight = scrollLayoutHeightRef.current;
+      if (layoutHeight > 0 && contentHeight - layoutHeight < INFINITE_SCROLL_THRESHOLD) {
+        txListRef.current?.loadMore();
+      }
+    },
+    [],
+  );
 
   const greetingName =
     profile?.displayName?.trim() || profile?.name?.trim() || userName?.trim() || '';
@@ -293,6 +324,8 @@ const HomeScreen: React.FC = () => {
           style={styles.transactionsContainer}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
           onScroll={handleTransactionsScroll}
+          onLayout={handleTransactionsLayout}
+          onContentSizeChange={handleTransactionsContentSizeChange}
           scrollEventThrottle={100}
           testID="transactions-scroll"
         >

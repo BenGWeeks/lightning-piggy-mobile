@@ -2,8 +2,10 @@ appId: com.lightningpiggy.app
 name: Transactions Infinite Scroll
 ---
 # Verifies that the transactions list uses infinite scroll instead of the
-# legacy "Show all N transactions" button: swiping up on the list should
-# progressively reveal more transactions without ever showing that button.
+# legacy "Show all N transactions" button: scrolling the list should
+# progressively reveal more transactions without ever showing that button,
+# and the row at index 20 (which is gated behind at least one loadMore())
+# must eventually become visible.
 # Requires a wallet that is connected and has more than 20 transactions.
 # Run: maestro test tests/e2e/test-transactions-infinite-scroll.yaml
 
@@ -26,44 +28,36 @@ name: Transactions Infinite Scroll
 - assertVisible:
     id: 'transactions-scroll'
 
+# The first batch should render row 0 immediately.
+- assertVisible:
+    id: 'transaction-row-0'
+
 # Regression check: the legacy "Show all N transactions" button must be gone.
 # With infinite scroll, additional transactions load via scrolling, not a button.
 - assertNotVisible:
     text: 'Show all .* transactions'
 
-# Swipe up on the transactions list a few times to trigger the
-# infinite-scroll loadMore callback. We assert the container remains
-# visible after each swipe — confirming no crash — and that the
-# legacy button never appears as the list expands.
-- swipe:
-    from:
-      id: 'transactions-scroll'
-    direction: UP
-- waitForAnimationToEnd:
-    timeout: 2000
+# Initially row 20 is NOT in the tree — only the first 20 rows (indices 0-19)
+# have been rendered. This guards against a regression where loadMore() is
+# never gated and the full list loads up-front.
+- assertNotVisible:
+    id: 'transaction-row-20'
+
+# Positive assertion: scrolling the list down must eventually surface row 20,
+# which only exists after loadMore() has fired at least once. If infinite
+# scroll is broken (loadMore never triggers, or batching is bypassed) this
+# step times out and the test fails.
+- scrollUntilVisible:
+    element:
+      id: 'transaction-row-20'
+    direction: DOWN
+    timeout: 30000
+    speed: 40
+
+# Legacy button must still be absent after the list has expanded.
 - assertNotVisible:
     text: 'Show all .* transactions'
 
-- swipe:
-    from:
-      id: 'transactions-scroll'
-    direction: UP
-- waitForAnimationToEnd:
-    timeout: 2000
-- assertNotVisible:
-    text: 'Show all .* transactions'
-
-- swipe:
-    from:
-      id: 'transactions-scroll'
-    direction: UP
-- waitForAnimationToEnd:
-    timeout: 2000
-- assertNotVisible:
-    text: 'Show all .* transactions'
-
-# List is still alive and rendering transactions after the swipes.
+# Container is still alive after scrolling.
 - assertVisible:
     id: 'transactions-scroll'
-- assertVisible:
-    text: '.*sats'
