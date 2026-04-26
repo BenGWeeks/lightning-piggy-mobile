@@ -7,7 +7,6 @@ import {
   Pressable,
   Modal,
   FlatList,
-  Platform,
   ActivityIndicator,
   RefreshControl,
   Alert,
@@ -24,9 +23,8 @@ import {
 } from 'react-native-keyboard-controller';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { Zap, Send, Plus, MapPin, ArrowDown, UserRound } from 'lucide-react-native';
+import { Zap, Send, Plus, ArrowDown } from 'lucide-react-native';
 import { Image as ExpoImage } from 'expo-image';
-import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -41,6 +39,7 @@ import SendSheet from '../components/SendSheet';
 import AttachPanel from '../components/AttachPanel';
 import GifPickerSheet from '../components/GifPickerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
+import MessageBubble from '../components/MessageBubble';
 import TransactionDetailSheet, {
   TransactionDetailData,
   CounterpartyContact,
@@ -50,23 +49,25 @@ import FriendPickerSheet, { PickedFriend } from '../components/FriendPickerSheet
 import {
   getCurrentLocation,
   formatGeoMessage,
-  parseGeoMessage,
   buildOsmViewUrl,
-  buildStaticMapUrl,
   formatCoordsForDisplay,
-  USER_AGENT,
   SharedLocation,
 } from '../services/locationService';
 import {
-  decodeProfileReference,
   fetchProfile,
   nprofileEncode,
   buildProfileRelayHints,
   DEFAULT_RELAYS,
 } from '../services/nostrService';
-import { extractGifUrl, isConfigured as isGifConfigured, Gif } from '../services/giphyService';
+import { isConfigured as isGifConfigured, Gif } from '../services/giphyService';
 import type { NostrProfile } from '../types/nostr';
 import type { RootStackParamList } from '../navigation/types';
+import {
+  classifyMessageContent,
+  extractInvoice,
+  extractSharedContact,
+  formatTime,
+} from '../utils/messageContent';
 
 type ConversationRoute = RouteProp<RootStackParamList, 'Conversation'>;
 type ConversationNavigation = NativeStackNavigationProp<RootStackParamList, 'Conversation'>;
@@ -112,104 +113,9 @@ type Item =
 // ones that have a real `createdAt` and participate in chronological sort.
 type TimedItem = Exclude<Item, { kind: 'dayHeader' }>;
 
-// Bolt11 invoices are self-identifying by their `lnXX` HRP, so detection
-// here matches them with or without the `lightning:` prefix.
-const INVOICE_REGEX = /\b(?:lightning:)?(ln(?:bc|tb|ts|bs)[0-9a-z]{50,})\b/i;
-
-// Image URLs we render inline in message bubbles. We only match trusted image
-// extensions so we don't accidentally fetch arbitrary URLs as images.
-const IMAGE_URL_REGEX = /^(https?:\/\/\S+?\.(?:png|jpe?g|gif|webp|heic|heif))(?:\?\S*)?$/i;
-
-function extractImageUrl(text: string): string | null {
-  if (!text) return null;
-  // Only treat a message as an image when the entire body is the URL. This
-  // avoids silently dropping surrounding text like "check this https://…jpg".
-  const trimmed = text.trim();
-  const match = trimmed.match(IMAGE_URL_REGEX);
-  return match ? match[0] : null;
-}
-
-// Lightning addresses look like plain email addresses — `alice@example.com`
-// — so we only treat a message as a payable LN address when the sender
-// explicitly prefixes it with `lightning:`. Otherwise we'd turn every
-// shared email into a Pay button and guess wrong.
-const LN_ADDRESS_REGEX = /lightning:([a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,})\b/i;
-
-// NIP-21 nostr: URIs carrying a NIP-19 profile reference (npub or nprofile).
-// We only treat profile-kind references as contact shares here — note, nevent,
-// naddr etc. fall through to plain text rendering.
-const NOSTR_PROFILE_URI_REGEX = /nostr:(npub1[0-9a-z]+|nprofile1[0-9a-z]+)/i;
-
-interface DecodedInvoice {
-  raw: string;
-  amountSats: number | null;
-  description: string | null;
-  /** Epoch seconds at which the invoice becomes invalid. `null` = unknown. */
-  expiresAt: number | null;
-  /** 32-byte payment hash (hex). Used to poll NWC for paid status. */
-  paymentHash: string | null;
-}
-
-function extractInvoice(text: string): DecodedInvoice | null {
-  if (!text) return null;
-  const match = text.match(INVOICE_REGEX);
-  if (!match) return null;
-  const raw = match[1];
-  try {
-    const decoded = bolt11Decode(raw);
-    let amountSats: number | null = null;
-    let description: string | null = null;
-    let timestamp: number | null = null;
-    let expirySeconds: number | null = null;
-    let paymentHash: string | null = null;
-    for (const section of decoded.sections) {
-      if (section.name === 'amount') {
-        amountSats = Math.round(Number(section.value) / 1000);
-      } else if (section.name === 'description') {
-        description = section.value as string;
-      } else if (section.name === 'timestamp') {
-        timestamp = section.value as number;
-      } else if (section.name === 'expiry') {
-        expirySeconds = section.value as number;
-      } else if (section.name === 'payment_hash') {
-        paymentHash = section.value as string;
-      }
-    }
-    const expiresAt =
-      timestamp !== null && expirySeconds !== null ? timestamp + expirySeconds : null;
-    return { raw, amountSats, description, expiresAt, paymentHash };
-  } catch {
-    return { raw, amountSats: null, description: null, expiresAt: null, paymentHash: null };
-  }
-}
-
-function extractLightningAddress(text: string): string | null {
-  if (!text) return null;
-  const match = text.match(LN_ADDRESS_REGEX);
-  return match ? match[1] : null;
-}
-
-interface SharedContactRef {
-  pubkey: string;
-  relays: string[];
-}
-
-function extractSharedContact(text: string): SharedContactRef | null {
-  if (!text) return null;
-  const match = text.match(NOSTR_PROFILE_URI_REGEX);
-  if (!match) return null;
-  return decodeProfileReference(match[0]);
-}
-
-function formatTime(epochSeconds: number): string {
-  // Message bubbles always show time only — the date context comes from
-  // the TODAY / YESTERDAY / date dividers that appear between day groups.
-  const d = new Date(epochSeconds * 1000);
-  const hh = d.getHours().toString().padStart(2, '0');
-  const mm = d.getMinutes().toString().padStart(2, '0');
-  return `${hh}:${mm}`;
-}
-
+// Local-only formatter — only used for the dayHeader rule between
+// chronological message groups, so it stays here rather than in the
+// shared `messageContent` util (which sticks to bubble-level concerns).
 function formatDayHeader(epochSeconds: number): string {
   const d = new Date(epochSeconds * 1000);
   const today = new Date();
@@ -222,14 +128,6 @@ function formatDayHeader(epochSeconds: number): string {
   if (sameDay(d, today)) return 'Today';
   if (sameDay(d, yesterday)) return 'Yesterday';
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
-function formatRelativeFuture(epochMs: number): string {
-  const deltaSec = Math.max(0, Math.floor((epochMs - Date.now()) / 1000));
-  if (deltaSec < 60) return 'in <1 min';
-  if (deltaSec < 3600) return `in ${Math.floor(deltaSec / 60)} min`;
-  if (deltaSec < 86400) return `in ${Math.floor(deltaSec / 3600)}h`;
-  return `in ${Math.floor(deltaSec / 86400)}d`;
 }
 
 const ConversationScreen: React.FC = () => {
@@ -353,23 +251,25 @@ const ConversationScreen: React.FC = () => {
 
   const items = useMemo<Item[]>(() => {
     const msgItems: TimedItem[] = messages.map((m) => {
-      const gifUrl = extractGifUrl(m.text);
-      if (gifUrl) {
+      // Classify each raw DM into the variant the renderer expects. Same
+      // shape used by the group screen (via `classifyMessageContent`)
+      // — keeps gif / geo detection in one place.
+      const classified = classifyMessageContent(m.text);
+      if (classified.kind === 'gif') {
         return {
           kind: 'gif',
           id: `dm-${m.id}`,
           fromMe: m.fromMe,
-          url: gifUrl,
+          url: classified.url,
           createdAt: m.createdAt,
         };
       }
-      const loc = parseGeoMessage(m.text);
-      if (loc) {
+      if (classified.kind === 'location') {
         return {
           kind: 'location',
           id: `dm-${m.id}`,
           fromMe: m.fromMe,
-          location: loc,
+          location: classified.location,
           createdAt: m.createdAt,
         };
       }
@@ -902,6 +802,11 @@ const ConversationScreen: React.FC = () => {
     });
   }, []);
 
+  const handlePayInvoice = useCallback((raw: string) => {
+    setInvoiceToPay(raw);
+    setSendSheetOpen(true);
+  }, []);
+
   const renderItem = useCallback(
     ({ item }: { item: Item }) => {
       if (item.kind === 'dayHeader') {
@@ -913,311 +818,44 @@ const ConversationScreen: React.FC = () => {
           </View>
         );
       }
-      if (item.kind === 'message') {
-        const imageUrl = extractImageUrl(item.text);
-        if (imageUrl) {
-          return (
-            <View
-              style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
+      // Wallet-derived zap variant — Lightning tx pulled from the wallet's
+      // ledger, NOT a Nostr message. Stays inline because it's the only
+      // 1:1-specific Item kind: groups don't pair zap receipts to a single
+      // peer, so MessageBubble doesn't carry this case.
+      if (item.kind === 'zap') {
+        return (
+          <View style={[styles.zapRow, item.fromMe ? styles.zapRowRight : styles.zapRowLeft]}>
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => setDetailTx(item.tx)}
+              style={[styles.zapCard, item.fromMe ? styles.zapCardMe : styles.zapCardThem]}
+              accessibilityLabel={item.fromMe ? 'Zap sent' : 'Zap received'}
+              testID={`conversation-zap-${item.id}`}
             >
               <View
                 style={[
-                  styles.imageBubble,
-                  item.fromMe ? styles.imageBubbleMe : styles.imageBubbleThem,
+                  styles.zapCardIconBadge,
+                  item.fromMe ? styles.zapCardIconBadgeMe : styles.zapCardIconBadgeThem,
                 ]}
               >
-                <Image
-                  source={{ uri: imageUrl }}
-                  style={styles.imageBubbleImage}
-                  resizeMode="cover"
-                  accessibilityLabel="Shared image"
+                <Zap
+                  size={18}
+                  color={item.fromMe ? colors.brandPink : colors.white}
+                  fill={item.fromMe ? colors.brandPink : colors.white}
                 />
-                <Text style={[styles.imageBubbleTime, item.fromMe && styles.imageBubbleTimeMe]}>
-                  {formatTime(item.createdAt)}
-                </Text>
               </View>
-            </View>
-          );
-        }
-        const invoice = extractInvoice(item.text);
-        if (invoice) {
-          const expired = invoice.expiresAt !== null && invoice.expiresAt * 1000 < Date.now();
-          const paid =
-            invoice.paymentHash !== null && isInvoicePaid(invoice.paymentHash, item.fromMe);
-          return (
-            <View
-              style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
-            >
-              <View
-                style={[
-                  styles.invoiceCard,
-                  item.fromMe ? styles.invoiceCardMe : styles.invoiceCardThem,
-                ]}
-              >
-                <Text style={[styles.invoiceLabel, item.fromMe && styles.invoiceLabelMe]}>
-                  {item.fromMe ? 'Invoice sent' : 'Invoice received'}
+              <View style={styles.zapCardBody}>
+                <Text style={[styles.zapCardLabel, item.fromMe && styles.zapCardLabelMe]}>
+                  {item.fromMe ? 'Zap sent' : 'Zap received'}
                 </Text>
-                <Text style={[styles.invoiceAmount, item.fromMe && styles.invoiceAmountMe]}>
-                  {invoice.amountSats !== null
-                    ? `${invoice.amountSats.toLocaleString()} sats`
-                    : 'Any amount'}
+                <Text style={[styles.zapCardAmount, item.fromMe && styles.zapCardAmountMe]}>
+                  {item.amountSats.toLocaleString()} sats
                 </Text>
-                {invoice.description ? (
-                  <Text
-                    style={[styles.invoiceMemo, item.fromMe && styles.invoiceMemoMe]}
-                    numberOfLines={2}
-                  >
-                    {invoice.description}
+                {item.comment ? (
+                  <Text style={[styles.zapCardComment, item.fromMe && styles.zapCardCommentMe]}>
+                    {item.comment}
                   </Text>
                 ) : null}
-                <View style={styles.invoiceTagRow}>
-                  {paid ? (
-                    <View style={[styles.invoiceTag, styles.invoiceTagPaid]}>
-                      <Text style={styles.invoiceTagPaidText}>Paid</Text>
-                    </View>
-                  ) : expired ? (
-                    <View style={[styles.invoiceTag, styles.invoiceTagExpired]}>
-                      <Text style={styles.invoiceTagExpiredText}>Expired</Text>
-                    </View>
-                  ) : item.fromMe ? (
-                    <View style={[styles.invoiceTag, styles.invoiceTagUnpaid]}>
-                      <Text style={styles.invoiceTagUnpaidText}>Unpaid</Text>
-                    </View>
-                  ) : null}
-                  {!paid && !expired && invoice.expiresAt !== null ? (
-                    <Text style={[styles.invoiceExpiry, item.fromMe && styles.invoiceExpiryMe]}>
-                      expires {formatRelativeFuture(invoice.expiresAt * 1000)}
-                    </Text>
-                  ) : null}
-                </View>
-                {item.fromMe ? null : paid || expired ? null : (
-                  <TouchableOpacity
-                    style={styles.invoicePayButton}
-                    onPress={() => {
-                      setInvoiceToPay(invoice.raw);
-                      setSendSheetOpen(true);
-                    }}
-                    accessibilityLabel="Pay this invoice"
-                    testID={`conversation-pay-${item.id}`}
-                  >
-                    <Zap size={16} color={colors.white} fill={colors.white} />
-                    <Text style={styles.invoicePayText}>Pay</Text>
-                  </TouchableOpacity>
-                )}
-                <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
-                  {formatTime(item.createdAt)}
-                </Text>
-              </View>
-            </View>
-          );
-        }
-        const sharedContact = extractSharedContact(item.text);
-        if (sharedContact) {
-          const loaded = sharedContact.pubkey in sharedProfiles;
-          const prof = sharedProfiles[sharedContact.pubkey] ?? null;
-          const displayName =
-            prof?.displayName || prof?.name || `${sharedContact.pubkey.slice(0, 8)}…`;
-          return (
-            <View
-              style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
-            >
-              <TouchableOpacity
-                activeOpacity={0.8}
-                onPress={() => openSharedContact(sharedContact.pubkey, prof)}
-                style={[
-                  styles.contactCard,
-                  item.fromMe ? styles.contactCardMe : styles.contactCardThem,
-                ]}
-                accessibilityLabel={`Shared contact ${displayName}`}
-                testID={`conversation-contact-${item.id}`}
-              >
-                <Text style={[styles.contactLabel, item.fromMe && styles.contactLabelMe]}>
-                  {item.fromMe ? 'Contact shared' : 'Contact'}
-                </Text>
-                <View style={styles.contactBodyRow}>
-                  {/* Always render the silhouette as the base layer so it
-                      shows whether `prof.picture` is missing OR the Image
-                      fails to load (broken URL, offline, etc). When
-                      `prof.picture` is set, the Image is z-stacked on top
-                      via absoluteFillObject and covers the silhouette
-                      once it loads. textBody (dark) is used for the icon
-                      to guarantee contrast against the light avatar BG —
-                      the previous inline SVG used textSupplementary
-                      (light grey on light grey → invisible). */}
-                  <View style={[styles.contactAvatar, styles.contactAvatarFallback]}>
-                    <UserRound size={26} color={colors.textBody} strokeWidth={1.75} />
-                    {prof?.picture ? (
-                      <Image
-                        source={{ uri: prof.picture }}
-                        style={[StyleSheet.absoluteFillObject, { borderRadius: 22 }]}
-                      />
-                    ) : null}
-                  </View>
-                  <View style={styles.contactInfo}>
-                    <Text
-                      style={[styles.contactName, item.fromMe && styles.contactNameMe]}
-                      numberOfLines={1}
-                    >
-                      {loaded ? displayName : 'Loading…'}
-                    </Text>
-                    {prof?.lud16 ? (
-                      <Text
-                        style={[styles.contactLn, item.fromMe && styles.contactLnMe]}
-                        numberOfLines={1}
-                      >
-                        {prof.lud16}
-                      </Text>
-                    ) : prof?.nip05 ? (
-                      <Text
-                        style={[styles.contactLn, item.fromMe && styles.contactLnMe]}
-                        numberOfLines={1}
-                      >
-                        {prof.nip05}
-                      </Text>
-                    ) : null}
-                  </View>
-                </View>
-                <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
-                  {formatTime(item.createdAt)}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          );
-        }
-        const lnAddress = extractLightningAddress(item.text);
-        if (lnAddress) {
-          return (
-            <View
-              style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
-            >
-              <View
-                style={[
-                  styles.invoiceCard,
-                  item.fromMe ? styles.invoiceCardMe : styles.invoiceCardThem,
-                ]}
-              >
-                <Text style={[styles.invoiceLabel, item.fromMe && styles.invoiceLabelMe]}>
-                  {item.fromMe ? 'Address sent' : 'Lightning address'}
-                </Text>
-                <Text
-                  style={[styles.invoiceMemo, item.fromMe && styles.invoiceMemoMe]}
-                  numberOfLines={1}
-                >
-                  {lnAddress}
-                </Text>
-                {item.fromMe ? null : (
-                  <TouchableOpacity
-                    style={styles.invoicePayButton}
-                    onPress={() => {
-                      setInvoiceToPay(lnAddress);
-                      setSendSheetOpen(true);
-                    }}
-                    accessibilityLabel="Pay this lightning address"
-                    testID={`conversation-pay-${item.id}`}
-                  >
-                    <Zap size={16} color={colors.white} fill={colors.white} />
-                    <Text style={styles.invoicePayText}>Pay</Text>
-                  </TouchableOpacity>
-                )}
-                <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
-                  {formatTime(item.createdAt)}
-                </Text>
-              </View>
-            </View>
-          );
-        }
-        return (
-          <View
-            style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
-          >
-            <View style={[styles.bubble, item.fromMe ? styles.bubbleMe : styles.bubbleThem]}>
-              <Text style={[styles.bubbleText, item.fromMe && styles.bubbleTextMe]}>
-                {item.text}
-              </Text>
-              <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
-                {formatTime(item.createdAt)}
-              </Text>
-            </View>
-          </View>
-        );
-      }
-      if (item.kind === 'gif') {
-        return (
-          <View
-            style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
-          >
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={() => setFullscreenGifUrl(item.url)}
-              style={[styles.gifCard, item.fromMe ? styles.gifCardMe : styles.gifCardThem]}
-              accessibilityLabel={
-                item.fromMe ? 'GIF sent, tap to expand' : 'GIF received, tap to expand'
-              }
-              accessibilityRole="imagebutton"
-              testID={`conversation-gif-${item.id}`}
-            >
-              <ExpoImage
-                source={{ uri: item.url }}
-                style={styles.gifImage}
-                contentFit="cover"
-                cachePolicy="memory-disk"
-                transition={150}
-                accessibilityIgnoresInvertColors
-              />
-              <Text style={[styles.gifTime, item.fromMe && styles.gifTimeMe]}>
-                {formatTime(item.createdAt)}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        );
-      }
-      if (item.kind === 'location') {
-        const { location } = item;
-        const mapUrl = buildStaticMapUrl(location);
-        return (
-          <View
-            style={[styles.bubbleRow, item.fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}
-          >
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={() => openLocation(location)}
-              style={[
-                styles.locationCard,
-                item.fromMe ? styles.locationCardMe : styles.locationCardThem,
-              ]}
-              accessibilityLabel={item.fromMe ? 'Location sent' : 'Location received'}
-              testID={`conversation-location-${item.id}`}
-            >
-              <ExpoImage
-                source={{ uri: mapUrl, headers: { 'User-Agent': USER_AGENT } }}
-                style={styles.locationMap}
-                contentFit="cover"
-                cachePolicy="disk"
-                transition={150}
-                accessibilityIgnoresInvertColors
-              />
-              <View style={styles.locationBody}>
-                <View style={styles.locationLabelRow}>
-                  <MapPin
-                    size={14}
-                    color={item.fromMe ? 'rgba(255,255,255,0.85)' : colors.textSupplementary}
-                  />
-                  <Text style={[styles.locationLabel, item.fromMe && styles.locationLabelMe]}>
-                    {item.fromMe ? 'Location sent' : 'Location'}
-                  </Text>
-                </View>
-                <Text style={[styles.locationCoords, item.fromMe && styles.locationCoordsMe]}>
-                  {formatCoordsForDisplay(location)}
-                </Text>
-                {location.accuracyMeters !== null ? (
-                  <Text style={[styles.locationAccuracy, item.fromMe && styles.locationAccuracyMe]}>
-                    ± {location.accuracyMeters} m · OpenStreetMap
-                  </Text>
-                ) : (
-                  <Text style={[styles.locationAccuracy, item.fromMe && styles.locationAccuracyMe]}>
-                    OpenStreetMap
-                  </Text>
-                )}
                 <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
                   {formatTime(item.createdAt)}
                 </Text>
@@ -1226,48 +864,43 @@ const ConversationScreen: React.FC = () => {
           </View>
         );
       }
+      // Map the local Item shape to MessageBubble's `BubbleContent`. The
+      // Items array was already classified upstream (see the items useMemo
+      // that calls extractGifUrl + parseGeoMessage when assembling) so this
+      // is a flat re-tag — MessageBubble handles the remaining text-format
+      // detection (image / invoice / lnaddr / contact) on render.
+      const content =
+        item.kind === 'gif'
+          ? ({ kind: 'gif', url: item.url } as const)
+          : item.kind === 'location'
+            ? ({ kind: 'location', location: item.location } as const)
+            : ({ kind: 'text', text: item.text } as const);
       return (
-        <View style={[styles.zapRow, item.fromMe ? styles.zapRowRight : styles.zapRowLeft]}>
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={() => setDetailTx(item.tx)}
-            style={[styles.zapCard, item.fromMe ? styles.zapCardMe : styles.zapCardThem]}
-            accessibilityLabel={item.fromMe ? 'Zap sent' : 'Zap received'}
-            testID={`conversation-zap-${item.id}`}
-          >
-            <View
-              style={[
-                styles.zapCardIconBadge,
-                item.fromMe ? styles.zapCardIconBadgeMe : styles.zapCardIconBadgeThem,
-              ]}
-            >
-              <Zap
-                size={18}
-                color={item.fromMe ? colors.brandPink : colors.white}
-                fill={item.fromMe ? colors.brandPink : colors.white}
-              />
-            </View>
-            <View style={styles.zapCardBody}>
-              <Text style={[styles.zapCardLabel, item.fromMe && styles.zapCardLabelMe]}>
-                {item.fromMe ? 'Zap sent' : 'Zap received'}
-              </Text>
-              <Text style={[styles.zapCardAmount, item.fromMe && styles.zapCardAmountMe]}>
-                {item.amountSats.toLocaleString()} sats
-              </Text>
-              {item.comment ? (
-                <Text style={[styles.zapCardComment, item.fromMe && styles.zapCardCommentMe]}>
-                  {item.comment}
-                </Text>
-              ) : null}
-              <Text style={[styles.bubbleTime, item.fromMe && styles.bubbleTimeMe]}>
-                {formatTime(item.createdAt)}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        </View>
+        <MessageBubble
+          id={item.id}
+          fromMe={item.fromMe}
+          createdAt={item.createdAt}
+          content={content}
+          sharedProfiles={sharedProfiles}
+          isInvoicePaid={isInvoicePaid}
+          onPayInvoice={handlePayInvoice}
+          onPayLightningAddress={handlePayInvoice}
+          onOpenContact={openSharedContact}
+          onOpenLocation={openLocation}
+          onOpenGifFullscreen={setFullscreenGifUrl}
+          testIdPrefix="conversation"
+        />
       );
     },
-    [openLocation, isInvoicePaid, sharedProfiles, openSharedContact, styles, colors],
+    [
+      openLocation,
+      isInvoicePaid,
+      sharedProfiles,
+      openSharedContact,
+      handlePayInvoice,
+      styles,
+      colors,
+    ],
   );
 
   const avatarNode =
@@ -1756,32 +1389,9 @@ const createStyles = (colors: Palette) =>
       textTransform: 'uppercase',
       letterSpacing: 0.5,
     },
-    bubble: {
-      maxWidth: '80%',
-      paddingHorizontal: 12,
-      paddingTop: 8,
-      // Match the 4 px bottom gap used by every other bubble/card so
-      // the time sits the same distance from the bubble edge regardless
-      // of message type.
-      paddingBottom: 4,
-      borderRadius: 16,
-    },
-    bubbleThem: {
-      backgroundColor: colors.surface,
-      borderBottomLeftRadius: 4,
-    },
-    bubbleMe: {
-      backgroundColor: colors.brandPink,
-      borderBottomRightRadius: 4,
-    },
-    bubbleText: {
-      fontSize: 15,
-      color: colors.textBody,
-      lineHeight: 20,
-    },
-    bubbleTextMe: {
-      color: colors.white,
-    },
+    // Bubble + per-message-type styles moved to MessageBubble.
+    // bubbleTime / bubbleTimeMe stay here because the inline zap
+    // renderer (1:1-only Item kind) still uses them for its time slug.
     bubbleTime: {
       fontSize: 10,
       color: colors.textSupplementary,
@@ -1878,207 +1488,6 @@ const createStyles = (colors: Palette) =>
     zapCardCommentMe: {
       color: colors.white,
     },
-    invoiceCard: {
-      maxWidth: '85%',
-      minWidth: 240,
-      paddingTop: 12,
-      paddingBottom: 4,
-      paddingHorizontal: 14,
-      borderRadius: 14,
-      borderWidth: 1,
-      gap: 6,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-      elevation: 1,
-    },
-    invoiceCardMe: {
-      backgroundColor: colors.brandPink,
-      borderColor: colors.brandPink,
-    },
-    invoiceCardThem: {
-      backgroundColor: colors.surface,
-      borderColor: colors.zapYellow,
-    },
-    invoiceHeaderRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 8,
-    },
-    invoiceLabel: {
-      fontSize: 12,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.6,
-    },
-    invoiceLabelMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    invoiceAmount: {
-      fontSize: 20,
-      fontWeight: '700',
-      color: colors.textHeader,
-      marginTop: 2,
-    },
-    invoiceAmountMe: {
-      color: colors.white,
-    },
-    invoiceMemo: {
-      fontSize: 14,
-      color: colors.textBody,
-      marginTop: 2,
-    },
-    invoiceMemoMe: {
-      color: 'rgba(255,255,255,0.9)',
-    },
-    invoiceExpiry: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      marginTop: 4,
-    },
-    invoiceExpiryMe: {
-      color: 'rgba(255,255,255,0.75)',
-    },
-    invoiceTagRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      flexWrap: 'wrap',
-      gap: 8,
-      marginTop: 6,
-    },
-    invoiceTag: {
-      paddingHorizontal: 8,
-      paddingVertical: 3,
-      borderRadius: 10,
-      alignSelf: 'flex-start',
-    },
-    invoiceTagPaid: {
-      backgroundColor: '#2e7d32',
-    },
-    invoiceTagPaidText: {
-      fontSize: 11,
-      fontWeight: '700',
-      color: '#ffffff',
-      letterSpacing: 0.3,
-    },
-    invoiceTagUnpaid: {
-      backgroundColor: 'rgba(255,255,255,0.22)',
-    },
-    invoiceTagUnpaidText: {
-      fontSize: 11,
-      fontWeight: '700',
-      color: '#ffffff',
-      letterSpacing: 0.3,
-    },
-    invoiceTagExpired: {
-      backgroundColor: 'rgba(0,0,0,0.32)',
-    },
-    invoiceTagExpiredText: {
-      fontSize: 11,
-      fontWeight: '700',
-      color: '#ffffff',
-      letterSpacing: 0.3,
-    },
-    invoicePayButton: {
-      marginTop: 8,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 6,
-      paddingVertical: 10,
-      borderRadius: 10,
-      backgroundColor: colors.brandPink,
-    },
-    invoicePayButtonDisabled: {
-      backgroundColor: colors.divider,
-    },
-    invoicePayText: {
-      fontSize: 14,
-      fontWeight: '700',
-      color: colors.white,
-    },
-    invoicePayExpiredText: {
-      fontSize: 14,
-      fontWeight: '700',
-      color: colors.textSupplementary,
-    },
-    contactCard: {
-      maxWidth: '85%',
-      minWidth: 240,
-      paddingTop: 12,
-      paddingBottom: 4,
-      paddingHorizontal: 14,
-      borderRadius: 14,
-      borderWidth: 1,
-      gap: 10,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-      elevation: 1,
-    },
-    contactCardMe: {
-      backgroundColor: colors.brandPink,
-      borderColor: colors.brandPink,
-    },
-    contactCardThem: {
-      backgroundColor: colors.surface,
-      borderColor: colors.divider,
-    },
-    contactHeaderRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 8,
-    },
-    contactLabel: {
-      fontSize: 12,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.6,
-    },
-    contactLabelMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    contactBodyRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-    },
-    contactAvatar: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      backgroundColor: colors.background,
-    },
-    contactAvatarFallback: {
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    contactInfo: {
-      flex: 1,
-      minWidth: 0,
-    },
-    contactName: {
-      fontSize: 16,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    contactNameMe: {
-      color: colors.white,
-    },
-    contactLn: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      marginTop: 2,
-    },
-    contactLnMe: {
-      color: 'rgba(255,255,255,0.9)',
-    },
     composer: {
       flexDirection: 'row',
       alignItems: 'flex-end',
@@ -2117,35 +1526,11 @@ const createStyles = (colors: Palette) =>
       justifyContent: 'center',
       backgroundColor: colors.background,
     },
-    gifCard: {
-      // Match contact / location / invoice card width so GIF bubbles don't
-      // look oddly narrow next to the other attachment types.
-      maxWidth: '85%',
-      minWidth: 240,
-      borderRadius: 14,
-      overflow: 'hidden',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-      elevation: 1,
-    },
-    gifCardMe: {
-      backgroundColor: colors.brandPink,
-    },
-    gifCardThem: {
-      backgroundColor: colors.surface,
-    },
-    gifImage: {
-      // Concrete width matches the contact/location cards' `minWidth: 240`
-      // so the GIF card sizes to the same visual footprint as the other
-      // attachment types (text-driven content would otherwise leave the
-      // gifCard stretched to its `maxWidth` while contact cards sit near
-      // their minWidth).
-      width: 240,
-      height: 240,
-      backgroundColor: colors.background,
-    },
+    // gifCard / gifImage / gifTime / locationCard / locationMap /
+    // locationBody / locationLabel / locationCoords / locationAccuracy /
+    // imageBubble + bg / time variants moved to MessageBubble. The
+    // fullscreen-modal styles below are still used by the Modal that
+    // expands a tapped GIF, which lives at the screen level.
     fullscreenBackdrop: {
       flex: 1,
       backgroundColor: 'rgba(0,0,0,0.92)',
@@ -2155,119 +1540,6 @@ const createStyles = (colors: Palette) =>
     fullscreenImage: {
       width: '100%',
       height: '100%',
-    },
-    gifTime: {
-      fontSize: 10,
-      color: colors.textSupplementary,
-      alignSelf: 'flex-end',
-      // Align with the card-timestamp right inset used by invoice /
-      // contact / location / zap so every attachment type sits at the
-      // same distance from its card's right edge.
-      paddingHorizontal: 14,
-      paddingVertical: 4,
-    },
-    gifTimeMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    locationCard: {
-      maxWidth: '85%',
-      minWidth: 240,
-      borderRadius: 14,
-      borderWidth: 1,
-      overflow: 'hidden',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-      elevation: 1,
-    },
-    locationCardMe: {
-      backgroundColor: colors.brandPink,
-      borderColor: colors.brandPink,
-    },
-    locationCardThem: {
-      backgroundColor: colors.surface,
-      borderColor: colors.divider,
-    },
-    locationMap: {
-      width: '100%',
-      height: 140,
-      backgroundColor: colors.background,
-    },
-    locationBody: {
-      paddingHorizontal: 14,
-      paddingTop: 10,
-      paddingBottom: 4,
-      gap: 2,
-    },
-    locationHeaderRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 8,
-    },
-    locationLabelRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-    },
-    locationLabel: {
-      fontSize: 12,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.6,
-    },
-    locationLabelMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    locationCoords: {
-      fontSize: 15,
-      fontWeight: '600',
-      color: colors.textHeader,
-      marginTop: 2,
-    },
-    locationCoordsMe: {
-      color: colors.white,
-    },
-    locationAccuracy: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-    },
-    locationAccuracyMe: {
-      color: 'rgba(255,255,255,0.85)',
-    },
-    imageBubble: {
-      maxWidth: '85%',
-      minWidth: 240,
-      borderRadius: 14,
-      overflow: 'hidden',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-      elevation: 1,
-    },
-    imageBubbleMe: {
-      backgroundColor: colors.brandPink,
-    },
-    imageBubbleThem: {
-      backgroundColor: colors.surface,
-    },
-    imageBubbleImage: {
-      width: 240,
-      height: 240,
-      backgroundColor: colors.background,
-    },
-    imageBubbleTime: {
-      fontSize: 10,
-      color: colors.textSupplementary,
-      alignSelf: 'flex-end',
-      paddingHorizontal: 14,
-      paddingVertical: 4,
-    },
-    imageBubbleTimeMe: {
-      color: 'rgba(255,255,255,0.85)',
     },
     loading: {
       flex: 1,

@@ -11,7 +11,11 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Linking,
+  Modal,
+  Pressable,
 } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { LogOut, Plus } from 'lucide-react-native';
@@ -27,17 +31,32 @@ import ContactProfileSheet from '../components/ContactProfileSheet';
 import AttachPanel from '../components/AttachPanel';
 import GifPickerSheet from '../components/GifPickerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
+import SendSheet from '../components/SendSheet';
 import FriendPickerSheet, { PickedFriend } from '../components/FriendPickerSheet';
+import MessageBubble from '../components/MessageBubble';
 import { isConfigured as isGifConfigured, type Gif } from '../services/giphyService';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
-import { getCurrentLocation, formatGeoMessage } from '../services/locationService';
-import { nprofileEncode, buildProfileRelayHints } from '../services/nostrService';
+import {
+  getCurrentLocation,
+  formatGeoMessage,
+  buildOsmViewUrl,
+  type SharedLocation,
+} from '../services/locationService';
+import {
+  fetchProfile,
+  nprofileEncode,
+  buildProfileRelayHints,
+  DEFAULT_RELAYS,
+} from '../services/nostrService';
 import {
   appendGroupMessage,
   loadGroupMessages,
   type GroupMessage,
 } from '../services/groupMessagesStorageService';
+import { classifyMessageContent, extractSharedContact } from '../utils/messageContent';
+import type { NostrProfile } from '../types/nostr';
 import type { GroupConversationRoute, RootStackParamList } from '../navigation/types';
+import type { CounterpartyContact } from '../components/TransactionDetailSheet';
 
 type GroupConversationNavigation = NativeStackNavigationProp<
   RootStackParamList,
@@ -77,6 +96,18 @@ const GroupConversationScreen: React.FC = () => {
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [sharingLocation, setSharingLocation] = useState(false);
+  // Sheets surfaced by MessageBubble taps. Mirror the 1:1 conversation
+  // wiring (ConversationScreen) so the rich-card affordances work the
+  // same in groups.
+  const [sendSheetOpen, setSendSheetOpen] = useState(false);
+  const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
+  const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
+  const [fullscreenGifUrl, setFullscreenGifUrl] = useState<string | null>(null);
+  // Cache of kind-0 profiles for shared-contact cards. Populated by the
+  // batch-fetch effect below, keyed by pubkey. `null` value = fetch
+  // attempted and resolved with no profile (so MessageBubble can drop
+  // the "Loading…" placeholder).
+  const [sharedProfiles, setSharedProfiles] = useState<Record<string, NostrProfile | null>>({});
   const listRef = useRef<FlatList<GroupMessage>>(null);
 
   const group = getGroup(route.params.groupId);
@@ -338,6 +369,76 @@ const GroupConversationScreen: React.FC = () => {
     [group, myPubkey, sendGroupMessage],
   );
 
+  // MessageBubble handler — Pay button on an invoice / lightning address
+  // bubble routes through SendSheet, same UX as 1:1 conversations.
+  const handlePayInvoice = useCallback((raw: string) => {
+    setInvoiceToPay(raw);
+    setSendSheetOpen(true);
+  }, []);
+
+  // MessageBubble handler — opens ContactProfileSheet for the shared
+  // contact, falling back to a short-pubkey placeholder when the kind-0
+  // hasn't loaded yet (sharedProfiles fetch is below).
+  const openSharedContact = useCallback((pk: string, profile: NostrProfile | null) => {
+    const name = profile?.displayName || profile?.name || `${pk.slice(0, 8)}…`;
+    setProfileContact({
+      pubkey: pk,
+      name,
+      picture: profile?.picture ?? null,
+      banner: profile?.banner ?? null,
+      nip05: profile?.nip05 ?? null,
+      lightningAddress: profile?.lud16 ?? null,
+      source: 'nostr',
+    });
+  }, []);
+
+  // MessageBubble handler — opens OSM in the system browser. Identical
+  // to 1:1 conversation behaviour.
+  const openLocation = useCallback((loc: SharedLocation) => {
+    const url = buildOsmViewUrl(loc);
+    Linking.openURL(url).catch(() => {
+      Alert.alert('Could not open link', 'No browser is available to open OpenStreetMap.');
+    });
+  }, []);
+
+  // Batch-fetch kind-0 profiles for every shared-contact reference in the
+  // group thread. Mirrors the 1:1 path so contact cards render with avatar
+  // + display name. Relay hints from the nprofile (when present) are
+  // merged with DEFAULT_RELAYS so we still find the person if they
+  // publish on niche relays.
+  useEffect(() => {
+    const byPubkey = new Map<string, Set<string>>();
+    for (const m of messages) {
+      const ref = extractSharedContact(m.text);
+      if (!ref) continue;
+      if (ref.pubkey in sharedProfiles) continue;
+      const set = byPubkey.get(ref.pubkey) ?? new Set<string>();
+      for (const r of ref.relays) set.add(r);
+      byPubkey.set(ref.pubkey, set);
+    }
+    if (byPubkey.size === 0) return;
+    let cancelled = false;
+    (async () => {
+      const updates: Record<string, NostrProfile | null> = {};
+      await Promise.all(
+        [...byPubkey.entries()].map(async ([pk, relaySet]) => {
+          const relays = [...new Set([...DEFAULT_RELAYS, ...relaySet])];
+          try {
+            updates[pk] = await fetchProfile(pk, relays);
+          } catch {
+            updates[pk] = null;
+          }
+        }),
+      );
+      if (!cancelled) {
+        setSharedProfiles((prev) => ({ ...prev, ...updates }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [messages, sharedProfiles]);
+
   if (!group) {
     return (
       <View style={styles.container}>
@@ -396,20 +497,29 @@ const GroupConversationScreen: React.FC = () => {
 
   const renderMessage = ({ item }: { item: GroupMessage }) => {
     const fromMe = item.senderPubkey === myPubkey;
-    const senderName =
-      memberNameByPubkey.get(item.senderPubkey) ?? `${item.senderPubkey.slice(0, 8)}…`;
+    const senderName = fromMe
+      ? null
+      : (memberNameByPubkey.get(item.senderPubkey) ?? `${item.senderPubkey.slice(0, 8)}…`);
+    // Reuse the shared bubble — same renderer 1:1 chats use, so contact /
+    // invoice / location / image / GIF cards all render identically across
+    // chat types (#239). The classifier handles geo: + GIF detection up
+    // front; image / invoice / lnaddr / contact ride on the text variant
+    // and detect at render time.
     return (
-      <View style={[styles.messageRow, fromMe ? styles.messageRowMe : styles.messageRowOther]}>
-        <View
-          style={[
-            styles.messageBubble,
-            fromMe ? styles.messageBubbleMe : styles.messageBubbleOther,
-          ]}
-        >
-          {!fromMe && <Text style={styles.messageSender}>{senderName}</Text>}
-          <Text style={fromMe ? styles.messageTextMe : styles.messageTextOther}>{item.text}</Text>
-        </View>
-      </View>
+      <MessageBubble
+        id={item.id}
+        fromMe={fromMe}
+        createdAt={item.createdAt}
+        content={classifyMessageContent(item.text)}
+        senderName={senderName}
+        sharedProfiles={sharedProfiles}
+        onPayInvoice={handlePayInvoice}
+        onPayLightningAddress={handlePayInvoice}
+        onOpenContact={openSharedContact}
+        onOpenLocation={openLocation}
+        onOpenGifFullscreen={setFullscreenGifUrl}
+        testIdPrefix="group-conversation"
+      />
     );
   };
 
@@ -661,6 +771,53 @@ const GroupConversationScreen: React.FC = () => {
         presetGroup={{ id: group.id, name: group.name }}
         onSendToGroup={handleSendInvoiceToGroup}
       />
+
+      {/* Pay button on a received invoice routes to SendSheet pre-filled
+          with the bolt11. Group invoices have no per-message wallet
+          binding, so we leave initialPicture / recipientPubkey unset and
+          let SendSheet decode the invoice for the destination. */}
+      <SendSheet
+        visible={sendSheetOpen}
+        onClose={() => {
+          setSendSheetOpen(false);
+          setInvoiceToPay(null);
+        }}
+        initialAddress={invoiceToPay ?? undefined}
+      />
+
+      {/* Tap a shared-contact card → opens the contact's profile sheet.
+          Distinct from the member-chip sheet above (selectedMemberPubkey)
+          which opens for taps in the group header. Both are mutually
+          exclusive in practice — the user can only tap one at a time. */}
+      <ContactProfileSheet
+        visible={profileContact !== null}
+        onClose={() => setProfileContact(null)}
+        contact={profileContact}
+      />
+
+      <Modal
+        visible={fullscreenGifUrl !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setFullscreenGifUrl(null)}
+      >
+        <Pressable
+          style={styles.fullscreenBackdrop}
+          onPress={() => setFullscreenGifUrl(null)}
+          accessibilityLabel="Close full-screen GIF"
+          testID="group-conversation-gif-fullscreen"
+        >
+          {fullscreenGifUrl ? (
+            <ExpoImage
+              source={{ uri: fullscreenGifUrl }}
+              style={styles.fullscreenImage}
+              contentFit="contain"
+              cachePolicy="memory-disk"
+              accessibilityIgnoresInvertColors
+            />
+          ) : null}
+        </Pressable>
+      </Modal>
     </KeyboardAvoidingView>
   );
 };
@@ -772,43 +929,17 @@ const createStyles = (colors: Palette) =>
       gap: 6,
       flexGrow: 1,
     },
-    messageRow: {
-      flexDirection: 'row',
-      marginVertical: 3,
+    // Bubble + per-message-type styles moved to src/components/MessageBubble
+    // — both 1:1 and group screens render the same bubble component now.
+    fullscreenBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.92)',
+      alignItems: 'center',
+      justifyContent: 'center',
     },
-    messageRowMe: {
-      justifyContent: 'flex-end',
-    },
-    messageRowOther: {
-      justifyContent: 'flex-start',
-    },
-    messageBubble: {
-      maxWidth: '78%',
-      paddingVertical: 8,
-      paddingHorizontal: 12,
-      borderRadius: 16,
-    },
-    messageBubbleMe: {
-      backgroundColor: colors.brandPink,
-      borderBottomRightRadius: 4,
-    },
-    messageBubbleOther: {
-      backgroundColor: colors.surface,
-      borderBottomLeftRadius: 4,
-    },
-    messageSender: {
-      fontSize: 11,
-      fontWeight: '700',
-      color: colors.brandPink,
-      marginBottom: 2,
-    },
-    messageTextMe: {
-      color: colors.white,
-      fontSize: 15,
-    },
-    messageTextOther: {
-      color: colors.textBody,
-      fontSize: 15,
+    fullscreenImage: {
+      width: '100%',
+      height: '100%',
     },
     composer: {
       flexDirection: 'row',

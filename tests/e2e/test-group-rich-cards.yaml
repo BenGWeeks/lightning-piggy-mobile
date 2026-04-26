@@ -1,0 +1,96 @@
+appId: com.lightningpiggy.app.dev
+name: Group chat — rich content (contact / invoice / location) renders as cards
+---
+# Verifies that the shared MessageBubble (#239 fix) actually upgrades
+# raw `lightning:`, `nostr:nprofile…`, and `geo:…` payloads into rich
+# tap-cards inside group chats — not the plain-text bubbles that used
+# to render before MessageBubble was extracted.
+#
+# Strategy: send each payload via the regular composer (typing it
+# directly), then assert the corresponding rich-card testID appears.
+# This skips the attach-flow + wallet/permissions plumbing — the
+# bug being verified is purely about RENDERING, so the path the
+# payload takes into the thread doesn't matter.
+#
+# testIDs we rely on (declared in src/components/MessageBubble.tsx):
+#   - group-conversation-pay-<id>      → invoice / lightning-address card
+#   - group-conversation-contact-<id>  → shared-contact card
+#   - group-conversation-location-<id> → location map card
+#
+# Safety:
+#   - Lightning address sent is `test@example.com` — never resolves; no
+#     real LNURL fetch is triggered.
+#   - We DO NOT tap the Pay button — no payment is attempted.
+#   - The nprofile sent encodes a valid pubkey (Lightning Piggy team
+#     account) but the test never opens the contact sheet either.
+#   - Location is a fixed coordinate string; no GPS permission needed.
+#
+# Run: maestro --device emulator-5554 test tests/e2e/test-group-rich-cards.yaml
+
+- runFlow:
+    file: _subflow-login-as.yaml
+    env:
+      MAESTRO_NSEC: ${MAESTRO_NSEC}
+
+- tapOn:
+    id: 'tab-friends'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'groups-button'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Triad fixture group must exist on this device. If it doesn't, skip
+# the assertions cleanly so this test stays a no-op until the 3-way
+# group setup runs.
+- runFlow:
+    when:
+      visible:
+        text: 'Triad'
+    commands:
+      - tapOn:
+          text: 'Triad'
+      - waitForAnimationToEnd:
+          timeout: 3000
+
+      # ---------- Lightning address → Pay card ----------
+      - tapOn:
+          id: 'group-message-input'
+      - inputText: 'lightning:test@example.com'
+      - hideKeyboard
+      - tapOn:
+          id: 'group-send-button'
+      - extendedWaitUntil:
+          visible:
+            id: 'group-conversation-pay-.*'
+          timeout: 8000
+
+      # ---------- Geo message → Location map card ----------
+      - tapOn:
+          id: 'group-message-input'
+      - inputText: 'Shared location\ngeo:51.5074,-0.1278;u=10\nhttps://www.openstreetmap.org/?mlat=51.5074&mlon=-0.1278#map=16/51.5074/-0.1278'
+      - hideKeyboard
+      - tapOn:
+          id: 'group-send-button'
+      - extendedWaitUntil:
+          visible:
+            id: 'group-conversation-location-.*'
+          timeout: 8000
+
+      # ---------- nprofile → Shared contact card ----------
+      # Use the Lightning Piggy team npub (always valid + harmless).
+      - tapOn:
+          id: 'group-message-input'
+      - inputText: 'Shared contact: Lightning Piggy\nnostr:npub1y2qcaseaspuwvjtyk4suswdhgselydc42ttlt0t2kzhnykne7s5swvaffq'
+      - hideKeyboard
+      - tapOn:
+          id: 'group-send-button'
+      - extendedWaitUntil:
+          visible:
+            id: 'group-conversation-contact-.*'
+          timeout: 8000
+
+      # Sanity: composer is still reachable after the three sends.
+      - assertVisible:
+          id: 'group-message-input'
