@@ -1,0 +1,68 @@
+appId: com.lightningpiggy.app.dev
+name: BrandedAlert renders for invalid Send-sheet input
+---
+# Triggers a `BrandedAlert.alert(...)` via the Send sheet's invalid-
+# invoice path, then asserts the on-brand modal renders (rather than
+# the system Alert.alert dialog) by looking for the `branded-alert`
+# testID and one of its `branded-alert-button-N` ids.
+#
+# The send-sheet's pasted-invalid-input is the most reliably-triggerable
+# alert in the app today — most other alerts are gated on real device
+# state (e.g. NFC-not-enabled, camera-permission-denied) which an
+# emulator can't easily fake.
+#
+# Pre-reqs:
+#  - .env contains MAESTRO_NSEC
+#  - Signed-in account has at least one connected NWC wallet
+#
+# Run:
+#   source .env && maestro --device emulator-5554 test \
+#     -e MAESTRO_NSEC=$MAESTRO_NSEC \
+#     tests/e2e/test-branded-alert.yaml
+
+- runFlow: _subflow-login-as.yaml
+
+- tapOn:
+    id: 'tab-home'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Open the SendSheet (Home → Send button)
+- tapOn:
+    id: 'home-send-button'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Switch to the Paste tab + paste obviously-invalid text → triggers
+# `BrandedAlert.alert('Invalid invoice', ...)` after the Continue tap.
+- tapOn:
+    text: 'Paste'
+    optional: true
+- tapOn:
+    id: 'send-paste-input'
+    optional: true
+- inputText: 'definitely-not-a-valid-bolt11'
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn:
+    text: 'Continue'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2500
+
+# The branded-alert modal should now render. Verify by testID — these
+# are the testIDs added by BrandedAlertHost. If the system Alert.alert
+# fired instead, this assertion fails (system alert has no testID).
+- assertVisible:
+    id: 'branded-alert'
+- assertVisible:
+    id: 'branded-alert-title'
+
+# Tap the OK / dismiss button (testID `branded-alert-button-0` for the
+# single-button form) and verify the alert closes.
+- tapOn:
+    id: 'branded-alert-button-0'
+- waitForAnimationToEnd:
+    timeout: 1500
+- assertNotVisible:
+    id: 'branded-alert'
