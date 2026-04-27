@@ -10,7 +10,9 @@ export type CardTheme =
   | 'alby'
   | 'lnbits'
   | 'primal'
-  | 'coinos';
+  | 'coinos'
+  | 'revolut'
+  | 'xapo';
 
 export type WalletType = 'nwc' | 'onchain';
 

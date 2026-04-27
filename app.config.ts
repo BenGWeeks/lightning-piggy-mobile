@@ -39,6 +39,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     resizeMode: 'contain',
     backgroundColor: '#e91e63',
   },
+  // Only the app's own `lightningpiggy://` scheme is registered globally.
+  // The PR #231 NFC-write feature does NOT need a `lightning:` scheme
+  // — `writeNpubToTag` drives the NfcManager session directly. Adding
+  // `lightning:` here would register Lightning Piggy as a system-wide
+  // handler for `lightning:` URIs without a Linking listener to route
+  // them, intercepting users' preferred LN wallet. The deferred NFC
+  // SCAN flow can re-add it when JS-side deep-link routing lands.
   scheme: 'lightningpiggy',
   ios: {
     supportsTablet: true,
@@ -71,6 +78,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // on it don't regress — can remove once verified.
     './plugins/withAdjustResize',
     './plugins/withAmberQueries',
+    './plugins/withNfc',
     'expo-secure-store',
     [
       'expo-image-picker',
