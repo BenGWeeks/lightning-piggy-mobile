@@ -56,6 +56,17 @@ interface Props {
   // invoice (or lightning address) directly to this friend. Used when the
   // sheet is opened from inside a conversation — the friend is implicit.
   presetFriend?: PickedFriend;
+  // Group-equivalent of `presetFriend`: the sheet jumps to amount entry
+  // and the eventual payload is posted to the named group via
+  // `onSendToGroup` instead of DM'd to a single peer. Should be mutually
+  // exclusive with `presetFriend` — call sites pass one or the other,
+  // never both. If both are accidentally supplied, `presetGroup` wins
+  // (see `handleSendToFriend`'s precedence ordering).
+  // `onSendToGroup` is required whenever `presetGroup` is set; without
+  // it the Send button stays disabled (it would otherwise silently
+  // no-op on press).
+  presetGroup?: { name: string };
+  onSendToGroup?: (payload: string) => Promise<{ success: boolean; error?: string }>;
   // Fired after a successful DM send with the exact text that was sent.
   // The conversation view uses this to append the outgoing message
   // locally, since the Nostr subscription only sees inbound events.
@@ -65,7 +76,14 @@ interface Props {
 type Mode = 'address' | 'amount';
 type Step = 'main' | 'amount';
 
-const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent }) => {
+const ReceiveSheet: React.FC<Props> = ({
+  visible,
+  onClose,
+  presetFriend,
+  presetGroup,
+  onSendToGroup,
+  onSent,
+}) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createReceiveSheetStyles(colors), [colors]);
   const {
@@ -174,11 +192,13 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
           .catch(() => {
             console.warn('Failed to fetch on-chain address');
           });
-      } else if (presetFriend) {
-        // "Send invoice to friend" entry point: skip straight to the
-        // amount-entry screen so the user doesn't land on the main
-        // receive/address view they can't use, then need a second tap
-        // on "Enter custom amount".
+      } else if (presetFriend || presetGroup) {
+        // "Send invoice to friend" / "Send invoice to group" entry point:
+        // skip straight to amount entry so the user doesn't land on the
+        // main receive/address view they can't use, then need a second
+        // tap on "Enter custom amount". Group flow needs an amount-bound
+        // bolt11 invoice anyway — sharing a static lud16 to a group has
+        // no useful "pay me" semantics.
         setMode('amount');
         setStep('amount');
       } else if (!lightningAddress) {
@@ -365,14 +385,53 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
     ],
   );
 
+  const handleSendToGroup = useCallback(async () => {
+    if (!friendShareValue || !presetGroup || !onSendToGroup || sendingToFriend) return;
+    setSendingToFriend(true);
+    try {
+      // Mirror the 1:1 payload rules: bolt11 stays bare (Nostr block
+      // parsers self-detect `lnbc…`), lud16 gets a `lightning:` prefix.
+      // Group flow currently only emits invoices (sheet jumps to amount
+      // entry above), so this is effectively the bolt11 branch — but
+      // keep the guard for symmetry in case we later allow address
+      // sharing into groups.
+      const payload = mode === 'address' ? `lightning:${friendShareValue}` : friendShareValue;
+      const result = await onSendToGroup(payload);
+      if (!result.success) {
+        Toast.show({
+          type: 'error',
+          text1: 'Send failed',
+          text2: result.error ?? 'Could not send to group.',
+          position: 'top',
+          visibilityTime: 4000,
+        });
+        return;
+      }
+      onSent?.(payload);
+      Toast.show({
+        type: 'success',
+        text1: `Invoice sent to ${presetGroup.name}`,
+        position: 'top',
+        visibilityTime: 2500,
+      });
+      onClose();
+    } finally {
+      setSendingToFriend(false);
+    }
+  }, [friendShareValue, presetGroup, onSendToGroup, sendingToFriend, mode, onSent, onClose]);
+
   const handleSendToFriend = useCallback(() => {
     if (!friendShareValue) return;
+    if (presetGroup) {
+      handleSendToGroup();
+      return;
+    }
     if (presetFriend) {
       handleFriendPicked(presetFriend);
       return;
     }
     setFriendPickerOpen(true);
-  }, [friendShareValue, presetFriend, handleFriendPicked]);
+  }, [friendShareValue, presetFriend, presetGroup, handleFriendPicked, handleSendToGroup]);
 
   const handleSheetChange = useCallback(
     (index: number) => {
@@ -556,7 +615,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
                 </Text>
               ) : null}
 
-              {presetFriend ? (
+              {presetFriend || presetGroup ? (
                 <View style={styles.buttonRow}>
                   <Pressable
                     style={({ pressed }) => [
@@ -566,8 +625,16 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
                       pressed && { opacity: 0.7 },
                     ]}
                     onPress={handleSendToFriend}
-                    disabled={!friendShareValue || sendingToFriend}
-                    accessibilityLabel={`Send to ${presetFriend.name}`}
+                    disabled={
+                      !friendShareValue ||
+                      sendingToFriend ||
+                      // Programmer-error guard: if a caller passes
+                      // `presetGroup` without `onSendToGroup`, the press
+                      // would early-return with no feedback. Surface the
+                      // misconfiguration as a disabled button instead.
+                      (!!presetGroup && !onSendToGroup)
+                    }
+                    accessibilityLabel={`Send to ${presetFriend?.name ?? presetGroup?.name}`}
                     testID="receive-send-to-friend"
                   >
                     {sendingToFriend ? (
@@ -576,7 +643,7 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
                       <>
                         <Send size={20} color={colors.white} />
                         <Text style={[styles.actionButtonText, styles.actionButtonTextPrimary]}>
-                          Send to {presetFriend.name}
+                          Send to {presetFriend?.name ?? presetGroup?.name}
                         </Text>
                       </>
                     )}
@@ -628,9 +695,11 @@ const ReceiveSheet: React.FC<Props> = ({ visible, onClose, presetFriend, onSent 
                *  Enter-custom-amount button, itself just a navigation
                *  affordance to the AmountEntryScreen). Now the primary
                *  amount affordance sits directly on the current view.
-               *  Hidden for presetFriend (single-shot flow with its own CTA).
+               *  Hidden for presetFriend / presetGroup (single-shot flows
+               *  with their own CTA — switching to address mode here would
+               *  let the group flow share a static lud16 we don't want).
                */}
-              {!presetFriend ? (
+              {!presetFriend && !presetGroup ? (
                 // With invoice (or on-chain amount set) → show summary +
                 // Change amount + "Show my address" fallback to lud16.
                 currentSats > 0 && (invoice || (isOnchainWallet && onchainAddress)) ? (
