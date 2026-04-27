@@ -110,6 +110,8 @@ const SingleAvatar: React.FC<SingleAvatarProps> = ({ picture, colors, innerSize 
           style={{ width: innerSize, height: innerSize, borderRadius: innerSize / 2 }}
           cachePolicy="disk"
           onError={() => setErrored(true)}
+          // First frame only — see #243.
+          autoplay={false}
         />
       ) : (
         <UserRound size={Math.round(innerSize * 0.55)} color={colors.textBody} strokeWidth={1.75} />

@@ -1,4 +1,12 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from 'react';
 import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nwcService from '../services/nwcService';
@@ -1466,46 +1474,85 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   }, [activeWalletId, activeWalletConnected, updateWalletInState]);
 
-  return (
-    <WalletContext.Provider
-      value={{
-        wallets,
-        activeWalletId,
-        activeWallet,
-        hasWallets,
-        isOnboarded,
-        isLoading,
-        currency,
-        setCurrency,
-        btcPrice,
-        addNwcWallet,
-        addOnchainWallet,
-        addHotWallet,
-        removeWallet,
-        updateWalletSettings,
-        reorderWallet,
-        setActiveWallet,
-        refreshActiveBalance,
-        completeOnboarding,
-        makeInvoice,
-        payInvoice,
-        makeInvoiceForWallet,
-        payInvoiceForWallet,
-        refreshBalanceForWallet,
-        fetchTransactionsForWallet,
-        addPendingTransaction,
-        getReceiveAddress,
-        lastIncomingPayment,
-        clearLastIncomingPayment,
-        expectPayment,
-        isConnected,
-        balance,
-        walletAlias,
-      }}
-    >
-      {children}
-    </WalletContext.Provider>
+  // Stable context value — without `useMemo` here the inline `{{...}}`
+  // literal produced a fresh object identity on every render of
+  // `WalletProvider`, so every consumer of `useWallet()` re-rendered
+  // whenever any internal state moved (the 30 s connection check, the
+  // 30 s balance poll, or the 1 s `expectPayment` tick during a Receive
+  // flow). Cascade hit every open sheet / TextInput, dropping in-flight
+  // keystrokes and snapping cursor position to end. See #243.
+  const contextValue = useMemo(
+    () => ({
+      wallets,
+      activeWalletId,
+      activeWallet,
+      hasWallets,
+      isOnboarded,
+      isLoading,
+      currency,
+      setCurrency,
+      btcPrice,
+      addNwcWallet,
+      addOnchainWallet,
+      addHotWallet,
+      removeWallet,
+      updateWalletSettings,
+      reorderWallet,
+      setActiveWallet,
+      refreshActiveBalance,
+      completeOnboarding,
+      makeInvoice,
+      payInvoice,
+      makeInvoiceForWallet,
+      payInvoiceForWallet,
+      refreshBalanceForWallet,
+      fetchTransactionsForWallet,
+      addPendingTransaction,
+      getReceiveAddress,
+      lastIncomingPayment,
+      clearLastIncomingPayment,
+      expectPayment,
+      isConnected,
+      balance,
+      walletAlias,
+    }),
+    [
+      wallets,
+      activeWalletId,
+      activeWallet,
+      hasWallets,
+      isOnboarded,
+      isLoading,
+      currency,
+      setCurrency,
+      btcPrice,
+      addNwcWallet,
+      addOnchainWallet,
+      addHotWallet,
+      removeWallet,
+      updateWalletSettings,
+      reorderWallet,
+      setActiveWallet,
+      refreshActiveBalance,
+      completeOnboarding,
+      makeInvoice,
+      payInvoice,
+      makeInvoiceForWallet,
+      payInvoiceForWallet,
+      refreshBalanceForWallet,
+      fetchTransactionsForWallet,
+      addPendingTransaction,
+      getReceiveAddress,
+      lastIncomingPayment,
+      clearLastIncomingPayment,
+      expectPayment,
+      isConnected,
+      balance,
+      walletAlias,
+    ],
   );
+
+  return <WalletContext.Provider value={contextValue}>{children}</WalletContext.Provider>;
 };
 
 export function useWallet() {

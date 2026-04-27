@@ -459,26 +459,41 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return list.sort((a, b) => b.activity.lastActivityAt - a.activity.lastActivityAt);
   }, [visibleGroups, activityByGroup]);
 
-  return (
-    <GroupsContext.Provider
-      value={{
-        groups,
-        visibleGroups,
-        followingOnly,
-        setFollowingOnly,
-        devMode,
-        loading,
-        createGroup,
-        renameGroup,
-        deleteGroup,
-        getGroup,
-        reconcileFromGroupStateEvent,
-        groupSummaries,
-      }}
-    >
-      {children}
-    </GroupsContext.Provider>
+  // Stable context value — see WalletContext for the same pattern + #243
+  // for the symptom catalogue (dropped keystrokes, cursor jumps, lag)
+  // that an unstable Provider value caused via cascading re-renders.
+  const contextValue = useMemo(
+    () => ({
+      groups,
+      visibleGroups,
+      followingOnly,
+      setFollowingOnly,
+      devMode,
+      loading,
+      createGroup,
+      renameGroup,
+      deleteGroup,
+      getGroup,
+      reconcileFromGroupStateEvent,
+      groupSummaries,
+    }),
+    [
+      groups,
+      visibleGroups,
+      followingOnly,
+      setFollowingOnly,
+      devMode,
+      loading,
+      createGroup,
+      renameGroup,
+      deleteGroup,
+      getGroup,
+      reconcileFromGroupStateEvent,
+      groupSummaries,
+    ],
   );
+
+  return <GroupsContext.Provider value={contextValue}>{children}</GroupsContext.Provider>;
 };
 
 export function useGroups(): GroupsContextType {
