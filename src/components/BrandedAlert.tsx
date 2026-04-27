@@ -195,6 +195,8 @@ export function BrandedAlertHost(): React.ReactElement | null {
                       styles.buttonText,
                       isCancel ? styles.cancelButtonText : styles.actionButtonText,
                     ]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
                   >
                     {btn.text}
                   </Text>
@@ -268,7 +270,10 @@ const createStyles = (colors: Palette) =>
     button: {
       flex: 1,
       paddingVertical: 12,
-      paddingHorizontal: 24,
+      // 24px horizontal padding clipped 6+ char labels ("Cancel" / "Sign Out")
+      // when two buttons sat side-by-side inside the card's 28px padding.
+      // 12px is enough to keep the touch target tappable without crowding text.
+      paddingHorizontal: 12,
       borderRadius: 14,
       alignItems: 'center',
       justifyContent: 'center',
