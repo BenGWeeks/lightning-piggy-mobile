@@ -63,10 +63,36 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   // true once the foreground work is done and the background task has the
   // swap — the sheet becomes a "done, safe to close" confirmation state.
   const [handedOff, setHandedOff] = useState(false);
+  // Set when the background reverse-swap task errors (usually an NWC relay
+  // timeout leaving the LN payment state unknown). Drives the "Retry now"
+  // button + the updated progress message in the progress view. Once the
+  // retry succeeds we keep the error reference (so the spinner stays
+  // suppressed in the post-retry state) and flip `recoveryAcked` to swap
+  // the message + hide the Retry button.
+  const [backgroundError, setBackgroundError] = useState<string | null>(null);
+  const [retryingRecovery, setRetryingRecovery] = useState(false);
+  const [recoveryAcked, setRecoveryAcked] = useState(false);
+  // Synchronous re-entrancy guard for the Retry button. React's
+  // setRetryingRecovery is async, so a fast double-tap can fire two
+  // concurrent recoverPendingSwaps() calls before `disabled` flips. The
+  // ref is checked + set synchronously inside the onPress closure.
+  const retryInFlightRef = useRef(false);
   const [feeEstimate, setFeeEstimate] = useState<string | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   const scrollRef = useRef<any>(null);
+  // Monotonically bumped every time the sheet opens or closes. Detached async
+  // work (background swap IIFE, Retry handler) captures the value at start and
+  // skips component-state setters if it has changed — otherwise a late callback
+  // from a previous transfer can leak error/progress state into a new one.
+  // Bumped via `useMemo` keyed on `visible` so the increment lands
+  // SYNCHRONOUSLY during render (before any IIFE this render kicks off
+  // captures it), not in an effect that runs post-commit and could let a
+  // late microtask from the previous session pass the stale-session check.
+  const sessionRef = useRef(0);
+  useMemo(() => {
+    sessionRef.current += 1;
+  }, [visible]);
   // No explicit snapPoints — content-height only, not user-draggable.
 
   const currentSats = parseInt(satsValue) || 0;
@@ -199,6 +225,14 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       setSending(false);
       setHandedOff(false);
       setProgressMsg(null);
+      setBackgroundError(null);
+      setRetryingRecovery(false);
+      setRecoveryAcked(false);
+      // NOTE: don't clear `retryInFlightRef` on visible-toggle. If the
+      // user closes mid-retry + reopens fast enough that the IIFE is
+      // still running, the in-flight ref must stay true so a second
+      // tap is correctly rejected — the ref is cleared by the IIFE's
+      // own finally block when its work actually completes.
       setFeeEstimate(null);
       setSourceDropdownOpen(false);
       setDestDropdownOpen(false);
@@ -382,6 +416,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         // user can dismiss the sheet immediately. The swap is persisted, so
         // swapRecoveryService is the safety net if this task dies.
         const amount = currentSats;
+        const iifeSession = sessionRef.current;
         (async () => {
           try {
             await payInvoiceForWallet(sourceId, swap.invoice);
@@ -414,11 +449,31 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             console.warn('[Transfer] Background reverse swap failed:', msg);
+            // Surface the error on the sheet itself — the previous version
+            // only showed a toast and left the progress message stuck on
+            // "Swap underway" forever. Users need an in-sheet signal so they
+            // can act without having to catch a transient toast. Guarded by
+            // the session token so a late failure from a previous transfer
+            // cannot paint error state onto a new one.
+            if (sessionRef.current === iifeSession) {
+              // Coerce empty Error.message to a generic non-empty string
+              // so the `backgroundError === null` check downstream behaves
+              // consistently — Error.message can be empty in practice
+              // (some SDK throws produce blank-message errors) and we need
+              // a non-null sentinel to drive the spinner-suppression +
+              // Retry-button render paths.
+              setBackgroundError(msg || 'Background step failed');
+              setProgressMsg(
+                'Background step failed — the LN payment reply may have been dropped ' +
+                  'by the relay. Your funds are safe; tap "Retry now" to re-check ' +
+                  'and broadcast the claim. Otherwise the app will retry automatically on next launch.',
+              );
+            }
             Toast.show({
               type: 'error',
               text1: 'Swap in progress',
               text2:
-                'Background step hit an error — recovery will retry on next app launch. Funds are safe.',
+                'Background step hit an error — tap "Retry now" in the sheet or relaunch the app. Funds are safe.',
               position: 'top',
               visibilityTime: 10000,
             });
@@ -695,9 +750,76 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                   </Text>
                 )}
                 <View style={styles.progressContainer}>
-                  <ActivityIndicator size="small" color={colors.brandPink} />
+                  {/* Hide spinner whenever the background errored — even
+                      after the retry succeeded. Re-enabling it would
+                      misrepresent the "Recovery retried" state as still
+                      running. Explicit `=== null` rather than `!x`
+                      because Error.message can be empty string and we
+                      want to suppress the spinner whenever the error
+                      slot is set, regardless of message length. */}
+                  {backgroundError === null && (
+                    <ActivityIndicator size="small" color={colors.brandPink} />
+                  )}
                   <Text style={styles.progressText}>{progressMsg}</Text>
                 </View>
+                {backgroundError !== null && !recoveryAcked && (
+                  <TouchableOpacity
+                    style={[styles.closeButton, retryingRecovery && styles.closeButtonDisabled]}
+                    onPress={async () => {
+                      // Synchronous re-entrancy guard. A fast double-tap
+                      // can fire two onPress callbacks before React
+                      // applies setRetryingRecovery(true) + the disabled
+                      // prop — the ref check + set is atomic in JS, so
+                      // the second tap returns immediately.
+                      if (retryInFlightRef.current) return;
+                      retryInFlightRef.current = true;
+                      const retrySession = sessionRef.current;
+                      setRetryingRecovery(true);
+                      try {
+                        await swapRecoveryService.recoverPendingSwaps();
+                        Toast.show({
+                          type: 'info',
+                          text1: 'Retry kicked off',
+                          text2: 'Any claimable swaps are being re-broadcast.',
+                          position: 'top',
+                          visibilityTime: 6000,
+                        });
+                        if (sessionRef.current === retrySession) {
+                          // Keep `backgroundError` set so the spinner
+                          // stays suppressed; flip `recoveryAcked` to
+                          // swap the message + hide the Retry button.
+                          setRecoveryAcked(true);
+                          setProgressMsg(
+                            'Recovery retried — check transaction history for the final status.',
+                          );
+                        }
+                      } catch (err) {
+                        const m = err instanceof Error ? err.message : String(err);
+                        Toast.show({
+                          type: 'error',
+                          text1: 'Retry failed',
+                          text2: m,
+                          position: 'top',
+                          visibilityTime: 8000,
+                        });
+                      } finally {
+                        retryInFlightRef.current = false;
+                        if (sessionRef.current === retrySession) {
+                          setRetryingRecovery(false);
+                        }
+                      }
+                    }}
+                    disabled={retryingRecovery}
+                    accessibilityLabel="Retry swap recovery"
+                    testID="transfer-retry-now"
+                  >
+                    {retryingRecovery ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={styles.closeButtonText}>Retry now</Text>
+                    )}
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity
                   style={styles.closeButton}
                   onPress={onClose}
