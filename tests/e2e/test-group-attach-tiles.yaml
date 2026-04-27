@@ -1,0 +1,88 @@
+appId: com.lightningpiggy.app.dev
+name: Group attach panel — Zap (disabled), Invoice, Contact tiles render
+---
+# Verifies that opening the inline AttachPanel inside a group chat
+# surfaces all 7 tiles, including the three that were missing before
+# #237: Zap (rendered but disabled), Invoice, and Contact.
+#
+# Safety constraints:
+#   - Wraps the whole flow in `runFlow when:` against the "Triad"
+#     fixture group — if the test device hasn't run the 3-way group
+#     setup yet, the test no-ops cleanly instead of failing.
+#   - Skips Camera / Gallery / Location (system permission prompts).
+#   - Does NOT tap Invoice or Zap (avoid generating real invoices /
+#     opening the payment flow).
+#   - Taps Contact only to assert the picker opens, then dismisses.
+#
+# Run: maestro --device emulator-5554 test tests/e2e/test-group-attach-tiles.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+
+- tapOn:
+    id: 'tab-friends'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'groups-button'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Only proceed if the Triad fixture group exists on this device.
+- runFlow:
+    when:
+      visible:
+        text: 'Triad'
+    commands:
+      - tapOn:
+          text: 'Triad'
+      - waitForAnimationToEnd:
+          timeout: 3000
+
+      # Composer + attach button visible
+      - assertVisible:
+          id: 'group-attach-button'
+      - assertVisible:
+          id: 'group-message-input'
+
+      # Open the panel
+      - tapOn:
+          id: 'group-attach-button'
+      - waitForAnimationToEnd:
+          timeout: 2000
+      - assertVisible:
+          id: 'conversation-attach-panel'
+
+      # The three tiles flagged in #237 must all render.
+      - assertVisible:
+          id: 'attach-send-zap'
+      - assertVisible:
+          id: 'attach-send-invoice'
+      - assertVisible:
+          id: 'attach-share-contact'
+      # Plus the existing tiles (camera / gallery / location render
+      # unconditionally; GIF only when GIPHY is configured).
+      - assertVisible:
+          id: 'attach-take-photo'
+      - assertVisible:
+          id: 'attach-send-image'
+      - assertVisible:
+          id: 'attach-share-location'
+
+      # Tap Contact → FriendPickerSheet opens. Don't actually share —
+      # back out without picking.
+      - tapOn:
+          id: 'attach-share-contact'
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - assertVisible:
+          id: 'friend-picker-search'
+      - back
+      - waitForAnimationToEnd:
+          timeout: 2000
+
+      # We're back on the conversation; composer is reachable again.
+      - assertVisible:
+          id: 'group-message-input'
