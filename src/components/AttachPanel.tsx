@@ -15,6 +15,11 @@ interface Props {
   // can still omit `onSendZap` to make it disappear.
   onSendZap?: () => void;
   zapDisabled?: boolean;
+  // Optional override for the disabled-zap a11y label. Lets call sites
+  // explain *why* the tile is disabled (e.g. "peer has no Lightning
+  // Address" in 1:1 vs. "no single recipient in groups") rather than the
+  // generic fallback. Only consulted when `zapDisabled` is set.
+  zapAccessibilityLabel?: string;
   onSendInvoice?: () => void;
   onShareContact?: () => void;
   onSendImage?: () => void;
@@ -44,6 +49,7 @@ const AttachPanel: React.FC<Props> = ({
   onShareLocation,
   onSendZap,
   zapDisabled,
+  zapAccessibilityLabel,
   onSendInvoice,
   onShareContact,
   onSendImage,
@@ -99,7 +105,9 @@ const AttachPanel: React.FC<Props> = ({
         icon: <Zap size={26} color={colors.white} fill={colors.white} />,
         onPress: onSendZap,
         testID: 'attach-send-zap',
-        accessibilityLabel: zapDisabled ? 'Send a zap (unavailable)' : 'Send a zap',
+        accessibilityLabel: zapDisabled
+          ? (zapAccessibilityLabel ?? 'Send a zap (unavailable)')
+          : 'Send a zap',
         disabled: zapDisabled,
       },
       onSendInvoice && {

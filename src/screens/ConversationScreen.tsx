@@ -1099,6 +1099,7 @@ const ConversationScreen: React.FC = () => {
                 setSendSheetOpen(true);
               }}
               zapDisabled={!lightningAddress}
+              zapAccessibilityLabel="Send a zap (unavailable — peer has no Lightning Address)"
               onSendInvoice={() => {
                 closeAttachPanel();
                 setInvoiceSheetOpen(true);

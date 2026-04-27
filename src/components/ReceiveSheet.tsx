@@ -58,9 +58,13 @@ interface Props {
   presetFriend?: PickedFriend;
   // Group-equivalent of `presetFriend`: the sheet jumps to amount entry
   // and the eventual payload is posted to the named group via
-  // `onSendToGroup` instead of DM'd to a single peer. Mutually exclusive
-  // with `presetFriend` (presetFriend wins if both are supplied — guard
-  // against that at the call site).
+  // `onSendToGroup` instead of DM'd to a single peer. Should be mutually
+  // exclusive with `presetFriend` — call sites pass one or the other,
+  // never both. If both are accidentally supplied, `presetGroup` wins
+  // (see `handleSendToFriend`'s precedence ordering).
+  // `onSendToGroup` is required whenever `presetGroup` is set; without
+  // it the Send button stays disabled (it would otherwise silently
+  // no-op on press).
   presetGroup?: { name: string };
   onSendToGroup?: (payload: string) => Promise<{ success: boolean; error?: string }>;
   // Fired after a successful DM send with the exact text that was sent.
@@ -621,7 +625,15 @@ const ReceiveSheet: React.FC<Props> = ({
                       pressed && { opacity: 0.7 },
                     ]}
                     onPress={handleSendToFriend}
-                    disabled={!friendShareValue || sendingToFriend}
+                    disabled={
+                      !friendShareValue ||
+                      sendingToFriend ||
+                      // Programmer-error guard: if a caller passes
+                      // `presetGroup` without `onSendToGroup`, the press
+                      // would early-return with no feedback. Surface the
+                      // misconfiguration as a disabled button instead.
+                      (!!presetGroup && !onSendToGroup)
+                    }
                     accessibilityLabel={`Send to ${presetFriend?.name ?? presetGroup?.name}`}
                     testID="receive-send-to-friend"
                   >

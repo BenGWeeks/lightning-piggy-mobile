@@ -120,7 +120,7 @@ const GroupConversationScreen: React.FC = () => {
   // so the effect deps can be [messages] only (not [messages, sharedProfiles]).
   // Prevents a redundant re-run after every fetch batch writes sharedProfiles.
   const scheduledProfilePubkeys = useRef(new Set<string>());
-  const listRef = useRef<FlatList<GroupMessage>>(null);
+  const listRef = useRef<FlatList<ClassifiedMessage>>(null);
 
   const group = getGroup(route.params.groupId);
 
@@ -454,6 +454,53 @@ const GroupConversationScreen: React.FC = () => {
     };
   }, [messages]);
 
+  // Pre-classify message content once per messages update so renderMessage
+  // (a FlatList renderItem) doesn't call classifyMessageContent on every
+  // frame for every visible bubble. Mirror of ConversationScreen's items
+  // useMemo which does the same classification.
+  const classifiedMessages = useMemo<ClassifiedMessage[]>(
+    () => messages.map((m) => ({ ...m, content: classifyMessageContent(m.text) })),
+    [messages],
+  );
+
+  const renderMessage = useCallback(
+    ({ item }: { item: ClassifiedMessage }) => {
+      const fromMe = item.senderPubkey === myPubkey;
+      const senderName = fromMe
+        ? null
+        : (memberNameByPubkey.get(item.senderPubkey) ?? `${item.senderPubkey.slice(0, 8)}…`);
+      // Reuse the shared bubble — same renderer 1:1 chats use, so contact /
+      // invoice / location / image / GIF cards all render identically across
+      // chat types (#239). The classifier handles geo: + GIF detection up
+      // front; image / invoice / lnaddr / contact ride on the text variant
+      // and detect at render time.
+      return (
+        <MessageBubble
+          id={item.id}
+          fromMe={fromMe}
+          createdAt={item.createdAt}
+          content={item.content}
+          senderName={senderName}
+          sharedProfiles={sharedProfiles}
+          onPayInvoice={handlePayInvoice}
+          onPayLightningAddress={handlePayInvoice}
+          onOpenContact={openSharedContact}
+          onOpenLocation={openLocation}
+          onOpenGifFullscreen={setFullscreenGifUrl}
+          testIdPrefix="group-conversation"
+        />
+      );
+    },
+    [
+      myPubkey,
+      memberNameByPubkey,
+      sharedProfiles,
+      handlePayInvoice,
+      openSharedContact,
+      openLocation,
+    ],
+  );
+
   if (!group) {
     return (
       <View style={styles.container}>
@@ -509,53 +556,6 @@ const GroupConversationScreen: React.FC = () => {
       ],
     );
   };
-
-  // Pre-classify message content once per messages update so renderMessage
-  // (a FlatList renderItem) doesn't call classifyMessageContent on every
-  // frame for every visible bubble. Mirror of ConversationScreen's items
-  // useMemo which does the same classification.
-  const classifiedMessages = useMemo<ClassifiedMessage[]>(
-    () => messages.map((m) => ({ ...m, content: classifyMessageContent(m.text) })),
-    [messages],
-  );
-
-  const renderMessage = useCallback(
-    ({ item }: { item: ClassifiedMessage }) => {
-      const fromMe = item.senderPubkey === myPubkey;
-      const senderName = fromMe
-        ? null
-        : (memberNameByPubkey.get(item.senderPubkey) ?? `${item.senderPubkey.slice(0, 8)}…`);
-      // Reuse the shared bubble — same renderer 1:1 chats use, so contact /
-      // invoice / location / image / GIF cards all render identically across
-      // chat types (#239). The classifier handles geo: + GIF detection up
-      // front; image / invoice / lnaddr / contact ride on the text variant
-      // and detect at render time.
-      return (
-        <MessageBubble
-          id={item.id}
-          fromMe={fromMe}
-          createdAt={item.createdAt}
-          content={item.content}
-          senderName={senderName}
-          sharedProfiles={sharedProfiles}
-          onPayInvoice={handlePayInvoice}
-          onPayLightningAddress={handlePayInvoice}
-          onOpenContact={openSharedContact}
-          onOpenLocation={openLocation}
-          onOpenGifFullscreen={setFullscreenGifUrl}
-          testIdPrefix="group-conversation"
-        />
-      );
-    },
-    [
-      myPubkey,
-      memberNameByPubkey,
-      sharedProfiles,
-      handlePayInvoice,
-      openSharedContact,
-      openLocation,
-    ],
-  );
 
   return (
     <KeyboardAvoidingView
@@ -684,6 +684,7 @@ const GroupConversationScreen: React.FC = () => {
             // users who expected the same set as 1:1 (#237).
             onSendZap={() => {}}
             zapDisabled
+            zapAccessibilityLabel="Send a zap (unavailable — no single recipient in a group)"
             onSendInvoice={() => {
               closeAttachPanel();
               setInvoiceSheetOpen(true);
