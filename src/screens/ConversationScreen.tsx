@@ -9,13 +9,13 @@ import {
   FlatList,
   ActivityIndicator,
   RefreshControl,
-  Alert,
   AppState,
   BackHandler,
   Image,
   Linking,
   StyleSheet,
 } from 'react-native';
+import { Alert } from '../components/BrandedAlert';
 import {
   KeyboardController,
   KeyboardStickyView,

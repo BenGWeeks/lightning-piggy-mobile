@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet, Alert, Platform } from 'react-native';
+import { View, Text, Image, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { Alert } from '../../components/BrandedAlert';
 import Svg, { Rect, Path as SvgPath } from 'react-native-svg';
 import * as Clipboard from 'expo-clipboard';
 import { useFocusEffect } from '@react-navigation/native';
