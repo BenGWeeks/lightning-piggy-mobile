@@ -196,6 +196,8 @@ const FriendPickerSheet: React.FC<Props> = ({
               source={{ uri: item.picture }}
               style={[StyleSheet.absoluteFillObject, styles.avatarImage]}
               cachePolicy="disk"
+              // First frame only — see #243.
+              autoplay={false}
             />
           ) : null}
         </View>

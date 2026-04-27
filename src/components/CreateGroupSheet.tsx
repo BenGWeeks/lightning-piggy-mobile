@@ -22,12 +22,89 @@ import type { Palette } from '../styles/palettes';
 import { useNostr } from '../contexts/NostrContext';
 import { useGroups } from '../contexts/GroupsContext';
 import type { Group } from '../types/groups';
+import type { NostrContact } from '../types/nostr';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
   onCreated?: (group: Group) => void;
 }
+
+interface MemberRowProps {
+  contact: NostrContact;
+  isSelected: boolean;
+  onToggle: (pubkey: string) => void;
+  styles: ReturnType<typeof createStyles>;
+  colors: Palette;
+}
+
+// React.memo means rows that didn't change props (typing in the Group
+// Name field doesn't touch any of `contact`, `isSelected`, `onToggle`,
+// `styles`, `colors`) skip re-render entirely. With ~50 contacts each
+// rendering an Image, the inline `.map` was producing the
+// flood-render that dropped keystrokes mid-IME-composition. See #243.
+const MemberRow = React.memo<MemberRowProps>(
+  ({ contact, isSelected, onToggle, styles, colors }) => {
+    const displayName =
+      contact.profile?.displayName ||
+      contact.profile?.name ||
+      contact.petname ||
+      contact.pubkey.slice(0, 12);
+    return (
+      <TouchableOpacity
+        style={styles.row}
+        onPress={() => onToggle(contact.pubkey)}
+        accessibilityLabel={`${isSelected ? 'Deselect' : 'Select'} ${displayName}`}
+        testID={`member-row-${contact.pubkey.slice(0, 12)}`}
+      >
+        <View style={styles.avatar}>
+          {contact.profile?.picture ? (
+            <Image
+              source={{ uri: contact.profile.picture }}
+              style={styles.avatarImage}
+              cachePolicy="disk"
+              // First frame only for animated WebP / GIF avatars.
+              // Without this, expo-image spawns a FrameDecoderExe
+              // thread per animated avatar and decodes every frame on
+              // a continuous loop. Saw 4 threads at >90% CPU each on a
+              // fresh AVD with ~50 contacts in the picker. Tapping
+              // through to a profile sheet still shows the live
+              // animation. See #243.
+              autoplay={false}
+            />
+          ) : (
+            <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+              <Circle cx="12" cy="8" r="4" fill={colors.textSupplementary} />
+              <Path
+                d="M4 20c0-3.314 3.582-6 8-6s8 2.686 8 6"
+                stroke={colors.textSupplementary}
+                strokeWidth={2}
+                strokeLinecap="round"
+              />
+            </Svg>
+          )}
+        </View>
+        <Text style={styles.rowName} numberOfLines={1}>
+          {displayName}
+        </Text>
+        <View style={[styles.checkbox, isSelected && styles.checkboxActive]}>
+          {isSelected && (
+            <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
+              <Path
+                d="M20 6 9 17l-5-5"
+                stroke={colors.white}
+                strokeWidth={3}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </Svg>
+          )}
+        </View>
+      </TouchableOpacity>
+    );
+  },
+);
+MemberRow.displayName = 'MemberRow';
 
 const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
   const colors = useThemeColors();
@@ -66,14 +143,17 @@ const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
     [],
   );
 
-  const toggle = (pubkey: string) => {
+  // useCallback so MemberRow's `onToggle` prop reference is stable.
+  // Without this the row's React.memo bailout would never hit because
+  // every render of CreateGroupSheet would produce a fresh toggle fn.
+  const toggle = useCallback((pubkey: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(pubkey)) next.delete(pubkey);
       else next.add(pubkey);
       return next;
     });
-  };
+  }, []);
 
   const sortedContacts = useMemo(() => {
     return [...contacts].sort((a, b) => {
@@ -151,56 +231,16 @@ const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
           <Text style={styles.emptyText}>Add Nostr friends first to include them in a group.</Text>
         ) : (
           <View>
-            {sortedContacts.map((c) => {
-              const displayName =
-                c.profile?.displayName || c.profile?.name || c.petname || c.pubkey.slice(0, 12);
-              const isSelected = selected.has(c.pubkey);
-              return (
-                <TouchableOpacity
-                  key={c.pubkey}
-                  style={styles.row}
-                  onPress={() => toggle(c.pubkey)}
-                  accessibilityLabel={`${isSelected ? 'Deselect' : 'Select'} ${displayName}`}
-                  testID={`member-row-${c.pubkey.slice(0, 12)}`}
-                >
-                  <View style={styles.avatar}>
-                    {c.profile?.picture ? (
-                      <Image
-                        source={{ uri: c.profile.picture }}
-                        style={styles.avatarImage}
-                        cachePolicy="disk"
-                      />
-                    ) : (
-                      <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-                        <Circle cx="12" cy="8" r="4" fill={colors.textSupplementary} />
-                        <Path
-                          d="M4 20c0-3.314 3.582-6 8-6s8 2.686 8 6"
-                          stroke={colors.textSupplementary}
-                          strokeWidth={2}
-                          strokeLinecap="round"
-                        />
-                      </Svg>
-                    )}
-                  </View>
-                  <Text style={styles.rowName} numberOfLines={1}>
-                    {displayName}
-                  </Text>
-                  <View style={[styles.checkbox, isSelected && styles.checkboxActive]}>
-                    {isSelected && (
-                      <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
-                        <Path
-                          d="M20 6 9 17l-5-5"
-                          stroke={colors.white}
-                          strokeWidth={3}
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </Svg>
-                    )}
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
+            {sortedContacts.map((c) => (
+              <MemberRow
+                key={c.pubkey}
+                contact={c}
+                isSelected={selected.has(c.pubkey)}
+                onToggle={toggle}
+                styles={styles}
+                colors={colors}
+              />
+            ))}
           </View>
         )}
 
