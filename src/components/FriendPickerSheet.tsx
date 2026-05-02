@@ -196,6 +196,8 @@ const FriendPickerSheet: React.FC<Props> = ({
               source={{ uri: item.picture }}
               style={[StyleSheet.absoluteFillObject, styles.avatarImage]}
               cachePolicy="disk"
+              // First frame only — see #243.
+              autoplay={false}
             />
           ) : null}
         </View>
@@ -211,7 +213,10 @@ const FriendPickerSheet: React.FC<Props> = ({
         </View>
       </TouchableOpacity>
     ),
-    [onSelect],
+    // `styles` and `colors` are theme-derived; without them the callback
+    // closes over a stale theme after a light/dark switch and rows render
+    // with the previous palette until the list remounts.
+    [onSelect, styles, colors],
   );
 
   return (
