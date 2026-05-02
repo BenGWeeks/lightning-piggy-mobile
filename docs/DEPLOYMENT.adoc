@@ -106,6 +106,53 @@ adb -s <serial> shell dumpsys package com.lightningpiggy.app | \
   grep -E "versionCode|lastUpdateTime"
 ----
 
+===== Connecting the phone for sideload
+
+`adb` first needs to see the phone. USB is the happy path, but in practice the dog-eared cable or a stuck USB controller often defeats it — when that happens, fall back to wireless adb instead of debugging the cable. Both phone and laptop must be on the same Wi-Fi.
+
+*Diagnose USB before giving up:*
+
+[source,bash]
+----
+# Check USB enumeration at the kernel level — this works without
+# adb authorization, so it's a clean signal of cable / port health.
+# A working Pixel shows up as `Bus NNN Device NNN: ID 18d1:...`
+# (Google vendor ID 18d1).
+lsusb | grep -iE "google|18d1"
+
+# If lsusb is empty even after re-plugging, the laptop doesn't see
+# the phone at all — it's the cable, the port, or lint in the
+# phone's USB-C socket. Don't keep poking adb; switch to wireless.
+----
+
+*Wireless adb (Android 11+ — Pixel 8 supports it):*
+
+. *Phone:* Settings → System → Developer options → Wireless debugging → ON.
+. *Phone:* tap the *Wireless debugging* row (not just the toggle) to open the detail page.
+. The detail page shows an **IP address & Port** at the top — this is the **persistent connection port** (no code beside it). Note it.
+. Tap *Pair device with pairing code* to open a dialog that shows a *different* port + a 6-digit code. Both expire after one pairing attempt — pair codes are one-shot, so don't generate one until the laptop is ready to consume it.
+. *Laptop:* pair, then connect:
++
+[source,bash]
+----
+adb pair 192.168.1.18:<PAIR_PORT> <CODE>
+# Successfully paired ... [guid=adb-...]
+
+adb connect 192.168.1.18:<CONNECT_PORT>
+# connected to 192.168.1.18:<CONNECT_PORT>
+
+adb devices
+# 192.168.1.18:<CONNECT_PORT>   device
+----
+. From here on, every `adb` command takes `-s 192.168.1.18:<CONNECT_PORT>` (the wireless socket) as the device serial — substitute that for `-s <serial>` in the commands above.
+
+*Common gotchas:*
+
+* `adb pair` returns `error: protocol fault (couldn't read status message): Success` — the pair code was already burned (one-shot, expires on any failed handshake). Tap *Pair device with pairing code* again to generate a new code.
+* `adb connect` succeeds but `adb devices` shows the host as `offline` — you skipped pairing. Pair first, *then* connect.
+* `adb mdns services` is empty even after pairing — your Wi-Fi blocks multicast (common on guest networks and some routers). Manual pair + connect with explicit IPs still works; only mDNS auto-discovery is broken.
+* The connect port and the pair port are *different* — the connect port is shown on the main *Wireless debugging* page; the pair port appears only inside the *Pair device with pairing code* dialog. Don't try to connect to the pair port; you'll get `offline`.
+
 ==== Why `./gradlew assembleRelease` + `adb install -r` silently fails
 
 Running `cd android && ./gradlew :app:assembleRelease` directly works
