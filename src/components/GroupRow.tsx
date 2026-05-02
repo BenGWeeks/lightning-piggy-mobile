@@ -4,25 +4,34 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import type { GroupSummary } from '../types/groups';
 import { useNostr } from '../contexts/NostrContext';
-import GroupAvatar from './GroupAvatar';
+import GroupAvatar, { type ContactInfo } from './GroupAvatar';
 import { formatConversationTimestamp } from '../utils/conversationSummaries';
 
 interface Props {
   summary: GroupSummary;
   onPress?: () => void;
   /**
-   * Optional precomputed pubkey → picture-URL map shared with sibling
-   * rows by the parent screen. Forwarded to GroupAvatar so the avatar
-   * cluster doesn't rebuild a contacts map per row.
+   * Optional precomputed pubkey → ContactInfo map shared with sibling
+   * rows by the parent screen. Forwarded to GroupAvatar (for the avatar
+   * cluster) and consulted directly here for the sender-name lookup —
+   * so neither path iterates the contacts list per row. See issue #245.
    */
-  contactPictureMap?: Map<string, string | null>;
+  contactInfoMap?: Map<string, ContactInfo>;
 }
 
 /** Resolve a friendly display name for a sender pubkey (kind-0 displayName
- * → name → petname → npub-prefix fallback). Mirrors the logic in
- * conversationSummaries.fallbackName so previews read consistently. */
-function senderName(pubkey: string, contacts: ReturnType<typeof useNostr>['contacts']): string {
-  const c = contacts.find((x) => x.pubkey.toLowerCase() === pubkey.toLowerCase());
+ * → name → petname → npub-prefix fallback). When a parent has supplied
+ * `contactInfoMap` we read from it (O(1)); otherwise we fall back to a
+ * linear scan of `contacts` (legacy path for non-list call sites). */
+function senderName(
+  pubkey: string,
+  contactInfoMap: Map<string, ContactInfo> | undefined,
+  contacts: ReturnType<typeof useNostr>['contacts'],
+): string {
+  const lc = pubkey.toLowerCase();
+  const fromMap = contactInfoMap?.get(lc)?.name;
+  if (fromMap) return fromMap;
+  const c = contacts.find((x) => x.pubkey.toLowerCase() === lc);
   return (
     c?.profile?.displayName?.trim() ||
     c?.profile?.name?.trim() ||
@@ -31,7 +40,7 @@ function senderName(pubkey: string, contacts: ReturnType<typeof useNostr>['conta
   );
 }
 
-const GroupRow: React.FC<Props> = ({ summary, onPress, contactPictureMap }) => {
+const GroupRow: React.FC<Props> = ({ summary, onPress, contactInfoMap }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { contacts, pubkey: myPubkey } = useNostr();
@@ -44,9 +53,9 @@ const GroupRow: React.FC<Props> = ({ summary, onPress, contactPictureMap }) => {
       return `${group.memberPubkeys.length + 1} member${group.memberPubkeys.length === 0 ? '' : 's'}`;
     }
     const isMe = myPubkey && activity.lastSenderPubkey === myPubkey.toLowerCase();
-    const who = isMe ? 'You' : senderName(activity.lastSenderPubkey, contacts);
+    const who = isMe ? 'You' : senderName(activity.lastSenderPubkey, contactInfoMap, contacts);
     return `${who}: ${activity.lastText}`;
-  }, [activity, contacts, myPubkey, group.memberPubkeys.length]);
+  }, [activity, contacts, contactInfoMap, myPubkey, group.memberPubkeys.length]);
 
   // Avatar pubkeys: lead with recent senders so the people who've been
   // talking show up first. Top up with non-sender members until we have
@@ -85,7 +94,7 @@ const GroupRow: React.FC<Props> = ({ summary, onPress, contactPictureMap }) => {
         pubkeys={avatarPubkeys}
         groupName={group.name}
         size={48}
-        contactPictureMap={contactPictureMap}
+        contactInfoMap={contactInfoMap}
       />
       <View style={styles.info}>
         <View style={styles.topRow}>

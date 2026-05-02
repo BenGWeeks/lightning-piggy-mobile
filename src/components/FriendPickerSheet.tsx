@@ -195,7 +195,9 @@ const FriendPickerSheet: React.FC<Props> = ({
             <Image
               source={{ uri: item.picture }}
               style={[StyleSheet.absoluteFillObject, styles.avatarImage]}
-              cachePolicy="disk"
+              // Canonical avatar caching policy — see issue #245.
+              cachePolicy="memory-disk"
+              recyclingKey={item.picture}
               // First frame only — see #243.
               autoplay={false}
             />
