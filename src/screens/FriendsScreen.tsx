@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef, Profiler } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Image, RefreshControl } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, RefreshControl } from 'react-native';
 import { InteractionManager } from 'react-native';
+import { Image } from 'expo-image';
 import { Alert } from '../components/BrandedAlert';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
@@ -293,10 +294,15 @@ const FriendsScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
+      {/* expo-image (vs stock RN Image) decodes off the UI thread and
+          caches the decoded bitmap on disk; the 754 KB friends-bg.png
+          was the dominant contributor to the cold-tab 5 s GPU stall
+          measured on AVD. See issue #245. */}
       <Image
         source={require('../../assets/images/friends-bg.png')}
         style={styles.bgImage}
-        resizeMode="contain"
+        contentFit="contain"
+        cachePolicy="memory-disk"
       />
       <TabHeader title="Friends" icon={<Users size={20} color={colors.brandPink} />} />
       <View style={styles.headerExtras}>
