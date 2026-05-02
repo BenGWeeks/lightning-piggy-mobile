@@ -113,6 +113,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     },
     predictiveBackGestureEnabled: false,
     package: getAndroidPackage(),
+    // Floor for the local-build versionCode. EAS production builds use
+    // their own remote autoIncrement counter (`eas.json` →
+    // `appVersionSource: "remote"`) and ignore this. Local
+    // `expo run:android --variant release` reads it directly — bump it
+    // by one before each local prod install when the previous APK on
+    // the target device was higher than this value, otherwise the
+    // install fails with INSTALL_FAILED_VERSION_DOWNGRADE. See
+    // docs/DEPLOYMENT.adoc → "Local production builds".
+    versionCode: 24,
   },
   web: {
     favicon: './assets/favicon.png',
