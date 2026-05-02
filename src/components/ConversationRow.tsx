@@ -41,6 +41,10 @@ const ConversationRow: React.FC<Props> = ({ summary, onPress }) => {
             transition={200}
             recyclingKey={summary.picture ?? undefined}
             onError={() => setAvatarError(true)}
+            // First frame only — animated avatars in the inbox list
+            // would otherwise spawn a per-row FrameDecoderExe thread.
+            // See #243.
+            autoplay={false}
           />
         ) : (
           <UserRound size={22} color={colors.textBody} strokeWidth={1.75} />
