@@ -30,8 +30,10 @@ interface Props {
   onCreated?: (group: Group) => void;
 }
 
+type ContactWithLabel = NostrContact & { displayName: string };
+
 interface MemberRowProps {
-  contact: NostrContact;
+  contact: ContactWithLabel;
   isSelected: boolean;
   onToggle: (pubkey: string) => void;
   styles: ReturnType<typeof createStyles>;
@@ -45,11 +47,7 @@ interface MemberRowProps {
 // flood-render that dropped keystrokes mid-IME-composition. See #243.
 const MemberRow = React.memo<MemberRowProps>(
   ({ contact, isSelected, onToggle, styles, colors }) => {
-    const displayName =
-      contact.profile?.displayName ||
-      contact.profile?.name ||
-      contact.petname ||
-      contact.pubkey.slice(0, 12);
+    const { displayName } = contact;
     return (
       <TouchableOpacity
         style={styles.row}
@@ -155,12 +153,16 @@ const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
     });
   }, []);
 
-  const sortedContacts = useMemo(() => {
-    return [...contacts].sort((a, b) => {
-      const an = (a.profile?.displayName || a.profile?.name || a.petname || a.pubkey).toLowerCase();
-      const bn = (b.profile?.displayName || b.profile?.name || b.petname || b.pubkey).toLowerCase();
-      return an.localeCompare(bn);
-    });
+  // Compute `displayName` once per contact here rather than in MemberRow's
+  // render — saves the `||` chain firing on every keystroke-driven re-render
+  // when memo bailout doesn't apply. Sort uses the same key for consistency.
+  const sortedContacts = useMemo<ContactWithLabel[]>(() => {
+    const labeled: ContactWithLabel[] = contacts.map((c) => ({
+      ...c,
+      displayName: c.profile?.displayName || c.profile?.name || c.petname || c.pubkey.slice(0, 12),
+    }));
+    labeled.sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
+    return labeled;
   }, [contacts]);
 
   const handleCreate = async () => {

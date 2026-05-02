@@ -1516,11 +1516,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       balance,
       walletAlias,
     }),
+    // `activeWallet`, `hasWallets`, `isConnected`, `balance`, `walletAlias`
+    // are all derived from `wallets` (+ `activeWalletId`), so listing
+    // `wallets` is enough — the derived values get fresh references when
+    // wallets changes and the memo invalidates correctly. See PR #244.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       wallets,
       activeWalletId,
-      activeWallet,
-      hasWallets,
       isOnboarded,
       isLoading,
       currency,
@@ -1546,9 +1549,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       lastIncomingPayment,
       clearLastIncomingPayment,
       expectPayment,
-      isConnected,
-      balance,
-      walletAlias,
     ],
   );
 
