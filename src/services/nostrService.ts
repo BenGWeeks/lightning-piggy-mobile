@@ -3,11 +3,13 @@ import {
   generateSecretKey,
   getPublicKey,
   finalizeEvent,
+  getEventHash,
   type VerifiedEvent,
 } from 'nostr-tools/pure';
 import type { Filter } from 'nostr-tools/filter';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nip04 from 'nostr-tools/nip04';
+import * as nip44 from 'nostr-tools/nip44';
 import * as nip59 from 'nostr-tools/nip59';
 import type { NostrProfile, NostrContact, RelayConfig } from '../types/nostr';
 
@@ -844,6 +846,143 @@ export async function sendNip17ToManyWithNsec(input: {
     }),
   );
   return { wrapsPublished: published, errors };
+}
+
+/**
+ * NIP-17 multi-recipient send for signers that don't expose a raw secret
+ * key (Amber, NIP-46, etc.). Mirrors `sendNip17ToManyWithNsec` but routes
+ * the two operations that require the user's key — the seal's NIP-44
+ * encryption and the seal's signature — through caller-supplied async
+ * callbacks. The wrap (kind-1059) is signed with a fresh ephemeral key
+ * generated locally, so it does not need the signer.
+ *
+ * Per recipient (and once for the sender, so other devices receive their
+ * own message) this triggers, via the callbacks:
+ *
+ *   1× signerNip44Encrypt(rumorJson, recipientPubkey)
+ *   1× signerSignSeal(unsignedSeal)
+ *
+ * Both calls are awaited SEQUENTIALLY across recipients. Amber's native
+ * module rejects concurrent intents with a `BUSY` error, so the loop
+ * MUST NOT use Promise.all over the per-recipient signing path. Wrap
+ * publishing is parallel (no signer involvement).
+ *
+ * The first signing failure aborts the loop and is surfaced via `errors`;
+ * any wraps already produced for prior recipients are still published.
+ */
+export async function sendNip17ToManyWithSigner(input: {
+  senderPubkey: string;
+  rumor: { kind: number; created_at: number; tags: string[][]; content: string; pubkey: string };
+  recipientPubkeys: string[];
+  relays: string[];
+  signerNip44Encrypt: (plaintext: string, recipientPubkey: string) => Promise<string>;
+  signerSignSeal: (unsignedSeal: {
+    kind: number;
+    created_at: number;
+    tags: string[][];
+    content: string;
+    pubkey: string;
+  }) => Promise<{
+    id: string;
+    pubkey: string;
+    sig: string;
+    kind: number;
+    created_at: number;
+    tags: string[][];
+    content: string;
+  }>;
+}): Promise<{ wrapsPublished: number; errors: string[] }> {
+  trackRelays(input.relays);
+
+  // Match nostr-tools' `wrapManyEvents` semantics: include the sender so
+  // their own message lands in their inbox on other devices. Dedup the
+  // combined list so a sender who is also explicitly p-tagged isn't
+  // wrapped twice.
+  const recipients = Array.from(
+    new Set([input.senderPubkey, ...input.recipientPubkeys].map((p) => p.toLowerCase())),
+  );
+
+  // Compute the rumor id once. The rumor is never signed (nostr-tools
+  // calls this a "rumor" precisely because it has no signature) — only
+  // its id is needed so receivers can dedupe across multiple wraps.
+  const rumorWithId = { ...input.rumor, id: getEventHash(input.rumor) };
+  const rumorJson = JSON.stringify(rumorWithId);
+
+  // Spec: each seal/wrap uses a randomized created_at within the past
+  // ~2 days to defeat traffic correlation. Mirror nostr-tools nip59.
+  const TWO_DAYS = 2 * 24 * 60 * 60;
+  const randomNow = (): number =>
+    Math.round(Math.floor(Date.now() / 1000) - Math.random() * TWO_DAYS);
+
+  const errors: string[] = [];
+  const signedWraps: VerifiedEvent[] = [];
+
+  // SEQUENTIAL — Amber's BUSY guard rejects parallel intents, and
+  // alternating "seal sign" / "nip44 encrypt" prompts share that guard.
+  for (const recipient of recipients) {
+    try {
+      const sealCiphertext = await input.signerNip44Encrypt(rumorJson, recipient);
+      const unsignedSeal = {
+        kind: 13, // Seal (NIP-59)
+        created_at: randomNow(),
+        tags: [] as string[][],
+        content: sealCiphertext,
+        pubkey: input.senderPubkey,
+      };
+      const signedSeal = await input.signerSignSeal(unsignedSeal);
+
+      // The wrap uses an ephemeral key — never the user's key — so we
+      // can finalize it locally without any signer round-trip. The wrap's
+      // `pubkey` is the ephemeral pubkey (set by finalizeEvent); the only
+      // identifier on the wrap that ties it to a recipient is the `p` tag.
+      const ephemeralKey = generateSecretKey();
+      const sealJson = JSON.stringify(signedSeal);
+      const wrapContent = nip44EncryptForRecipient(sealJson, ephemeralKey, recipient);
+      const wrap = finalizeEvent(
+        {
+          kind: 1059, // GiftWrap (NIP-59)
+          created_at: randomNow(),
+          tags: [['p', recipient]],
+          content: wrapContent,
+        },
+        ephemeralKey,
+      );
+      signedWraps.push(wrap);
+    } catch (e) {
+      errors.push((e as Error)?.message ?? 'signer step failed');
+      // First failure is almost certainly user-cancellation in Amber or
+      // a permission denial; bail rather than firing N more dialogs.
+      break;
+    }
+  }
+
+  let published = 0;
+  await Promise.all(
+    signedWraps.map(async (wrap) => {
+      try {
+        await Promise.any(pool.publish(input.relays, wrap));
+        published++;
+      } catch (e) {
+        errors.push((e as Error)?.message ?? 'publish failed');
+      }
+    }),
+  );
+  return { wrapsPublished: published, errors };
+}
+
+/**
+ * NIP-44 v2 encrypt, matching the primitive nostr-tools' nip59 uses
+ * internally. Exposed here so the Amber NIP-17 path can construct the
+ * gift wrap (which is signed with an ephemeral key, never the user's
+ * key, so it doesn't need to round-trip through Amber).
+ */
+function nip44EncryptForRecipient(
+  plaintext: string,
+  senderSecretKey: Uint8Array,
+  recipientPubkey: string,
+): string {
+  const conversationKey = nip44.v2.utils.getConversationKey(senderSecretKey, recipientPubkey);
+  return nip44.v2.encrypt(plaintext, conversationKey);
 }
 
 /**

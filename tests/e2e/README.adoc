@@ -1,0 +1,87 @@
+= Maestro E2E test suite
+
+Maestro flows in this directory run on the developer's AVD (and
+sometimes their physical Pixel) against *real* Nostr relays under the
+developer's *real* signed-in identity. There is no test relay or test
+sandbox — anything a flow does will publish real events that real
+contacts may see.
+
+That makes selector hygiene a safety issue, not just a code-quality
+issue. The rules below are enforced by hand on every PR that touches
+this directory.
+
+== Piggy-only fixtures (group membership)
+
+Any flow that *creates*, *adds members to*, *removes members from*, or
+otherwise mutates a Nostr group MUST scope its member-targeting
+selectors to the three Piggy test accounts and no others. A wildcard
+like `text: 'Remove .*'` or `id: 'member-row-.*'` could happily remove
+the developer's real friend from a real group, send a DM to a stranger,
+or otherwise leak test activity outside the controlled fixture set.
+
+The three Piggy accounts and their `member-row` / `group-member-remove`
+testID suffixes (first 12 hex chars of the pubkey, matching the
+`pubkey.slice(0, 12)` slicing in `CreateGroupSheet.tsx` and
+`GroupMembersSheet.tsx`):
+
+|===
+| Account      | testID suffix    | Notes
+
+| Big Piggy    | `ccedbff9a6f2`   | Default `MAESTRO_NSEC`. Usually the
+                                    logged-in user, so doesn't appear
+                                    in the *other* members list — appears
+                                    in `group-member-row-*` (with a
+                                    "· you" tag) but NOT in
+                                    `group-member-remove-*`.
+| Middle Piggy | `4b2fcb4e3c30`   | `MAESTRO_NSEC3`.
+| Little Piggy | `d9b33280ba73`   | `MAESTRO_NSEC2`. The default
+                                    `MEMBER_PUBKEY_PREFIX` for the
+                                    `test-create-leave-group.yaml` flow.
+|===
+
+The "Triad" fixture group (created by
+`test-3way-group-create-as-big.yaml`) has all three Piggies as members
+and is the canonical group to drive any member-mutation flow against.
+
+=== Selector rules
+
+Do:
+
+* `id: 'member-row-d9b33280ba73'` — full Piggy testID
+* `id: 'group-member-remove-d9b33280ba73'` — full Piggy testID
+* `id: 'member-row-${MEMBER_PUBKEY_PREFIX}'` — env var, with the
+  comment in the flow stating that the default + accepted values are
+  Piggy prefixes only
+* `text: 'Triad'` — exact, known fixture group name
+* `text: 'Open group Triad'` — accessibility-label exact match
+
+Don't:
+
+* `text: 'Remove .*'` — matches any member's X button, including real
+  friends
+* `id: 'member-row-.*'` — matches any contact in the picker
+* `text: 'Open group .*'` — opens whichever group happens to be at the
+  top, which on a real signed-in device is whatever the user's most
+  recent group activity is
+* `text: '.* members'` — same problem
+* Any other regex / substring that could resolve to a non-Piggy member
+  or non-fixture group
+
+=== When a flow can't use a Piggy prefix
+
+If a flow needs to exercise a code path the Piggies can't cover (e.g.
+something specific to a profile-card layout that only renders for a
+non-Piggy contact), the flow MUST be gated behind a `runFlow when:`
+clause that asserts a Piggy fixture is present, OR explicitly documented
+at the top of the file as "manual run only — do NOT add to run-all.sh".
+Don't ship an unguarded flow that taps a non-Piggy member.
+
+== Other safety conventions
+
+* Never use coordinate taps (`point:`, `tapOn: { point: }`,
+  `adb shell input tap`). See `CLAUDE.md` § Testing.
+* Never send a real Lightning payment from a flow. Use lightning
+  addresses that don't resolve (`test@example.com`) or invoices the
+  flow generates and then cancels.
+* Never tap "Confirm" / "Send" on a payment, contact-share, or DM
+  unless the recipient is another Piggy.
