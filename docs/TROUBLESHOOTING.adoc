@@ -69,6 +69,18 @@ Always follow merges that add/remove icon or asset files with a `--clear` restar
 | Plain React Native `TextInput` loses keystrokes when placed inside `BottomSheetView` / `BottomSheetModal` — the sheet container is animated by `react-native-reanimated` and can re-render while the IME is mid-composition, dropping characters. The symptom looks like the input "friendly deletes" letters you just typed. +
 *Fix:* use `BottomSheetTextInput` from `@gorhom/bottom-sheet` (not `TextInput` from `react-native`) for every input inside a bottom-sheet subtree. It hooks into the sheet's keyboard + animation context and keeps keystrokes intact. All sheets in this repo (FeedbackSheet, TransferSheet, AddWalletWizard, EditProfileSheet, AddFriendSheet, NostrLoginSheet, and — as of #96 — SendSheet) follow this pattern. If you add a new sheet, grep `BottomSheetTextInput` for the canonical import site.
 
+| Maestro `inputText` drops characters in plain `TextInput`
+| Generic char-drop, not the BottomSheetTextInput-specific failure below. Maestro's `adb shell input text "$value"` synthesizes keystrokes faster than Android's IME composition pipeline can absorb them — long strings (>8-12 chars) lose chars in the middle. Affects the SDK 55 New Architecture especially. +
+*Workaround:* split the input into ~8-character chunks across multiple `inputText` steps. Same pattern as `../satmo-react-native/docs/TROUBLESHOOTING.adoc`:
+[source,yaml]
+----
+- inputText: "justowl3"
+- inputText: "@primal"
+- inputText: ".net"
+----
+The IME finishes composing each chunk before the next one starts. For nsec / npub / NWC URLs (60-90 chars) this is too painful — use the clipboard-paste pattern (next entry). +
+*When chunking is fine:* short text (lightning addresses, group names, search queries). When clipboard-paste is required: any 30+ char secret / URL.
+
 | Maestro `inputText` doesn't update React state in `BottomSheetTextInput`
 | `BottomSheetTextInput` from `@gorhom/bottom-sheet` doesn't always trigger `onChangeText` when Maestro uses `inputText`. The text appears visually in the input but the React state stays empty, causing validation to fail. Under React Native's New Architecture (Fabric, default in SDK 55) the `testID` lands on the wrapper View rather than the native `EditText`, so the synthetic `adb shell input text` keystrokes don't advance the JS event path. **Do not** replace with regular `TextInput` — the bottom sheet needs its own input to adjust when the keyboard opens. +
 *Canonical workaround — clipboard paste:* expose an in-app "Paste" button next to the input that calls `Clipboard.getStringAsync()` (expo-clipboard) and sets state directly. From the Maestro host, seed the clipboard first — host→emulator clipboard sync forwards it to the device (confirmed working on Android 16 emulator with Android Studio's default clipboard-sharing setting):
