@@ -132,15 +132,26 @@ const MessagesScreen: React.FC = () => {
         // Latin letter then by lower-case name, then take the first
         // 50. That's the set the user will see in the initial sheet
         // viewport — prefetching them is the relevant warm-up.
-        const named: { picture: string; sortKey: string }[] = [];
+        //
+        // firstAlpha mirrors FriendPickerSheet's local helper: NFKD-
+        // normalise + uppercase, return first [A-Z] char or '#'.
+        const firstAlpha = (n: string): string => {
+          const m = n.normalize('NFKD').toUpperCase().match(/[A-Z]/);
+          return m ? m[0] : '#';
+        };
+        const named: { picture: string; fa: string; lc: string }[] = [];
         for (const c of contacts) {
           const name = (c.profile?.displayName || c.profile?.name || c.petname || '').trim();
           const picture = c.profile?.picture;
           if (!name || !picture) continue;
-          named.push({ picture, sortKey: name.toLowerCase() });
+          named.push({ picture, fa: firstAlpha(name), lc: name.toLowerCase() });
         }
-        named.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+        named.sort((a, b) => {
+          if (a.fa !== b.fa) return a.fa.localeCompare(b.fa);
+          return a.lc.localeCompare(b.lc);
+        });
         const avatarUrls = named.slice(0, 50).map((x) => x.picture);
+
         if (avatarUrls.length === 0) return;
 
         lastAvatarPrefetchAt.current = Date.now();
