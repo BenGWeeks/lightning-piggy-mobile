@@ -30,12 +30,16 @@
 #   ./scripts/coverage-priorities.sh           # top 20
 #   ./scripts/coverage-priorities.sh 50        # top 50
 #
-# Output is a TSV table: rank, score, churn, loc, fanout, coverage%, path.
+# Output is a fixed-width table: rank, score, churn, loc, fanout, coverage%, path.
+# (Older versions of this header said TSV; the table renderer was changed to
+# fixed-width for grep / less readability.)
 #
 # Notes
 # -----
-# - Requires bash, git, awk, sort. No node/npm needed for the ranker itself.
-# - Pure Bash on purpose so it runs in CI and locally without extra installs.
+# - Requires bash, git, awk, sort, sed. No node/npm/python needed for the
+#   ranker itself.
+# - Targets bash 3.2+ (macOS default) — no `mapfile`, no `<<<` here-strings
+#   inside loops.
 # - The fanout grep is rough — it counts source files that mention the basename.
 #   Good enough as a relative ranking signal; not meant to be an exact import
 #   graph. If you want a precise graph, swap in `madge` or `dependency-cruiser`.
@@ -57,40 +61,42 @@ else
   echo "      Run 'npm run test:coverage' first for accurate ranking." >&2
 fi
 
-# Build a temp lookup of "filename -> count of src files importing it" once.
-# We grep for the basename (without extension), which catches both
-#   import X from './foo'   and   import X from 'src/utils/foo'.
-FANOUT_TMP=$(mktemp)
-trap 'rm -f "$FANOUT_TMP"' EXIT
-
-# All TS/TSX files under src/
-mapfile -t FILES < <(find src -type f \( -name '*.ts' -o -name '*.tsx' \) \
+# All TS/TSX files under src/. Bash-3.2 portable (no `mapfile`).
+FILES=()
+while IFS= read -r line; do
+  FILES+=("$line")
+done < <(find src -type f \( -name '*.ts' -o -name '*.tsx' \) \
   ! -name '*.test.ts' ! -name '*.test.tsx' ! -name '*.d.ts' | sort)
 
 # Extract coverage pct for a path (returns "0" if not present or no coverage run).
+# Pure awk parse of the JSON — no python required. coverage-summary.json is
+# flat enough that a regex on the "lines" object suffices; if the schema ever
+# nests further, swap this to `node -e` (Node is already a dev-time dep).
 coverage_for() {
   local path="$1"
-  if (( HAVE_COVERAGE == 0 )); then
+  if [ "$HAVE_COVERAGE" = "0" ]; then
     echo "0"
     return
   fi
-  # Match either an absolute or repo-relative key — Jest writes absolute paths.
-  python3 - "$path" "$SUMMARY" <<'PY' 2>/dev/null || echo "0"
-import json, sys, os
-target = sys.argv[1]
-summary_path = sys.argv[2]
-with open(summary_path) as f:
-    data = json.load(f)
-abs_target = os.path.abspath(target)
-for key, val in data.items():
-    if key == "total":
-        continue
-    if key == abs_target or key.endswith("/" + target):
-        print(val.get("lines", {}).get("pct", 0))
-        break
-else:
-    print(0)
-PY
+  local abs_target
+  abs_target=$(cd "$(dirname "$path")" && pwd)/$(basename "$path")
+  awk -v abs="$abs_target" -v rel="$path" '
+    # Track the current top-level key (file path or "total")
+    /^[[:space:]]*"[^"]+":[[:space:]]*\{/ {
+      match($0, /"[^"]+"/)
+      key = substr($0, RSTART+1, RLENGTH-2)
+    }
+    # Within the matching block, capture the lines pct
+    (key == abs || index(key, "/" rel) == length(key) - length(rel)) &&
+    /"lines":[[:space:]]*\{[^}]*"pct":[[:space:]]*[0-9.]+/ {
+      match($0, /"pct":[[:space:]]*[0-9.]+/)
+      pct = substr($0, RSTART+6, RLENGTH-6)
+      gsub(/[^0-9.]/, "", pct)
+      print pct
+      exit
+    }
+    END { if (!pct) print 0 }
+  ' "$SUMMARY" 2>/dev/null || echo "0"
 }
 
 SINCE="$DAYS days ago"
@@ -99,7 +105,7 @@ printf "%s\n" "Computing risk scores for ${#FILES[@]} files (churn window: $DAYS
 
 # Emit raw rows: score<TAB>churn<TAB>loc<TAB>fanout<TAB>coverage<TAB>path
 ROWS_TMP=$(mktemp)
-trap 'rm -f "$FANOUT_TMP" "$ROWS_TMP"' EXIT
+trap 'rm -f "$ROWS_TMP"' EXIT
 
 for f in "${FILES[@]}"; do
   # churn — commits touching this file in the window

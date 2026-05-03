@@ -49,10 +49,6 @@ jobs:
           echo "pct=$PCT" >> "$GITHUB_OUTPUT"
           echo "PR line coverage: $PCT%"
 
-      - name: Stash PR coverage
-        if: github.event_name == 'pull_request'
-        run: cp coverage/coverage-summary.json /tmp/pr-coverage-summary.json
-
       # On PRs, also build coverage for the merge target so we can compare.
       # On push-to-main this step is skipped — main *is* the new baseline.
       - name: Checkout main (for baseline)

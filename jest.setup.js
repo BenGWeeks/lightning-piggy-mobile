@@ -5,7 +5,11 @@
 // custom data, react-native-nfc-manager, etc.). Per-test overrides should live
 // in the test file itself, not here.
 
-// Silence noisy warnings from RN's `LogBox` in jsdom environment.
+// React Native modules read `__DEV__` (defined globally by Metro at
+// runtime). Jest doesn't define it, so `if (__DEV__) console.warn(...)`
+// branches in app code throw `__DEV__ is not defined` during a test
+// run unless we provide a global stub. Set true here so dev-only
+// branches are exercised by tests (matches Metro's `expo start`).
 if (typeof global !== 'undefined') {
   global.__DEV__ = true;
 }

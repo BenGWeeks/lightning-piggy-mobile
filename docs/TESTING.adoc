@@ -32,7 +32,10 @@ Unit tests run in Node (jsdom) via https://jestjs.io[Jest] with the `jest-expo` 
 # Run the suite
 npm test
 
-# Run with coverage (writes ./coverage/coverage-summary.json + lcov)
+# Run with coverage (writes ./coverage/coverage-summary.json plus a
+# text summary to stdout — reporters in jest.config.js are
+# `json-summary` + `text`; lcov is intentionally off to keep the
+# artifact small)
 npm run test:coverage
 
 # Watch a single file
