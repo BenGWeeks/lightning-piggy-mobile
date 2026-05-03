@@ -6,13 +6,15 @@ import {
   StyleSheet,
   BackHandler,
   ActivityIndicator,
+  Keyboard,
+  Platform,
 } from 'react-native';
 import { Alert } from './BrandedAlert';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
-  BottomSheetView,
+  BottomSheetScrollView,
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -31,13 +33,26 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
-  // No explicit snapPoints — content-height only, not user-draggable.
   const [mode, setMode] = useState<'paste' | 'scan'>('paste');
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   useEffect(() => {
     if (visible) {
@@ -116,7 +131,13 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
       keyboardBlurBehavior="restore"
       android_keyboardInputMode="adjustResize"
     >
-      <BottomSheetView style={styles.content}>
+      <BottomSheetScrollView
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
+        ]}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={styles.title}>Add Nostr Friend</Text>
 
         {/* Mode toggle */}
@@ -218,7 +239,7 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
             )}
           </View>
         )}
-      </BottomSheetView>
+      </BottomSheetScrollView>
     </BottomSheetModal>
   );
 };
@@ -235,7 +256,6 @@ const createStyles = (colors: Palette) =>
       width: 40,
     },
     content: {
-      flex: 1,
       alignItems: 'center',
       paddingHorizontal: 24,
       paddingTop: 8,

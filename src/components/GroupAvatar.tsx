@@ -6,6 +6,21 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { useNostr } from '../contexts/NostrContext';
 
+/** Per-contact info shared across rows. Picture + name + lightning
+ * address are the three fields screens need to render a row plus
+ * navigate to a conversation; bundling them lets us iterate `contacts`
+ * once at the parent and avoid O(rows × contacts) `.find()` calls
+ * inside row-level components (ConversationRow, GroupRow, GroupAvatar).
+ *
+ * `picture` is what GroupAvatar consumes; `name` is what GroupRow uses
+ * for its sender label; `lightningAddress` is what handlers need when
+ * navigating from a row tap. See issue #245. */
+export interface ContactInfo {
+  picture: string | null;
+  name: string | null;
+  lightningAddress: string | null;
+}
+
 interface Props {
   /**
    * Lowercased hex pubkeys of the people whose avatars we want to show,
@@ -18,14 +33,14 @@ interface Props {
   /** Diameter of the outer container. Inner avatars scale to ~62%. */
   size?: number;
   /**
-   * Optional precomputed pubkey → picture-URL map. When the row is
+   * Optional precomputed pubkey → ContactInfo map. When the row is
    * rendered inside a list (`MessagesScreen` / `GroupsScreen`), the
    * parent builds this once from `useNostr().contacts` and passes the
    * same instance to every row, so we don't iterate the contacts list
    * O(rows × avatars × contacts) per render. Standalone usages
    * (without a parent map) fall back to the internal lookup.
    */
-  contactPictureMap?: Map<string, string | null>;
+  contactInfoMap?: Map<string, ContactInfo>;
 }
 
 const MAX_AVATARS = 3;
@@ -38,7 +53,7 @@ const MAX_AVATARS = 3;
 // where animation IS wanted (e.g. a future GroupConversationScreen
 // header), promote `autoplay` to an `autoplayAvatar?: boolean` prop on
 // `Props` rather than flipping the literal.
-const GroupAvatar: React.FC<Props> = ({ pubkeys, groupName, size = 48, contactPictureMap }) => {
+const GroupAvatar: React.FC<Props> = ({ pubkeys, groupName, size = 48, contactInfoMap }) => {
   const colors = useThemeColors();
   const { contacts } = useNostr();
   const styles = useMemo(() => createStyles(colors, size), [colors, size]);
@@ -48,20 +63,24 @@ const GroupAvatar: React.FC<Props> = ({ pubkeys, groupName, size = 48, contactPi
   // The internal-build path stays for non-list call sites (e.g. a
   // future GroupConversationScreen header avatar).
   const items = useMemo(() => {
-    let lookup: Map<string, string | null>;
-    if (contactPictureMap) {
-      lookup = contactPictureMap;
+    let lookup: Map<string, ContactInfo>;
+    if (contactInfoMap) {
+      lookup = contactInfoMap;
     } else {
-      lookup = new Map<string, string | null>();
+      lookup = new Map<string, ContactInfo>();
       for (const c of contacts) {
-        lookup.set(c.pubkey.toLowerCase(), c.profile?.picture ?? null);
+        lookup.set(c.pubkey.toLowerCase(), {
+          picture: c.profile?.picture ?? null,
+          name: (c.profile?.displayName || c.profile?.name || c.petname || '').trim() || null,
+          lightningAddress: c.profile?.lud16 ?? null,
+        });
       }
     }
     return pubkeys.slice(0, MAX_AVATARS).map((pk) => ({
       pubkey: pk,
-      picture: lookup.get(pk.toLowerCase()) ?? null,
+      picture: lookup.get(pk.toLowerCase())?.picture ?? null,
     }));
-  }, [pubkeys, contacts, contactPictureMap]);
+  }, [pubkeys, contacts, contactInfoMap]);
 
   if (items.length === 0) {
     // No-message fallback: brand-pink letter avatar matches GroupsScreen.
@@ -116,7 +135,13 @@ const SingleAvatar: React.FC<SingleAvatarProps> = ({ picture, colors, innerSize 
         <Image
           source={{ uri: picture! }}
           style={{ width: innerSize, height: innerSize, borderRadius: innerSize / 2 }}
-          cachePolicy="disk"
+          // memory-disk + recyclingKey + transition match the canonical
+          // avatar caching policy used by ConversationRow / ContactListItem.
+          // Without recyclingKey, expo-image can't reuse decoded bitmaps
+          // when a row is recycled by FlashList. See issue #245.
+          cachePolicy="memory-disk"
+          recyclingKey={picture}
+          transition={200}
           onError={() => setErrored(true)}
           // First frame only — see #243.
           autoplay={false}

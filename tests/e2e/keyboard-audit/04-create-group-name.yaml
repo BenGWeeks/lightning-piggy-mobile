@@ -1,0 +1,25 @@
+appId: com.lightningpiggy.app.dev
+name: Keyboard audit — CreateGroupSheet name input
+---
+- launchApp:
+    appId: com.lightningpiggy.app.dev
+    stopApp: true
+- waitForAnimationToEnd:
+    timeout: 8000
+- tapOn:
+    id: 'tab-friends'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'groups-button'
+- waitForAnimationToEnd:
+    timeout: 2000
+# GroupsScreen → "+" → CreateGroupSheet
+- tapOn:
+    id: 'create-group-button'
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: 'create-group-name'
+- waitForAnimationToEnd:
+    timeout: 2000

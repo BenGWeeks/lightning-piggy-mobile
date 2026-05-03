@@ -9,7 +9,13 @@ import React, {
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Group, GroupActivity, GroupSummary } from '../types/groups';
-import { createGroupId, loadGroups, saveGroups } from '../services/groupsStorageService';
+import {
+  createGroupId,
+  loadGroupActivity,
+  loadGroups,
+  saveGroupActivity,
+  saveGroups,
+} from '../services/groupsStorageService';
 import { setKnownGroups } from '../services/groupRoutingRegistry';
 import { loadGroupMessages } from '../services/groupMessagesStorageService';
 import { useNostr, subscribeGroupMessages } from './NostrContext';
@@ -41,6 +47,15 @@ interface GroupsContextType {
   loading: boolean;
   createGroup: (name: string, memberPubkeys: string[]) => Promise<Group>;
   renameGroup: (groupId: string, newName: string) => Promise<boolean>;
+  /** Append unique pubkeys to the group's member list. Returns the
+   * updated group, or null if the group doesn't exist. Re-publishes
+   * the kind-30200 group-state event so other members pick up the
+   * new roster (best-effort; failures are non-fatal). */
+  addMembersToGroup: (groupId: string, pubkeys: string[]) => Promise<Group | null>;
+  /** Remove a single pubkey from the group's member list. Returns
+   * the updated group, or null if the group doesn't exist or the
+   * pubkey wasn't a member. Re-publishes group state on success. */
+  removeMemberFromGroup: (groupId: string, pubkey: string) => Promise<Group | null>;
   deleteGroup: (groupId: string) => Promise<void>;
   getGroup: (groupId: string) => Group | undefined;
   /**
@@ -159,6 +174,51 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     setKnownGroups(groups);
   }, [groups]);
+
+  // Eagerly hydrate `activityByGroup` from the disk cache as soon as the
+  // user identity is known. Without this, the Messages tab renders group
+  // rows with placeholder activity (createdAt-based timestamp, empty
+  // preview) until the per-group `loadGroupMessages` loop below resolves.
+  // Mirrors the dmInbox eager-hydration pattern from PR #253. A single
+  // AsyncStorage round-trip vs N per-group reads to first useful paint.
+  //
+  // The cache is keyed off `groups`, not `visibleGroups` — so it can
+  // include entries for groups whose follow gate failed at write time.
+  // The visible-list filter at `visibleGroups` re-applies downstream,
+  // so unfollowed entries never reach the rendered list. Schema is
+  // validated at load time by `loadGroupActivity` (entries with bad
+  // shapes are dropped rather than crashing first paint via
+  // `formatConversationTimestamp(NaN)`). Cleared on logout via
+  // NostrContext.logout's per-pubkey cleanup.
+  useEffect(() => {
+    if (!isLoggedIn || !pubkey) return;
+    let cancelled = false;
+    loadGroupActivity(pubkey).then((cached) => {
+      if (cancelled) return;
+      if (Object.keys(cached).length === 0) return;
+      // Merge under any in-memory entries that may have arrived first
+      // (e.g. live subscribeGroupMessages updates) — those win.
+      setActivityByGroup((prev) => ({ ...cached, ...prev }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoggedIn, pubkey]);
+
+  // Persist `activityByGroup` after every change so the next cold start
+  // can hydrate from this cache. Debounced via setTimeout to coalesce
+  // bursts (e.g. live message arrivals). Per-pubkey namespace mirrors
+  // the dmInbox cache key pattern.
+  useEffect(() => {
+    if (!isLoggedIn || !pubkey) return;
+    if (Object.keys(activityByGroup).length === 0) return;
+    const handle = setTimeout(() => {
+      saveGroupActivity(pubkey, activityByGroup).catch((e) => {
+        if (__DEV__) console.warn('[Groups] saveGroupActivity failed:', e);
+      });
+    }, 500);
+    return () => clearTimeout(handle);
+  }, [activityByGroup, isLoggedIn, pubkey]);
 
   // Populate activity for any group we don't yet have a rollup for. Runs
   // after the initial loadGroups() resolves and again whenever a new
@@ -294,6 +354,84 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (__DEV__) console.warn('[Groups] publishGroupState (rename) failed:', e);
       });
       return true;
+    },
+    [persist, publishGroupState],
+  );
+
+  const addMembersToGroup = useCallback(
+    async (groupId: string, pubkeys: string[]): Promise<Group | null> => {
+      let updated: Group | null = null;
+      let didChange = false;
+      await persist((curr) => {
+        const idx = curr.findIndex((g) => g.id === groupId);
+        if (idx === -1) return curr;
+        const existing = new Set(curr[idx].memberPubkeys);
+        // Dedupe input — a caller that asks for [pkA, pkA] should add
+        // pkA exactly once. Bare `pubkeys.filter` would let both through
+        // because the filter is against the pre-mutation `existing` set.
+        const toAdd = [...new Set(pubkeys)].filter((pk) => !existing.has(pk));
+        if (toAdd.length === 0) {
+          updated = curr[idx];
+          return curr;
+        }
+        didChange = true;
+        updated = {
+          ...curr[idx],
+          memberPubkeys: [...curr[idx].memberPubkeys, ...toAdd],
+          updatedAt: Date.now(),
+        };
+        const next = [...curr];
+        next[idx] = updated;
+        return next;
+      });
+      if (!updated) return null;
+      // Only republish kind-30200 when membership actually changed.
+      // No-op adds (every input pubkey already a member) shouldn't spam
+      // the relays with an unchanged member list.
+      if (didChange) {
+        const finalUpdated: Group = updated;
+        publishGroupState({
+          groupId: finalUpdated.id,
+          name: finalUpdated.name,
+          memberPubkeys: finalUpdated.memberPubkeys,
+        }).catch((e) => {
+          if (__DEV__) console.warn('[Groups] publishGroupState (add) failed:', e);
+        });
+      }
+      return updated;
+    },
+    [persist, publishGroupState],
+  );
+
+  const removeMemberFromGroup = useCallback(
+    async (groupId: string, pubkey: string): Promise<Group | null> => {
+      let updated: Group | null = null;
+      await persist((curr) => {
+        const idx = curr.findIndex((g) => g.id === groupId);
+        if (idx === -1) return curr;
+        if (!curr[idx].memberPubkeys.includes(pubkey)) {
+          updated = null;
+          return curr;
+        }
+        updated = {
+          ...curr[idx],
+          memberPubkeys: curr[idx].memberPubkeys.filter((pk) => pk !== pubkey),
+          updatedAt: Date.now(),
+        };
+        const next = [...curr];
+        next[idx] = updated;
+        return next;
+      });
+      if (!updated) return null;
+      const finalUpdated: Group = updated;
+      publishGroupState({
+        groupId: finalUpdated.id,
+        name: finalUpdated.name,
+        memberPubkeys: finalUpdated.memberPubkeys,
+      }).catch((e) => {
+        if (__DEV__) console.warn('[Groups] publishGroupState (remove) failed:', e);
+      });
+      return finalUpdated;
     },
     [persist, publishGroupState],
   );
@@ -472,6 +610,8 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       loading,
       createGroup,
       renameGroup,
+      addMembersToGroup,
+      removeMemberFromGroup,
       deleteGroup,
       getGroup,
       reconcileFromGroupStateEvent,
@@ -486,6 +626,8 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       loading,
       createGroup,
       renameGroup,
+      addMembersToGroup,
+      removeMemberFromGroup,
       deleteGroup,
       getGroup,
       reconcileFromGroupStateEvent,
