@@ -27,14 +27,17 @@ name: Zap-the-Team SendSheet shows preset amount pills
 - waitForAnimationToEnd:
     timeout: 4000
 
-# Wait for the team profile to fetch (shows "Zap the Team" button after).
+# Wait for the team profile to fetch (button enables after). Use the
+# testID rather than the text — the rendered label is "⚡ Zap the Team"
+# (with emoji prefix) and Maestro's regex text matcher won't match the
+# bare "Zap the Team" substring.
 - extendedWaitUntil:
     visible:
-      text: 'Zap the Team'
+      id: 'zap-team-button'
     timeout: 10000
 
 - tapOn:
-    text: 'Zap the Team'
+    id: 'zap-team-button'
 - waitForAnimationToEnd:
     timeout: 3000
 
@@ -57,12 +60,15 @@ name: Zap-the-Team SendSheet shows preset amount pills
 - assertVisible:
     id: 'suggested-amount-10000'
 
-# Tap 100 — the amount-entry-input should reflect 100. Assert against
-# the input's testID rather than `text: '100'` (which would also match
-# the still-visible pill, giving a false pass even if state never updated).
+# Tap 100 — the amount-entry-input should reflect 100. Use a child
+# selector so we assert the value INSIDE the input (not just that the
+# input element exists). `containsChild text: '100'` scoped to the
+# input testID gives us a true post-tap value check, while still
+# avoiding a false positive from the still-visible pill text.
 - tapOn:
     id: 'suggested-amount-100'
 - waitForAnimationToEnd:
     timeout: 1000
 - assertVisible:
     id: 'amount-entry-input'
+    text: '100'
