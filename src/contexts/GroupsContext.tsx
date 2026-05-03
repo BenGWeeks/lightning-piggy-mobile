@@ -353,8 +353,17 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
         const existing = curr[idx];
         const isNewer = evMs > existing.updatedAt;
-        if (isNewer && input.name && input.name !== existing.name) {
-          const updated: Group = { ...existing, name: input.name, updatedAt: evMs };
+        if (isNewer) {
+          // Always bump updatedAt on a newer rumor — even if the
+          // subject is unchanged. Otherwise an older rename whose
+          // created_at sits between the stale updatedAt and this
+          // rumor could later "win" the latest-wins comparison.
+          const nameChanged = !!(input.name && input.name !== existing.name);
+          const updated: Group = {
+            ...existing,
+            ...(nameChanged && input.name ? { name: input.name } : {}),
+            updatedAt: evMs,
+          };
           const next = [...curr];
           next[idx] = updated;
           resolved = updated;

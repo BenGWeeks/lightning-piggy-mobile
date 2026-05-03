@@ -29,7 +29,7 @@ import {
   findGroupForParticipants,
   reconcileSyntheticGroup,
 } from '../services/groupRoutingRegistry';
-import { syntheticGroupIdForParticipants } from '../utils/syntheticGroupId';
+import { isSyntheticGroupId, syntheticGroupIdForParticipants } from '../utils/syntheticGroupId';
 import { appendGroupMessage, type GroupMessage } from '../services/groupMessagesStorageService';
 
 /**
@@ -137,13 +137,21 @@ async function tryRouteGroupRumor(
   const cls = classifyRumor(rumor, viewerPubkey);
   if (!cls || cls.type !== 'group') return { kind: 'not-group' };
   let group = findGroupForParticipants(cls.otherParticipants);
-  if (!group) {
-    // No matching kind-30200-backed local group. Before dropping, try
-    // the NIP-17 spec-aligned fallback: foreign clients (Amethyst /
-    // Quartz, 0xchat) don't publish kind-30200; they advertise the
-    // group name via the kind-14 `subject` tag, and the room identity
-    // is the participant set. Materialise a synthetic group keyed off
-    // a deterministic SHA-256 of the sorted pubkey-set so subsequent
+  // Always run the synthetic-reconcile path when the matched group is
+  // synthetic (no kind-30200 backing it) — that's the only way later
+  // `subject`-tag renames from foreign clients propagate to the local
+  // group name. Per NIP-17 latest-wins, every kind-14 with a `subject`
+  // for an existing room can update its name; without this branch the
+  // first sender's subject would stick forever.
+  const isSynthetic = group ? isSyntheticGroupId(group.id) : false;
+  if (!group || isSynthetic) {
+    // No matching kind-30200-backed local group, OR matched a synthetic
+    // group that may need a name refresh. Try the NIP-17 spec-aligned
+    // fallback: foreign clients (Amethyst / Quartz, 0xchat) don't
+    // publish kind-30200; they advertise the group name via the
+    // kind-14 `subject` tag, and the room identity is the participant
+    // set. Materialise / update a synthetic group keyed off a
+    // deterministic SHA-256 of the sorted pubkey-set so subsequent
     // messages from the same room land in the same local thread, and
     // so the same id is computed across all peers / sessions.
     //
