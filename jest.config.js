@@ -14,7 +14,9 @@
 module.exports = {
   preset: 'jest-expo',
   setupFiles: ['<rootDir>/jest.setup.js'],
-  testMatch: ['<rootDir>/src/**/*.test.{ts,tsx}', '<rootDir>/tests/unit/**/*.test.{ts,tsx}'],
+  // Co-located convention: tests live next to their subject as `<file>.test.ts`.
+  // Centralised `tests/unit/` is intentionally NOT matched — see CLAUDE.md.
+  testMatch: ['<rootDir>/src/**/*.test.{ts,tsx}'],
   collectCoverageFrom: [
     'src/services/**/*.{ts,tsx}',
     'src/utils/**/*.{ts,tsx}',
