@@ -1,0 +1,25 @@
+appId: com.lightningpiggy.app.dev
+name: Keyboard audit — Messages tab search
+---
+- launchApp:
+    appId: com.lightningpiggy.app.dev
+    stopApp: true
+- waitForAnimationToEnd:
+    timeout: 8000
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 3000
+# Messages search-toggle is rendered conditionally; wait for it
+- extendedWaitUntil:
+    visible:
+      id: 'messages-search-toggle'
+    timeout: 8000
+- tapOn:
+    id: 'messages-search-toggle'
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn:
+    id: 'messages-search-input'
+- waitForAnimationToEnd:
+    timeout: 2000

@@ -60,7 +60,11 @@ const MemberRow = React.memo<MemberRowProps>(
             <Image
               source={{ uri: contact.profile.picture }}
               style={styles.avatarImage}
-              cachePolicy="disk"
+              // memory-disk + recyclingKey match the canonical avatar
+              // caching policy (see ConversationRow / ContactListItem /
+              // GroupAvatar). Standardised in #245.
+              cachePolicy="memory-disk"
+              recyclingKey={contact.profile.picture}
               // First frame only for animated WebP / GIF avatars.
               // Without this, expo-image spawns a FrameDecoderExe
               // thread per animated avatar and decodes every frame on
