@@ -16,7 +16,11 @@ import {
   saveGroupActivity,
   saveGroups,
 } from '../services/groupsStorageService';
-import { setKnownGroups } from '../services/groupRoutingRegistry';
+import {
+  setKnownGroups,
+  setSyntheticGroupReconciler,
+  type SyntheticRoomInput,
+} from '../services/groupRoutingRegistry';
 import { loadGroupMessages } from '../services/groupMessagesStorageService';
 import { useNostr, subscribeGroupMessages } from './NostrContext';
 import {
@@ -305,6 +309,73 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return after;
   }, []);
 
+  // Synthetic-room reconciler: invoked from NostrContext's group routing
+  // path when a kind-14 arrives from a foreign client (Amethyst / Quartz,
+  // 0xchat) with no matching kind-30200. The id is a deterministic
+  // SHA-256 of the participant set, so subsequent kind-14s from the
+  // same room route to the same local thread. Subject is latest-wins
+  // per NIP-17 spec ("the newest subject in the chat room is the
+  // subject of the conversation").
+  //
+  // Stored as a regular Group entry (no kind-30200 publish, no member-
+  // list mutation API) — synthetic rooms are read-only mirrors of
+  // foreign-client conversations on LP. Sending into them re-uses the
+  // normal sendGroupMessage path: the room's pubkey-set is reconstructed
+  // from memberPubkeys + viewer, so the kind-14 lands at the same
+  // participants and round-trips cleanly.
+  //
+  // Held behind a ref so the registry handler stays stable across
+  // re-renders. The effect re-binds the ref body whenever `persist`
+  // changes (today: never, since persist is `useCallback([])`), which
+  // also means the registry pointer effectively installs once.
+  const reconcileSyntheticRef = useRef<
+    ((input: SyntheticRoomInput) => Promise<Group | null>) | null
+  >(null);
+  useEffect(() => {
+    reconcileSyntheticRef.current = async (input) => {
+      let resolved: Group | null = null;
+      // createdAt on the rumor is in seconds; local state uses ms.
+      const evMs = input.createdAtSec * 1000;
+      await persist((curr) => {
+        const idx = curr.findIndex((g) => g.id === input.groupId);
+        if (idx === -1) {
+          const group: Group = {
+            id: input.groupId,
+            name: input.name,
+            // memberPubkeys excludes the viewer by LP convention; the
+            // caller already filtered the viewer out.
+            memberPubkeys: [...new Set(input.memberPubkeys)],
+            createdAt: evMs,
+            updatedAt: evMs,
+          };
+          resolved = group;
+          return [group, ...curr];
+        }
+        const existing = curr[idx];
+        const isNewer = evMs > existing.updatedAt;
+        if (isNewer && input.name && input.name !== existing.name) {
+          const updated: Group = { ...existing, name: input.name, updatedAt: evMs };
+          const next = [...curr];
+          next[idx] = updated;
+          resolved = updated;
+          return next;
+        }
+        resolved = existing;
+        return curr;
+      });
+      return resolved;
+    };
+    setSyntheticGroupReconciler((input) =>
+      reconcileSyntheticRef.current ? reconcileSyntheticRef.current(input) : Promise.resolve(null),
+    );
+    return () => {
+      // Drop the registry pointer on unmount so a stale closure can't
+      // mutate state after the provider tears down (e.g. logout race).
+      setSyntheticGroupReconciler(null);
+      reconcileSyntheticRef.current = null;
+    };
+  }, [persist]);
+
   const createGroup = useCallback(
     async (name: string, memberPubkeys: string[]): Promise<Group> => {
       const now = Date.now();
@@ -358,6 +429,21 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [persist, publishGroupState],
   );
 
+  // ---------------------------------------------------------------------------
+  // SPEC DIVERGENCE — tracked under the same interop work as `subject`-tag
+  // alignment (issue #271). NIP-17 says the room key is the (sender + p tags)
+  // pubkey set, so changing the membership creates a NEW room with EMPTY
+  // history (because the room key itself changed). LP currently mutates
+  // `memberPubkeys` in place and KEEPS the stored message log — different
+  // semantics. This is intentional for now: the "mutable group" UX is
+  // friendlier than the spec's "you got dropped from a room, here's a new
+  // empty one" flow. The follow-up question for the maintainer is whether
+  // to keep this divergent UX or migrate to spec-strict (clean history on
+  // every member add/remove). Synthetic groups (id prefix `s_`, see
+  // syntheticGroupId.ts) MUST follow the spec — they have no kind-30200
+  // backing and no add/remove API today (read-only mirrors of foreign-
+  // client rooms).
+  // ---------------------------------------------------------------------------
   const addMembersToGroup = useCallback(
     async (groupId: string, pubkeys: string[]): Promise<Group | null> => {
       let updated: Group | null = null;

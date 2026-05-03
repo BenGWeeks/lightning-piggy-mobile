@@ -20,11 +20,16 @@ import type { DmInboxEntry } from '../utils/conversationSummaries';
 import {
   classifyRumor,
   partnerFromRumor,
+  subjectFromRumor,
   unwrapWrapNsec,
   unwrapWrapViaNip44,
   type DecodedRumor,
 } from '../utils/nip17Unwrap';
-import { findGroupForParticipants } from '../services/groupRoutingRegistry';
+import {
+  findGroupForParticipants,
+  reconcileSyntheticGroup,
+} from '../services/groupRoutingRegistry';
+import { syntheticGroupIdForParticipants } from '../utils/syntheticGroupId';
 import { appendGroupMessage, type GroupMessage } from '../services/groupMessagesStorageService';
 
 /**
@@ -131,11 +136,47 @@ async function tryRouteGroupRumor(
 ): Promise<GroupRouteResult> {
   const cls = classifyRumor(rumor, viewerPubkey);
   if (!cls || cls.type !== 'group') return { kind: 'not-group' };
-  const group = findGroupForParticipants(cls.otherParticipants);
+  let group = findGroupForParticipants(cls.otherParticipants);
   if (!group) {
-    // Group-shaped rumor with no matching local group. Could be a brand-
-    // new group whose kind-30200 hasn't propagated yet, or a spammer.
-    // Drop on the floor for v1 — these wraps are NOT written into the
+    // No matching kind-30200-backed local group. Before dropping, try
+    // the NIP-17 spec-aligned fallback: foreign clients (Amethyst /
+    // Quartz, 0xchat) don't publish kind-30200; they advertise the
+    // group name via the kind-14 `subject` tag, and the room identity
+    // is the participant set. Materialise a synthetic group keyed off
+    // a deterministic SHA-256 of the sorted pubkey-set so subsequent
+    // messages from the same room land in the same local thread, and
+    // so the same id is computed across all peers / sessions.
+    //
+    // We require a `subject` to take this fallback — kind-14s without
+    // one are either (a) LP-native groups whose kind-30200 hasn't
+    // landed yet (existing drop-then-refresh behaviour is correct), or
+    // (b) malformed / spam (no semantic name to attach to anyway).
+    const subject = subjectFromRumor(rumor);
+    if (subject) {
+      // NIP-17 room key = pubkey + p tags = sender + every p-tag
+      // (viewer included). `participantsFromRumor` returns exactly
+      // that set; it's what `classifyRumor` derived `otherParticipants`
+      // from minus the viewer, so re-include the viewer here.
+      const fullRoom = new Set<string>(cls.otherParticipants);
+      fullRoom.add(viewerPubkey.toLowerCase());
+      const synthId = syntheticGroupIdForParticipants(fullRoom);
+      // memberPubkeys excludes the viewer by LP convention (see Group
+      // type docstring + reconcileFromGroupStateEvent).
+      const synthetic = await reconcileSyntheticGroup({
+        groupId: synthId,
+        name: subject,
+        memberPubkeys: Array.from(cls.otherParticipants),
+        createdAtSec: rumor.created_at,
+      });
+      if (synthetic) {
+        group = synthetic;
+      }
+    }
+  }
+  if (!group) {
+    // Still no match (no subject, or GroupsContext hasn't registered
+    // its reconciler yet — typically only during cold boot / logout).
+    // Drop on the floor: these wraps are NOT written into the
     // persistent NIP-17 wrap cache (the caller's `continue` happens
     // before the cache write), so retry only happens via a relay
     // re-fetch on the next force-refresh. Caveat: NIP-59 wraps use
