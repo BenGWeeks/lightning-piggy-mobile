@@ -14,6 +14,7 @@ import {
   Pressable,
 } from 'react-native';
 import {
+  KeyboardController,
   KeyboardStickyView,
   useReanimatedKeyboardAnimation,
 } from 'react-native-keyboard-controller';
@@ -270,6 +271,14 @@ const GroupConversationScreen: React.FC = () => {
   // and Photo go through the existing imageUploadService (Blossom →
   // URL) and send the URL as the message body — same as the 1:1 path.
   const closeAttachPanel = useCallback(() => setAttachPanelOpen(false), []);
+  // Mirror ConversationScreen's openAttachPanel: dismiss the IME first
+  // so the panel + composer + keyboard never have to stack. Without this,
+  // tapping the attach button while the message input is focused leaves
+  // the keyboard up, forcing the sticky layout to compete with the IME.
+  const openAttachPanel = useCallback(() => {
+    setAttachPanelOpen(true);
+    KeyboardController.dismiss();
+  }, []);
 
   const uploadAndSend = useCallback(
     async (localUri: string, base64?: string | null) => {
@@ -719,7 +728,7 @@ const GroupConversationScreen: React.FC = () => {
           <Animated.View style={[styles.composer, composerSafeAreaStyle]}>
             <TouchableOpacity
               style={styles.attachButton}
-              onPress={() => setAttachPanelOpen((v) => !v)}
+              onPress={() => (attachPanelOpen ? closeAttachPanel() : openAttachPanel())}
               disabled={sending || sharingLocation || uploadingImage}
               accessibilityLabel="Attach"
               testID="group-attach-button"
