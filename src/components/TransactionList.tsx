@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useImperativeHandle, forwardRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
@@ -21,6 +21,23 @@ import type { RootStackParamList } from '../navigation/types';
 
 interface Props {
   transactions: WalletTransaction[];
+}
+
+/** Imperative handle exposed via `forwardRef` so the parent ScrollView
+ * (HomeScreen) can drive infinite-scroll batch reveals as the user nears
+ * the bottom. We can't use FlatList's `onEndReached` here because the
+ * transactions list is rendered as plain rows inside HomeScreen's
+ * outer ScrollView (FlatList nested in ScrollView is a known
+ * anti-pattern: the inner list collapses to 0 height + onEndReached
+ * never fires). Per #172 the parent owns the scroll, so it also owns
+ * the bottom-detection and just calls `loadMore()`. */
+export interface TransactionListHandle {
+  /** Reveal the next batch of `INITIAL_COUNT` rows. No-op when all
+   * cached transactions are already visible. Safe to call repeatedly. */
+  loadMore: () => void;
+  /** Whether more cached rows are still hidden. Lets the parent skip
+   * the bottom-detection math when nothing's left to reveal. */
+  hasMore: boolean;
 }
 
 function zapCounterpartyLabel(cp: ZapCounterpartyInfo): string {
@@ -88,7 +105,7 @@ function txKey(tx: WalletTransaction, fallbackIndex: number): string {
   return `fb:${tx.type}:${tx.created_at ?? tx.settled_at ?? 'pending'}:${tx.amount}:${fallbackIndex}`;
 }
 
-const TransactionList: React.FC<Props> = ({ transactions }) => {
+const TransactionList = forwardRef<TransactionListHandle, Props>(({ transactions }, ref) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { btcPrice, currency, activeWalletId } = useWallet();
@@ -137,23 +154,41 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
     const match = desc.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
     return match ? match[0].toLowerCase() : null;
   };
-  const [showAll, setShowAll] = useState(false);
+  // Infinite scroll: start by revealing INITIAL_COUNT rows and grow in
+  // INITIAL_COUNT-sized batches as the parent ScrollView nears its
+  // bottom (HomeScreen drives this via the imperative `loadMore`
+  // handle below). Replaces the old `showAll` boolean + "Show all N"
+  // tap target — see #172.
+  const [visibleCount, setVisibleCount] = useState(INITIAL_COUNT);
   const [detail, setDetail] = useState<TransactionDetailData | null>(null);
   const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
   const [zapContact, setZapContact] = useState<CounterpartyContact | null>(null);
 
-  // Collapse the list back to the initial N rows when the active wallet
+  // Reset the visible window to the first batch when the active wallet
   // changes, but NOT on every transactions-array update. WalletContext
   // polls balances/transactions every few seconds and emits a new array
   // reference each time; keying the reset on `transactions` meant the
-  // effect fired on every poll and immediately undid the user's "Show
-  // all N" tap (symptom: tap appeared to expand for a split second and
-  // then collapse). HomeScreen renders TransactionList without a `key`
-  // so it doesn't remount on wallet switch — we reset explicitly here
-  // instead.
+  // effect fired on every poll and immediately collapsed the rows the
+  // user had already scrolled into view. HomeScreen renders
+  // TransactionList without a `key` so it doesn't remount on wallet
+  // switch — we reset explicitly here instead.
   useEffect(() => {
-    setShowAll(false);
+    setVisibleCount(INITIAL_COUNT);
   }, [activeWalletId]);
+
+  const totalCount = transactions.length;
+  const hasMore = visibleCount < totalCount;
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      loadMore: () => {
+        setVisibleCount((c) => (c >= totalCount ? c : Math.min(c + INITIAL_COUNT, totalCount)));
+      },
+      hasMore,
+    }),
+    [totalCount, hasMore],
+  );
 
   if (transactions.length === 0) {
     return (
@@ -172,8 +207,7 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
     if (!bTime) return 1;
     return bTime - aTime;
   });
-  const visibleTransactions = showAll ? sorted : sorted.slice(0, INITIAL_COUNT);
-  const hasMore = transactions.length > INITIAL_COUNT;
+  const visibleTransactions = sorted.slice(0, visibleCount);
 
   // Flatten into a mixed list of day headers + rows. Pending entries (no
   // timestamp) get a "Pending" header so they still group visually.
@@ -316,11 +350,6 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
           </TouchableOpacity>
         );
       })}
-      {hasMore && !showAll && (
-        <TouchableOpacity style={styles.showMore} onPress={() => setShowAll(true)}>
-          <Text style={styles.showMoreText}>Show all {transactions.length} transactions</Text>
-        </TouchableOpacity>
-      )}
       <TransactionDetailSheet
         visible={detail !== null}
         tx={detail}
@@ -381,7 +410,8 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
       />
     </View>
   );
-};
+});
+TransactionList.displayName = 'TransactionList';
 
 const AVATAR_SIZE = 40;
 
@@ -481,15 +511,6 @@ const createStyles = (colors: Palette) =>
       fontSize: 11,
       color: colors.textSupplementary,
       marginTop: 1,
-    },
-    showMore: {
-      paddingVertical: 16,
-      alignItems: 'center',
-    },
-    showMoreText: {
-      color: colors.brandPink,
-      fontSize: 14,
-      fontWeight: '600',
     },
     incoming: {
       color: colors.green,

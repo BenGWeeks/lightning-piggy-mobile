@@ -1,0 +1,48 @@
+appId: com.lightningpiggy.app.dev
+name: Home transactions list — infinite scroll
+---
+# Covers #172. Replaces the legacy "Show all N transactions" button with
+# inline batch reveal as the user nears the bottom of the transactions
+# scroll. Acceptance criteria:
+#   * "Show all N transactions" button is gone.
+#   * Scrolling to the bottom reveals the next batch automatically.
+#
+# Assumes the active wallet has >20 transactions so the second batch
+# (rows 21+) is initially hidden. The dev wallet on the AVD usually
+# satisfies this; if not, add a few zaps before running.
+
+- waitForAnimationToEnd: { timeout: 10000 }
+- tapOn: { id: 'tab-home' }
+- waitForAnimationToEnd: { timeout: 3000 }
+
+# At least one transaction row must render before we try to scroll —
+# otherwise we'd hit the empty-state "No transactions yet" message and
+# the scroll below would be a no-op.
+- extendedWaitUntil:
+    visible:
+      text: '.*sats'
+    timeout: 30000
+
+# The legacy button must be gone.
+- assertNotVisible:
+    text: 'Show all .* transactions'
+
+# Scroll the transactions list to the bottom of the first batch. We
+# scroll multiple times to push past the initial 20 rows and let the
+# parent ScrollView trigger TransactionList.loadMore().
+- repeat:
+    times: 6
+    commands:
+      - scroll
+      - waitForAnimationToEnd: { timeout: 500 }
+
+# After scrolling we should still be able to see transaction rows
+# (sats labels) — i.e. more rows have been revealed and rendered, not
+# the end-of-list bounce-back.
+- assertVisible:
+    text: '.*sats'
+
+# And the legacy button still must not appear after revealing the
+# next batch.
+- assertNotVisible:
+    text: 'Show all .* transactions'

@@ -8,6 +8,8 @@ import {
   RefreshControl,
   ActivityIndicator,
   InteractionManager,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
@@ -19,7 +21,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import ReceiveSheet from '../components/ReceiveSheet';
 import SendSheet from '../components/SendSheet';
 import TransferSheet from '../components/TransferSheet';
-import TransactionList from '../components/TransactionList';
+import TransactionList, { type TransactionListHandle } from '../components/TransactionList';
 import WalletCarousel from '../components/WalletCarousel';
 import AddWalletWizard from '../components/AddWalletWizard';
 import WalletSettingsSheet from '../components/WalletSettingsSheet';
@@ -170,6 +172,23 @@ const HomeScreen: React.FC = () => {
     setRefreshing(false);
   };
 
+  // Infinite scroll: TransactionList renders rows directly into our
+  // ScrollView (FlatList nested in ScrollView is the anti-pattern that
+  // collapses to 0 height + never fires onEndReached), so we own the
+  // scroll-position math here and call into the list's imperative
+  // `loadMore()` handle when the user nears the bottom. See #172.
+  const transactionListRef = useRef<TransactionListHandle>(null);
+  const handleTransactionsScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    // 200px threshold mirrors the issue spec — gives the next batch
+    // time to mount before the user actually hits the bottom, so the
+    // reveal feels seamless instead of bouncing against an end-stop.
+    const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+    if (distanceFromBottom < 200) {
+      transactionListRef.current?.loadMore();
+    }
+  }, []);
+
   const handleWalletChange = useCallback(
     (walletId: string | null) => {
       if (walletId !== activeWalletId) {
@@ -278,6 +297,12 @@ const HomeScreen: React.FC = () => {
         <ScrollView
           style={styles.transactionsContainer}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+          onScroll={handleTransactionsScroll}
+          // 100ms throttle keeps onScroll cheap while still firing
+          // multiple times per second — fast enough to detect the
+          // bottom approach during a flick, slow enough not to drown
+          // the JS thread on large lists.
+          scrollEventThrottle={100}
         >
           {!hasWallets || activeWalletId === null ? (
             <View style={styles.emptyState}>
@@ -290,7 +315,7 @@ const HomeScreen: React.FC = () => {
               <ActivityIndicator size="small" color="#EC008C" />
             </View>
           ) : (
-            <TransactionList transactions={transactions} />
+            <TransactionList ref={transactionListRef} transactions={transactions} />
           )}
         </ScrollView>
       </View>
