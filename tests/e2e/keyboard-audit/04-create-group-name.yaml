@@ -14,11 +14,28 @@ name: Keyboard audit — CreateGroupSheet name input
     id: 'groups-button'
 - waitForAnimationToEnd:
     timeout: 2000
-# GroupsScreen → "+" → CreateGroupSheet
+# GroupsScreen → "+" → CreateGroupSheet (now a 2-step wizard, see #249).
+# Step 1 = pick members; step 2 = name. The keyboard audit cares about
+# the name input, so we pick the first visible member, advance to step 2,
+# then focus the name field.
 - tapOn:
     id: 'create-group-button'
 - waitForAnimationToEnd:
     timeout: 2000
+# Pick the first member row (any contact will do — we just need >=1
+# selected so the Next button is enabled). The accessibilityLabel is
+# `Select <displayName>` for unselected rows; Maestro `text:` runs a
+# fully-anchored regex match so `Select .*` finds the first one without
+# us needing to know any specific contact's testID.
+- tapOn:
+    text: 'Select .*'
+    index: 0
+- waitForAnimationToEnd:
+    timeout: 1000
+- tapOn:
+    id: 'create-group-next'
+- waitForAnimationToEnd:
+    timeout: 1500
 - tapOn:
     id: 'create-group-name'
 - waitForAnimationToEnd:
