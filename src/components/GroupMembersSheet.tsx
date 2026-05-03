@@ -19,6 +19,10 @@ interface Props {
   visible: boolean;
   groupId: string | null;
   onClose: () => void;
+  // Optional. When provided, tapping a member row (other than self)
+  // calls this with their pubkey. The host screen typically opens
+  // ContactProfileSheet in response. Without this, rows are display-only.
+  onMemberTap?: (pubkey: string) => void;
 }
 
 interface MemberRow {
@@ -46,7 +50,7 @@ interface MemberRow {
  * Sheet uses `enableDynamicSizing={false}` + an explicit snap point per
  * the v5 dynamic-sizing collapse fix in `docs/TROUBLESHOOTING.adoc`.
  */
-const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
+const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMemberTap }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { getGroup, addMembersToGroup, removeMemberFromGroup } = useGroups();
@@ -167,7 +171,16 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
           </View>
 
           {members.map((m) => (
-            <View key={m.pubkey} style={styles.row}>
+            <TouchableOpacity
+              key={m.pubkey}
+              style={styles.row}
+              onPress={
+                onMemberTap && m.pubkey !== selfPubkey ? () => onMemberTap(m.pubkey) : undefined
+              }
+              activeOpacity={onMemberTap && m.pubkey !== selfPubkey ? 0.6 : 1}
+              accessibilityLabel={`View ${m.name}'s profile`}
+              testID={`group-member-row-${m.pubkey.slice(0, 12)}`}
+            >
               <View style={styles.avatar}>
                 {m.picture ? (
                   <Image
@@ -196,7 +209,7 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
                   <X size={18} color={colors.brandPink} strokeWidth={2.5} />
                 </TouchableOpacity>
               ) : null}
-            </View>
+            </TouchableOpacity>
           ))}
 
           <TouchableOpacity

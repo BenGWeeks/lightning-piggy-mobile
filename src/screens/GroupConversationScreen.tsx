@@ -727,6 +727,22 @@ const GroupConversationScreen: React.FC = () => {
         visible={membersSheetVisible}
         groupId={group.id}
         onClose={() => setMembersSheetVisible(false)}
+        onMemberTap={(pk) => {
+          // Close the manage-members sheet first so the profile sheet
+          // doesn't stack on top — keeps the back-stack predictable
+          // and matches the FriendPickerSheet → CreateGroupSheet hand-off.
+          const c = contacts.find((x) => x.pubkey === pk);
+          setMembersSheetVisible(false);
+          setProfileContact({
+            pubkey: pk,
+            name: c?.profile?.displayName || c?.profile?.name || c?.petname || `${pk.slice(0, 8)}…`,
+            picture: c?.profile?.picture ?? null,
+            banner: c?.profile?.banner ?? null,
+            nip05: c?.profile?.nip05 ?? null,
+            lightningAddress: c?.profile?.lud16 ?? null,
+            source: 'nostr',
+          });
+        }}
       />
 
       <GifPickerSheet
