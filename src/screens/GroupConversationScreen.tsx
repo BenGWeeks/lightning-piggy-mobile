@@ -7,6 +7,7 @@ import {
   FlatList,
   Image,
   ActivityIndicator,
+  InteractionManager,
   Linking,
   Modal,
   Pressable,
@@ -170,9 +171,27 @@ const GroupConversationScreen: React.FC = () => {
   // `subscribeGroupMessages` hook above will then pick them up live.
   // Force-mode skips the `since` filter (NIP-59 wraps have a randomised
   // created_at — see refreshDmInbox's comment).
+  //
+  // Deferred via InteractionManager so the screen-open transition gets a
+  // clean frame budget — refreshDmInbox can churn through ~1000 cached
+  // NIP-17 wraps synchronously on the JS thread (~40s on a real Pixel
+  // with a busy inbox), and if we kick it off during mount it blocks the
+  // *back* transition too: the user taps Back, the JS thread is locked,
+  // and the navigation animation can't start until the refresh finishes
+  // (#286). Cancelling the InteractionManager handle on unmount means a
+  // user who backs out before the transition even completes gets the
+  // best case — refresh never runs at all.
+  //
+  // No unmount guard is needed inside the refresh callback: refreshDmInbox
+  // writes only to NostrContext state (setDmInbox / cache writes), not to
+  // this screen's local state, so a late-finishing refresh after unmount
+  // is harmless.
   useEffect(() => {
     if (!group) return;
-    refreshDmInbox({ force: true }).catch(() => {});
+    const handle = InteractionManager.runAfterInteractions(() => {
+      refreshDmInbox({ force: true }).catch(() => {});
+    });
+    return () => handle.cancel();
   }, [group, refreshDmInbox]);
 
   const members: MemberRow[] = useMemo(() => {
