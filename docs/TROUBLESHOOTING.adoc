@@ -51,6 +51,25 @@ TMPDIR="$HOME/eas-tmp" EXPO_NO_DOCTOR=1 \
 ----
 *Cleanup:* `rm -rf "$HOME/eas-tmp"` between builds when you want to reclaim disk; the next run's `mkdir -p` and Gradle will re-create everything, including hidden entries such as `.gradle` or `.expo`. The EAS-CLI checkout under `$TMPDIR/eas-build-local-nodejs/` is also safe to delete between runs. Full recipe + rationale in `docs/DEPLOYMENT.adoc` → "Local production builds".
 
+| "How long is the EAS iOS build queue right now?" — no public API
+| EAS doesn't expose live queue depth via API; status.expo.dev only reports operational/degraded. Best signals: +
+1. **Last completed-build duration** — proxy for current load: +
+[source,bash]
+----
+NODE_NO_WARNINGS=1 eas build:list --platform ios --status finished --limit 1 --non-interactive \
+  | grep -E "Started at|Finished at"
+----
+Subtract the two timestamps. Free-tier iOS production has historically been ~2-3 hours wall-time. +
+2. **Are any builds currently queued?** +
+[source,bash]
+----
+NODE_NO_WARNINGS=1 eas build:list --status in-queue --status in-progress --limit 10 --non-interactive
+----
+Empty output = nothing in flight; positive output shows projects ahead of you in the shared queue. +
+3. **EAS dashboard** — https://expo.dev/accounts/bengweeks/projects/lightning-piggy-app/builds renders queue position client-side once a build is in flight; the initial HTML doesn't include it. +
+*Why this matters:* GH-Release-driven iOS builds go to TestFlight after EAS finishes + Apple processes (~10 min). For a same-day TestFlight push, kick off in the morning. For a v1.X.Y-rc1 cycle, plan ~3-4 hours from tag-push to "installable in TestFlight". +
+*The only definitive number* is the queue position EAS prints once your build is submitted. Until then, all numbers are estimates from prior runs.
+
 | Maestro can't tap a third-party signer's FAB / button (Aegis, Clave, etc) — `Element not found` or silent no-op
 | Some signer apps (notably Aegis ≥0.5.0, possibly Clave) ship without accessibility labels on key UI elements like the "+" FAB to add a connection. Maestro's `tapOn: { id: ... }` and `tapOn: { text: ... }` both miss because there's nothing to match. The `index:` selector also ranks unpredictably for un-labelled `ImageView` clickables. +
 *Why coordinates aren't a workaround:* `point: '90%, 91%'` and `adb shell input tap` are forbidden by the project's CLAUDE.md (fragile across screen sizes / OS versions / device profiles). +

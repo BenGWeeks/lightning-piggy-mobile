@@ -176,6 +176,81 @@ jobs:
             dist/lightning-piggy-${{ github.event.release.tag_name }}.apk \
             --repo "$GITHUB_REPOSITORY" --clobber
 
+  sync-release-identifiers:
+    name: Sync EAS build numbers into Release title
+    # A TestFlight tester sees `1.0.1 (42)` (X.Y.Z + EAS build number); the
+    # GH Release shows `v1.0.1-rc1`. Without correlation it's hard to tell
+    # which release a given TestFlight build came from. This step rewrites
+    # the Release title to embed the iOS + Android build numbers, so a
+    # tester can match `(42)` in TestFlight against the title here.
+    if: github.event_name == 'release'
+    needs: [build-and-submit, attach-android-apk]
+    runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+      NODE_NO_WARNINGS: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+
+      - name: Resolve build numbers + edit Release title
+        run: |
+          # Pull the build number for this commit on each platform. Filter
+          # by gitCommitHash so we don't accidentally pick up an unrelated
+          # in-flight build from a parallel branch.
+          ios_build=$(npx -y -p eas-cli@${{ env.EAS_CLI_VERSION }} eas build:list \
+            --platform ios --status finished --limit 5 --json --non-interactive \
+            | jq -r --arg sha "${{ github.sha }}" \
+                '[.[] | select(.gitCommitHash == $sha)][0].buildVersion // empty')
+          android_build=$(npx -y -p eas-cli@${{ env.EAS_CLI_VERSION }} eas build:list \
+            --platform android --status finished --limit 5 --json --non-interactive \
+            | jq -r --arg sha "${{ github.sha }}" \
+                '[.[] | select(.gitCommitHash == $sha)][0].buildVersion // empty')
+
+          # Derive the original title from the release event payload.
+          # Fall back to the tag name if no title was set.
+          base_title=$(gh release view "${{ github.event.release.tag_name }}" \
+            --repo "$GITHUB_REPOSITORY" --json name --jq .name)
+          if [ -z "$base_title" ] || [ "$base_title" = "${{ github.event.release.tag_name }}" ]; then
+            base_title="${{ github.event.release.tag_name }}"
+          fi
+
+          # Compose the suffix from whichever build numbers we resolved.
+          # Both should be present on a normal "all platforms" release;
+          # platform-specific re-runs may legitimately have only one.
+          suffix=""
+          if [ -n "$ios_build" ] && [ -n "$android_build" ]; then
+            suffix=" (iOS build $ios_build / Android build $android_build)"
+          elif [ -n "$ios_build" ]; then
+            suffix=" (iOS build $ios_build)"
+          elif [ -n "$android_build" ]; then
+            suffix=" (Android build $android_build)"
+          fi
+
+          if [ -z "$suffix" ]; then
+            echo "::warning title=No build numbers resolved::Could not find a finished EAS build for commit ${{ github.sha }} on either platform; leaving Release title unchanged."
+            exit 0
+          fi
+
+          # Idempotency: if the title already contains the build-number
+          # suffix (e.g. workflow re-run), don't double-append.
+          if echo "$base_title" | grep -qE '\(iOS build [0-9]+|Android build [0-9]+)'; then
+            echo "Release title already has a build-number suffix; skipping rewrite."
+            exit 0
+          fi
+
+          new_title="${base_title}${suffix}"
+          echo "Old title: $base_title"
+          echo "New title: $new_title"
+          gh release edit "${{ github.event.release.tag_name }}" \
+            --repo "$GITHUB_REPOSITORY" --title "$new_title"
+
   attach-technical-pdf:
     name: Generate & attach Technical Solution PDF
     if: github.event_name == 'release'
