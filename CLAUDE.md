@@ -30,6 +30,14 @@
 - Use the branded `Alert` from `src/components/BrandedAlert.tsx`, not React Native's native `Alert.alert` — the branded one matches the app's theme (pink/blue) and is testable via `id: 'branded-alert-button-N'` in Maestro flows. ESLint enforces this via `no-restricted-imports`.
 - Use the branded `Toast` from `src/components/BrandedToast.tsx`, not `react-native-toast-message` directly — matches the app's pink/blue theme. ESLint enforces this via `no-restricted-imports`.
 
+## Unit tests
+
+- Coverage scope: **`src/services`, `src/utils`, `src/contexts` only.** Components are excluded — they're best covered by Maestro pixel/flow tests (mocking Reanimated + bottom-sheet + Image for unit tests is high-effort, low-payoff).
+- Runner: Jest via `jest-expo` preset. Per the 2026 review of alternatives (Vitest's RN preset is still WIP, Bun test isn't documented for Expo, node:test has no RN renderer), Jest remains the right choice for RN + Expo SDK 55.
+- Add new tests under `tests/unit/<area>.test.ts`. Co-located `.test.ts` next to source files also works.
+- Pick targets via `bash scripts/coverage-priorities.sh 20` — ranks files by `(churn × LOC × fanout) / (coverage% + 1)`. Top of the list is where bugs hurt most.
+- The `Coverage` GitHub Actions workflow gates every PR: line-coverage may not drop more than 0.5pp vs main.
+
 ## Pull Request Titles
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/) plus a trailing issue reference when the PR resolves one:

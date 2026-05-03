@@ -5,19 +5,23 @@
 // (so TS/JSX/Reanimated worklets transpile correctly), and a sensible default
 // transformIgnorePatterns covering the RN / Expo / nostr-tools / @noble ecosystem.
 //
-// Coverage is collected from `src/**` only — generated files, native shells, and
-// scripts are excluded so the baseline reflects app code we actually own.
+// Coverage is scoped to `src/services`, `src/utils`, `src/contexts` only.
+// Components are excluded — they're best covered by Maestro pixel/flow tests
+// (mocking Reanimated + bottom-sheet + Image for unit tests is high-effort,
+// low-payoff). This keeps the gate tightly focused on the high-leverage
+// non-UI surface and stops component-only PRs from being penalised.
 
 module.exports = {
   preset: 'jest-expo',
   setupFiles: ['<rootDir>/jest.setup.js'],
   testMatch: ['<rootDir>/src/**/*.test.{ts,tsx}', '<rootDir>/tests/unit/**/*.test.{ts,tsx}'],
   collectCoverageFrom: [
-    'src/**/*.{ts,tsx}',
+    'src/services/**/*.{ts,tsx}',
+    'src/utils/**/*.{ts,tsx}',
+    'src/contexts/**/*.{ts,tsx}',
     '!src/**/*.d.ts',
     '!src/**/index.{ts,tsx}',
     '!src/**/*.stories.{ts,tsx}',
-    '!src/types/**',
   ],
   // Extend jest-expo's transformIgnorePatterns to also let nostr-tools and
   // its ESM-only crypto deps (@noble/*, @scure/*) through Babel. They all
