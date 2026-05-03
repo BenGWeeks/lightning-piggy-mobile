@@ -61,14 +61,17 @@ describe('findGroupForParticipants', () => {
     expect(hit).toBe(g);
   });
 
-  it('treats lookups case-insensitively', () => {
-    const g = makeGroup('g1', [PK_A, PK_B]);
+  it('normalises stored member pubkeys to lowercase before comparing', () => {
+    // findGroupForParticipants compares `pk.toLowerCase()` (stored
+    // member) against the participant set as-is, so the case-folding
+    // it actually performs is on the stored side. Register the group
+    // with uppercase members and look up with lowercase to exercise
+    // that branch — using `.toUpperCase().toLowerCase()` on both
+    // sides (as the test used to) just folds back to lowercase before
+    // the call and never reaches the normalisation code path.
+    const g = makeGroup('g1', [PK_A.toUpperCase(), PK_B.toUpperCase()]);
     setKnownGroups([g]);
-    // Lookup uses lowercase comparison against the stored member list,
-    // so an upper-case participant set still matches.
-    const hit = findGroupForParticipants(
-      new Set([PK_A.toUpperCase().toLowerCase(), PK_B.toLowerCase()]),
-    );
+    const hit = findGroupForParticipants(new Set([PK_A, PK_B]));
     expect(hit).toBe(g);
   });
 

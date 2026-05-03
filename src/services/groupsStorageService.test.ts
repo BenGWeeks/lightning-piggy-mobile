@@ -91,18 +91,43 @@ describe('loadGroupActivity / saveGroupActivity', () => {
 
   it('drops entries whose lastActivityAt is not a finite number', async () => {
     // The shape guard exists specifically because
-    // formatConversationTimestamp throws on a non-finite ts. A malformed
-    // entry must be silently dropped rather than crashing the inbox on
-    // mount.
+    // formatConversationTimestamp throws on a non-finite ts. A
+    // malformed entry must be silently dropped rather than crashing
+    // the inbox on mount.
+    //
+    // We can't round-trip NaN / Infinity through AsyncStorage via
+    // JSON.stringify — both get coerced to `null`, which would
+    // degenerate this case into the "non-number" branch and let a
+    // regression that removes the `Number.isFinite(...)` guard slip
+    // through. Spy on JSON.parse for exactly one call so the parsed
+    // object actually contains NaN / Infinity, exercising the finite-
+    // number branch the production guard cares about.
     const stored = {
       g_good: validActivity(),
-      g_nan: { ...validActivity(), lastActivityAt: NaN },
+      g_nan: { ...validActivity(), lastActivityAt: '__NaN' },
       g_str: { ...validActivity(), lastActivityAt: '123' },
-      g_inf: { ...validActivity(), lastActivityAt: Infinity },
+      g_inf: { ...validActivity(), lastActivityAt: '__Infinity' },
     };
-    await AsyncStorage.setItem(`nostr_group_activity_${PUBKEY}`, JSON.stringify(stored));
-    const loaded = await loadGroupActivity(PUBKEY);
-    expect(Object.keys(loaded)).toEqual(['g_good']);
+    const raw = JSON.stringify(stored);
+    const realParse = JSON.parse;
+    const spy = jest.spyOn(JSON, 'parse').mockImplementationOnce(((text: string) => {
+      const parsed = realParse(text);
+      if (parsed && typeof parsed === 'object') {
+        for (const key of Object.keys(parsed)) {
+          const entry = (parsed as Record<string, { lastActivityAt: unknown }>)[key];
+          if (entry && entry.lastActivityAt === '__NaN') entry.lastActivityAt = NaN;
+          if (entry && entry.lastActivityAt === '__Infinity') entry.lastActivityAt = Infinity;
+        }
+      }
+      return parsed;
+    }) as typeof JSON.parse);
+    try {
+      await AsyncStorage.setItem(`nostr_group_activity_${PUBKEY}`, raw);
+      const loaded = await loadGroupActivity(PUBKEY);
+      expect(Object.keys(loaded)).toEqual(['g_good']);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('drops entries missing required fields', async () => {

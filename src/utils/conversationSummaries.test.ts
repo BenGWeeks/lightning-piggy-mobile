@@ -214,7 +214,17 @@ describe('buildDmSummaries', () => {
 // ---------- mergeSummaries ----------
 
 describe('mergeSummaries', () => {
-  function summary(pubkey: string | null, ts: number, comment = ''): ConversationSummary {
+  // `kind` distinguishes a zap-shaped row (carries an amount) from a
+  // DM-shaped row (always 0 sats — buildDmSummaries hard-codes 0).
+  // Defaulting to the realistic shape per kind keeps the merge tests
+  // honest: passing 21 to every DM row would mask amount-handling
+  // regressions inside mergeSummaries.
+  function summary(
+    pubkey: string | null,
+    ts: number,
+    comment = '',
+    kind: 'zap' | 'dm' = 'zap',
+  ): ConversationSummary {
     return {
       id: pubkey ?? `anon:${ts}`,
       pubkey,
@@ -223,7 +233,7 @@ describe('mergeSummaries', () => {
       nip05: null,
       lightningAddress: null,
       lastActivityAt: ts,
-      lastAmountSats: pubkey ? 21 : 9,
+      lastAmountSats: kind === 'dm' ? 0 : pubkey ? 21 : 9,
       lastDirection: 'incoming',
       lastComment: comment,
       anonymous: pubkey === null,
@@ -238,7 +248,7 @@ describe('mergeSummaries', () => {
 
   it('uses the DM preview when zap + DM are within the preference window', () => {
     const z = summary(PK_A, 1000, '');
-    const d = summary(PK_A, 1000 + 60, 'hi from DM');
+    const d = summary(PK_A, 1000 + 60, 'hi from DM', 'dm');
     const merged = mergeSummaries([z], [d]);
     expect(merged).toHaveLength(1);
     expect(merged[0].lastComment).toBe('hi from DM');
@@ -247,17 +257,18 @@ describe('mergeSummaries', () => {
 
   it('uses the newer raw row outside the preference window', () => {
     const z = summary(PK_A, 1000, '');
-    const d = summary(PK_A, 1000 + 10 * 60, 'much later');
+    const d = summary(PK_A, 1000 + 10 * 60, 'much later', 'dm');
     const merged = mergeSummaries([z], [d]);
     expect(merged).toHaveLength(1);
     expect(merged[0].lastComment).toBe('much later');
-    // outside the window → the DM is the newest, but lastAmountSats
-    // takes the newest's value (which the DM shape provides as 21).
-    expect(merged[0].lastAmountSats).toBe(21);
+    // Outside the window → the DM is the newest, and DM rows from
+    // buildDmSummaries always carry lastAmountSats = 0. Asserting 0
+    // here keeps the test in step with what production really emits.
+    expect(merged[0].lastAmountSats).toBe(0);
   });
 
   it('passes through a zap-only or DM-only partner unchanged', () => {
-    const merged = mergeSummaries([summary(PK_A, 1000, '')], [summary(PK_B, 2000, 'hi')]);
+    const merged = mergeSummaries([summary(PK_A, 1000, '')], [summary(PK_B, 2000, 'hi', 'dm')]);
     // Sorted newest-first.
     expect(merged.map((m) => m.pubkey)).toEqual([PK_B, PK_A]);
   });
@@ -266,33 +277,60 @@ describe('mergeSummaries', () => {
 // ---------- formatConversationTimestamp ----------
 
 describe('formatConversationTimestamp', () => {
-  const NOW = new Date('2026-05-03T12:00:00.000Z');
-  const sec = (d: string) => Math.floor(new Date(d).getTime() / 1000);
+  // Build NOW + every fixture in *local* time so the calendar-day
+  // comparisons inside formatConversationTimestamp (which use
+  // `getFullYear/getMonth/getDate`) stay stable across host TZs.
+  // A pinned UTC string would shift to a different local day on
+  // hosts like UTC-10 / UTC+14, breaking the same-day / Yesterday
+  // assertions.
+  const NOW = new Date();
+  NOW.setFullYear(2026, 4 /* May */, 3);
+  NOW.setHours(12, 0, 0, 0);
+  const localSec = (
+    year: number,
+    month0: number,
+    day: number,
+    hour = 0,
+    minute = 0,
+    second = 0,
+  ): number => {
+    const d = new Date();
+    d.setFullYear(year, month0, day);
+    d.setHours(hour, minute, second, 0);
+    return Math.floor(d.getTime() / 1000);
+  };
 
   it('renders "now" inside the same minute', () => {
-    expect(formatConversationTimestamp(sec('2026-05-03T11:59:30.000Z'), NOW)).toBe('now');
+    expect(formatConversationTimestamp(localSec(2026, 4, 3, 11, 59, 30), NOW)).toBe('now');
   });
 
   it('renders minute granularity within the hour', () => {
-    expect(formatConversationTimestamp(sec('2026-05-03T11:30:00.000Z'), NOW)).toBe('30m');
+    expect(formatConversationTimestamp(localSec(2026, 4, 3, 11, 30), NOW)).toBe('30m');
   });
 
   it('renders hour granularity within the same calendar day', () => {
-    expect(formatConversationTimestamp(sec('2026-05-03T08:00:00.000Z'), NOW)).toBe('4h');
+    expect(formatConversationTimestamp(localSec(2026, 4, 3, 8, 0), NOW)).toBe('4h');
   });
 
   it('renders "Yesterday" for the previous calendar day', () => {
-    expect(formatConversationTimestamp(sec('2026-05-02T20:00:00.000Z'), NOW)).toBe('Yesterday');
+    expect(formatConversationTimestamp(localSec(2026, 4, 2, 20, 0), NOW)).toBe('Yesterday');
   });
 
   it('renders an explicit short date for older entries', () => {
-    const out = formatConversationTimestamp(sec('2026-04-10T12:00:00.000Z'), NOW);
-    expect(out).toMatch(/Apr/i);
-    expect(out).not.toMatch(/Yesterday/);
+    const ts = localSec(2026, 3 /* April */, 10, 12, 0);
+    const out = formatConversationTimestamp(ts, NOW);
+    // Compute the expected localised date substring at runtime so the
+    // assertion is locale-agnostic — `Apr` only appears for English
+    // locales; `de-DE` produces "10. Apr.", `ar-EG` Arabic digits, etc.
+    const expectedDateStr = new Date(ts * 1000).toLocaleDateString(undefined, {
+      day: 'numeric',
+      month: 'short',
+    });
+    expect(out).toBe(expectedDateStr);
   });
 
   it('includes the year for older years', () => {
-    const out = formatConversationTimestamp(sec('2024-12-31T12:00:00.000Z'), NOW);
+    const out = formatConversationTimestamp(localSec(2024, 11 /* December */, 31, 12, 0), NOW);
     expect(out).toContain('2024');
   });
 });
@@ -340,6 +378,12 @@ describe('conversationPreview', () => {
       lastDirection: 'incoming',
       lastComment: '',
     });
-    expect(out).toBe('⚡ 12,345 sats');
+    // conversationPreview uses `(12345).toLocaleString()` so the
+    // grouping separator depends on the host locale (`12,345` /
+    // `12.345` / `12 345` / Arabic digits, etc.). Compute the
+    // expected number locally so the assertion stays valid in any
+    // locale.
+    const expectedAmount = (12345).toLocaleString();
+    expect(out).toBe(`⚡ ${expectedAmount} sats`);
   });
 });

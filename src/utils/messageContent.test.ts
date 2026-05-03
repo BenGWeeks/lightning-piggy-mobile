@@ -2,7 +2,8 @@
  * Coverage for the message-content classifiers (image / invoice / LN
  * address / shared contact / time / relative-future). The bolt11
  * decoder is real (light-bolt11-decoder is pure JS); we only fixture
- * a known-valid testnet invoice so the assertion is deterministic.
+ * a known-valid mainnet invoice (from the BOLT-11 spec's own test
+ * vectors) so the assertion is deterministic.
  */
 
 import * as nip19 from 'nostr-tools/nip19';

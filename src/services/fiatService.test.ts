@@ -32,15 +32,28 @@ describe('satsToFiat', () => {
 describe('formatFiat', () => {
   it('renders an amount with 2 decimal places + currency symbol', () => {
     const out = formatFiat(12.34, 'USD');
-    expect(out).toContain('12.34');
-    // Don't lock the symbol position (locale-specific) — just check
-    // both the number and currency identifier are present.
+    // formatFiat goes through `toLocaleString(undefined, ...)`, so the
+    // decimal separator (.,) and grouping/spacing are locale-driven.
+    // Compute the locale-correct fraction substring at runtime so the
+    // assertion is valid on `de-DE` ("12,34 $") just as much as on
+    // `en-US` ("$12.34").
+    const expectedNumber = (12.34).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    expect(out).toContain(expectedNumber);
   });
 
   it('renders sub-cent amounts as "< <symbol>0.01"', () => {
     const out = formatFiat(0.0001, 'USD');
     expect(out.startsWith('< ')).toBe(true);
-    expect(out).toContain('0.01');
+    // Compute the locale-correct "0.01" substring (`0,01` on `de-DE`
+    // etc.) so the assertion is locale-agnostic.
+    const expectedFloor = (0.01).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    expect(out).toContain(expectedFloor);
   });
 
   it('does not collapse 0 to "< 0.01"', () => {
@@ -56,6 +69,14 @@ describe('satsToFiatString', () => {
 
   it('formats sats into the localised currency string when a price is given', () => {
     const out = satsToFiatString(100_000, 50_000, 'USD');
-    expect(out).toContain('50.00');
+    // Like formatFiat above, the result goes through
+    // toLocaleString(undefined, ...) — compute the expected `50.00`
+    // substring in the host locale so this passes on `de-DE` /
+    // `fr-FR` / etc., where the decimal separator differs.
+    const expected = (50).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    expect(out).toContain(expected);
   });
 });
