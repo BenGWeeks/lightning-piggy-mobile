@@ -105,28 +105,50 @@ const MessagesScreen: React.FC = () => {
   //
   // Also pre-warms the friend-picker avatar bitmaps. Histograms from
   // perf-suite showed the FAB → FriendPicker open path spends most
-  // of its 38 % modern-jank budget on cold avatar decode (50 simultaneous
-  // first-paint Image decodes in the sheet animation window). Prefetching
-  // them on tab focus pushes the decode cost OUT of the FAB-tap-to-content
-  // window — by the time the user taps (+), `expo-image`'s disk cache
-  // is warm and the avatars render without a fresh decode. Capped at 50
-  // so we don't spike memory on huge contact lists. See plan in #245.
+  // of its modern-jank budget on cold avatar decode. Prefetching the
+  // avatars the picker will actually display (filtered + sorted to
+  // match FriendPickerSheet's friends memo, capped at 50) pushes the
+  // decode cost OUT of the FAB-tap-to-content window. By the time the
+  // user taps (+), `expo-image`'s disk cache is warm and the avatars
+  // render without a fresh decode. See plan in #245.
+  //
+  // TTL gate (30 s) so the prefetch doesn't re-fire on every
+  // contacts-array change — `loadContacts` updates contacts
+  // incrementally as kind-0 profile batches arrive, which would
+  // otherwise schedule the same 50-avatar prefetch on every drip.
+  // Mirrors the same pattern used by `dmInboxLastRefreshAt`.
+  const lastAvatarPrefetchAt = useRef<number>(0);
   useFocusEffect(
     useCallback(() => {
       if (!isLoggedIn) return;
       const handle = InteractionManager.runAfterInteractions(() => {
         refreshDmInbox();
-        const avatarUrls = contacts
-          .map((c) => c.profile?.picture)
-          .filter((u): u is string => !!u)
-          .slice(0, 50);
-        if (avatarUrls.length > 0) {
-          ExpoImage.prefetch(avatarUrls, 'memory-disk').catch(() => {
-            // Prefetch failures are silent — the avatar will just decode
-            // on-demand at sheet open time, which is the un-fixed
-            // pre-prefetch behaviour. No user-visible regression.
-          });
+
+        const PREFETCH_TTL_MS = 30_000;
+        if (Date.now() - lastAvatarPrefetchAt.current < PREFETCH_TTL_MS) return;
+
+        // Match FriendPickerSheet's `friends` memo: drop entries with
+        // no resolved name (the picker hides them), sort by first
+        // Latin letter then by lower-case name, then take the first
+        // 50. That's the set the user will see in the initial sheet
+        // viewport — prefetching them is the relevant warm-up.
+        const named: { picture: string; sortKey: string }[] = [];
+        for (const c of contacts) {
+          const name = (c.profile?.displayName || c.profile?.name || c.petname || '').trim();
+          const picture = c.profile?.picture;
+          if (!name || !picture) continue;
+          named.push({ picture, sortKey: name.toLowerCase() });
         }
+        named.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+        const avatarUrls = named.slice(0, 50).map((x) => x.picture);
+        if (avatarUrls.length === 0) return;
+
+        lastAvatarPrefetchAt.current = Date.now();
+        ExpoImage.prefetch(avatarUrls, 'memory-disk').catch(() => {
+          // Prefetch failures are silent — falls back to on-demand
+          // decode at sheet open time, the un-fixed behaviour. No
+          // user-visible regression.
+        });
       });
       return () => handle.cancel();
     }, [isLoggedIn, refreshDmInbox, contacts]),
