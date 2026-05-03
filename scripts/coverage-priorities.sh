@@ -107,6 +107,32 @@ printf "%s\n" "Computing risk scores for ${#FILES[@]} files (churn window: $DAYS
 ROWS_TMP=$(mktemp)
 trap 'rm -f "$ROWS_TMP"' EXIT
 
+# One-pass fanout cache: scan every src file once, look at every line
+# that looks like an `import ... from '...'` and tally the basename.
+# Replaces the previous O(N * size_of_src) per-file `grep -rlF` loop —
+# in this repo that was ~130 files × full-tree scans = noticeably slow
+# on every run.
+FANOUT_TMP=$(mktemp)
+trap 'rm -f "$ROWS_TMP" "$FANOUT_TMP"' EXIT
+# grep + sed + awk pipeline (POSIX-portable — mawk's `match()` doesn't
+# support gawk's 3-arg array-capture form, so we extract via grep -oE
+# instead). Produces "<basename>\t<count>" rows.
+#
+# `from "./foo"`, `from "../bar/baz"`, `from "src/utils/foo"` all
+# produce "foo" / "baz" / "foo" via the final basename-extraction awk.
+grep -hoE "from[[:space:]]+['\"][^'\"]+['\"]" "${FILES[@]}" 2>/dev/null \
+  | sed -E "s/.*['\"]([^'\"]+)['\"].*/\1/" \
+  | awk -F/ '{print $NF}' \
+  | sort | uniq -c \
+  | awk '{print $2"\t"$1}' >"$FANOUT_TMP"
+
+fanout_for() {
+  # Stem (basename without .ts/.tsx). Look up the cached count; subtract
+  # 1 if the file imports itself (rare, but cheap to guard).
+  local stem="$1"
+  awk -F'\t' -v s="$stem" '$1 == s { print $2; found=1; exit } END { if (!found) print 0 }' "$FANOUT_TMP"
+}
+
 for f in "${FILES[@]}"; do
   # churn — commits touching this file in the window
   churn=$(git log --since="$SINCE" --pretty=format:'%H' -- "$f" 2>/dev/null | wc -l | tr -d ' ')
@@ -114,13 +140,9 @@ for f in "${FILES[@]}"; do
   # loc — non-empty? wc -l counts newlines; close enough as a relative signal
   loc=$(wc -l <"$f" | tr -d ' ')
 
-  # fanout — count distinct src files that import this one (by basename, no ext).
-  # `|| true` so set -e doesn't kill us when grep finds nothing (common for
-  # leaf utility files that nothing imports).
   base=$(basename "$f")
   stem="${base%.*}"
-  fanout=$( { grep -rlF "$stem" src --include='*.ts' --include='*.tsx' 2>/dev/null || true; } \
-    | { grep -vF "$f" || true; } | wc -l | tr -d ' ')
+  fanout=$(fanout_for "$stem")
 
   cov=$(coverage_for "$f")
 
