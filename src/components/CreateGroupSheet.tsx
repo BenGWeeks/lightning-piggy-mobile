@@ -438,7 +438,8 @@ const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
                   <Image
                     source={{ uri: c.profile.picture }}
                     style={styles.summaryAvatarImage}
-                    cachePolicy="disk"
+                    cachePolicy="memory-disk"
+                    recyclingKey={c.profile.picture}
                     autoplay={false}
                   />
                 ) : (
