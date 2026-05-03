@@ -21,6 +21,32 @@ module.exports = [
     rules: {
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/no-explicit-any': 'warn',
+      // Force toasts to flow through the brand-themed wrapper. Direct
+      // imports of `react-native-toast-message` bypass the pink / blue
+      // accent + rounded-corner styling configured in BrandedToast.tsx.
+      // The wrapper itself is the only legitimate consumer; an override
+      // block below opens a hole specifically for that file.
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'react-native-toast-message',
+              message:
+                "Import Toast from 'src/components/BrandedToast' instead — keeps the on-brand pink/blue toast styling consistent across the app.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // BrandedToast wraps `react-native-toast-message` and MUST be allowed
+    // to import it directly. Re-declare the restriction as 'off' for this
+    // single file to punch a hole in the global rule above.
+    files: ['src/components/BrandedToast.tsx'],
+    rules: {
+      'no-restricted-imports': 'off',
     },
   },
   {
