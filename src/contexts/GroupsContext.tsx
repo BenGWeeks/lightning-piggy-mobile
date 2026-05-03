@@ -47,6 +47,15 @@ interface GroupsContextType {
   loading: boolean;
   createGroup: (name: string, memberPubkeys: string[]) => Promise<Group>;
   renameGroup: (groupId: string, newName: string) => Promise<boolean>;
+  /** Append unique pubkeys to the group's member list. Returns the
+   * updated group, or null if the group doesn't exist. Re-publishes
+   * the kind-30200 group-state event so other members pick up the
+   * new roster (best-effort; failures are non-fatal). */
+  addMembersToGroup: (groupId: string, pubkeys: string[]) => Promise<Group | null>;
+  /** Remove a single pubkey from the group's member list. Returns
+   * the updated group, or null if the group doesn't exist or the
+   * pubkey wasn't a member. Re-publishes group state on success. */
+  removeMemberFromGroup: (groupId: string, pubkey: string) => Promise<Group | null>;
   deleteGroup: (groupId: string) => Promise<void>;
   getGroup: (groupId: string) => Group | undefined;
   /**
@@ -349,6 +358,84 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [persist, publishGroupState],
   );
 
+  const addMembersToGroup = useCallback(
+    async (groupId: string, pubkeys: string[]): Promise<Group | null> => {
+      let updated: Group | null = null;
+      let didChange = false;
+      await persist((curr) => {
+        const idx = curr.findIndex((g) => g.id === groupId);
+        if (idx === -1) return curr;
+        const existing = new Set(curr[idx].memberPubkeys);
+        // Dedupe input — a caller that asks for [pkA, pkA] should add
+        // pkA exactly once. Bare `pubkeys.filter` would let both through
+        // because the filter is against the pre-mutation `existing` set.
+        const toAdd = [...new Set(pubkeys)].filter((pk) => !existing.has(pk));
+        if (toAdd.length === 0) {
+          updated = curr[idx];
+          return curr;
+        }
+        didChange = true;
+        updated = {
+          ...curr[idx],
+          memberPubkeys: [...curr[idx].memberPubkeys, ...toAdd],
+          updatedAt: Date.now(),
+        };
+        const next = [...curr];
+        next[idx] = updated;
+        return next;
+      });
+      if (!updated) return null;
+      // Only republish kind-30200 when membership actually changed.
+      // No-op adds (every input pubkey already a member) shouldn't spam
+      // the relays with an unchanged member list.
+      if (didChange) {
+        const finalUpdated: Group = updated;
+        publishGroupState({
+          groupId: finalUpdated.id,
+          name: finalUpdated.name,
+          memberPubkeys: finalUpdated.memberPubkeys,
+        }).catch((e) => {
+          if (__DEV__) console.warn('[Groups] publishGroupState (add) failed:', e);
+        });
+      }
+      return updated;
+    },
+    [persist, publishGroupState],
+  );
+
+  const removeMemberFromGroup = useCallback(
+    async (groupId: string, pubkey: string): Promise<Group | null> => {
+      let updated: Group | null = null;
+      await persist((curr) => {
+        const idx = curr.findIndex((g) => g.id === groupId);
+        if (idx === -1) return curr;
+        if (!curr[idx].memberPubkeys.includes(pubkey)) {
+          updated = null;
+          return curr;
+        }
+        updated = {
+          ...curr[idx],
+          memberPubkeys: curr[idx].memberPubkeys.filter((pk) => pk !== pubkey),
+          updatedAt: Date.now(),
+        };
+        const next = [...curr];
+        next[idx] = updated;
+        return next;
+      });
+      if (!updated) return null;
+      const finalUpdated: Group = updated;
+      publishGroupState({
+        groupId: finalUpdated.id,
+        name: finalUpdated.name,
+        memberPubkeys: finalUpdated.memberPubkeys,
+      }).catch((e) => {
+        if (__DEV__) console.warn('[Groups] publishGroupState (remove) failed:', e);
+      });
+      return finalUpdated;
+    },
+    [persist, publishGroupState],
+  );
+
   const deleteGroup = useCallback(
     async (groupId: string): Promise<void> => {
       await persist((curr) => curr.filter((g) => g.id !== groupId));
@@ -523,6 +610,8 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       loading,
       createGroup,
       renameGroup,
+      addMembersToGroup,
+      removeMemberFromGroup,
       deleteGroup,
       getGroup,
       reconcileFromGroupStateEvent,
@@ -537,6 +626,8 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       loading,
       createGroup,
       renameGroup,
+      addMembersToGroup,
+      removeMemberFromGroup,
       deleteGroup,
       getGroup,
       reconcileFromGroupStateEvent,

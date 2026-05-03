@@ -63,6 +63,10 @@ interface Props {
   // the Messages-tab "+" FAB surface group creation alongside 1:1 — see
   // PR #227.
   onNewGroup?: () => void;
+  // Optional. Hide these pubkeys from the picker — used by
+  // GroupMembersSheet so existing members aren't selectable (otherwise
+  // adding them silently no-ops in addMembersToGroup).
+  excludePubkeys?: readonly string[];
 }
 
 const FriendPickerSheet: React.FC<Props> = ({
@@ -72,6 +76,7 @@ const FriendPickerSheet: React.FC<Props> = ({
   title = 'Send to friend',
   subtitle,
   onNewGroup,
+  excludePubkeys,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -163,17 +168,21 @@ const FriendPickerSheet: React.FC<Props> = ({
   // comparison, the previous implementation did 1100+ NFKD normalizes
   // synchronously while the bottom-sheet open animation was running —
   // which is what made the (+) FAB tap feel slow. See issue #245.
-  // Only re-runs when `contacts` changes (NOT every keystroke).
-  // SortedFriend keeps the precomputed sort keys around so
+  // Only re-runs when `contacts` or `excludePubkeys` change (NOT every
+  // keystroke). SortedFriend keeps the precomputed sort keys around so
   // `availableLetters` and `handleLetterPress` can read them too,
   // instead of recomputing firstAlpha 50× per keystroke.
   const sortedFriends = useMemo<SortedFriend[]>(() => {
+    const exclude = excludePubkeys ? new Set(excludePubkeys) : null;
     const enriched: SortedFriend[] = [];
     for (const c of contacts) {
       const name = (c.profile?.displayName || c.profile?.name || c.petname || '').trim();
       // Contacts with no resolved name aren't useful in the picker —
-      // they can't be reliably identified by the user.
+      // they can't be reliably identified by the user. Also drop any
+      // caller-excluded pubkeys (e.g. existing group members) so they
+      // don't silently no-op in addMembersToGroup.
       if (name.length === 0) continue;
+      if (exclude?.has(c.pubkey)) continue;
       enriched.push({
         pubkey: c.pubkey,
         name,
@@ -188,7 +197,7 @@ const FriendPickerSheet: React.FC<Props> = ({
       return NAME_COLLATOR.compare(a.nameLower, b.nameLower);
     });
     return enriched;
-  }, [contacts]);
+  }, [contacts, excludePubkeys]);
 
   // Step 2: filter the pre-sorted list by `deferredSearch`. Substring
   // match is O(n) per keystroke with no allocations — the sort doesn't
