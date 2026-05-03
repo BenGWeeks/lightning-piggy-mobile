@@ -14,6 +14,8 @@ keyboard up" is a pixel screenshot.
 
 == Pre-reqs
 
+=== AVD keyboard gates
+
 The Android emulator suppresses the soft IME by default on API 35+ —
 see `TROUBLESHOOTING.adoc` "AVD soft keyboard never appears". Apply both
 gates before running the audit:
@@ -23,6 +25,23 @@ gates before running the audit:
 adb shell settings put secure show_ime_with_hard_keyboard 1
 adb shell settings put secure stylus_handwriting_enabled 0
 ----
+
+=== Fixture data
+
+Some flows expect specific contacts / groups to exist on the signed-in
+account so they can drive a deterministic path:
+
+[cols="1,2,2", options="header"]
+|===
+| Flow | Needs | Why
+| 06 (1:1 conversation input) | A 1:1 DM with "Daniel Prince" visible in the Messages tab | Tapped to open the conversation
+| 09 (GIF picker) | Same as 06 | Same — GIF picker opens from inside a conversation
+| 11 (rename group) | A group named "TestGroup Abc" | Tapped to open the group conversation, then the title taps to rename
+|===
+
+If your testing seed uses different names, `sed -i` the YAML files in
+`tests/e2e/keyboard-audit/` to match — every flow that needs fixture
+data has a single anchored `text:` selector at the top.
 
 == Run
 

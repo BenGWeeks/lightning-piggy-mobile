@@ -10,9 +10,15 @@ name: Keyboard audit — RenameGroupSheet input
     id: 'tab-messages'
 - waitForAnimationToEnd:
     timeout: 3000
-# Open a group conversation. The first group row is reliable; "OK" is too generic
+# Open the "TestGroup Abc" group (see docs/keyboard-audit.adoc §
+# Fixture data prereqs). Scroll first since it may be below the fold.
+- scrollUntilVisible:
+    element:
+      text: 'TestGroup Abc$'
+    direction: DOWN
+    timeout: 8000
 - tapOn:
-    text: 'TestGroup Abc'
+    text: 'TestGroup Abc$'
 - waitForAnimationToEnd:
     timeout: 3000
 # Group title taps the rename trigger (group-title testID, line 588)

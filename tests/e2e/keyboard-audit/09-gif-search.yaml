@@ -10,9 +10,16 @@ name: Keyboard audit — GifPickerSheet search
     id: 'tab-messages'
 - waitForAnimationToEnd:
     timeout: 3000
-# Open a 1:1 conversation
+# Open a 1:1 conversation. Scroll first — Daniel Prince may be below
+# the fold on Ben's testing seed. Anchor the regex with $ to avoid a
+# false-match on "Daniel Princeton" / similar.
+- scrollUntilVisible:
+    element:
+      text: 'Daniel Prince$'
+    direction: DOWN
+    timeout: 8000
 - tapOn:
-    text: 'Daniel Prince'
+    text: 'Daniel Prince$'
 - waitForAnimationToEnd:
     timeout: 3000
 # Open the attach picker

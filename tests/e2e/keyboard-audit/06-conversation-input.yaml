@@ -10,14 +10,16 @@ name: Keyboard audit — 1:1 conversation message input
     id: 'tab-messages'
 - waitForAnimationToEnd:
     timeout: 3000
-# Daniel Prince is a 1:1 DM in the Messages list; scroll to find it
+# Daniel Prince is a 1:1 DM in the Messages list; scroll to find it.
+# Anchor the regex with $ so it doesn't match "Daniel Princeton" /
+# "Daniel Prince's…" if a similar contact is present (repo convention).
 - scrollUntilVisible:
     element:
-      text: 'Daniel Prince'
+      text: 'Daniel Prince$'
     direction: DOWN
     timeout: 8000
 - tapOn:
-    text: 'Daniel Prince'
+    text: 'Daniel Prince$'
 - extendedWaitUntil:
     visible:
       id: 'conversation-input'

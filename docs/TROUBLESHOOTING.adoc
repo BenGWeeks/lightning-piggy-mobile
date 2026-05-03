@@ -22,7 +22,7 @@ adb shell ime enable com.google.android.inputmethod.latin/com.android.inputmetho
 adb shell ime set com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME
 ----
 *Verify:* `adb shell dumpsys input_method | grep mInputShown` should report `mInputShown=true` once an input is focused. The audit script `scripts/keyboard-screenshot-audit.sh` polls this gate before every screenshot. +
-*Lower-friction alternative:* the satmo-react-native repo recommends running daily-driver dev work on **API 34, no Google Play, "Medium Phone" device profile**. API 34 doesn't ship the stylus-handwriting service so the second gate is a no-op, and the smaller GMS surface frees ~300 MB RAM. See `../satmo-react-native/docs/TROUBLESHOOTING.adoc` ("Mouse clicks / taps don't register" + "Emulator slow to boot"). API 36 is fine for production-build smoke testing — just expect to re-run both `settings put` commands after each cold boot.
+*Lower-friction alternative:* run daily-driver dev work on **API 34, no Google Play, "Medium Phone" device profile**. API 34 doesn't ship the stylus-handwriting service so the second gate is a no-op, and the smaller GMS surface frees ~300 MB RAM (avoiding the "System UI isn't responding" stalls under memory pressure). API 36 is fine for production-build smoke testing — just expect to re-run both `settings put` commands after each cold boot.
 
 | Maestro can't find elements behind a modal Alert dialog
 | Dismiss the alert first (e.g. tap "KEEP CURRENT" or "Cancel") before asserting visibility of elements underneath.
