@@ -182,16 +182,28 @@ const GroupConversationScreen: React.FC = () => {
   // user who backs out before the transition even completes gets the
   // best case — refresh never runs at all.
   //
-  // No unmount guard is needed inside the refresh callback: refreshDmInbox
-  // writes only to NostrContext state (setDmInbox / cache writes), not to
-  // this screen's local state, so a late-finishing refresh after unmount
-  // is harmless.
+  // The AbortController covers the other case: the refresh has already
+  // started running when the user taps back. handle.cancel() is a no-op
+  // once runAfterInteractions has fired, so without the signal the
+  // decrypt loop keeps grinding the JS thread for tens of seconds after
+  // unmount and the back-tap appears frozen. refreshDmInbox checks
+  // signal.aborted between batches in its decrypt loops; aborting here
+  // lets it bail out within ~1 batch (≤ DECRYPT_YIELD_EVERY items).
+  //
+  // No unmount guard is needed inside the refresh callback for state
+  // safety: refreshDmInbox writes only to NostrContext state, not to
+  // this screen's local state, so a late-finishing refresh is harmless
+  // for correctness — the abort is purely a perf concern.
   useEffect(() => {
     if (!group) return;
+    const ac = new AbortController();
     const handle = InteractionManager.runAfterInteractions(() => {
-      refreshDmInbox({ force: true }).catch(() => {});
+      refreshDmInbox({ force: true, signal: ac.signal }).catch(() => {});
     });
-    return () => handle.cancel();
+    return () => {
+      handle.cancel();
+      ac.abort();
+    };
   }, [group, refreshDmInbox]);
 
   const members: MemberRow[] = useMemo(() => {
