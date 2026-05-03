@@ -277,6 +277,28 @@ function convLastSeenKey(user: string, peer: string) {
   return DM_CONV_LAST_SEEN_PREFIX + user + '_' + peer;
 }
 
+/** Read the persisted DM inbox for a user. Used during session restore /
+ * post-login so the Messages tab paints from cache on cold start instead
+ * of waiting for the relay round-trip + NIP-17 decrypt loop (3-5 s). The
+ * shape mirrors what `refreshDmInbox` already writes at the end of every
+ * successful refresh — so this is purely a read-side hoist of work that
+ * was already happening, just earlier in the lifecycle.
+ *
+ * No follow-list filter is applied here. The next `refreshDmInbox` call
+ * (fires via Messages-tab focus) re-applies the filter against current
+ * follows, so a since-last-session unfollow never persists to the UI for
+ * more than the brief render window before that re-filter happens. */
+async function loadDmInboxFromCache(pubkey: string): Promise<DmInboxEntry[]> {
+  try {
+    const raw = await AsyncStorage.getItem(inboxCacheKey(pubkey));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 async function loadLastSeen(key: string): Promise<number | undefined> {
   const raw = await AsyncStorage.getItem(key);
   if (!raw) return undefined;
@@ -628,6 +650,16 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return false;
   }, []);
 
+  /** Eagerly hydrate `dmInbox` from the persisted NIP-17 inbox cache so
+   * the Messages tab paints conversations on cold start instead of
+   * staying blank for the relay-fetch + decrypt loop (~3-5 s). Called
+   * from session-restore + post-login flows; refreshDmInbox handles
+   * its own cache read separately for the delta-fetch path. */
+  const hydrateDmInboxFromCache = useCallback(async (pk: string) => {
+    const cached = await loadDmInboxFromCache(pk);
+    if (cached.length > 0) setDmInbox(cached);
+  }, []);
+
   const loadContacts = useCallback(
     async (pk: string, relayUrls: string[], opts?: { force?: boolean }) => {
       const t0 = Date.now();
@@ -798,6 +830,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         // Load cached contacts immediately (no network, <100ms)
         await loadContactsFromCache();
 
+        // Eagerly hydrate dmInbox from disk cache so the Messages tab
+        // paints conversations on cold start. The relay refresh below
+        // doesn't touch dmInbox; the eventual refreshDmInbox call
+        // (driven by Messages-tab focus) does its own cache read for
+        // the delta-fetch path and replaces this hydrated state with
+        // the merged disk+relay result.
+        await hydrateDmInboxFromCache(pk);
+
         // Defer relay fetches until after animations/rendering complete.
         // Seed the working relay set from the cached NIP-65 relay list so
         // `loadProfile` / `loadContacts` hit the relays the user actually
@@ -834,7 +874,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         console.warn('Nostr auto-login failed:', error);
       }
     })();
-  }, [loadRelays, loadProfile, loadContacts, loadContactsFromCache]);
+  }, [loadRelays, loadProfile, loadContacts, loadContactsFromCache, hydrateDmInboxFromCache]);
 
   const loginWithNsec = useCallback(
     async (nsec: string): Promise<{ success: boolean; error?: string }> => {
@@ -858,6 +898,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
         // Load cached contacts immediately, fetch fresh data in background
         await loadContactsFromCache();
+        // Eagerly hydrate dmInbox from disk cache so Messages tab paints
+        // on first focus instead of staying blank for the relay round-trip.
+        await hydrateDmInboxFromCache(pk);
         InteractionManager.runAfterInteractions(async () => {
           try {
             const readRelays = await loadRelays(pk);
@@ -880,7 +923,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setIsLoggingIn(false);
       }
     },
-    [loadRelays, loadProfile, loadContacts, loadContactsFromCache],
+    [loadRelays, loadProfile, loadContacts, loadContactsFromCache, hydrateDmInboxFromCache],
   );
 
   const loginWithAmber = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
@@ -902,6 +945,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       // Load cached contacts immediately, fetch fresh data in background
       await loadContactsFromCache();
+      // Eagerly hydrate dmInbox from disk cache so Messages tab paints
+      // on first focus instead of staying blank for the relay round-trip.
+      await hydrateDmInboxFromCache(pk);
       InteractionManager.runAfterInteractions(async () => {
         try {
           const readRelays = await loadRelays(pk);
@@ -921,7 +967,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } finally {
       setIsLoggingIn(false);
     }
-  }, [loadRelays, loadProfile, loadContacts, loadContactsFromCache]);
+  }, [loadRelays, loadProfile, loadContacts, loadContactsFromCache, hydrateDmInboxFromCache]);
 
   const logout = useCallback(async () => {
     clearMemoisedSecretKey();
@@ -968,6 +1014,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       for (const k of allKeysForGroups) {
         if (k.startsWith('group_messages_')) toRemove.push(k);
       }
+      // Per-pubkey group activity cache (added in #257). Contains
+      // decrypted last-message previews (`GroupActivity.lastText`),
+      // so we MUST clear it on logout — leaving it on disk would
+      // expose private content to whoever logs in next.
+      toRemove.push(`nostr_group_activity_${loggedOutPubkey}`);
     }
     await AsyncStorage.multiRemove(toRemove);
 

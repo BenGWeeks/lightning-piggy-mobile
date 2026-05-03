@@ -14,6 +14,13 @@ interface Props {
   confirmLabel?: string;
   onConfirm: (sats: number) => void;
   onBack?: () => void;
+  /**
+   * Optional preset sats amounts. When provided, a row of pill buttons
+   * renders between the input card and the confirm button. Tapping one
+   * fills both the sats and fiat text. Useful when the calling flow
+   * has a small set of sensible defaults the user is likely to pick.
+   */
+  suggestedAmounts?: number[];
 }
 
 type Unit = 'sats' | 'fiat';
@@ -37,6 +44,7 @@ const AmountEntryScreen: React.FC<Props> = ({
   confirmLabel = 'Confirm',
   onConfirm,
   onBack,
+  suggestedAmounts,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createAmountEntryStyles(colors), [colors]);
@@ -86,6 +94,24 @@ const AmountEntryScreen: React.FC<Props> = ({
   // via `.toFixed(2)` on every swap, so a sats→fiat→sats round-trip
   // drifts off by the rounding error (e.g. 5,000 → $3.90 → 5,006).
   const currentSats = useMemo(() => parseInt(satsText, 10) || 0, [satsText]);
+
+  // Tap a suggested-amount pill: write through to both sats + fiat so a
+  // subsequent unit swap reads the same value. Marks the field
+  // pristine so the next keypress replaces (otherwise typing "1" after
+  // tapping 21 would yield "211" — same root cause as the keypad's
+  // pristine-replace handling).
+  const handleSuggestedAmount = useCallback(
+    (sats: number) => {
+      setSatsText(String(sats));
+      if (btcPrice) {
+        setFiatText(satsToFiat(sats, btcPrice).toFixed(2));
+      } else {
+        setFiatText('');
+      }
+      setPristine(true);
+    },
+    [btcPrice],
+  );
 
   const setPrimaryRaw = useCallback(
     (next: string) => {
@@ -303,6 +329,29 @@ const AmountEntryScreen: React.FC<Props> = ({
           <Text style={styles.warningText}>Maximum is {maxSats?.toLocaleString()} sats.</Text>
         ) : null}
       </View>
+
+      {suggestedAmounts && suggestedAmounts.length > 0 ? (
+        <View style={styles.suggestedRow}>
+          {suggestedAmounts.map((sats) => {
+            const selected = currentSats === sats;
+            return (
+              <TouchableOpacity
+                key={sats}
+                style={[styles.suggestedPill, selected && styles.suggestedPillActive]}
+                onPress={() => handleSuggestedAmount(sats)}
+                accessibilityLabel={`${sats} sats`}
+                testID={`suggested-amount-${sats}`}
+              >
+                <Text
+                  style={[styles.suggestedPillText, selected && styles.suggestedPillTextActive]}
+                >
+                  {sats.toLocaleString()}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ) : null}
 
       <TouchableOpacity
         style={[styles.confirmButton, !canConfirm && styles.confirmButtonDisabled]}

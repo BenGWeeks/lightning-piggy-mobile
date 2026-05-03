@@ -1,0 +1,16 @@
+appId: com.lightningpiggy.app.dev
+name: PERF — switch to Friends tab (no assertions)
+---
+# Companion to scripts/perf-friends-tab.sh — drives launch → Friends-tab
+# tap. The wrapper script handles screen-capping at fixed delays after
+# this flow returns. No assertions: this is a measurement aid, not a
+# regression test.
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 8000
+# t=0: tap the Friends tab. Maestro returns shortly after the tap;
+# the wrapper sleeps in fixed offsets to capture the fill-in timeline.
+- tapOn:
+    id: 'tab-friends'
