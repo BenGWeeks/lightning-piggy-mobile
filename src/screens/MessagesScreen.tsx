@@ -8,6 +8,7 @@ import {
   RefreshControl,
   InteractionManager,
 } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { FlashList } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Users, Clock } from 'lucide-react-native';
@@ -101,12 +102,34 @@ const MessagesScreen: React.FC = () => {
   // behind it. InteractionManager yields to the scheduler and runs
   // the work once the UI is idle. `.cancel()` in cleanup avoids
   // firing the refresh on a focus that was already abandoned.
+  //
+  // Also pre-warms the friend-picker avatar bitmaps. Histograms from
+  // perf-suite showed the FAB → FriendPicker open path spends most
+  // of its 38 % modern-jank budget on cold avatar decode (50 simultaneous
+  // first-paint Image decodes in the sheet animation window). Prefetching
+  // them on tab focus pushes the decode cost OUT of the FAB-tap-to-content
+  // window — by the time the user taps (+), `expo-image`'s disk cache
+  // is warm and the avatars render without a fresh decode. Capped at 50
+  // so we don't spike memory on huge contact lists. See plan in #245.
   useFocusEffect(
     useCallback(() => {
       if (!isLoggedIn) return;
-      const handle = InteractionManager.runAfterInteractions(() => refreshDmInbox());
+      const handle = InteractionManager.runAfterInteractions(() => {
+        refreshDmInbox();
+        const avatarUrls = contacts
+          .map((c) => c.profile?.picture)
+          .filter((u): u is string => !!u)
+          .slice(0, 50);
+        if (avatarUrls.length > 0) {
+          ExpoImage.prefetch(avatarUrls, 'memory-disk').catch(() => {
+            // Prefetch failures are silent — the avatar will just decode
+            // on-demand at sheet open time, which is the un-fixed
+            // pre-prefetch behaviour. No user-visible regression.
+          });
+        }
+      });
       return () => handle.cancel();
-    }, [isLoggedIn, refreshDmInbox]),
+    }, [isLoggedIn, refreshDmInbox, contacts]),
   );
 
   const followPubkeys = useMemo(() => {
