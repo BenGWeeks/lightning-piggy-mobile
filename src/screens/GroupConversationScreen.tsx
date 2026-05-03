@@ -6,12 +6,12 @@ import {
   StyleSheet,
   FlatList,
   TextInput,
-  Alert,
   ActivityIndicator,
   Linking,
   Modal,
   Pressable,
 } from 'react-native';
+import { Alert } from '../components/BrandedAlert';
 import {
   KeyboardController,
   KeyboardStickyView,

@@ -32,4 +32,29 @@ module.exports = [
       globals: { ...globals.node },
     },
   },
+  {
+    // Block React Native's native `Alert` outside BrandedAlert.tsx itself
+    // so every alert renders through the in-app branded modal (matches
+    // the app's pink/blue theme and is testable via Maestro). The
+    // whitelist on BrandedAlert.tsx is defence-in-depth — that file
+    // wraps RN's `Modal` and does not currently import `Alert` from
+    // 'react-native', but a future re-export for parity testing would
+    // legitimately need to. See CLAUDE.md → "Code Style".
+    files: ['src/**/*.ts', 'src/**/*.tsx'],
+    ignores: ['src/components/BrandedAlert.tsx'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'react-native',
+              importNames: ['Alert'],
+              message: "Use Alert from 'src/components/BrandedAlert' instead — see CLAUDE.md.",
+            },
+          ],
+        },
+      ],
+    },
+  },
 ];

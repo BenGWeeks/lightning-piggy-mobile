@@ -5,11 +5,11 @@ import {
   Image,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   ActivityIndicator,
   Linking,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Alert } from '../../components/BrandedAlert';
 import * as nip19 from 'nostr-tools/nip19';
 import { UserRound } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
