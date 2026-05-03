@@ -6,12 +6,14 @@ import {
   ActivityIndicator,
   BackHandler,
   Alert,
+  Keyboard,
+  Platform,
 } from 'react-native';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
-  BottomSheetView,
+  BottomSheetScrollView,
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -32,7 +34,23 @@ const RenameGroupSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
   const sheetRef = useRef<BottomSheetModal>(null);
-  const snapPoints = useMemo(() => ['40%'], []);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  // Canonical keyboard-height tracking — mirrors FeedbackSheet /
+  // SendSheet / NostrLoginSheet. Rule 5 of the "Bottom sheet doesn't
+  // slide up when keyboard opens" checklist in TROUBLESHOOTING.adoc.
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   useEffect(() => {
     if (visible) {
@@ -96,7 +114,6 @@ const RenameGroupSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
   return (
     <BottomSheetModal
       ref={sheetRef}
-      snapPoints={snapPoints}
       onDismiss={onClose}
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}
@@ -105,7 +122,13 @@ const RenameGroupSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
       keyboardBlurBehavior="restore"
       android_keyboardInputMode="adjustResize"
     >
-      <BottomSheetView style={styles.content}>
+      <BottomSheetScrollView
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
+        ]}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={styles.title}>Rename Group</Text>
         <Text style={styles.label}>Group Name</Text>
         <BottomSheetTextInput
@@ -134,7 +157,7 @@ const RenameGroupSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
             <Text style={styles.saveButtonText}>Save</Text>
           )}
         </TouchableOpacity>
-      </BottomSheetView>
+      </BottomSheetScrollView>
     </BottomSheetModal>
   );
 };
@@ -151,7 +174,6 @@ const createStyles = (colors: Palette) =>
       width: 40,
     },
     content: {
-      flex: 1,
       paddingHorizontal: 24,
       paddingTop: 8,
       paddingBottom: 40,
