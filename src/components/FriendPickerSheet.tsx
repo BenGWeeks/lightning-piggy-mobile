@@ -102,18 +102,16 @@ const FriendPickerSheet: React.FC<Props> = ({
     }
   }, [visible]);
 
-  // Defer the BottomSheetFlatList mount until the open animation has
-  // finished. With ~50 contacts each rendering an avatar Image, mounting
-  // the list synchronously while the sheet animates UP produces the
-  // "FAB feels slow" jank measured at ~38% modern jank in perf-suite
-  // (cold sheet open). InteractionManager.runAfterInteractions yields
-  // until the animation runs to completion, then mounts the list — the
-  // sheet shows a brief blank area (~250 ms) but the open animation
-  // itself is smooth, which is what users actually notice.
-  //
-  // No skeleton — we tried in #252 and the reanimated shimmer competed
-  // with the animation, making the metric WORSE (40 % vs 34 %). Empty
-  // sheet → real list is the right shape.
+  // Defer the BottomSheetFlatList mount until JS thread + native
+  // interactions are idle. `InteractionManager.runAfterInteractions`
+  // doesn't strictly wait for the bottom-sheet open animation to
+  // finish (Reanimated worklets run on the UI thread, outside its
+  // tracking) — but it does defer past JS-side work + ongoing native
+  // touch interactions, which empirically delays the list mount until
+  // the sheet has visibly settled. The user sees a brief blank area
+  // (~250 ms) before the list snaps in, instead of the JS thread
+  // building 50 PickedFriend objects + queuing avatar Image decodes
+  // during the animation.
   const [listReady, setListReady] = useState(false);
   useEffect(() => {
     if (!visible) {
@@ -290,12 +288,13 @@ const FriendPickerSheet: React.FC<Props> = ({
           />
         </View>
         <View style={styles.listWithBar}>
-          {/* `listReady` flips true via InteractionManager once the open
-              animation has finished. Until then we render an empty View
-              so the sheet animates up over a blank surface (~250ms),
-              instead of over a JS thread busy mounting 50 avatar Images
-              + an alphabet bar. See `useEffect([visible])` above. */}
-          {!listReady ? null : availableLetters.length > 0 ? (
+          {/* `listReady` flips true via InteractionManager once JS work +
+              touch interactions are idle (which empirically lines up
+              with the sheet open animation finishing). Until then this
+              area is intentionally blank — nothing for the JS thread
+              to render while it's busy with the open animation. See
+              `useEffect([visible])` above. */}
+          {listReady && availableLetters.length > 0 ? (
             <AlphabetBar
               letters={availableLetters}
               currentLetter={currentLetter}
