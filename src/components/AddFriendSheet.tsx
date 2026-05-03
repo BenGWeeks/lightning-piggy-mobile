@@ -31,7 +31,10 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
-  // No explicit snapPoints — content-height only, not user-draggable.
+  // Fixed snap + enableDynamicSizing={false} together avoid the v5 #1602
+  // collapse where focusing the npub input shrinks the sheet to 0 and
+  // hides everything but the IME. See TROUBLESHOOTING.adoc.
+  const snapPoints = useMemo(() => ['55%'], []);
   const [mode, setMode] = useState<'paste' | 'scan'>('paste');
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
@@ -108,6 +111,8 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
   return (
     <BottomSheetModal
       ref={sheetRef}
+      snapPoints={snapPoints}
+      enableDynamicSizing={false}
       onDismiss={onClose}
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}

@@ -32,7 +32,9 @@ const RenameGroupSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
   const sheetRef = useRef<BottomSheetModal>(null);
-  const snapPoints = useMemo(() => ['40%'], []);
+  // 70% to keep the input + Save button above Gboard (IME ≈50% of
+  // screen on most Android phones); 40% put both behind the keyboard.
+  const snapPoints = useMemo(() => ['70%'], []);
 
   useEffect(() => {
     if (visible) {
@@ -97,6 +99,7 @@ const RenameGroupSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
     <BottomSheetModal
       ref={sheetRef}
       snapPoints={snapPoints}
+      enableDynamicSizing={false}
       onDismiss={onClose}
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}
