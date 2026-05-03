@@ -1,0 +1,95 @@
+appId: com.lightningpiggy.app.dev
+name: Group manage-members sheet — open + add picker + remove flow
+---
+# Verifies the new GroupMembersSheet (issue #259) replaces the inert
+# "N members" header text + horizontal chip strip with a tappable
+# affordance that opens a manage-members bottom sheet, and that the
+# Remove path actually fires the confirmation alert.
+#
+# Preconditions:
+#   - User is logged in (nsec or Amber).
+#   - At least one group exists with at least 2 members.
+#   - At least one Nostr contact is NOT yet in that group (so "Add" has
+#     a valid candidate).
+#
+# Run: maestro test tests/e2e/test-group-manage-members.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 30000
+
+# Land on the Messages tab and pick the first visible group conversation.
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: 'Open group .*'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# The header should now show a tappable "N members" line. Tapping it
+# opens the GroupMembersSheet. The earlier horizontal chip strip should
+# no longer be in the layout.
+- assertVisible:
+    id: 'group-member-count'
+- tapOn:
+    id: 'group-member-count'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# The sheet's "Add members" button is the canonical affordance for
+# extending the group; tapping it opens the FriendPickerSheet.
+- assertVisible:
+    id: 'group-members-add'
+- tapOn:
+    id: 'group-members-add'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Picker should be visible. We don't drive a selection here (the test
+# device's contacts vary); we just confirm the picker opened, then close
+# it via hardware back so the test cleans up.
+- assertVisible:
+    id: 'friend-picker-search'
+- back
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Back at the manage-members sheet — close via the Done button.
+- assertVisible:
+    id: 'group-members-done'
+- tapOn:
+    id: 'group-members-done'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Sheet dismissed; member-count line is still visible in the header.
+- assertVisible:
+    id: 'group-member-count'
+
+# Re-open the sheet and exercise the Remove path. We can't predict
+# the testID suffix (`group-member-remove-${pubkey-prefix}`) without
+# a stable test fixture, so use the accessibilityLabel pattern
+# `Remove .*` to match any non-self member's X button. Self has no
+# Remove button (per the GroupMembersSheet self-guard) so this is
+# always a real other-member.
+- tapOn:
+    id: 'group-member-count'
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    text: 'Remove .*'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+# BrandedAlert confirmation should be visible. Cancel rather than
+# Confirm so the test is idempotent — we've proved the flow reaches
+# the confirmation, we don't need to actually mutate group state.
+- assertVisible:
+    text: 'Remove member?'
+- tapOn:
+    text: 'Cancel'
+- waitForAnimationToEnd:
+    timeout: 1500

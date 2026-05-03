@@ -1,0 +1,33 @@
+appId: com.lightningpiggy.app.dev
+name: PERF — Messages tab scroll iterations
+---
+- swipe:
+    direction: UP
+    duration: 400
+- swipe:
+    direction: UP
+    duration: 400
+- swipe:
+    direction: UP
+    duration: 400
+- swipe:
+    direction: DOWN
+    duration: 400
+- swipe:
+    direction: DOWN
+    duration: 400
+- swipe:
+    direction: DOWN
+    duration: 400
+- swipe:
+    direction: UP
+    duration: 400
+- swipe:
+    direction: UP
+    duration: 400
+- swipe:
+    direction: DOWN
+    duration: 400
+- swipe:
+    direction: DOWN
+    duration: 400

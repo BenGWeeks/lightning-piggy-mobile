@@ -17,22 +17,13 @@ const ContactListItem: React.FC<Props> = ({ name, picture, lightningAddress, onP
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [avatarError, setAvatarError] = useState(false);
-  const [avatarLoaded, setAvatarLoaded] = useState(false);
 
-  // Reset state when picture URL changes
+  // Reset error state when picture URL changes (rows are recycled by
+  // FlashList; without this a row that errored before would show its
+  // fallback even when reused for a contact whose picture loads fine).
   useEffect(() => {
     setAvatarError(false);
-    setAvatarLoaded(false);
   }, [picture]);
-
-  // Timeout: if image hasn't loaded in 3s, show fallback
-  useEffect(() => {
-    if (!picture || avatarLoaded || avatarError) return;
-    const timer = setTimeout(() => {
-      if (!avatarLoaded) setAvatarError(true);
-    }, 5000);
-    return () => clearTimeout(timer);
-  }, [picture, avatarLoaded, avatarError]);
 
   const showImage = !!picture && !avatarError;
 
@@ -43,12 +34,11 @@ const ContactListItem: React.FC<Props> = ({ name, picture, lightningAddress, onP
           <Image
             source={{ uri: picture }}
             style={styles.avatarImage}
-            cachePolicy="disk"
+            cachePolicy="memory-disk"
             transition={200}
             recyclingKey={picture || undefined}
             autoplay={false}
             onError={() => setAvatarError(true)}
-            onLoad={() => setAvatarLoaded(true)}
           />
         ) : (
           <UserRound size={22} color={colors.textBody} strokeWidth={1.75} />

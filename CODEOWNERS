@@ -1,0 +1,14 @@
+# Code owners for lightning-piggy-mobile
+#
+# Order matters: the LAST matching pattern takes precedence.
+# Patterns mirror .gitignore syntax.
+#
+# When a PR is opened, GitHub auto-requests reviews from the matching
+# owner(s). With branch-protection's `require_code_owner_reviews`
+# enabled, those reviews are required before merge.
+#
+# See https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-policies/customizing-your-repository/about-code-owners
+
+# Catch-all — any path not matched by a more specific rule below
+# routes to @BenGWeeks for review.
+* @BenGWeeks
