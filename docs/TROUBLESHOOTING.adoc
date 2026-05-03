@@ -42,7 +42,7 @@ adb shell ime set com.google.android.inputmethod.latin/com.android.inputmethod.l
 | EAS local production build crashes mid-Gradle with `UncheckedIOException: Could not add entry ... to cache fileHashes.bin`
 | `/tmp` is on tmpfs (default Ubuntu/Debian) capped at ~12 GB. The EAS local builder generates ~9 GB of native-lib intermediates during the multi-arch APK assembly (arm64 + armv7 + x86 + x86_64). When tmpfs hits 100 %, Gradle's incremental-cache writer throws on the next `fileHashes.bin` flush and the entire build aborts. +
 *Symptom:* `tail -3 /tmp/eas-build.log` shows the IOException; `df -h /tmp` shows tmpfs at 100 %; the build PID is gone with no APK at `android/app/build/outputs/apk/release/app-release.apk`. +
-*Fix:* point Gradle at disk-backed storage via `TMPDIR`:
+*Fix:* point Gradle at disk-backed storage via `TMPDIR`: +
 [source,bash]
 ----
 mkdir -p ~/eas-tmp
