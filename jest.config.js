@@ -19,6 +19,19 @@ module.exports = {
     '!src/**/*.stories.{ts,tsx}',
     '!src/types/**',
   ],
+  // Extend jest-expo's transformIgnorePatterns to also let nostr-tools and
+  // its ESM-only crypto deps (@noble/*, @scure/*) through Babel. They all
+  // ship as ES modules ("import { sha256 } from '@noble/hashes/sha2.js'")
+  // which Jest can't run via the default CommonJS require pipeline —
+  // without this allow-list any test that touches the Nostr wire-format
+  // helpers (e.g. createGroupChatRumor in nostrService) crashes with
+  // "SyntaxError: Cannot use import statement outside a module" on the
+  // first transitive crypto import. The base preset list is reproduced
+  // verbatim so this doesn't silently drift if jest-expo updates.
+  transformIgnorePatterns: [
+    '/node_modules/(?!(.pnpm|react-native|@react-native|@react-native-community|expo|@expo|@expo-google-fonts|react-navigation|@react-navigation|@sentry/react-native|native-base|nostr-tools|@noble|@scure))',
+    '/node_modules/react-native-reanimated/plugin/',
+  ],
   coverageThreshold: {
     // Floor — the CI workflow enforces the relative gate (no regression vs main).
     // This is a belt-and-braces hard floor so coverage cannot collapse to 0%.
