@@ -1,9 +1,10 @@
 appId: com.lightningpiggy.app.dev
-name: Group manage-members sheet — open + add + remove
+name: Group manage-members sheet — open + add picker + remove flow
 ---
 # Verifies the new GroupMembersSheet (issue #259) replaces the inert
 # "N members" header text + horizontal chip strip with a tappable
-# affordance that opens a manage-members bottom sheet.
+# affordance that opens a manage-members bottom sheet, and that the
+# Remove path actually fires the confirmation alert.
 #
 # Preconditions:
 #   - User is logged in (nsec or Amber).
@@ -67,3 +68,28 @@ name: Group manage-members sheet — open + add + remove
 # Sheet dismissed; member-count line is still visible in the header.
 - assertVisible:
     id: 'group-member-count'
+
+# Re-open the sheet and exercise the Remove path. We can't predict
+# the testID suffix (`group-member-remove-${pubkey-prefix}`) without
+# a stable test fixture, so use the accessibilityLabel pattern
+# `Remove .*` to match any non-self member's X button. Self has no
+# Remove button (per the GroupMembersSheet self-guard) so this is
+# always a real other-member.
+- tapOn:
+    id: 'group-member-count'
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    text: 'Remove .*'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+# BrandedAlert confirmation should be visible. Cancel rather than
+# Confirm so the test is idempotent — we've proved the flow reaches
+# the confirmation, we don't need to actually mutate group state.
+- assertVisible:
+    text: 'Remove member?'
+- tapOn:
+    text: 'Cancel'
+- waitForAnimationToEnd:
+    timeout: 1500
