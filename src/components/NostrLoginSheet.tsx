@@ -243,6 +243,7 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
       name: 'Lightning Piggy',
     });
     setNip46Uri(uri);
+    console.log('[Nostr][NIP46] pairing URI:', uri);
     setMode('nip46-pair');
     setNip46Pairing(true);
     const abort = new AbortController();
@@ -380,10 +381,10 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
                 style={styles.amberButton}
                 onPress={handleAmber}
                 disabled={isLoggingIn}
-                accessibilityLabel="Use Amber Signer"
+                accessibilityLabel="Use NIP-55 Signer (Amber)"
                 testID="amber-button"
               >
-                <Text style={styles.amberButtonText}>Use Amber Signer</Text>
+                <Text style={styles.amberButtonText}>Use NIP-55 Signer (Amber)</Text>
               </TouchableOpacity>
             )}
 
@@ -400,7 +401,11 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
               accessibilityLabel="Use NIP-46 Signer"
               testID="nip46-button"
             >
-              <Text style={styles.amberButtonText}>Use NIP-46 Signer (Clave / nsec.app)</Text>
+              <Text style={styles.amberButtonText}>
+                {Platform.OS === 'ios'
+                  ? 'Use NIP-46 Signer (Clave / Aegis / nsec.app)'
+                  : 'Use NIP-46 Signer (Aegis / Nowser / nsec.app)'}
+              </Text>
             </TouchableOpacity>
 
             <View style={styles.dividerRow}>
@@ -470,8 +475,9 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
           <>
             <Text style={styles.title}>Connect via NIP-46</Text>
             <Text style={styles.subtitle}>
-              Open your bunker app (Clave, Aegis, nsec.app) and scan this QR. We'll wait up to 2
-              minutes for the connection.
+              Open your bunker app
+              {Platform.OS === 'ios' ? ' (Clave, Aegis, nsec.app)' : ' (Aegis, Nowser, nsec.app)'}{' '}
+              and scan this QR. We'll wait up to 2 minutes for the connection.
             </Text>
 
             {/* Black-on-white QR for max scan reliability across themes
