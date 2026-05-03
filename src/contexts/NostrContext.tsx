@@ -1014,6 +1014,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       for (const k of allKeysForGroups) {
         if (k.startsWith('group_messages_')) toRemove.push(k);
       }
+      // Per-pubkey group activity cache (added in #257). Contains
+      // decrypted last-message previews (`GroupActivity.lastText`),
+      // so we MUST clear it on logout — leaving it on disk would
+      // expose private content to whoever logs in next.
+      toRemove.push(`nostr_group_activity_${loggedOutPubkey}`);
     }
     await AsyncStorage.multiRemove(toRemove);
 
