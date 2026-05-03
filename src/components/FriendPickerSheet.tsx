@@ -7,6 +7,7 @@ import {
   BackHandler,
   Keyboard,
   Platform,
+  InteractionManager,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { UserRound, UsersRound } from 'lucide-react-native';
@@ -29,6 +30,12 @@ export interface PickedFriend {
   lightningAddress: string | null;
 }
 
+// Internal-only: PickedFriend plus precomputed sort keys. We never
+// expose these to onSelect callers (they only ever see PickedFriend);
+// they exist purely so the sort comparator + alphabet helpers don't
+// re-derive them on every comparison or keystroke.
+type SortedFriend = PickedFriend & { nameAlpha: string; nameLower: string };
+
 // Many Nostr contacts prepend emoji/flags/zaps, OR spell their name with
 // stylized Unicode variants (𝙰𝚂𝙲𝙾𝚃, ᴄʏʙᴇʀɢᴜʏ, 𝔼𝕣𝕪𝕟) that aren't in the
 // plain A-Z range. NFKD-normalize first so compatibility forms fold down
@@ -38,6 +45,11 @@ const firstAlpha = (name: string): string => {
   const m = normalized.match(/[A-Z]/);
   return m ? m[0] : '#';
 };
+
+// Cached at module scope so the open-path doesn't construct a fresh
+// Intl.Collator per comparison (5-10× slower than reusing one). Same
+// pattern as FriendsScreen. See issue #245.
+const NAME_COLLATOR = new Intl.Collator(undefined, { sensitivity: 'base' });
 
 interface Props {
   visible: boolean;
@@ -106,6 +118,26 @@ const FriendPickerSheet: React.FC<Props> = ({
     }
   }, [visible]);
 
+  // Defer the BottomSheetFlatList mount until JS thread + native
+  // interactions are idle. `InteractionManager.runAfterInteractions`
+  // doesn't strictly wait for the bottom-sheet open animation to
+  // finish (Reanimated worklets run on the UI thread, outside its
+  // tracking) — but it does defer past JS-side work + ongoing native
+  // touch interactions, which empirically delays the list mount until
+  // the sheet has visibly settled. The user sees a brief blank area
+  // (~250 ms) before the list snaps in, instead of the JS thread
+  // building 50 PickedFriend objects + queuing avatar Image decodes
+  // during the animation.
+  const [listReady, setListReady] = useState(false);
+  useEffect(() => {
+    if (!visible) {
+      setListReady(false);
+      return;
+    }
+    const handle = InteractionManager.runAfterInteractions(() => setListReady(true));
+    return () => handle.cancel();
+  }, [visible]);
+
   useEffect(() => {
     if (!visible) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -128,45 +160,69 @@ const FriendPickerSheet: React.FC<Props> = ({
     };
   }, []);
 
-  const friends = useMemo<PickedFriend[]>(() => {
+  // Step 1: build + sort the friends list. Pre-computes `nameAlpha` and
+  // `nameLower` once per friend so the sort comparator does O(1) string
+  // compares instead of re-running `firstAlpha()` (NFKD + uppercase +
+  // regex, ~0.5 ms each) and `.toLowerCase()` for every comparison.
+  // With 50 contacts × ~280 comparisons × 4 firstAlpha calls per
+  // comparison, the previous implementation did 1100+ NFKD normalizes
+  // synchronously while the bottom-sheet open animation was running —
+  // which is what made the (+) FAB tap feel slow. See issue #245.
+  // Only re-runs when `contacts` or `excludePubkeys` change (NOT every
+  // keystroke). SortedFriend keeps the precomputed sort keys around so
+  // `availableLetters` and `handleLetterPress` can read them too,
+  // instead of recomputing firstAlpha 50× per keystroke.
+  const sortedFriends = useMemo<SortedFriend[]>(() => {
     const exclude = excludePubkeys ? new Set(excludePubkeys) : null;
-    const list: PickedFriend[] = contacts.map((c) => ({
-      pubkey: c.pubkey,
-      name: (c.profile?.displayName || c.profile?.name || c.petname || '').trim(),
-      picture: c.profile?.picture ?? null,
-      lightningAddress: c.profile?.lud16 ?? null,
-    }));
-    // Contacts with no resolved name aren't useful here — they can't be
-    // reliably identified by the user. Drop them from the picker. Also
-    // drop any caller-excluded pubkeys (e.g. existing group members).
-    const named = list.filter((f) => f.name.length > 0 && !exclude?.has(f.pubkey));
-    // Sort by the first Latin letter (so "🇦🇷Marcel" sits with other Ms),
-    // then by raw name within the letter group. Keeps the alphabet bar's
-    // scrollToIndex accurate.
-    named.sort((a, b) => {
-      const la = firstAlpha(a.name);
-      const lb = firstAlpha(b.name);
-      if (la !== lb) return la.localeCompare(lb);
-      return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+    const enriched: SortedFriend[] = [];
+    for (const c of contacts) {
+      const name = (c.profile?.displayName || c.profile?.name || c.petname || '').trim();
+      // Contacts with no resolved name aren't useful in the picker —
+      // they can't be reliably identified by the user. Also drop any
+      // caller-excluded pubkeys (e.g. existing group members) so they
+      // don't silently no-op in addMembersToGroup.
+      if (name.length === 0) continue;
+      if (exclude?.has(c.pubkey)) continue;
+      enriched.push({
+        pubkey: c.pubkey,
+        name,
+        picture: c.profile?.picture ?? null,
+        lightningAddress: c.profile?.lud16 ?? null,
+        nameAlpha: firstAlpha(name),
+        nameLower: name.toLowerCase(),
+      });
+    }
+    enriched.sort((a, b) => {
+      if (a.nameAlpha !== b.nameAlpha) return NAME_COLLATOR.compare(a.nameAlpha, b.nameAlpha);
+      return NAME_COLLATOR.compare(a.nameLower, b.nameLower);
     });
+    return enriched;
+  }, [contacts, excludePubkeys]);
+
+  // Step 2: filter the pre-sorted list by `deferredSearch`. Substring
+  // match is O(n) per keystroke with no allocations — the sort doesn't
+  // re-run, only this filter pass does. Precomputed `nameLower` is
+  // reused for the substring match.
+  const friends = useMemo<SortedFriend[]>(() => {
     const q = deferredSearch.trim().toLowerCase();
-    if (!q) return named;
-    return named.filter(
+    if (!q) return sortedFriends;
+    return sortedFriends.filter(
       (f) =>
-        f.name.toLowerCase().includes(q) ||
+        f.nameLower.includes(q) ||
         (f.lightningAddress && f.lightningAddress.toLowerCase().includes(q)),
     );
-  }, [contacts, deferredSearch, excludePubkeys]);
+  }, [sortedFriends, deferredSearch]);
 
   const availableLetters = useMemo(() => {
     const letters = new Set<string>();
-    for (const f of friends) letters.add(firstAlpha(f.name));
+    // Precomputed nameAlpha — no firstAlpha() recomputation per friend.
+    for (const f of friends) letters.add(f.nameAlpha);
     return Array.from(letters).sort();
   }, [friends]);
 
   const handleLetterPress = useCallback(
     (letter: string) => {
-      const index = friends.findIndex((f) => firstAlpha(f.name) === letter);
+      const index = friends.findIndex((f) => f.nameAlpha === letter);
       if (index < 0) return;
       setCurrentLetter(letter);
       listRef.current?.scrollToIndex?.({ index, animated: false, viewPosition: 0 });
@@ -202,7 +258,9 @@ const FriendPickerSheet: React.FC<Props> = ({
             <Image
               source={{ uri: item.picture }}
               style={[StyleSheet.absoluteFillObject, styles.avatarImage]}
-              cachePolicy="disk"
+              // Canonical avatar caching policy — see issue #245.
+              cachePolicy="memory-disk"
+              recyclingKey={item.picture}
               // First frame only — see #243.
               autoplay={false}
             />
@@ -274,68 +332,76 @@ const FriendPickerSheet: React.FC<Props> = ({
           />
         </View>
         <View style={styles.listWithBar}>
-          {availableLetters.length > 0 ? (
+          {/* `listReady` flips true via InteractionManager once JS work +
+              touch interactions are idle (which empirically lines up
+              with the sheet open animation finishing). Until then this
+              area is intentionally blank — nothing for the JS thread
+              to render while it's busy with the open animation. See
+              `useEffect([visible])` above. */}
+          {listReady && availableLetters.length > 0 ? (
             <AlphabetBar
               letters={availableLetters}
               currentLetter={currentLetter}
               onLetterPress={handleLetterPress}
             />
           ) : null}
-          <BottomSheetFlatList<PickedFriend>
-            ref={listRef}
-            data={friends}
-            keyExtractor={(f: PickedFriend) => f.pubkey}
-            renderItem={renderItem}
-            ListHeaderComponent={
-              onNewGroup ? (
-                <TouchableOpacity
-                  style={styles.row}
-                  onPress={onNewGroup}
-                  accessibilityLabel="Create a new group"
-                  testID="friend-picker-new-group"
-                >
-                  <View style={styles.newGroupIcon}>
-                    <UsersRound size={28} color={colors.brandPink} />
-                  </View>
-                  <View style={styles.info}>
-                    <Text style={styles.newGroupName}>New group</Text>
-                  </View>
-                </TouchableOpacity>
-              ) : null
-            }
-            contentContainerStyle={[
-              styles.listContent,
-              { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
-            ]}
-            keyboardShouldPersistTaps="handled"
-            style={styles.list}
-            onScrollToIndexFailed={(info: {
-              index: number;
-              highestMeasuredFrameIndex: number;
-              averageItemLength: number;
-            }) => {
-              const offset = info.averageItemLength * info.index;
-              listRef.current?.scrollToOffset?.({ offset, animated: false });
-              setTimeout(() => {
-                listRef.current?.scrollToIndex?.({
-                  index: info.index,
-                  animated: false,
-                  viewPosition: 0,
-                });
-              }, 50);
-            }}
-            ListEmptyComponent={
-              <View style={styles.empty}>
-                <Text style={styles.emptyText}>
-                  {contacts.length === 0
-                    ? 'You don’t follow anyone on Nostr yet.'
-                    : search
-                      ? 'No friends match your search.'
-                      : 'No contacts with resolved profiles to send to.'}
-                </Text>
-              </View>
-            }
-          />
+          {listReady ? (
+            <BottomSheetFlatList<PickedFriend>
+              ref={listRef}
+              data={friends}
+              keyExtractor={(f: PickedFriend) => f.pubkey}
+              renderItem={renderItem}
+              ListHeaderComponent={
+                onNewGroup ? (
+                  <TouchableOpacity
+                    style={styles.row}
+                    onPress={onNewGroup}
+                    accessibilityLabel="Create a new group"
+                    testID="friend-picker-new-group"
+                  >
+                    <View style={styles.newGroupIcon}>
+                      <UsersRound size={28} color={colors.brandPink} />
+                    </View>
+                    <View style={styles.info}>
+                      <Text style={styles.newGroupName}>New group</Text>
+                    </View>
+                  </TouchableOpacity>
+                ) : null
+              }
+              contentContainerStyle={[
+                styles.listContent,
+                { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
+              ]}
+              keyboardShouldPersistTaps="handled"
+              style={styles.list}
+              onScrollToIndexFailed={(info: {
+                index: number;
+                highestMeasuredFrameIndex: number;
+                averageItemLength: number;
+              }) => {
+                const offset = info.averageItemLength * info.index;
+                listRef.current?.scrollToOffset?.({ offset, animated: false });
+                setTimeout(() => {
+                  listRef.current?.scrollToIndex?.({
+                    index: info.index,
+                    animated: false,
+                    viewPosition: 0,
+                  });
+                }, 50);
+              }}
+              ListEmptyComponent={
+                <View style={styles.empty}>
+                  <Text style={styles.emptyText}>
+                    {contacts.length === 0
+                      ? 'You don’t follow anyone on Nostr yet.'
+                      : search
+                        ? 'No friends match your search.'
+                        : 'No contacts with resolved profiles to send to.'}
+                  </Text>
+                </View>
+              }
+            />
+          ) : null}
         </View>
       </View>
     </BottomSheetModal>
