@@ -30,6 +30,14 @@
 - Use the branded `Alert` from `src/components/BrandedAlert.tsx`, not React Native's native `Alert.alert` — the branded one matches the app's theme (pink/blue) and is testable via `id: 'branded-alert-button-N'` in Maestro flows. ESLint enforces this via `no-restricted-imports`.
 - Use the branded `Toast` from `src/components/BrandedToast.tsx`, not `react-native-toast-message` directly — matches the app's pink/blue theme. ESLint enforces this via `no-restricted-imports`.
 
+## Signers
+
+The app supports three Nostr signers, branched on `signerType` in `NostrContext.tsx`:
+
+- `nsec` — local key (`src/services/nostrService.ts`)
+- `amber` (NIP-55) — Android only via Intent IPC (`src/services/amberService.ts`)
+- `nip46` (NIP-46 / "Nostr Connect") — cross-platform, relay-based; works with Clave (iOS), Aegis, nsec.app (`src/services/nostrConnectService.ts`). See `docs/nip46-clave.adoc` for the pairing flow + the silent-decrypt batch trade-off.
+
 ## Pull Request Titles
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/) plus a trailing issue reference when the PR resolves one:

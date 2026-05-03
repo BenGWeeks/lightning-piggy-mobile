@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Alert } from './BrandedAlert';
 import Svg, { Path } from 'react-native-svg';
+import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
 import {
   BottomSheetModal,
@@ -19,22 +20,47 @@ import {
   BottomSheetScrollView,
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
+import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { useNostr } from '../contexts/NostrContext';
 import * as nostrService from '../services/nostrService';
+import * as nostrConnectService from '../services/nostrConnectService';
+
+/** Default relay used in the `nostrconnect://` pairing URI. Picked
+ *  because it's well-connected, accepts unauthenticated publishes, and
+ *  is the default that Clave / nsec.app / Aegis all subscribe to out
+ *  of the box. Users who run their own bunker on a private relay can
+ *  edit this in a follow-up if needed — pair-time URI customisation
+ *  is out of scope for the initial cut. */
+const NIP46_DEFAULT_RELAY = 'wss://relay.nsec.app';
+
+/** NIP-46 perms we ask for at pair time. Covers everything the app
+ *  needs to function as a Nostr client today: read profile / contacts,
+ *  publish profile updates, send DMs (NIP-04) and group messages
+ *  (NIP-44). The bunker may grant a subset; per-method permission
+ *  errors are surfaced as `NIP-46 signer denied <method>` per the
+ *  service. */
+const NIP46_PERMS = [
+  'sign_event',
+  'nip04_encrypt',
+  'nip04_decrypt',
+  'nip44_encrypt',
+  'nip44_decrypt',
+];
 
 interface Props {
   visible: boolean;
   onClose: () => void;
 }
 
-type Mode = 'login' | 'create' | 'backup';
+type Mode = 'login' | 'create' | 'backup' | 'nip46-pair';
 
 const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { loginWithNsec, loginWithAmber, publishProfile, isLoggingIn } = useNostr();
+  const { loginWithNsec, loginWithAmber, loginWithNip46, publishProfile, isLoggingIn } = useNostr();
   const [nsecInput, setNsecInput] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -42,6 +68,12 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [newName, setNewName] = useState('');
   const [generatedNsec, setGeneratedNsec] = useState('');
   const [creating, setCreating] = useState(false);
+  const [nip46Uri, setNip46Uri] = useState<string | null>(null);
+  const [nip46Pairing, setNip46Pairing] = useState(false);
+  /** Abort signal for an in-flight bunker pairing — set so dismissing
+   *  the sheet (or tapping Cancel) aborts the BunkerSigner.fromURI
+   *  promise instead of leaving a relay subscription hanging. */
+  const nip46AbortRef = useRef<AbortController | null>(null);
   const sheetRef = useRef<BottomSheetModal>(null);
   const scrollRef = useRef<any>(null);
   // No explicit snapPoints — content-height only, not user-draggable.
@@ -51,9 +83,17 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
       setMode('login');
       setNewName('');
       setGeneratedNsec('');
+      setNip46Uri(null);
+      setNip46Pairing(false);
       setError(null);
       sheetRef.current?.present();
     } else {
+      // Sheet closed externally — abort any in-flight bunker pairing
+      // so the relay subscription doesn't outlive the UI.
+      if (nip46AbortRef.current) {
+        nip46AbortRef.current.abort();
+        nip46AbortRef.current = null;
+      }
       sheetRef.current?.dismiss();
     }
   }, [visible]);
@@ -164,6 +204,99 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
     }
   };
 
+  /**
+   * Begin a NIP-46 ("Nostr Connect" / bunker) pairing. Generates a
+   * fresh per-app keypair, builds a `nostrconnect://` URI, renders it
+   * as a QR for the user's bunker (Clave, Aegis, nsec.app) to scan,
+   * then awaits the bunker's `connect` ack. On success, hands the
+   * persisted connection to NostrContext.
+   *
+   * The per-app secret key is generated *here*, not in the service —
+   * the URI's `clientPubkey` derives from it, and we need it locally
+   * for the BunkerSigner to set up its inbound subscription.
+   *
+   * Two failure modes worth distinguishing:
+   *  - User dismisses the sheet / taps Cancel → AbortController fires,
+   *    BunkerSigner.fromURI rejects, we just close quietly.
+   *  - 120s timeout reached → reject with a clear "took too long" so
+   *    the user can retry without thinking it's an app bug.
+   */
+  const handleNip46 = async () => {
+    setError(null);
+    // Per-app keypair — never the user's real nsec. The bunker side
+    // sees this as the "client" pubkey for the lifetime of the
+    // pairing; it's persisted to SecureStore so app restarts don't
+    // require re-pairing.
+    const clientSecretKey = generateSecretKey();
+    const clientPubkey = getPublicKey(clientSecretKey);
+    // 16 random bytes → 32 hex chars. Used by the bunker to verify
+    // that the inbound `connect` request matches the URI they scanned.
+    // crypto.getRandomValues is polyfilled in src/polyfills.ts.
+    const secretBytes = new Uint8Array(16);
+    crypto.getRandomValues(secretBytes);
+    const secret = bytesToHex(secretBytes);
+    const uri = nostrConnectService.buildPairingUri({
+      clientPubkey,
+      relay: NIP46_DEFAULT_RELAY,
+      secret,
+      perms: NIP46_PERMS,
+      name: 'Lightning Piggy',
+    });
+    setNip46Uri(uri);
+    console.log('[Nostr][NIP46] pairing URI:', uri);
+    setMode('nip46-pair');
+    setNip46Pairing(true);
+    const abort = new AbortController();
+    nip46AbortRef.current = abort;
+    try {
+      const { connection } = await nostrConnectService.awaitBunkerPair({
+        clientSecretKey,
+        clientPubkey,
+        relay: NIP46_DEFAULT_RELAY,
+        secret,
+        perms: NIP46_PERMS,
+        name: 'Lightning Piggy',
+        maxWaitSeconds: 120,
+      });
+      // Bail out if the user dismissed the sheet between scan and ack.
+      if (abort.signal.aborted) return;
+      const result = await loginWithNip46(connection);
+      if (result.success) {
+        setNip46Pairing(false);
+        onClose();
+      } else {
+        setNip46Pairing(false);
+        setError(result.error || 'NIP-46 login failed');
+        setMode('login');
+      }
+    } catch (e) {
+      if (abort.signal.aborted) return; // user cancelled — silent
+      setNip46Pairing(false);
+      const msg = e instanceof Error ? e.message : 'NIP-46 pairing failed';
+      setError(msg.includes('subscription closed') ? 'Pairing took too long — try again' : msg);
+      setMode('login');
+    } finally {
+      nip46AbortRef.current = null;
+    }
+  };
+
+  const handleCancelNip46 = () => {
+    if (nip46AbortRef.current) {
+      nip46AbortRef.current.abort();
+      nip46AbortRef.current = null;
+    }
+    setNip46Pairing(false);
+    setNip46Uri(null);
+    setMode('login');
+  };
+
+  const handleCopyNip46Uri = async () => {
+    if (nip46Uri) {
+      await Clipboard.setStringAsync(nip46Uri);
+      Alert.alert('Copied', 'Pairing URI copied. Paste it into your bunker app.');
+    }
+  };
+
   return (
     <BottomSheetModal
       ref={sheetRef}
@@ -248,12 +381,32 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
                 style={styles.amberButton}
                 onPress={handleAmber}
                 disabled={isLoggingIn}
-                accessibilityLabel="Use Amber Signer"
+                accessibilityLabel="Use NIP-55 Signer (Amber)"
                 testID="amber-button"
               >
-                <Text style={styles.amberButtonText}>Use Amber Signer</Text>
+                <Text style={styles.amberButtonText}>Use NIP-55 Signer (Amber)</Text>
               </TouchableOpacity>
             )}
+
+            {/* NIP-46 ("Nostr Connect") — cross-platform signer button.
+                Visible on every platform (iOS users have no Amber
+                option, NIP-46 is their only hardware-isolated route;
+                Android users get NIP-46 as an alternative when their
+                bunker isn't installed locally — useful for the
+                nsec.app web bunker etc). See issue #283. */}
+            <TouchableOpacity
+              style={styles.amberButton}
+              onPress={handleNip46}
+              disabled={isLoggingIn}
+              accessibilityLabel="Use NIP-46 Signer"
+              testID="nip46-button"
+            >
+              <Text style={styles.amberButtonText}>
+                {Platform.OS === 'ios'
+                  ? 'Use NIP-46 Signer (Clave / Aegis / nsec.app)'
+                  : 'Use NIP-46 Signer (Aegis / Nowser / nsec.app)'}
+              </Text>
+            </TouchableOpacity>
 
             <View style={styles.dividerRow}>
               <View style={styles.dividerLine} />
@@ -314,6 +467,52 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
 
             <TouchableOpacity style={styles.backLink} onPress={() => setMode('login')}>
               <Text style={styles.backLinkText}>Back to login</Text>
+            </TouchableOpacity>
+          </>
+        )}
+
+        {mode === 'nip46-pair' && (
+          <>
+            <Text style={styles.title}>Connect via NIP-46</Text>
+            <Text style={styles.subtitle}>
+              Open your bunker app
+              {Platform.OS === 'ios' ? ' (Clave, Aegis, nsec.app)' : ' (Aegis, Nowser, nsec.app)'}{' '}
+              and scan this QR. We'll wait up to 2 minutes for the connection.
+            </Text>
+
+            {/* Black-on-white QR for max scan reliability across themes
+                — same rationale as QrSheet.tsx's qrContainer. */}
+            <View style={styles.nip46QrContainer}>
+              {nip46Uri ? (
+                <QRCode value={nip46Uri} size={220} backgroundColor="#FFFFFF" color="#000000" />
+              ) : null}
+            </View>
+
+            {nip46Pairing && (
+              <View style={styles.nip46WaitingRow}>
+                <ActivityIndicator color={colors.brandPink} />
+                <Text style={styles.nip46WaitingText}>Waiting for bunker…</Text>
+              </View>
+            )}
+
+            {error && <Text style={styles.error}>{error}</Text>}
+
+            <TouchableOpacity
+              style={styles.copyButton}
+              onPress={handleCopyNip46Uri}
+              accessibilityLabel="Copy pairing URI"
+              testID="copy-nip46-uri"
+            >
+              <Text style={styles.copyButtonText}>Copy pairing URI</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.backLink}
+              onPress={handleCancelNip46}
+              accessibilityLabel="Cancel NIP-46 pairing"
+              testID="cancel-nip46"
+            >
+              <Text style={styles.backLinkText}>Cancel</Text>
             </TouchableOpacity>
           </>
         )}
@@ -523,6 +722,26 @@ const createStyles = (colors: Palette) =>
       color: colors.brandPink,
       fontSize: 14,
       fontWeight: '600',
+    },
+    nip46QrContainer: {
+      padding: 16,
+      backgroundColor: '#FFFFFF',
+      borderRadius: 16,
+      alignSelf: 'center',
+      marginTop: 8,
+      marginBottom: 16,
+    },
+    nip46WaitingRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 10,
+      marginBottom: 12,
+    },
+    nip46WaitingText: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+      fontWeight: '500',
     },
   });
 

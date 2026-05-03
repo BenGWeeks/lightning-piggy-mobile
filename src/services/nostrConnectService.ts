@@ -1,0 +1,374 @@
+/**
+ * NIP-46 ("Nostr Connect" / bunker) signer service.
+ *
+ * Mirrors the API shape of `amberService.ts` so that NostrContext can
+ * branch on `signerType: 'nip46'` and call into the same method names
+ * (requestPublicKey, requestEventSignature, requestNip04Encrypt, etc.)
+ * without caring about the underlying transport.
+ *
+ * Where Amber speaks Android Intents (NIP-55) and is therefore Android-
+ * only with ~10-50 ms per call, NIP-46 speaks NIP-04 / NIP-44 encrypted
+ * DMs over a Nostr relay, runs on every platform that can talk to a
+ * relay (notably iOS, where Clave is the canonical signer), and pays
+ * ~200-1500 ms per call for the round-trip.
+ *
+ * See `docs/nip46-clave.adoc` for the pairing flow walkthrough and the
+ * comparison table against NIP-55. See issue #283 for the design
+ * rationale.
+ *
+ * Implementation notes
+ * --------------------
+ * - All signing happens through nostr-tools' `BunkerSigner` class. We
+ *   keep a single in-memory instance per session, lazily constructed on
+ *   first use from the persisted `Nip46Connection`. NostrContext owns
+ *   the persisted object; this service just consumes it.
+ * - The `BunkerSigner.signEvent` API takes an `EventTemplate` (no
+ *   pubkey, no id, no sig) and returns a `VerifiedEvent`. To match
+ *   amberService.requestEventSignature's `(jsonString, eventId,
+ *   currentUser) => { signature, event }` signature we wrap and
+ *   serialise on the way in/out.
+ * - Permission errors from the bunker are normalised to
+ *   `Error('NIP-46 signer denied <method>')` so callers can detect them
+ *   and prompt the user to re-pair with broader perms.
+ */
+import { BunkerSigner, createNostrConnectURI, type BunkerPointer } from 'nostr-tools/nip46';
+import { hexToBytes } from '@noble/hashes/utils.js';
+import type { Nip46Connection } from '../types/nostr';
+
+/** Lazily-constructed BunkerSigner. Re-created when the active
+ *  connection changes (login / logout / re-pair). */
+let _activeSigner: BunkerSigner | null = null;
+let _activeConnection: Nip46Connection | null = null;
+
+/** Heuristic for "the bunker rejected this method because the user
+ *  didn't grant the corresponding perm". Bunker error shapes vary
+ *  across implementations (Clave / nsec.app / Aegis all word it
+ *  slightly differently), so we match on the substrings most likely to
+ *  appear. False negatives just surface as a generic error to the
+ *  caller — no harm done. */
+function isPermissionError(err: unknown): boolean {
+  const msg = (err as Error)?.message?.toLowerCase() ?? '';
+  return (
+    msg.includes('permission') ||
+    msg.includes('denied') ||
+    msg.includes('not authorized') ||
+    msg.includes('unauthorized') ||
+    msg.includes('forbidden')
+  );
+}
+
+function wrapPermissionError(method: string, err: unknown): Error {
+  if (isPermissionError(err)) {
+    return new Error(`NIP-46 signer denied ${method}`);
+  }
+  return err instanceof Error ? err : new Error(String(err));
+}
+
+/**
+ * Set (or replace) the active connection. Closes any prior signer
+ * cleanly so its relay subscription doesn't leak. Idempotent on the
+ * same connection object — repeated calls with identical fields are
+ * a no-op.
+ *
+ * Called from NostrContext on:
+ *  - app startup (after reading the persisted connection from SecureStore)
+ *  - successful pairing (right after the BunkerSigner has connect()ed)
+ *  - logout (with `null` to release the relay subscription)
+ */
+export async function setActiveConnection(connection: Nip46Connection | null): Promise<void> {
+  if (
+    _activeConnection &&
+    connection &&
+    _activeConnection.remoteSignerPubkey === connection.remoteSignerPubkey &&
+    _activeConnection.userPubkey === connection.userPubkey &&
+    _activeConnection.clientSecretKeyHex === connection.clientSecretKeyHex &&
+    _activeConnection.relays.join('|') === connection.relays.join('|')
+  ) {
+    return;
+  }
+  if (_activeSigner) {
+    try {
+      await _activeSigner.close();
+    } catch {
+      // Best-effort cleanup — ignore close errors so we still
+      // transition to the new state.
+    }
+    _activeSigner = null;
+  }
+  _activeConnection = connection;
+}
+
+export function getActiveConnection(): Nip46Connection | null {
+  return _activeConnection;
+}
+
+/**
+ * Lazily construct and return the BunkerSigner for the active
+ * connection. Throws if no connection is set.
+ *
+ * The first call performs a `connect()` round-trip; subsequent calls
+ * reuse the open subscription. This is intentional — the bunker keeps
+ * a long-lived subscription on the relay and tearing it down per
+ * request would add ~200-1500 ms of overhead per signature.
+ */
+async function getSigner(): Promise<BunkerSigner> {
+  if (_activeSigner) return _activeSigner;
+  if (!_activeConnection) {
+    throw new Error('NIP-46 signer not connected');
+  }
+  const pointer: BunkerPointer = {
+    pubkey: _activeConnection.remoteSignerPubkey,
+    relays: _activeConnection.relays,
+    secret: null,
+  };
+  const clientSecretKey = hexToBytes(_activeConnection.clientSecretKeyHex);
+  const signer = BunkerSigner.fromBunker(clientSecretKey, pointer);
+  // `connect()` is the explicit handshake — it sends a `connect`
+  // request through the relay so the bunker registers this session
+  // before we start firing signEvent / nip44_encrypt at it. Subsequent
+  // requests reuse the subscription opened here.
+  try {
+    await signer.connect();
+  } catch (e) {
+    // If the bunker can't be reached (relay down, bunker app closed,
+    // user revoked the connection) surface a clear error rather than
+    // letting per-method calls each fail with their own opaque message.
+    throw new Error(
+      `NIP-46 signer could not connect: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+  _activeSigner = signer;
+  return signer;
+}
+
+/**
+ * Returns the user's hex pubkey as reported by the bunker. We DO NOT
+ * trust the cached `userPubkey` from the persisted connection here —
+ * the bunker is the source of truth (it might have rotated keys,
+ * switched accounts, etc.).
+ */
+export async function requestPublicKey(): Promise<string> {
+  const signer = await getSigner();
+  try {
+    return await signer.getPublicKey();
+  } catch (e) {
+    throw wrapPermissionError('get_public_key', e);
+  }
+}
+
+/**
+ * Sign an unsigned event. Mirrors `amberService.requestEventSignature`'s
+ * `(eventJson, eventId, currentUser) => { signature, event }` signature
+ * so NostrContext can call either service interchangeably.
+ *
+ * `eventId` and `currentUser` are accepted but unused — Amber's native
+ * module needs them for its Intent extras; the bunker derives both from
+ * the unsigned event itself.
+ */
+export async function requestEventSignature(
+  eventJson: string,
+  _eventId: string,
+  _currentUser: string,
+): Promise<{ signature: string; event: string }> {
+  const signer = await getSigner();
+  const parsed = JSON.parse(eventJson);
+  // BunkerSigner.signEvent takes an EventTemplate — strip pubkey/id/sig
+  // even if the caller included them, matching how Amber's Kotlin side
+  // handles the same JSON shape (see PR #267's Amber group-send path).
+  const template = {
+    kind: parsed.kind,
+    created_at: parsed.created_at,
+    tags: parsed.tags ?? [],
+    content: parsed.content ?? '',
+  };
+  let signed;
+  try {
+    signed = await signer.signEvent(template);
+  } catch (e) {
+    throw wrapPermissionError('sign_event', e);
+  }
+  return { signature: signed.sig, event: JSON.stringify(signed) };
+}
+
+export async function requestNip04Encrypt(
+  plaintext: string,
+  recipientPubkey: string,
+  _currentUser: string,
+): Promise<string> {
+  const signer = await getSigner();
+  try {
+    return await signer.nip04Encrypt(recipientPubkey, plaintext);
+  } catch (e) {
+    throw wrapPermissionError('nip04_encrypt', e);
+  }
+}
+
+export async function requestNip04Decrypt(
+  ciphertext: string,
+  senderPubkey: string,
+  _currentUser: string,
+): Promise<string> {
+  const signer = await getSigner();
+  try {
+    return await signer.nip04Decrypt(senderPubkey, ciphertext);
+  } catch (e) {
+    throw wrapPermissionError('nip04_decrypt', e);
+  }
+}
+
+export async function requestNip44Encrypt(
+  plaintext: string,
+  recipientPubkey: string,
+  _currentUser: string,
+): Promise<string> {
+  const signer = await getSigner();
+  try {
+    return await signer.nip44Encrypt(recipientPubkey, plaintext);
+  } catch (e) {
+    throw wrapPermissionError('nip44_encrypt', e);
+  }
+}
+
+export async function requestNip44Decrypt(
+  ciphertext: string,
+  senderPubkey: string,
+  _currentUser: string,
+): Promise<string> {
+  const signer = await getSigner();
+  try {
+    return await signer.nip44Decrypt(senderPubkey, ciphertext);
+  } catch (e) {
+    throw wrapPermissionError('nip44_decrypt', e);
+  }
+}
+
+/**
+ * NIP-46 has no equivalent of Amber's `nip44DecryptSilent`
+ * ContentResolver fast-path. Each decrypt is a relay round-trip plus
+ * (optionally) a user prompt on the bunker side. For an inbox-refresh
+ * batch of 50 wraps this would be 50 * (200-1500ms) = unusable, plus
+ * 50 prompts unless the user pre-granted nip44_decrypt at pair time.
+ *
+ * Trade-off taken here: the inbox refresh path in NostrContext
+ * **feature-flags off the silent batch path when signerType ===
+ * 'nip46'** — instead, the inbox shows a "decrypting..." spinner and
+ * progress UI while wraps catch up via the per-request slow path
+ * (`requestNip44Decrypt`). This is correct (one prompt per wrap, all
+ * properly attributed) but slow on cold cache.
+ *
+ * A spec-compliant `nip44_decrypt_batch` extension would need
+ * coordination with at least Clave / nsec.app / Aegis — leaving for
+ * follow-up work. See issue #283.
+ *
+ * This function exists only so that callers asking for it explicitly
+ * get a clear error rather than silently falling back to a path that
+ * would prompt 50 times. Use `requestNip44Decrypt` instead.
+ */
+export async function requestNip44DecryptSilent(
+  _ciphertext: string,
+  _senderPubkey: string,
+  _currentUser: string,
+): Promise<string> {
+  throw new Error('NIP-46 does not support silent batch decrypt — use requestNip44Decrypt');
+}
+
+/**
+ * Build a `nostrconnect://` pairing URI. The bunker (Clave / Aegis /
+ * nsec.app / etc.) scans this and replies with a `connect` ack that
+ * carries the bunker's pubkey, completing the pairing handshake.
+ *
+ * `clientPubkey` is the per-app keypair pubkey (NOT the user's nsec).
+ * `secret` is 32 hex chars of crypto-secure entropy used by the bunker
+ * to authenticate the inbound connection request.
+ *
+ * Format follows the NIP-46 spec, section "Nostr Connect URIs":
+ *   nostrconnect://<client-pub>?relay=<url>&secret=<hex>&perms=<csv>&name=<urlenc>
+ *
+ * Multiple `relay=` params can be repeated — we keep one for now
+ * (bunker.damus.io is the de-facto default).
+ */
+export function buildPairingUri(input: {
+  clientPubkey: string;
+  relay: string;
+  secret: string;
+  perms: string[];
+  name?: string;
+}): string {
+  // Delegate to nostr-tools' canonical builder so the URI shape
+  // (param names, ordering quirks, missing-perms handling) stays
+  // in sync with what BunkerSigner.fromURI parses on the other side.
+  return createNostrConnectURI({
+    clientPubkey: input.clientPubkey,
+    relays: [input.relay],
+    secret: input.secret,
+    perms: input.perms,
+    name: input.name,
+  });
+}
+
+/**
+ * Wait for a bunker to respond to our pairing URI. Generates the
+ * BunkerSigner from the URI, awaits the bunker's `connect` ack
+ * (resolved by `BunkerSigner.fromURI`), then returns both the live
+ * signer and the connection object the caller should persist.
+ *
+ * The caller (NostrLoginSheet) is responsible for:
+ *  - generating the per-app keypair
+ *  - rendering the URI as a QR for the bunker to scan
+ *  - persisting the returned `Nip46Connection` to SecureStore
+ *  - calling `setActiveConnection` so subsequent service calls reuse
+ *    the open subscription
+ *
+ * `maxWaitSeconds` defaults to 120 — enough for a slow user to switch
+ * apps, find Clave, scan the QR, and tap Approve. Longer than that we
+ * give up and the user can retap the button.
+ */
+export async function awaitBunkerPair(input: {
+  clientSecretKey: Uint8Array;
+  clientPubkey: string;
+  relay: string;
+  secret: string;
+  perms: string[];
+  name: string;
+  maxWaitSeconds?: number;
+}): Promise<{ signer: BunkerSigner; connection: Nip46Connection; userPubkey: string }> {
+  const uri = buildPairingUri({
+    clientPubkey: input.clientPubkey,
+    relay: input.relay,
+    secret: input.secret,
+    perms: input.perms,
+    name: input.name,
+  });
+  const maxWait = (input.maxWaitSeconds ?? 120) * 1000;
+  const signer = await BunkerSigner.fromURI(input.clientSecretKey, uri, undefined, maxWait);
+  // The bunker's pubkey is now in `signer.bp.pubkey`. Resolve the
+  // user's signing pubkey too — on multi-account bunkers (nsec.app,
+  // etc.) the bunker pubkey and signing pubkey differ, and the
+  // signing pubkey is what NostrContext stores as the logged-in user.
+  const userPubkey = await signer.getPublicKey();
+  const connection: Nip46Connection = {
+    remoteSignerPubkey: signer.bp.pubkey,
+    userPubkey,
+    relays: [input.relay],
+    clientSecretKeyHex: bytesToHexLocal(input.clientSecretKey),
+    perms: input.perms.join(','),
+  };
+  // Hand the live signer to the cache so the caller doesn't pay a
+  // second `connect()` round-trip on its first signEvent.
+  _activeConnection = connection;
+  _activeSigner = signer;
+  return { signer, connection, userPubkey };
+}
+
+/**
+ * Local hex encoder so we don't pull in another dep. Matches the output
+ * of `@noble/hashes/utils.bytesToHex` for the same input.
+ */
+function bytesToHexLocal(bytes: Uint8Array): string {
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) {
+    const h = bytes[i].toString(16);
+    s += h.length === 1 ? '0' + h : h;
+  }
+  return s;
+}
