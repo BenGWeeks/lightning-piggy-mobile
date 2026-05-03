@@ -1,0 +1,97 @@
+= Keyboard-state audit
+
+This doc captures what the IME (soft keyboard) does on every input in the
+app — driven by Maestro to focus each input, then captured outside of
+Maestro via `adb screencap` so the IME's own window is included.
+
+Why both: Maestro's `assertVisible:` only inspects the Android
+accessibility tree's `visibleBounds`. **It does not check whether an
+element is actually visible to the eye.** The IME is its own window
+above the app's surface; a button can be 100% occluded by the keyboard
+and `assertVisible: { id: 'send-paste-go' }` still passes. The only
+reliable way to verify "the user can see and reach this control with the
+keyboard up" is a pixel screenshot.
+
+== Pre-reqs
+
+The Android emulator suppresses the soft IME by default on API 35+ —
+see `TROUBLESHOOTING.adoc` "AVD soft keyboard never appears". Apply both
+gates before running the audit:
+
+[source,bash]
+----
+adb shell settings put secure show_ime_with_hard_keyboard 1
+adb shell settings put secure stylus_handwriting_enabled 0
+----
+
+== Run
+
+[source,bash]
+----
+# all 12 surfaces
+bash scripts/keyboard-screenshot-audit.sh
+
+# one surface
+FLOW=03-friend-picker-search bash scripts/keyboard-screenshot-audit.sh
+----
+
+Output: `docs/screenshots/keyboard-states/<surface>.png`.
+
+== Surfaces covered
+
+[cols="1,3,1", options="header"]
+|===
+| #  | Surface                                | Status
+
+| 01 | Messages tab — search input            | OK
+| 02 | Friends tab — search input             | OK
+| 03 | FriendPickerSheet — search input       | OK
+| 04 | CreateGroupSheet — group-name input    | OK
+| 05 | AddFriendSheet — npub input            | **BUG**: sheet content invisible (only IME shown)
+| 06 | ConversationScreen — message input     | OK
+| 07 | FeedbackSheet — message input          | OK
+| 08 | EditProfileSheet — display-name input  | header clipped (auto-scroll hides title) — minor
+| 09 | GifPickerSheet — search input          | OK
+| 10 | SendSheet — paste input                | unreached: "Send" disabled when no wallet connected
+| 11 | RenameGroupSheet — name input          | **BUG**: sheet content invisible (only IME shown)
+| 12 | AddWalletWizard — NWC URL input        | OK
+|===
+
+== Bugs surfaced by the audit
+
+Both bugs match the same root cause already documented in
+`TROUBLESHOOTING.adoc`: `BottomSheetModal` renders with collapsed content
+when its `BottomSheetTextInput` has `autoFocus` and `enableDynamicSizing`
+is left at its v5 default (`true`). The two affected sheets did not get
+the `enableDynamicSizing={false}` workaround that `FriendPickerSheet`,
+`SendSheet`, etc. already have.
+
+* **AddFriendSheet** — `src/components/AddFriendSheet.tsx:108-118`
+  needs `enableDynamicSizing={false}` plus a fixed `snapPoints` (it
+  currently has neither).
+* **RenameGroupSheet** — `src/components/RenameGroupSheet.tsx:97-107`
+  has `snapPoints={['40%']}` but is missing
+  `enableDynamicSizing={false}`.
+
+The minor EditProfileSheet header clipping (08) is an auto-scroll
+behaviour from a long form inside a non-scrollable sheet view; lower
+priority but worth a follow-up.
+
+== Surfaces not covered yet
+
+These either need a precondition the audit doesn't set up, or are
+multi-step:
+
+* `WalletSettingsSheet` (wallet name + lightning address)
+* `ContactProfileSheet` (lightning-address input)
+* `SendSheet` (amount keypad — separate keypad, not OS IME)
+* `ReceiveSheet` (amount keypad)
+* `TransferSheet` (amount keypad)
+* `OnChainScreen` (Electrum URL)
+* `account/NostrScreen` (Blossom URL)
+* `NostrLoginSheet` (nsec input)
+* `GroupConversationScreen` message input (audit covers 1:1 only)
+
+Add new flows to `tests/e2e/keyboard-audit/` and an entry to the
+`FLOWS=()` array in `scripts/keyboard-screenshot-audit.sh` to extend
+coverage.

@@ -1,0 +1,28 @@
+appId: com.lightningpiggy.app.dev
+name: Keyboard audit — 1:1 conversation message input
+---
+- launchApp:
+    appId: com.lightningpiggy.app.dev
+    stopApp: true
+- waitForAnimationToEnd:
+    timeout: 8000
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 3000
+# Daniel Prince is a 1:1 DM in the Messages list; scroll to find it
+- scrollUntilVisible:
+    element:
+      text: 'Daniel Prince'
+    direction: DOWN
+    timeout: 8000
+- tapOn:
+    text: 'Daniel Prince'
+- extendedWaitUntil:
+    visible:
+      id: 'conversation-input'
+    timeout: 8000
+- tapOn:
+    id: 'conversation-input'
+- waitForAnimationToEnd:
+    timeout: 2000

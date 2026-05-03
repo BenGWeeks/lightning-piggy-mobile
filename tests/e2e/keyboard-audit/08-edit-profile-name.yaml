@@ -1,0 +1,24 @@
+appId: com.lightningpiggy.app.dev
+name: Keyboard audit — EditProfileSheet display name
+---
+- launchApp:
+    appId: com.lightningpiggy.app.dev
+    stopApp: true
+- waitForAnimationToEnd:
+    timeout: 8000
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'drawer-row-profile'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    text: 'Edit Profile'
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: 'edit-display-name'
+- waitForAnimationToEnd:
+    timeout: 2000

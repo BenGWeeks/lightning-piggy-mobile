@@ -1,0 +1,28 @@
+appId: com.lightningpiggy.app.dev
+name: Keyboard audit — RenameGroupSheet input
+---
+- launchApp:
+    appId: com.lightningpiggy.app.dev
+    stopApp: true
+- waitForAnimationToEnd:
+    timeout: 8000
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 3000
+# Open a group conversation. The first group row is reliable; "OK" is too generic
+- tapOn:
+    text: 'TestGroup Abc'
+- waitForAnimationToEnd:
+    timeout: 3000
+# Group title taps the rename trigger (group-title testID, line 588)
+- tapOn:
+    id: 'group-title'
+- extendedWaitUntil:
+    visible:
+      id: 'rename-group-input'
+    timeout: 10000
+- tapOn:
+    id: 'rename-group-input'
+- waitForAnimationToEnd:
+    timeout: 2000

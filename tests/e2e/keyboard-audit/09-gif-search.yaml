@@ -1,0 +1,31 @@
+appId: com.lightningpiggy.app.dev
+name: Keyboard audit — GifPickerSheet search
+---
+- launchApp:
+    appId: com.lightningpiggy.app.dev
+    stopApp: true
+- waitForAnimationToEnd:
+    timeout: 8000
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 3000
+# Open a 1:1 conversation
+- tapOn:
+    text: 'Daniel Prince'
+- waitForAnimationToEnd:
+    timeout: 3000
+# Open the attach picker
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd:
+    timeout: 2000
+# GIF tile in the attach panel
+- tapOn:
+    text: 'GIF'
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: 'gif-search-input'
+- waitForAnimationToEnd:
+    timeout: 2000
