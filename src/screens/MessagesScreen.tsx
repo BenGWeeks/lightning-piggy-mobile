@@ -334,18 +334,18 @@ const MessagesScreen: React.FC = () => {
 
   const renderItem = useCallback(
     ({ item }: { item: InboxRow }) => {
+      // Pass the parent handler reference directly (stable across renders)
+      // and let ConversationRow / GroupRow bind the row's summary into the
+      // press callback at the leaf. Previously we passed an inline arrow
+      // (`() => handleX(item.summary)`) which was a fresh reference per
+      // render and defeated the row's React.memo. (#300 follow-up.)
       if (item.kind === 'dm') {
-        return (
-          <ConversationRow
-            summary={item.summary}
-            onPress={() => handleConversationPress(item.summary)}
-          />
-        );
+        return <ConversationRow summary={item.summary} onPress={handleConversationPress} />;
       }
       return (
         <GroupRow
           summary={item.summary}
-          onPress={() => handleGroupPress(item.summary)}
+          onPress={handleGroupPress}
           contactInfoMap={contactInfoMap}
         />
       );
