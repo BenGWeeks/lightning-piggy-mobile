@@ -17,9 +17,9 @@
     "test": "jest",
     "test:coverage": "jest --coverage --coverageReporters=json-summary --coverageReporters=text",
     "perf": "bash scripts/perf-suite.sh",
-    "perf:pixel": "DEVICE=37111FDJH0067B PKG=com.lightningpiggy.app SAMPLES=3 bash scripts/perf-suite.sh",
-    "perf:pixel:quick": "DEVICE=37111FDJH0067B PKG=com.lightningpiggy.app SAMPLES=1 bash scripts/perf-suite.sh",
-    "perf:pixel:long": "DEVICE=37111FDJH0067B PKG=com.lightningpiggy.app SAMPLES=5 bash scripts/perf-suite.sh"
+    "perf:pixel": "bash scripts/perf-suite-pixel.sh",
+    "perf:pixel:quick": "SAMPLES=1 bash scripts/perf-suite-pixel.sh",
+    "perf:pixel:long": "SAMPLES=5 bash scripts/perf-suite-pixel.sh"
   },
   "dependencies": {
     "@bitcoinerlab/secp256k1": "^1.2.0",
@@ -42,7 +42,6 @@
     "electrum-client": "github:BlueWallet/rn-electrum-client",
     "events": "^3.3.0",
     "expo": "~55.0.9",
-    "expo-audio": "~55.0.14",
     "expo-camera": "~55.0.11",
     "expo-clipboard": "~55.0.9",
     "expo-contacts": "~55.0.9",

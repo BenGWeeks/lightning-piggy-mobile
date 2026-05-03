@@ -23,7 +23,13 @@ npm run format
 
 === Unit Testing with Jest
 
-Unit tests run in Node (jsdom) via https://jestjs.io[Jest] with the `jest-expo` preset and https://callstack.github.io/react-native-testing-library/[`@testing-library/react-native`]. Test files live next to source as `*.test.ts` / `*.test.tsx`, or under `tests/unit/`.
+Unit tests run in Node (jsdom) via https://jestjs.io[Jest] with the `jest-expo` preset and https://callstack.github.io/react-native-testing-library/[`@testing-library/react-native`].
+
+**Test files MUST live next to the source as `<file>.test.ts` / `<file>.test.tsx`** (co-located convention). The centralised `tests/unit/` directory is NOT scanned — `jest.config.js`'s `testMatch` is `<rootDir>/src/**/*.test.{ts,tsx}` only. Co-location surfaces missing tests at a glance, keeps tests with their subject when files move, and shortens the relative imports.
+
+For cross-cutting tests (touching multiple files), put them next to the file whose API the test most directly exercises. Example: `src/services/nostrService.test.ts` covers the outgoing wire format; `src/utils/nip17Unwrap.test.ts` covers the incoming parser; `src/utils/syntheticGroupId.test.ts` covers the room-key derivation — even though all three relate to NIP-17 interop.
+
+**Coverage scope:** `src/services`, `src/utils`, `src/contexts` only. Components are excluded (they're tested via Maestro pixel/flow tests instead — mocking Reanimated + bottom-sheet + `expo-image` for unit tests is high-effort, low-payoff).
 
 ==== Running Locally
 

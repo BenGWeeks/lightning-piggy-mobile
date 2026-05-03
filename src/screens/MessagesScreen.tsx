@@ -10,8 +10,8 @@ import {
 import { Image as ExpoImage } from 'expo-image';
 import TabBackgroundImage from '../components/TabBackgroundImage';
 import { FlashList } from '@shopify/flash-list';
-import Svg, { Circle, Path } from 'react-native-svg';
-import { Users, Clock } from 'lucide-react-native';
+import Svg, { Path } from 'react-native-svg';
+import { Users, Clock, Search, X } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, CompositeNavigationProp, useFocusEffect } from '@react-navigation/native';
@@ -119,11 +119,23 @@ const MessagesScreen: React.FC = () => {
   // otherwise schedule the same 50-avatar prefetch on every drip.
   // Mirrors the same pattern used by `dmInboxLastRefreshAt`.
   const lastAvatarPrefetchAt = useRef<number>(0);
+  // TTL gate for the focus-driven inbox refresh. Without it, every focus
+  // (including the back-from-group transition) triggered a full
+  // refreshDmInbox cached-loop on the JS thread for ~3 s on a chunky
+  // inbox — perceived as MessagesScreen freezing right after the back
+  // animation lands (#286 / #300). 30 s mirrors the avatar-prefetch TTL
+  // below; the live `subscribeGroupMessages` channel covers delivery
+  // for any wraps that arrive while the user was inside a group.
+  const dmInboxLastRefreshAt = useRef<number>(0);
+  const DM_INBOX_REFRESH_TTL_MS = 30_000;
   useFocusEffect(
     useCallback(() => {
       if (!isLoggedIn) return;
       const handle = InteractionManager.runAfterInteractions(() => {
-        refreshDmInbox();
+        if (Date.now() - dmInboxLastRefreshAt.current >= DM_INBOX_REFRESH_TTL_MS) {
+          dmInboxLastRefreshAt.current = Date.now();
+          refreshDmInbox();
+        }
 
         const PREFETCH_TTL_MS = 30_000;
         if (Date.now() - lastAvatarPrefetchAt.current < PREFETCH_TTL_MS) return;
@@ -322,18 +334,18 @@ const MessagesScreen: React.FC = () => {
 
   const renderItem = useCallback(
     ({ item }: { item: InboxRow }) => {
+      // Pass the parent handler reference directly (stable across renders)
+      // and let ConversationRow / GroupRow bind the row's summary into the
+      // press callback at the leaf. Previously we passed an inline arrow
+      // (`() => handleX(item.summary)`) which was a fresh reference per
+      // render and defeated the row's React.memo. (#300 follow-up.)
       if (item.kind === 'dm') {
-        return (
-          <ConversationRow
-            summary={item.summary}
-            onPress={() => handleConversationPress(item.summary)}
-          />
-        );
+        return <ConversationRow summary={item.summary} onPress={handleConversationPress} />;
       }
       return (
         <GroupRow
           summary={item.summary}
-          onPress={() => handleGroupPress(item.summary)}
+          onPress={handleGroupPress}
           contactInfoMap={contactInfoMap}
         />
       );
@@ -349,15 +361,7 @@ const MessagesScreen: React.FC = () => {
         <View style={styles.chipRow}>
           {searchExpanded ? (
             <View style={styles.searchRow}>
-              <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
-                <Circle cx="11" cy="11" r="8" stroke="rgba(255,255,255,0.7)" strokeWidth={2} />
-                <Path
-                  d="m21 21-4.3-4.3"
-                  stroke="rgba(255,255,255,0.7)"
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                />
-              </Svg>
+              <Search size={16} color="rgba(255,255,255,0.7)" strokeWidth={2} />
               <TextInput
                 ref={searchInputRef}
                 style={styles.searchInput}
@@ -379,14 +383,7 @@ const MessagesScreen: React.FC = () => {
                 accessibilityLabel="Close search"
                 testID="messages-close-search"
               >
-                <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
-                  <Path
-                    d="M18 6 6 18M6 6l12 12"
-                    stroke="rgba(255,255,255,0.8)"
-                    strokeWidth={2.5}
-                    strokeLinecap="round"
-                  />
-                </Svg>
+                <X size={16} color="rgba(255,255,255,0.8)" strokeWidth={2.5} />
               </TouchableOpacity>
             </View>
           ) : (
@@ -401,15 +398,7 @@ const MessagesScreen: React.FC = () => {
                 accessibilityLabel="Search conversations"
                 testID="messages-search-toggle"
               >
-                <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                  <Circle cx="11" cy="11" r="8" stroke="rgba(255,255,255,0.8)" strokeWidth={2} />
-                  <Path
-                    d="m21 21-4.3-4.3"
-                    stroke="rgba(255,255,255,0.8)"
-                    strokeWidth={2}
-                    strokeLinecap="round"
-                  />
-                </Svg>
+                <Search size={18} color="rgba(255,255,255,0.8)" strokeWidth={2} />
               </TouchableOpacity>
             </>
           )}

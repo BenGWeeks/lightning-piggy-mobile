@@ -283,6 +283,17 @@ function yieldToEventLoop(): Promise<void> {
  * in FriendsScreen as the canary. */
 const DECRYPT_YIELD_EVERY = 15;
 
+/** Yield cadence for the kind-1059 (NIP-17 wrap) loops in
+ * `refreshDmInbox`. Smaller than `DECRYPT_YIELD_EVERY` because this
+ * counter ticks on EVERY wrap — cache hit, miss, follow-filter drop,
+ * group-route, the lot — so even an inbox of pure cache hits still
+ * yields the JS thread regularly. The cache-hit path itself is cheap
+ * (~ms), but on a >1000-wrap inbox the bulk processing piles up to
+ * tens of seconds of unbroken JS work without a periodic yield, which
+ * starves UI events (back-tap appears frozen — #286). 8 keeps each
+ * yield-bounded burst well under a 60 fps frame budget. */
+const NIP17_LOOP_YIELD_EVERY = 8;
+
 /**
  * Minimum gap between `refreshDmInbox` calls fired by
  * `useFocusEffect` on the Messages tab. Without a TTL, every tab return
@@ -435,6 +446,15 @@ async function readCachedWithTtl<T>(
   }
 }
 
+/** Options accepted by `refreshDmInbox`. All fields optional so existing
+ * callers continue to work without changes. `signal` lets a screen
+ * cancel the refresh on unmount so the decrypt loop stops chewing the
+ * JS thread after the user has navigated away (#286). */
+export interface RefreshDmInboxOptions {
+  force?: boolean;
+  signal?: AbortSignal;
+}
+
 interface NostrContextType {
   isLoggedIn: boolean;
   isLoggingIn: boolean;
@@ -526,8 +546,14 @@ interface NostrContextType {
    *
    * `force: true`: bypass the TTL and hit relays. Reserved for
    * explicit user-initiated refreshes (pull-to-refresh).
+   *
+   * `signal`: optional AbortSignal for cancelling the in-flight
+   * refresh. Checked between batches in the decrypt loops so a
+   * navigation-away can stop the JS-thread churn (#286). Aborting
+   * is best-effort — a refresh that's mid-batch will finish that
+   * batch (≤ DECRYPT_YIELD_EVERY items) before bailing out.
    */
-  refreshDmInbox: (opts?: { force?: boolean }) => Promise<void>;
+  refreshDmInbox: (opts?: RefreshDmInboxOptions) => Promise<void>;
   /**
    * Tri-state for the NIP-17 silent-decrypt fast path.
    *  - 'unknown': haven't tried yet in this session
@@ -1967,11 +1993,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
 
   const refreshDmInbox = useCallback(
-    async (opts?: { force?: boolean }): Promise<void> => {
+    async (opts?: RefreshDmInboxOptions): Promise<void> => {
       if (!pubkey || !isLoggedIn) {
         setDmInbox([]);
         return;
       }
+      const signal = opts?.signal;
       // Freshness TTL: skip the refresh entirely if the previous one
       // finished within DM_INBOX_REFRESH_TTL_MS, unless the caller
       // explicitly opts into a forced refresh (pull-to-refresh). The
@@ -2046,6 +2073,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             readRelays,
             opts?.force ? {} : { since: lastSeen },
           );
+          if (signal?.aborted) return;
           const entries: DmInboxEntry[] = [];
 
           // NIP-04 — partner pubkey is in the envelope, so we can apply
@@ -2088,6 +2116,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
           // Slow pass — parallel decrypt of misses in yield-able chunks.
           for (let i = 0; i < k4Misses.length; i += DECRYPT_YIELD_EVERY) {
+            if (signal?.aborted) return;
             const batch = k4Misses.slice(i, i + DECRYPT_YIELD_EVERY);
             const batchResults = await Promise.all(
               batch.map(async (t) => {
@@ -2111,6 +2140,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             }
             if (i + DECRYPT_YIELD_EVERY < k4Misses.length) await yieldToEventLoop();
           }
+          if (signal?.aborted) return;
 
           // NIP-17 — partner pubkey is INSIDE the encrypted rumor, so we
           // have to decrypt to know who sent it. For the nsec signer this
@@ -2135,7 +2165,18 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               const newlyCached: Nip17CacheEntry[] = [];
               let unfollowedPurged = 0;
               let nip17Decrypted = 0;
+              let nip17Iterated = 0;
               for (const wrap of kind1059) {
+                // Periodic yield + abort check covers the cache-hit path
+                // too (#286). Without this, a long run of cache hits
+                // (or skipped/unfollowed entries) walks the whole
+                // kind1059 list synchronously between the per-decrypt
+                // yields below — bad on a >1000-wrap inbox where any
+                // back-tap during refresh appears frozen.
+                if (++nip17Iterated % NIP17_LOOP_YIELD_EVERY === 0) {
+                  if (signal?.aborted) return;
+                  await yieldToEventLoop();
+                }
                 const cached = cache[wrap.id];
                 if (cached) {
                   // Cache entry exists → it was from a followed sender
@@ -2214,8 +2255,15 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               const cache = safeParseRecord<Nip17CacheEntry>(raw);
               const newlyCached: Nip17CacheEntry[] = [];
               let permissionDenied = false;
+              let nip17Iterated = 0;
 
               for (const wrap of kind1059) {
+                // Periodic yield + abort check (#286) — see the nsec
+                // branch above for rationale.
+                if (++nip17Iterated % NIP17_LOOP_YIELD_EVERY === 0) {
+                  if (signal?.aborted) return;
+                  await yieldToEventLoop();
+                }
                 const cached = cache[wrap.id];
                 if (cached) {
                   // Cache entry exists → it was from a followed sender when
@@ -2294,8 +2342,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
           // Identity-change guard: if the user logged out or switched signer
           // while we were mid-flight, don't leak these entries into a
-          // different session's state.
+          // different session's state. Abort signal is treated the same way:
+          // if the navigating-away screen has signalled cancel, skip the
+          // commit so we don't pay the merge / persist cost.
           if (refreshForPubkey !== pubkey || refreshForSigner !== signerType) return;
+          if (signal?.aborted) return;
 
           // PR B: merge cached-with-fresh, keep at most DM_INBOX_CAP
           // entries (newest-first), then persist + update last-seen.

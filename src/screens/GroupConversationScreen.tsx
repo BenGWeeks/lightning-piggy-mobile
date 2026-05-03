@@ -88,14 +88,7 @@ const GroupConversationScreen: React.FC = () => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { getGroup, deleteGroup } = useGroups();
-  const {
-    contacts,
-    sendGroupMessage,
-    pubkey: myPubkey,
-    refreshDmInbox,
-    signEvent,
-    relays,
-  } = useNostr();
+  const { contacts, sendGroupMessage, pubkey: myPubkey, signEvent, relays } = useNostr();
   const [renameVisible, setRenameVisible] = useState(false);
   const [membersSheetVisible, setMembersSheetVisible] = useState(false);
   const [draft, setDraft] = useState('');
@@ -168,15 +161,13 @@ const GroupConversationScreen: React.FC = () => {
     return unsubscribe;
   }, [group]);
 
-  // Force-refresh the DM inbox on mount so the NIP-17 decrypt loop runs
-  // and routes any pending kind-14 group rumors into local storage. The
-  // `subscribeGroupMessages` hook above will then pick them up live.
-  // Force-mode skips the `since` filter (NIP-59 wraps have a randomised
-  // created_at — see refreshDmInbox's comment).
-  useEffect(() => {
-    if (!group) return;
-    refreshDmInbox({ force: true }).catch(() => {});
-  }, [group, refreshDmInbox]);
+  // NOTE: We used to call refreshDmInbox({ force: true }) on mount here
+  // to drain any pending kind-14 group rumors before the live subscription
+  // kicked in. That cost 3-25 s of JS-thread blocking depending on inbox
+  // size — perceived as freeze on back-tap (#286). The live subscription
+  // (`subscribeGroupMessages` above) handles delivery for any wraps that
+  // land while the screen is open; missed wraps from before mount get
+  // drained on the next MessagesScreen focus or app-foreground refresh.
 
   const members: MemberRow[] = useMemo(() => {
     if (!group) return [];
