@@ -1,0 +1,74 @@
+appId: com.lightningpiggy.app.dev
+name: Zap-the-Team SendSheet shows preset amount pills
+---
+# Verifies the four suggested-amount pills (21 / 100 / 1000 / 10000)
+# render on the AmountEntryScreen when the SendSheet is opened from
+# the "Zap the Team" entry on AboutScreen, and that tapping one fills
+# the amount input.
+#
+# Pre-reqs:
+#  - .env contains MAESTRO_NSEC
+#  - Signed-in account has a wallet (BTC price feed needs to load)
+#
+# Run:
+#   source .env && maestro --device emulator-5554 test \
+#     -e MAESTRO_NSEC=$MAESTRO_NSEC \
+#     tests/e2e/test-zap-team-suggested-amounts.yaml
+
+- runFlow: _subflow-login-as.yaml
+
+# Open drawer → About
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'drawer-row-about'
+- waitForAnimationToEnd:
+    timeout: 4000
+
+# Wait for the team profile to fetch (button enables after). Use the
+# testID rather than the text — the rendered label is "⚡ Zap the Team"
+# (with emoji prefix) and Maestro's regex text matcher won't match the
+# bare "Zap the Team" substring.
+- extendedWaitUntil:
+    visible:
+      id: 'zap-team-button'
+    timeout: 10000
+
+- tapOn:
+    id: 'zap-team-button'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Tap the amount-step entry to surface the AmountEntryScreen with pills.
+# The exact label depends on whether the SendSheet lands on its main
+# step first or directly on amount entry; covers both:
+- tapOn:
+    text: 'Enter amount'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# All four preset pills should be visible.
+- assertVisible:
+    id: 'suggested-amount-21'
+- assertVisible:
+    id: 'suggested-amount-100'
+- assertVisible:
+    id: 'suggested-amount-1000'
+- assertVisible:
+    id: 'suggested-amount-10000'
+
+# Tap 100 — the amount-entry-input should reflect 100. Use a child
+# selector so we assert the value INSIDE the input (not just that the
+# input element exists). `containsChild text: '100'` scoped to the
+# input testID gives us a true post-tap value check, while still
+# avoiding a false positive from the still-visible pill text.
+- tapOn:
+    id: 'suggested-amount-100'
+- waitForAnimationToEnd:
+    timeout: 1000
+- assertVisible:
+    id: 'amount-entry-input'
+    text: '100'
