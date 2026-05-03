@@ -76,7 +76,8 @@ module.exports = [
             {
               name: 'react-native',
               importNames: ['Alert'],
-              message: "Use Alert from 'src/components/BrandedAlert' instead — see CLAUDE.md.",
+              message:
+                "Use the branded Alert from src/components/BrandedAlert.tsx instead. Import via the relative path matching this file's location (e.g. '../components/BrandedAlert' from src/screens/, './BrandedAlert' from src/components/). See CLAUDE.md → Code Style.",
             },
           ],
         },
