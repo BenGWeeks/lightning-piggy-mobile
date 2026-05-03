@@ -7,6 +7,7 @@ import {
   BackHandler,
   Keyboard,
   Platform,
+  InteractionManager,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { UserRound, UsersRound } from 'lucide-react-native';
@@ -110,6 +111,26 @@ const FriendPickerSheet: React.FC<Props> = ({
     } else {
       sheetRef.current?.dismiss();
     }
+  }, [visible]);
+
+  // Defer the BottomSheetFlatList mount until JS thread + native
+  // interactions are idle. `InteractionManager.runAfterInteractions`
+  // doesn't strictly wait for the bottom-sheet open animation to
+  // finish (Reanimated worklets run on the UI thread, outside its
+  // tracking) — but it does defer past JS-side work + ongoing native
+  // touch interactions, which empirically delays the list mount until
+  // the sheet has visibly settled. The user sees a brief blank area
+  // (~250 ms) before the list snaps in, instead of the JS thread
+  // building 50 PickedFriend objects + queuing avatar Image decodes
+  // during the animation.
+  const [listReady, setListReady] = useState(false);
+  useEffect(() => {
+    if (!visible) {
+      setListReady(false);
+      return;
+    }
+    const handle = InteractionManager.runAfterInteractions(() => setListReady(true));
+    return () => handle.cancel();
   }, [visible]);
 
   useEffect(() => {
@@ -302,68 +323,76 @@ const FriendPickerSheet: React.FC<Props> = ({
           />
         </View>
         <View style={styles.listWithBar}>
-          {availableLetters.length > 0 ? (
+          {/* `listReady` flips true via InteractionManager once JS work +
+              touch interactions are idle (which empirically lines up
+              with the sheet open animation finishing). Until then this
+              area is intentionally blank — nothing for the JS thread
+              to render while it's busy with the open animation. See
+              `useEffect([visible])` above. */}
+          {listReady && availableLetters.length > 0 ? (
             <AlphabetBar
               letters={availableLetters}
               currentLetter={currentLetter}
               onLetterPress={handleLetterPress}
             />
           ) : null}
-          <BottomSheetFlatList<PickedFriend>
-            ref={listRef}
-            data={friends}
-            keyExtractor={(f: PickedFriend) => f.pubkey}
-            renderItem={renderItem}
-            ListHeaderComponent={
-              onNewGroup ? (
-                <TouchableOpacity
-                  style={styles.row}
-                  onPress={onNewGroup}
-                  accessibilityLabel="Create a new group"
-                  testID="friend-picker-new-group"
-                >
-                  <View style={styles.newGroupIcon}>
-                    <UsersRound size={28} color={colors.brandPink} />
-                  </View>
-                  <View style={styles.info}>
-                    <Text style={styles.newGroupName}>New group</Text>
-                  </View>
-                </TouchableOpacity>
-              ) : null
-            }
-            contentContainerStyle={[
-              styles.listContent,
-              { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
-            ]}
-            keyboardShouldPersistTaps="handled"
-            style={styles.list}
-            onScrollToIndexFailed={(info: {
-              index: number;
-              highestMeasuredFrameIndex: number;
-              averageItemLength: number;
-            }) => {
-              const offset = info.averageItemLength * info.index;
-              listRef.current?.scrollToOffset?.({ offset, animated: false });
-              setTimeout(() => {
-                listRef.current?.scrollToIndex?.({
-                  index: info.index,
-                  animated: false,
-                  viewPosition: 0,
-                });
-              }, 50);
-            }}
-            ListEmptyComponent={
-              <View style={styles.empty}>
-                <Text style={styles.emptyText}>
-                  {contacts.length === 0
-                    ? 'You don’t follow anyone on Nostr yet.'
-                    : search
-                      ? 'No friends match your search.'
-                      : 'No contacts with resolved profiles to send to.'}
-                </Text>
-              </View>
-            }
-          />
+          {listReady ? (
+            <BottomSheetFlatList<PickedFriend>
+              ref={listRef}
+              data={friends}
+              keyExtractor={(f: PickedFriend) => f.pubkey}
+              renderItem={renderItem}
+              ListHeaderComponent={
+                onNewGroup ? (
+                  <TouchableOpacity
+                    style={styles.row}
+                    onPress={onNewGroup}
+                    accessibilityLabel="Create a new group"
+                    testID="friend-picker-new-group"
+                  >
+                    <View style={styles.newGroupIcon}>
+                      <UsersRound size={28} color={colors.brandPink} />
+                    </View>
+                    <View style={styles.info}>
+                      <Text style={styles.newGroupName}>New group</Text>
+                    </View>
+                  </TouchableOpacity>
+                ) : null
+              }
+              contentContainerStyle={[
+                styles.listContent,
+                { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
+              ]}
+              keyboardShouldPersistTaps="handled"
+              style={styles.list}
+              onScrollToIndexFailed={(info: {
+                index: number;
+                highestMeasuredFrameIndex: number;
+                averageItemLength: number;
+              }) => {
+                const offset = info.averageItemLength * info.index;
+                listRef.current?.scrollToOffset?.({ offset, animated: false });
+                setTimeout(() => {
+                  listRef.current?.scrollToIndex?.({
+                    index: info.index,
+                    animated: false,
+                    viewPosition: 0,
+                  });
+                }, 50);
+              }}
+              ListEmptyComponent={
+                <View style={styles.empty}>
+                  <Text style={styles.emptyText}>
+                    {contacts.length === 0
+                      ? 'You don’t follow anyone on Nostr yet.'
+                      : search
+                        ? 'No friends match your search.'
+                        : 'No contacts with resolved profiles to send to.'}
+                  </Text>
+                </View>
+              }
+            />
+          ) : null}
         </View>
       </View>
     </BottomSheetModal>
