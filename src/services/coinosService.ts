@@ -401,3 +401,13 @@ export function generateStrongPassword(): string {
   }
   return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
+
+/** Strip protocol + trailing slash from a base URL to render the
+ *  Lightning-address suffix in UI (`bigpiggy@coinos.io`). */
+export function hostFromBaseUrl(baseUrl: string): string {
+  return baseUrl
+    .trim()
+    .replace(/^https?:\/\//, '')
+    .replace(/\/+$/, '')
+    .toLowerCase();
+}

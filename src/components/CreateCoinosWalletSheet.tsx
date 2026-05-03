@@ -18,11 +18,27 @@ import { ChevronDown, ChevronUp, ShieldAlert } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { useWallet } from '../contexts/WalletContext';
+import { useNostr } from '../contexts/NostrContext';
 import * as coinosService from '../services/coinosService';
 import * as walletStorage from '../services/walletStorageService';
 import CoinosRecoverySheet, { CoinosRecoveryDetails } from './CoinosRecoverySheet';
 
-type Step = 'custody' | 'creating' | 'recovery';
+// custody → username → creating → recovery. The username step exists
+// because the chosen value becomes the user's permanent CoinOS
+// Lightning address (`username@coinos.io`); auto-generating something
+// like `lp_a3f9` would saddle them with `lp_a3f9@coinos.io` forever.
+type Step = 'custody' | 'username' | 'creating' | 'recovery';
+
+// Strip non-[a-z0-9_] from a Nostr displayname → CoinOS-safe username
+// suggestion. CoinOS allows underscores per its `/register` validation,
+// so we keep them; everything else (spaces, emojis, punctuation) drops.
+function normaliseToCoinosUsername(input: string): string {
+  return input
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^a-z0-9_]/g, '')
+    .slice(0, 32);
+}
 
 interface Props {
   visible: boolean;
@@ -45,6 +61,7 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { addNwcWallet, wallets, setActiveWallet } = useWallet();
+  const { profile } = useNostr();
   const ref = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['90%'], []);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -55,6 +72,23 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
   const [baseUrl, setBaseUrl] = useState(coinosService.DEFAULT_COINOS_BASE_URL);
   const [probing, setProbing] = useState(false);
   const [recovery, setRecovery] = useState<CoinosRecoveryDetails | null>(null);
+  // User-chosen CoinOS username. Defaults to a normalised slice of the
+  // logged-in Nostr displayname so the suggested Lightning address is
+  // memorable from day one (e.g. "Big Piggy" → `bigpiggy@coinos.io`).
+  // Falls back to `coinosService.suggestUsername()` (random) if the
+  // user has no displayname yet.
+  const defaultUsername = useMemo(() => {
+    const fromProfile = normaliseToCoinosUsername(
+      profile?.displayName || profile?.name || '',
+    );
+    return fromProfile.length >= 3 ? fromProfile : coinosService.suggestUsername();
+  }, [profile?.displayName, profile?.name]);
+  const [username, setUsername] = useState(defaultUsername);
+  // Re-seed when the default changes (e.g. profile arrives async) and
+  // the user hasn't typed anything yet.
+  useEffect(() => {
+    setUsername((curr) => (curr === '' ? defaultUsername : curr));
+  }, [defaultUsername]);
   // Track the wallet id that addNwcWallet just minted so we can persist
   // the CoinOS recovery info against the right id and switch to it
   // before exiting.
@@ -124,23 +158,36 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
     [step],
   );
 
-  const handleCreate = useCallback(async () => {
+  // First step: from custody → username picker. Probe the optional
+  // self-hosted instance here so a typo gets caught BEFORE the user
+  // picks a name they like, not after.
+  const handleAdvanceToUsername = useCallback(async () => {
     setError(null);
-    setStep('creating');
-
-    // Optional self-hosted instance: probe /health before we commit so a
-    // typo doesn't strand a half-registered account on a bogus host.
     if (baseUrl !== coinosService.DEFAULT_COINOS_BASE_URL) {
       setProbing(true);
       const ok = await coinosService.probeCoinosInstance(baseUrl).finally(() => setProbing(false));
       if (!ok) {
-        setStep('custody');
         setError('Could not reach that CoinOS instance. Check the URL and try again.');
         return;
       }
     }
+    setStep('username');
+  }, [baseUrl]);
 
-    const username = coinosService.suggestUsername();
+  // Second step: from username picker → register + mint NWC.
+  const handleCreate = useCallback(async () => {
+    setError(null);
+    const trimmed = username.trim();
+    if (trimmed.length < 3) {
+      setError('Username must be at least 3 characters');
+      return;
+    }
+    if (!/^[a-z0-9_]+$/.test(trimmed)) {
+      setError('Username can only contain lowercase letters, numbers, and underscores');
+      return;
+    }
+    setStep('creating');
+
     const password = coinosService.generateStrongPassword();
 
     try {
@@ -163,7 +210,7 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
         // — they can paste the NWC string into Add Wallet manually if
         // the failure persists, since it's already shown on the
         // recovery screen we'd reach next.
-        setStep('custody');
+        setStep('username');
         setError(result.error || 'Lightning Piggy could not connect to the new CoinOS wallet.');
         return;
       }
@@ -205,10 +252,10 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
           : e instanceof Error
             ? e.message
             : 'Something went wrong creating your CoinOS wallet.';
-      setStep('custody');
+      setStep('username');
       setError(message);
     }
-  }, [addNwcWallet, baseUrl]);
+  }, [addNwcWallet, baseUrl, username]);
 
   const handleAcknowledge = useCallback(() => {
     // Make sure the new wallet is selected as active before we exit so
@@ -315,11 +362,16 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
 
               <TouchableOpacity
                 style={styles.primaryButton}
-                onPress={handleCreate}
-                accessibilityLabel="Create CoinOS managed Lightning wallet"
+                onPress={handleAdvanceToUsername}
+                disabled={probing}
+                accessibilityLabel="Continue to username picker"
                 testID="coinos-create-button"
               >
-                <Text style={styles.primaryButtonText}>Create my wallet</Text>
+                {probing ? (
+                  <ActivityIndicator color={colors.white} />
+                ) : (
+                  <Text style={styles.primaryButtonText}>Continue</Text>
+                )}
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -329,6 +381,65 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
                 testID="coinos-create-cancel"
               >
                 <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {step === 'username' && (
+            <View style={styles.section} testID="coinos-username-step">
+              <Text style={styles.title}>Pick your Lightning address</Text>
+              <Text style={styles.subtitle}>
+                Friends will send zaps + payments to this address. Pick something you&apos;re happy
+                to share.
+              </Text>
+
+              <Text style={styles.advancedLabel}>Username</Text>
+              <BottomSheetTextInput
+                style={styles.input}
+                value={username}
+                onChangeText={(v) => {
+                  setUsername(normaliseToCoinosUsername(v));
+                  setError(null);
+                }}
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoFocus
+                placeholder="bigpiggy"
+                placeholderTextColor={colors.textSupplementary}
+                testID="coinos-username-input"
+              />
+              <Text style={styles.advancedHint}>
+                Your Lightning address will be{' '}
+                <Text style={{ fontWeight: '700' }}>
+                  {username || 'username'}@{coinosService.hostFromBaseUrl(baseUrl)}
+                </Text>
+              </Text>
+
+              {error && (
+                <Text style={styles.errorText} testID="coinos-create-error">
+                  {error}
+                </Text>
+              )}
+
+              <TouchableOpacity
+                style={styles.primaryButton}
+                onPress={handleCreate}
+                accessibilityLabel="Create CoinOS managed Lightning wallet"
+                testID="coinos-username-confirm"
+              >
+                <Text style={styles.primaryButtonText}>Create my wallet</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => {
+                  setError(null);
+                  setStep('custody');
+                }}
+                style={styles.cancelButton}
+                accessibilityLabel="Back to custody disclosure"
+                testID="coinos-username-back"
+              >
+                <Text style={styles.cancelButtonText}>Back</Text>
               </TouchableOpacity>
             </View>
           )}
