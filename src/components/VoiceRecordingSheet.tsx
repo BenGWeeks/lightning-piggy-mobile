@@ -36,9 +36,13 @@ interface Props {
    */
   onSend: (uri: string) => void | Promise<void>;
   /**
-   * When true, the Send button shows a spinner and stays disabled while
-   * the parent's upload + post is in flight. Cancel still works so the
-   * user can bail out of a stuck upload.
+   * When true, the Send button shows a spinner and stays disabled
+   * while the parent's upload + post is in flight. Cancel only
+   * dismisses the sheet — it does NOT abort an in-flight upload, so
+   * a tap on Cancel during `sending` may still result in the voice
+   * note posting once the parent's `onSend` resolves. (Aborting
+   * an in-flight upload would require threading an AbortSignal
+   * through `uploadBlob`, tracked as a follow-up.)
    */
   sending?: boolean;
 }
@@ -119,6 +123,12 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
   // handler doesn't race a still-finalising recorder. Cleared on every
   // open so a previous session's URI can't leak to a new send.
   const [recordedUri, setRecordedUri] = useState<string | null>(null);
+  // Synchronous send guard. The parent's `sending` prop only flips
+  // after onSend's first await, so a quick double-tap on Send can call
+  // onSend twice before either screen re-renders. A ref flips
+  // synchronously inside handleSend before the first await so the
+  // second tap returns immediately.
+  const sendInFlightRef = useRef(false);
   // Tracks whether we've ever started recording in this session — used
   // to gate the pulse animation and the "tap mic to record" hint.
   const [didStart, setDidStart] = useState(false);
@@ -172,6 +182,7 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
     if (visible) {
       setRecordedUri(null);
       setDidStart(false);
+      sendInFlightRef.current = false;
       sheetRef.current?.present();
     } else {
       sheetRef.current?.dismiss();
@@ -226,12 +237,30 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
       return false;
     }
     setRequesting(true);
+    let result;
     try {
-      const result = await requestRecordingPermissionsAsync();
-      return result.granted;
+      result = await requestRecordingPermissionsAsync();
     } finally {
       setRequesting(false);
     }
+    if (!result.granted) {
+      // First-time deny — surface the "Open Settings" path immediately
+      // so the user doesn't have to tap the mic a second time to learn
+      // how to recover. On Android the second prompt also auto-flips
+      // canAskAgain to false; iOS only ever shows the OS prompt once.
+      Alert.alert(
+        'Microphone access needed',
+        'Voice notes need microphone access. You can grant it any time from system Settings.',
+        result.canAskAgain
+          ? [{ text: 'OK', style: 'cancel' }]
+          : [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            ],
+      );
+      return false;
+    }
+    return true;
   }, []);
 
   const handleStart = useCallback(async () => {
@@ -305,29 +334,49 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
   }, [onClose, recorder]);
 
   const handleSend = useCallback(async () => {
-    if (!recordedUri || sending) return;
-    // Belt-and-braces size cap. The 60 s recording limit *should* keep
-    // an AAC clip well under 2 MB at typical speech bitrates, so this
-    // path is unlikely to trigger today — but if a user swaps to a
-    // stricter Blossom server, or the codec/quality changes in future,
-    // we'd rather fail fast here than burn upload bandwidth on a clip
-    // the server will reject anyway.
+    if (!recordedUri || sending || sendInFlightRef.current) return;
+    // Flip the synchronous guard BEFORE any await so a second tap that
+    // arrives in the same JS turn (before `sending` has had a chance
+    // to flip via the parent's setState) returns at the guard above.
+    sendInFlightRef.current = true;
     try {
-      const sizeBytes = await getFileSizeBytes(recordedUri);
-      if (sizeBytes > MAX_VOICE_NOTE_SIZE_BYTES) {
-        const sizeMb = (sizeBytes / (1024 * 1024)).toFixed(2);
-        Alert.alert(
-          'Voice note too large',
-          `Voice note too large (${sizeMb} MB). Maximum is 5 MB. Try recording a shorter clip.`,
-        );
-        return;
+      // Belt-and-braces size cap. The 60 s recording limit *should*
+      // keep an AAC clip well under 2 MB at typical speech bitrates,
+      // so this path is unlikely to trigger today — but if a user
+      // swaps to a stricter Blossom server, or the codec/quality
+      // changes in future, we'd rather fail fast here than burn
+      // upload bandwidth on a clip the server will reject anyway.
+      try {
+        const sizeBytes = await getFileSizeBytes(recordedUri);
+        if (sizeBytes > MAX_VOICE_NOTE_SIZE_BYTES) {
+          const sizeMb = (sizeBytes / (1024 * 1024)).toFixed(2);
+          Alert.alert(
+            'Voice note too large',
+            `Voice note too large (${sizeMb} MB). Maximum is 5 MB. Try recording a shorter clip.`,
+          );
+          // Failed fast — let the user retry; clear the guard so a
+          // subsequent tap can proceed.
+          sendInFlightRef.current = false;
+          return;
+        }
+      } catch (err) {
+        console.warn('[VoiceRecordingSheet] size check failed', err);
+        // Fall through — let the upload path surface its own error
+        // rather than blocking the send because we couldn't stat the
+        // file.
       }
+      await onSend(recordedUri);
     } catch (err) {
-      console.warn('[VoiceRecordingSheet] size check failed', err);
-      // Fall through — let the upload path surface its own error rather
-      // than blocking the send because we couldn't stat the file.
+      // Parent's onSend may throw — clear the guard so the user can
+      // retry without remounting the sheet.
+      sendInFlightRef.current = false;
+      throw err;
     }
-    await onSend(recordedUri);
+    // Note: on success we leave sendInFlightRef = true. The sheet is
+    // about to be dismissed by the parent, and `visible` flipping will
+    // reset the ref on the next open. Holding it true in the meantime
+    // prevents a third tap from racing in if the user happens to keep
+    // jabbing the button while the sheet is animating away.
   }, [recordedUri, sending, onSend]);
 
   const renderBackdrop = useCallback(
@@ -411,9 +460,11 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
 
         <View style={styles.buttonRow}>
           <TouchableOpacity
-            style={[styles.actionButton, styles.cancelButton]}
+            style={[styles.actionButton, styles.cancelButton, sending && styles.sendButtonDisabled]}
             onPress={handleCancel}
+            disabled={sending}
             accessibilityLabel="Cancel voice note"
+            accessibilityState={{ disabled: sending }}
             testID="voice-cancel-button"
           >
             <X size={18} color={colors.textBody} />

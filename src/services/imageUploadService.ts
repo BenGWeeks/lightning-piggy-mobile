@@ -60,17 +60,52 @@ export async function stripImageMetadata(
   return { uri: result.uri, base64: result.base64 };
 }
 
-export async function uploadToNostrBuild(imageUri: string): Promise<string> {
-  const filename = imageUri.split('/').pop() || 'image.jpg';
+// Map a filename extension to the spec-correct MIME type. Required so
+// that non-image blobs (e.g. `.m4a` voice notes from #235 that fall
+// back to nostr.build when no Blossom signer is available) aren't
+// uploaded as `image/m4a` — which nostr.build will either reject or
+// serve with the wrong Content-Type, breaking inline playback in
+// receiving clients.
+function mimeFromExt(ext: string | undefined): string {
+  if (!ext) return 'application/octet-stream';
+  switch (ext) {
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'png':
+      return 'image/png';
+    case 'gif':
+      return 'image/gif';
+    case 'webp':
+      return 'image/webp';
+    case 'm4a':
+    case 'mp4':
+      // expo-audio's HIGH_QUALITY preset writes AAC inside an MP4
+      // container with a `.m4a` extension on iOS / Android.
+      return 'audio/mp4';
+    case 'aac':
+      return 'audio/aac';
+    case 'mp3':
+      return 'audio/mpeg';
+    case 'ogg':
+    case 'opus':
+      return 'audio/ogg';
+    case 'wav':
+      return 'audio/wav';
+    default:
+      return `application/${ext}`;
+  }
+}
+
+export async function uploadToNostrBuild(fileUri: string): Promise<string> {
+  const filename = fileUri.split('/').pop() || 'upload.bin';
   const match = /\.(\w+)$/.exec(filename);
-  // Normalise JPEG variants to the spec-correct image/jpeg — `image/${ext}`
-  // otherwise emits the non-standard `image/jpg` for `.jpg` filenames.
   const ext = match?.[1]?.toLowerCase();
-  const type = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext ? `image/${ext}` : 'image/jpeg';
+  const type = mimeFromExt(ext);
 
   const formData = new FormData();
   // React Native FormData accepts {uri, name, type} but TypeScript expects Blob
-  formData.append('file', { uri: imageUri, name: filename, type } as unknown as Blob);
+  formData.append('file', { uri: fileUri, name: filename, type } as unknown as Blob);
 
   const response = await fetch(NOSTR_BUILD_UPLOAD_URL, {
     method: 'POST',
