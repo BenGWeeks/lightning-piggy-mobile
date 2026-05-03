@@ -18,14 +18,23 @@ set -u
 
 LABEL="${1:-baseline}"
 OUT="/tmp/perf-messages-${LABEL}"
-PKG="com.lightningpiggy.app.dev"
-DEVICE="emulator-5554"
+# Parameterised so contributors on different emulators / release variants
+# don't have to edit the script. Defaults match the dev-AVD setup.
+PKG="${PKG:-com.lightningpiggy.app.dev}"
+DEVICE="${DEVICE:-emulator-5554}"
 FLOW="tests/e2e/perf-messages-tab-open.yaml"
 
 mkdir -p "$OUT"
 echo "→ writing to $OUT"
 
 echo "→ resetting gfxinfo + capturing baseline"
+# NB: the reset happens once, BEFORE the Maestro flow runs (which both
+# launches the app AND taps the Messages tab). So gfxinfo-after below
+# captures frames from BOTH the cold launch AND the tab switch — a
+# meaningful "cold cost of reaching the Messages tab" measure. If you
+# need isolated tab-switch frames (i.e. switch from a warmed-up Home),
+# use scripts/perf-suite.sh — its warmup pass primes the app first
+# and resets gfxinfo before the tab-tap-only flow.
 adb -s "$DEVICE" shell dumpsys gfxinfo "$PKG" reset > /dev/null 2>&1 || true
 adb -s "$DEVICE" shell dumpsys gfxinfo "$PKG" > "$OUT/gfxinfo-before.txt" 2>&1 || true
 
@@ -37,11 +46,15 @@ if [ "$MAESTRO_EXIT" -ne 0 ]; then
   exit 1
 fi
 
-echo "→ adb-screencap timeline (relative to tab tap return)"
-sleep 0.3 && adb -s "$DEVICE" exec-out screencap -p > "$OUT/t0500.png"
-sleep 0.5 && adb -s "$DEVICE" exec-out screencap -p > "$OUT/t1000.png"
-sleep 1.0 && adb -s "$DEVICE" exec-out screencap -p > "$OUT/t2000.png"
-sleep 1.0 && adb -s "$DEVICE" exec-out screencap -p > "$OUT/t3000.png"
+echo "→ adb-screencap timeline (cumulative ms relative to tap return)"
+# Filenames now match the cumulative sleep elapsed: 0.3 + 0.5 + 1.0 + 1.0
+# = 0.3s, 0.8s, 1.8s, 2.8s. Older runs had t0500/t1000/t2000/t3000 which
+# misled readers into thinking each capture was at a round half-second
+# offset rather than at the cumulative wallclock.
+sleep 0.3 && adb -s "$DEVICE" exec-out screencap -p > "$OUT/t0300.png"
+sleep 0.5 && adb -s "$DEVICE" exec-out screencap -p > "$OUT/t0800.png"
+sleep 1.0 && adb -s "$DEVICE" exec-out screencap -p > "$OUT/t1800.png"
+sleep 1.0 && adb -s "$DEVICE" exec-out screencap -p > "$OUT/t2800.png"
 
 echo "→ capturing post-tap gfxinfo"
 adb -s "$DEVICE" shell dumpsys gfxinfo "$PKG" > "$OUT/gfxinfo-after.txt" 2>&1 || true
