@@ -1,0 +1,93 @@
+name: PR Lint
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+    branches: [main]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  pr-lint:
+    name: Title, body and issue link
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR title, body and issue reference
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -u
+
+          # Bots open PRs without ticket refs / test plans — skip with success
+          # (exit 0 inside the step, not a job-level `if:`, so the check still
+          # reports "success" rather than "skipped" and can be required).
+          if [ "$GITHUB_ACTOR" = 'dependabot[bot]' ] || [ "$GITHUB_ACTOR" = 'github-actions[bot]' ]; then
+            echo "Skipping PR lint for bot actor: $GITHUB_ACTOR"
+            exit 0
+          fi
+
+          fail=0
+
+          # 1. Title must use Conventional Commits + optional scope:
+          #      <type>(<scope>): <subject>           e.g. perf(ui): kill 5s GPU stall
+          #      <type>: <subject>                    e.g. docs: tidy README
+          #    Optional trailing "(#nnn)" or "(#nnn, #mmm)" issue suffix is allowed.
+          #    feat / fix / perf / refactor REQUIRE a "Closes #nnn" line in the body.
+          #    chore / ci / docs / deps / test / build / style do not.
+          title_regex='^(feat|fix|perf|refactor|chore|ci|docs|deps|test|build|style)(\([a-z0-9-]+\))?: .+'
+          if ! echo "$PR_TITLE" | grep -Eq "$title_regex"; then
+            echo "::error::PR title must follow: <type>(<scope>): <subject>"
+            echo "::error::types: feat, fix, perf, refactor, chore, ci, docs, deps, test, build, style"
+            echo "::error::scope is optional but lower-case alphanumeric (eg. ui, nostr, dm, onboarding)"
+            echo "::error::Got: '$PR_TITLE'"
+            fail=1
+          fi
+
+          # 2. Body must not be empty and must be a meaningful length
+          body_len=$(echo -n "${PR_BODY:-}" | wc -c)
+          if [ "$body_len" -lt 40 ]; then
+            echo "::error::PR body is missing or too short (<40 chars). Describe what changed and why."
+            fail=1
+          fi
+
+          # 3. feat / fix / perf / refactor PRs must contain at least one
+          #    'Closes #nnn' (or 'Fixes #nnn') line so GitHub auto-closes
+          #    the linked issue when the PR merges.
+          if echo "$PR_TITLE" | grep -Eq '^(feat|fix|perf|refactor)(\([a-z0-9-]+\))?: '; then
+            closes_regex='^(Closes|Fixes) #[0-9]+'
+            if ! echo "$PR_BODY" | grep -Eq "$closes_regex"; then
+              echo "::error::PR body must contain at least one 'Closes #nnn' line for"
+              echo "::error::feat/fix/perf/refactor PRs. Example:  Closes #123"
+              echo "::error::This auto-closes the linked issue when the PR merges."
+              fail=1
+            fi
+          else
+            echo "Non-issue PR prefix detected — skipping 'Closes #nnn' requirement."
+          fi
+
+          # 4. Body must include a Test plan section
+          if ! echo "$PR_BODY" | grep -Eq '^## Test plan'; then
+            echo "::error::PR body must include a '## Test plan' section."
+            echo "::error::Provide step-by-step tester actions, or 'N/A — <reason>'"
+            echo "::error::for pure refactor / docs / ci / deps with no user-visible change."
+            fail=1
+          else
+            tp_content=$(echo "$PR_BODY" | awk '
+              /^## Test plan/ {intp=1; next}
+              /^## / {intp=0}
+              intp {print}
+            ' | perl -0pe 's/<!--.*?-->//gs' | tr -d '[:space:]')
+            if [ -z "$tp_content" ]; then
+              echo "::error::'## Test plan' section is empty or only contains the template comment."
+              echo "::error::Add steps or 'N/A — <reason>'."
+              fail=1
+            fi
+          fi
+
+          if [ "$fail" -ne 0 ]; then
+            exit 1
+          fi
+          echo "PR lint passed."
