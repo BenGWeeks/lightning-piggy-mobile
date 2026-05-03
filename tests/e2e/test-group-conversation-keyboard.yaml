@@ -31,7 +31,7 @@ name: Group conversation composer rises with keyboard
 # Pick the first visible group conversation. Using a regex anchor on
 # "members" sub-text so we don't accidentally pick a 1:1 DM row.
 - tapOn:
-    text: 'members$'
+    text: "TestGroup Abc$"
 - waitForAnimationToEnd:
     timeout: 4000
 
