@@ -6,7 +6,6 @@ import {
   StyleSheet,
   FlatList,
   TextInput,
-  Image,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -17,7 +16,7 @@ import {
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
-import Svg, { Path, Circle } from 'react-native-svg';
+import Svg, { Path } from 'react-native-svg';
 import { LogOut, Plus } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -27,6 +26,7 @@ import type { Palette } from '../styles/palettes';
 import { useGroups } from '../contexts/GroupsContext';
 import { useNostr, subscribeGroupMessages, notifyGroupMessage } from '../contexts/NostrContext';
 import RenameGroupSheet from '../components/RenameGroupSheet';
+import GroupMembersSheet from '../components/GroupMembersSheet';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import AttachPanel from '../components/AttachPanel';
 import GifPickerSheet from '../components/GifPickerSheet';
@@ -93,6 +93,7 @@ const GroupConversationScreen: React.FC = () => {
     relays,
   } = useNostr();
   const [renameVisible, setRenameVisible] = useState(false);
+  const [membersSheetVisible, setMembersSheetVisible] = useState(false);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [messages, setMessages] = useState<GroupMessage[]>([]);
@@ -610,51 +611,22 @@ const GroupConversationScreen: React.FC = () => {
             <LogOut size={18} color={colors.white} strokeWidth={2} />
           </TouchableOpacity>
         </View>
-        <Text style={styles.memberCount}>
-          {members.length} member{members.length === 1 ? '' : 's'}
-        </Text>
+        {/* Tappable member-count line — opens GroupMembersSheet for
+            add/remove. Replaces the inert text + horizontal chip strip
+            that used to live below this header. See issue #259. */}
+        <TouchableOpacity
+          onPress={() => setMembersSheetVisible(true)}
+          accessibilityLabel="Manage members"
+          testID="group-member-count"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Text style={styles.memberCount}>
+            {members.length} member{members.length === 1 ? '' : 's'}
+          </Text>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.content}>
-        {/* Member chips so the test can verify membership without scrolling
-            off-screen on small devices. */}
-        <View style={styles.membersStrip}>
-          <FlatList
-            data={members}
-            keyExtractor={(item) => item.pubkey}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={styles.memberChip}
-                onPress={() => setSelectedMemberPubkey(item.pubkey)}
-                accessibilityLabel={`Open profile for ${item.name}`}
-                testID={`member-chip-${item.pubkey.slice(0, 12)}`}
-              >
-                <View style={styles.memberAvatar}>
-                  {item.picture ? (
-                    <Image source={{ uri: item.picture }} style={styles.memberAvatarImage} />
-                  ) : (
-                    <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
-                      <Circle cx="12" cy="8" r="4" fill={colors.textSupplementary} />
-                      <Path
-                        d="M4 20c0-3.314 3.582-6 8-6s8 2.686 8 6"
-                        stroke={colors.textSupplementary}
-                        strokeWidth={2}
-                        strokeLinecap="round"
-                      />
-                    </Svg>
-                  )}
-                </View>
-                <Text style={styles.memberChipName} numberOfLines={1}>
-                  {item.name}
-                </Text>
-              </TouchableOpacity>
-            )}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.membersStripContent}
-          />
-        </View>
-
         {loadingMessages ? (
           <ActivityIndicator color={colors.brandPink} style={{ marginTop: 32 }} />
         ) : (
@@ -750,6 +722,12 @@ const GroupConversationScreen: React.FC = () => {
         visible={renameVisible}
         groupId={group.id}
         onClose={() => setRenameVisible(false)}
+      />
+
+      <GroupMembersSheet
+        visible={membersSheetVisible}
+        groupId={group.id}
+        onClose={() => setMembersSheetVisible(false)}
       />
 
       {/* Tap a member chip to open their profile sheet. The contact lookup
@@ -917,46 +895,6 @@ const createStyles = (colors: Palette) =>
       borderTopRightRadius: 24,
       marginTop: -24,
       overflow: 'hidden',
-    },
-    membersStrip: {
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.divider,
-      paddingTop: 12,
-      paddingBottom: 12,
-    },
-    membersStripContent: {
-      paddingHorizontal: 16,
-      gap: 10,
-    },
-    memberChip: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingVertical: 6,
-      paddingHorizontal: 10,
-      borderRadius: 18,
-      backgroundColor: colors.surface,
-      gap: 8,
-      maxWidth: 180,
-    },
-    memberAvatar: {
-      width: 28,
-      height: 28,
-      borderRadius: 14,
-      backgroundColor: colors.background,
-      justifyContent: 'center',
-      alignItems: 'center',
-      overflow: 'hidden',
-    },
-    memberAvatarImage: {
-      width: 28,
-      height: 28,
-      borderRadius: 14,
-    },
-    memberChipName: {
-      fontSize: 13,
-      fontWeight: '600',
-      color: colors.textHeader,
-      flexShrink: 1,
     },
     messagesList: {
       paddingVertical: 12,
