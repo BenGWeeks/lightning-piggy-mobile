@@ -106,6 +106,53 @@ adb -s <serial> shell dumpsys package com.lightningpiggy.app | \
   grep -E "versionCode|lastUpdateTime"
 ----
 
+===== Connecting the phone for sideload
+
+`adb` first needs to see the phone. USB is the happy path, but in practice the dog-eared cable or a stuck USB controller often defeats it — when that happens, fall back to wireless adb instead of debugging the cable. Both phone and laptop must be on the same Wi-Fi.
+
+*Diagnose USB before giving up:*
+
+[source,bash]
+----
+# Check USB enumeration at the kernel level — this works without
+# adb authorization, so it's a clean signal of cable / port health.
+# A working Pixel shows up as `Bus NNN Device NNN: ID 18d1:...`
+# (Google vendor ID 18d1).
+lsusb | grep -iE "google|18d1"
+
+# If lsusb is empty even after re-plugging, the laptop doesn't see
+# the phone at all — it's the cable, the port, or lint in the
+# phone's USB-C socket. Don't keep poking adb; switch to wireless.
+----
+
+*Wireless adb (Android 11+ — Pixel 8 supports it):*
+
+. *Phone:* Settings → System → Developer options → Wireless debugging → ON.
+. *Phone:* tap the *Wireless debugging* row (not just the toggle) to open the detail page.
+. The detail page shows an **IP address & Port** at the top — this is the **persistent connection port** (no code beside it). Note it.
+. Tap *Pair device with pairing code* to open a dialog that shows a *different* port + a 6-digit code. Both expire after one pairing attempt — pair codes are one-shot, so don't generate one until the laptop is ready to consume it.
+. *Laptop:* pair, then connect:
++
+[source,bash]
+----
+adb pair 192.168.1.18:<PAIR_PORT> <CODE>
+# Successfully paired ... [guid=adb-...]
+
+adb connect 192.168.1.18:<CONNECT_PORT>
+# connected to 192.168.1.18:<CONNECT_PORT>
+
+adb devices
+# 192.168.1.18:<CONNECT_PORT>   device
+----
+. From here on, every `adb` command takes `-s 192.168.1.18:<CONNECT_PORT>` (the wireless socket) as the device serial — substitute that for `-s <serial>` in the commands above.
+
+*Common gotchas:*
+
+* `adb pair` returns `error: protocol fault (couldn't read status message): Success` — the pair code was already burned (one-shot, expires on any failed handshake). Tap *Pair device with pairing code* again to generate a new code.
+* `adb connect` succeeds but `adb devices` shows the host as `offline` — you skipped pairing. Pair first, *then* connect.
+* `adb mdns services` is empty even after pairing — your Wi-Fi blocks multicast (common on guest networks and some routers). Manual pair + connect with explicit IPs still works; only mDNS auto-discovery is broken.
+* The connect port and the pair port are *different* — the connect port is shown on the main *Wireless debugging* page; the pair port appears only inside the *Pair device with pairing code* dialog. Don't try to connect to the pair port; you'll get `offline`.
+
 ==== Why `./gradlew assembleRelease` + `adb install -r` silently fails
 
 Running `cd android && ./gradlew :app:assembleRelease` directly works
@@ -159,7 +206,98 @@ Three separate numbers, maintained by three different actors — easy to confuse
 | The in-repo `version:` field in `app.config.ts`
 | The last release workflow run
 | Between releases this is a stale snapshot of the most recent tag's `X.Y.Z` minus any RC suffix. Treat it as read-only; the tag is the source of truth.
+
+| The in-repo `android.versionCode:` field in `app.config.ts`
+| Hand-edited per local prod build (see "Local production builds" below)
+| Floor for the **locally-built** Android `versionCode`. EAS production builds use a separate **remote** counter (`eas.json` → `"appVersionSource": "remote"`) and ignore this field — so the two counters can drift, and the EAS counter is usually well ahead. Bump this manually before each local `--variant release` install whenever the target device already has a higher versionCode installed (e.g. from a prior EAS build).
 |===
+
+==== Local production builds
+
+There are two reasons to build a release APK locally:
+
+. **You want to sideload the prod APK over an existing EAS-built install** to validate a fix on real hardware without pushing a tag (and without losing your wallets / Nostr login).
+. **You're testing the release-build pipeline itself** — for instance verifying R8 didn't strip a class.
+
+The right command depends on which case you're in.
+
+===== Case 1 (recommended): keep existing data on an EAS-built device
+
+Use `eas build --local --profile production`. This runs **EAS's exact production pipeline** on your machine (instead of in the cloud) — it fetches the EAS upload keystore down at build time, runs prebuild against `appVersionSource: "remote"` so versionCode pulls from the EAS counter, and emits an APK that the device treats as a normal upgrade of the existing install:
+
+[source,bash]
+----
+# Builds an .apk in the repo root (e.g. build-1733864000123.apk) without
+# installing. EAS's autoIncrement bumps the remote versionCode by one and
+# tags this build with it — so the artifact is always strictly higher
+# than whatever's on the device. Build runs on this machine; only the
+# keystore + counter come from EAS.
+eas build --local --profile production --platform android --non-interactive
+
+# Then sideload to the Pixel. `adb -s` takes the adb serial here (NOT
+# the model name expo run:android wants).
+adb -s <serial> install -r build-*.apk
+----
+
+Side-loading this way preserves all app data (`/data/data/com.lightningpiggy.app/` is left untouched on upgrade). Wallets, Nostr login, message history all survive.
+
+Caveats:
+* Burns one EAS build counter increment per local prod build. Costs nothing financially (local builds don't count against the EAS plan), but the published `versionCode` numbers stop being a clean count of cloud-built APKs.
+* First run can be slow — eas-cli has to fetch the keystore + run a clean Gradle build (~5–10 min). Subsequent runs are incremental.
+
+===== Case 2: standalone local prod build (fresh device or OK to wipe data)
+
+`npx expo run:android --variant release --device <Pixel_model>` produces a locally-signed prod APK. **The signing keystore differs from the EAS upload keystore**, so this APK *cannot* upgrade an existing EAS-built install — Android refuses cross-keystore updates with:
+
+[source]
+----
+INSTALL_FAILED_UPDATE_INCOMPATIBLE: Existing package signatures do not match newer version
+----
+
+The `-r -d` flags don't bypass this; it's a security guarantee, not a flag. Either `adb uninstall com.lightningpiggy.app` first (wipes data), or use Case 1.
+
+A second gotcha: the locally-built versionCode does not auto-increment. The local pipeline reads `android.versionCode` from `app.config.ts` (whose default is `1`) — so the device under test, which is usually running a high-20s EAS-built versionCode, rejects the install:
+
+[source]
+----
+INSTALL_FAILED_VERSION_DOWNGRADE: Update version code N is older than current M
+----
+
+Workflow if you do go this route:
+
+. Read the most recent EAS-built versionCode:
++
+[source,bash]
+----
+eas build:list --platform android --status finished --limit 1
+----
+. Bump `android.versionCode` in `app.config.ts` to **(latest-EAS) + 1**. The release workflow overwrites `version:` but not `versionCode:`, so this bump persists across releases. EAS uses its own remote counter regardless, so committing this number doesn't interfere with the cloud pipeline.
+. Re-prebuild + build:
++
+[source,bash]
+----
+APP_VARIANT=production npx expo prebuild --platform android --no-install
+npx expo run:android --variant release --device <Pixel_model>
+----
++
+`--device` for physical phones takes the **model name** (`Pixel_8`), not the adb serial. For emulators it's the AVD name. Maestro CLI is the opposite — it accepts the adb serial. See `docs/TROUBLESHOOTING.adoc`.
+. Uninstall first if the device has an EAS-built install (signature mismatch, see above): `adb -s <serial> uninstall com.lightningpiggy.app`.
+
+===== Reading the installed versionCode + signature
+
+[source,bash]
+----
+# Currently-installed version
+adb -s <serial> shell dumpsys package com.lightningpiggy.app \
+  | grep -E "versionCode|versionName"
+
+# Currently-installed signature (SHA-256 of the signer's cert).
+# An EAS-built install and a locally-built install will print
+# different fingerprints here — that's the source of the
+# UPDATE_INCOMPATIBLE error.
+adb -s <serial> shell dumpsys package com.lightningpiggy.app \
+  | grep -E "Signer #1 cert"
+----
 
 Reading the version of a running install:
 

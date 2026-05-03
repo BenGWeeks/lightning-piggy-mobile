@@ -5,6 +5,12 @@
 - Use `npm start` (not `npx expo start`) — the start script includes `--dev-client` which is required for custom native modules
 - Native rebuild required after changing plugins or native modules: `npx expo run:android`
 
+## Deploying a release APK to a physical device
+
+- The user's primary device is a Pixel running an EAS-built production install. **`npx expo run:android --variant release` will not upgrade it** — locally-signed APK fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE` (different keystore than EAS) and `INSTALL_FAILED_VERSION_DOWNGRADE` (local versionCode resets to 1 every prebuild, while EAS's remote counter is in the high 20s).
+- To preserve the user's app data (wallets, Nostr login, message history), use `eas build --local --profile production --platform android --non-interactive` instead. This runs EAS's pipeline on this machine, fetches the EAS upload keystore so the signature matches, and uses the remote-incremented versionCode. Sideload with `adb -s <serial> install -r build-*.apk` (note: `adb` takes the serial, `expo run:android --device` takes the model name like `Pixel_8`).
+- Full recipe + rationale (case 1 vs case 2) lives in `docs/DEPLOYMENT.adoc` → "Local production builds". When a deploy fails for one of these reasons, update that section if anything's changed.
+
 ## Testing
 
 - E2E tests use Maestro and live in `tests/e2e/`
