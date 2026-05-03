@@ -7,7 +7,6 @@ import {
   FlatList,
   Image,
   ActivityIndicator,
-  InteractionManager,
   Linking,
   Modal,
   Pressable,
@@ -88,14 +87,7 @@ const GroupConversationScreen: React.FC = () => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { getGroup, deleteGroup } = useGroups();
-  const {
-    contacts,
-    sendGroupMessage,
-    pubkey: myPubkey,
-    refreshDmInbox,
-    signEvent,
-    relays,
-  } = useNostr();
+  const { contacts, sendGroupMessage, pubkey: myPubkey, signEvent, relays } = useNostr();
   const [renameVisible, setRenameVisible] = useState(false);
   const [membersSheetVisible, setMembersSheetVisible] = useState(false);
   const [draft, setDraft] = useState('');
@@ -166,45 +158,13 @@ const GroupConversationScreen: React.FC = () => {
     return unsubscribe;
   }, [group]);
 
-  // Force-refresh the DM inbox on mount so the NIP-17 decrypt loop runs
-  // and routes any pending kind-14 group rumors into local storage. The
-  // `subscribeGroupMessages` hook above will then pick them up live.
-  // Force-mode skips the `since` filter (NIP-59 wraps have a randomised
-  // created_at — see refreshDmInbox's comment).
-  //
-  // Deferred via InteractionManager so the screen-open transition gets a
-  // clean frame budget — refreshDmInbox can churn through ~1000 cached
-  // NIP-17 wraps synchronously on the JS thread (~40s on a real Pixel
-  // with a busy inbox), and if we kick it off during mount it blocks the
-  // *back* transition too: the user taps Back, the JS thread is locked,
-  // and the navigation animation can't start until the refresh finishes
-  // (#286). Cancelling the InteractionManager handle on unmount means a
-  // user who backs out before the transition even completes gets the
-  // best case — refresh never runs at all.
-  //
-  // The AbortController covers the other case: the refresh has already
-  // started running when the user taps back. handle.cancel() is a no-op
-  // once runAfterInteractions has fired, so without the signal the
-  // decrypt loop keeps grinding the JS thread for tens of seconds after
-  // unmount and the back-tap appears frozen. refreshDmInbox checks
-  // signal.aborted between batches in its decrypt loops; aborting here
-  // lets it bail out within ~1 batch (≤ DECRYPT_YIELD_EVERY items).
-  //
-  // No unmount guard is needed inside the refresh callback for state
-  // safety: refreshDmInbox writes only to NostrContext state, not to
-  // this screen's local state, so a late-finishing refresh is harmless
-  // for correctness — the abort is purely a perf concern.
-  useEffect(() => {
-    if (!group) return;
-    const ac = new AbortController();
-    const handle = InteractionManager.runAfterInteractions(() => {
-      refreshDmInbox({ force: true, signal: ac.signal }).catch(() => {});
-    });
-    return () => {
-      handle.cancel();
-      ac.abort();
-    };
-  }, [group, refreshDmInbox]);
+  // NOTE: We used to call refreshDmInbox({ force: true }) on mount here
+  // to drain any pending kind-14 group rumors before the live subscription
+  // kicked in. That cost 3-25 s of JS-thread blocking depending on inbox
+  // size — perceived as freeze on back-tap (#286). The live subscription
+  // (`subscribeGroupMessages` above) handles delivery for any wraps that
+  // land while the screen is open; missed wraps from before mount get
+  // drained on the next MessagesScreen focus or app-foreground refresh.
 
   const members: MemberRow[] = useMemo(() => {
     if (!group) return [];
