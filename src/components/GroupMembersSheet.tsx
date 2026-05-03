@@ -183,7 +183,7 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
               </View>
               <Text style={styles.rowName} numberOfLines={1}>
                 {m.name}
-                {m.pubkey === selfPubkey ? <Text style={styles.youTag}>  · you</Text> : null}
+                {m.pubkey === selfPubkey ? <Text style={styles.youTag}> · you</Text> : null}
               </Text>
               {m.pubkey !== selfPubkey ? (
                 <TouchableOpacity
