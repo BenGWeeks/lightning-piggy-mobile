@@ -1391,6 +1391,19 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           if (result.wrapsPublished === 0) {
             return { success: false, error: result.errors[0] ?? 'No wraps published' };
           }
+          // Partial send — some recipients got the message, others didn't
+          // (typically the user cancelled an Amber prompt mid-loop, or
+          // a relay rejected one wrap). Surface this as a non-fatal
+          // failure rather than silent success so the composer doesn't
+          // clear and the user sees how many members actually received it.
+          if (result.errors.length > 0) {
+            const intended = result.wrapsPublished + result.errors.length;
+            return {
+              success: false,
+              wrapsPublished: result.wrapsPublished,
+              error: `Sent to ${result.wrapsPublished} of ${intended} members. ${result.errors[0]}`,
+            };
+          }
           return { success: true, wrapsPublished: result.wrapsPublished };
         }
 
@@ -1425,6 +1438,19 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           });
           if (result.wrapsPublished === 0) {
             return { success: false, error: result.errors[0] ?? 'No wraps published' };
+          }
+          // Partial send — some recipients got the message, others didn't
+          // (typically the user cancelled an Amber prompt mid-loop, or
+          // a relay rejected one wrap). Surface this as a non-fatal
+          // failure rather than silent success so the composer doesn't
+          // clear and the user sees how many members actually received it.
+          if (result.errors.length > 0) {
+            const intended = result.wrapsPublished + result.errors.length;
+            return {
+              success: false,
+              wrapsPublished: result.wrapsPublished,
+              error: `Sent to ${result.wrapsPublished} of ${intended} members. ${result.errors[0]}`,
+            };
           }
           return { success: true, wrapsPublished: result.wrapsPublished };
         }
