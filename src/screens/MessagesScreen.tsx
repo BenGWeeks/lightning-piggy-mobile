@@ -7,7 +7,7 @@ import {
   RefreshControl,
   InteractionManager,
 } from 'react-native';
-import { Image } from 'expo-image';
+import TabBackgroundImage from '../components/TabBackgroundImage';
 import { FlashList } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Users, Clock } from 'lucide-react-native';
@@ -287,16 +287,7 @@ const MessagesScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      {/* expo-image (vs stock RN Image) decodes off the UI thread and
-          caches the decoded bitmap on disk; the 754 KB friends-bg.png
-          was the dominant contributor to the cold-tab 5 s GPU stall
-          measured on AVD. See issue #245. */}
-      <Image
-        source={require('../../assets/images/friends-bg.png')}
-        style={styles.bgImage}
-        contentFit="contain"
-        cachePolicy="memory-disk"
-      />
+      <TabBackgroundImage style={styles.bgImage} />
       <TabHeader title="Messages" icon={<MessageCircle size={20} color={colors.brandPink} />} />
       <View style={styles.headerExtras}>
         <View style={styles.chipRow}>
