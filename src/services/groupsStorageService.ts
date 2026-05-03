@@ -38,12 +38,36 @@ export function createGroupId(): string {
 // the in-memory state — stale by at most one app session.
 const GROUP_ACTIVITY_KEY = (pubkey: string) => `nostr_group_activity_${pubkey}`;
 
+/** Type-guard for a single GroupActivity entry. Rejects anything that
+ * would crash downstream consumers — `formatConversationTimestamp`
+ * throws `RangeError: Invalid time value` if `lastActivityAt` isn't a
+ * finite number, so the cache must filter on shape, not just type. */
+function isValidGroupActivity(v: unknown): v is GroupActivity {
+  if (typeof v !== 'object' || v === null) return false;
+  const a = v as Record<string, unknown>;
+  return (
+    typeof a.lastActivityAt === 'number' &&
+    Number.isFinite(a.lastActivityAt) &&
+    typeof a.lastText === 'string' &&
+    (a.lastSenderPubkey === null || typeof a.lastSenderPubkey === 'string') &&
+    Array.isArray(a.recentSenderPubkeys)
+  );
+}
+
 export async function loadGroupActivity(pubkey: string): Promise<Record<string, GroupActivity>> {
   try {
     const raw = await AsyncStorage.getItem(GROUP_ACTIVITY_KEY(pubkey));
     if (!raw) return {};
     const parsed = JSON.parse(raw);
-    return typeof parsed === 'object' && parsed !== null ? parsed : {};
+    // Reject arrays + non-plain values + entries that fail the shape check.
+    // Stale / partial / older-schema caches are silently dropped rather
+    // than crashing the Messages tab on next mount.
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    const valid: Record<string, GroupActivity> = {};
+    for (const [groupId, entry] of Object.entries(parsed)) {
+      if (isValidGroupActivity(entry)) valid[groupId] = entry;
+    }
+    return valid;
   } catch {
     return {};
   }

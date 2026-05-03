@@ -172,7 +172,15 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // preview) until the per-group `loadGroupMessages` loop below resolves.
   // Mirrors the dmInbox eager-hydration pattern from PR #253. A single
   // AsyncStorage round-trip vs N per-group reads to first useful paint.
-  // No follow filter (cached entries were already filtered when written).
+  //
+  // The cache is keyed off `groups`, not `visibleGroups` — so it can
+  // include entries for groups whose follow gate failed at write time.
+  // The visible-list filter at `visibleGroups` re-applies downstream,
+  // so unfollowed entries never reach the rendered list. Schema is
+  // validated at load time by `loadGroupActivity` (entries with bad
+  // shapes are dropped rather than crashing first paint via
+  // `formatConversationTimestamp(NaN)`). Cleared on logout via
+  // NostrContext.logout's per-pubkey cleanup.
   useEffect(() => {
     if (!isLoggedIn || !pubkey) return;
     let cancelled = false;
