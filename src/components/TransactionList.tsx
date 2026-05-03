@@ -385,6 +385,13 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
 
 const AVATAR_SIZE = 40;
 
+/**
+ * Total row height in dp: AVATAR_SIZE (40) + paddingVertical 10 × 2 = 60.
+ * Exported so HomeScreen's SkeletonList can match while transactions
+ * are still being fetched, avoiding a layout shift when they land.
+ */
+export const TRANSACTION_ROW_HEIGHT = AVATAR_SIZE + 20;
+
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
     list: {

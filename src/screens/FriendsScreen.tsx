@@ -16,6 +16,7 @@ import ContactProfileSheet from '../components/ContactProfileSheet';
 import AddFriendSheet from '../components/AddFriendSheet';
 import SendSheet from '../components/SendSheet';
 import AlphabetBar from '../components/AlphabetBar';
+import { SkeletonList } from '../components/SkeletonRow';
 import { fetchPhoneContacts, PhoneContact, setLightningAddress } from '../services/contactsService';
 import { createFriendsScreenStyles } from '../styles/FriendsScreen.styles';
 import type { MainTabParamList, RootStackParamList } from '../navigation/types';
@@ -88,6 +89,22 @@ const FriendsScreen: React.FC = () => {
       .then(setPhoneContacts)
       .catch(() => {});
   }, []);
+
+  // Cold-mount skeleton: hide as soon as either data source lands, OR
+  // after the first InteractionManager tick if neither fires (i.e. user
+  // truly has zero contacts — fall through to the empty state). Without
+  // this we'd render a blank list area for the few hundred ms it takes
+  // NostrContext + phoneContacts to hydrate. See plan in #245 follow-up.
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    if (hydrated) return;
+    if (contacts.length > 0 || phoneContacts.length > 0) {
+      setHydrated(true);
+      return;
+    }
+    const handle = InteractionManager.runAfterInteractions(() => setHydrated(true));
+    return () => handle.cancel();
+  }, [hydrated, contacts.length, phoneContacts.length]);
 
   // Force-refresh the own-profile kind-0 on focus so the top-right
   // profile icon picks up external renames (e.g. via Amber or another
@@ -451,29 +468,38 @@ const FriendsScreen: React.FC = () => {
               />
             )}
             <Profiler id="FriendsList" onRender={onProfilerRender}>
-              <FlashList
-                ref={flatListRef}
-                data={combinedList}
-                keyExtractor={(item) => item.id}
-                renderItem={renderItem}
-                refreshControl={
-                  <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
-                }
-                ListEmptyComponent={
-                  <View style={styles.emptyState}>
-                    <Text style={styles.emptySubtitle}>
-                      {search ? 'No contacts match your search.' : 'No contacts found.'}
-                    </Text>
-                  </View>
-                }
-                contentContainerStyle={styles.listContent}
-                onScroll={handleScroll}
-                // 32ms ≈ 2 frames at 60fps — keeps the alphabet-bar
-                // highlight in sync with fast flings without firing the
-                // handler every frame. The previous 250ms made the
-                // highlight lag visibly on momentum scrolls.
-                scrollEventThrottle={32}
-              />
+              {!hydrated ? (
+                <SkeletonList
+                  count={10}
+                  rowHeight={CONTACT_LIST_ITEM_HEIGHT}
+                  avatarSize={44}
+                  lines={2}
+                />
+              ) : (
+                <FlashList
+                  ref={flatListRef}
+                  data={combinedList}
+                  keyExtractor={(item) => item.id}
+                  renderItem={renderItem}
+                  refreshControl={
+                    <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+                  }
+                  ListEmptyComponent={
+                    <View style={styles.emptyState}>
+                      <Text style={styles.emptySubtitle}>
+                        {search ? 'No contacts match your search.' : 'No contacts found.'}
+                      </Text>
+                    </View>
+                  }
+                  contentContainerStyle={styles.listContent}
+                  onScroll={handleScroll}
+                  // 32ms ≈ 2 frames at 60fps — keeps the alphabet-bar
+                  // highlight in sync with fast flings without firing the
+                  // handler every frame. The previous 250ms made the
+                  // highlight lag visibly on momentum scrolls.
+                  scrollEventThrottle={32}
+                />
+              )}
             </Profiler>
           </View>
         )}

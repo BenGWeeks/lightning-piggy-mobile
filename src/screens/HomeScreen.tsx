@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ScrollView,
   RefreshControl,
-  ActivityIndicator,
   InteractionManager,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -19,7 +18,8 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import ReceiveSheet from '../components/ReceiveSheet';
 import SendSheet from '../components/SendSheet';
 import TransferSheet from '../components/TransferSheet';
-import TransactionList from '../components/TransactionList';
+import TransactionList, { TRANSACTION_ROW_HEIGHT } from '../components/TransactionList';
+import { SkeletonList } from '../components/SkeletonRow';
 import WalletCarousel from '../components/WalletCarousel';
 import AddWalletWizard from '../components/AddWalletWizard';
 import WalletSettingsSheet from '../components/WalletSettingsSheet';
@@ -286,9 +286,11 @@ const HomeScreen: React.FC = () => {
               </TouchableOpacity>
             </View>
           ) : loadingTransactions && transactions.length === 0 ? (
-            <View style={styles.emptyState}>
-              <ActivityIndicator size="small" color="#EC008C" />
-            </View>
+            // Row-shaped skeleton instead of a centred spinner so the
+            // layout doesn't jump when transactions land. 5 rows ≈ one
+            // viewport of pre-roll on a typical phone. See plan in
+            // #245 follow-up.
+            <SkeletonList count={5} rowHeight={TRANSACTION_ROW_HEIGHT} avatarSize={40} lines={2} />
           ) : (
             <TransactionList transactions={transactions} />
           )}

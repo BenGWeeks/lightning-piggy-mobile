@@ -19,8 +19,9 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import { useGroups } from '../contexts/GroupsContext';
-import ConversationRow from '../components/ConversationRow';
+import ConversationRow, { CONVERSATION_ROW_HEIGHT } from '../components/ConversationRow';
 import GroupRow from '../components/GroupRow';
+import { SkeletonList } from '../components/SkeletonRow';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import FriendPickerSheet, { type PickedFriend } from '../components/FriendPickerSheet';
 import CreateGroupSheet from '../components/CreateGroupSheet';
@@ -84,6 +85,23 @@ const MessagesScreen: React.FC = () => {
       if (v === '90') setWindowDays(90);
     });
   }, []);
+
+  // Cold-mount skeleton: hide as soon as either dmInbox or wallets land
+  // (i.e. there are conversations to show), OR after the first
+  // InteractionManager tick if neither fires (truly empty inbox →
+  // fall through to the empty-state UI). Otherwise the list area renders
+  // blank for the few hundred ms it takes NostrContext + WalletContext
+  // to hydrate. See plan in #245 follow-up.
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    if (hydrated) return;
+    if (dmInbox.length > 0 || wallets.length > 0) {
+      setHydrated(true);
+      return;
+    }
+    const handle = InteractionManager.runAfterInteractions(() => setHydrated(true));
+    return () => handle.cancel();
+  }, [hydrated, dmInbox.length, wallets.length]);
 
   const cycleWindowDays = useCallback(() => {
     setWindowDays((prev) => {
@@ -395,6 +413,8 @@ const MessagesScreen: React.FC = () => {
               <Text style={styles.connectButtonText}>Go to Account</Text>
             </TouchableOpacity>
           </View>
+        ) : !hydrated ? (
+          <SkeletonList count={6} rowHeight={CONVERSATION_ROW_HEIGHT} avatarSize={48} lines={2} />
         ) : (
           <FlashList
             data={filteredRows}

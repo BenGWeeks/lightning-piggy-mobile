@@ -7,6 +7,14 @@ import type { Palette } from '../styles/palettes';
 import type { ConversationSummary } from '../utils/conversationSummaries';
 import { conversationPreview, formatConversationTimestamp } from '../utils/conversationSummaries';
 
+/**
+ * Total row height in dp: avatar 48 + paddingVertical 12 × 2 = 72.
+ * Exported so SkeletonRow can match the height exactly — mismatched
+ * heights produce layout shift the moment the skeleton is replaced.
+ * If you change paddingVertical or the avatar size below, update this too.
+ */
+export const CONVERSATION_ROW_HEIGHT = 72;
+
 interface Props {
   summary: ConversationSummary;
   onPress?: () => void;

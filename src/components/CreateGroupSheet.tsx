@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   BackHandler,
   Alert,
+  InteractionManager,
 } from 'react-native';
 import { Image } from 'expo-image';
 import Svg, { Path, Circle } from 'react-native-svg';
@@ -17,6 +18,7 @@ import {
   BottomSheetScrollView,
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
+import { SkeletonList } from './SkeletonRow';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { useNostr } from '../contexts/NostrContext';
@@ -31,6 +33,13 @@ interface Props {
 }
 
 type ContactWithLabel = NostrContact & { displayName: string };
+
+/**
+ * Total row height in dp: avatar 40 + paddingVertical 10 × 2 = 60.
+ * Exported so SkeletonRow can match the height exactly while the real
+ * member list is being built off the JS thread post-animation.
+ */
+export const MEMBER_ROW_HEIGHT = 60;
 
 interface MemberRowProps {
   contact: ContactWithLabel;
@@ -123,6 +132,22 @@ const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
     } else {
       sheetRef.current?.dismiss();
     }
+  }, [visible]);
+
+  // Defer the heavy member-list mount until after the sheet's open
+  // animation completes — same pattern as FriendPickerSheet. With ~50
+  // contacts each rendering an avatar Image, mounting them DURING the
+  // animation produces visible jank. Skeleton fills the area in the
+  // meantime; the real list mounts on the next interaction tick.
+  // See plan in #245 follow-up.
+  const [listReady, setListReady] = useState(false);
+  useEffect(() => {
+    if (!visible) {
+      setListReady(false);
+      return;
+    }
+    const handle = InteractionManager.runAfterInteractions(() => setListReady(true));
+    return () => handle.cancel();
   }, [visible]);
 
   useEffect(() => {
@@ -229,7 +254,9 @@ const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
         />
 
         <Text style={styles.label}>Members {selected.size > 0 ? `(${selected.size})` : ''}</Text>
-        {sortedContacts.length === 0 ? (
+        {!listReady ? (
+          <SkeletonList count={8} rowHeight={MEMBER_ROW_HEIGHT} avatarSize={40} lines={1} />
+        ) : sortedContacts.length === 0 ? (
           <Text style={styles.emptyText}>Add Nostr friends first to include them in a group.</Text>
         ) : (
           <View>

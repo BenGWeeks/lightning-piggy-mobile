@@ -7,6 +7,13 @@ import { useNostr } from '../contexts/NostrContext';
 import GroupAvatar from './GroupAvatar';
 import { formatConversationTimestamp } from '../utils/conversationSummaries';
 
+/**
+ * Total row height in dp: avatar 48 + paddingVertical 12 × 2 = 72.
+ * Exported so SkeletonRow can match the height exactly — mismatched
+ * heights produce layout shift when the skeleton is replaced.
+ */
+export const GROUP_ROW_HEIGHT = 72;
+
 interface Props {
   summary: GroupSummary;
   onPress?: () => void;
