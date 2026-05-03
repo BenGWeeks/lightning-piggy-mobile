@@ -30,6 +30,12 @@ export interface PickedFriend {
   lightningAddress: string | null;
 }
 
+// Internal-only: PickedFriend plus precomputed sort keys. We never
+// expose these to onSelect callers (they only ever see PickedFriend);
+// they exist purely so the sort comparator + alphabet helpers don't
+// re-derive them on every comparison or keystroke.
+type SortedFriend = PickedFriend & { nameAlpha: string; nameLower: string };
+
 // Many Nostr contacts prepend emoji/flags/zaps, OR spell their name with
 // stylized Unicode variants (𝙰𝚂𝙲𝙾𝚃, ᴄʏʙᴇʀɢᴜʏ, 𝔼𝕣𝕪𝕟) that aren't in the
 // plain A-Z range. NFKD-normalize first so compatibility forms fold down
@@ -39,6 +45,11 @@ const firstAlpha = (name: string): string => {
   const m = normalized.match(/[A-Z]/);
   return m ? m[0] : '#';
 };
+
+// Cached at module scope so the open-path doesn't construct a fresh
+// Intl.Collator per comparison (5-10× slower than reusing one). Same
+// pattern as FriendsScreen. See issue #245.
+const NAME_COLLATOR = new Intl.Collator(undefined, { sensitivity: 'base' });
 
 interface Props {
   visible: boolean;
@@ -144,43 +155,65 @@ const FriendPickerSheet: React.FC<Props> = ({
     };
   }, []);
 
-  const friends = useMemo<PickedFriend[]>(() => {
-    const list: PickedFriend[] = contacts.map((c) => ({
-      pubkey: c.pubkey,
-      name: (c.profile?.displayName || c.profile?.name || c.petname || '').trim(),
-      picture: c.profile?.picture ?? null,
-      lightningAddress: c.profile?.lud16 ?? null,
-    }));
-    // Contacts with no resolved name aren't useful here — they can't be
-    // reliably identified by the user. Drop them from the picker.
-    const named = list.filter((f) => f.name.length > 0);
-    // Sort by the first Latin letter (so "🇦🇷Marcel" sits with other Ms),
-    // then by raw name within the letter group. Keeps the alphabet bar's
-    // scrollToIndex accurate.
-    named.sort((a, b) => {
-      const la = firstAlpha(a.name);
-      const lb = firstAlpha(b.name);
-      if (la !== lb) return la.localeCompare(lb);
-      return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+  // Step 1: build + sort the friends list. Pre-computes `nameAlpha` and
+  // `nameLower` once per friend so the sort comparator does O(1) string
+  // compares instead of re-running `firstAlpha()` (NFKD + uppercase +
+  // regex, ~0.5 ms each) and `.toLowerCase()` for every comparison.
+  // With 50 contacts × ~280 comparisons × 4 firstAlpha calls per
+  // comparison, the previous implementation did 1100+ NFKD normalizes
+  // synchronously while the bottom-sheet open animation was running —
+  // which is what made the (+) FAB tap feel slow. See issue #245.
+  // Only re-runs when `contacts` changes (NOT every keystroke).
+  // SortedFriend keeps the precomputed sort keys around so
+  // `availableLetters` and `handleLetterPress` can read them too,
+  // instead of recomputing firstAlpha 50× per keystroke.
+  const sortedFriends = useMemo<SortedFriend[]>(() => {
+    const enriched: SortedFriend[] = [];
+    for (const c of contacts) {
+      const name = (c.profile?.displayName || c.profile?.name || c.petname || '').trim();
+      // Contacts with no resolved name aren't useful in the picker —
+      // they can't be reliably identified by the user.
+      if (name.length === 0) continue;
+      enriched.push({
+        pubkey: c.pubkey,
+        name,
+        picture: c.profile?.picture ?? null,
+        lightningAddress: c.profile?.lud16 ?? null,
+        nameAlpha: firstAlpha(name),
+        nameLower: name.toLowerCase(),
+      });
+    }
+    enriched.sort((a, b) => {
+      if (a.nameAlpha !== b.nameAlpha) return NAME_COLLATOR.compare(a.nameAlpha, b.nameAlpha);
+      return NAME_COLLATOR.compare(a.nameLower, b.nameLower);
     });
+    return enriched;
+  }, [contacts]);
+
+  // Step 2: filter the pre-sorted list by `deferredSearch`. Substring
+  // match is O(n) per keystroke with no allocations — the sort doesn't
+  // re-run, only this filter pass does. Precomputed `nameLower` is
+  // reused for the substring match.
+  const friends = useMemo<SortedFriend[]>(() => {
     const q = deferredSearch.trim().toLowerCase();
-    if (!q) return named;
-    return named.filter(
+    if (!q) return sortedFriends;
+    return sortedFriends.filter(
       (f) =>
-        f.name.toLowerCase().includes(q) ||
+        f.nameLower.includes(q) ||
         (f.lightningAddress && f.lightningAddress.toLowerCase().includes(q)),
     );
-  }, [contacts, deferredSearch]);
+  }, [sortedFriends, deferredSearch]);
 
   const availableLetters = useMemo(() => {
     const letters = new Set<string>();
-    for (const f of friends) letters.add(firstAlpha(f.name));
+    // Precomputed nameAlpha — no firstAlpha() recomputation per friend.
+    for (const f of friends) letters.add(f.nameAlpha);
     return Array.from(letters).sort();
   }, [friends]);
 
   const handleLetterPress = useCallback(
     (letter: string) => {
-      const index = friends.findIndex((f) => firstAlpha(f.name) === letter);
+      const index = friends.findIndex((f) => f.nameAlpha === letter);
       if (index < 0) return;
       setCurrentLetter(letter);
       listRef.current?.scrollToIndex?.({ index, animated: false, viewPosition: 0 });
@@ -216,7 +249,9 @@ const FriendPickerSheet: React.FC<Props> = ({
             <Image
               source={{ uri: item.picture }}
               style={[StyleSheet.absoluteFillObject, styles.avatarImage]}
-              cachePolicy="disk"
+              // Canonical avatar caching policy — see issue #245.
+              cachePolicy="memory-disk"
+              recyclingKey={item.picture}
               // First frame only — see #243.
               autoplay={false}
             />

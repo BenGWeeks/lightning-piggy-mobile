@@ -1,0 +1,18 @@
+appId: com.lightningpiggy.app.dev
+name: PERF — warmup → tab Friends (no swipes)
+---
+# Phase 1 of perf-scroll.sh: launch + Friends tab tap. The wrapper
+# resets gfxinfo after this flow exits, then runs perf-friends-swipes.yaml.
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 30000
+# `tapOn id:` has built-in retry/wait — proves more reliable on cold
+# dev-mode launches (where Metro is still bundling) than asserting
+# `extendedWaitUntil visible: 'Friends'`, which couldn't find the tab
+# label inside the bottom-nav widget on AVD.
+- tapOn:
+    id: 'tab-friends'
+- waitForAnimationToEnd:
+    timeout: 5000

@@ -4,10 +4,10 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  Image,
   RefreshControl,
   InteractionManager,
 } from 'react-native';
+import TabBackgroundImage from '../components/TabBackgroundImage';
 import { FlashList } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Users, Clock } from 'lucide-react-native';
@@ -21,6 +21,7 @@ import { useWallet } from '../contexts/WalletContext';
 import { useGroups } from '../contexts/GroupsContext';
 import ConversationRow from '../components/ConversationRow';
 import GroupRow from '../components/GroupRow';
+import type { ContactInfo } from '../components/GroupAvatar';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import FriendPickerSheet, { type PickedFriend } from '../components/FriendPickerSheet';
 import CreateGroupSheet from '../components/CreateGroupSheet';
@@ -115,14 +116,20 @@ const MessagesScreen: React.FC = () => {
     return set;
   }, [contacts]);
 
-  // Build a single pubkey → picture-URL lookup for the screen, shared
-  // by all group rows so each `GroupAvatar` doesn't iterate the contacts
-  // list per row. Cost is O(contacts) once per render of MessagesScreen
-  // instead of O(rows × contacts).
-  const contactPictureMap = useMemo(() => {
-    const map = new Map<string, string | null>();
+  // Single pubkey → ContactInfo lookup for the screen, shared by every
+  // row + handler. Three previously-separate `contacts.find()` paths
+  // (GroupAvatar's avatar cluster, GroupRow's sender-name preview, and
+  // handleConversationPress's picture/lightning-address fallback) now
+  // all consult this map, so a 50-contact x N-row screen does O(contacts)
+  // once per render instead of O(rows × contacts) per render. See #245.
+  const contactInfoMap = useMemo(() => {
+    const map = new Map<string, ContactInfo>();
     for (const c of contacts) {
-      map.set(c.pubkey.toLowerCase(), c.profile?.picture ?? null);
+      map.set(c.pubkey.toLowerCase(), {
+        picture: c.profile?.picture ?? null,
+        name: (c.profile?.displayName || c.profile?.name || c.petname || '').trim() || null,
+        lightningAddress: c.profile?.lud16 ?? null,
+      });
     }
     return map;
   }, [contacts]);
@@ -205,11 +212,9 @@ const MessagesScreen: React.FC = () => {
 
   const handleConversationPress = useCallback(
     (summary: ConversationSummary) => {
-      const contact = summary.pubkey
-        ? contacts.find((c) => c.pubkey === summary.pubkey)
-        : undefined;
-      const picture = summary.picture ?? contact?.profile?.picture ?? null;
-      const lightningAddress = summary.lightningAddress ?? contact?.profile?.lud16 ?? null;
+      const info = summary.pubkey ? contactInfoMap.get(summary.pubkey.toLowerCase()) : undefined;
+      const picture = summary.picture ?? info?.picture ?? null;
+      const lightningAddress = summary.lightningAddress ?? info?.lightningAddress ?? null;
       if (summary.pubkey) {
         navigation.navigate('Conversation', {
           pubkey: summary.pubkey,
@@ -232,7 +237,7 @@ const MessagesScreen: React.FC = () => {
         source: 'nostr',
       });
     },
-    [contacts, navigation],
+    [contactInfoMap, navigation],
   );
 
   const handleStartConversation = useCallback(() => {
@@ -273,20 +278,16 @@ const MessagesScreen: React.FC = () => {
         <GroupRow
           summary={item.summary}
           onPress={() => handleGroupPress(item.summary)}
-          contactPictureMap={contactPictureMap}
+          contactInfoMap={contactInfoMap}
         />
       );
     },
-    [handleConversationPress, handleGroupPress, contactPictureMap],
+    [handleConversationPress, handleGroupPress, contactInfoMap],
   );
 
   return (
     <View style={styles.container}>
-      <Image
-        source={require('../../assets/images/friends-bg.png')}
-        style={styles.bgImage}
-        resizeMode="contain"
-      />
+      <TabBackgroundImage style={styles.bgImage} />
       <TabHeader title="Messages" icon={<MessageCircle size={20} color={colors.brandPink} />} />
       <View style={styles.headerExtras}>
         <View style={styles.chipRow}>

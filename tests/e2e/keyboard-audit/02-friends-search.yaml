@@ -1,0 +1,20 @@
+appId: com.lightningpiggy.app.dev
+name: Keyboard audit — Friends tab search
+---
+- launchApp:
+    appId: com.lightningpiggy.app.dev
+    stopApp: true
+- waitForAnimationToEnd:
+    timeout: 8000
+- tapOn:
+    id: 'tab-friends'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'search-toggle'
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn:
+    id: 'search-input'
+- waitForAnimationToEnd:
+    timeout: 2000
