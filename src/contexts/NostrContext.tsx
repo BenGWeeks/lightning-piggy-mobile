@@ -1296,8 +1296,16 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
 
   /**
-   * NIP-17 multi-recipient send. NSEC-only path — for Amber, returns an
-   * error and leaves the per-event signing flow as a follow-up.
+   * NIP-17 multi-recipient send. Supports both nsec (signs locally) and
+   * Amber (per-recipient signEvent + nip44Encrypt round-trips) signers.
+   *
+   * Amber path is sequential by design — the native module rejects
+   * concurrent intents with `BUSY` (see modules/amber-signer/.../
+   * AmberSignerModule.kt → launchIntent). With N recipients (+1 for the
+   * sender's own inbox copy), this fires up to 2N Amber prompts unless
+   * the user has pre-granted blanket permission for `sign_event` and
+   * `nip44_encrypt`, in which case Amber's ContentResolver fast-path
+   * resolves silently. See issue #247.
    */
   const sendGroupMessage = useCallback(
     async (input: {
@@ -1307,36 +1315,70 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       text: string;
     }): Promise<{ success: boolean; wrapsPublished?: number; error?: string }> => {
       if (!pubkey || !isLoggedIn) return { success: false, error: 'Not logged in' };
-      if (signerType !== 'nsec') {
-        return {
-          success: false,
-          error: 'Group messages currently require an nsec login (Amber not yet supported)',
-        };
-      }
       const text = input.text.trim();
       if (!text) return { success: false, error: 'Empty message' };
       const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
       const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
       try {
-        const nsec = await SecureStore.getItemAsync(NSEC_KEY);
-        if (!nsec) return { success: false, error: 'Key not found' };
-        const { secretKey } = nostrService.decodeNsec(nsec);
         const rumor = nostrService.createGroupChatRumor({
           senderPubkey: pubkey,
           subject: input.subject,
           memberPubkeys: input.memberPubkeys,
           content: text,
         });
-        const result = await nostrService.sendNip17ToManyWithNsec({
-          senderSecretKey: secretKey,
-          rumor,
-          recipientPubkeys: input.memberPubkeys,
-          relays: targetRelays,
-        });
-        if (result.wrapsPublished === 0) {
-          return { success: false, error: result.errors[0] ?? 'No wraps published' };
+
+        if (signerType === 'nsec') {
+          const nsec = await SecureStore.getItemAsync(NSEC_KEY);
+          if (!nsec) return { success: false, error: 'Key not found' };
+          const { secretKey } = nostrService.decodeNsec(nsec);
+          const result = await nostrService.sendNip17ToManyWithNsec({
+            senderSecretKey: secretKey,
+            rumor,
+            recipientPubkeys: input.memberPubkeys,
+            relays: targetRelays,
+          });
+          if (result.wrapsPublished === 0) {
+            return { success: false, error: result.errors[0] ?? 'No wraps published' };
+          }
+          return { success: true, wrapsPublished: result.wrapsPublished };
         }
-        return { success: true, wrapsPublished: result.wrapsPublished };
+
+        if (signerType === 'amber') {
+          const currentUser = pubkey;
+          const result = await nostrService.sendNip17ToManyWithSigner({
+            senderPubkey: currentUser,
+            rumor,
+            recipientPubkeys: input.memberPubkeys,
+            relays: targetRelays,
+            signerNip44Encrypt: (plaintext, recipientPubkey) =>
+              amberService.requestNip44Encrypt(plaintext, recipientPubkey, currentUser),
+            signerSignSeal: async (unsignedSeal) => {
+              // Match the kind-4 DM Amber path — strip `pubkey` from
+              // the JSON we send out. Amber derives the field from
+              // `current_user`. Keeps both Amber sign paths shaped
+              // identically and avoids any version of Amber that
+              // rejects an event whose declared pubkey doesn't match
+              // its signing identity.
+              const { pubkey: _omit, ...sealForAmber } = unsignedSeal;
+              void _omit;
+              const { event: signedEventJson } = await amberService.requestEventSignature(
+                JSON.stringify(sealForAmber),
+                '',
+                currentUser,
+              );
+              if (!signedEventJson) {
+                throw new Error('Amber returned empty signed seal');
+              }
+              return JSON.parse(signedEventJson);
+            },
+          });
+          if (result.wrapsPublished === 0) {
+            return { success: false, error: result.errors[0] ?? 'No wraps published' };
+          }
+          return { success: true, wrapsPublished: result.wrapsPublished };
+        }
+
+        return { success: false, error: 'Unsupported signer type' };
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to send group message';
         return { success: false, error: message };
@@ -1346,8 +1388,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
 
   /**
-   * Publish a kind-30200 group-state event. Same signing-path constraints
-   * as sendGroupMessage (nsec-only for now).
+   * Publish a kind-30200 group-state event. Single signEvent call —
+   * trivially safe for Amber (no per-recipient fan-out, no concurrency).
    */
   const publishGroupState = useCallback(
     async (input: {
@@ -1356,22 +1398,40 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       memberPubkeys: string[];
     }): Promise<{ success: boolean; error?: string }> => {
       if (!pubkey || !isLoggedIn) return { success: false, error: 'Not logged in' };
-      if (signerType !== 'nsec') {
-        return { success: false, error: 'Group state publish currently requires nsec login' };
-      }
       const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
       const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
       try {
-        const nsec = await SecureStore.getItemAsync(NSEC_KEY);
-        if (!nsec) return { success: false, error: 'Key not found' };
-        const { secretKey } = nostrService.decodeNsec(nsec);
         const event = nostrService.createGroupStateEvent({
           groupId: input.groupId,
           name: input.name,
           memberPubkeys: input.memberPubkeys,
         });
-        await nostrService.signAndPublishEvent(event, secretKey, targetRelays);
-        return { success: true };
+
+        if (signerType === 'nsec') {
+          const nsec = await SecureStore.getItemAsync(NSEC_KEY);
+          if (!nsec) return { success: false, error: 'Key not found' };
+          const { secretKey } = nostrService.decodeNsec(nsec);
+          await nostrService.signAndPublishEvent(event, secretKey, targetRelays);
+          return { success: true };
+        }
+
+        if (signerType === 'amber') {
+          // Mirror the kind-4 DM Amber path — pass the unsigned event
+          // without `pubkey`; Amber sets it from `current_user`.
+          const { event: signedEventJson } = await amberService.requestEventSignature(
+            JSON.stringify(event),
+            '',
+            pubkey,
+          );
+          if (!signedEventJson) {
+            return { success: false, error: 'Amber returned empty event' };
+          }
+          const signed = JSON.parse(signedEventJson);
+          await nostrService.publishSignedEvent(signed, targetRelays);
+          return { success: true };
+        }
+
+        return { success: false, error: 'Unsupported signer type' };
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to publish group state';
         return { success: false, error: message };
