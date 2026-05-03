@@ -243,7 +243,12 @@ const GifPickerSheet: React.FC<Props> = ({ visible, onClose, onSelect }) => {
       topInset={topInset}
       onChange={handleSheetChange}
       enablePanDownToClose
-      keyboardBehavior="interactive"
+      // "extend" auto-snaps to the highest snap (90%) when the IME
+      // opens, so the GIF grid keeps as many rows visible as possible
+      // above Gboard. With "interactive" the sheet stayed at 75% and
+      // the visible area shrank to ~25% of screen — only ~4 GIFs in
+      // view (#265, surfaced by the PR #263 audit).
+      keyboardBehavior="extend"
       keyboardBlurBehavior="restore"
       android_keyboardInputMode="adjustResize"
       backdropComponent={renderBackdrop}

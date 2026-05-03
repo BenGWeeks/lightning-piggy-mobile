@@ -1,6 +1,15 @@
-import React, { useState, useMemo, useCallback, useEffect, useRef, Profiler } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Image, RefreshControl } from 'react-native';
+import React, {
+  useState,
+  useMemo,
+  useCallback,
+  useEffect,
+  useRef,
+  useDeferredValue,
+  Profiler,
+} from 'react';
+import { View, Text, TextInput, TouchableOpacity, RefreshControl } from 'react-native';
 import { InteractionManager } from 'react-native';
+import TabBackgroundImage from '../components/TabBackgroundImage';
 import { Alert } from '../components/BrandedAlert';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
@@ -27,6 +36,12 @@ type FriendsNavigation = CompositeNavigationProp<
 
 type Filter = 'all' | 'nostr' | 'contacts';
 
+// Cached at module scope so every keystroke doesn't construct a fresh
+// Intl.Collator (5-10× slower than reusing one). 'base' sensitivity is
+// case- and accent-insensitive — appropriate for friend-list ordering.
+// See issue #245.
+const NAME_COLLATOR = new Intl.Collator(undefined, { sensitivity: 'base' });
+
 interface ListItem {
   id: string;
   name: string;
@@ -45,6 +60,11 @@ const FriendsScreen: React.FC = () => {
   const { isLoggedIn, profile, contacts, refreshContacts, refreshProfile, addContact } = useNostr();
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
+  // Drives the expensive filter step off a deferred copy of `search`,
+  // so a fast typist doesn't drop keystrokes while the list re-filters.
+  // Same pattern FriendPickerSheet uses for its sheet-side search
+  // (see #243). Issue #245.
+  const deferredSearch = useDeferredValue(search);
   const [searchExpanded, setSearchExpanded] = useState(false);
   const searchInputRef = useRef<TextInput>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -106,10 +126,13 @@ const FriendsScreen: React.FC = () => {
     }, [isLoggedIn, refreshProfile]),
   );
 
-  const combinedList = useMemo(() => {
+  // Step 1: build + sort the full list. This memo invalidates only when
+  // the underlying contact sources or the chip filter change — NOT on
+  // every keystroke. The N-log-N Intl.Collator sort runs once per source
+  // change rather than once per keystroke. See issue #245.
+  const sortedItems = useMemo<ListItem[]>(() => {
     const items: ListItem[] = [];
 
-    // Nostr contacts
     if (filter !== 'contacts') {
       for (const c of contacts) {
         items.push({
@@ -130,7 +153,6 @@ const FriendsScreen: React.FC = () => {
       }
     }
 
-    // Phone contacts
     if (filter !== 'nostr') {
       for (const c of phoneContacts) {
         items.push({
@@ -146,22 +168,23 @@ const FriendsScreen: React.FC = () => {
       }
     }
 
-    // Filter by search
-    let result = items;
-    if (search.trim()) {
-      const lower = search.toLowerCase();
-      result = items.filter(
-        (item) =>
-          item.name.toLowerCase().includes(lower) ||
-          (item.lightningAddress && item.lightningAddress.toLowerCase().includes(lower)),
-      );
-    }
+    items.sort((a, b) => NAME_COLLATOR.compare(a.name, b.name));
+    return items;
+  }, [contacts, phoneContacts, filter]);
 
-    // Sort alphabetically
-    result.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
-
-    return result;
-  }, [contacts, phoneContacts, filter, search]);
+  // Step 2: filter the pre-sorted list by `deferredSearch`. Substring
+  // match is O(n) per keystroke but with no allocations and no sort —
+  // and `useDeferredValue` lets React stale-render this filter step
+  // when the JS thread is busy, so input characters don't drop.
+  const combinedList = useMemo<ListItem[]>(() => {
+    const lower = deferredSearch.trim().toLowerCase();
+    if (!lower) return sortedItems;
+    return sortedItems.filter(
+      (item) =>
+        item.name.toLowerCase().includes(lower) ||
+        (item.lightningAddress && item.lightningAddress.toLowerCase().includes(lower)),
+    );
+  }, [sortedItems, deferredSearch]);
 
   const flatListRef = useRef<FlashListRef<ListItem>>(null);
 
@@ -293,11 +316,7 @@ const FriendsScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      <Image
-        source={require('../../assets/images/friends-bg.png')}
-        style={styles.bgImage}
-        resizeMode="contain"
-      />
+      <TabBackgroundImage style={styles.bgImage} />
       <TabHeader title="Friends" icon={<Users size={20} color={colors.brandPink} />} />
       <View style={styles.headerExtras}>
         {/* Filter chips + search toggle */}
