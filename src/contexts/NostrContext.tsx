@@ -650,6 +650,16 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return false;
   }, []);
 
+  /** Eagerly hydrate `dmInbox` from the persisted NIP-17 inbox cache so
+   * the Messages tab paints conversations on cold start instead of
+   * staying blank for the relay-fetch + decrypt loop (~3-5 s). Called
+   * from session-restore + post-login flows; refreshDmInbox handles
+   * its own cache read separately for the delta-fetch path. */
+  const hydrateDmInboxFromCache = useCallback(async (pk: string) => {
+    const cached = await loadDmInboxFromCache(pk);
+    if (cached.length > 0) setDmInbox(cached);
+  }, []);
+
   const loadContacts = useCallback(
     async (pk: string, relayUrls: string[], opts?: { force?: boolean }) => {
       const t0 = Date.now();
@@ -821,15 +831,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         await loadContactsFromCache();
 
         // Eagerly hydrate dmInbox from disk cache so the Messages tab
-        // paints conversations on cold start instead of staying blank
-        // for the 3-5 s relay-fetch + NIP-17 decrypt loop. The same
-        // cache is read again later (inside refreshDmInbox) where it
-        // also drives delta-fetch via lastSeen — that path stays
-        // unchanged. Eager hydration runs in parallel with the relay
-        // refresh below; both paths converge on setDmInbox without
-        // racing because the relay path always merges with current state.
-        const cachedInbox = await loadDmInboxFromCache(pk);
-        if (cachedInbox.length > 0) setDmInbox(cachedInbox);
+        // paints conversations on cold start. The relay refresh below
+        // doesn't touch dmInbox; the eventual refreshDmInbox call
+        // (driven by Messages-tab focus) does its own cache read for
+        // the delta-fetch path and replaces this hydrated state with
+        // the merged disk+relay result.
+        await hydrateDmInboxFromCache(pk);
 
         // Defer relay fetches until after animations/rendering complete.
         // Seed the working relay set from the cached NIP-65 relay list so
@@ -867,7 +874,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         console.warn('Nostr auto-login failed:', error);
       }
     })();
-  }, [loadRelays, loadProfile, loadContacts, loadContactsFromCache]);
+  }, [loadRelays, loadProfile, loadContacts, loadContactsFromCache, hydrateDmInboxFromCache]);
 
   const loginWithNsec = useCallback(
     async (nsec: string): Promise<{ success: boolean; error?: string }> => {
@@ -893,8 +900,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         await loadContactsFromCache();
         // Eagerly hydrate dmInbox from disk cache so Messages tab paints
         // on first focus instead of staying blank for the relay round-trip.
-        const cachedInbox = await loadDmInboxFromCache(pk);
-        if (cachedInbox.length > 0) setDmInbox(cachedInbox);
+        await hydrateDmInboxFromCache(pk);
         InteractionManager.runAfterInteractions(async () => {
           try {
             const readRelays = await loadRelays(pk);
@@ -917,7 +923,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setIsLoggingIn(false);
       }
     },
-    [loadRelays, loadProfile, loadContacts, loadContactsFromCache],
+    [loadRelays, loadProfile, loadContacts, loadContactsFromCache, hydrateDmInboxFromCache],
   );
 
   const loginWithAmber = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
@@ -941,8 +947,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       await loadContactsFromCache();
       // Eagerly hydrate dmInbox from disk cache so Messages tab paints
       // on first focus instead of staying blank for the relay round-trip.
-      const cachedInbox = await loadDmInboxFromCache(pk);
-      if (cachedInbox.length > 0) setDmInbox(cachedInbox);
+      await hydrateDmInboxFromCache(pk);
       InteractionManager.runAfterInteractions(async () => {
         try {
           const readRelays = await loadRelays(pk);
@@ -962,7 +967,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } finally {
       setIsLoggingIn(false);
     }
-  }, [loadRelays, loadProfile, loadContacts, loadContactsFromCache]);
+  }, [loadRelays, loadProfile, loadContacts, loadContactsFromCache, hydrateDmInboxFromCache]);
 
   const logout = useCallback(async () => {
     clearMemoisedSecretKey();
