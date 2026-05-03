@@ -103,8 +103,9 @@ If the build fails partway with `UncheckedIOException: Could not add
 entry ... fileHashes.bin` (or any I/O error inside the Gradle cache),
 check `df -h /tmp` first — if it's at or near 100 % the
 `TMPDIR=~/eas-tmp` knob above is what you're missing. The `~/eas-tmp`
-working tree can be deleted between builds (`rm -rf ~/eas-tmp/*`) to
-reclaim disk; Gradle re-creates everything it needs.
+working tree can be deleted between builds (`rm -rf ~/eas-tmp`) to
+reclaim disk; the next `mkdir -p ~/eas-tmp` re-creates it before the
+build.
 
 ===== Verify the install actually committed
 
