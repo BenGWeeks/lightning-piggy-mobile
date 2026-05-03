@@ -13,7 +13,7 @@ import TabBackgroundImage from '../components/TabBackgroundImage';
 import { Alert } from '../components/BrandedAlert';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { Users } from 'lucide-react-native';
+import { Users, Search, X } from 'lucide-react-native';
 import { useNavigation, CompositeNavigationProp, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -323,15 +323,7 @@ const FriendsScreen: React.FC = () => {
         <View style={styles.chipRow}>
           {searchExpanded ? (
             <View style={styles.searchRow}>
-              <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
-                <Circle cx="11" cy="11" r="8" stroke="rgba(255,255,255,0.7)" strokeWidth={2} />
-                <Path
-                  d="m21 21-4.3-4.3"
-                  stroke="rgba(255,255,255,0.7)"
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                />
-              </Svg>
+              <Search size={16} color="rgba(255,255,255,0.7)" strokeWidth={2} />
               <TextInput
                 ref={searchInputRef}
                 style={styles.searchInput}
@@ -353,14 +345,7 @@ const FriendsScreen: React.FC = () => {
                 accessibilityLabel="Close search"
                 testID="close-search"
               >
-                <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
-                  <Path
-                    d="M18 6 6 18M6 6l12 12"
-                    stroke="rgba(255,255,255,0.8)"
-                    strokeWidth={2.5}
-                    strokeLinecap="round"
-                  />
-                </Svg>
+                <X size={16} color="rgba(255,255,255,0.8)" strokeWidth={2.5} />
               </TouchableOpacity>
             </View>
           ) : (
@@ -385,15 +370,7 @@ const FriendsScreen: React.FC = () => {
                 accessibilityLabel="Search friends"
                 testID="search-toggle"
               >
-                <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                  <Circle cx="11" cy="11" r="8" stroke="rgba(255,255,255,0.8)" strokeWidth={2} />
-                  <Path
-                    d="m21 21-4.3-4.3"
-                    stroke="rgba(255,255,255,0.8)"
-                    strokeWidth={2}
-                    strokeLinecap="round"
-                  />
-                </Svg>
+                <Search size={18} color="rgba(255,255,255,0.8)" strokeWidth={2} />
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.addButton}
