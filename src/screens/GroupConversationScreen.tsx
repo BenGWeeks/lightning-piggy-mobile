@@ -98,7 +98,6 @@ const GroupConversationScreen: React.FC = () => {
   const [sending, setSending] = useState(false);
   const [messages, setMessages] = useState<GroupMessage[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(true);
-  const [selectedMemberPubkey, setSelectedMemberPubkey] = useState<string | null>(null);
   const [attachPanelOpen, setAttachPanelOpen] = useState(false);
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
   const [invoiceSheetOpen, setInvoiceSheetOpen] = useState(false);
@@ -730,35 +729,6 @@ const GroupConversationScreen: React.FC = () => {
         onClose={() => setMembersSheetVisible(false)}
       />
 
-      {/* Tap a member chip to open their profile sheet. The contact lookup
-          uses the existing `contacts` (kind:3 follow list); for members we
-          haven't yet fetched a profile for, the sheet falls back to a
-          short-pubkey placeholder. */}
-      <ContactProfileSheet
-        visible={selectedMemberPubkey !== null}
-        onClose={() => setSelectedMemberPubkey(null)}
-        contact={
-          selectedMemberPubkey
-            ? (() => {
-                const c = contacts.find((x) => x.pubkey === selectedMemberPubkey);
-                return {
-                  pubkey: selectedMemberPubkey,
-                  name:
-                    c?.profile?.displayName ||
-                    c?.profile?.name ||
-                    c?.petname ||
-                    `${selectedMemberPubkey.slice(0, 8)}…`,
-                  picture: c?.profile?.picture ?? null,
-                  banner: c?.profile?.banner ?? null,
-                  nip05: c?.profile?.nip05 ?? null,
-                  lightningAddress: c?.profile?.lud16 ?? null,
-                  source: 'nostr' as const,
-                };
-              })()
-            : null
-        }
-      />
-
       <GifPickerSheet
         visible={gifPickerOpen}
         onClose={() => setGifPickerOpen(false)}
@@ -798,10 +768,7 @@ const GroupConversationScreen: React.FC = () => {
         initialAddress={invoiceToPay ?? undefined}
       />
 
-      {/* Tap a shared-contact card → opens the contact's profile sheet.
-          Distinct from the member-chip sheet above (selectedMemberPubkey)
-          which opens for taps in the group header. Both are mutually
-          exclusive in practice — the user can only tap one at a time. */}
+      {/* Tap a shared-contact card → opens the contact's profile sheet. */}
       <ContactProfileSheet
         visible={profileContact !== null}
         onClose={() => setProfileContact(null)}

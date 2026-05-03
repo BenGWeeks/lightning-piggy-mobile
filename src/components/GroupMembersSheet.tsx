@@ -50,7 +50,7 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { getGroup, addMembersToGroup, removeMemberFromGroup } = useGroups();
-  const { contacts } = useNostr();
+  const { contacts, pubkey: selfPubkey } = useNostr();
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['85%'], []);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -183,16 +183,19 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
               </View>
               <Text style={styles.rowName} numberOfLines={1}>
                 {m.name}
+                {m.pubkey === selfPubkey ? <Text style={styles.youTag}>  · you</Text> : null}
               </Text>
-              <TouchableOpacity
-                style={styles.removeButton}
-                onPress={() => handleRemove(m)}
-                accessibilityLabel={`Remove ${m.name}`}
-                testID={`group-member-remove-${m.pubkey.slice(0, 12)}`}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <X size={18} color={colors.brandPink} strokeWidth={2.5} />
-              </TouchableOpacity>
+              {m.pubkey !== selfPubkey ? (
+                <TouchableOpacity
+                  style={styles.removeButton}
+                  onPress={() => handleRemove(m)}
+                  accessibilityLabel={`Remove ${m.name}`}
+                  testID={`group-member-remove-${m.pubkey.slice(0, 12)}`}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <X size={18} color={colors.brandPink} strokeWidth={2.5} />
+                </TouchableOpacity>
+              ) : null}
             </View>
           ))}
 
@@ -214,6 +217,7 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
         onSelect={handlePickerSelect}
         title="Add members"
         subtitle="Pick a friend to add to this group"
+        excludePubkeys={group.memberPubkeys}
       />
     </>
   );
@@ -279,6 +283,10 @@ const createStyles = (colors: Palette) =>
       fontSize: 15,
       fontWeight: '600',
       color: colors.textHeader,
+    },
+    youTag: {
+      fontWeight: '400',
+      color: colors.textSupplementary,
     },
     removeButton: {
       width: 32,

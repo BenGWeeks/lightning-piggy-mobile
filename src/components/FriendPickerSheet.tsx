@@ -51,6 +51,10 @@ interface Props {
   // the Messages-tab "+" FAB surface group creation alongside 1:1 — see
   // PR #227.
   onNewGroup?: () => void;
+  // Optional. Hide these pubkeys from the picker — used by
+  // GroupMembersSheet so existing members aren't selectable (otherwise
+  // adding them silently no-ops in addMembersToGroup).
+  excludePubkeys?: readonly string[];
 }
 
 const FriendPickerSheet: React.FC<Props> = ({
@@ -60,6 +64,7 @@ const FriendPickerSheet: React.FC<Props> = ({
   title = 'Send to friend',
   subtitle,
   onNewGroup,
+  excludePubkeys,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -124,6 +129,7 @@ const FriendPickerSheet: React.FC<Props> = ({
   }, []);
 
   const friends = useMemo<PickedFriend[]>(() => {
+    const exclude = excludePubkeys ? new Set(excludePubkeys) : null;
     const list: PickedFriend[] = contacts.map((c) => ({
       pubkey: c.pubkey,
       name: (c.profile?.displayName || c.profile?.name || c.petname || '').trim(),
@@ -131,8 +137,9 @@ const FriendPickerSheet: React.FC<Props> = ({
       lightningAddress: c.profile?.lud16 ?? null,
     }));
     // Contacts with no resolved name aren't useful here — they can't be
-    // reliably identified by the user. Drop them from the picker.
-    const named = list.filter((f) => f.name.length > 0);
+    // reliably identified by the user. Drop them from the picker. Also
+    // drop any caller-excluded pubkeys (e.g. existing group members).
+    const named = list.filter((f) => f.name.length > 0 && !exclude?.has(f.pubkey));
     // Sort by the first Latin letter (so "🇦🇷Marcel" sits with other Ms),
     // then by raw name within the letter group. Keeps the alphabet bar's
     // scrollToIndex accurate.
@@ -149,7 +156,7 @@ const FriendPickerSheet: React.FC<Props> = ({
         f.name.toLowerCase().includes(q) ||
         (f.lightningAddress && f.lightningAddress.toLowerCase().includes(q)),
     );
-  }, [contacts, deferredSearch]);
+  }, [contacts, deferredSearch, excludePubkeys]);
 
   const availableLetters = useMemo(() => {
     const letters = new Set<string>();

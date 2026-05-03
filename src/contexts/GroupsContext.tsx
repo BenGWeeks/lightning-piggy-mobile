@@ -310,15 +310,20 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const addMembersToGroup = useCallback(
     async (groupId: string, pubkeys: string[]): Promise<Group | null> => {
       let updated: Group | null = null;
+      let didChange = false;
       await persist((curr) => {
         const idx = curr.findIndex((g) => g.id === groupId);
         if (idx === -1) return curr;
         const existing = new Set(curr[idx].memberPubkeys);
-        const toAdd = pubkeys.filter((pk) => !existing.has(pk));
+        // Dedupe input — a caller that asks for [pkA, pkA] should add
+        // pkA exactly once. Bare `pubkeys.filter` would let both through
+        // because the filter is against the pre-mutation `existing` set.
+        const toAdd = [...new Set(pubkeys)].filter((pk) => !existing.has(pk));
         if (toAdd.length === 0) {
           updated = curr[idx];
           return curr;
         }
+        didChange = true;
         updated = {
           ...curr[idx],
           memberPubkeys: [...curr[idx].memberPubkeys, ...toAdd],
@@ -329,15 +334,20 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return next;
       });
       if (!updated) return null;
-      const finalUpdated: Group = updated;
-      publishGroupState({
-        groupId: finalUpdated.id,
-        name: finalUpdated.name,
-        memberPubkeys: finalUpdated.memberPubkeys,
-      }).catch((e) => {
-        if (__DEV__) console.warn('[Groups] publishGroupState (add) failed:', e);
-      });
-      return finalUpdated;
+      // Only republish kind-30200 when membership actually changed.
+      // No-op adds (every input pubkey already a member) shouldn't spam
+      // the relays with an unchanged member list.
+      if (didChange) {
+        const finalUpdated: Group = updated;
+        publishGroupState({
+          groupId: finalUpdated.id,
+          name: finalUpdated.name,
+          memberPubkeys: finalUpdated.memberPubkeys,
+        }).catch((e) => {
+          if (__DEV__) console.warn('[Groups] publishGroupState (add) failed:', e);
+        });
+      }
+      return updated;
     },
     [persist, publishGroupState],
   );
