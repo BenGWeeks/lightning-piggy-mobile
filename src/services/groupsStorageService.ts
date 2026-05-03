@@ -1,18 +1,20 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Group, GroupActivity } from '../types/groups';
+import { perAccountKey } from './perAccountStorage';
 
-// Account scoping: persisted under a single global key (`nostr_groups`)
-// rather than namespaced per-account. Cross-account leak is prevented
-// at logout by NostrContext.logout, which AsyncStorage.multiRemove's
-// `nostr_groups` along with the per-pubkey caches. Per-account
-// namespacing (`nostr_groups_${pubkey}`) becomes necessary when we add
-// multi-account switching without a logout in between — tracked as a
-// follow-up.
-const GROUPS_KEY = 'nostr_groups';
+// Account scoping: per-account namespaced under `nostr_groups_${pubkey}`
+// since the multi-account switcher landed (#288). The legacy global
+// `nostr_groups` key is migrated on first launch by
+// `migrateToPerAccountStorage`; the post-migration source of truth is
+// the namespaced key. When pubkey is null (rare race during boot before
+// auto-login completes) we fall back to the bare key for backwards
+// compatibility — the next save with a real pubkey will land in the
+// namespaced slot.
+const GROUPS_KEY_BASE = 'nostr_groups';
 
-export async function loadGroups(): Promise<Group[]> {
+export async function loadGroups(pubkey: string | null): Promise<Group[]> {
   try {
-    const raw = await AsyncStorage.getItem(GROUPS_KEY);
+    const raw = await AsyncStorage.getItem(perAccountKey(GROUPS_KEY_BASE, pubkey));
     if (!raw) return [];
     const parsed = JSON.parse(raw) as Group[];
     return Array.isArray(parsed) ? parsed : [];
@@ -21,8 +23,8 @@ export async function loadGroups(): Promise<Group[]> {
   }
 }
 
-export async function saveGroups(groups: Group[]): Promise<void> {
-  await AsyncStorage.setItem(GROUPS_KEY, JSON.stringify(groups));
+export async function saveGroups(pubkey: string | null, groups: Group[]): Promise<void> {
+  await AsyncStorage.setItem(perAccountKey(GROUPS_KEY_BASE, pubkey), JSON.stringify(groups));
 }
 
 export function createGroupId(): string {

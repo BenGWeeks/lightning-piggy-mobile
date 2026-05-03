@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { Alert } from './BrandedAlert';
 import { Image } from 'expo-image';
@@ -13,14 +13,18 @@ import {
   Info,
   LogOut,
   QrCode,
+  MoreHorizontal,
 } from 'lucide-react-native';
 import QrSheet from './QrSheet';
 import NostrLoginSheet from './NostrLoginSheet';
+import AccountSwitcherSheet from './AccountSwitcherSheet';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { DrawerContentComponentProps } from '@react-navigation/drawer';
 import { DrawerContentScrollView } from '@react-navigation/drawer';
 import { useNostr } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
+import * as nostrService from '../services/nostrService';
+import type { NostrProfile } from '../types/nostr';
 import type { Palette } from '../styles/palettes';
 import { appVersion } from '../utils/appVersion';
 import type { AccountDrawerParamList } from '../navigation/types';
@@ -87,15 +91,63 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const sectionRows = useMemo(() => buildSectionRows(colors), [colors]);
   const insets = useSafeAreaInsets();
-  const { isLoggedIn, profile, logout } = useNostr();
+  const { isLoggedIn, profile, logout, identities, pubkey, switchIdentity, relays } = useNostr();
   const [signingOut, setSigningOut] = useState(false);
   const [qrSheetOpen, setQrSheetOpen] = useState(false);
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [profileById, setProfileById] = useState<Record<string, NostrProfile>>({});
+
+  // Up to 3 small avatars to the right of the active one. Sort by
+  // most-recently-used so the user's "other" identity sits closest
+  // to the active one.
+  const otherIdentities = useMemo(() => {
+    return identities
+      .filter((id) => id.pubkey !== pubkey)
+      .sort((a, b) => b.lastUsedAt - a.lastUsedAt)
+      .slice(0, 3);
+  }, [identities, pubkey]);
+
+  // Lazy-fetch kind-0 for the small switcher avatars. The active
+  // identity already has its profile in `profile`; only the others
+  // need fan-out. Skipped entirely while the drawer is closed
+  // (provider re-renders this on open via the drawer focus tick).
+  useEffect(() => {
+    if (otherIdentities.length === 0) return;
+    let cancelled = false;
+    const targetRelays = relays.filter((r) => r.read).map((r) => r.url);
+    const fanOut = targetRelays.length > 0 ? targetRelays : nostrService.DEFAULT_RELAYS;
+    (async () => {
+      for (const id of otherIdentities) {
+        if (cancelled) return;
+        if (profileById[id.pubkey]) continue;
+        try {
+          const fetched = await nostrService.fetchProfile(id.pubkey, fanOut);
+          if (cancelled) return;
+          if (fetched) setProfileById((prev) => ({ ...prev, [id.pubkey]: fetched }));
+        } catch {
+          // best-effort: row falls back to the placeholder avatar
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // profileById intentionally omitted — see AccountSwitcherSheet for the same pattern.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [otherIdentities, relays]);
 
   const displayName = profile?.displayName || profile?.name || '';
   const truncatedNpub = profile?.npub
     ? `${profile.npub.slice(0, 12)}…${profile.npub.slice(-6)}`
     : '';
+
+  const handleSwitchTo = (targetPubkey: string) => {
+    if (targetPubkey === pubkey) return;
+    switchIdentity(targetPubkey).catch((e) => {
+      if (__DEV__) console.warn('[Drawer] switchIdentity failed:', e);
+    });
+  };
 
   const handleSignOut = () => {
     if (!isLoggedIn) return;
@@ -123,19 +175,64 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
         contentContainerStyle={styles.scrollContent}
         scrollIndicatorInsets={{ right: 1 }}
       >
-        {/* Header — enlarged avatar + display name + npub */}
+        {/* Header — Primal-style: large active avatar + small switcher
+            avatars + ⋯ button on the same row, then display name + npub
+            below. The small avatars are tappable shortcuts; the ⋯ opens
+            the full AccountSwitcherSheet (#288). */}
         <View style={styles.header}>
-          <View style={styles.avatarLarge}>
-            {profile?.picture ? (
-              <Image
-                source={{ uri: profile.picture }}
-                style={styles.avatarImage}
-                cachePolicy="disk"
-              />
-            ) : (
-              <View style={[styles.avatarImage, styles.avatarPlaceholder]}>
-                <UserRound size={40} color={colors.textBody} strokeWidth={1.75} />
+          <View style={styles.headerAvatarRow}>
+            <View style={styles.avatarLarge}>
+              {profile?.picture ? (
+                <Image
+                  source={{ uri: profile.picture }}
+                  style={styles.avatarImage}
+                  cachePolicy="disk"
+                />
+              ) : (
+                <View style={[styles.avatarImage, styles.avatarPlaceholder]}>
+                  <UserRound size={40} color={colors.textBody} strokeWidth={1.75} />
+                </View>
+              )}
+            </View>
+            {isLoggedIn && otherIdentities.length > 0 && (
+              <View style={styles.switcherAvatars}>
+                {otherIdentities.map((id) => {
+                  const prof = profileById[id.pubkey];
+                  return (
+                    <TouchableOpacity
+                      key={id.pubkey}
+                      style={styles.avatarSmall}
+                      onPress={() => handleSwitchTo(id.pubkey)}
+                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                      accessibilityLabel={`Switch to ${prof?.displayName || prof?.name || 'account'}`}
+                      testID={`drawer-switch-${id.pubkey.slice(0, 8)}`}
+                    >
+                      {prof?.picture ? (
+                        <Image
+                          source={{ uri: prof.picture }}
+                          style={styles.avatarSmallImage}
+                          cachePolicy="disk"
+                        />
+                      ) : (
+                        <View style={[styles.avatarSmallImage, styles.avatarPlaceholder]}>
+                          <UserRound size={18} color={colors.textBody} strokeWidth={1.75} />
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
+            )}
+            {isLoggedIn && (
+              <TouchableOpacity
+                style={styles.moreButton}
+                onPress={() => setSwitcherOpen(true)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityLabel="Manage accounts"
+                testID="drawer-accounts-more"
+              >
+                <MoreHorizontal size={22} color={colors.textBody} />
+              </TouchableOpacity>
             )}
           </View>
           {isLoggedIn ? (
@@ -241,6 +338,8 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
       )}
 
       <NostrLoginSheet visible={loginSheetOpen} onClose={() => setLoginSheetOpen(false)} />
+
+      <AccountSwitcherSheet visible={switcherOpen} onClose={() => setSwitcherOpen(false)} />
     </View>
   );
 };
@@ -260,18 +359,52 @@ const createStyles = (colors: Palette) =>
       paddingBottom: 20,
       alignItems: 'flex-start',
     },
-    avatarLarge: {
-      width: 72,
-      height: 72,
-      borderRadius: 36,
-      overflow: 'hidden',
-      backgroundColor: 'rgba(0,0,0,0.05)',
+    headerAvatarRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      alignSelf: 'stretch',
       marginBottom: 12,
     },
+    avatarLarge: {
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+      overflow: 'hidden',
+      backgroundColor: 'rgba(0,0,0,0.05)',
+    },
     avatarImage: {
-      width: 72,
-      height: 72,
-      borderRadius: 36,
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+    },
+    switcherAvatars: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginLeft: 12,
+      flex: 1,
+    },
+    avatarSmall: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      overflow: 'hidden',
+      backgroundColor: 'rgba(0,0,0,0.05)',
+    },
+    avatarSmallImage: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+    },
+    moreButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.divider,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginLeft: 'auto',
     },
     avatarPlaceholder: {
       backgroundColor: colors.background,

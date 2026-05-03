@@ -62,8 +62,12 @@ const NostrScreen: React.FC = () => {
 
   useEffect(() => {
     getBlossomServer().then(setBlossomServerInput);
-    AsyncStorage.getItem('amber_nip17_enabled').then((v) => setAmberNip17Enabled(v === 'true'));
-  }, []);
+    // Per-account namespaced (#288). Falls back to legacy global key
+    // when the user is logged out so the toggle still hydrates from
+    // pre-multi-account state during the first render.
+    const key = profile?.pubkey ? `amber_nip17_enabled_${profile.pubkey}` : 'amber_nip17_enabled';
+    AsyncStorage.getItem(key).then((v) => setAmberNip17Enabled(v === 'true'));
+  }, [profile?.pubkey]);
 
   const handleBlossomSave = async () => {
     const normalized = blossomServer.trim() || DEFAULT_BLOSSOM_SERVER;
@@ -74,10 +78,11 @@ const NostrScreen: React.FC = () => {
   const toggleAmberNip17 = useCallback(() => {
     setAmberNip17Enabled((prev) => {
       const next = !prev;
-      AsyncStorage.setItem('amber_nip17_enabled', next ? 'true' : 'false').catch(() => {});
+      const key = profile?.pubkey ? `amber_nip17_enabled_${profile.pubkey}` : 'amber_nip17_enabled';
+      AsyncStorage.setItem(key, next ? 'true' : 'false').catch(() => {});
       return next;
     });
-  }, []);
+  }, [profile?.pubkey]);
 
   const grantAmberNip44Permission = useCallback(async () => {
     if (!profile?.pubkey) throw new Error('No profile pubkey — log in first.');

@@ -29,7 +29,9 @@ import {
   subscribeGroupStateForViewer,
 } from '../services/nostrService';
 
-const FOLLOWING_ONLY_KEY = 'groups_following_only';
+import { perAccountKey } from '../services/perAccountStorage';
+
+const FOLLOWING_ONLY_KEY_BASE = 'groups_following_only';
 
 interface GroupsContextType {
   groups: Group[];
@@ -150,27 +152,47 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     | null
   >(null);
 
+  // Re-load groups whenever the active identity flips. Without keying
+  // off pubkey, switching from Big Piggy to Middle Piggy would still
+  // show Big's groups until a hard reload — the whole point of the
+  // multi-account refactor is the seamless switch.
   useEffect(() => {
-    loadGroups()
+    if (!pubkey) {
+      // Logged out: clear everything so a fresh login (or restart)
+      // doesn't render the previous identity's group cache for a frame.
+      setGroups([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    loadGroups(pubkey)
       .then((loaded) => setGroups(loaded))
       .finally(() => setLoading(false));
-  }, []);
+  }, [pubkey]);
 
   // Load persisted user preferences for the chip + dev-mode escape hatch.
   // dev_mode is shared with AboutScreen's hidden-tap unlock so the same
-  // override surfaces across the app.
+  // override surfaces across the app. The "following only" toggle is
+  // per-account (Primal/Damus convention: muting/filter prefs travel
+  // with the identity, not the device).
   useEffect(() => {
-    AsyncStorage.getItem(FOLLOWING_ONLY_KEY).then((v) => {
+    AsyncStorage.getItem(perAccountKey(FOLLOWING_ONLY_KEY_BASE, pubkey)).then((v) => {
       // Default ON; only flip OFF if the user explicitly persisted false.
-      if (v === 'false') setFollowingOnlyState(false);
+      setFollowingOnlyState(v !== 'false');
     });
     AsyncStorage.getItem('dev_mode').then((v) => setDevMode(v === 'true'));
-  }, []);
+  }, [pubkey]);
 
-  const setFollowingOnly = useCallback((next: boolean) => {
-    setFollowingOnlyState(next);
-    AsyncStorage.setItem(FOLLOWING_ONLY_KEY, next ? 'true' : 'false').catch(() => {});
-  }, []);
+  const setFollowingOnly = useCallback(
+    (next: boolean) => {
+      setFollowingOnlyState(next);
+      AsyncStorage.setItem(
+        perAccountKey(FOLLOWING_ONLY_KEY_BASE, pubkey),
+        next ? 'true' : 'false',
+      ).catch(() => {});
+    },
+    [pubkey],
+  );
 
   // Keep the module-level routing registry in lock-step with React state
   // so NostrContext's NIP-17 decrypt loop can resolve which group an
@@ -297,17 +319,20 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     groupsRef.current = groups;
   }, [groups]);
 
-  const persist = useCallback(async (mutate: (curr: Group[]) => Group[]): Promise<Group[]> => {
-    const after = mutate(groupsRef.current);
-    // Update the ref BEFORE setGroups so a concurrent caller scheduled
-    // immediately after this one reads the fresh array — otherwise
-    // both callers' mutates would run against the same `curr` and the
-    // second's write would clobber the first's.
-    groupsRef.current = after;
-    setGroups(after);
-    await saveGroups(after);
-    return after;
-  }, []);
+  const persist = useCallback(
+    async (mutate: (curr: Group[]) => Group[]): Promise<Group[]> => {
+      const after = mutate(groupsRef.current);
+      // Update the ref BEFORE setGroups so a concurrent caller scheduled
+      // immediately after this one reads the fresh array — otherwise
+      // both callers' mutates would run against the same `curr` and the
+      // second's write would clobber the first's.
+      groupsRef.current = after;
+      setGroups(after);
+      await saveGroups(pubkey, after);
+      return after;
+    },
+    [pubkey],
+  );
 
   // Synthetic-room reconciler: invoked from NostrContext's group routing
   // path when a kind-14 arrives from a foreign client (Amethyst / Quartz,

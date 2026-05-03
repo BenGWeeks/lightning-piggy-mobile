@@ -31,6 +31,16 @@ import {
 } from '../services/groupRoutingRegistry';
 import { isSyntheticGroupId, syntheticGroupIdForParticipants } from '../utils/syntheticGroupId';
 import { appendGroupMessage, type GroupMessage } from '../services/groupMessagesStorageService';
+import { perAccountKey } from '../services/perAccountStorage';
+import {
+  loadIdentities,
+  upsertIdentity,
+  removeIdentity as removeIdentityFromStore,
+  setActiveIdentity,
+  type StoredIdentity,
+} from '../services/identitiesStore';
+import { migrateToPerAccountStorage } from '../services/migrateToPerAccountStorage';
+import { setActivePubkeyForWalletStorage } from '../services/walletStorageService';
 
 /**
  * Module-level LRU cache for NIP-04 plaintext keyed by event id. Keeps
@@ -72,11 +82,13 @@ function clearMemoisedSecretKey(): void {
 // AsyncStorage keys for the NIP-17 gift-wrap caches. Both signer paths
 // use the same cache shape (wrap-id → decrypted rumor entry); they're
 // kept under separate keys so cross-signer login on the same device
-// doesn't leak plaintext between identities.
-const AMBER_NIP17_CACHE_KEY = 'amber_nip17_cache_v1';
-const NSEC_NIP17_CACHE_KEY = 'nsec_nip17_cache_v1';
+// doesn't leak plaintext between identities. As of #288 the keys are
+// also per-account namespaced — each base is suffixed with `_${pubkey}`
+// via `perAccountKey()` at every read/write site.
+const AMBER_NIP17_CACHE_KEY_BASE = 'amber_nip17_cache_v1';
+const NSEC_NIP17_CACHE_KEY_BASE = 'nsec_nip17_cache_v1';
 const NIP17_CACHE_CAP = 5000;
-const AMBER_NIP17_ENABLED_KEY = 'amber_nip17_enabled';
+const AMBER_NIP17_ENABLED_KEY_BASE = 'amber_nip17_enabled';
 
 /** Persistent wrap-id → DmInboxEntry cache. Only ever contains rumors
  * from followed senders — see refreshDmInbox's filter gate. */
@@ -394,14 +406,17 @@ function mergeConversationMessages(
 const NSEC_KEY = 'nostr_nsec';
 const PUBKEY_KEY = 'nostr_pubkey';
 const SIGNER_TYPE_KEY = 'nostr_signer_type';
-const CONTACTS_CACHE_KEY = 'nostr_contacts_cache';
-const PROFILES_CACHE_KEY = 'nostr_profiles_cache';
-const CACHE_TIMESTAMP_KEY = 'nostr_cache_timestamp';
-const CONTACTS_TIMESTAMP_KEY = 'nostr_contacts_timestamp';
-const OWN_PROFILE_CACHE_KEY = 'nostr_own_profile_cache';
-const OWN_PROFILE_TIMESTAMP_KEY = 'nostr_own_profile_timestamp';
-const RELAY_LIST_CACHE_KEY = 'nostr_relay_list_cache';
-const RELAY_LIST_TIMESTAMP_KEY = 'nostr_relay_list_timestamp';
+// Cache key bases — each is suffixed with `_${pubkey}` via perAccountKey()
+// at every call site. The legacy un-suffixed keys are migrated on first
+// launch (see migrateToPerAccountStorage).
+const CONTACTS_CACHE_KEY_BASE = 'nostr_contacts_cache';
+const PROFILES_CACHE_KEY_BASE = 'nostr_profiles_cache';
+const CACHE_TIMESTAMP_KEY_BASE = 'nostr_cache_timestamp';
+const CONTACTS_TIMESTAMP_KEY_BASE = 'nostr_contacts_timestamp';
+const OWN_PROFILE_CACHE_KEY_BASE = 'nostr_own_profile_cache';
+const OWN_PROFILE_TIMESTAMP_KEY_BASE = 'nostr_own_profile_timestamp';
+const RELAY_LIST_CACHE_KEY_BASE = 'nostr_relay_list_cache';
+const RELAY_LIST_TIMESTAMP_KEY_BASE = 'nostr_relay_list_timestamp';
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours — for all-cached fast path
 // A contact whose kind-0 we couldn't resolve on the previous attempt is
 // retried much sooner than 24 h. The "miss" often reflects the user's
@@ -444,6 +459,32 @@ interface NostrContextType {
   contacts: NostrContact[];
   relays: RelayConfig[];
   signerType: SignerType | null;
+  /**
+   * Multi-account registry — every signed-in identity on this device.
+   * Drives the drawer header switcher and the AccountSwitcherSheet
+   * (#288). The active identity is the one whose `pubkey` matches the
+   * `pubkey` field above; everything else is "warm in the drawer".
+   *
+   * Each entry carries the full credentials needed to sign as that
+   * identity (nsec for nsec-typed entries, pubkey-only for amber —
+   * Amber accepts a `current_user` hint per signing call so it can
+   * pick the right identity from its own keychain). The array is
+   * ordered for display: most-recently-active first via `lastUsedAt`.
+   */
+  identities: StoredIdentity[];
+  /**
+   * Flip the active identity to a registered one. No-op if pubkey is
+   * already active or unknown to the registry. Tears down in-memory
+   * state for the previous identity but keeps its disk caches around
+   * so a switch back is instant.
+   */
+  switchIdentity: (pubkey: string) => Promise<void>;
+  /**
+   * Remove a single identity from the registry. If it's the active
+   * one, behaves like `logout` (with a successor switch if available);
+   * otherwise wipes that identity's caches + entry, leaves active alone.
+   */
+  signOutIdentity: (pubkey: string) => Promise<void>;
   loginWithNsec: (nsec: string) => Promise<{ success: boolean; error?: string }>;
   loginWithAmber: () => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
@@ -577,6 +618,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [amberNip44Permission, setAmberNip44Permission] = useState<
     'unknown' | 'granted' | 'denied'
   >('unknown');
+  // Multi-account registry (#288). Mirrors the SecureStore `identities_v1`
+  // blob so the drawer header and AccountSwitcherSheet can render without
+  // each rendering its own SecureStore round-trip. The `pubkey` state above
+  // is the single source of truth for "who is the active identity"; this
+  // array is the side-table of all signed-in identities for the switcher.
+  // Per-identity profile metadata (avatar/display name) is fetched lazily
+  // by the switcher row component (uses the existing kind-0 fetcher).
+  const [identities, setIdentities] = useState<StoredIdentity[]>([]);
 
   // Single-flight guard: coalesce overlapping refreshDmInbox calls (e.g.
   // useFocusEffect firing while a pull-to-refresh is still in-flight) so
@@ -600,9 +649,13 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Publish the logged-in pubkey through the nostrService module so
   // non-React consumers (e.g. WalletContext's zap sender resolver) can
-  // read it without introducing a circular provider dependency.
+  // read it without introducing a circular provider dependency. Same
+  // mirror is needed for `walletStorageService` — its module-level
+  // `walletListKey()` reads from this published value to pick the
+  // correct per-account `wallet_list_${pk}` AsyncStorage key (#288).
   useEffect(() => {
     nostrService.setCurrentUserPubkey(pubkey);
+    setActivePubkeyForWalletStorage(pubkey);
   }, [pubkey]);
 
   useEffect(() => {
@@ -623,8 +676,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // Cache-fresh fast path: hydrate UI from cache and skip the relay RTT.
       // `force` bypasses it for user-initiated refreshes.
       const { value: cached, ageMs } = await readCachedWithTtl<NostrProfile>(
-        OWN_PROFILE_CACHE_KEY,
-        OWN_PROFILE_TIMESTAMP_KEY,
+        perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, pk),
+        perAccountKey(OWN_PROFILE_TIMESTAMP_KEY_BASE, pk),
       );
       if (!opts?.force && cached && ageMs < CACHE_MAX_AGE_MS) {
         setProfile(cached);
@@ -636,36 +689,39 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (fetchedProfile) {
         setProfile(fetchedProfile);
         InteractionManager.runAfterInteractions(() => {
-          AsyncStorage.setItem(OWN_PROFILE_CACHE_KEY, JSON.stringify(fetchedProfile)).catch(
-            () => {},
-          );
-          AsyncStorage.setItem(OWN_PROFILE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+          AsyncStorage.setItem(
+            perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, pk),
+            JSON.stringify(fetchedProfile),
+          ).catch(() => {});
+          AsyncStorage.setItem(
+            perAccountKey(OWN_PROFILE_TIMESTAMP_KEY_BASE, pk),
+            Date.now().toString(),
+          ).catch(() => {});
         });
       }
     },
     [],
   );
 
-  const loadContactsFromCache = useCallback(async () => {
+  const loadContactsFromCache = useCallback(async (pk: string) => {
     try {
       const t0 = Date.now();
       // One multiGet round-trip for all three caches. Contacts freshness
-      // is gated by CONTACTS_TIMESTAMP_KEY (the contact-list's own write
+      // is gated by CONTACTS_TIMESTAMP_KEY_BASE (the contact-list's own write
       // time), not the profiles timestamp — they get separate keys so a
       // successful contact refresh isn't blocked by an unrelated profiles
-      // cache entry.
-      const pairs = await AsyncStorage.multiGet([
-        CONTACTS_CACHE_KEY,
-        PROFILES_CACHE_KEY,
-        CONTACTS_TIMESTAMP_KEY,
-      ]);
+      // cache entry. Per-account namespaced (#288).
+      const contactsKey = perAccountKey(CONTACTS_CACHE_KEY_BASE, pk);
+      const profilesKey = perAccountKey(PROFILES_CACHE_KEY_BASE, pk);
+      const contactsTsKey = perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pk);
+      const pairs = await AsyncStorage.multiGet([contactsKey, profilesKey, contactsTsKey]);
       let contactsJson: string | null = null;
       let profilesJson: string | null = null;
       let contactsTsStr: string | null = null;
       for (const [k, v] of pairs) {
-        if (k === CONTACTS_CACHE_KEY) contactsJson = v;
-        else if (k === PROFILES_CACHE_KEY) profilesJson = v;
-        else if (k === CONTACTS_TIMESTAMP_KEY) contactsTsStr = v;
+        if (k === contactsKey) contactsJson = v;
+        else if (k === profilesKey) profilesJson = v;
+        else if (k === contactsTsKey) contactsTsStr = v;
       }
       if (contactsTsStr && Date.now() - parseInt(contactsTsStr, 10) > CACHE_MAX_AGE_MS) {
         if (__DEV__) console.log('[Nostr] contacts cache expired, skipping');
@@ -720,8 +776,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         { value: cachedContacts, ageMs: contactsAgeMs },
         { value: cachedProfileMapOrNull, ageMs: cacheAgeMs },
       ] = await Promise.all([
-        readCachedWithTtl<NostrContact[]>(CONTACTS_CACHE_KEY, CONTACTS_TIMESTAMP_KEY),
-        readCachedWithTtl<Record<string, NostrProfile>>(PROFILES_CACHE_KEY, CACHE_TIMESTAMP_KEY),
+        readCachedWithTtl<NostrContact[]>(
+          perAccountKey(CONTACTS_CACHE_KEY_BASE, pk),
+          perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pk),
+        ),
+        readCachedWithTtl<Record<string, NostrProfile>>(
+          perAccountKey(PROFILES_CACHE_KEY_BASE, pk),
+          perAccountKey(CACHE_TIMESTAMP_KEY_BASE, pk),
+        ),
       ]);
       const cachedProfileMap = cachedProfileMapOrNull ?? {};
       const contactsCacheFresh = !opts?.force && contactsAgeMs < CACHE_MAX_AGE_MS;
@@ -741,8 +803,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             `[Nostr] fetchContactList: ${Date.now() - t0}ms, ${fetchedContacts.length} contacts`,
           );
         InteractionManager.runAfterInteractions(() => {
-          AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(fetchedContacts)).catch(() => {});
-          AsyncStorage.setItem(CONTACTS_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+          AsyncStorage.setItem(
+            perAccountKey(CONTACTS_CACHE_KEY_BASE, pk),
+            JSON.stringify(fetchedContacts),
+          ).catch(() => {});
+          AsyncStorage.setItem(
+            perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pk),
+            Date.now().toString(),
+          ).catch(() => {});
         });
       }
 
@@ -816,8 +884,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         profileMap.forEach((v, k) => {
           merged[k] = v;
         });
-        AsyncStorage.setItem(PROFILES_CACHE_KEY, JSON.stringify(merged)).catch(() => {});
-        AsyncStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+        AsyncStorage.setItem(
+          perAccountKey(PROFILES_CACHE_KEY_BASE, pk),
+          JSON.stringify(merged),
+        ).catch(() => {});
+        AsyncStorage.setItem(
+          perAccountKey(CACHE_TIMESTAMP_KEY_BASE, pk),
+          Date.now().toString(),
+        ).catch(() => {});
       });
     },
     [],
@@ -828,8 +902,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // Cache-fresh fast path — NIP-65 relay lists rarely change, so serve
     // from cache when under the TTL and skip the ~3s relay round trip.
     const { value: cached, ageMs } = await readCachedWithTtl<RelayConfig[]>(
-      RELAY_LIST_CACHE_KEY,
-      RELAY_LIST_TIMESTAMP_KEY,
+      perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk),
+      perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, pk),
     );
     if (cached && ageMs < CACHE_MAX_AGE_MS) {
       setRelays(cached);
@@ -842,8 +916,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       console.log(`[Nostr] fetchRelayList: ${Date.now() - t0}ms, ${relayList.length} relays`);
     setRelays(relayList);
     InteractionManager.runAfterInteractions(() => {
-      AsyncStorage.setItem(RELAY_LIST_CACHE_KEY, JSON.stringify(relayList)).catch(() => {});
-      AsyncStorage.setItem(RELAY_LIST_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+      AsyncStorage.setItem(
+        perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk),
+        JSON.stringify(relayList),
+      ).catch(() => {});
+      AsyncStorage.setItem(
+        perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, pk),
+        Date.now().toString(),
+      ).catch(() => {});
     });
     const readRelays = relayList.filter((r) => r.read).map((r) => r.url);
     return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
@@ -853,6 +933,13 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     (async () => {
       try {
+        // Hydrate the multi-account registry first so the switcher has
+        // something to render even before the active identity finishes
+        // loading. Empty array on a fresh install — the auto-login below
+        // populates it when the legacy single-account keys are migrated.
+        const blob = await loadIdentities();
+        setIdentities(blob.identities);
+
         const storedSignerType = await SecureStore.getItemAsync(SIGNER_TYPE_KEY);
         let pk: string | null = null;
 
@@ -863,6 +950,19 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setPubkey(pk);
             setSignerType('nsec');
             setIsLoggedIn(true);
+            // Backfill the registry from the legacy single-account state
+            // for users upgrading from before the multi-account refactor.
+            // Idempotent — `upsertIdentity` is a no-op when this pubkey
+            // is already present.
+            if (!blob.identities.some((i) => i.pubkey === pk)) {
+              const next = await upsertIdentity({
+                pubkey: pk,
+                signerType: 'nsec',
+                nsec: storedNsec,
+                lastUsedAt: Date.now(),
+              });
+              setIdentities(next.identities);
+            }
           }
         } else if (storedSignerType === 'amber') {
           const storedPubkey = await SecureStore.getItemAsync(PUBKEY_KEY);
@@ -871,13 +971,38 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setPubkey(pk);
             setSignerType('amber');
             setIsLoggedIn(true);
+            if (!blob.identities.some((i) => i.pubkey === pk)) {
+              const next = await upsertIdentity({
+                pubkey: pk,
+                signerType: 'amber',
+                lastUsedAt: Date.now(),
+              });
+              setIdentities(next.identities);
+            }
           }
         }
 
         if (!pk) return;
 
+        // One-time per-account storage migration. Self-contained in
+        // `migrateToPerAccountStorage` — runs once, copies legacy global
+        // values to `${base}_${pk}`, sets a flag, and short-circuits on
+        // every subsequent call. Safe to await before the first cache
+        // read because it adds <50 ms to cold start.
+        try {
+          const result = await migrateToPerAccountStorage(pk);
+          if (__DEV__ && !result.alreadyDone) {
+            console.log(
+              `[Nostr] per-account storage migration: copied ${result.ranSteps} keys`,
+              result.copiedKeys,
+            );
+          }
+        } catch (e) {
+          console.warn('[Nostr] per-account storage migration failed:', e);
+        }
+
         // Load cached contacts immediately (no network, <100ms)
-        await loadContactsFromCache();
+        await loadContactsFromCache(pk);
 
         // Eagerly hydrate dmInbox from disk cache so the Messages tab
         // paints conversations on cold start. The relay refresh below
@@ -898,8 +1023,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           // Ignore the timestamp here — even a stale cached relay list is
           // better than DEFAULT_RELAYS for reaching user-only relays.
           const { value: cachedRelays } = await readCachedWithTtl<RelayConfig[]>(
-            RELAY_LIST_CACHE_KEY,
-            RELAY_LIST_TIMESTAMP_KEY,
+            perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk!),
+            perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, pk!),
           );
           if (cachedRelays) {
             const readRelays = cachedRelays.filter((r) => r.read).map((r) => r.url);
@@ -937,16 +1062,35 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const { pubkey: pk } = nostrService.decodeNsec(trimmed);
         setPubkey(pk);
 
-        // Store credentials
+        // Store credentials in the legacy single-active-identity slots
+        // (still the canonical location every other consumer reads from)
+        // AND register the identity in the multi-account store so the
+        // switcher knows it exists.
         await SecureStore.setItemAsync(NSEC_KEY, trimmed);
         await SecureStore.setItemAsync(SIGNER_TYPE_KEY, 'nsec');
+        const next = await upsertIdentity({
+          pubkey: pk,
+          signerType: 'nsec',
+          nsec: trimmed,
+          lastUsedAt: Date.now(),
+        });
+        setIdentities(next.identities);
 
         setSignerType('nsec');
         setIsLoggedIn(true);
         setIsLoggingIn(false);
 
+        // First-launch migration for this identity — idempotent flag
+        // means this is a no-op once the user has migrated on any
+        // previous login.
+        try {
+          await migrateToPerAccountStorage(pk);
+        } catch (e) {
+          if (__DEV__) console.warn('[Nostr] per-account migration on login failed:', e);
+        }
+
         // Load cached contacts immediately, fetch fresh data in background
-        await loadContactsFromCache();
+        await loadContactsFromCache(pk);
         // Eagerly hydrate dmInbox from disk cache so Messages tab paints
         // on first focus instead of staying blank for the relay round-trip.
         await hydrateDmInboxFromCache(pk);
@@ -987,13 +1131,25 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setPubkey(pk);
       await SecureStore.setItemAsync(PUBKEY_KEY, pk);
       await SecureStore.setItemAsync(SIGNER_TYPE_KEY, 'amber');
+      const next = await upsertIdentity({
+        pubkey: pk,
+        signerType: 'amber',
+        lastUsedAt: Date.now(),
+      });
+      setIdentities(next.identities);
 
       setSignerType('amber');
       setIsLoggedIn(true);
       setIsLoggingIn(false);
 
+      try {
+        await migrateToPerAccountStorage(pk);
+      } catch (e) {
+        if (__DEV__) console.warn('[Nostr] per-account migration on login failed:', e);
+      }
+
       // Load cached contacts immediately, fetch fresh data in background
-      await loadContactsFromCache();
+      await loadContactsFromCache(pk);
       // Eagerly hydrate dmInbox from disk cache so Messages tab paints
       // on first focus instead of staying blank for the relay round-trip.
       await hydrateDmInboxFromCache(pk);
@@ -1018,6 +1174,48 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [loadRelays, loadProfile, loadContacts, loadContactsFromCache, hydrateDmInboxFromCache]);
 
+  /**
+   * Wipe every per-account AsyncStorage entry for `loggedOutPubkey`.
+   * Extracted from `logout` so the multi-account sign-out path can
+   * call it without coupling to the active-identity teardown logic.
+   */
+  const wipeAccountCaches = useCallback(async (loggedOutPubkey: string | null) => {
+    if (!loggedOutPubkey) return;
+    const toRemove: string[] = [
+      // Per-account namespaced caches (#288 storage refactor)
+      perAccountKey(CONTACTS_CACHE_KEY_BASE, loggedOutPubkey),
+      perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, loggedOutPubkey),
+      perAccountKey(PROFILES_CACHE_KEY_BASE, loggedOutPubkey),
+      perAccountKey(CACHE_TIMESTAMP_KEY_BASE, loggedOutPubkey),
+      perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, loggedOutPubkey),
+      perAccountKey(OWN_PROFILE_TIMESTAMP_KEY_BASE, loggedOutPubkey),
+      perAccountKey(RELAY_LIST_CACHE_KEY_BASE, loggedOutPubkey),
+      perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, loggedOutPubkey),
+      perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, loggedOutPubkey),
+      perAccountKey(AMBER_NIP17_ENABLED_KEY_BASE, loggedOutPubkey),
+      perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, loggedOutPubkey),
+      // Pre-existing per-pubkey caches (already namespaced before #288)
+      inboxCacheKey(loggedOutPubkey),
+      inboxLastSeenKey(loggedOutPubkey),
+      `nostr_group_activity_${loggedOutPubkey}`,
+      `nostr_groups_${loggedOutPubkey}`,
+      `groups_following_only_${loggedOutPubkey}`,
+      `wallet_list_${loggedOutPubkey}`,
+    ];
+    const allKeys = await AsyncStorage.getAllKeys();
+    const convPrefix = DM_CONV_CACHE_PREFIX + loggedOutPubkey + '_';
+    const lastSeenPrefix = DM_CONV_LAST_SEEN_PREFIX + loggedOutPubkey + '_';
+    for (const k of allKeys) {
+      if (k.startsWith(convPrefix) || k.startsWith(lastSeenPrefix)) toRemove.push(k);
+    }
+    // group_messages_${groupId} is keyed by the random group id (not
+    // pubkey), so we can't selectively remove "this identity's groups"
+    // — they're shared across whichever identities are members. Leave
+    // them in place; they're orphaned safely once no remaining identity
+    // is a member, and re-attached if the same identity signs back in.
+    await AsyncStorage.multiRemove(toRemove);
+  }, []);
+
   const logout = useCallback(async () => {
     clearMemoisedSecretKey();
     setAmberNip44Permission('unknown');
@@ -1026,50 +1224,42 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     await SecureStore.deleteItemAsync(NSEC_KEY);
     await SecureStore.deleteItemAsync(PUBKEY_KEY);
     await SecureStore.deleteItemAsync(SIGNER_TYPE_KEY);
-    const toRemove: string[] = [
-      CONTACTS_CACHE_KEY,
-      CONTACTS_TIMESTAMP_KEY,
-      PROFILES_CACHE_KEY,
-      CACHE_TIMESTAMP_KEY,
-      OWN_PROFILE_CACHE_KEY,
-      OWN_PROFILE_TIMESTAMP_KEY,
-      RELAY_LIST_CACHE_KEY,
-      RELAY_LIST_TIMESTAMP_KEY,
-      // DM-inbox state is identity-scoped — decrypted rumors and the
-      // Amber NIP-17 permission intent belong to the logged-in user,
-      // not globally.
-      AMBER_NIP17_CACHE_KEY,
-      AMBER_NIP17_ENABLED_KEY,
-      NSEC_NIP17_CACHE_KEY,
-    ];
-    // PR B caches are per-user-keyed — only clear the ones for the
-    // user we're logging out of. Per-peer conversation caches share
-    // the same prefix; we grep AsyncStorage keys for them.
+    await wipeAccountCaches(loggedOutPubkey);
+
+    // Remove this identity from the multi-account registry. If other
+    // identities exist the switcher will pick a successor; otherwise
+    // we drop into the logged-out state below.
+    let nextIdentities: StoredIdentity[] = [];
+    let nextActive: string | null = null;
     if (loggedOutPubkey) {
-      toRemove.push(inboxCacheKey(loggedOutPubkey));
-      toRemove.push(inboxLastSeenKey(loggedOutPubkey));
-      const allKeys = await AsyncStorage.getAllKeys();
-      const convPrefix = DM_CONV_CACHE_PREFIX + loggedOutPubkey + '_';
-      const lastSeenPrefix = DM_CONV_LAST_SEEN_PREFIX + loggedOutPubkey + '_';
-      for (const k of allKeys) {
-        if (k.startsWith(convPrefix) || k.startsWith(lastSeenPrefix)) toRemove.push(k);
-      }
-      // Group state + per-group message logs are NOT yet account-scoped
-      // (single-account today; per-account namespacing is a follow-up).
-      // Clear them on logout so the next signed-in identity can't see
-      // the previous identity's groups or thread history.
-      const allKeysForGroups = allKeys; // already fetched above
-      toRemove.push('nostr_groups');
-      for (const k of allKeysForGroups) {
-        if (k.startsWith('group_messages_')) toRemove.push(k);
-      }
-      // Per-pubkey group activity cache (added in #257). Contains
-      // decrypted last-message previews (`GroupActivity.lastText`),
-      // so we MUST clear it on logout — leaving it on disk would
-      // expose private content to whoever logs in next.
-      toRemove.push(`nostr_group_activity_${loggedOutPubkey}`);
+      const blob = await removeIdentityFromStore(loggedOutPubkey);
+      nextIdentities = blob.identities;
+      nextActive = blob.activePubkey;
     }
-    await AsyncStorage.multiRemove(toRemove);
+    setIdentities(nextIdentities);
+
+    if (nextActive && nextIdentities.length > 0) {
+      // Switch to the successor without dropping into the logged-out
+      // screen — feels seamless to the user (they sign out of Big Piggy
+      // and immediately see Middle Piggy's caches).
+      const successor = nextIdentities.find((i) => i.pubkey === nextActive);
+      if (successor) {
+        await SecureStore.setItemAsync(SIGNER_TYPE_KEY, successor.signerType);
+        if (successor.signerType === 'nsec' && successor.nsec) {
+          await SecureStore.setItemAsync(NSEC_KEY, successor.nsec);
+        } else if (successor.signerType === 'amber') {
+          await SecureStore.setItemAsync(PUBKEY_KEY, successor.pubkey);
+        }
+        setPubkey(successor.pubkey);
+        setSignerType(successor.signerType);
+        setIsLoggedIn(true);
+        // Eagerly hydrate the new identity's caches; the next focus tick
+        // will refresh from relays.
+        await loadContactsFromCache(successor.pubkey);
+        await hydrateDmInboxFromCache(successor.pubkey);
+        return;
+      }
+    }
 
     setPubkey(null);
     setProfile(null);
@@ -1079,7 +1269,103 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setIsLoggedIn(false);
 
     nostrService.cleanup();
-  }, []);
+  }, [pubkey, wipeAccountCaches, loadContactsFromCache, hydrateDmInboxFromCache]);
+
+  /**
+   * Flip the active identity to `nextPubkey`. Must already be a
+   * registered identity (call `loginWithNsec` / `loginWithAmber`
+   * first to add a brand-new one). The flip:
+   *   1. Persists the new active in `identities_v1` + the legacy
+   *      single-identity SecureStore keys (NSEC/PUBKEY/SIGNER_TYPE),
+   *      so a hard restart resumes on the new identity.
+   *   2. Tears down the old identity's in-memory state (nip04 cache,
+   *      memoised secret, profile, contacts, relays). Persistent
+   *      caches are NOT touched — they're keyed per-pubkey, so the
+   *      old identity's data stays on disk for the next switch back.
+   *   3. Eagerly hydrates the new identity from disk caches so
+   *      Friends / Messages tabs paint instantly without waiting for
+   *      the relay round-trip.
+   *
+   * No-op if `nextPubkey === pubkey` (already active) or if the
+   * pubkey isn't in the registry.
+   */
+  const switchIdentity = useCallback(
+    async (nextPubkey: string): Promise<void> => {
+      if (nextPubkey === pubkey) return;
+      const blob = await loadIdentities();
+      const target = blob.identities.find((i) => i.pubkey === nextPubkey);
+      if (!target) {
+        if (__DEV__) console.warn(`[Nostr] switchIdentity: ${nextPubkey} not in registry`);
+        return;
+      }
+      // Tear down the previous identity's in-memory state. Persistent
+      // caches (per-account namespaced) are kept on disk so a switch
+      // back is instant.
+      clearMemoisedSecretKey();
+      nip04PlaintextCache.clear();
+      setAmberNip44Permission('unknown');
+      setProfile(null);
+      setContacts([]);
+      setRelays([]);
+      setDmInbox([]);
+
+      // Promote the target identity to "active" everywhere.
+      await SecureStore.setItemAsync(SIGNER_TYPE_KEY, target.signerType);
+      if (target.signerType === 'nsec' && target.nsec) {
+        await SecureStore.setItemAsync(NSEC_KEY, target.nsec);
+        // Clear the legacy amber pubkey slot — we're an nsec identity now.
+        await SecureStore.deleteItemAsync(PUBKEY_KEY);
+      } else if (target.signerType === 'amber') {
+        await SecureStore.setItemAsync(PUBKEY_KEY, target.pubkey);
+        await SecureStore.deleteItemAsync(NSEC_KEY);
+      }
+      const updated = await setActiveIdentity(target.pubkey);
+      setIdentities(updated.identities);
+      setPubkey(target.pubkey);
+      setSignerType(target.signerType);
+      setIsLoggedIn(true);
+
+      // Eagerly hydrate from persisted per-account caches. The next
+      // tab focus / pull-to-refresh will fan out to relays.
+      await loadContactsFromCache(target.pubkey);
+      await hydrateDmInboxFromCache(target.pubkey);
+      // Defer the relay refresh — keeps the switch animation smooth.
+      InteractionManager.runAfterInteractions(async () => {
+        try {
+          const readRelays = await loadRelays(target.pubkey);
+          await loadProfile(target.pubkey, readRelays);
+          loadContacts(target.pubkey, readRelays).catch((e) =>
+            console.warn('[Nostr] post-switch contact refresh failed:', e),
+          );
+        } catch (e) {
+          console.warn('[Nostr] post-switch refresh failed:', e);
+        }
+      });
+    },
+    [pubkey, loadContactsFromCache, hydrateDmInboxFromCache, loadRelays, loadProfile, loadContacts],
+  );
+
+  /**
+   * Remove a single identity from the multi-account registry. If
+   * `targetPubkey` is the active identity, behaves like `logout` (with
+   * the post-removal switch to a successor if one exists).
+   * Otherwise just wipes that identity's caches + registry entry; the
+   * active identity stays put.
+   */
+  const signOutIdentity = useCallback(
+    async (targetPubkey: string): Promise<void> => {
+      // Active-identity sign-out reuses the existing logout path so
+      // the in-memory teardown stays in one place.
+      if (targetPubkey === pubkey) {
+        await logout();
+        return;
+      }
+      await wipeAccountCaches(targetPubkey);
+      const blob = await removeIdentityFromStore(targetPubkey);
+      setIdentities(blob.identities);
+    },
+    [pubkey, logout, wipeAccountCaches],
+  );
 
   const refreshProfile = useCallback(
     async (opts?: { force?: boolean }) => {
@@ -1236,10 +1522,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         };
         setProfile(updatedProfile);
         InteractionManager.runAfterInteractions(() => {
-          AsyncStorage.setItem(OWN_PROFILE_CACHE_KEY, JSON.stringify(updatedProfile)).catch(
-            () => {},
-          );
-          AsyncStorage.setItem(OWN_PROFILE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+          AsyncStorage.setItem(
+            perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, pubkey),
+            JSON.stringify(updatedProfile),
+          ).catch(() => {});
+          AsyncStorage.setItem(
+            perAccountKey(OWN_PROFILE_TIMESTAMP_KEY_BASE, pubkey),
+            Date.now().toString(),
+          ).catch(() => {});
         });
 
         return true;
@@ -1265,8 +1555,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (success) {
         startTransition(() => setContacts(updatedContacts));
         // Update cache so restarts reflect the follow immediately
-        AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(updatedContacts)).catch(() => {});
-        AsyncStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+        const cKey = perAccountKey(CONTACTS_CACHE_KEY_BASE, pubkey);
+        const tKey = perAccountKey(CACHE_TIMESTAMP_KEY_BASE, pubkey);
+        AsyncStorage.setItem(cKey, JSON.stringify(updatedContacts)).catch(() => {});
+        AsyncStorage.setItem(tKey, Date.now().toString()).catch(() => {});
         // Fetch profile for the new contact
         const readRelays = getReadRelays();
         const profileData = await nostrService.fetchProfile(contactPubkey, readRelays);
@@ -1277,7 +1569,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 c.pubkey === contactPubkey ? { ...c, profile: profileData } : c,
               );
               // Update cache with profile data
-              AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(updated)).catch(() => {});
+              AsyncStorage.setItem(cKey, JSON.stringify(updated)).catch(() => {});
               return updated;
             }),
           );
@@ -1285,7 +1577,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
       return success;
     },
-    [contacts, publishContactList, getReadRelays],
+    [contacts, publishContactList, getReadRelays, pubkey],
   );
 
   const unfollowContact = useCallback(
@@ -1295,12 +1587,18 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (success) {
         startTransition(() => setContacts(updatedContacts));
         // Update cache so restarts reflect the unfollow immediately
-        AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(updatedContacts)).catch(() => {});
-        AsyncStorage.setItem(CACHE_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+        AsyncStorage.setItem(
+          perAccountKey(CONTACTS_CACHE_KEY_BASE, pubkey),
+          JSON.stringify(updatedContacts),
+        ).catch(() => {});
+        AsyncStorage.setItem(
+          perAccountKey(CACHE_TIMESTAMP_KEY_BASE, pubkey),
+          Date.now().toString(),
+        ).catch(() => {});
       }
       return success;
     },
-    [contacts, publishContactList],
+    [contacts, publishContactList, pubkey],
   );
 
   const addContact = useCallback(
@@ -1767,9 +2065,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // next tab focus. For a chat UX that's a non-issue.
       const signerWrapCacheKey =
         signerType === 'nsec'
-          ? NSEC_NIP17_CACHE_KEY
+          ? perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, pubkey)
           : signerType === 'amber'
-            ? AMBER_NIP17_CACHE_KEY
+            ? perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, pubkey)
             : null;
       const wrapCacheRaw = signerWrapCacheKey
         ? await AsyncStorage.getItem(signerWrapCacheKey)
@@ -1814,7 +2112,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             // this thread open), we decrypt AND write them back so the
             // next thread open across ANY conversation can short-circuit
             // without waiting for the next inbox refresh.
-            const raw = await AsyncStorage.getItem(NSEC_NIP17_CACHE_KEY);
+            const nsecCacheKey = perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, pubkey);
+            const raw = await AsyncStorage.getItem(nsecCacheKey);
             const cache = safeParseRecord<Nip17CacheEntry>(raw);
             const newlyCached: Nip17CacheEntry[] = [];
             let nip17Decrypted = 0;
@@ -1868,13 +2167,17 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               });
             }
             if (newlyCached.length > 0) {
-              await writeNip17Cache(NSEC_NIP17_CACHE_KEY, cache);
+              await writeNip17Cache(nsecCacheKey, cache);
             }
           }
         } else if (signerType === 'amber') {
-          const amberEnabled = (await AsyncStorage.getItem(AMBER_NIP17_ENABLED_KEY)) === 'true';
+          const amberEnabled =
+            (await AsyncStorage.getItem(perAccountKey(AMBER_NIP17_ENABLED_KEY_BASE, pubkey))) ===
+            'true';
           if (amberEnabled) {
-            const raw = await AsyncStorage.getItem(AMBER_NIP17_CACHE_KEY);
+            const raw = await AsyncStorage.getItem(
+              perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, pubkey),
+            );
             const cache = safeParseRecord<Nip17CacheEntry>(raw);
             for (const wrap of kind1059) {
               const cached = cache[wrap.id];
@@ -2130,7 +2433,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               // Persistent wrap-id cache mirroring the Amber branch. Only
               // ever contains rumors from followed senders — see the
               // filter gate below. This is the fix for #176.
-              const raw = await AsyncStorage.getItem(NSEC_NIP17_CACHE_KEY);
+              const nsecCacheKey = perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, refreshForPubkey);
+              const raw = await AsyncStorage.getItem(nsecCacheKey);
               const cache = safeParseRecord<Nip17CacheEntry>(raw);
               const newlyCached: Nip17CacheEntry[] = [];
               let unfollowedPurged = 0;
@@ -2196,11 +2500,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               }
 
               if (newlyCached.length > 0 || unfollowedPurged > 0) {
-                await writeNip17Cache(NSEC_NIP17_CACHE_KEY, cache);
+                await writeNip17Cache(nsecCacheKey, cache);
               }
             }
           } else if (refreshForSigner === 'amber' && kind1059.length > 0) {
-            const amberEnabled = (await AsyncStorage.getItem(AMBER_NIP17_ENABLED_KEY)) === 'true';
+            const amberEnabled =
+              (await AsyncStorage.getItem(
+                perAccountKey(AMBER_NIP17_ENABLED_KEY_BASE, refreshForPubkey),
+              )) === 'true';
             if (!amberEnabled) {
               if (__DEV__) {
                 console.log(
@@ -2210,7 +2517,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             } else {
               // Persistent cache keyed by wrap id. Only ever contains rumors
               // from *followed* senders — see the filter gate below.
-              const raw = await AsyncStorage.getItem(AMBER_NIP17_CACHE_KEY);
+              const amberCacheKey = perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, refreshForPubkey);
+              const raw = await AsyncStorage.getItem(amberCacheKey);
               const cache = safeParseRecord<Nip17CacheEntry>(raw);
               const newlyCached: Nip17CacheEntry[] = [];
               let permissionDenied = false;
@@ -2287,7 +2595,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               setAmberNip44Permission(permissionDenied ? 'denied' : 'granted');
 
               if (newlyCached.length > 0) {
-                await writeNip17Cache(AMBER_NIP17_CACHE_KEY, cache);
+                await writeNip17Cache(amberCacheKey, cache);
               }
             }
           }
@@ -2406,6 +2714,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       contacts,
       relays,
       signerType,
+      identities,
+      switchIdentity,
+      signOutIdentity,
       loginWithNsec,
       loginWithAmber,
       logout,
@@ -2435,6 +2746,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       contacts,
       relays,
       signerType,
+      identities,
+      switchIdentity,
+      signOutIdentity,
       loginWithNsec,
       loginWithAmber,
       logout,
