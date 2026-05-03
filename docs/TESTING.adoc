@@ -1,6 +1,6 @@
 == Testing
 
-This guide covers code quality checks and end-to-end testing for Lightning Piggy.
+This guide covers code quality checks, unit testing, and end-to-end testing for Lightning Piggy.
 
 === Code Quality
 
@@ -20,6 +20,64 @@ npm run format:check
 # Auto-format with Prettier
 npm run format
 ----
+
+=== Unit Testing with Jest
+
+Unit tests run in Node (jsdom) via https://jestjs.io[Jest] with the `jest-expo` preset and https://callstack.github.io/react-native-testing-library/[`@testing-library/react-native`]. Test files live next to source as `*.test.ts` / `*.test.tsx`, or under `tests/unit/`.
+
+==== Running Locally
+
+[source,bash]
+----
+# Run the suite
+npm test
+
+# Run with coverage (writes ./coverage/coverage-summary.json plus a
+# text summary to stdout — reporters in jest.config.js are
+# `json-summary` + `text`; lcov is intentionally off to keep the
+# artifact small)
+npm run test:coverage
+
+# Watch a single file
+npx jest src/utils/foo.test.ts --watch
+----
+
+==== Coverage Gate (CI)
+
+The `Coverage` workflow (`.github/workflows/coverage.yml`) runs on every PR to `main`:
+
+. Runs `jest --coverage` on the PR branch.
+. Re-runs `jest --coverage` on `main` for the baseline.
+. Fails the PR if PR line-coverage drops below main by more than **0.5 percentage points** (the noise floor — small refactors that move lines around shouldn't trip the gate).
+
+The first PR after this infrastructure merges may show a 0% main baseline if `coverage-summary.json` isn't generated yet — that's expected and the gate will pass trivially. Subsequent PRs are then held to the new baseline, so coverage can only steadily increase.
+
+To tighten or loosen the gate, edit `NOISE_FLOOR` in the workflow file.
+
+==== Picking What to Cover Next
+
+Use `scripts/coverage-priorities.sh` to get a prioritized list of files most worth testing:
+
+[source,bash]
+----
+# Generate coverage data first (otherwise every file ranks as 0% covered)
+npm run test:coverage
+
+# Top 20 ranked files (default)
+./scripts/coverage-priorities.sh
+
+# Top 50
+./scripts/coverage-priorities.sh 50
+----
+
+The ranking heuristic is `(churn × loc × fanout) / (coverage% + 1)`:
+
+* **churn** — distinct commits in the last 90 days (changes often → likely to regress)
+* **loc** — file size (more behaviour → more to break)
+* **fanout** — how many other src files reference this one (blast radius)
+* **coverage** — already-tested files drop down the list
+
+Pick from the top of the list. The script prints rank, score, and the underlying counts so you can see *why* a file ranked where it did.
 
 === E2E Testing with Maestro
 
