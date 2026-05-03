@@ -10,8 +10,8 @@ import {
 import { Image as ExpoImage } from 'expo-image';
 import TabBackgroundImage from '../components/TabBackgroundImage';
 import { FlashList } from '@shopify/flash-list';
-import Svg, { Circle, Path } from 'react-native-svg';
-import { Users, Clock } from 'lucide-react-native';
+import Svg, { Path } from 'react-native-svg';
+import { Users, Clock, Search, X } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, CompositeNavigationProp, useFocusEffect } from '@react-navigation/native';
@@ -349,15 +349,7 @@ const MessagesScreen: React.FC = () => {
         <View style={styles.chipRow}>
           {searchExpanded ? (
             <View style={styles.searchRow}>
-              <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
-                <Circle cx="11" cy="11" r="8" stroke="rgba(255,255,255,0.7)" strokeWidth={2} />
-                <Path
-                  d="m21 21-4.3-4.3"
-                  stroke="rgba(255,255,255,0.7)"
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                />
-              </Svg>
+              <Search size={16} color="rgba(255,255,255,0.7)" strokeWidth={2} />
               <TextInput
                 ref={searchInputRef}
                 style={styles.searchInput}
@@ -379,14 +371,7 @@ const MessagesScreen: React.FC = () => {
                 accessibilityLabel="Close search"
                 testID="messages-close-search"
               >
-                <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
-                  <Path
-                    d="M18 6 6 18M6 6l12 12"
-                    stroke="rgba(255,255,255,0.8)"
-                    strokeWidth={2.5}
-                    strokeLinecap="round"
-                  />
-                </Svg>
+                <X size={16} color="rgba(255,255,255,0.8)" strokeWidth={2.5} />
               </TouchableOpacity>
             </View>
           ) : (
@@ -401,15 +386,7 @@ const MessagesScreen: React.FC = () => {
                 accessibilityLabel="Search conversations"
                 testID="messages-search-toggle"
               >
-                <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                  <Circle cx="11" cy="11" r="8" stroke="rgba(255,255,255,0.8)" strokeWidth={2} />
-                  <Path
-                    d="m21 21-4.3-4.3"
-                    stroke="rgba(255,255,255,0.8)"
-                    strokeWidth={2}
-                    strokeLinecap="round"
-                  />
-                </Svg>
+                <Search size={18} color="rgba(255,255,255,0.8)" strokeWidth={2} />
               </TouchableOpacity>
             </>
           )}
