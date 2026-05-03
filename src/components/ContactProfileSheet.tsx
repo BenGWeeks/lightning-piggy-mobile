@@ -22,7 +22,7 @@ import NfcIcon from './icons/NfcIcon';
 import NfcWriteSheet from './NfcWriteSheet';
 import { isNfcSupported } from '../services/nfcService';
 import * as Clipboard from 'expo-clipboard';
-import Toast from 'react-native-toast-message';
+import Toast from './BrandedToast';
 import { npubEncode, nprofileEncode, buildProfileRelayHints } from '../services/nostrService';
 import { useNostr } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';

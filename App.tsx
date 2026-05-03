@@ -8,7 +8,6 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
-import Toast, { BaseToast, ErrorToast, InfoToast } from 'react-native-toast-message';
 import { WalletProvider, useWallet } from './src/contexts/WalletContext';
 import { NostrProvider } from './src/contexts/NostrContext';
 import { GroupsProvider } from './src/contexts/GroupsContext';
@@ -17,38 +16,7 @@ import AppNavigator from './src/navigation/AppNavigator';
 import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
 import BootSplash from './src/components/BootSplash';
 import { BrandedAlertHost } from './src/components/BrandedAlert';
-
-// Render toasts with unlimited-line body so long error messages (e.g. Electrum
-// script-verify errors) aren't truncated. Height grows to fit content.
-const toastConfig = {
-  success: (props: React.ComponentProps<typeof BaseToast>) => (
-    <BaseToast
-      {...props}
-      text1NumberOfLines={2}
-      text2NumberOfLines={0}
-      style={[props.style, { height: undefined, minHeight: 60, paddingVertical: 10 }]}
-      text2Style={{ fontSize: 13, flexWrap: 'wrap' }}
-    />
-  ),
-  info: (props: React.ComponentProps<typeof InfoToast>) => (
-    <InfoToast
-      {...props}
-      text1NumberOfLines={2}
-      text2NumberOfLines={0}
-      style={[props.style, { height: undefined, minHeight: 60, paddingVertical: 10 }]}
-      text2Style={{ fontSize: 13, flexWrap: 'wrap' }}
-    />
-  ),
-  error: (props: React.ComponentProps<typeof ErrorToast>) => (
-    <ErrorToast
-      {...props}
-      text1NumberOfLines={2}
-      text2NumberOfLines={0}
-      style={[props.style, { height: undefined, minHeight: 60, paddingVertical: 10 }]}
-      text2Style={{ fontSize: 13, flexWrap: 'wrap' }}
-    />
-  ),
-};
+import { BrandedToast } from './src/components/BrandedToast';
 
 // Renders the global incoming-payment celebration on top of the nav
 // stack. Lives inside the WalletProvider so it can subscribe to the
@@ -115,7 +83,13 @@ export default function App() {
                     <ThemedStatusBar />
                     <AppNavigator />
                   </BottomSheetModalProvider>
-                  <Toast topOffset={60} config={toastConfig} />
+                  {/* BrandedToast: brand-themed wrapper around
+                      `react-native-toast-message`. Single mount for the
+                      app's toast slot — keeps styling (pink success
+                      accent, red error, rounded corners + shadow that
+                      mirror BrandedAlert) in one place. ESLint blocks
+                      direct imports of the underlying lib elsewhere. */}
+                  <BrandedToast />
                   <GlobalIncomingPaymentOverlay />
                   {/* BrandedAlertHost: portal target for the on-brand
                       BrandedAlert dialog. Sits at the root so any sheet /

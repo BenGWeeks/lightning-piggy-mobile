@@ -27,6 +27,7 @@
 
 - Prettier and ESLint must pass before committing
 - TypeScript strict mode — `npx tsc --noEmit` must pass
+- Use the branded `Toast` from `src/components/BrandedToast.tsx`, not `react-native-toast-message` directly — matches the app's pink/blue theme. ESLint enforces this via `no-restricted-imports`.
 
 ## Pull Request Titles
 
