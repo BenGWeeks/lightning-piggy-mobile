@@ -6,11 +6,20 @@ name: Group manage-members sheet — open + add picker + remove flow
 # affordance that opens a manage-members bottom sheet, and that the
 # Remove path actually fires the confirmation alert.
 #
+# SAFETY (Piggy-only fixtures): this flow MUST target the "Triad" group
+# created by the 3-way group-chat fixture (test-3way-group-create-as-big.yaml)
+# and ONLY the Little Piggy member's Remove button (full testID
+# `group-member-remove-d9b33280ba73`). Earlier revisions used
+# `text: 'Open group .*'` and `text: 'Remove .*'`, which would happily
+# remove a real (non-Piggy) friend from a real group on Ben's signed-in
+# device. See tests/e2e/README.adoc § Piggy-only fixtures for the
+# member-prefix table.
+#
 # Preconditions:
-#   - User is logged in (nsec or Amber).
-#   - At least one group exists with at least 2 members.
-#   - At least one Nostr contact is NOT yet in that group (so "Add" has
-#     a valid candidate).
+#   - User is logged in as Big Piggy (MAESTRO_NSEC).
+#   - The "Triad" fixture group exists with Big + Middle + Little Piggy
+#     as members. Run `scripts/test-3way-group-chat.sh` first if it
+#     doesn't.
 #
 # Run: maestro test tests/e2e/test-group-manage-members.yaml
 
@@ -19,13 +28,21 @@ name: Group manage-members sheet — open + add picker + remove flow
 - waitForAnimationToEnd:
     timeout: 30000
 
-# Land on the Messages tab and pick the first visible group conversation.
+# Land on the Messages tab and open the Triad fixture group. We
+# scrollUntilVisible because Big follows ~50+ accounts and Triad may
+# be below the fold depending on recent activity.
 - tapOn:
     id: 'tab-messages'
 - waitForAnimationToEnd:
     timeout: 5000
+- scrollUntilVisible:
+    element:
+      text: 'Triad'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 50
 - tapOn:
-    text: 'Open group .*'
+    text: 'Triad'
 - waitForAnimationToEnd:
     timeout: 5000
 
@@ -48,9 +65,9 @@ name: Group manage-members sheet — open + add picker + remove flow
 - waitForAnimationToEnd:
     timeout: 2000
 
-# Picker should be visible. We don't drive a selection here (the test
-# device's contacts vary); we just confirm the picker opened, then close
-# it via hardware back so the test cleans up.
+# Picker should be visible. We don't drive a selection here (any tap
+# would publish a real kind:30200 update) — just confirm the picker
+# opened, then close it via hardware back so the test cleans up.
 - assertVisible:
     id: 'friend-picker-search'
 - back
@@ -69,18 +86,19 @@ name: Group manage-members sheet — open + add picker + remove flow
 - assertVisible:
     id: 'group-member-count'
 
-# Re-open the sheet and exercise the Remove path. We can't predict
-# the testID suffix (`group-member-remove-${pubkey-prefix}`) without
-# a stable test fixture, so use the accessibilityLabel pattern
-# `Remove .*` to match any non-self member's X button. Self has no
-# Remove button (per the GroupMembersSheet self-guard) so this is
-# always a real other-member.
+# Re-open the sheet and exercise the Remove path on a SPECIFIC Piggy
+# fixture member (Little Piggy, pubkey prefix d9b33280ba73). DO NOT
+# replace this with a wildcard — this device runs Maestro against the
+# user's real Nostr identity and a wildcard could remove a real friend
+# from the Triad group, leaking test activity to non-test accounts.
 - tapOn:
     id: 'group-member-count'
 - waitForAnimationToEnd:
     timeout: 2000
+- assertVisible:
+    id: 'group-member-remove-d9b33280ba73'
 - tapOn:
-    text: 'Remove .*'
+    id: 'group-member-remove-d9b33280ba73'
 - waitForAnimationToEnd:
     timeout: 1500
 
