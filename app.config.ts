@@ -57,6 +57,26 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       // to file separate export-compliance documentation. See
       // https://developer.apple.com/documentation/security/complying_with_encryption_export_regulations
       ITSAppUsesNonExemptEncryption: false,
+      // Background-modes scaffolding for OS notifications (#279). We
+      // register a BGTaskScheduler refresh task identifier here so the
+      // app can run a periodic relay-poll + decrypt sweep in the
+      // background and surface OS notifications without relying on
+      // APNs (we have no remote push server — see
+      // docs/architecture/notifications.adoc for rationale).
+      //
+      // Trade-off: BGTaskScheduler cadence is OS-controlled; expect
+      // ~30 min between executions in practice. iOS realtime DM
+      // notifications are NOT achievable without APNs + a remote
+      // server, and the project explicitly rejects that path. The
+      // ~30 min latency is the iOS reality we accept; surface it in
+      // onboarding when the iOS build ships.
+      //
+      // The actual TaskScheduler handler implementation is a
+      // follow-up — registering the identifier here is the
+      // architectural commitment. The handler will live in a native
+      // Swift module added by a future config plugin.
+      UIBackgroundModes: ['fetch', 'processing'],
+      BGTaskSchedulerPermittedIdentifiers: ['com.lightningpiggy.app.relay-refresh'],
     },
   },
   plugins: [
@@ -79,7 +99,19 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     './plugins/withAdjustResize',
     './plugins/withAmberQueries',
     './plugins/withNfc',
+    // OS notifications foundation (#279). Adds Android manifest
+    // permissions for the planned persistent foreground service that
+    // keeps a relay WebSocket alive without FCM. The Java/Kotlin
+    // Service class itself ships in a follow-up — see
+    // plugins/withForegroundService.js for the deferred-vs-landed
+    // breakdown.
+    './plugins/withForegroundService',
     'expo-secure-store',
+    // expo-notifications config plugin sets the Android notification
+    // icon + colour and is a no-op on iOS beyond linking the native
+    // module. We rely on local (not remote) notifications only — no
+    // FCM token is requested. See src/services/notificationService.ts.
+    'expo-notifications',
     [
       'expo-image-picker',
       {

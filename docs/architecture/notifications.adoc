@@ -1,0 +1,197 @@
+= OS Notifications Architecture
+:toc:
+:source-highlighter: rouge
+
+This document explains how Lightning Piggy delivers OS-level
+notifications (incoming DMs, group messages, payments, zaps) to a
+backgrounded or closed app *without* depending on Firebase Cloud
+Messaging or any other Google Play Services component.
+
+It is the canonical reference for the foundation landed in PR for
+issue https://github.com/BenGWeeks/lightning-piggy-mobile/issues/279[#279].
+
+== Why no FCM
+
+Lightning Piggy targets users on de-Googled Android distributions
+(GrapheneOS, CalyxOS, /e/OS, microG-flashed stock ROMs). FCM
+requires Google Play Services to be present on the device — when GMS
+is absent, an FCM-based notification stack silently never fires, and
+the affected user has no way to fix it short of reflashing.
+
+Standard React Native push libraries (`react-native-firebase/messaging`,
+`@notifee/react-native` with FCM transport, OneSignal, etc.) all sit
+on top of FCM and inherit this constraint. They are excluded from
+Lightning Piggy's dependency graph by policy, not just preference.
+
+Apple Push Notification service (APNs) is the equivalent on iOS but
+requires us to operate a remote push server that holds an APNs token
+per device and forwards events to it. We deliberately do not run a
+backend (the app talks to relays + LNbits + Boltz directly), so APNs
+is out for the same architectural reason that FCM is out: there is
+no remote sender. iOS notifications therefore arrive via local
+notifications fired by the JS runtime when it next runs (see
+"iOS background story" below).
+
+== The three pieces
+
+[cols="1,3"]
+|===
+| Component | Role
+
+| `src/services/notificationService.ts`
+| Single integration point. Exposes typed `fireNotification(payload)`
+to every trigger site (DM rumor decrypt, payment settle, zap receipt).
+Owns Android channels, lazy permission flow, and the lock-screen
+content privacy preference. Backed by `expo-notifications` LOCAL
+notifications (no FCM token requested).
+
+| Android persistent foreground service
+| Keeps a single relay WebSocket + LNbits / NWC subscription alive
+while the app is backgrounded. Holds a `dataSync` foreground service
+type so Doze and App Standby don't suspend the socket. Required
+manifest permissions land via `plugins/withForegroundService.js`;
+the Kotlin `Service` class itself is a follow-up.
+
+| iOS BGTaskScheduler task
+| Periodic background refresh registered via the
+`BGTaskSchedulerPermittedIdentifiers` Info.plist key in
+`app.config.ts`. The OS picks the cadence (typically ~30 min). Native
+handler implementation is a follow-up.
+|===
+
+== Android background story
+
+----
+[ Foreground service ] ── relay WebSocket ──> [ relays ]
+       │                  LNbits / NWC sub
+       │
+       ├── decrypts incoming gift wrap, classifies, persists
+       │
+       └─> notificationService.fireNotification({...})
+              │
+              └─> expo-notifications local schedule
+                     │
+                     └─> OS notification shade
+----
+
+* `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_DATA_SYNC` permissions
+  declared in `withForegroundService.js`.
+* User sees a persistent low-priority notification ("Listening for
+  messages") while the service runs — this is non-negotiable per
+  Android's foreground-service contract from API 26 onward. We will
+  surface it on a dedicated channel with importance set to
+  `MIN` so it collapses below the notification fold.
+* `RECEIVE_BOOT_COMPLETED` permission lets us re-arm the service after
+  device reboot (BootReceiver implementation also a follow-up).
+* `POST_NOTIFICATIONS` runtime permission is requested *lazily* the
+  first time we actually want to fire a notification, not at app
+  boot. See `notificationService.ensureNotificationPermission()`.
+
+This path works on stock Android, GrapheneOS, microG, and any other
+AOSP derivative. It does not work in scenarios where the user has
+manually battery-restricted the app — that's a documentation
+problem, addressed in onboarding.
+
+== iOS background story
+
+iOS has no equivalent to Android's foreground service. The two
+alternatives we evaluated:
+
+1. **Silent push via APNs** — requires us to run a remote server
+   that holds APNs tokens and forwards events. *Rejected* — same
+   architectural reason as FCM (no backend).
+2. **`audio` background mode keep-alive trick** — plays a near-silent
+   audio stream so iOS keeps the app process alive. App Store
+   review reliably rejects this. *Rejected.*
+3. **`BGTaskScheduler` periodic refresh** — OS-controlled cadence,
+   typically 15-30 min between executions, may be longer if the
+   device is locked / on battery / hasn't been used recently.
+   *Accepted as the iOS reality.*
+
+Trade-off the user must understand: on iOS, message and payment
+notifications can be delayed by up to ~30 min, and the device must
+have been used recently for the OS to schedule the task at all.
+This will be explained in iOS onboarding when the iOS build ships.
+
+== Privacy: lock-screen content
+
+Decrypted DM plaintext is *never* written to the lock-screen
+notification body by default. The user must explicitly opt in via
+a future Settings toggle (preference key
+`notif_pref_lockscreen_content_v1`).
+
+How it's enforced:
+
+* **Android channel level** — both `messages` and `payments`
+  channels are created with
+  `lockscreenVisibility: AndroidNotificationVisibility.SECRET`.
+  The OS replaces the body with a generic placeholder when the
+  device is locked.
+* **Per-notification level** — when the preference is OFF (default),
+  `notificationService.fireNotification` substitutes the
+  caller-provided title/body with a generic
+  `"New message" / "Open Lightning Piggy to read"` pair before
+  scheduling. This means the actual content never enters the OS
+  notification store at all, even briefly — defence in depth on
+  top of the channel-level setting.
+
+The full payload still rides in the notification's `data` field so
+the in-app screen we navigate to on tap can render the real content
+once the user has unlocked.
+
+== Per-channel mute
+
+Android 8+ surfaces every channel separately in system Settings →
+Apps → Lightning Piggy → Notifications. A user who wants payment
+alerts but no message alerts (or vice versa) can mute either channel
+without affecting the other or uninstalling the app.
+
+In-app per-channel toggles are a follow-up — for the foundation PR,
+the system Settings UI is the only mute path.
+
+== The notification-manager service as single integration point
+
+Every trigger site in the app — `NostrContext.tryRouteGroupRumor`,
+the future DM-inbox notification fire, payment-settled handlers,
+zap-received handlers — calls `fireNotification(payload)` and
+nothing else. They never reach into `expo-notifications` directly.
+
+This seam exists so we can:
+
+* swap the backing notification library without touching trigger
+  sites,
+* add notification grouping / collapsing in one place (multiple
+  DMs from the same sender → one notification),
+* implement quiet hours / per-contact mute / snooze in one place,
+* add badge counts in one place,
+
+— all without an audit pass through every trigger site.
+
+== Status (as of the foundation PR)
+
+Landed:
+
+* `expo-notifications` dependency wired (SDK 55-compatible version)
+* `notificationService` with Android channels, lazy permission flow,
+  privacy-preserving lock-screen behaviour, typed payload API
+* One trigger wired end-to-end: `tryRouteGroupRumor` fires a
+  notification on every successfully routed group rumor
+* Android manifest permissions for the foreground service via
+  `plugins/withForegroundService.js`
+* iOS Info.plist `UIBackgroundModes` + BGTaskScheduler identifier
+* This document
+
+Deferred to follow-up PRs (TODO comments are planted at the call
+sites with the issue reference):
+
+* Kotlin `NostrRelayService` class + manifest `<service>` entry
+* Android `BootReceiver` to re-arm after reboot
+* iOS Swift BGTaskScheduler handler
+* DM-inbox trigger wiring (1:1 messages — issue #279 covers this)
+* Payment-settled trigger wiring
+* Zap-received trigger wiring
+* In-app per-channel mute UI
+* Notification grouping (multiple from same sender → one stack)
+* Settings UI for the lock-screen-content opt-in toggle
+* Suppress-when-foreground heuristic (don't notify for the
+  conversation the user is currently looking at)
