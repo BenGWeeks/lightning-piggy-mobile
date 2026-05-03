@@ -6,10 +6,10 @@ import {
   StyleSheet,
   ActivityIndicator,
   BackHandler,
-  Alert,
   Platform,
   Keyboard,
 } from 'react-native';
+import { Alert } from './BrandedAlert';
 import { Image } from 'expo-image';
 import Svg, { Path, Circle } from 'react-native-svg';
 import {

@@ -6,12 +6,12 @@ import {
   StyleSheet,
   FlatList,
   Image,
-  Alert,
   ActivityIndicator,
   Linking,
   Modal,
   Pressable,
 } from 'react-native';
+import { Alert } from '../components/BrandedAlert';
 import { KeyboardController } from 'react-native-keyboard-controller';
 import { Image as ExpoImage } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
