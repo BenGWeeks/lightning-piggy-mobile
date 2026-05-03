@@ -9,7 +9,11 @@ import { formatConversationTimestamp } from '../utils/conversationSummaries';
 
 interface Props {
   summary: GroupSummary;
-  onPress?: () => void;
+  // Receives `summary` so the parent can pass a single stable handler
+  // reference across all rows (no fresh arrow per render). Without this,
+  // React.memo's prop comparison saw a new onPress every render and
+  // re-rendered the row even when its data hadn't changed (#300 follow-up).
+  onPress?: (summary: GroupSummary) => void;
   /**
    * Optional precomputed pubkey → ContactInfo map shared with sibling
    * rows by the parent screen. Forwarded to GroupAvatar (for the avatar
@@ -45,6 +49,12 @@ const GroupRow: React.FC<Props> = ({ summary, onPress, contactInfoMap }) => {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { contacts, pubkey: myPubkey } = useNostr();
   const { group, activity } = summary;
+  // Bind summary into the parent handler at the leaf so TouchableOpacity
+  // sees a stable callback per render — see ConversationRow note.
+  const handlePress = useMemo(
+    () => (onPress ? () => onPress(summary) : undefined),
+    [onPress, summary],
+  );
 
   const timestamp = formatConversationTimestamp(activity.lastActivityAt);
 
@@ -85,7 +95,7 @@ const GroupRow: React.FC<Props> = ({ summary, onPress, contactInfoMap }) => {
   return (
     <TouchableOpacity
       style={styles.container}
-      onPress={onPress}
+      onPress={handlePress}
       activeOpacity={onPress ? 0.6 : 1}
       accessibilityLabel={`Open group ${group.name}`}
       testID={`group-row-${group.id}`}

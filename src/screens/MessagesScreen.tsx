@@ -119,11 +119,23 @@ const MessagesScreen: React.FC = () => {
   // otherwise schedule the same 50-avatar prefetch on every drip.
   // Mirrors the same pattern used by `dmInboxLastRefreshAt`.
   const lastAvatarPrefetchAt = useRef<number>(0);
+  // TTL gate for the focus-driven inbox refresh. Without it, every focus
+  // (including the back-from-group transition) triggered a full
+  // refreshDmInbox cached-loop on the JS thread for ~3 s on a chunky
+  // inbox — perceived as MessagesScreen freezing right after the back
+  // animation lands (#286 / #300). 30 s mirrors the avatar-prefetch TTL
+  // below; the live `subscribeGroupMessages` channel covers delivery
+  // for any wraps that arrive while the user was inside a group.
+  const dmInboxLastRefreshAt = useRef<number>(0);
+  const DM_INBOX_REFRESH_TTL_MS = 30_000;
   useFocusEffect(
     useCallback(() => {
       if (!isLoggedIn) return;
       const handle = InteractionManager.runAfterInteractions(() => {
-        refreshDmInbox();
+        if (Date.now() - dmInboxLastRefreshAt.current >= DM_INBOX_REFRESH_TTL_MS) {
+          dmInboxLastRefreshAt.current = Date.now();
+          refreshDmInbox();
+        }
 
         const PREFETCH_TTL_MS = 30_000;
         if (Date.now() - lastAvatarPrefetchAt.current < PREFETCH_TTL_MS) return;
@@ -322,18 +334,18 @@ const MessagesScreen: React.FC = () => {
 
   const renderItem = useCallback(
     ({ item }: { item: InboxRow }) => {
+      // Pass the parent handler reference directly (stable across renders)
+      // and let ConversationRow / GroupRow bind the row's summary into the
+      // press callback at the leaf. Previously we passed an inline arrow
+      // (`() => handleX(item.summary)`) which was a fresh reference per
+      // render and defeated the row's React.memo. (#300 follow-up.)
       if (item.kind === 'dm') {
-        return (
-          <ConversationRow
-            summary={item.summary}
-            onPress={() => handleConversationPress(item.summary)}
-          />
-        );
+        return <ConversationRow summary={item.summary} onPress={handleConversationPress} />;
       }
       return (
         <GroupRow
           summary={item.summary}
-          onPress={() => handleGroupPress(item.summary)}
+          onPress={handleGroupPress}
           contactInfoMap={contactInfoMap}
         />
       );
