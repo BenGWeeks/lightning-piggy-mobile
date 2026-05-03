@@ -8,8 +8,8 @@ import {
   Platform,
   BackHandler,
   Keyboard,
-  Alert,
 } from 'react-native';
+import { Alert } from './BrandedAlert';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import {

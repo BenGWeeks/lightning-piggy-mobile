@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, Platform, Keyboard } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, Keyboard } from 'react-native';
+import { Alert } from './BrandedAlert';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,

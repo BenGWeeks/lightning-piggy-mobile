@@ -3,13 +3,13 @@ import {
   View,
   Text,
   TouchableOpacity,
-  Alert,
   ActivityIndicator,
   BackHandler,
   Image,
   Keyboard,
   Platform,
 } from 'react-native';
+import { Alert } from './BrandedAlert';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
@@ -399,7 +399,7 @@ const SendSheet: React.FC<Props> = ({
         }
       } else if (isLightningAddress(invoiceData)) {
         if (!lnurlParams) {
-          Alert.alert('Error', 'Lightning address not resolved yet. Please wait.');
+          Alert.alert('Error', 'Payment details not resolved yet. Please wait.');
           setSending(false);
           return;
         }
@@ -727,6 +727,8 @@ const SendSheet: React.FC<Props> = ({
                   <TouchableOpacity
                     style={[styles.tab, inputMode === 'scan' && styles.tabActive]}
                     onPress={() => setInputMode('scan')}
+                    accessibilityLabel="Scan tab"
+                    testID="send-tab-scan"
                   >
                     <Text style={[styles.tabText, inputMode === 'scan' && styles.tabTextActive]}>
                       Scan
@@ -735,6 +737,8 @@ const SendSheet: React.FC<Props> = ({
                   <TouchableOpacity
                     style={[styles.tab, inputMode === 'paste' && styles.tabActive]}
                     onPress={() => setInputMode('paste')}
+                    accessibilityLabel="Input tab"
+                    testID="send-tab-input"
                   >
                     <Text style={[styles.tabText, inputMode === 'paste' && styles.tabTextActive]}>
                       Input
@@ -779,15 +783,24 @@ const SendSheet: React.FC<Props> = ({
                       multiline
                       autoCapitalize="none"
                       autoCorrect={false}
+                      accessibilityLabel="Paste invoice or address"
+                      testID="send-paste-input"
                     />
                     <View style={styles.pasteButtonRow}>
-                      <TouchableOpacity style={styles.pasteButton} onPress={handlePaste}>
+                      <TouchableOpacity
+                        style={styles.pasteButton}
+                        onPress={handlePaste}
+                        accessibilityLabel="Paste from clipboard"
+                        testID="send-paste-clipboard"
+                      >
                         <Text style={styles.pasteButtonText}>Paste from clipboard</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={[styles.goButton, !pasteText.trim() && styles.goButtonDisabled]}
                         onPress={handlePasteSubmit}
                         disabled={!pasteText.trim()}
+                        accessibilityLabel="Go — process pasted invoice or address"
+                        testID="send-paste-go"
                       >
                         <Text style={styles.goButtonText}>Go</Text>
                       </TouchableOpacity>

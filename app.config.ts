@@ -39,6 +39,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     resizeMode: 'contain',
     backgroundColor: '#e91e63',
   },
+  // Only the app's own `lightningpiggy://` scheme is registered globally.
+  // The PR #231 NFC-write feature does NOT need a `lightning:` scheme
+  // — `writeNpubToTag` drives the NfcManager session directly. Adding
+  // `lightning:` here would register Lightning Piggy as a system-wide
+  // handler for `lightning:` URIs without a Linking listener to route
+  // them, intercepting users' preferred LN wallet. The deferred NFC
+  // SCAN flow can re-add it when JS-side deep-link routing lands.
   scheme: 'lightningpiggy',
   ios: {
     supportsTablet: true,
@@ -71,6 +78,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // on it don't regress — can remove once verified.
     './plugins/withAdjustResize',
     './plugins/withAmberQueries',
+    './plugins/withNfc',
     'expo-secure-store',
     [
       'expo-image-picker',
@@ -105,6 +113,15 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     },
     predictiveBackGestureEnabled: false,
     package: getAndroidPackage(),
+    // Floor for the local-build versionCode. EAS production builds use
+    // their own remote autoIncrement counter (`eas.json` →
+    // `appVersionSource: "remote"`) and ignore this. Local
+    // `expo run:android --variant release` reads it directly — bump it
+    // by one before each local prod install when the previous APK on
+    // the target device was higher than this value, otherwise the
+    // install fails with INSTALL_FAILED_VERSION_DOWNGRADE. See
+    // docs/DEPLOYMENT.adoc → "Local production builds".
+    versionCode: 24,
   },
   web: {
     favicon: './assets/favicon.png',

@@ -30,6 +30,14 @@ interface Props {
 
 const MAX_AVATARS = 3;
 
+// NOTE: inner avatars hard-code `autoplay={false}` on `expo-image` (see
+// SingleAvatar below). That assumes every consumer is a list-density
+// context — currently only `GroupRow.tsx`, where animated WebP/GIF
+// avatars would spawn FrameDecoderExe threads per row and tank scrolling
+// (see #243). If GroupAvatar gets reused in a single-avatar context
+// where animation IS wanted (e.g. a future GroupConversationScreen
+// header), promote `autoplay` to an `autoplayAvatar?: boolean` prop on
+// `Props` rather than flipping the literal.
 const GroupAvatar: React.FC<Props> = ({ pubkeys, groupName, size = 48, contactPictureMap }) => {
   const colors = useThemeColors();
   const { contacts } = useNostr();
@@ -110,6 +118,8 @@ const SingleAvatar: React.FC<SingleAvatarProps> = ({ picture, colors, innerSize 
           style={{ width: innerSize, height: innerSize, borderRadius: innerSize / 2 }}
           cachePolicy="disk"
           onError={() => setErrored(true)}
+          // First frame only — see #243.
+          autoplay={false}
         />
       ) : (
         <UserRound size={Math.round(innerSize * 0.55)} color={colors.textBody} strokeWidth={1.75} />

@@ -1,14 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef, Profiler } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  Image,
-  RefreshControl,
-  Alert,
-} from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, Image, RefreshControl } from 'react-native';
 import { InteractionManager } from 'react-native';
+import { Alert } from '../components/BrandedAlert';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Users } from 'lucide-react-native';
