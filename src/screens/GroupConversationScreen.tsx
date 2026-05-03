@@ -11,7 +11,11 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Linking,
+  Modal,
+  Pressable,
 } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { LogOut, Plus } from 'lucide-react-native';
@@ -26,20 +30,46 @@ import RenameGroupSheet from '../components/RenameGroupSheet';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import AttachPanel from '../components/AttachPanel';
 import GifPickerSheet from '../components/GifPickerSheet';
+import ReceiveSheet from '../components/ReceiveSheet';
+import SendSheet from '../components/SendSheet';
+import FriendPickerSheet, { PickedFriend } from '../components/FriendPickerSheet';
+import MessageBubble from '../components/MessageBubble';
 import { isConfigured as isGifConfigured, type Gif } from '../services/giphyService';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
-import { getCurrentLocation, formatGeoMessage } from '../services/locationService';
+import {
+  getCurrentLocation,
+  formatGeoMessage,
+  buildOsmViewUrl,
+  type SharedLocation,
+} from '../services/locationService';
+import {
+  fetchProfile,
+  nprofileEncode,
+  buildProfileRelayHints,
+  DEFAULT_RELAYS,
+} from '../services/nostrService';
 import {
   appendGroupMessage,
   loadGroupMessages,
   type GroupMessage,
 } from '../services/groupMessagesStorageService';
+import {
+  classifyMessageContent,
+  extractSharedContact,
+  type BubbleContent,
+} from '../utils/messageContent';
+import type { NostrProfile } from '../types/nostr';
 import type { GroupConversationRoute, RootStackParamList } from '../navigation/types';
+import type { CounterpartyContact } from '../components/TransactionDetailSheet';
 
 type GroupConversationNavigation = NativeStackNavigationProp<
   RootStackParamList,
   'GroupConversation'
 >;
+
+// Pre-classified variant of GroupMessage — created in a useMemo so
+// classifyMessageContent is NOT called inside the hot renderMessage path.
+type ClassifiedMessage = GroupMessage & { content: BubbleContent };
 
 interface MemberRow {
   pubkey: string;
@@ -54,7 +84,14 @@ const GroupConversationScreen: React.FC = () => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { getGroup, deleteGroup } = useGroups();
-  const { contacts, sendGroupMessage, pubkey: myPubkey, refreshDmInbox, signEvent } = useNostr();
+  const {
+    contacts,
+    sendGroupMessage,
+    pubkey: myPubkey,
+    refreshDmInbox,
+    signEvent,
+    relays,
+  } = useNostr();
   const [renameVisible, setRenameVisible] = useState(false);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -63,9 +100,27 @@ const GroupConversationScreen: React.FC = () => {
   const [selectedMemberPubkey, setSelectedMemberPubkey] = useState<string | null>(null);
   const [attachPanelOpen, setAttachPanelOpen] = useState(false);
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
+  const [invoiceSheetOpen, setInvoiceSheetOpen] = useState(false);
+  const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [sharingLocation, setSharingLocation] = useState(false);
-  const listRef = useRef<FlatList<GroupMessage>>(null);
+  // Sheets surfaced by MessageBubble taps. Mirror the 1:1 conversation
+  // wiring (ConversationScreen) so the rich-card affordances work the
+  // same in groups.
+  const [sendSheetOpen, setSendSheetOpen] = useState(false);
+  const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
+  const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
+  const [fullscreenGifUrl, setFullscreenGifUrl] = useState<string | null>(null);
+  // Cache of kind-0 profiles for shared-contact cards. Populated by the
+  // batch-fetch effect below, keyed by pubkey. `null` value = fetch
+  // attempted and resolved with no profile (so MessageBubble can drop
+  // the "Loading…" placeholder).
+  const [sharedProfiles, setSharedProfiles] = useState<Record<string, NostrProfile | null>>({});
+  // Tracks which pubkeys have already been scheduled for a kind-0 fetch
+  // so the effect deps can be [messages] only (not [messages, sharedProfiles]).
+  // Prevents a redundant re-run after every fetch batch writes sharedProfiles.
+  const scheduledProfilePubkeys = useRef(new Set<string>());
+  const listRef = useRef<FlatList<ClassifiedMessage>>(null);
 
   const group = getGroup(route.params.groupId);
 
@@ -274,6 +329,178 @@ const GroupConversationScreen: React.FC = () => {
     [closeAttachPanel, sendText],
   );
 
+  // Share another contact's Nostr profile into the group. Mirrors the 1:1
+  // path (ConversationScreen.handleShareContactPicked): "Shared contact:
+  // <name>\nnostr:nprofile…" lets other Nostr clients render a tappable
+  // profile mention. We send via the group's own sendText so the message
+  // shows up in the group thread (not as a DM to the picked contact).
+  const handleShareContactPicked = useCallback(
+    async (friend: PickedFriend) => {
+      setContactPickerOpen(false);
+      closeAttachPanel();
+      const readRelays = relays.filter((r) => r.read).map((r) => r.url);
+      const relayHints = buildProfileRelayHints(friend.pubkey, contacts, readRelays);
+      const nprofile = nprofileEncode(friend.pubkey, relayHints);
+      const label = friend.name || 'a contact';
+      await sendText(`Shared contact: ${label}\nnostr:${nprofile}`);
+    },
+    [closeAttachPanel, contacts, relays, sendText],
+  );
+
+  // ReceiveSheet hands us the bolt11 via `onSendToGroup`. We post it
+  // directly via sendGroupMessage (NOT sendText) because sendText raises
+  // its own Alert on failure — ReceiveSheet shows a Toast on failure as
+  // well, and stacking both reads as a bug. Optimistic local append
+  // mirrors what sendText does so the invoice shows up in the thread.
+  const handleSendInvoiceToGroup = useCallback(
+    async (payload: string): Promise<{ success: boolean; error?: string }> => {
+      if (!group || !myPubkey) return { success: false, error: 'Group unavailable.' };
+      const result = await sendGroupMessage({
+        groupId: group.id,
+        subject: group.name,
+        memberPubkeys: group.memberPubkeys,
+        text: payload,
+      });
+      if (!result.success) return { success: false, error: result.error ?? 'Send failed' };
+      const local: GroupMessage = {
+        id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        senderPubkey: myPubkey,
+        text: payload,
+        createdAt: Math.floor(Date.now() / 1000),
+      };
+      try {
+        const next = await appendGroupMessage(group.id, local);
+        setMessages(next);
+        notifyGroupMessage(group.id, local);
+        setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 0);
+      } catch (err) {
+        if (__DEV__) console.warn('[GroupConversationScreen] appendGroupMessage failed:', err);
+      }
+      return { success: true };
+    },
+    [group, myPubkey, sendGroupMessage],
+  );
+
+  // MessageBubble handler — Pay button on an invoice / lightning address
+  // bubble routes through SendSheet, same UX as 1:1 conversations.
+  const handlePayInvoice = useCallback((raw: string) => {
+    setInvoiceToPay(raw);
+    setSendSheetOpen(true);
+  }, []);
+
+  // MessageBubble handler — opens ContactProfileSheet for the shared
+  // contact, falling back to a short-pubkey placeholder when the kind-0
+  // hasn't loaded yet (sharedProfiles fetch is below).
+  const openSharedContact = useCallback((pk: string, profile: NostrProfile | null) => {
+    const name = profile?.displayName || profile?.name || `${pk.slice(0, 8)}…`;
+    setProfileContact({
+      pubkey: pk,
+      name,
+      picture: profile?.picture ?? null,
+      banner: profile?.banner ?? null,
+      nip05: profile?.nip05 ?? null,
+      lightningAddress: profile?.lud16 ?? null,
+      source: 'nostr',
+    });
+  }, []);
+
+  // MessageBubble handler — opens OSM in the system browser. Identical
+  // to 1:1 conversation behaviour.
+  const openLocation = useCallback((loc: SharedLocation) => {
+    const url = buildOsmViewUrl(loc);
+    Linking.openURL(url).catch(() => {
+      Alert.alert('Could not open link', 'No browser is available to open OpenStreetMap.');
+    });
+  }, []);
+
+  // Batch-fetch kind-0 profiles for every shared-contact reference in the
+  // group thread. Mirrors the 1:1 path so contact cards render with avatar
+  // + display name. Relay hints from the nprofile (when present) are
+  // merged with DEFAULT_RELAYS so we still find the person if they
+  // publish on niche relays.
+  useEffect(() => {
+    const byPubkey = new Map<string, Set<string>>();
+    for (const m of messages) {
+      const ref = extractSharedContact(m.text);
+      if (!ref) continue;
+      if (scheduledProfilePubkeys.current.has(ref.pubkey)) continue;
+      const set = byPubkey.get(ref.pubkey) ?? new Set<string>();
+      for (const r of ref.relays) set.add(r);
+      byPubkey.set(ref.pubkey, set);
+    }
+    if (byPubkey.size === 0) return;
+    // Mark all found pubkeys as scheduled before the async work starts so
+    // a second messages-update doesn't re-queue the same fetches.
+    for (const pk of byPubkey.keys()) scheduledProfilePubkeys.current.add(pk);
+    let cancelled = false;
+    (async () => {
+      const updates: Record<string, NostrProfile | null> = {};
+      await Promise.all(
+        [...byPubkey.entries()].map(async ([pk, relaySet]) => {
+          const mergedRelays = [...new Set([...DEFAULT_RELAYS, ...relaySet])];
+          try {
+            updates[pk] = await fetchProfile(pk, mergedRelays);
+          } catch {
+            updates[pk] = null;
+          }
+        }),
+      );
+      if (!cancelled) {
+        setSharedProfiles((prev) => ({ ...prev, ...updates }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [messages]);
+
+  // Pre-classify message content once per messages update so renderMessage
+  // (a FlatList renderItem) doesn't call classifyMessageContent on every
+  // frame for every visible bubble. Mirror of ConversationScreen's items
+  // useMemo which does the same classification.
+  const classifiedMessages = useMemo<ClassifiedMessage[]>(
+    () => messages.map((m) => ({ ...m, content: classifyMessageContent(m.text) })),
+    [messages],
+  );
+
+  const renderMessage = useCallback(
+    ({ item }: { item: ClassifiedMessage }) => {
+      const fromMe = item.senderPubkey === myPubkey;
+      const senderName = fromMe
+        ? null
+        : (memberNameByPubkey.get(item.senderPubkey) ?? `${item.senderPubkey.slice(0, 8)}…`);
+      // Reuse the shared bubble — same renderer 1:1 chats use, so contact /
+      // invoice / location / image / GIF cards all render identically across
+      // chat types (#239). The classifier handles geo: + GIF detection up
+      // front; image / invoice / lnaddr / contact ride on the text variant
+      // and detect at render time.
+      return (
+        <MessageBubble
+          id={item.id}
+          fromMe={fromMe}
+          createdAt={item.createdAt}
+          content={item.content}
+          senderName={senderName}
+          sharedProfiles={sharedProfiles}
+          onPayInvoice={handlePayInvoice}
+          onPayLightningAddress={handlePayInvoice}
+          onOpenContact={openSharedContact}
+          onOpenLocation={openLocation}
+          onOpenGifFullscreen={setFullscreenGifUrl}
+          testIdPrefix="group-conversation"
+        />
+      );
+    },
+    [
+      myPubkey,
+      memberNameByPubkey,
+      sharedProfiles,
+      handlePayInvoice,
+      openSharedContact,
+      openLocation,
+    ],
+  );
+
   if (!group) {
     return (
       <View style={styles.container}>
@@ -327,25 +554,6 @@ const GroupConversationScreen: React.FC = () => {
           },
         },
       ],
-    );
-  };
-
-  const renderMessage = ({ item }: { item: GroupMessage }) => {
-    const fromMe = item.senderPubkey === myPubkey;
-    const senderName =
-      memberNameByPubkey.get(item.senderPubkey) ?? `${item.senderPubkey.slice(0, 8)}…`;
-    return (
-      <View style={[styles.messageRow, fromMe ? styles.messageRowMe : styles.messageRowOther]}>
-        <View
-          style={[
-            styles.messageBubble,
-            fromMe ? styles.messageBubbleMe : styles.messageBubbleOther,
-          ]}
-        >
-          {!fromMe && <Text style={styles.messageSender}>{senderName}</Text>}
-          <Text style={fromMe ? styles.messageTextMe : styles.messageTextOther}>{item.text}</Text>
-        </View>
-      </View>
     );
   };
 
@@ -452,7 +660,7 @@ const GroupConversationScreen: React.FC = () => {
         ) : (
           <FlatList
             ref={listRef}
-            data={messages}
+            data={classifiedMessages}
             keyExtractor={(item) => item.id}
             renderItem={renderMessage}
             contentContainerStyle={styles.messagesList}
@@ -471,6 +679,20 @@ const GroupConversationScreen: React.FC = () => {
             onSendImage={handlePickAndSendImage}
             onTakePhoto={handleTakeAndSendPhoto}
             onSendGif={isGifConfigured() ? () => setGifPickerOpen(true) : undefined}
+            // Zap renders but stays disabled — there's no single recipient
+            // to zap in a group, but hiding the tile entirely confused
+            // users who expected the same set as 1:1 (#237).
+            onSendZap={() => {}}
+            zapDisabled
+            zapAccessibilityLabel="Send a zap (unavailable — no single recipient in a group)"
+            onSendInvoice={() => {
+              closeAttachPanel();
+              setInvoiceSheetOpen(true);
+            }}
+            onShareContact={() => {
+              // Picker opens over the panel; close on cancel/select.
+              setContactPickerOpen(true);
+            }}
           />
         ) : null}
 
@@ -564,6 +786,73 @@ const GroupConversationScreen: React.FC = () => {
         onClose={() => setGifPickerOpen(false)}
         onSelect={handleSendGif}
       />
+
+      <FriendPickerSheet
+        visible={contactPickerOpen}
+        onClose={() => {
+          // Closing the picker (cancel or pick) also closes the
+          // AttachPanel underneath — same behaviour as 1:1 chats.
+          setContactPickerOpen(false);
+          setAttachPanelOpen(false);
+        }}
+        onSelect={handleShareContactPicked}
+        title={`Share a contact with ${group.name}`}
+        subtitle="They'll see it as a Nostr profile card they can open."
+      />
+
+      <ReceiveSheet
+        visible={invoiceSheetOpen}
+        onClose={() => setInvoiceSheetOpen(false)}
+        presetGroup={{ name: group.name }}
+        onSendToGroup={handleSendInvoiceToGroup}
+      />
+
+      {/* Pay button on a received invoice routes to SendSheet pre-filled
+          with the bolt11. Group invoices have no per-message wallet
+          binding, so we leave initialPicture / recipientPubkey unset and
+          let SendSheet decode the invoice for the destination. */}
+      <SendSheet
+        visible={sendSheetOpen}
+        onClose={() => {
+          setSendSheetOpen(false);
+          setInvoiceToPay(null);
+        }}
+        initialAddress={invoiceToPay ?? undefined}
+      />
+
+      {/* Tap a shared-contact card → opens the contact's profile sheet.
+          Distinct from the member-chip sheet above (selectedMemberPubkey)
+          which opens for taps in the group header. Both are mutually
+          exclusive in practice — the user can only tap one at a time. */}
+      <ContactProfileSheet
+        visible={profileContact !== null}
+        onClose={() => setProfileContact(null)}
+        contact={profileContact}
+      />
+
+      <Modal
+        visible={fullscreenGifUrl !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setFullscreenGifUrl(null)}
+      >
+        <Pressable
+          style={styles.fullscreenBackdrop}
+          onPress={() => setFullscreenGifUrl(null)}
+          accessibilityLabel="Close full-screen GIF"
+          testID="group-conversation-gif-fullscreen"
+        >
+          {fullscreenGifUrl ? (
+            <ExpoImage
+              source={{ uri: fullscreenGifUrl }}
+              style={styles.fullscreenImage}
+              contentFit="contain"
+              cachePolicy="memory-disk"
+              accessibilityIgnoresInvertColors
+            />
+          ) : null}
+        </Pressable>
+      </Modal>
     </KeyboardAvoidingView>
   );
 };
@@ -675,43 +964,17 @@ const createStyles = (colors: Palette) =>
       gap: 6,
       flexGrow: 1,
     },
-    messageRow: {
-      flexDirection: 'row',
-      marginVertical: 3,
+    // Bubble + per-message-type styles moved to src/components/MessageBubble
+    // — both 1:1 and group screens render the same bubble component now.
+    fullscreenBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.92)',
+      alignItems: 'center',
+      justifyContent: 'center',
     },
-    messageRowMe: {
-      justifyContent: 'flex-end',
-    },
-    messageRowOther: {
-      justifyContent: 'flex-start',
-    },
-    messageBubble: {
-      maxWidth: '78%',
-      paddingVertical: 8,
-      paddingHorizontal: 12,
-      borderRadius: 16,
-    },
-    messageBubbleMe: {
-      backgroundColor: colors.brandPink,
-      borderBottomRightRadius: 4,
-    },
-    messageBubbleOther: {
-      backgroundColor: colors.surface,
-      borderBottomLeftRadius: 4,
-    },
-    messageSender: {
-      fontSize: 11,
-      fontWeight: '700',
-      color: colors.brandPink,
-      marginBottom: 2,
-    },
-    messageTextMe: {
-      color: colors.white,
-      fontSize: 15,
-    },
-    messageTextOther: {
-      color: colors.textBody,
-      fontSize: 15,
+    fullscreenImage: {
+      width: '100%',
+      height: '100%',
     },
     composer: {
       flexDirection: 'row',

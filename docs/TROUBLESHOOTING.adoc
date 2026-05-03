@@ -337,4 +337,41 @@ After cold boot, tapping a text input shows the full docked Gboard at the bottom
 *Side effect:* with `hw.keyboard=no`, the laptop keyboard no longer types into the emulator. For interactive development this is annoying — your two paths are: (a) tap-input via mouse on the emulator window and use Gboard, or (b) inject text from the host CLI with `adb -s emulator-5554 shell input text "your%smessage"` (`%s` = space). For Maestro tests, prefer the `inputText` action which doesn't depend on a visible IME. +
 *Workaround when neither approach works:* if you need both laptop typing AND a working IME, run on a real device. For Maestro tests run inside CI, use `inputText` exclusively and never assert on the keyboard's visible bounds — only on the visibility / position of the composer above where the IME *would* be. +
 *Diagnostic:* after cold boot `adb shell dumpsys input_method | grep mInputShown` should be `true` while focused, and `adb shell dumpsys input | grep -E "AT Translated|qwerty"` will always show the AT keyboard regardless. The reliable test is whether tapping an input renders the docked Gboard pixels — there is no clean adb signal for "Gboard is rendered vs the floating chooser is rendered".
+
+| Emulator boots to a grey screen / `boot_completed` never flips to 1 / `adb devices` flaps `device` ↔ `offline` indefinitely
+| The persistent userdata overlay (`userdata-qemu.img.qcow2`) has accumulated corrupt state from a prior crashed boot — typically an Android Studio's *Digital Wellbeing* ANR cascade, a hard-killed `qemu-system` process, or a Vulkan/gfxstream stall during the initial GPU init. Once that file is corrupt every subsequent cold boot tries to mount it and either hangs in `system_server` init, never reaches `getprop sys.boot_completed=1`, or — most commonly — gets far enough that ADB sees the device but the framework never stabilises, so `adb` reports `device` for a few seconds then drops back to `offline` as the watchdog fires. Switching GPU modes (`-gpu host` → `-gpu swiftshader_indirect`) does **not** help — the corrupt overlay is the root cause, not the renderer. Symptom in the emulator log: GPU init completes (`Setting display: 0 configuration to: 1080x2400`, `Created extended window`) but every subsequent `adb command '… getprop sys.boot_completed' failed: 'adb: device offline'` line repeats forever. +
+*Fix (factory-reset just the runtime state, no need to recreate the AVD):* kill any stuck instances, delete the qcow2 overlays + snapshots + lock files, then cold-boot. The base `.img` files regenerate fresh overlays on first boot — equivalent to `avdmanager` recreating the AVD without actually needing `cmdline-tools` installed. +
+[source,bash]
+----
+# 1. Kill any stuck emulator processes
+adb emu kill 2>/dev/null
+pkill -9 -f qemu-system
+pkill -9 -f "emulator -avd"
+
+# 2. Back up config.ini (cheap insurance against the sed-on-shutdown
+#    truncation bug noted in the "System UI isn't responding" entry)
+cp ~/.android/avd/<AVD_NAME>.avd/config.ini \
+   ~/.android/avd/<AVD_NAME>.avd/config.ini.preboot-bak
+
+# 3. Delete the qcow2 overlays, snapshots, and runtime locks.
+#    The base *.img files are NOT touched — they regenerate the
+#    overlays on next boot.
+rm ~/.android/avd/<AVD_NAME>.avd/userdata-qemu.img.qcow2
+rm ~/.android/avd/<AVD_NAME>.avd/cache.img.qcow2
+rm ~/.android/avd/<AVD_NAME>.avd/sdcard.img.qcow2
+rm ~/.android/avd/<AVD_NAME>.avd/encryptionkey.img.qcow2
+rm -f ~/.android/avd/<AVD_NAME>.avd/multiinstance.lock
+rm -f ~/.android/avd/<AVD_NAME>.avd/read-snapshot.txt
+rm -f ~/.android/avd/<AVD_NAME>.avd/quickbootChoice.ini
+rm -rf ~/.android/avd/<AVD_NAME>.avd/snapshots
+rm -rf ~/.android/avd/<AVD_NAME>.avd/tmpAdbCmds
+
+# 4. Cold-boot. Hardware GPU works fine once the overlay is clean.
+QT_QPA_PLATFORM=xcb $ANDROID_HOME/emulator/emulator \
+  -avd <AVD_NAME> -gpu host -no-snapshot -no-boot-anim
+----
+*What you lose:* every app installed inside the AVD, signed-in accounts, AVD-side preferences. The AVD config (`config.ini`, `hardware-qemu.ini`, `AVD.conf`) and base system image are preserved, so the AVD itself stays valid. +
+*What you gain:* the `userdata-qemu.img.qcow2` file goes from a multi-GB accumulated overlay (often 7 GB+ after months of use) back to a thin overlay regenerated from the system image's userdata. +
+*Don't waste time on these false leads first:* (a) `adb reboot` won't help — the corrupt overlay is what re-mounts on every boot. (b) Switching GPU mode won't help — the GPU init phase succeeds; the failure is in Android userspace boot. (c) Increasing AVD RAM won't help — `system_server` isn't OOM, it's hanging on the corrupt overlay. (d) Re-running `expo prebuild` won't help — this is an emulator state issue, not an app build issue. +
+*Verify clean boot:* `adb -s emulator-5554 shell getprop sys.boot_completed` returns `1` (with a stable trailing newline) and `adb devices` shows `device` (not `offline`) consistently for >30 s. UI rendering should be smooth — if you see frame stutters and a `Process system isn't responding` dialog, you're probably on `swiftshader_indirect` (software GL) and need to re-launch with `-gpu host` now that the overlay is clean.
 |===

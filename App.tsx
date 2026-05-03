@@ -16,6 +16,7 @@ import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
 import BootSplash from './src/components/BootSplash';
+import { BrandedAlertHost } from './src/components/BrandedAlert';
 
 // Render toasts with unlimited-line body so long error messages (e.g. Electrum
 // script-verify errors) aren't truncated. Height grows to fit content.
@@ -116,6 +117,12 @@ export default function App() {
                   </BottomSheetModalProvider>
                   <Toast topOffset={60} config={toastConfig} />
                   <GlobalIncomingPaymentOverlay />
+                  {/* BrandedAlertHost: portal target for the on-brand
+                      BrandedAlert dialog. Sits at the root so any sheet /
+                      screen that calls `Alert.alert(...)` (the BrandedAlert
+                      drop-in re-export, NOT the system Alert) renders
+                      above the rest of the UI without z-index gymnastics. */}
+                  <BrandedAlertHost />
                 </GroupsProvider>
               </NostrProvider>
             </WalletProvider>
