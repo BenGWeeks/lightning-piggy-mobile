@@ -37,7 +37,7 @@ const ConversationRow: React.FC<Props> = ({ summary, onPress }) => {
           <Image
             source={{ uri: summary.picture! }}
             style={styles.avatarImage}
-            cachePolicy="disk"
+            cachePolicy="memory-disk"
             transition={200}
             recyclingKey={summary.picture ?? undefined}
             onError={() => setAvatarError(true)}

@@ -1,0 +1,14 @@
+appId: com.lightningpiggy.app.dev
+name: PERF — warmup → tab Messages (no swipes)
+---
+# Phase 1 of perf-scroll.sh: launch + Messages tab tap. The wrapper
+# resets gfxinfo after this flow exits, then runs perf-messages-swipes.yaml.
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 30000
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000

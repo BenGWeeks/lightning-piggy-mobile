@@ -1,0 +1,37 @@
+appId: com.lightningpiggy.app.dev
+name: PERF — Friends tab scroll iterations
+---
+# Phase 2 of perf-scroll.sh: assumes Friends tab is already on screen
+# (perf-friends-scroll.yaml ran first + wrapper reset gfxinfo). Pure
+# scroll work — no launch, no tab tap.
+
+- swipe:
+    direction: UP
+    duration: 400
+- swipe:
+    direction: UP
+    duration: 400
+- swipe:
+    direction: UP
+    duration: 400
+- swipe:
+    direction: DOWN
+    duration: 400
+- swipe:
+    direction: DOWN
+    duration: 400
+- swipe:
+    direction: DOWN
+    duration: 400
+- swipe:
+    direction: UP
+    duration: 400
+- swipe:
+    direction: UP
+    duration: 400
+- swipe:
+    direction: DOWN
+    duration: 400
+- swipe:
+    direction: DOWN
+    duration: 400
