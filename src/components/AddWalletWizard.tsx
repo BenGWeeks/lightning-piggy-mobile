@@ -27,7 +27,8 @@ import { MiniWalletCard } from './WalletCard';
 import { validateNwcUrl } from '../services/nwcService';
 import { validateOnchainImport } from '../services/onchainService';
 import { LightningIcon, ChainIcon } from './icons/ArrowIcons';
-import { ClipboardPaste, QrCode } from 'lucide-react-native';
+import { ClipboardPaste, QrCode, Sparkles } from 'lucide-react-native';
+import CreateCoinosWalletSheet from './CreateCoinosWalletSheet';
 
 interface Props {
   visible: boolean;
@@ -53,6 +54,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   const [scanning, setScanning] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [coinosOpen, setCoinosOpen] = useState(false);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   const scrollRef = useRef<any>(null);
   // No explicit snapPoints — content-height only, not user-draggable.
@@ -238,7 +240,12 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
     };
   }, []);
 
-  if (!visible) return null;
+  // Note: we deliberately don't early-return on `!visible`. The CoinOS
+  // create-sheet is rendered alongside this wizard and needs to outlive
+  // the wizard's dismissal — the user's path is "Add Wallet → Create
+  // Lightning Wallet → CoinOS sheet → Home", so the wizard dismisses
+  // mid-flow and the CoinOS sheet keeps going. The underlying
+  // BottomSheetModal hides itself via the ref-driven dismiss() above.
 
   const stepTitle: Record<Step, string> = {
     type: 'Add Wallet',
@@ -265,360 +272,411 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   };
 
   return (
-    <BottomSheetModal
-      ref={bottomSheetRef}
-      enablePanDownToClose
-      onChange={handleSheetChange}
-      backdropComponent={renderBackdrop}
-      backgroundStyle={styles.sheetBackground}
-      handleIndicatorStyle={styles.handle}
-      keyboardBehavior="interactive"
-      keyboardBlurBehavior="restore"
-      android_keyboardInputMode="adjustResize"
-    >
-      <BottomSheetScrollView
-        ref={scrollRef}
-        style={styles.content}
-        contentContainerStyle={{ paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 60 }}
-        keyboardShouldPersistTaps="handled"
+    <>
+      <BottomSheetModal
+        ref={bottomSheetRef}
+        enablePanDownToClose
+        onChange={handleSheetChange}
+        backdropComponent={renderBackdrop}
+        backgroundStyle={styles.sheetBackground}
+        handleIndicatorStyle={styles.handle}
+        keyboardBehavior="interactive"
+        keyboardBlurBehavior="restore"
+        android_keyboardInputMode="adjustResize"
       >
-        <Text style={styles.title}>{stepTitle[step]}</Text>
+        <BottomSheetScrollView
+          ref={scrollRef}
+          style={styles.content}
+          contentContainerStyle={{ paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 60 }}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Text style={styles.title}>{stepTitle[step]}</Text>
 
-        {/* Step: Wallet Type Selection */}
-        {step === 'type' && (
-          <View style={styles.stepContent}>
-            <Text style={styles.description}>What type of wallet would you like to add?</Text>
-            <TouchableOpacity
-              style={styles.typeCard}
-              onPress={() => handleTypeSelect('nwc')}
-              testID="wallet-type-nwc"
-              accessibilityLabel="Lightning NWC"
-            >
-              <View style={styles.typeCardIconWrapper}>
-                <LightningIcon size={28} color={colors.brandPink} strokeWidth={2.5} />
-              </View>
-              <View style={styles.typeCardText}>
-                <Text style={styles.typeCardTitle}>Lightning (NWC)</Text>
-                <Text style={styles.typeCardDesc}>
-                  Connect a Lightning wallet via Nostr Wallet Connect
-                </Text>
-              </View>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.typeCard}
-              onPress={() => handleTypeSelect('onchain')}
-              testID="wallet-type-onchain"
-              accessibilityLabel="Bitcoin On-chain"
-            >
-              <View style={styles.typeCardIconWrapper}>
-                <ChainIcon size={28} color={colors.brandPink} strokeWidth={2.5} />
-              </View>
-              <View style={styles.typeCardText}>
-                <Text style={styles.typeCardTitle}>Bitcoin (On-chain)</Text>
-                <Text style={styles.typeCardDesc}>
-                  Import a watch-only wallet via an extended public key (xpub/ypub/zpub) or a single
-                  Bitcoin address
-                </Text>
-              </View>
-            </TouchableOpacity>
-            {devMode && (
+          {/* Step: Wallet Type Selection */}
+          {step === 'type' && (
+            <View style={styles.stepContent}>
+              <Text style={styles.description}>What type of wallet would you like to add?</Text>
+              {/* Auto-provision (CoinOS managed). First in the list because
+                it's the zero-friction path for new users. The custody
+                disclosure lives in the create flow itself, not here, so
+                this tile stays visually consistent with the rest. */}
               <TouchableOpacity
                 style={styles.typeCard}
-                onPress={handleMnemonicSelect}
-                testID="wallet-type-mnemonic"
-                accessibilityLabel="Import seed phrase"
+                onPress={() => {
+                  // Close THIS sheet so the create-CoinOS sheet can take
+                  // its slot — two presented BottomSheetModals stack and
+                  // make the lower one un-tappable.
+                  bottomSheetRef.current?.dismiss();
+                  // Defer opening so the dismiss animation has a frame.
+                  setTimeout(() => setCoinosOpen(true), 250);
+                }}
+                testID="wallet-type-coinos"
+                accessibilityLabel="Create a managed Lightning wallet on CoinOS"
               >
                 <View style={styles.typeCardIconWrapper}>
-                  <LightningIcon size={28} color="#FF9800" strokeWidth={2.5} />
+                  <Sparkles size={28} color={colors.brandPink} strokeWidth={2.5} />
                 </View>
                 <View style={styles.typeCardText}>
-                  <Text style={styles.typeCardTitle}>Import Seed Phrase (Beta)</Text>
+                  <Text style={styles.typeCardTitle}>Create a Lightning Wallet</Text>
                   <Text style={styles.typeCardDesc}>
-                    Import a 12 or 24 word mnemonic for a full hot wallet
+                    Auto-set-up a managed wallet on CoinOS in seconds. Custodial — best for getting
+                    started with small amounts.
                   </Text>
                 </View>
               </TouchableOpacity>
-            )}
-          </View>
-        )}
-
-        {/* Step: NWC URL */}
-        {step === 'url' && (
-          <View style={styles.stepContent}>
-            {scanning ? (
-              <View style={styles.scannerContainer}>
-                <CameraView
-                  style={styles.scanner}
-                  facing="back"
-                  barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-                  onBarcodeScanned={handleBarCodeScanned}
-                />
-                <TouchableOpacity style={styles.secondaryButton} onPress={() => setScanning(false)}>
-                  <Text style={styles.secondaryButtonText}>Cancel</Text>
+              <TouchableOpacity
+                style={styles.typeCard}
+                onPress={() => handleTypeSelect('nwc')}
+                testID="wallet-type-nwc"
+                accessibilityLabel="Lightning NWC"
+              >
+                <View style={styles.typeCardIconWrapper}>
+                  <LightningIcon size={28} color={colors.brandPink} strokeWidth={2.5} />
+                </View>
+                <View style={styles.typeCardText}>
+                  <Text style={styles.typeCardTitle}>Lightning (NWC)</Text>
+                  <Text style={styles.typeCardDesc}>
+                    Connect a Lightning wallet via Nostr Wallet Connect
+                  </Text>
+                </View>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.typeCard}
+                onPress={() => handleTypeSelect('onchain')}
+                testID="wallet-type-onchain"
+                accessibilityLabel="Bitcoin On-chain"
+              >
+                <View style={styles.typeCardIconWrapper}>
+                  <ChainIcon size={28} color={colors.brandPink} strokeWidth={2.5} />
+                </View>
+                <View style={styles.typeCardText}>
+                  <Text style={styles.typeCardTitle}>Bitcoin (On-chain)</Text>
+                  <Text style={styles.typeCardDesc}>
+                    Import a watch-only wallet via an extended public key (xpub/ypub/zpub) or a
+                    single Bitcoin address
+                  </Text>
+                </View>
+              </TouchableOpacity>
+              {devMode && (
+                <TouchableOpacity
+                  style={styles.typeCard}
+                  onPress={handleMnemonicSelect}
+                  testID="wallet-type-mnemonic"
+                  accessibilityLabel="Import seed phrase"
+                >
+                  <View style={styles.typeCardIconWrapper}>
+                    <LightningIcon size={28} color="#FF9800" strokeWidth={2.5} />
+                  </View>
+                  <View style={styles.typeCardText}>
+                    <Text style={styles.typeCardTitle}>Import Seed Phrase (Beta)</Text>
+                    <Text style={styles.typeCardDesc}>
+                      Import a 12 or 24 word mnemonic for a full hot wallet
+                    </Text>
+                  </View>
                 </TouchableOpacity>
-              </View>
-            ) : (
-              <>
-                <Text style={styles.description}>
-                  Paste or scan your Nostr Wallet Connect (NWC) connection string.
-                </Text>
-                <BottomSheetTextInput
-                  style={styles.nwcInput}
-                  placeholder="nostr+walletconnect://..."
-                  placeholderTextColor={colors.textSupplementary}
-                  value={nwcUrl}
-                  onChangeText={(text) => {
-                    setNwcUrl(text);
-                    setError(null);
-                  }}
-                  multiline
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  testID="nwc-url-input"
-                  accessibilityLabel="NWC connection URL input"
-                />
-                <View style={styles.secondaryButtonRow}>
+              )}
+            </View>
+          )}
+
+          {/* Step: NWC URL */}
+          {step === 'url' && (
+            <View style={styles.stepContent}>
+              {scanning ? (
+                <View style={styles.scannerContainer}>
+                  <CameraView
+                    style={styles.scanner}
+                    facing="back"
+                    barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+                    onBarcodeScanned={handleBarCodeScanned}
+                  />
                   <TouchableOpacity
-                    style={[styles.secondaryButton, styles.secondaryButtonHalf]}
-                    onPress={handleScan}
-                    accessibilityLabel="Scan QR Code"
-                    testID="wizard-nwc-scan"
+                    style={styles.secondaryButton}
+                    onPress={() => setScanning(false)}
                   >
-                    <QrCode size={18} color={colors.textBody} strokeWidth={2} />
-                    <Text style={styles.secondaryButtonText}>Scan QR</Text>
+                    <Text style={styles.secondaryButtonText}>Cancel</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.secondaryButton, styles.secondaryButtonHalf]}
-                    onPress={async () => {
-                      const text = await Clipboard.getStringAsync();
-                      if (text) {
-                        setNwcUrl(text.trim());
+                </View>
+              ) : (
+                <>
+                  <Text style={styles.description}>
+                    Paste or scan your Nostr Wallet Connect (NWC) connection string.
+                  </Text>
+                  <BottomSheetTextInput
+                    style={styles.nwcInput}
+                    placeholder="nostr+walletconnect://..."
+                    placeholderTextColor={colors.textSupplementary}
+                    value={nwcUrl}
+                    onChangeText={(text) => {
+                      setNwcUrl(text);
+                      setError(null);
+                    }}
+                    multiline
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    testID="nwc-url-input"
+                    accessibilityLabel="NWC connection URL input"
+                  />
+                  <View style={styles.secondaryButtonRow}>
+                    <TouchableOpacity
+                      style={[styles.secondaryButton, styles.secondaryButtonHalf]}
+                      onPress={handleScan}
+                      accessibilityLabel="Scan QR Code"
+                      testID="wizard-nwc-scan"
+                    >
+                      <QrCode size={18} color={colors.textBody} strokeWidth={2} />
+                      <Text style={styles.secondaryButtonText}>Scan QR</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.secondaryButton, styles.secondaryButtonHalf]}
+                      onPress={async () => {
+                        const text = await Clipboard.getStringAsync();
+                        if (text) {
+                          setNwcUrl(text.trim());
+                          setError(null);
+                        }
+                      }}
+                      accessibilityLabel="Paste NWC URL from clipboard"
+                      testID="wizard-nwc-paste"
+                    >
+                      <ClipboardPaste size={18} color={colors.textBody} strokeWidth={2} />
+                      <Text style={styles.secondaryButtonText}>Paste</Text>
+                    </TouchableOpacity>
+                  </View>
+                  {error && <Text style={styles.errorText}>{error}</Text>}
+                  <View style={styles.buttonRow}>
+                    <TouchableOpacity
+                      style={styles.backButton}
+                      onPress={() => {
                         setError(null);
-                      }
-                    }}
-                    accessibilityLabel="Paste NWC URL from clipboard"
-                    testID="wizard-nwc-paste"
-                  >
-                    <ClipboardPaste size={18} color={colors.textBody} strokeWidth={2} />
-                    <Text style={styles.secondaryButtonText}>Paste</Text>
-                  </TouchableOpacity>
-                </View>
-                {error && <Text style={styles.errorText}>{error}</Text>}
-                <View style={styles.buttonRow}>
-                  <TouchableOpacity
-                    style={styles.backButton}
-                    onPress={() => {
-                      setError(null);
-                      setStep('type');
-                    }}
-                  >
-                    <Text style={styles.backButtonText}>Back</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.primaryButton, { flex: 1 }]}
-                    onPress={handleUrlNext}
-                    accessibilityLabel="Next — validate NWC URL"
-                    testID="wizard-url-next"
-                  >
-                    <Text style={styles.primaryButtonText}>Next</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
-          </View>
-        )}
+                        setStep('type');
+                      }}
+                    >
+                      <Text style={styles.backButtonText}>Back</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.primaryButton, { flex: 1 }]}
+                      onPress={handleUrlNext}
+                      accessibilityLabel="Next — validate NWC URL"
+                      testID="wizard-url-next"
+                    >
+                      <Text style={styles.primaryButtonText}>Next</Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+            </View>
+          )}
 
-        {/* Step: xpub import */}
-        {step === 'xpub' && (
-          <View style={styles.stepContent}>
-            {scanning ? (
-              <View style={styles.scannerContainer}>
-                <CameraView
-                  style={styles.scanner}
-                  facing="back"
-                  barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-                  onBarcodeScanned={handleBarCodeScanned}
-                />
-                <TouchableOpacity style={styles.secondaryButton} onPress={() => setScanning(false)}>
-                  <Text style={styles.secondaryButtonText}>Cancel</Text>
+          {/* Step: xpub import */}
+          {step === 'xpub' && (
+            <View style={styles.stepContent}>
+              {scanning ? (
+                <View style={styles.scannerContainer}>
+                  <CameraView
+                    style={styles.scanner}
+                    facing="back"
+                    barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+                    onBarcodeScanned={handleBarCodeScanned}
+                  />
+                  <TouchableOpacity
+                    style={styles.secondaryButton}
+                    onPress={() => setScanning(false)}
+                  >
+                    <Text style={styles.secondaryButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <>
+                  <Text style={styles.description}>
+                    Paste or scan an extended public key (xpub, ypub, or zpub) to track a whole HD
+                    wallet, or a single Bitcoin address (bc1…, 1…, 3…) to watch just that one.
+                  </Text>
+                  <BottomSheetTextInput
+                    style={styles.nwcInput}
+                    placeholder="xpub6… or bc1q…"
+                    placeholderTextColor={colors.textSupplementary}
+                    value={xpub}
+                    onChangeText={(text) => {
+                      setXpub(text);
+                      setError(null);
+                    }}
+                    multiline
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    testID="xpub-input"
+                    accessibilityLabel="Extended public key or address input"
+                  />
+                  <TouchableOpacity style={styles.secondaryButton} onPress={handleScan}>
+                    <Text style={styles.secondaryButtonText}>Scan QR Code</Text>
+                  </TouchableOpacity>
+                  {error && <Text style={styles.errorText}>{error}</Text>}
+                  <View style={styles.buttonRow}>
+                    <TouchableOpacity
+                      style={styles.backButton}
+                      onPress={() => {
+                        setError(null);
+                        setStep('type');
+                      }}
+                    >
+                      <Text style={styles.backButtonText}>Back</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.primaryButton, { flex: 1 }]}
+                      onPress={handleXpubNext}
+                    >
+                      <Text style={styles.primaryButtonText}>Next</Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+            </View>
+          )}
+
+          {/* Step: Mnemonic import (dev mode only) */}
+          {step === 'mnemonic' && (
+            <View style={styles.stepContent}>
+              <Text style={styles.description}>
+                Enter your 12 or 24 word seed phrase. Numbers, colons, and extra whitespace will be
+                stripped automatically.
+              </Text>
+              <BottomSheetTextInput
+                style={[styles.nwcInput, { minHeight: 100 }]}
+                placeholder="word1 word2 word3 ..."
+                placeholderTextColor={colors.textSupplementary}
+                value={mnemonicInput}
+                onChangeText={(text) => {
+                  setMnemonicInput(text);
+                  setError(null);
+                }}
+                multiline
+                autoCapitalize="none"
+                autoCorrect={false}
+                testID="mnemonic-input"
+                accessibilityLabel="Seed phrase input"
+              />
+              {error && <Text style={styles.errorText}>{error}</Text>}
+              <View style={styles.buttonRow}>
+                <TouchableOpacity
+                  style={styles.backButton}
+                  onPress={() => {
+                    setError(null);
+                    setStep('type');
+                  }}
+                >
+                  <Text style={styles.backButtonText}>Back</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.primaryButton, { flex: 1 }]}
+                  onPress={handleMnemonicNext}
+                >
+                  <Text style={styles.primaryButtonText}>Next</Text>
                 </TouchableOpacity>
               </View>
-            ) : (
-              <>
-                <Text style={styles.description}>
-                  Paste or scan an extended public key (xpub, ypub, or zpub) to track a whole HD
-                  wallet, or a single Bitcoin address (bc1…, 1…, 3…) to watch just that one.
-                </Text>
-                <BottomSheetTextInput
-                  style={styles.nwcInput}
-                  placeholder="xpub6… or bc1q…"
-                  placeholderTextColor={colors.textSupplementary}
-                  value={xpub}
-                  onChangeText={(text) => {
-                    setXpub(text);
+            </View>
+          )}
+
+          {step === 'alias' && (
+            <View style={styles.stepContent}>
+              <Text style={styles.description}>
+                Give this wallet a name so you can easily identify it.
+              </Text>
+              <BottomSheetTextInput
+                style={styles.aliasInput}
+                placeholder="e.g. My Savings, Spending Wallet"
+                placeholderTextColor={colors.textSupplementary}
+                value={alias}
+                onChangeText={(text) => {
+                  setAlias(text);
+                  setError(null);
+                }}
+                autoCapitalize="words"
+                autoCorrect={false}
+                testID="wallet-alias-input"
+                accessibilityLabel="Wallet alias input"
+              />
+              {error && <Text style={styles.errorText}>{error}</Text>}
+              <View style={styles.buttonRow}>
+                <TouchableOpacity
+                  style={styles.backButton}
+                  onPress={() => {
                     setError(null);
+                    setStep(backStep());
                   }}
-                  multiline
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  testID="xpub-input"
-                  accessibilityLabel="Extended public key or address input"
-                />
-                <TouchableOpacity style={styles.secondaryButton} onPress={handleScan}>
-                  <Text style={styles.secondaryButtonText}>Scan QR Code</Text>
+                >
+                  <Text style={styles.backButtonText}>Back</Text>
                 </TouchableOpacity>
-                {error && <Text style={styles.errorText}>{error}</Text>}
-                <View style={styles.buttonRow}>
-                  <TouchableOpacity
-                    style={styles.backButton}
-                    onPress={() => {
-                      setError(null);
-                      setStep('type');
-                    }}
-                  >
-                    <Text style={styles.backButtonText}>Back</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.primaryButton, { flex: 1 }]}
-                    onPress={handleXpubNext}
-                  >
-                    <Text style={styles.primaryButtonText}>Next</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
-          </View>
-        )}
+                <TouchableOpacity
+                  style={[styles.primaryButton, { flex: 1 }]}
+                  onPress={handleAliasNext}
+                >
+                  <Text style={styles.primaryButtonText}>Next</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
 
-        {/* Step: Mnemonic import (dev mode only) */}
-        {step === 'mnemonic' && (
-          <View style={styles.stepContent}>
-            <Text style={styles.description}>
-              Enter your 12 or 24 word seed phrase. Numbers, colons, and extra whitespace will be
-              stripped automatically.
-            </Text>
-            <BottomSheetTextInput
-              style={[styles.nwcInput, { minHeight: 100 }]}
-              placeholder="word1 word2 word3 ..."
-              placeholderTextColor={colors.textSupplementary}
-              value={mnemonicInput}
-              onChangeText={(text) => {
-                setMnemonicInput(text);
-                setError(null);
-              }}
-              multiline
-              autoCapitalize="none"
-              autoCorrect={false}
-              testID="mnemonic-input"
-              accessibilityLabel="Seed phrase input"
-            />
-            {error && <Text style={styles.errorText}>{error}</Text>}
-            <View style={styles.buttonRow}>
-              <TouchableOpacity
-                style={styles.backButton}
-                onPress={() => {
-                  setError(null);
-                  setStep('type');
-                }}
-              >
-                <Text style={styles.backButtonText}>Back</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.primaryButton, { flex: 1 }]}
-                onPress={handleMnemonicNext}
-              >
-                <Text style={styles.primaryButtonText}>Next</Text>
-              </TouchableOpacity>
+          {step === 'theme' && (
+            <View style={styles.stepContent}>
+              <Text style={styles.description}>Choose a card design for this wallet.</Text>
+              <View style={styles.themeGrid}>
+                {themeList.map((theme) => (
+                  <MiniWalletCard
+                    key={theme.id}
+                    theme={theme}
+                    selected={selectedTheme === theme.id}
+                    onPress={() => setSelectedTheme(theme.id)}
+                  />
+                ))}
+              </View>
+              {error && <Text style={styles.errorText}>{error}</Text>}
+              <View style={styles.buttonRow}>
+                <TouchableOpacity
+                  style={styles.backButton}
+                  onPress={() => {
+                    setError(null);
+                    setStep('alias');
+                  }}
+                >
+                  <Text style={styles.backButtonText}>Back</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.primaryButton, { flex: 1 }, connecting && { opacity: 0.7 }]}
+                  onPress={handleConnect}
+                  disabled={connecting}
+                  testID="wizard-connect-button"
+                  accessibilityLabel={
+                    walletType === 'onchain' ? 'Add on-chain wallet' : 'Connect wallet'
+                  }
+                >
+                  {connecting ? (
+                    <ActivityIndicator color={colors.white} />
+                  ) : (
+                    <Text style={styles.primaryButtonText}>
+                      {walletType === 'onchain' ? 'Add Wallet' : 'Connect'}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
-        )}
-
-        {step === 'alias' && (
-          <View style={styles.stepContent}>
-            <Text style={styles.description}>
-              Give this wallet a name so you can easily identify it.
-            </Text>
-            <BottomSheetTextInput
-              style={styles.aliasInput}
-              placeholder="e.g. My Savings, Spending Wallet"
-              placeholderTextColor={colors.textSupplementary}
-              value={alias}
-              onChangeText={(text) => {
-                setAlias(text);
-                setError(null);
-              }}
-              autoCapitalize="words"
-              autoCorrect={false}
-              testID="wallet-alias-input"
-              accessibilityLabel="Wallet alias input"
-            />
-            {error && <Text style={styles.errorText}>{error}</Text>}
-            <View style={styles.buttonRow}>
-              <TouchableOpacity
-                style={styles.backButton}
-                onPress={() => {
-                  setError(null);
-                  setStep(backStep());
-                }}
-              >
-                <Text style={styles.backButtonText}>Back</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.primaryButton, { flex: 1 }]}
-                onPress={handleAliasNext}
-              >
-                <Text style={styles.primaryButtonText}>Next</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-
-        {step === 'theme' && (
-          <View style={styles.stepContent}>
-            <Text style={styles.description}>Choose a card design for this wallet.</Text>
-            <View style={styles.themeGrid}>
-              {themeList.map((theme) => (
-                <MiniWalletCard
-                  key={theme.id}
-                  theme={theme}
-                  selected={selectedTheme === theme.id}
-                  onPress={() => setSelectedTheme(theme.id)}
-                />
-              ))}
-            </View>
-            {error && <Text style={styles.errorText}>{error}</Text>}
-            <View style={styles.buttonRow}>
-              <TouchableOpacity
-                style={styles.backButton}
-                onPress={() => {
-                  setError(null);
-                  setStep('alias');
-                }}
-              >
-                <Text style={styles.backButtonText}>Back</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.primaryButton, { flex: 1 }, connecting && { opacity: 0.7 }]}
-                onPress={handleConnect}
-                disabled={connecting}
-                testID="wizard-connect-button"
-                accessibilityLabel={
-                  walletType === 'onchain' ? 'Add on-chain wallet' : 'Connect wallet'
-                }
-              >
-                {connecting ? (
-                  <ActivityIndicator color={colors.white} />
-                ) : (
-                  <Text style={styles.primaryButtonText}>
-                    {walletType === 'onchain' ? 'Add Wallet' : 'Connect'}
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-      </BottomSheetScrollView>
-    </BottomSheetModal>
+          )}
+        </BottomSheetScrollView>
+      </BottomSheetModal>
+      {/* CoinOS create flow lives outside the wizard's BottomSheetModal so
+        it survives the wizard's dismiss(). Mounted unconditionally so
+        the visible={coinosOpen} prop drives presentation. */}
+      <CreateCoinosWalletSheet
+        visible={coinosOpen}
+        onClose={() => setCoinosOpen(false)}
+        onComplete={() => {
+          setCoinosOpen(false);
+          // Roll the wizard back to step 'type' so the next time it opens
+          // the user starts at the menu, not in the middle of a previous
+          // CoinOS attempt.
+          reset();
+          onClose();
+        }}
+      />
+    </>
   );
 };
 
