@@ -39,6 +39,27 @@ adb shell ime set com.google.android.inputmethod.latin/com.android.inputmethod.l
 | `npx expo start` fails but `npm start` works
 | The `start` script includes `--dev-client` which is required for custom native modules. Always use `npm start`.
 
+| EAS local production build crashes mid-Gradle with `UncheckedIOException: Could not add entry ... to cache fileHashes.bin`
+| `/tmp` is on tmpfs (default Ubuntu/Debian) capped at ~12 GB. The EAS local builder generates ~9 GB of native-lib intermediates during the multi-arch APK assembly (arm64 + armv7 + x86 + x86_64). When tmpfs hits 100 %, Gradle's incremental-cache writer throws on the next `fileHashes.bin` flush and the entire build aborts. +
+*Symptom:* `tail -3 /tmp/eas-build.log` shows the IOException; `df -h /tmp` shows tmpfs at 100 %; the build PID is gone with no APK at `android/app/build/outputs/apk/release/app-release.apk`. +
+*Fix:* point Gradle at disk-backed storage via `TMPDIR`: +
+[source,bash]
+----
+mkdir -p "$HOME/eas-tmp"
+TMPDIR="$HOME/eas-tmp" EXPO_NO_DOCTOR=1 \
+  eas build --local --platform android --profile production --non-interactive
+----
+*Cleanup:* `rm -rf "$HOME/eas-tmp"` between builds when you want to reclaim disk; the next run's `mkdir -p` and Gradle will re-create everything, including hidden entries such as `.gradle` or `.expo`. The EAS-CLI checkout under `$TMPDIR/eas-build-local-nodejs/` is also safe to delete between runs. Full recipe + rationale in `docs/DEPLOYMENT.adoc` → "Local production builds".
+
+| Maestro can't tap a third-party signer's FAB / button (Aegis, Clave, etc) — `Element not found` or silent no-op
+| Some signer apps (notably Aegis ≥0.5.0, possibly Clave) ship without accessibility labels on key UI elements like the "+" FAB to add a connection. Maestro's `tapOn: { id: ... }` and `tapOn: { text: ... }` both miss because there's nothing to match. The `index:` selector also ranks unpredictably for un-labelled `ImageView` clickables. +
+*Why coordinates aren't a workaround:* `point: '90%, 91%'` and `adb shell input tap` are forbidden by the project's CLAUDE.md (fragile across screen sizes / OS versions / device profiles). +
+*Workarounds:* +
+1. Drive the signer setup manually before kicking off the Maestro flow — pre-pair the signer with the test nsec via its own UI, then have Maestro start from a state where the signer is ready. +
+2. File the missing a11y label upstream and pin the older signer version where the bug doesn't apply. +
+3. Use a signer that exposes a11y selectors (per the 2026-05 review, Nowser surfaces tappable elements with `accessibilityLabel` / resource-id, so Maestro can drive its connection-add flow without coordinate fallbacks). +
+*Validated this session:* PR #284 (NIP-46 / Clave) reaches the QR pairing screen + verifies the spec-compliant `nostrconnect://` URI fully via Maestro; the bunker-side approval cannot be Maestro-driven on Aegis until Aegis ships a `testTag` / `accessibilityLabel` on the FAB. Manual handoff is the supported path today.
+
 | Metro not connecting to device over USB
 | Run `adb reverse tcp:8081 tcp:8081` for USB port forwarding before launching the app.
 
