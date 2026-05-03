@@ -8,13 +8,17 @@ import {
   TextInput,
   Image,
   Alert,
-  KeyboardAvoidingView,
-  Platform,
   ActivityIndicator,
   Linking,
   Modal,
   Pressable,
 } from 'react-native';
+import {
+  KeyboardController,
+  KeyboardStickyView,
+  useReanimatedKeyboardAnimation,
+} from 'react-native-keyboard-controller';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { Image as ExpoImage } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import Svg, { Path, Circle } from 'react-native-svg';
@@ -79,6 +83,20 @@ interface MemberRow {
 
 const GroupConversationScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
+  // Mirrors the canonical chat-composer pattern from ConversationScreen.
+  // KeyboardAvoidingView with `behavior=undefined` on Android (the prior
+  // implementation) is a no-op — the composer sat behind the IME instead
+  // of riding above it. KeyboardStickyView from react-native-keyboard-
+  // controller floats the composer flush against the keyboard's top edge,
+  // and the animated paddingBottom shrinks the safe-area inset to 0 as
+  // the keyboard opens (so the composer hugs the keyboard instead of
+  // leaving an inset-sized gap). Requires `react-native-edge-to-edge`'s
+  // `WindowInsetsCompat` listener to be installed (see #194 / app.config.ts
+  // → withEdgeToEdge plugin) so the IME inset is visible to RNKC.
+  const keyboard = useReanimatedKeyboardAnimation();
+  const composerSafeAreaStyle = useAnimatedStyle(() => ({
+    paddingBottom: 8 + Math.max(insets.bottom * (1 + keyboard.progress.value * -1), 0),
+  }));
   const navigation = useNavigation<GroupConversationNavigation>();
   const route = useRoute<GroupConversationRoute>();
   const colors = useThemeColors();
@@ -253,6 +271,14 @@ const GroupConversationScreen: React.FC = () => {
   // and Photo go through the existing imageUploadService (Blossom →
   // URL) and send the URL as the message body — same as the 1:1 path.
   const closeAttachPanel = useCallback(() => setAttachPanelOpen(false), []);
+  // Mirror ConversationScreen's openAttachPanel: dismiss the IME first
+  // so the panel + composer + keyboard never have to stack. Without this,
+  // tapping the attach button while the message input is focused leaves
+  // the keyboard up, forcing the sticky layout to compete with the IME.
+  const openAttachPanel = useCallback(() => {
+    setAttachPanelOpen(true);
+    KeyboardController.dismiss();
+  }, []);
 
   const uploadAndSend = useCallback(
     async (localUri: string, base64?: string | null) => {
@@ -558,11 +584,7 @@ const GroupConversationScreen: React.FC = () => {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
-    >
+    <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <View style={styles.titleRow}>
           <TouchableOpacity
@@ -673,77 +695,85 @@ const GroupConversationScreen: React.FC = () => {
           />
         )}
 
-        {attachPanelOpen ? (
-          <AttachPanel
-            onShareLocation={handleShareLocation}
-            onSendImage={handlePickAndSendImage}
-            onTakePhoto={handleTakeAndSendPhoto}
-            onSendGif={isGifConfigured() ? () => setGifPickerOpen(true) : undefined}
-            // Zap renders but stays disabled — there's no single recipient
-            // to zap in a group, but hiding the tile entirely confused
-            // users who expected the same set as 1:1 (#237).
-            onSendZap={() => {}}
-            zapDisabled
-            zapAccessibilityLabel="Send a zap (unavailable — no single recipient in a group)"
-            onSendInvoice={() => {
-              closeAttachPanel();
-              setInvoiceSheetOpen(true);
-            }}
-            onShareContact={() => {
-              // Picker opens over the panel; close on cancel/select.
-              setContactPickerOpen(true);
-            }}
-          />
-        ) : null}
+        {/* KeyboardStickyView floats the composer (and the AttachPanel
+            when open) above the IME on Android 15+ edge-to-edge. Same
+            canonical chat pattern as ConversationScreen.tsx. The
+            AttachPanel intentionally lives INSIDE the sticky view so
+            its intrinsic height drives the sticky's total height — the
+            panel + composer together rise to the IME's top edge. */}
+        <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
+          {attachPanelOpen ? (
+            <AttachPanel
+              onShareLocation={handleShareLocation}
+              onSendImage={handlePickAndSendImage}
+              onTakePhoto={handleTakeAndSendPhoto}
+              onSendGif={isGifConfigured() ? () => setGifPickerOpen(true) : undefined}
+              // Zap renders but stays disabled — there's no single recipient
+              // to zap in a group, but hiding the tile entirely confused
+              // users who expected the same set as 1:1 (#237).
+              onSendZap={() => {}}
+              zapDisabled
+              zapAccessibilityLabel="Send a zap (unavailable — no single recipient in a group)"
+              onSendInvoice={() => {
+                closeAttachPanel();
+                setInvoiceSheetOpen(true);
+              }}
+              onShareContact={() => {
+                // Picker opens over the panel; close on cancel/select.
+                setContactPickerOpen(true);
+              }}
+            />
+          ) : null}
 
-        <View style={[styles.composer, { paddingBottom: insets.bottom + 8 }]}>
-          <TouchableOpacity
-            style={styles.attachButton}
-            onPress={() => setAttachPanelOpen((v) => !v)}
-            disabled={sending || sharingLocation || uploadingImage}
-            accessibilityLabel="Attach"
-            testID="group-attach-button"
-          >
-            {sharingLocation || uploadingImage ? (
-              <ActivityIndicator color={colors.brandPink} />
-            ) : (
-              <Plus size={22} color={colors.brandPink} />
-            )}
-          </TouchableOpacity>
-          <TextInput
-            style={styles.input}
-            placeholder="Type a message…"
-            placeholderTextColor={colors.textSupplementary}
-            value={draft}
-            onChangeText={setDraft}
-            onFocus={closeAttachPanel}
-            multiline
-            accessibilityLabel="Group message input"
-            testID="group-message-input"
-            editable={!sending}
-          />
-          <TouchableOpacity
-            style={[styles.sendButton, (!draft.trim() || sending) && styles.sendButtonDisabled]}
-            onPress={handleSend}
-            disabled={!draft.trim() || sending}
-            accessibilityLabel="Send group message"
-            testID="group-send-button"
-          >
-            {sending ? (
-              <ActivityIndicator color={colors.white} />
-            ) : (
-              <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-                <Path
-                  d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z"
-                  stroke={colors.white}
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </Svg>
-            )}
-          </TouchableOpacity>
-        </View>
+          <Animated.View style={[styles.composer, composerSafeAreaStyle]}>
+            <TouchableOpacity
+              style={styles.attachButton}
+              onPress={() => (attachPanelOpen ? closeAttachPanel() : openAttachPanel())}
+              disabled={sending || sharingLocation || uploadingImage}
+              accessibilityLabel="Attach"
+              testID="group-attach-button"
+            >
+              {sharingLocation || uploadingImage ? (
+                <ActivityIndicator color={colors.brandPink} />
+              ) : (
+                <Plus size={22} color={colors.brandPink} />
+              )}
+            </TouchableOpacity>
+            <TextInput
+              style={styles.input}
+              placeholder="Type a message…"
+              placeholderTextColor={colors.textSupplementary}
+              value={draft}
+              onChangeText={setDraft}
+              onFocus={closeAttachPanel}
+              multiline
+              accessibilityLabel="Group message input"
+              testID="group-message-input"
+              editable={!sending}
+            />
+            <TouchableOpacity
+              style={[styles.sendButton, (!draft.trim() || sending) && styles.sendButtonDisabled]}
+              onPress={handleSend}
+              disabled={!draft.trim() || sending}
+              accessibilityLabel="Send group message"
+              testID="group-send-button"
+            >
+              {sending ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+                  <Path
+                    d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z"
+                    stroke={colors.white}
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </Svg>
+              )}
+            </TouchableOpacity>
+          </Animated.View>
+        </KeyboardStickyView>
       </View>
 
       <RenameGroupSheet
@@ -853,7 +883,7 @@ const GroupConversationScreen: React.FC = () => {
           ) : null}
         </Pressable>
       </Modal>
-    </KeyboardAvoidingView>
+    </View>
   );
 };
 

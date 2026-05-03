@@ -1,0 +1,55 @@
+appId: com.lightningpiggy.app.dev
+name: Group conversation composer rises with keyboard
+---
+# Asserts the regression this PR fixes: tapping the message input in a
+# group conversation must keep the composer visible above Gboard
+# instead of letting it slide behind the IME. We can't pixel-verify
+# Maestro can't see the IME's window) but we CAN assert the composer's
+# accessibility node is still in the visible tree AFTER focusing the
+# input. Without the KeyboardStickyView wrap, the composer detaches
+# from the visible region on Android.
+#
+# Preconditions:
+#   - Logged-in account with at least one group conversation visible on
+#     the Messages tab.
+#   - AVD keyboard gates applied (TROUBLESHOOTING.adoc § AVD soft keyboard):
+#       adb shell settings put secure show_ime_with_hard_keyboard 1
+#       adb shell settings put secure stylus_handwriting_enabled 0
+#
+# Run: maestro test tests/e2e/test-group-conversation-keyboard.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 30000
+
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Pick the first visible group conversation. Using a regex anchor on
+# "members" sub-text so we don't accidentally pick a 1:1 DM row.
+- tapOn:
+    text: "TestGroup Abc$"
+- waitForAnimationToEnd:
+    timeout: 4000
+
+- assertVisible:
+    id: 'group-message-input'
+
+# Focusing the input opens the IME on Android. Without
+# KeyboardStickyView, the composer + send button get pushed behind
+# the IME and assertVisible fails (the accessibility node is no
+# longer in the on-screen window region).
+- tapOn:
+    id: 'group-message-input'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# These two should remain visible with the keyboard up — that's the
+# whole point of the fix.
+- assertVisible:
+    id: 'group-message-input'
+- assertVisible:
+    id: 'group-attach-button'
