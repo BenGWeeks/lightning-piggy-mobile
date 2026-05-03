@@ -45,6 +45,38 @@ interface Props {
 
 const MAX_RECORDING_SECONDS = 60;
 
+// Soft cap below typical Blossom server limits (often 25-100 MB) to
+// fail fast with a friendly error rather than waste bandwidth on an
+// upload the server will reject. Bump this when you know your default
+// Blossom server's advertised limit is larger.
+const MAX_VOICE_NOTE_SIZE_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Stat a local `file://` URI by streaming it into a Blob and reading
+ * `blob.size`. We do this rather than pull in `expo-file-system` (not
+ * a current dep) because the same XHR-to-Blob pattern is already used
+ * inside `imageUploadService.readFileAsBase64` for actually shipping
+ * the bytes — it's the most reliable way to read a file:// URI on
+ * Android RN today (the plain `fetch` path is flaky on some OEMs).
+ */
+async function getFileSizeBytes(fileUri: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', fileUri, true);
+    xhr.responseType = 'blob';
+    xhr.onerror = () => reject(new Error(`Failed to stat ${fileUri}`));
+    xhr.onload = () => {
+      const blob = xhr.response as Blob | null;
+      if (!blob) {
+        reject(new Error('Empty blob response when sizing local file'));
+        return;
+      }
+      resolve(blob.size);
+    };
+    xhr.send();
+  });
+}
+
 /**
  * In-app voice-note recording sheet (#235). Tap-to-toggle: the big mic
  * button starts recording on first tap, switches to a stop icon while
@@ -274,6 +306,27 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
 
   const handleSend = useCallback(async () => {
     if (!recordedUri || sending) return;
+    // Belt-and-braces size cap. The 60 s recording limit *should* keep
+    // an AAC clip well under 2 MB at typical speech bitrates, so this
+    // path is unlikely to trigger today — but if a user swaps to a
+    // stricter Blossom server, or the codec/quality changes in future,
+    // we'd rather fail fast here than burn upload bandwidth on a clip
+    // the server will reject anyway.
+    try {
+      const sizeBytes = await getFileSizeBytes(recordedUri);
+      if (sizeBytes > MAX_VOICE_NOTE_SIZE_BYTES) {
+        const sizeMb = (sizeBytes / (1024 * 1024)).toFixed(2);
+        Alert.alert(
+          'Voice note too large',
+          `Voice note too large (${sizeMb} MB). Maximum is 5 MB. Try recording a shorter clip.`,
+        );
+        return;
+      }
+    } catch (err) {
+      console.warn('[VoiceRecordingSheet] size check failed', err);
+      // Fall through — let the upload path surface its own error rather
+      // than blocking the send because we couldn't stat the file.
+    }
     await onSend(recordedUri);
   }, [recordedUri, sending, onSend]);
 
