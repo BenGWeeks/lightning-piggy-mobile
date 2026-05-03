@@ -49,7 +49,7 @@ mkdir -p ~/eas-tmp
 TMPDIR=~/eas-tmp EXPO_NO_DOCTOR=1 \
   eas build --local --platform android --profile production --non-interactive
 ----
-*Cleanup:* `rm -rf ~/eas-tmp/*` between builds when you want to reclaim disk; Gradle re-creates everything. The EAS-CLI checkout itself (`/tmp/benw/eas-build-local-nodejs/...`) gets recreated under TMPDIR and is also safe to delete between runs. Full recipe + rationale in `docs/DEPLOYMENT.adoc` → "Local production builds".
+*Cleanup:* `rm -rf ~/eas-tmp` between builds when you want to reclaim disk; the next run's `mkdir -p ~/eas-tmp` and Gradle will re-create everything, including hidden entries such as `.gradle` or `.expo`. The EAS-CLI checkout itself (`/tmp/benw/eas-build-local-nodejs/...`) gets recreated under TMPDIR and is also safe to delete between runs. Full recipe + rationale in `docs/DEPLOYMENT.adoc` → "Local production builds".
 
 | Maestro can't tap a third-party signer's FAB / button (Aegis, Clave, etc) — `Element not found` or silent no-op
 | Some signer apps (notably Aegis ≥0.5.0, possibly Clave) ship without accessibility labels on key UI elements like the "+" FAB to add a connection. Maestro's `tapOn: { id: ... }` and `tapOn: { text: ... }` both miss because there's nothing to match. The `index:` selector also ranks unpredictably for un-labelled `ImageView` clickables. +
