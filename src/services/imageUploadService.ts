@@ -99,26 +99,80 @@ export async function uploadToNostrBuild(imageUri: string): Promise<string> {
 }
 
 /**
- * Upload an image using the user's configured Blossom server when a signer is
- * available, falling back to nostr.build otherwise. Callers that don't have a
- * Nostr signer (e.g. not yet logged in) can pass `signer: null` to force the
- * nostr.build path.
+ * Read a local `file://` URI as a base64 string via XMLHttpRequest +
+ * FileReader. Used by `uploadBlob` callers (voice notes from #235) that
+ * don't have a picker handing them a base64 payload.
  *
- * `base64` is the raw image bytes as a base64 string — available directly
- * from `expo-image-picker` when the picker is launched with `base64: true`.
- * Blossom uploads use this to avoid reading `file://` URIs, which is
- * unreliable on Android in React Native. nostr.build uploads use
- * FormData with `{uri, name, type}`, which the native FormData serializer
- * can read without going through the JS fetch layer.
+ * We use XHR rather than `fetch().arrayBuffer()` because RN's fetch is
+ * inconsistent across versions when reading `file://` on Android — the
+ * exact same reason `uploadToBlossom` insists on a base64 payload.
+ */
+async function readFileAsBase64(fileUri: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', fileUri, true);
+    xhr.responseType = 'blob';
+    xhr.onerror = () => reject(new Error(`Failed to read ${fileUri}`));
+    xhr.onload = () => {
+      const blob = xhr.response as Blob;
+      if (!blob) {
+        reject(new Error('Empty blob response when reading local file'));
+        return;
+      }
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('FileReader failed on local file'));
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        // result is a `data:<mime>;base64,<payload>` string — strip the prefix.
+        const comma = result.indexOf(',');
+        if (comma < 0) {
+          reject(new Error('Unexpected FileReader result shape'));
+          return;
+        }
+        resolve(result.slice(comma + 1));
+      };
+      reader.readAsDataURL(blob);
+    };
+    xhr.send();
+  });
+}
+
+/**
+ * Upload an arbitrary blob (image, audio, …) using the user's configured
+ * Blossom server when a signer is available, falling back to nostr.build
+ * otherwise. Blossom is content-addressed and MIME-agnostic — the same
+ * pipeline that ships images works unchanged for `.m4a` voice notes
+ * (#235), GIFs, etc.
+ *
+ * `base64` is optional. When the caller already has the bytes in memory
+ * (e.g. expo-image-picker with `base64: true`) pass them through to skip
+ * a redundant file read. When omitted, we read the file from disk via
+ * XHR + FileReader. nostr.build uploads always go through the
+ * FormData `{uri, name, type}` path which doesn't need base64.
+ */
+export async function uploadBlob(
+  fileUri: string,
+  signer: BlossomSigner | null,
+  base64?: string | null,
+): Promise<string> {
+  if (signer) {
+    const server = await getBlossomServer();
+    const payload = base64 ?? (await readFileAsBase64(fileUri));
+    return uploadToBlossom(fileUri, server, signer, payload);
+  }
+  return uploadToNostrBuild(fileUri);
+}
+
+/**
+ * Image-specific alias for `uploadBlob`. Kept for legacy call sites
+ * (image picker / camera / profile avatar) that consistently pass a
+ * picker base64 payload — semantically the same as `uploadBlob`, but
+ * the name documents the intent at the call site.
  */
 export async function uploadImage(
   imageUri: string,
   signer: BlossomSigner | null,
   base64?: string | null,
 ): Promise<string> {
-  if (signer) {
-    const server = await getBlossomServer();
-    return uploadToBlossom(imageUri, server, signer, base64);
-  }
-  return uploadToNostrBuild(imageUri);
+  return uploadBlob(imageUri, signer, base64);
 }

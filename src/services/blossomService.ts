@@ -51,6 +51,19 @@ function inferContentType(imageUri: string, blobType: string | undefined): strin
       return 'image/heic';
     case 'heif':
       return 'image/heif';
+    // Voice notes (#235). expo-audio's HIGH_QUALITY preset emits .m4a on
+    // both Android and iOS; keep .mp3 / .wav / .aac / .ogg in the table
+    // so future audio-attach paths (e.g. picker-based uploads) flow
+    // through Blossom with the right MIME.
+    case 'm4a':
+    case 'aac':
+      return 'audio/mp4';
+    case 'mp3':
+      return 'audio/mpeg';
+    case 'wav':
+      return 'audio/wav';
+    case 'ogg':
+      return 'audio/ogg';
     case 'jpg':
     case 'jpeg':
     default:
@@ -67,15 +80,16 @@ export async function uploadToBlossom(
   const server = serverUrl.trim().replace(/\/+$/, '');
   if (!server) throw new Error('Blossom server URL is empty');
 
-  // Prefer the base64 payload returned directly by expo-image-picker when
-  // the caller passed `base64: true`. Reading local `file://` URIs via
+  // Prefer the base64 payload returned directly by expo-image-picker (or
+  // the file→base64 step in uploadBlob for non-image blobs) when the
+  // caller passed `base64: true`. Reading local `file://` URIs via
   // fetch/XHR is unreliable on Android in React Native — the base64 path
   // keeps the upload in pure JS and avoids that failure mode entirely.
   if (!imageBase64) {
-    throw new Error('Selected image has no base64 payload');
+    throw new Error('Selected file has no base64 payload');
   }
   const bytes = Buffer.from(imageBase64, 'base64');
-  if (bytes.length === 0) throw new Error('Selected image is empty');
+  if (bytes.length === 0) throw new Error('Selected file is empty');
   console.log('[Blossom] read', bytes.length, 'bytes from base64');
 
   const hashHex = bytesToHex(sha256(bytes));
@@ -86,7 +100,7 @@ export async function uploadToBlossom(
   const unsigned: UnsignedNostrEvent = {
     kind: 24242,
     created_at: nowSec,
-    content: 'Upload image',
+    content: 'Upload blob',
     tags: [
       ['t', 'upload'],
       ['x', hashHex],
