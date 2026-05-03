@@ -10,6 +10,20 @@
 | Bottom sheet doesn't slide up when keyboard opens on Android
 | All of these are required: (1) Use `BottomSheetTextInput` from `@gorhom/bottom-sheet` instead of React Native's `TextInput`. (2) Use `BottomSheetScrollView` (not `BottomSheetView`) as the content wrapper. (3) Set `keyboardBehavior="interactive"`, `keyboardBlurBehavior="restore"`, and `android_keyboardInputMode="adjustResize"` on the `BottomSheetModal`. (4) Ensure `android:windowSoftInputMode="adjustResize"` in AndroidManifest (via `plugins/withAdjustResize.js`). (5) Add a `Keyboard.addListener` to track keyboard height and set dynamic `paddingBottom` on the `contentContainerStyle` (e.g. `paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40`). (6) Do NOT wrap content in `TouchableWithoutFeedback` with `Keyboard.dismiss` — this interferes with the sheet's keyboard handling. See `NostrLoginSheet.tsx` as the reference implementation.
 
+| AVD soft keyboard never appears (focus an input → no IME, or IME blinks then dismisses)
+| The Android emulator suppresses the on-screen IME when it detects a "hardware keyboard" (the AVD reports the host keyboard as attached). On API 35+ a second gate kicks in: `stylus_handwriting_enabled` defaults to `1`, which routes some focus events into the stylus-handwriting service instead of bringing up Gboard. Both gates regress on AVD restart unless re-applied. +
+*Fix (apply BOTH; `setprop`-style settings persist across `am force-stop` but not across emulator boot):* +
+[source,bash]
+----
+adb shell settings put secure show_ime_with_hard_keyboard 1
+adb shell settings put secure stylus_handwriting_enabled 0
+adb shell ime reset
+adb shell ime enable com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME
+adb shell ime set com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME
+----
+*Verify:* `adb shell dumpsys input_method | grep mInputShown` should report `mInputShown=true` once an input is focused. The audit script `scripts/keyboard-screenshot-audit.sh` polls this gate before every screenshot. +
+*Lower-friction alternative:* run daily-driver dev work on **API 34, no Google Play, "Medium Phone" device profile**. API 34 doesn't ship the stylus-handwriting service so the second gate is a no-op, and the smaller GMS surface frees ~300 MB RAM (avoiding the "System UI isn't responding" stalls under memory pressure). API 36 is fine for production-build smoke testing — just expect to re-run both `settings put` commands after each cold boot.
+
 | Maestro can't find elements behind a modal Alert dialog
 | Dismiss the alert first (e.g. tap "KEEP CURRENT" or "Cancel") before asserting visibility of elements underneath.
 
