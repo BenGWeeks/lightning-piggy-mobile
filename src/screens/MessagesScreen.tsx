@@ -412,11 +412,6 @@ const MessagesScreen: React.FC = () => {
               item.kind === 'dm' ? `dm:${item.summary.id}` : `group:${item.summary.group.id}`
             }
             renderItem={renderItem}
-            // 250 dp ≈ 3-4 rows of pre-render around the viewport. The
-            // FlashList default is more aggressive, which means many
-            // off-screen avatars start decoding during a fling and
-            // contend with the on-screen frames. See #245.
-            drawDistance={250}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
             ListEmptyComponent={
               <View style={styles.emptyState}>

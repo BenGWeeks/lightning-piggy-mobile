@@ -484,9 +484,6 @@ const FriendsScreen: React.FC = () => {
                 data={combinedList}
                 keyExtractor={(item) => item.id}
                 renderItem={renderItem}
-                // Limit pre-render around the viewport so off-screen
-                // avatars don't all start decoding during a fling. See #245.
-                drawDistance={250}
                 refreshControl={
                   <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
                 }
