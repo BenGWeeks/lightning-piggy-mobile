@@ -1,0 +1,28 @@
+appId: com.lightningpiggy.app.dev
+name: Keyboard audit — AddWalletWizard NWC URL input
+---
+- launchApp:
+    appId: com.lightningpiggy.app.dev
+    stopApp: true
+- waitForAnimationToEnd:
+    timeout: 8000
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'drawer-row-wallets'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'add-wallet-button'
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: 'wallet-type-nwc'
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: 'nwc-url-input'
+- waitForAnimationToEnd:
+    timeout: 2000

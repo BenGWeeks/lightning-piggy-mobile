@@ -13,7 +13,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts,.tsx",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,json}\"",
-    "format": "prettier --write \"src/**/*.{ts,tsx,json}\""
+    "format": "prettier --write \"src/**/*.{ts,tsx,json}\"",
+    "test": "jest",
+    "test:coverage": "jest --coverage --coverageReporters=json-summary --coverageReporters=text"
   },
   "dependencies": {
     "@bitcoinerlab/secp256k1": "^1.2.0",
@@ -71,13 +73,18 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
+    "@testing-library/react-native": "^13.0.0",
+    "@types/jest": "^29.5.14",
     "@types/react": "~19.2.2",
     "@typescript-eslint/eslint-plugin": "^8.57.2",
     "@typescript-eslint/parser": "^8.57.2",
     "eslint": "^9.39.4",
     "eslint-config-expo": "^55.0.0",
     "eslint-config-prettier": "^10.1.8",
+    "jest": "^29.7.0",
+    "jest-expo": "~55.0.2",
     "prettier": "^3.8.1",
+    "react-test-renderer": "19.2.0",
     "typescript": "~5.9.2"
   },
   "private": true
