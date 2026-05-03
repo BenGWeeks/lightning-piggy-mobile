@@ -15,7 +15,14 @@ import { LRUCache } from '../utils/lru';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
-import type { NostrProfile, NostrContact, RelayConfig, SignerType } from '../types/nostr';
+import * as nostrConnectService from '../services/nostrConnectService';
+import type {
+  NostrProfile,
+  NostrContact,
+  RelayConfig,
+  SignerType,
+  Nip46Connection,
+} from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import {
   classifyRumor,
@@ -70,6 +77,10 @@ function clearMemoisedSecretKey(): void {
 // doesn't leak plaintext between identities.
 const AMBER_NIP17_CACHE_KEY = 'amber_nip17_cache_v1';
 const NSEC_NIP17_CACHE_KEY = 'nsec_nip17_cache_v1';
+/** Per-signer wrap cache for the NIP-46 path. Same shape as the other
+ *  two — kept under its own key so cross-signer login on the same
+ *  device doesn't leak plaintext between identities. */
+const NIP46_NIP17_CACHE_KEY = 'nip46_nip17_cache_v1';
 const NIP17_CACHE_CAP = 5000;
 const AMBER_NIP17_ENABLED_KEY = 'amber_nip17_enabled';
 
@@ -345,6 +356,10 @@ function mergeConversationMessages(
 const NSEC_KEY = 'nostr_nsec';
 const PUBKEY_KEY = 'nostr_pubkey';
 const SIGNER_TYPE_KEY = 'nostr_signer_type';
+/** SecureStore (not AsyncStorage) — the persisted NIP-46 connection
+ *  contains a per-app private key. Anyone with it + the bunker pubkey
+ *  + relay can impersonate this app's session against the bunker. */
+const NIP46_CONNECTION_KEY = 'nostr_nip46_connection';
 const CONTACTS_CACHE_KEY = 'nostr_contacts_cache';
 const PROFILES_CACHE_KEY = 'nostr_profiles_cache';
 const CACHE_TIMESTAMP_KEY = 'nostr_cache_timestamp';
@@ -397,6 +412,13 @@ interface NostrContextType {
   signerType: SignerType | null;
   loginWithNsec: (nsec: string) => Promise<{ success: boolean; error?: string }>;
   loginWithAmber: () => Promise<{ success: boolean; error?: string }>;
+  /**
+   * Finalise a NIP-46 ("Nostr Connect" / bunker) pairing. Called by
+   * `NostrLoginSheet` once the bunker has acked the `nostrconnect://`
+   * QR. The connection is persisted to SecureStore so subsequent app
+   * launches auto-restore the BunkerSigner without re-pairing.
+   */
+  loginWithNip46: (connection: Nip46Connection) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   /**
    * Re-fetch the logged-in user's kind-0.
@@ -823,6 +845,25 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setSignerType('amber');
             setIsLoggedIn(true);
           }
+        } else if (storedSignerType === 'nip46') {
+          // Hydrate the persisted NIP-46 connection from SecureStore
+          // (same store we wrote it to in `loginWithNip46`). The
+          // `userPubkey` field is what we treat as the logged-in user;
+          // the bunker pubkey is internal plumbing.
+          const storedConnRaw = await SecureStore.getItemAsync(NIP46_CONNECTION_KEY);
+          const storedPubkey = await SecureStore.getItemAsync(PUBKEY_KEY);
+          if (storedConnRaw && storedPubkey) {
+            try {
+              const conn = JSON.parse(storedConnRaw) as Nip46Connection;
+              await nostrConnectService.setActiveConnection(conn);
+              pk = storedPubkey;
+              setPubkey(pk);
+              setSignerType('nip46');
+              setIsLoggedIn(true);
+            } catch (e) {
+              if (__DEV__) console.warn('[Nostr] NIP-46 connection hydrate failed:', e);
+            }
+          }
         }
 
         if (!pk) return;
@@ -969,6 +1010,63 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [loadRelays, loadProfile, loadContacts, loadContactsFromCache, hydrateDmInboxFromCache]);
 
+  /**
+   * Finalise a NIP-46 ("Nostr Connect" / bunker) pairing. The QR scan +
+   * ack handshake happens in NostrLoginSheet (it owns the per-app
+   * keypair generation, the URI build, and the await-for-bunker round-
+   * trip). By the time we get here, `nostrConnectService` already has
+   * a live `BunkerSigner` in memory and the connection object is ready
+   * to persist.
+   *
+   * Mirrors `loginWithAmber`'s shape — same SecureStore writes, same
+   * post-login background refresh — so the auto-login useEffect can
+   * pick it up on next cold start without special-casing.
+   */
+  const loginWithNip46 = useCallback(
+    async (connection: Nip46Connection): Promise<{ success: boolean; error?: string }> => {
+      setIsLoggingIn(true);
+      try {
+        const pk = connection.userPubkey;
+        setPubkey(pk);
+        await SecureStore.setItemAsync(PUBKEY_KEY, pk);
+        await SecureStore.setItemAsync(NIP46_CONNECTION_KEY, JSON.stringify(connection));
+        await SecureStore.setItemAsync(SIGNER_TYPE_KEY, 'nip46');
+
+        // The pairing flow already populated nostrConnectService's
+        // in-memory cache via `awaitBunkerPair`; re-asserting here is
+        // cheap and idempotent — guards against the (rare) case where
+        // the caller built the connection from a non-pairing path.
+        await nostrConnectService.setActiveConnection(connection);
+
+        setSignerType('nip46');
+        setIsLoggedIn(true);
+        setIsLoggingIn(false);
+
+        await loadContactsFromCache();
+        await hydrateDmInboxFromCache(pk);
+        InteractionManager.runAfterInteractions(async () => {
+          try {
+            const readRelays = await loadRelays(pk);
+            await loadProfile(pk, readRelays);
+            loadContacts(pk, readRelays).catch((e) =>
+              console.warn('Background contact refresh failed:', e),
+            );
+          } catch (error) {
+            console.warn('NIP-46 post-login refresh failed:', error);
+          }
+        });
+
+        return { success: true };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'NIP-46 login failed';
+        return { success: false, error: message };
+      } finally {
+        setIsLoggingIn(false);
+      }
+    },
+    [loadRelays, loadProfile, loadContacts, loadContactsFromCache, hydrateDmInboxFromCache],
+  );
+
   const logout = useCallback(async () => {
     clearMemoisedSecretKey();
     setAmberNip44Permission('unknown');
@@ -977,6 +1075,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     await SecureStore.deleteItemAsync(NSEC_KEY);
     await SecureStore.deleteItemAsync(PUBKEY_KEY);
     await SecureStore.deleteItemAsync(SIGNER_TYPE_KEY);
+    await SecureStore.deleteItemAsync(NIP46_CONNECTION_KEY);
+    // Tear down the live BunkerSigner subscription so the bunker
+    // doesn't keep receiving requests under the previous identity if
+    // someone signs in again immediately.
+    await nostrConnectService.setActiveConnection(null).catch(() => {});
     const toRemove: string[] = [
       CONTACTS_CACHE_KEY,
       CONTACTS_TIMESTAMP_KEY,
@@ -992,6 +1095,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       AMBER_NIP17_CACHE_KEY,
       AMBER_NIP17_ENABLED_KEY,
       NSEC_NIP17_CACHE_KEY,
+      NIP46_NIP17_CACHE_KEY,
     ];
     // PR B caches are per-user-keyed — only clear the ones for the
     // user we're logging out of. Per-peer conversation caches share
@@ -1089,6 +1193,18 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         } catch {
           return null;
         }
+      } else if (signerType === 'nip46') {
+        try {
+          const eventJson = JSON.stringify(zapEvent);
+          const { event: signedEventJson } = await nostrConnectService.requestEventSignature(
+            eventJson,
+            '',
+            pubkey,
+          );
+          return signedEventJson || null;
+        } catch {
+          return null;
+        }
       }
 
       return null;
@@ -1112,6 +1228,16 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         } else if (signerType === 'amber') {
           const eventJson = JSON.stringify(event);
           const { event: signedEventJson } = await amberService.requestEventSignature(
+            eventJson,
+            '',
+            pubkey,
+          );
+          if (!signedEventJson) return false;
+          const signed = JSON.parse(signedEventJson);
+          await nostrService.publishSignedEvent(signed, targetRelays);
+        } else if (signerType === 'nip46') {
+          const eventJson = JSON.stringify(event);
+          const { event: signedEventJson } = await nostrConnectService.requestEventSignature(
             eventJson,
             '',
             pubkey,
@@ -1153,6 +1279,16 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         } else if (signerType === 'amber') {
           const eventJson = JSON.stringify(event);
           const { event: signedEventJson } = await amberService.requestEventSignature(
+            eventJson,
+            '',
+            pubkey,
+          );
+          if (!signedEventJson) return false;
+          const signed = JSON.parse(signedEventJson);
+          await nostrService.publishSignedEvent(signed, targetRelays);
+        } else if (signerType === 'nip46') {
+          const eventJson = JSON.stringify(event);
+          const { event: signedEventJson } = await nostrConnectService.requestEventSignature(
             eventJson,
             '',
             pubkey,
@@ -1336,6 +1472,31 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           const signed = JSON.parse(signedEventJson);
           await nostrService.publishSignedEvent(signed, targetRelays);
           return { success: true };
+        } else if (signerType === 'nip46') {
+          // NIP-46 has the same Encrypt → SignEvent → Publish shape as
+          // the Amber path, just over a relay round-trip instead of an
+          // Android Intent. Two bunker round-trips per DM (one each).
+          const ciphertext = await nostrConnectService.requestNip04Encrypt(
+            plaintext,
+            normalizedRecipientPubkey,
+            pubkey,
+          );
+          if (!ciphertext) return { success: false, error: 'Bunker returned empty ciphertext' };
+          const event = {
+            kind: 4,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: [['p', normalizedRecipientPubkey]],
+            content: ciphertext,
+          };
+          const { event: signedEventJson } = await nostrConnectService.requestEventSignature(
+            JSON.stringify(event),
+            '',
+            pubkey,
+          );
+          if (!signedEventJson) return { success: false, error: 'Bunker returned empty event' };
+          const signed = JSON.parse(signedEventJson);
+          await nostrService.publishSignedEvent(signed, targetRelays);
+          return { success: true };
         }
         return { success: false, error: 'Unsupported signer type' };
       } catch (error) {
@@ -1455,6 +1616,61 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           return { success: true, wrapsPublished: result.wrapsPublished };
         }
 
+        if (signerType === 'nip46') {
+          // NIP-46 group send. Mirrors the Amber path's shape exactly —
+          // including the partial-send-as-failure semantics added in PR
+          // #267 — but routes per-recipient nip44_encrypt + seal-sign
+          // calls through the bunker instead of an Android Intent.
+          //
+          // Latency caveat: each recipient costs 2 bunker round-trips
+          // (~400-3000ms each), so a 5-member group can take 5-15s in
+          // the worst case. The composer surfaces a "sending..."
+          // spinner while this runs. See issue #283 for the latency
+          // analysis vs Amber's IPC fast-path.
+          const currentUser = pubkey;
+          const result = await nostrService.sendNip17ToManyWithSigner({
+            senderPubkey: currentUser,
+            rumor,
+            recipientPubkeys: input.memberPubkeys,
+            relays: targetRelays,
+            signerNip44Encrypt: (plaintext, recipientPubkey) =>
+              nostrConnectService.requestNip44Encrypt(plaintext, recipientPubkey, currentUser),
+            signerSignSeal: async (unsignedSeal) => {
+              // Strip pubkey from the JSON we send to the bunker —
+              // matches the Amber path: the seal's pubkey field is
+              // derived from the signer's identity, not from the
+              // unsigned event we hand it.
+              const { pubkey: _omit, ...sealForSigner } = unsignedSeal;
+              void _omit;
+              const { event: signedEventJson } = await nostrConnectService.requestEventSignature(
+                JSON.stringify(sealForSigner),
+                '',
+                currentUser,
+              );
+              if (!signedEventJson) {
+                throw new Error('NIP-46 signer returned empty signed seal');
+              }
+              return JSON.parse(signedEventJson);
+            },
+          });
+          if (result.wrapsPublished === 0) {
+            return { success: false, error: result.errors[0] ?? 'No wraps published' };
+          }
+          // Match PR #267's partial-send semantics — surface "5 of 7
+          // delivered" as a non-success so the composer doesn't clear.
+          // Without this check Copilot will (rightly) flag the path as
+          // hiding partial failures from the user.
+          if (result.errors.length > 0) {
+            const intended = result.wrapsPublished + result.errors.length;
+            return {
+              success: false,
+              wrapsPublished: result.wrapsPublished,
+              error: `Sent to ${result.wrapsPublished} of ${intended} members. ${result.errors[0]}`,
+            };
+          }
+          return { success: true, wrapsPublished: result.wrapsPublished };
+        }
+
         return { success: false, error: 'Unsupported signer type' };
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to send group message';
@@ -1508,6 +1724,21 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           return { success: true };
         }
 
+        if (signerType === 'nip46') {
+          // Single signEvent — one bunker round-trip, no fan-out.
+          const { event: signedEventJson } = await nostrConnectService.requestEventSignature(
+            JSON.stringify(event),
+            '',
+            pubkey,
+          );
+          if (!signedEventJson) {
+            return { success: false, error: 'NIP-46 signer returned empty event' };
+          }
+          const signed = JSON.parse(signedEventJson);
+          await nostrService.publishSignedEvent(signed, targetRelays);
+          return { success: true };
+        }
+
         return { success: false, error: 'Unsupported signer type' };
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to publish group state';
@@ -1537,6 +1768,17 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
         if (signerType === 'amber') {
           return await amberService.requestNip04Decrypt(ciphertext, counterpartyPubkey, pubkey);
+        }
+        if (signerType === 'nip46') {
+          // ~200-1500ms per call. The inbox path batches these in
+          // DECRYPT_YIELD_EVERY-sized parallel groups, so total wall-
+          // time scales with batch_size / parallelism. See note in
+          // nostrConnectService about batched decrypt being a follow-up.
+          return await nostrConnectService.requestNip04Decrypt(
+            ciphertext,
+            counterpartyPubkey,
+            pubkey,
+          );
         }
         return null;
       } catch (error) {
@@ -1721,7 +1963,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           ? NSEC_NIP17_CACHE_KEY
           : signerType === 'amber'
             ? AMBER_NIP17_CACHE_KEY
-            : null;
+            : signerType === 'nip46'
+              ? NIP46_NIP17_CACHE_KEY
+              : null;
       const wrapCacheRaw = signerWrapCacheKey
         ? await AsyncStorage.getItem(signerWrapCacheKey)
         : null;
@@ -1868,6 +2112,48 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               } catch (error) {
                 if (__DEV__) console.warn('[Nostr] Amber NIP-17 thread unwrap failed:', error);
               }
+            }
+          }
+        } else if (signerType === 'nip46') {
+          // Same shape as the Amber thread-view path — use the per-
+          // request decrypt (slow, but one prompt per wrap is fine when
+          // the user has actively opened a thread). Cache hits short-
+          // circuit, misses pay the bunker round-trip.
+          const raw = await AsyncStorage.getItem(NIP46_NIP17_CACHE_KEY);
+          const cache = safeParseRecord<Nip17CacheEntry>(raw);
+          for (const wrap of kind1059) {
+            const cached = cache[wrap.id];
+            if (cached) {
+              nip17CacheHits++;
+              if (cached.partnerPubkey !== normalized) continue;
+              decrypted.push({
+                id: wrap.id,
+                fromMe: cached.fromMe,
+                text: cached.text,
+                createdAt: cached.createdAt,
+              });
+              continue;
+            }
+            nip17FreshDecrypts++;
+            try {
+              const rumor = await unwrapWrapViaNip44(
+                wrap,
+                (ct, cp) => nostrConnectService.requestNip44Decrypt(ct, cp, pubkey),
+                onSkip,
+              );
+              if (!rumor) continue;
+              const routeResult = await tryRouteGroupRumor(rumor, pubkey, wrap.id);
+              if (routeResult.kind !== 'not-group') continue;
+              const partnership = partnerFromRumor(rumor, pubkey);
+              if (!partnership || partnership.partnerPubkey !== normalized) continue;
+              decrypted.push({
+                id: wrap.id,
+                fromMe: partnership.fromMe,
+                text: rumor.content,
+                createdAt: rumor.created_at,
+              });
+            } catch (error) {
+              if (__DEV__) console.warn('[Nostr] NIP-46 NIP-17 thread unwrap failed:', error);
             }
           }
         }
@@ -2241,6 +2527,72 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 await writeNip17Cache(AMBER_NIP17_CACHE_KEY, cache);
               }
             }
+          } else if (refreshForSigner === 'nip46' && kind1059.length > 0) {
+            // NIP-46 inbox decrypt path. Per-wrap relay round-trip
+            // (~200-1500ms). For an inbox with 50 wraps that's 10-75s
+            // wall-time on cold cache — acceptable as long as we keep
+            // the spinner visible. Cache hits short-circuit for free.
+            //
+            // Trade-off vs Amber's silent ContentResolver fast-path:
+            // there's no equivalent on NIP-46 today (would require a
+            // spec'd `nip44_decrypt_batch` extension co-ordinated
+            // across Clave / nsec.app / Aegis). Documented in
+            // nostrConnectService.requestNip44DecryptSilent.
+            const raw = await AsyncStorage.getItem(NIP46_NIP17_CACHE_KEY);
+            const cache = safeParseRecord<Nip17CacheEntry>(raw);
+            const newlyCached: Nip17CacheEntry[] = [];
+            for (const wrap of kind1059) {
+              const cached = cache[wrap.id];
+              if (cached) {
+                if (!refreshFollows.has(cached.partnerPubkey)) continue;
+                entries.push({
+                  id: cached.wrapId,
+                  partnerPubkey: cached.partnerPubkey,
+                  fromMe: cached.fromMe,
+                  createdAt: cached.createdAt,
+                  text: cached.text,
+                  wireKind: cached.wireKind,
+                });
+                continue;
+              }
+              try {
+                const rumor = await unwrapWrapViaNip44(
+                  wrap,
+                  (ct, cp) => nostrConnectService.requestNip44Decrypt(ct, cp, refreshForPubkey),
+                  onSkip,
+                );
+                if (!rumor) continue;
+                const routeResult = await tryRouteGroupRumor(rumor, refreshForPubkey, wrap.id);
+                if (routeResult.kind !== 'not-group') continue;
+                const partnership = partnerFromRumor(rumor, refreshForPubkey);
+                if (!partnership) continue;
+                if (!refreshFollows.has(partnership.partnerPubkey)) continue;
+                const entry: Nip17CacheEntry = {
+                  id: wrap.id,
+                  wrapId: wrap.id,
+                  partnerPubkey: partnership.partnerPubkey,
+                  fromMe: partnership.fromMe,
+                  createdAt: rumor.created_at,
+                  text: rumor.content,
+                  wireKind: rumor.kind,
+                };
+                cache[wrap.id] = entry;
+                newlyCached.push(entry);
+                entries.push({
+                  id: entry.id,
+                  partnerPubkey: entry.partnerPubkey,
+                  fromMe: entry.fromMe,
+                  createdAt: entry.createdAt,
+                  text: entry.text,
+                  wireKind: entry.wireKind,
+                });
+              } catch (error) {
+                if (__DEV__) console.warn('[Nostr] NIP-46 NIP-17 unwrap failed:', error);
+              }
+            }
+            if (newlyCached.length > 0) {
+              await writeNip17Cache(NIP46_NIP17_CACHE_KEY, cache);
+            }
           }
 
           // Identity-change guard: if the user logged out or switched signer
@@ -2338,6 +2690,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           );
           if (!signedEventJson) return null;
           return JSON.parse(signedEventJson) as SignedEvent;
+        } else if (signerType === 'nip46') {
+          const { event: signedEventJson } = await nostrConnectService.requestEventSignature(
+            JSON.stringify(event),
+            '',
+            pubkey,
+          );
+          if (!signedEventJson) return null;
+          return JSON.parse(signedEventJson) as SignedEvent;
         }
         return null;
       } catch (error) {
@@ -2359,6 +2719,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       signerType,
       loginWithNsec,
       loginWithAmber,
+      loginWithNip46,
       logout,
       refreshProfile,
       refreshContacts,
@@ -2388,6 +2749,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       signerType,
       loginWithNsec,
       loginWithAmber,
+      loginWithNip46,
       logout,
       refreshProfile,
       refreshContacts,
