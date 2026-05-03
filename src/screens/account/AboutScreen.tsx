@@ -5,11 +5,11 @@ import {
   Image,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   ActivityIndicator,
   Linking,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Alert } from '../../components/BrandedAlert';
 import * as nip19 from 'nostr-tools/nip19';
 import { UserRound } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
@@ -191,10 +191,6 @@ const AboutScreen: React.FC = () => {
           initialAddress={teamProfile.lud16}
           initialPicture={teamProfile.picture || undefined}
           recipientPubkey={teamProfile.pubkey}
-          // Preset amount pills on the amount-entry step so kids can tap
-          // a sensible team-zap value (21 / 100 / 1k / 10k sats) instead
-          // of typing one and accidentally sending too much.
-          suggestedAmounts={[21, 100, 1000, 10000]}
         />
       )}
       <FeedbackSheet

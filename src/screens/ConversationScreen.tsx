@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   Pressable,
   Modal,
@@ -16,14 +15,9 @@ import {
   StyleSheet,
 } from 'react-native';
 import { Alert } from '../components/BrandedAlert';
-import {
-  KeyboardController,
-  KeyboardStickyView,
-  useReanimatedKeyboardAnimation,
-} from 'react-native-keyboard-controller';
-import Animated, { useAnimatedStyle } from 'react-native-reanimated';
+import { KeyboardController } from 'react-native-keyboard-controller';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { Zap, Send, Plus, ArrowDown } from 'lucide-react-native';
+import { Zap, ArrowDown } from 'lucide-react-native';
 import { Image as ExpoImage } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -37,6 +31,7 @@ import type { Palette } from '../styles/palettes';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 import SendSheet from '../components/SendSheet';
 import AttachPanel from '../components/AttachPanel';
+import ConversationComposer from '../components/ConversationComposer';
 import GifPickerSheet from '../components/GifPickerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
 import MessageBubble from '../components/MessageBubble';
@@ -136,22 +131,8 @@ const ConversationScreen: React.FC = () => {
   const navigation = useNavigation<ConversationNavigation>();
   const route = useRoute<ConversationRoute>();
   const insets = useSafeAreaInsets();
-  // Memoised so the FlatList's contentContainerStyle reference only
-  // changes when `attachPanelOpen` flips. Without this the array literal
-  // was re-created on every render (e.g. each keystroke as `draft`
-  // changes), causing extra FlatList layout work in a hot path.
-  // Drives the composer's animated paddingBottom: when keyboard is closed
-  // we add insets.bottom of dead space so the input row sits above the
-  // gesture bar; as the keyboard opens we shrink that to 0 so the input
-  // hugs the keyboard's top edge with no whitespace gap. This replaces
-  // the old `KeyboardStickyView offset.closed: -insets.bottom` shift,
-  // which left the composer visually overlapping the FlatList by
-  // insets.bottom dp (its layout box stayed at parent.bottom while the
-  // visual rendered shifted up).
-  const keyboard = useReanimatedKeyboardAnimation();
-  const composerSafeAreaStyle = useAnimatedStyle(() => ({
-    paddingBottom: 8 + Math.max(insets.bottom * (1 + keyboard.progress.value * -1), 0),
-  }));
+  // The composer owns its own keyboard wiring (KeyboardStickyView +
+  // useReanimatedKeyboardAnimation) — see ConversationComposer.tsx.
   const { pubkey, name, picture, lightningAddress } = route.params;
 
   const {
@@ -1073,23 +1054,35 @@ const ConversationScreen: React.FC = () => {
           </View>
         ) : null}
 
-        {/* Composer sits inside KeyboardStickyView so it rides above the
-            IME on Android 15+. Both `closed` and `opened` offsets are 0
-            so the sticky view's layout box matches its visual position;
-            the gesture-bar inset is handled by an animated paddingBottom
-            on the composer itself (composerSafeAreaStyle), which goes
-            from 8 + insets.bottom (closed → above gesture bar) to 8
-            (open → flush against keyboard top, no whitespace gap). This
-            way the FlatList ends right where the composer begins, with
-            no inset overlap to compensate for. */}
-        <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
-          {/* Inline attach panel — renders ABOVE the composer row when
-              open. Its intrinsic height (4-col grid + paddings) drives
-              the sticky view's total height, so the composer + panel
-              together rise to sit at the screen bottom. Opening the
-              panel dismisses the IME (see openAttachPanel) so we never
-              have to stack panel + composer + keyboard. */}
-          {attachPanelOpen ? (
+        {/* Composer + attach panel + IME-aware safe area now live in the
+            shared ConversationComposer (#251). Both the 1:1 and group
+            screens render through the same component so the keyboard
+            wrapper, animated paddingBottom, and attach-panel placement
+            can't drift again the way they did between v22 and v26. */}
+        <ConversationComposer
+          value={draft}
+          onChangeText={setDraft}
+          onSend={handleSend}
+          sending={sending}
+          disabled={!isLoggedIn}
+          onAttachToggle={() => (attachPanelOpen ? closeAttachPanel() : openAttachPanel())}
+          attachOpen={attachPanelOpen}
+          attachDisabled={sharingLocation || uploadingImage}
+          attachLoading={sharingLocation || uploadingImage}
+          onInputFocus={closeAttachPanel}
+          placeholder="Message"
+          // 1:1 ships the compact lucide Send icon (40x40) + a light-grey
+          // attach button background. Defaults match this so we keep the
+          // shipped 1:1 visuals byte-for-byte.
+          sendButtonVariant="icon"
+          attachButtonHasBackground
+          composerPaddingHorizontal={10}
+          testIDs={{
+            input: 'conversation-input',
+            attach: 'conversation-attach',
+            send: 'conversation-send',
+          }}
+          attachPanel={
             <AttachPanel
               onShareLocation={handleShareLocation}
               onSendImage={handlePickAndSendImage}
@@ -1118,48 +1111,8 @@ const ConversationScreen: React.FC = () => {
                   : undefined
               }
             />
-          ) : null}
-          <Animated.View style={[styles.composer, composerSafeAreaStyle]}>
-            <TouchableOpacity
-              style={styles.composerAttachButton}
-              onPress={() => (attachPanelOpen ? closeAttachPanel() : openAttachPanel())}
-              disabled={!isLoggedIn || sending || sharingLocation || uploadingImage}
-              accessibilityLabel="Attach"
-              testID="conversation-attach"
-            >
-              {sharingLocation || uploadingImage ? (
-                <ActivityIndicator color={colors.brandPink} />
-              ) : (
-                <Plus size={22} color={colors.brandPink} />
-              )}
-            </TouchableOpacity>
-            <TextInput
-              style={styles.composerInput}
-              placeholder="Message"
-              placeholderTextColor={colors.textSupplementary}
-              value={draft}
-              onChangeText={setDraft}
-              onFocus={closeAttachPanel}
-              multiline
-              editable={isLoggedIn && !sending}
-              accessibilityLabel="Message input"
-              testID="conversation-input"
-            />
-            <TouchableOpacity
-              style={styles.composerSendButton}
-              onPress={handleSend}
-              disabled={!draft.trim() || sending}
-              accessibilityLabel="Send message"
-              testID="conversation-send"
-            >
-              {sending ? (
-                <ActivityIndicator color={colors.white} />
-              ) : (
-                <Send size={20} color={colors.white} />
-              )}
-            </TouchableOpacity>
-          </Animated.View>
-        </KeyboardStickyView>
+          }
+        />
       </View>
       <GifPickerSheet
         visible={gifPickerOpen}
@@ -1497,44 +1450,9 @@ const createStyles = (colors: Palette) =>
     zapCardCommentMe: {
       color: colors.white,
     },
-    composer: {
-      flexDirection: 'row',
-      alignItems: 'flex-end',
-      paddingHorizontal: 10,
-      paddingTop: 8,
-      gap: 8,
-      backgroundColor: colors.surface,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.divider,
-    },
-    composerInput: {
-      flex: 1,
-      minHeight: 40,
-      maxHeight: 120,
-      backgroundColor: colors.background,
-      borderRadius: 20,
-      paddingHorizontal: 14,
-      paddingTop: 10,
-      paddingBottom: 10,
-      fontSize: 15,
-      color: colors.textBody,
-    },
-    composerSendButton: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      backgroundColor: colors.brandPink,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    composerAttachButton: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: colors.background,
-    },
+    // composer + composerInput + composerSendButton + composerAttachButton
+    // moved to ConversationComposer (#251) — kept in sync with the group
+    // screen via that shared component.
     // gifCard / gifImage / gifTime / locationCard / locationMap /
     // locationBody / locationLabel / locationCoords / locationAccuracy /
     // imageBubble + bg / time variants moved to MessageBubble. The

@@ -43,13 +43,6 @@ interface Props {
   initialPicture?: string;
   recipientPubkey?: string;
   recipientName?: string;
-  /**
-   * Optional preset amount pills forwarded to AmountEntryScreen.
-   * Tapping one fills both sats + fiat. Useful when the calling flow
-   * has a small set of sensible defaults the user is likely to pick.
-   * Call sites that omit the prop render the amount step unchanged.
-   */
-  suggestedAmounts?: number[];
 }
 
 type InputMode = 'scan' | 'paste';
@@ -104,7 +97,6 @@ const SendSheet: React.FC<Props> = ({
   initialPicture,
   recipientPubkey,
   recipientName,
-  suggestedAmounts,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createSendSheetStyles(colors), [colors]);
@@ -661,7 +653,6 @@ const SendSheet: React.FC<Props> = ({
               minSats={amountMinSats}
               maxSats={amountMaxSats}
               confirmLabel="Done"
-              suggestedAmounts={suggestedAmounts}
               onBack={() => setStep('main')}
               onConfirm={(sats) => {
                 setSatsValue(String(sats));

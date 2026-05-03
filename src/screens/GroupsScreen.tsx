@@ -6,9 +6,9 @@ import {
   StyleSheet,
   FlatList,
   Image,
-  Alert,
   InteractionManager,
 } from 'react-native';
+import { Alert } from '../components/BrandedAlert';
 import Svg, { Path } from 'react-native-svg';
 import { Users } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
