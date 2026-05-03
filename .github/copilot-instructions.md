@@ -16,14 +16,14 @@ When reviewing pull requests in this repository, format your output to support *
 
 4. **Each comment should be self-contained.** Include enough context that the author can act on it without scrolling back to the summary or other comments.
 
-5. **Suggest concrete fixes** when possible. A 3-line code suggestion is more useful than a paragraph of prose. Use GitHub's suggestion blocks (` ```suggestion `) when the fix is mechanical.
+5. **Suggest concrete fixes** when possible. A 3-line code suggestion is more useful than a paragraph of prose. Use GitHub's `suggestion` code blocks when the fix is mechanical.
 
 ## Repository conventions to enforce
 
-- **Conventional Commits + scope** in PR titles: `<type>(<scope>): <subject> (#issue)`
+- **Conventional Commits + optional scope** in PR titles: `<type>: <subject>` or `<type>(<scope>): <subject>`
   - Types: `feat`, `fix`, `perf`, `refactor`, `chore`, `ci`, `docs`, `deps`, `test`, `build`, `style`
-  - Scope is optional, lower-case alphanumeric (e.g. `ui`, `nostr`, `dm`, `onboarding`)
-  - `feat`/`fix`/`perf`/`refactor` PRs must reference an issue with `Closes #N` in the body
+  - Scope is optional, lower-case alphanumeric when present (e.g. `ui`, `nostr`, `dm`, `onboarding`)
+  - A trailing `(#nnn)` issue suffix is allowed but optional; what's required (for `feat`/`fix`/`perf`/`refactor`) is at least one `Closes #nnn` line in the PR body — see `pr-lint.yml`
 - **All PRs include `## Test plan`** section with concrete steps or `N/A — <reason>`
 - **Mobile-specific:** all interactive elements need `accessibilityLabel` and/or `testID`. Maestro tests must use `id:` or `text:` selectors, never coordinates (see `CLAUDE.md`)
 - **Avatar caching:** every `expo-image` `<Image>` for an avatar must use `cachePolicy="memory-disk"` + `recyclingKey={picture}` + `autoplay={false}` (see PR #245 follow-ups)
