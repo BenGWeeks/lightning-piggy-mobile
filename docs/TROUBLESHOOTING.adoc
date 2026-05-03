@@ -71,7 +71,7 @@ Always follow merges that add/remove icon or asset files with a `--clear` restar
 
 | Maestro `inputText` drops characters in plain `TextInput`
 | Generic char-drop, not the BottomSheetTextInput-specific failure below. Maestro's `adb shell input text "$value"` synthesizes keystrokes faster than Android's IME composition pipeline can absorb them — long strings (>8-12 chars) lose chars in the middle. Affects the SDK 55 New Architecture especially. +
-*Workaround:* split the input into ~8-character chunks across multiple `inputText` steps. Same pattern as `../satmo-react-native/docs/TROUBLESHOOTING.adoc`:
+*Workaround:* split the input into ~8-character chunks across multiple `inputText` steps:
 [source,yaml]
 ----
 - inputText: "justowl3"
