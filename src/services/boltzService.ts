@@ -781,6 +781,120 @@ export async function waitForSubmarineSwapComplete(
   );
 }
 
+// ─── Receive-side helpers (issue #92) ────────────────────────────────────────
+
+/**
+ * Build a BIP-21 payment URI from a Boltz submarine-swap lockup address +
+ * expected amount. Used by the Receive sheet so external senders get a QR
+ * that wallets parse with the amount pre-filled — under-/over-payment is
+ * the single biggest support footgun for forward swaps.
+ *
+ * Boltz fee includes a percentage charge on the input amount, so the
+ * `expectedAmount` returned by `createSubmarineSwapForward` is what we
+ * must hand to the sender — never the raw invoice amount.
+ *
+ * BIP-21 amount is denominated in BTC, encoded with up to 8 decimal places
+ * and trailing-zero stripped (per the spec; some wallets get confused by
+ * trailing zeros even though the spec allows them).
+ */
+export function buildBoltzBip21Uri(lockupAddress: string, expectedAmountSats: number): string {
+  if (!lockupAddress) throw new Error('lockupAddress required for BIP-21');
+  if (!Number.isFinite(expectedAmountSats) || expectedAmountSats <= 0) {
+    throw new Error('expectedAmountSats must be a positive number');
+  }
+  const btc = (expectedAmountSats / 100_000_000).toFixed(8).replace(/0+$/, '').replace(/\.$/, '');
+  return `bitcoin:${lockupAddress}?amount=${btc}`;
+}
+
+/**
+ * Phase a Boltz submarine-swap status into a coarse UI bucket.
+ *
+ * The Receive sheet doesn't need to render every Boltz state verbatim —
+ * what the sender (and the recipient watching) cares about is "where in
+ * the pipeline are we and is anything wrong?". This collapses the
+ * 10+ raw statuses into 4 buckets the UI can drive a single label off.
+ *
+ * `failed` is terminal-error; the caller should surface a Refund affordance.
+ * `complete` is terminal-success; the caller can dismiss.
+ */
+export type SubmarineSwapPhase =
+  | 'awaiting-payment' // No on-chain tx detected yet
+  | 'detected' // Lockup tx in mempool, waiting for Boltz to pay LN invoice
+  | 'paying-invoice' // Boltz is paying the LN invoice
+  | 'complete' // LN invoice paid + swap claimed
+  | 'failed' // swap.expired / invoice.failedToPay / transaction.lockupFailed / refunded
+  | 'unknown';
+
+const SUBMARINE_FAIL_STATUSES = new Set<string>([
+  'swap.expired',
+  'transaction.refunded',
+  'invoice.failedToPay',
+  'transaction.lockupFailed',
+  'transaction.failed',
+]);
+
+export function classifySubmarineSwapStatus(status: string | undefined): SubmarineSwapPhase {
+  if (!status) return 'unknown';
+  if (
+    status === 'invoice.settled' ||
+    status === 'transaction.claimed' ||
+    status === 'invoice.paid'
+  ) {
+    return 'complete';
+  }
+  if (SUBMARINE_FAIL_STATUSES.has(status)) return 'failed';
+  if (status === 'transaction.claim.pending' || status === 'invoice.pending') {
+    return 'paying-invoice';
+  }
+  if (status === 'transaction.mempool' || status === 'transaction.confirmed') {
+    return 'detected';
+  }
+  // swap.created / invoice.set / anything else = still awaiting the on-chain payment
+  return 'awaiting-payment';
+}
+
+/**
+ * Subscribe to submarine-swap status updates and emit a phase to the
+ * caller every time it changes. Resolves when a terminal phase
+ * (`complete` or `failed`) is reached, or when the timeout elapses.
+ *
+ * Wraps `waitForSwapStatus` so we get the same WebSocket-with-poll
+ * fallback behaviour as the rest of the service.
+ */
+export async function watchSubmarineSwapStatus(
+  swapId: string,
+  onPhase: (phase: SubmarineSwapPhase, rawStatus: string, raw: any) => void,
+  timeoutMs: number = 24 * 60 * 60 * 1000, // 24h default — submarine swaps wait for an external sender
+): Promise<{ phase: SubmarineSwapPhase; rawStatus: string; raw: any }> {
+  console.log(
+    `[Boltz] Watching submarine swap ${swapId} (timeout ${Math.round(timeoutMs / 1000)}s)`,
+  );
+  let lastPhase: SubmarineSwapPhase | null = null;
+
+  const result = await waitForSwapStatus(
+    swapId,
+    (status, data) => {
+      const phase = classifySubmarineSwapStatus(status);
+      if (phase !== lastPhase) {
+        lastPhase = phase;
+        try {
+          onPhase(phase, status, data);
+        } catch (e) {
+          console.warn('[Boltz] watchSubmarineSwapStatus onPhase callback threw:', e);
+        }
+      }
+      return phase === 'complete' || phase === 'failed';
+    },
+    timeoutMs,
+  );
+
+  return {
+    phase: classifySubmarineSwapStatus(result?.status),
+    rawStatus: result?.status,
+    raw: result,
+  };
+}
+
 // ─── Legacy alias for backward compatibility ──────────────────────────────────
 
 /** @deprecated Use createReverseSwap instead */

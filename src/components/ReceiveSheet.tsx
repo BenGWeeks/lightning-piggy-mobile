@@ -29,6 +29,7 @@ import { createReceiveSheetStyles } from '../styles/ReceiveSheet.styles';
 import { satsToFiat, formatFiat } from '../services/fiatService';
 import AmountEntryScreen from './AmountEntryScreen';
 import FriendPickerSheet, { PickedFriend } from './FriendPickerSheet';
+import BoltzReceiveSheet from './BoltzReceiveSheet';
 import type { RootStackParamList } from '../navigation/types';
 
 function paymentHashFromBolt11(bolt11: string): string | null {
@@ -109,6 +110,10 @@ const ReceiveSheet: React.FC<Props> = ({
   const [onchainAddress, setOnchainAddress] = useState<string | null>(null);
   const [friendPickerOpen, setFriendPickerOpen] = useState(false);
   const [sendingToFriend, setSendingToFriend] = useState(false);
+  // On-chain → Lightning via Boltz forward submarine swap (issue #92).
+  // Only ever opens for an LN (NWC) wallet — gated by `isOnchainWallet`
+  // checks at the render call site below.
+  const [boltzReceiveOpen, setBoltzReceiveOpen] = useState(false);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   const { sendDirectMessage, contacts } = useNostr();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -761,6 +766,26 @@ const ReceiveSheet: React.FC<Props> = ({
                   </TouchableOpacity>
                 ) : null
               ) : null}
+
+              {/* Issue #92 — on-chain → Lightning via Boltz forward
+               *  submarine swap. Symmetric to the LN→on-chain path that
+               *  TransferSheet already exposes. Only meaningful when the
+               *  selected wallet is a connected NWC wallet (on-chain
+               *  wallets already display a native receive address; the
+               *  preset DM/group flows have a single-purpose CTA already).
+               *  Tapping opens BoltzReceiveSheet on top of this one. */}
+              {!presetFriend && !presetGroup && !isOnchainWallet && selectedWallet?.isConnected ? (
+                <TouchableOpacity
+                  style={styles.secondaryActionButton}
+                  onPress={() => setBoltzReceiveOpen(true)}
+                  testID="receive-via-onchain-boltz"
+                  accessibilityLabel="Receive on-chain via Boltz swap"
+                >
+                  <Text style={styles.secondaryActionText}>
+                    {'Receive on-chain (via Boltz swap)  ₿'}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           )}
         </BottomSheetView>
@@ -771,6 +796,11 @@ const ReceiveSheet: React.FC<Props> = ({
         onSelect={handleFriendPicked}
         title="Send invoice to a friend"
         subtitle="They'll get an encrypted Nostr DM with a Pay button."
+      />
+      <BoltzReceiveSheet
+        visible={boltzReceiveOpen}
+        onClose={() => setBoltzReceiveOpen(false)}
+        walletId={selectedWalletId}
       />
     </>
   );
