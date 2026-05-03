@@ -1,0 +1,121 @@
+name: Coverage
+
+# Runs Jest with coverage on PRs and on main, and fails the PR if its
+# line-coverage drops below main's by more than the noise floor.
+#
+# Strategy: re-run jest on main inside the same workflow (no artifact
+# branch / gh-pages cache to maintain). Slower but zero-config and
+# always reflects the *current* main, not a stale snapshot.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  coverage:
+    name: Jest coverage gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          # Need full history so we can fetch main into a sibling worktree below.
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies (PR)
+        run: npm ci
+
+      - name: Run Jest with coverage (PR)
+        run: npm run test:coverage -- --passWithNoTests
+
+      - name: Read PR coverage
+        id: pr_cov
+        run: |
+          if [[ ! -f coverage/coverage-summary.json ]]; then
+            echo "pct=0" >> "$GITHUB_OUTPUT"
+            echo "PR coverage summary missing — treating as 0%."
+            exit 0
+          fi
+          # Jest writes "Unknown" (string) when no tests ran — coerce to 0.
+          PCT=$(node -e "const p=require('./coverage/coverage-summary.json').total.lines.pct; console.log(typeof p === 'number' ? p : 0)")
+          echo "pct=$PCT" >> "$GITHUB_OUTPUT"
+          echo "PR line coverage: $PCT%"
+
+      - name: Stash PR coverage
+        if: github.event_name == 'pull_request'
+        run: cp coverage/coverage-summary.json /tmp/pr-coverage-summary.json
+
+      # On PRs, also build coverage for the merge target so we can compare.
+      # On push-to-main this step is skipped — main *is* the new baseline.
+      - name: Checkout main (for baseline)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin main --depth=1
+          git worktree add /tmp/main-baseline origin/main
+
+      - name: Install dependencies (main baseline)
+        if: github.event_name == 'pull_request'
+        working-directory: /tmp/main-baseline
+        run: npm ci
+
+      - name: Run Jest with coverage (main baseline)
+        if: github.event_name == 'pull_request'
+        working-directory: /tmp/main-baseline
+        # If main has no jest config yet (first time the gate runs after merge),
+        # tolerate it — the baseline is treated as 0% and the PR can only improve.
+        run: npm run test:coverage -- --passWithNoTests || echo "Main baseline jest run failed — treating as 0%."
+
+      - name: Read main baseline coverage
+        if: github.event_name == 'pull_request'
+        id: main_cov
+        run: |
+          SUMMARY=/tmp/main-baseline/coverage/coverage-summary.json
+          if [[ ! -f "$SUMMARY" ]]; then
+            echo "pct=0" >> "$GITHUB_OUTPUT"
+            echo "Main baseline coverage summary missing — treating as 0%."
+            exit 0
+          fi
+          PCT=$(node -e "const p=require('$SUMMARY').total.lines.pct; console.log(typeof p === 'number' ? p : 0)")
+          echo "pct=$PCT" >> "$GITHUB_OUTPUT"
+          echo "Main line coverage: $PCT%"
+
+      - name: Compare coverage
+        if: github.event_name == 'pull_request'
+        env:
+          PR_PCT: ${{ steps.pr_cov.outputs.pct }}
+          MAIN_PCT: ${{ steps.main_cov.outputs.pct }}
+          # Tolerated regression in percentage points. Tweak in this file only.
+          NOISE_FLOOR: '0.5'
+        run: |
+          echo "PR:   $PR_PCT%"
+          echo "main: $MAIN_PCT%"
+          echo "noise floor: $NOISE_FLOOR pp"
+
+          # awk handles floats; bash arithmetic is integer-only.
+          DROPPED=$(awk -v pr="$PR_PCT" -v main="$MAIN_PCT" -v nf="$NOISE_FLOOR" \
+            'BEGIN { print (pr < main - nf) ? "yes" : "no" }')
+
+          if [[ "$DROPPED" == "yes" ]]; then
+            echo "::error::Coverage regressed: $PR_PCT% < $MAIN_PCT% - $NOISE_FLOOR pp"
+            echo "Add unit tests to recover coverage. See docs/TESTING.adoc and"
+            echo "scripts/coverage-priorities.sh for help picking what to cover."
+            exit 1
+          fi
+
+          echo "Coverage gate passed."
+
+      - name: Upload PR coverage report
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 14
