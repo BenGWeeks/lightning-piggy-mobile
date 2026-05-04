@@ -13,6 +13,7 @@ import * as nwcService from '../services/nwcService';
 import * as nostrService from '../services/nostrService';
 import * as lnurlService from '../services/lnurlService';
 import * as zapCounterpartyStorage from '../services/zapCounterpartyStorage';
+import * as zapSenderProfileStorage from '../services/zapSenderProfileStorage';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
@@ -955,15 +956,25 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             const commentTag = nostrService.parseZapReceipt(r);
             let profile: ZapCounterpartyInfo['profile'] = null;
             if (recipientPubkey) {
-              const p = await nostrService.fetchProfile(recipientPubkey, queryRelays);
-              if (p) {
-                profile = {
-                  npub: p.npub,
-                  name: p.name,
-                  displayName: p.displayName,
-                  picture: p.picture,
-                  nip05: p.nip05,
-                };
+              // Same persistent-cache shortcut as the incoming branch
+              // — saves the kind-0 round-trip when this recipient was
+              // resolved on a previous cold start (#95).
+              const hit = await zapSenderProfileStorage.get(recipientPubkey);
+              if (hit) {
+                profile = hit;
+              } else {
+                const p = await nostrService.fetchProfile(recipientPubkey, queryRelays);
+                if (p) {
+                  profile = {
+                    npub: p.npub,
+                    name: p.name,
+                    displayName: p.displayName,
+                    picture: p.picture,
+                    nip05: p.nip05,
+                  };
+                  // Write-through for the next cold start.
+                  void zapSenderProfileStorage.setMany(new Map([[recipientPubkey, profile]]));
+                }
               }
             }
             byHash.set(tx.paymentHash!, {
@@ -1104,13 +1115,42 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (parsed.senderPubkey && !parsed.anonymous) pubkeysToFetch.add(parsed.senderPubkey);
       }
 
-      // Batch profile fetch. Returns a Map keyed by pubkey.
-      const profileMap =
+      // Persistent cache hit first — strangers' kind-0 events change
+      // infrequently and the relay round-trip is the slow part of the
+      // first cold-start render of TransactionList (#95). Anything served
+      // from AsyncStorage skips the relay query entirely.
+      const cached =
         pubkeysToFetch.size > 0
-          ? await nostrService.fetchProfiles([...pubkeysToFetch], queryRelays)
+          ? await zapSenderProfileStorage.getMany([...pubkeysToFetch])
+          : new Map<string, zapSenderProfileStorage.CachedZapSenderProfile>();
+      const stillToFetch = [...pubkeysToFetch].filter((pk) => !cached.has(pk));
+
+      // Batch profile fetch (relays). Returns a Map keyed by pubkey.
+      const profileMap =
+        stillToFetch.length > 0
+          ? await nostrService.fetchProfiles(stillToFetch, queryRelays)
           : undefined;
 
+      // Write-through any newly-resolved profiles so the next cold start
+      // serves them from disk.
+      if (profileMap && profileMap.size > 0) {
+        const toPersist = new Map<string, zapSenderProfileStorage.CachedZapSenderProfile>();
+        for (const [pk, p] of profileMap) {
+          toPersist.set(pk, {
+            npub: p.npub,
+            name: p.name,
+            displayName: p.displayName,
+            picture: p.picture,
+            nip05: p.nip05,
+          });
+        }
+        // Fire-and-forget — don't block UI updates on the AsyncStorage write.
+        void zapSenderProfileStorage.setMany(toPersist);
+      }
+
       const toCounterpartyProfile = (pk: string): ZapCounterpartyInfo['profile'] => {
+        const hit = cached.get(pk);
+        if (hit) return hit;
         const p = profileMap?.get(pk);
         if (!p) return null;
         return {
