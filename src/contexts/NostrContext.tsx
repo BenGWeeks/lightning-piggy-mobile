@@ -1411,6 +1411,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           if (result.wrapsPublished === 0) {
             return { success: false, error: result.errors[0] ?? 'No wraps published' };
           }
+          // Partial send — at least one wrap (recipient delivery and/or sender's own inbox copy) failed to publish. Surface as non-fatal failure so the composer keeps its draft and the user can retry, mirroring sendGroupMessage's pattern.
+          if (result.errors.length > 0) {
+            const intended = result.wrapsPublished + result.errors.length;
+            return {
+              success: false,
+              error: `Send incomplete — published ${result.wrapsPublished} of ${intended} wraps. ${result.errors[0]}`,
+            };
+          }
           return { success: true };
         }
 
@@ -1443,6 +1451,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           });
           if (result.wrapsPublished === 0) {
             return { success: false, error: result.errors[0] ?? 'No wraps published' };
+          }
+          // Same partial-send handling as the nsec path. Amber's per-recipient sequential signing means a cancelled prompt or a failed seal mid-loop leaves earlier wraps published but later ones unsent — surface that to the user instead of silent success.
+          if (result.errors.length > 0) {
+            const intended = result.wrapsPublished + result.errors.length;
+            return {
+              success: false,
+              error: `Send incomplete — published ${result.wrapsPublished} of ${intended} wraps. ${result.errors[0]}`,
+            };
           }
           return { success: true };
         }

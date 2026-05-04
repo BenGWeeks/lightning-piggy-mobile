@@ -54,7 +54,7 @@ We will keep the kind-4 read filter and the `nip04.decrypt` codepath until both 
 . The user research signal that no active contacts are still on NIP-04-only clients (Damus is the relevant laggard at the time of writing).
 . The kind-4 plaintext cache (`nip04PlaintextCache` LRU + the per-thread persisted cache) for a representative active user shows zero new fresh-decrypt entries for at least 90 days, evidenced by the `[Perf] fetchConversation` log line `k4=N (hits=0, fresh=0)`.
 
-There is no scheduled removal date. Removal will be announced one release ahead in `docs/CHANGELOG` (or release notes) and the read filter will land behind a feature flag for one release before the codepath itself is deleted.
+There is no scheduled removal date. Removal will be announced one release ahead in the GitHub Release notes and the read filter will land behind a feature flag for one release before the codepath itself is deleted.
 
 ==== Interop notes
 
