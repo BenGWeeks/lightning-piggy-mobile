@@ -12,6 +12,7 @@ import { InteractionManager } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { LRUCache } from '../utils/lru';
+import { evictNip17CacheOverflow, touchNip17CacheEntry } from '../utils/nip17Cache';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
@@ -242,27 +243,34 @@ function safeParseRecord<T>(raw: string | null): Record<string, T> {
 }
 
 /** Persist a wrap-id cache back to AsyncStorage, enforcing the size
- * cap in insertion order (oldest-inserted evicts first — LRU-ish, and
- * O(overflow) instead of the O(n log n) sort-by-createdAt this
- * replaced). Object keys in JS preserve insertion order for non-
- * integer string keys, and wrap ids are hex, so iteration order is
- * stable across parse/stringify round-trips. Write failures are
- * surfaced as a warn — a corrupted storage subsystem would otherwise
- * silently re-decrypt on every refresh with no breadcrumb. */
+ * cap in insertion order (oldest-inserted evicts first). Combined with
+ * the `touchNip17CacheEntry` helper called on every cache hit during
+ * `refreshDmInbox`, this gives true LRU semantics: a re-touched entry
+ * is delete+reinserted to the tail, so it survives the next eviction
+ * sweep even if 5000 newer wraps arrive after it. Without the touch
+ * this is FIFO-by-first-write — see #193 for why FIFO regresses to
+ * pre-#176 behaviour for users with very active inboxes.
+ *
+ * Object keys in JS preserve insertion order for non-integer string
+ * keys, and wrap ids are hex, so iteration order is stable across
+ * `JSON.parse` / `JSON.stringify` round-trips — the on-disk LRU order
+ * survives app restarts without any new persistence machinery.
+ *
+ * Returns the number of entries evicted so callers can include it in
+ * a perf log line. Write failures are surfaced as a warn — a corrupted
+ * storage subsystem would otherwise silently re-decrypt on every
+ * refresh with no breadcrumb. */
 async function writeNip17Cache(
   storageKey: string,
   cache: Record<string, Nip17CacheEntry>,
-): Promise<void> {
-  const keys = Object.keys(cache);
-  const overflow = keys.length - NIP17_CACHE_CAP;
-  if (overflow > 0) {
-    for (let i = 0; i < overflow; i++) delete cache[keys[i]];
-  }
+): Promise<number> {
+  const evicted = evictNip17CacheOverflow(cache, NIP17_CACHE_CAP);
   try {
     await AsyncStorage.setItem(storageKey, JSON.stringify(cache));
   } catch (err) {
     console.warn(`[Nostr] NIP-17 cache write failed (${storageKey}):`, err);
   }
+  return evicted;
 }
 
 /** Yield to the JS event loop so UI interactions can tick between
@@ -2032,6 +2040,16 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           const refreshStart = performance.now();
           let nip04CacheHits = 0;
           let nip04FreshDecrypts = 0;
+          // NIP-17 perf counters — emitted in the `[Perf] refreshDmInbox`
+          // line so #193 can be tracked post-merge. `nip17Hits` /
+          // `nip17Misses` capture the cache-hit ratio per refresh;
+          // `nip17Evictions` shows whether the 5000-cap is actually
+          // squeezing entries out (was previously invisible — the FIFO
+          // sort-and-slice path ran silently).
+          let nip17Hits = 0;
+          let nip17Misses = 0;
+          let nip17Evictions = 0;
+          let nip17CacheSize = 0;
 
           // PR B: load persisted inbox + last-seen so we can (a) paint
           // cached entries before the relay round-trip finishes and
@@ -2166,6 +2184,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               let unfollowedPurged = 0;
               let nip17Decrypted = 0;
               let nip17Iterated = 0;
+              let touched = 0;
               for (const wrap of kind1059) {
                 // Periodic yield + abort check covers the cache-hit path
                 // too (#286). Without this, a long run of cache hits
@@ -2179,6 +2198,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 }
                 const cached = cache[wrap.id];
                 if (cached) {
+                  nip17Hits++;
                   // Cache entry exists → it was from a followed sender
                   // when first stored. Re-check against the *current*
                   // follow set so unfollowed partners don't keep
@@ -2190,6 +2210,13 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                     unfollowedPurged++;
                     continue;
                   }
+                  // LRU touch (#193): re-insert at the tail so this hot
+                  // entry survives the next overflow eviction. Without
+                  // this the cache is FIFO-by-first-write — a thread
+                  // the user re-opens regularly can be evicted just
+                  // because 5000 newer wraps happened to arrive first.
+                  touchNip17CacheEntry(cache, wrap.id);
+                  touched++;
                   entries.push({
                     id: cached.wrapId,
                     partnerPubkey: cached.partnerPubkey,
@@ -2200,6 +2227,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   });
                   continue;
                 }
+                nip17Misses++;
                 const rumor = unwrapWrapNsec(wrap, secretKey, onSkip);
                 if (++nip17Decrypted % DECRYPT_YIELD_EVERY === 0) await yieldToEventLoop();
                 if (!rumor) continue;
@@ -2236,9 +2264,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 });
               }
 
-              if (newlyCached.length > 0 || unfollowedPurged > 0) {
-                await writeNip17Cache(NSEC_NIP17_CACHE_KEY, cache);
+              // Persist if we mutated the cache for any reason: new
+              // entries, follow-set purges, or LRU touches (#193) — the
+              // touch reorders insertion order, and we need that order
+              // on disk for it to survive app restart.
+              if (newlyCached.length > 0 || unfollowedPurged > 0 || touched > 0) {
+                nip17Evictions += await writeNip17Cache(NSEC_NIP17_CACHE_KEY, cache);
               }
+              nip17CacheSize = Object.keys(cache).length;
             }
           } else if (refreshForSigner === 'amber' && kind1059.length > 0) {
             const amberEnabled = (await AsyncStorage.getItem(AMBER_NIP17_ENABLED_KEY)) === 'true';
@@ -2256,6 +2289,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               const newlyCached: Nip17CacheEntry[] = [];
               let permissionDenied = false;
               let nip17Iterated = 0;
+              let touched = 0;
 
               for (const wrap of kind1059) {
                 // Periodic yield + abort check (#286) — see the nsec
@@ -2266,10 +2300,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 }
                 const cached = cache[wrap.id];
                 if (cached) {
+                  nip17Hits++;
                   // Cache entry exists → it was from a followed sender when
                   // first stored. Re-check against the *current* follow set
                   // so unfollowed partners don't keep surfacing from cache.
                   if (!refreshFollows.has(cached.partnerPubkey)) continue;
+                  // LRU touch (#193) — see nsec branch for rationale.
+                  touchNip17CacheEntry(cache, wrap.id);
+                  touched++;
                   entries.push({
                     id: cached.wrapId,
                     partnerPubkey: cached.partnerPubkey,
@@ -2280,6 +2318,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   });
                   continue;
                 }
+                nip17Misses++;
                 // Uncached — unwrap via Amber's silent content-resolver path.
                 // If Amber hasn't granted blanket nip44_decrypt permission,
                 // this throws PERMISSION_NOT_GRANTED and we stop iterating.
@@ -2334,9 +2373,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
               setAmberNip44Permission(permissionDenied ? 'denied' : 'granted');
 
-              if (newlyCached.length > 0) {
-                await writeNip17Cache(AMBER_NIP17_CACHE_KEY, cache);
+              // Persist on new entries OR LRU touches (#193) — touches
+              // reorder insertion order which we need on disk.
+              if (newlyCached.length > 0 || touched > 0) {
+                nip17Evictions += await writeNip17Cache(AMBER_NIP17_CACHE_KEY, cache);
               }
+              nip17CacheSize = Object.keys(cache).length;
             }
           }
 
@@ -2354,6 +2396,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           const filteredFinal = merged.filter((e) => refreshFollows.has(e.partnerPubkey));
 
           // Perf summary: one line per refresh, grep with `\[Perf\] refreshDmInbox`.
+          // The `nip17-cache` segment (#193) lets us see at a glance
+          // whether the LRU swap is keeping hot entries warm: a healthy
+          // long-running inbox should converge to hits >> misses with
+          // size pinned at the 5000 cap and a non-zero evictions counter
+          // each refresh once the cap is reached.
           console.log(
             `[Perf] refreshDmInbox: ` +
               `${(performance.now() - refreshStart).toFixed(0)}ms, ` +
@@ -2363,6 +2410,13 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               `fresh=${entries.length}, ` +
               `merged=${merged.length}, ` +
               `rendered=${filteredFinal.length}`,
+          );
+          console.log(
+            `[Perf] nip17-cache: ` +
+              `hits=${nip17Hits}, ` +
+              `misses=${nip17Misses}, ` +
+              `evictions=${nip17Evictions}, ` +
+              `size=${nip17CacheSize}`,
           );
 
           setDmInbox(filteredFinal);
