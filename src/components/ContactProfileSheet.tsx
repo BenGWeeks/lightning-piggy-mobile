@@ -16,10 +16,11 @@ import {
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
-import Svg, { Circle, Path } from 'react-native-svg';
+import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import { Zap, Copy, Share2, UserRound } from 'lucide-react-native';
 import NfcIcon from './icons/NfcIcon';
 import NfcWriteSheet from './NfcWriteSheet';
+import QrSheet from './QrSheet';
 import { isNfcSupported } from '../services/nfcService';
 import * as Clipboard from 'expo-clipboard';
 import Toast from './BrandedToast';
@@ -28,6 +29,23 @@ import { useNostr } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import FriendPickerSheet, { PickedFriend } from './FriendPickerSheet';
+
+// Inline QR-grid icon — same look used by ProfileScreen so the share
+// row matches across own-profile and friend-profile surfaces.
+const QrIcon: React.FC<{ size?: number; color?: string }> = ({ size = 22, color }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Rect x="3" y="3" width="7" height="7" rx="1" stroke={color} strokeWidth={2} />
+    <Rect x="14" y="3" width="7" height="7" rx="1" stroke={color} strokeWidth={2} />
+    <Rect x="3" y="14" width="7" height="7" rx="1" stroke={color} strokeWidth={2} />
+    <Path
+      d="M14 14h3v3h-3zM20 14v3h-3M14 20h3M20 20h0"
+      stroke={color}
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </Svg>
+);
 
 interface ContactData {
   pubkey: string | null;
@@ -71,6 +89,7 @@ const ContactProfileSheet: React.FC<Props> = ({
   const [sharing, setSharing] = useState(false);
   const [nfcWriteVisible, setNfcWriteVisible] = useState(false);
   const [nfcSupported, setNfcSupported] = useState(false);
+  const [qrSheetOpen, setQrSheetOpen] = useState(false);
   // Probe device NFC capability once when the sheet opens. Hide the
   // NFC tile entirely if the hardware isn't there (or expo-go's NFC
   // shim returns false in dev) — no point teasing a feature that
@@ -168,6 +187,12 @@ const ContactProfileSheet: React.FC<Props> = ({
   const handleCopyNpub = async () => {
     if (!contact?.pubkey) return;
     await Clipboard.setStringAsync(npubEncode(contact.pubkey));
+    Toast.show({
+      type: 'success',
+      text1: 'npub copied',
+      position: 'top',
+      visibilityTime: 1500,
+    });
   };
 
   const handleShare = useCallback(() => {
@@ -293,10 +318,49 @@ const ContactProfileSheet: React.FC<Props> = ({
 
         {/* npub */}
         {npubDisplay && (
-          <TouchableOpacity style={styles.npubRow} onPress={handleCopyNpub}>
+          <View style={styles.npubRow}>
             <Text style={styles.npubText}>{npubDisplay}</Text>
-            <Copy size={20} color={colors.brandPink} />
-          </TouchableOpacity>
+          </View>
+        )}
+
+        {/* npub share affordances: matches ProfileScreen (issue #310).
+            Friend's npub gets the same Copy / QR / NFC tile treatment
+            as the user's own npub — no more 18 px tap targets. */}
+        {contact.pubkey && (
+          <View style={styles.shareRow}>
+            <TouchableOpacity
+              style={styles.shareTile}
+              onPress={handleCopyNpub}
+              accessibilityLabel="Copy npub"
+              testID="contact-npub-copy"
+            >
+              <Copy size={22} color={colors.brandPink} />
+              <Text style={styles.shareTileText}>Copy</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.shareTile}
+              onPress={() => setQrSheetOpen(true)}
+              accessibilityLabel="Show npub QR"
+              testID="contact-npub-qr"
+            >
+              <QrIcon size={22} color={colors.brandPink} />
+              <Text style={styles.shareTileText}>QR</Text>
+            </TouchableOpacity>
+            {nfcSupported && (
+              <TouchableOpacity
+                style={styles.shareTile}
+                onPress={() => setNfcWriteVisible(true)}
+                accessibilityLabel="Write npub to NFC tag"
+                /* preserves the testID used by tests/e2e/test-nfc-write-sheet.yaml
+                   so the existing Maestro flow keeps passing — the action is
+                   the same, only the host moved from the bottom row to here. */
+                testID="contact-nfc-write-button"
+              >
+                <NfcIcon size={22} color={colors.brandPink} />
+                <Text style={styles.shareTileText}>NFC</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         )}
 
         {/* Lightning Address */}
@@ -423,16 +487,6 @@ const ContactProfileSheet: React.FC<Props> = ({
               </Svg>
             </TouchableOpacity>
           )}
-          {contact.pubkey && nfcSupported && (
-            <TouchableOpacity
-              style={styles.iconButton}
-              onPress={() => setNfcWriteVisible(true)}
-              accessibilityLabel="Write to NFC tag"
-              testID="contact-nfc-write-button"
-            >
-              <NfcIcon size={18} color={colors.brandPink} />
-            </TouchableOpacity>
-          )}
         </View>
         {/* Write the friend's npub (nostr:-prefixed) to a physical NFC
             tag. The friend can then tap the tag against another device
@@ -444,6 +498,15 @@ const ContactProfileSheet: React.FC<Props> = ({
             onClose={() => setNfcWriteVisible(false)}
             npub={npubEncode(contact.pubkey)}
             displayName={contact.name}
+          />
+        )}
+        {contact.pubkey && (
+          <QrSheet
+            visible={qrSheetOpen}
+            onClose={() => setQrSheetOpen(false)}
+            npub={npubEncode(contact.pubkey)}
+            lightningAddress={contact.lightningAddress}
+            defaultMode="npub"
           />
         )}
       </BottomSheetView>
@@ -549,6 +612,30 @@ const createStyles = (colors: Palette) =>
       color: colors.textSupplementary,
       fontWeight: '500',
     },
+    shareRow: {
+      flexDirection: 'row',
+      gap: 8,
+      marginTop: 10,
+      paddingHorizontal: 24,
+      alignSelf: 'stretch',
+    },
+    shareTile: {
+      flex: 1,
+      minHeight: 56,
+      paddingVertical: 8,
+      paddingHorizontal: 8,
+      borderRadius: 10,
+      borderWidth: 1.5,
+      borderColor: colors.brandPink,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 4,
+    },
+    shareTileText: {
+      color: colors.brandPink,
+      fontSize: 12,
+      fontWeight: '600',
+    },
     lightningAddress: {
       fontSize: 13,
       color: colors.textSupplementary,
@@ -593,7 +680,13 @@ const createStyles = (colors: Palette) =>
     },
     actionRow: {
       flexDirection: 'row',
+      // Wrap so Follow / Message / Zap / Share / External never clip on
+      // narrow screens (issue #310 — bottom row was overflowing the
+      // right edge on Pixel-class widths).
+      flexWrap: 'wrap',
+      justifyContent: 'center',
       gap: 8,
+      rowGap: 8,
       marginTop: 20,
       paddingHorizontal: 16,
     },

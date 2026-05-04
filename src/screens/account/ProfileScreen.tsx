@@ -97,11 +97,28 @@ const ProfileScreen: React.FC = () => {
           </View>
 
           <View style={styles.npubRow}>
-            <TouchableOpacity style={styles.npubCopy} onPress={copyNpub}>
-              <Text style={styles.npubText}>{truncatedNpub}</Text>
-              <Copy size={20} color={colors.textSupplementary} />
+            <Text style={styles.npubText} numberOfLines={1}>
+              {truncatedNpub}
+            </Text>
+          </View>
+
+          {/* npub share affordances: lifted from tiny inline icons to
+              proper ≥44 dp tap targets with labels (issue #310). The
+              tiles share the same npub payload — Copy goes to clipboard,
+              QR displays a scannable npub, NFC writes nostr:npub to a
+              physical tag. */}
+          <View style={styles.shareRow}>
+            <TouchableOpacity
+              style={styles.shareTile}
+              onPress={copyNpub}
+              accessibilityLabel="Copy npub"
+              testID="profile-npub-copy"
+            >
+              <Copy size={22} color={colors.brandPink} />
+              <Text style={styles.shareTileText}>Copy</Text>
             </TouchableOpacity>
             <TouchableOpacity
+              style={styles.shareTile}
               onPress={() => {
                 setQrDefaultMode('npub');
                 setQrSheetOpen(true);
@@ -109,15 +126,18 @@ const ProfileScreen: React.FC = () => {
               accessibilityLabel="Show npub QR"
               testID="profile-npub-qr"
             >
-              <QrIcon size={22} color={colors.textSupplementary} />
+              <QrIcon size={22} color={colors.brandPink} />
+              <Text style={styles.shareTileText}>QR</Text>
             </TouchableOpacity>
             {nfcSupported && (
               <TouchableOpacity
+                style={styles.shareTile}
                 onPress={() => setNfcWriteVisible(true)}
                 accessibilityLabel="Write npub to NFC tag"
                 testID="profile-npub-nfc"
               >
-                <NfcIcon size={22} color={colors.textSupplementary} />
+                <NfcIcon size={22} color={colors.brandPink} />
+                <Text style={styles.shareTileText}>NFC</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -225,20 +245,37 @@ const createStyles = (colors: Palette) =>
     npubRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 8,
       paddingHorizontal: 16,
       paddingBottom: 8,
-    },
-    npubCopy: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      flex: 1,
     },
     npubText: {
       color: colors.textSupplementary,
       fontSize: 12,
       fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+      flex: 1,
+    },
+    shareRow: {
+      flexDirection: 'row',
+      gap: 8,
+      paddingHorizontal: 16,
+      paddingBottom: 12,
+    },
+    shareTile: {
+      flex: 1,
+      minHeight: 56,
+      paddingVertical: 8,
+      paddingHorizontal: 8,
+      borderRadius: 10,
+      borderWidth: 1.5,
+      borderColor: colors.brandPink,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 4,
+    },
+    shareTileText: {
+      color: colors.brandPink,
+      fontSize: 12,
+      fontWeight: '600',
     },
     profileLnRow: {
       flexDirection: 'row',
