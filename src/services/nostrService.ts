@@ -1052,3 +1052,41 @@ export function subscribeGroupStateForViewer(input: {
     }
   };
 }
+
+// Subscribe to inbound NIP-17 gift wraps (kind 1059) addressed to the
+// viewer. Long-lived sub kept open while the user is signed in so the
+// app delivers DMs / group messages live without waiting for the
+// 30 s-TTL `refreshDmInbox` or pull-to-refresh (#349).
+//
+// Notes:
+//  - `#p:[viewerPubkey]` matches the recipient tag set by the wrap; the
+//    sender's identity is hidden inside the encrypted seal so we can't
+//    filter by author at the relay layer. Decrypt happens caller-side.
+//  - No `since` filter — NIP-59 randomises wrap.created_at by ~2 days
+//    for plausible deniability, so a since cutoff would silently drop
+//    fresh wraps. Same reasoning as fetchInboxDmEvents above.
+//  - Caller is responsible for deduping (e.g. against the persistent
+//    NIP-17 wrap-id cache populated by refreshDmInbox).
+export function subscribeInboxWrapsForViewer(input: {
+  viewerPubkey: string;
+  relays: string[];
+  onEvent: (ev: RawGiftWrapEvent) => void;
+}): () => void {
+  trackRelays(input.relays);
+  const sub = pool.subscribeMany(
+    input.relays,
+    { kinds: [1059], '#p': [input.viewerPubkey] } as Filter,
+    {
+      onevent: (ev) => {
+        input.onEvent(ev as unknown as RawGiftWrapEvent);
+      },
+    },
+  );
+  return () => {
+    try {
+      sub.close();
+    } catch {
+      // best-effort
+    }
+  };
+}
