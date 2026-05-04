@@ -1969,12 +1969,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       // Persist merged list + new per-peer last-seen so next open of
       // THIS thread sees only the delta. Fire-and-forget; the caller
-      // gets its data immediately via `merged`.
-      const newConvLastSeen = Math.max(
-        convLastSeen ?? 0,
-        ...kind4Events.map((e) => e.created_at),
-        ...kind1059.map((e) => e.created_at),
-      );
+      // gets its data immediately via `merged`. kind-1059 deliberately
+      // excluded — wrap timestamps are randomized per NIP-59 and would
+      // poison the kind-4 since cursor (same reasoning as the inbox
+      // path; see fetchInboxDmEvents + refreshDmInbox).
+      const newConvLastSeen = Math.max(convLastSeen ?? 0, ...kind4Events.map((e) => e.created_at));
       Promise.all([
         AsyncStorage.setItem(convCacheKey(pubkey, normalized), JSON.stringify(merged)).catch(
           () => {},
@@ -2367,15 +2366,17 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
           setDmInbox(filteredFinal);
 
-          // Persist merged list + new last-seen (max created_at across
-          // fresh entries, kind-4 + kind-1059 both contribute). Debounced
-          // writes would be nicer but AsyncStorage setItem is async and
-          // rarely blocking at this scale; keep simple for now.
-          const newLastSeen = Math.max(
-            lastSeen ?? 0,
-            ...kind4.map((e) => e.created_at),
-            ...kind1059.map((e) => e.created_at),
-          );
+          // Persist merged list + new last-seen. Only kind-4 contributes
+          // here — NIP-59 wraps have randomized timestamps (~2 days in
+          // either direction of the real publish time) for plausible
+          // deniability, so wrap.created_at can't be used as a
+          // monotonic publish-time cursor. Including them here would
+          // ratchet lastSeen into the future on the first wrap with a
+          // forward-dated ts, then cause subsequent kind-4 since-filters
+          // to drop legitimate recent NIP-04 messages. fetchInboxDmEvents
+          // already drops the `since` filter for kind-1059 entirely (see
+          // the matching comment there); the cache dedupes wraps by id.
+          const newLastSeen = Math.max(lastSeen ?? 0, ...kind4.map((e) => e.created_at));
           await Promise.all([
             AsyncStorage.setItem(inboxCacheKey(refreshForPubkey), JSON.stringify(merged)).catch(
               () => {},
