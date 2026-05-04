@@ -59,6 +59,13 @@ module.exports = [
     },
   },
   {
+    // Jest setup/config files run under Node with Jest globals available.
+    files: ['jest.setup.js', 'jest.config.js'],
+    languageOptions: {
+      globals: { ...globals.node, ...globals.jest },
+    },
+  },
+  {
     // Block React Native's native `Alert` outside BrandedAlert.tsx itself
     // so every alert renders through the in-app branded modal (matches
     // the app's pink/blue theme and is testable via Maestro). The
