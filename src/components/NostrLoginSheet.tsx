@@ -476,7 +476,9 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
             <Text style={styles.title}>Connect via NIP-46</Text>
             <Text style={styles.subtitle}>
               Open your bunker app
-              {Platform.OS === 'ios' ? ' (Clave, Aegis, nsec.app)' : ' (Aegis, Nowser, nsec.app)'}{' '}
+              {Platform.OS === 'ios'
+                ? ' (Clave, Aegis, nsec.app)'
+                : ' (Aegis, Nowser, nsec.app)'}{' '}
               and scan this QR. We'll wait up to 2 minutes for the connection.
             </Text>
 
