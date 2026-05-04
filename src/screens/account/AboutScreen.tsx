@@ -93,9 +93,13 @@ const AboutScreen: React.FC = () => {
           : 'Hot wallet options hidden.',
       );
     } else {
-      versionTapTimer.current = setTimeout(() => {
-        versionTapCount.current = 0;
-      }, 1000);
+      // Maestro tapOn cadence on Android emulator is ~400ms each, so 3 taps need >1s. Widen window in dev builds only.
+      versionTapTimer.current = setTimeout(
+        () => {
+          versionTapCount.current = 0;
+        },
+        __DEV__ ? 3000 : 1000,
+      );
     }
   };
 
