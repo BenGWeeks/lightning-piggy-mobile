@@ -31,6 +31,7 @@ import {
 } from '../services/groupRoutingRegistry';
 import { isSyntheticGroupId, syntheticGroupIdForParticipants } from '../utils/syntheticGroupId';
 import { appendGroupMessage, type GroupMessage } from '../services/groupMessagesStorageService';
+import { getUserRelays, setUserRelays, mergeRelays } from '../services/nostrRelayStorage';
 
 /**
  * Module-level LRU cache for NIP-04 plaintext keyed by event id. Keeps
@@ -463,6 +464,22 @@ interface NostrContextType {
   profile: NostrProfile | null;
   contacts: NostrContact[];
   relays: RelayConfig[];
+  /**
+   * Relays the user has explicitly added in-app via the Nostr settings
+   * screen (#202). Subset of `relays` — exposed separately so the
+   * editor UI can distinguish user-managed rows (removable) from
+   * NIP-65 / default rows (read-only here; users edit those via
+   * another Nostr client for now).
+   */
+  userRelays: RelayConfig[];
+  /**
+   * Add or update a user-managed relay. Replaces any existing entry
+   * with the same URL (so toggling read/write on an existing user
+   * relay works through the same call). Persists to AsyncStorage.
+   */
+  addUserRelay: (config: RelayConfig) => Promise<void>;
+  /** Remove a user-managed relay by URL. Persists to AsyncStorage. */
+  removeUserRelay: (url: string) => Promise<void>;
   signerType: SignerType | null;
   loginWithNsec: (nsec: string) => Promise<{ success: boolean; error?: string }>;
   loginWithAmber: () => Promise<{ success: boolean; error?: string }>;
@@ -595,7 +612,18 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [profile, setProfile] = useState<NostrProfile | null>(null);
   const [contacts, setContacts] = useState<NostrContact[]>([]);
-  const [relays, setRelays] = useState<RelayConfig[]>([]);
+  // `nip65Relays` mirrors the user's published kind-10002 list (or the
+  // last cached snapshot of it). `userRelays` are explicit in-app
+  // overrides persisted to AsyncStorage by the Nostr settings screen
+  // (#202). The exposed `relays` memo is the merge — defaults +
+  // NIP-65 + user overrides — so every existing read/write filter
+  // call site picks up user-added relays without further plumbing.
+  const [nip65Relays, setNip65Relays] = useState<RelayConfig[]>([]);
+  const [userRelays, setUserRelaysState] = useState<RelayConfig[]>([]);
+  const relays = useMemo(
+    () => mergeRelays({ nip65: nip65Relays, user: userRelays }),
+    [nip65Relays, userRelays],
+  );
   const [signerType, setSignerType] = useState<SignerType | null>(null);
   const [pubkey, setPubkey] = useState<string | null>(null);
   const [dmInbox, setDmInbox] = useState<DmInboxEntry[]>([]);
@@ -630,6 +658,43 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     nostrService.setCurrentUserPubkey(pubkey);
   }, [pubkey]);
+
+  // Hydrate the user-added relay overrides once at mount. Persisted
+  // separately from the NIP-65 cache so they survive logout/login and
+  // are available before any relay round-trip completes.
+  useEffect(() => {
+    getUserRelays()
+      .then((list) => {
+        if (list.length > 0) setUserRelaysState(list);
+      })
+      .catch((e) => console.warn('[Nostr] failed to load user relays:', e));
+  }, []);
+
+  const addUserRelay = useCallback(
+    async (config: RelayConfig): Promise<void> => {
+      const next: RelayConfig[] = (() => {
+        const existing = userRelays.findIndex((r) => r.url === config.url);
+        if (existing >= 0) {
+          const copy = [...userRelays];
+          copy[existing] = config;
+          return copy;
+        }
+        return [...userRelays, config];
+      })();
+      setUserRelaysState(next);
+      await setUserRelays(next);
+    },
+    [userRelays],
+  );
+
+  const removeUserRelay = useCallback(
+    async (url: string): Promise<void> => {
+      const next = userRelays.filter((r) => r.url !== url);
+      setUserRelaysState(next);
+      await setUserRelays(next);
+    },
+    [userRelays],
+  );
 
   useEffect(() => {
     // Publish read relays so zap-receipt queries from WalletContext hit
@@ -858,7 +923,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       RELAY_LIST_TIMESTAMP_KEY,
     );
     if (cached && ageMs < CACHE_MAX_AGE_MS) {
-      setRelays(cached);
+      setNip65Relays(cached);
       if (__DEV__) console.log(`[Nostr] fetchRelayList: skipped (cache fresh)`);
       const readRelays = cached.filter((r) => r.read).map((r) => r.url);
       return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
@@ -866,7 +931,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const relayList = await nostrService.fetchRelayList(pk, nostrService.DEFAULT_RELAYS);
     if (__DEV__)
       console.log(`[Nostr] fetchRelayList: ${Date.now() - t0}ms, ${relayList.length} relays`);
-    setRelays(relayList);
+    setNip65Relays(relayList);
     InteractionManager.runAfterInteractions(() => {
       AsyncStorage.setItem(RELAY_LIST_CACHE_KEY, JSON.stringify(relayList)).catch(() => {});
       AsyncStorage.setItem(RELAY_LIST_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
@@ -1100,7 +1165,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setPubkey(null);
     setProfile(null);
     setContacts([]);
-    setRelays([]);
+    setNip65Relays([]);
+    // NOTE: deliberately NOT clearing user-added relays on logout —
+    // they're an in-app preference, not per-account secret material.
+    // The next account login will see the same overrides. To wipe
+    // them, users can remove each row from the Nostr settings screen.
     setSignerType(null);
     setIsLoggedIn(false);
 
@@ -2456,6 +2525,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       profile,
       contacts,
       relays,
+      userRelays,
+      addUserRelay,
+      removeUserRelay,
       signerType,
       loginWithNsec,
       loginWithAmber,
@@ -2485,6 +2557,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       profile,
       contacts,
       relays,
+      userRelays,
+      addUserRelay,
+      removeUserRelay,
       signerType,
       loginWithNsec,
       loginWithAmber,
