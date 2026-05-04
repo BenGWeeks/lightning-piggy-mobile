@@ -1370,6 +1370,20 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [contacts, followContact],
   );
 
+  /**
+   * Send a 1:1 direct message via NIP-17 (kind-14 rumor → kind-13 seal →
+   * kind-1059 gift wrap). NIP-04 (kind 4) is no longer produced — see
+   * issue #140 and `docs/PROTOCOLS.adoc`. Reads of legacy kind-4 history
+   * are unchanged: `fetchConversation` and `refreshDmInbox` still query
+   * and decrypt kind 4 alongside kind 1059 so old threads survive.
+   *
+   * Reuses the same `sendNip17ToManyWith{Nsec,Signer}` plumbing as
+   * `sendGroupMessage`, with the recipient list being a single peer.
+   * `wrapManyEvents` (nsec) and the sequential signer loop (Amber) both
+   * also wrap for the sender, so the message lands in the user's own
+   * inbox on other devices — the same multi-device behaviour group
+   * messages have today.
+   */
   const sendDirectMessage = useCallback(
     async (
       recipientPubkey: string,
@@ -1378,8 +1392,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (!pubkey || !isLoggedIn) {
         return { success: false, error: 'Not logged in' };
       }
-      const normalizedRecipientPubkey = recipientPubkey.trim();
-      if (!/^[0-9a-f]{64}$/i.test(normalizedRecipientPubkey)) {
+      const normalizedRecipientPubkey = recipientPubkey.trim().toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(normalizedRecipientPubkey)) {
         return { success: false, error: 'Invalid public key format' };
       }
       // Union the user's published write relays with DEFAULT_RELAYS. Publish
@@ -1389,40 +1403,77 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
       const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
       try {
+        const rumor = nostrService.createDirectMessageRumor({
+          senderPubkey: pubkey,
+          recipientPubkey: normalizedRecipientPubkey,
+          content: plaintext,
+        });
+
         if (signerType === 'nsec') {
           const nsec = await SecureStore.getItemAsync(NSEC_KEY);
           if (!nsec) return { success: false, error: 'Key not found' };
           const { secretKey } = nostrService.decodeNsec(nsec);
-          const event = await nostrService.createDirectMessageEvent(
-            secretKey,
-            normalizedRecipientPubkey,
-            plaintext,
-          );
-          await nostrService.signAndPublishEvent(event, secretKey, targetRelays);
-          return { success: true };
-        } else if (signerType === 'amber') {
-          const ciphertext = await amberService.requestNip04Encrypt(
-            plaintext,
-            normalizedRecipientPubkey,
-            pubkey,
-          );
-          if (!ciphertext) return { success: false, error: 'Amber returned empty ciphertext' };
-          const event = {
-            kind: 4,
-            created_at: Math.floor(Date.now() / 1000),
-            tags: [['p', normalizedRecipientPubkey]],
-            content: ciphertext,
-          };
-          const { event: signedEventJson } = await amberService.requestEventSignature(
-            JSON.stringify(event),
-            '',
-            pubkey,
-          );
-          if (!signedEventJson) return { success: false, error: 'Amber returned empty event' };
-          const signed = JSON.parse(signedEventJson);
-          await nostrService.publishSignedEvent(signed, targetRelays);
+          const result = await nostrService.sendNip17ToManyWithNsec({
+            senderSecretKey: secretKey,
+            rumor,
+            recipientPubkeys: [normalizedRecipientPubkey],
+            relays: targetRelays,
+          });
+          if (result.wrapsPublished === 0) {
+            return { success: false, error: result.errors[0] ?? 'No wraps published' };
+          }
+          // Partial send — at least one wrap (recipient delivery and/or sender's own inbox copy) failed to publish. Surface as non-fatal failure so the composer keeps its draft and the user can retry, mirroring sendGroupMessage's pattern.
+          if (result.errors.length > 0) {
+            const intended = result.wrapsPublished + result.errors.length;
+            return {
+              success: false,
+              error: `Send incomplete — published ${result.wrapsPublished} of ${intended} wraps. ${result.errors[0]}`,
+            };
+          }
           return { success: true };
         }
+
+        if (signerType === 'amber') {
+          const currentUser = pubkey;
+          const result = await nostrService.sendNip17ToManyWithSigner({
+            senderPubkey: currentUser,
+            rumor,
+            recipientPubkeys: [normalizedRecipientPubkey],
+            relays: targetRelays,
+            signerNip44Encrypt: (plain, recipient) =>
+              amberService.requestNip44Encrypt(plain, recipient, currentUser),
+            signerSignSeal: async (unsignedSeal) => {
+              // Strip `pubkey` before handing to Amber — matches the
+              // group-send Amber path. Amber derives the field from
+              // `current_user` and some versions reject events whose
+              // declared pubkey doesn't match the signing identity.
+              const { pubkey: _omit, ...sealForAmber } = unsignedSeal;
+              void _omit;
+              const { event: signedEventJson } = await amberService.requestEventSignature(
+                JSON.stringify(sealForAmber),
+                '',
+                currentUser,
+              );
+              if (!signedEventJson) {
+                throw new Error('Amber returned empty signed seal');
+              }
+              return JSON.parse(signedEventJson);
+            },
+          });
+          if (result.wrapsPublished === 0) {
+            return { success: false, error: result.errors[0] ?? 'No wraps published' };
+          }
+          // Same partial-send handling as the nsec path. Amber's per-recipient sequential signing means a cancelled prompt or a failed seal mid-loop leaves earlier wraps published but later ones unsent — surface that to the user instead of silent success.
+          if (result.errors.length > 0) {
+            const intended = result.wrapsPublished + result.errors.length;
+            return {
+              success: false,
+              error: `Send incomplete — published ${result.wrapsPublished} of ${intended} wraps. ${result.errors[0]}`,
+            };
+          }
+          return { success: true };
+        }
+
         return { success: false, error: 'Unsupported signer type' };
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to send message';
