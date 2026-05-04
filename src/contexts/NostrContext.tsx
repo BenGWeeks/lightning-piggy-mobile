@@ -1492,16 +1492,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             signerNip44Encrypt: (plaintext, recipientPubkey) =>
               amberService.requestNip44Encrypt(plaintext, recipientPubkey, currentUser),
             signerSignSeal: async (unsignedSeal) => {
-              // Match the kind-4 DM Amber path — strip `pubkey` from
-              // the JSON we send out. Amber derives the field from
-              // `current_user`. Keeps both Amber sign paths shaped
-              // identically and avoids any version of Amber that
-              // rejects an event whose declared pubkey doesn't match
-              // its signing identity.
-              const { pubkey: _omit, ...sealForAmber } = unsignedSeal;
-              void _omit;
+              // Keep pubkey on the seal — Amber misroutes kind=13 sign_event Intents without it (#356).
               const { event: signedEventJson } = await amberService.requestEventSignature(
-                JSON.stringify(sealForAmber),
+                JSON.stringify(unsignedSeal),
                 '',
                 currentUser,
               );
