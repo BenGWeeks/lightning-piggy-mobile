@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
@@ -189,7 +190,25 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
             </Text>
 
             <View style={styles.inputRow}>
-              <BottomSheetTextInput
+              {/*
+                Plain RN TextInput rather than BottomSheetTextInput. Issue
+                #228: Maestro's `inputText` drops characters when typing
+                into @gorhom/bottom-sheet's BottomSheetTextInput under the
+                New Architecture — the visible secureTextEntry dots
+                masked the issue, but the bech32 parse rejected the
+                truncated nsec with "Invalid private key", blocking the
+                3-way group-chat suite (PR #227, issue #146).
+
+                Keyboard tracking for the sheet is preserved by the
+                existing manual `Keyboard.addListener` / `keyboardHeight`
+                padding above plus the sheet's own
+                `keyboardBehavior="interactive"` +
+                `android_keyboardInputMode="adjustResize"`. Other
+                BottomSheetTextInput call sites in this file (the
+                create-name-input) stay as-is — scope is just the nsec
+                input that the Maestro flows type into.
+              */}
+              <TextInput
                 style={styles.input}
                 placeholder="nsec1..."
                 placeholderTextColor={colors.textSupplementary}
