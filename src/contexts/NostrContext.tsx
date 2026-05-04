@@ -2520,6 +2520,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const activeSigner = signerType;
     const readRelays = getReadRelays();
     const seen = new Set<string>();
+    const SEEN_CAP = 4096;
+    // Lazy-populated in-memory mirror of the persisted NIP-17 wrap-id cache. Loaded
+    // on first wrap so we don't JSON.parse the full cache (up to 5000 entries) on every event.
+    let knownWrapIds: Set<string> | null = null;
     let cancelled = false;
     let writeChain: Promise<void> = Promise.resolve();
 
@@ -2527,6 +2531,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (cancelled) return;
       if (seen.has(wrap.id)) return;
       seen.add(wrap.id);
+      // Drop oldest ~25% so a long-lived sub under spam doesn't grow the Set unboundedly.
+      if (seen.size > SEEN_CAP) {
+        const drop = Math.floor(SEEN_CAP / 4);
+        const it = seen.values();
+        for (let i = 0; i < drop; i++) seen.delete(it.next().value!);
+      }
 
       // Cache short-circuit: if refreshDmInbox already decrypted this
       // wrap and persisted it, the live sub has nothing to do — the
@@ -2539,9 +2549,13 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             ? AMBER_NIP17_CACHE_KEY
             : null;
       if (!cacheKey) return;
-      const existingRaw = await AsyncStorage.getItem(cacheKey);
-      const existingCache = safeParseRecord<Nip17CacheEntry>(existingRaw);
-      if (existingCache[wrap.id]) return;
+      if (knownWrapIds === null) {
+        // First wrap — pay the JSON.parse once to seed the in-memory mirror.
+        const seedRaw = await AsyncStorage.getItem(cacheKey);
+        const seedCache = safeParseRecord<Nip17CacheEntry>(seedRaw);
+        knownWrapIds = new Set(Object.keys(seedCache));
+      }
+      if (knownWrapIds.has(wrap.id)) return;
 
       const onSkip = (reason: string, wrapId: string) => {
         if (__DEV__) console.warn(`[Nostr] live NIP-17 unwrap skip (${wrapId}): ${reason}`);
@@ -2612,38 +2626,41 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         wireKind: entry.wireKind,
       };
 
-      // Serialise the read-modify-write of both AsyncStorage blobs
-      // (wrap cache + inbox cache) so concurrent live wraps don't
-      // race each other or refreshDmInbox's writes.
-      writeChain = writeChain.then(async () => {
-        if (cancelled) return;
-        const wrapRaw = await AsyncStorage.getItem(cacheKey);
-        const wrapCache = safeParseRecord<Nip17CacheEntry>(wrapRaw);
-        if (wrapCache[wrap.id]) return;
-        wrapCache[wrap.id] = entry;
-        await writeNip17Cache(cacheKey, wrapCache);
+      // Serialise read→merge→write of wrap+inbox blobs so concurrent live wraps don't race each other.
+      // The trailing `.catch` is load-bearing: without it a single throw leaves `writeChain` rejected and every later `.then(...)` skips its onFulfilled.
+      writeChain = writeChain
+        .then(async () => {
+          if (cancelled) return;
+          const wrapRaw = await AsyncStorage.getItem(cacheKey);
+          const wrapCache = safeParseRecord<Nip17CacheEntry>(wrapRaw);
+          if (wrapCache[wrap.id]) {
+            knownWrapIds?.add(wrap.id);
+            return;
+          }
+          wrapCache[wrap.id] = entry;
+          await writeNip17Cache(cacheKey, wrapCache);
+          knownWrapIds?.add(wrap.id);
 
-        const inboxRaw = await AsyncStorage.getItem(inboxCacheKey(viewerPubkey));
-        const cachedInbox: DmInboxEntry[] = inboxRaw
-          ? (() => {
-              try {
-                const parsed = JSON.parse(inboxRaw);
-                return Array.isArray(parsed) ? parsed : [];
-              } catch {
-                return [];
-              }
-            })()
-          : [];
-        const merged = mergeInboxEntries(cachedInbox, [inboxEntry], DM_INBOX_CAP);
-        await AsyncStorage.setItem(inboxCacheKey(viewerPubkey), JSON.stringify(merged)).catch(
-          () => {},
-        );
-      });
-      try {
-        await writeChain;
-      } catch (e) {
-        if (__DEV__) console.warn('[Nostr] live wrap persist failed:', e);
-      }
+          const inboxRaw = await AsyncStorage.getItem(inboxCacheKey(viewerPubkey));
+          const cachedInbox: DmInboxEntry[] = inboxRaw
+            ? (() => {
+                try {
+                  const parsed = JSON.parse(inboxRaw);
+                  return Array.isArray(parsed) ? parsed : [];
+                } catch {
+                  return [];
+                }
+              })()
+            : [];
+          const merged = mergeInboxEntries(cachedInbox, [inboxEntry], DM_INBOX_CAP);
+          await AsyncStorage.setItem(inboxCacheKey(viewerPubkey), JSON.stringify(merged)).catch(
+            () => {},
+          );
+        })
+        .catch((e) => {
+          if (__DEV__) console.warn('[Nostr] live wrap persist failed:', e);
+        });
+      await writeChain;
       if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
 
       setDmInbox((prev) => mergeInboxEntries(prev, [inboxEntry], DM_INBOX_CAP));
