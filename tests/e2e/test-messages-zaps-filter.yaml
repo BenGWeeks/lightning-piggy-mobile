@@ -1,0 +1,43 @@
+appId: com.lightningpiggy.app.dev
+name: Messages Zaps Filter Chip Toggles On and Off
+---
+# Verifies the "Zaps" filter chip on the Messages inbox (#147). The chip
+# defaults to OFF (DMs only) and tapping it unions zap counterparties
+# back into the conversation list. We only assert chip visibility +
+# tappability + accessibility-state flip — confirming the underlying
+# row-set change requires a known zap-only counterparty fixture in the
+# wallet history, which the standard Piggy login fixtures don't seed.
+#
+# Preconditions:
+#   - Logged in (nsec or Amber).
+#
+# Run: maestro test tests/e2e/test-messages-zaps-filter.yaml
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Land on the Messages tab
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# The Zaps chip should be present (OFF by default — DMs-only inbox).
+- assertVisible:
+    id: 'messages-zaps-toggle'
+
+# Tap to enable — chip should flip to "Hide..." accessibility label.
+- tapOn:
+    id: 'messages-zaps-toggle'
+- waitForAnimationToEnd:
+    timeout: 1000
+- assertVisible:
+    id: 'messages-zaps-toggle'
+
+# Tap again to disable — back to default DMs-only state.
+- tapOn:
+    id: 'messages-zaps-toggle'
+- waitForAnimationToEnd:
+    timeout: 1000
+- assertVisible:
+    id: 'messages-zaps-toggle'

@@ -11,7 +11,7 @@ import { Image as ExpoImage } from 'expo-image';
 import TabBackgroundImage from '../components/TabBackgroundImage';
 import { FlashList } from '@shopify/flash-list';
 import Svg, { Path } from 'react-native-svg';
-import { Users, Clock, Search, X } from 'lucide-react-native';
+import { Users, Clock, Search, X, Zap } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, CompositeNavigationProp, useFocusEffect } from '@react-navigation/native';
@@ -80,10 +80,18 @@ const MessagesScreen: React.FC = () => {
   const [createGroupVisible, setCreateGroupVisible] = useState(false);
   const [anonSheetContact, setAnonSheetContact] = useState<AnonContact | null>(null);
   const [windowDays, setWindowDays] = useState<30 | 90>(30);
+  // Default OFF so the inbox starts as DMs-only (#147). When ON, the
+  // memo below re-merges zap-counterparty rows into the conversation
+  // list so users who primarily zap (vs. DM) still get a one-tap path
+  // back to the legacy mixed view.
+  const [showZapCounterparties, setShowZapCounterparties] = useState(false);
 
   useEffect(() => {
     AsyncStorage.getItem('messages_window_days').then((v) => {
       if (v === '90') setWindowDays(90);
+    });
+    AsyncStorage.getItem('messages_show_zap_counterparties').then((v) => {
+      if (v === '1') setShowZapCounterparties(true);
     });
   }, []);
 
@@ -91,6 +99,14 @@ const MessagesScreen: React.FC = () => {
     setWindowDays((prev) => {
       const next: 30 | 90 = prev === 30 ? 90 : 30;
       AsyncStorage.setItem('messages_window_days', String(next)).catch(() => {});
+      return next;
+    });
+  }, []);
+
+  const toggleShowZapCounterparties = useCallback(() => {
+    setShowZapCounterparties((prev) => {
+      const next = !prev;
+      AsyncStorage.setItem('messages_show_zap_counterparties', next ? '1' : '0').catch(() => {});
       return next;
     });
   }, []);
@@ -203,15 +219,20 @@ const MessagesScreen: React.FC = () => {
   }, [contacts]);
 
   const conversationSummaries = useMemo(() => {
-    const zap = buildConversationSummaries(wallets, contacts);
     // Pass followPubkeys as a defence-in-depth filter. NostrContext's
     // refreshDmInbox already drops non-follows at the data layer, but
     // applying it again here guards against stale dmInbox state from
     // before a follow was revoked. The "Following only" rule is
     // load-bearing — keep it enforced everywhere a summary is built.
     const dm = buildDmSummaries(dmInbox, contacts, followPubkeys);
+    // #147: by default the inbox shows DMs only — zap-only counterparties
+    // (rows that were derived purely from wallet zap history with no
+    // decoded NIP-04/NIP-17 message) are hidden. The "Show zap
+    // counterparties" filter chip re-unions them when the user opts in.
+    if (!showZapCounterparties) return dm;
+    const zap = buildConversationSummaries(wallets, contacts);
     return mergeSummaries(zap, dm);
-  }, [wallets, contacts, dmInbox, followPubkeys]);
+  }, [wallets, contacts, dmInbox, followPubkeys, showZapCounterparties]);
 
   // Following-only is always on by design (parental-control requirement);
   // enforcement lives inside buildDmSummaries + refreshDmInbox. This memo
@@ -425,6 +446,25 @@ const MessagesScreen: React.FC = () => {
             >
               <Clock size={14} color={colors.brandPink} />
               <Text style={styles.filterChipText}>Last {windowDays} days</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={
+                showZapCounterparties
+                  ? styles.filterChipInteractiveOn
+                  : styles.filterChipInteractive
+              }
+              onPress={toggleShowZapCounterparties}
+              accessibilityLabel={
+                showZapCounterparties
+                  ? 'Hide zap counterparties from the inbox'
+                  : 'Show zap counterparties in the inbox'
+              }
+              accessibilityRole="button"
+              accessibilityState={{ selected: showZapCounterparties }}
+              testID="messages-zaps-toggle"
+            >
+              <Zap size={14} color={colors.brandPink} />
+              <Text style={styles.filterChipText}>Zaps</Text>
             </TouchableOpacity>
           </View>
         )}
