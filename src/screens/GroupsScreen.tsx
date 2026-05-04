@@ -25,15 +25,6 @@ import type { Group } from '../types/groups';
 
 type GroupsNavigation = NativeStackNavigationProp<RootStackParamList, 'Groups'>;
 
-// Compose the avatar-cluster source: viewer first (so they show up even on
-// inactive groups where there are no recent senders), then other members.
-// Matches the "X people = X icons" mental model — memberPubkeys excludes
-// the viewer by LP convention, so without prepending, a 1:1 group would
-// render only 1 avatar and a 3-person group only 2. (#363)
-function memberPubkeysWithViewer(myPubkey: string | null, memberPubkeys: string[]): string[] {
-  return myPubkey ? [myPubkey, ...memberPubkeys] : memberPubkeys;
-}
-
 const GroupsScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<GroupsNavigation>();
@@ -56,6 +47,22 @@ const GroupsScreen: React.FC = () => {
     }
     return map;
   }, [contacts]);
+
+  // Per-group avatar inputs precomputed once per (visibleGroups, myPubkey)
+  // change. Both the displayed member count and the GroupAvatar pubkeys
+  // are derived from the same `pubkeys` array — so they can never drift
+  // (Copilot blocking on PR 365: when myPubkey is null during session
+  // restore, count and cluster size must still agree). Memoizing also
+  // keeps the array reference stable, so React.memo(GroupAvatar) can
+  // skip re-renders during unrelated state churn.
+  const groupAvatarInputs = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const g of visibleGroups) {
+      map.set(g.id, myPubkey ? [myPubkey, ...g.memberPubkeys] : g.memberPubkeys);
+    }
+    return map;
+  }, [visibleGroups, myPubkey]);
+
   const enforceFollowingOnly = followingOnly || !devMode;
   const [createVisible, setCreateVisible] = useState(false);
 
@@ -95,33 +102,35 @@ const GroupsScreen: React.FC = () => {
   );
 
   const renderItem = useCallback(
-    ({ item }: { item: Group }) => (
-      <TouchableOpacity
-        style={styles.row}
-        onPress={() => openGroup(item)}
-        onLongPress={() => handleLongPress(item)}
-        activeOpacity={0.6}
-        accessibilityLabel={`Open group ${item.name}`}
-        testID={`group-row-${item.id}`}
-      >
-        <GroupAvatar
-          pubkeys={memberPubkeysWithViewer(myPubkey, item.memberPubkeys)}
-          groupName={item.name}
-          size={44}
-          contactInfoMap={contactInfoMap}
-        />
-        <View style={styles.info}>
-          <Text style={styles.name} numberOfLines={1}>
-            {item.name}
-          </Text>
-          <Text style={styles.subtitle} numberOfLines={1}>
-            {item.memberPubkeys.length + 1} member
-            {item.memberPubkeys.length === 0 ? '' : 's'}
-          </Text>
-        </View>
-      </TouchableOpacity>
-    ),
-    [openGroup, handleLongPress, styles, contactInfoMap, myPubkey],
+    ({ item }: { item: Group }) => {
+      const pubkeys = groupAvatarInputs.get(item.id) ?? item.memberPubkeys;
+      return (
+        <TouchableOpacity
+          style={styles.row}
+          onPress={() => openGroup(item)}
+          onLongPress={() => handleLongPress(item)}
+          activeOpacity={0.6}
+          accessibilityLabel={`Open group ${item.name}`}
+          testID={`group-row-${item.id}`}
+        >
+          <GroupAvatar
+            pubkeys={pubkeys}
+            groupName={item.name}
+            size={44}
+            contactInfoMap={contactInfoMap}
+          />
+          <View style={styles.info}>
+            <Text style={styles.name} numberOfLines={1}>
+              {item.name}
+            </Text>
+            <Text style={styles.subtitle} numberOfLines={1}>
+              {pubkeys.length} member{pubkeys.length === 1 ? '' : 's'}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      );
+    },
+    [openGroup, handleLongPress, styles, contactInfoMap, groupAvatarInputs],
   );
 
   return (
