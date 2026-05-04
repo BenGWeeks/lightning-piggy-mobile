@@ -14,6 +14,7 @@ import { Alert } from '../components/BrandedAlert';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Users, Search, X } from 'lucide-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation, CompositeNavigationProp, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -35,6 +36,10 @@ type FriendsNavigation = CompositeNavigationProp<
 >;
 
 type Filter = 'all' | 'nostr' | 'contacts';
+const FILTER_STORAGE_KEY = 'friends_filter';
+const FILTER_VALUES: readonly Filter[] = ['all', 'nostr', 'contacts'] as const;
+const isFilter = (v: string | null): v is Filter =>
+  v !== null && (FILTER_VALUES as readonly string[]).includes(v);
 
 // Cached at module scope so every keystroke doesn't construct a fresh
 // Intl.Collator (5-10× slower than reusing one). 'base' sensitivity is
@@ -107,6 +112,24 @@ const FriendsScreen: React.FC = () => {
     fetchPhoneContacts()
       .then(setPhoneContacts)
       .catch(() => {});
+  }, []);
+
+  // Restore the persisted Friends-tab filter selection on mount so it
+  // survives app restarts (#311). Mirrors the AsyncStorage pattern used
+  // by MessagesScreen for `messages_show_zap_counterparties` (#147 / PR
+  // #305). Falls back to 'all' if the stored value is missing or not a
+  // recognised Filter — same default as a brand-new install.
+  useEffect(() => {
+    AsyncStorage.getItem(FILTER_STORAGE_KEY)
+      .then((v) => {
+        if (isFilter(v)) setFilter(v);
+      })
+      .catch(() => {});
+  }, []);
+
+  const setFilterAndPersist = useCallback((next: Filter) => {
+    setFilter(next);
+    AsyncStorage.setItem(FILTER_STORAGE_KEY, next).catch(() => {});
   }, []);
 
   // Force-refresh the own-profile kind-0 on focus so the top-right
@@ -354,7 +377,11 @@ const FriendsScreen: React.FC = () => {
                 <TouchableOpacity
                   key={f.key}
                   style={[styles.chip, filter === f.key && styles.chipActive]}
-                  onPress={() => setFilter(f.key)}
+                  onPress={() => setFilterAndPersist(f.key)}
+                  accessibilityLabel={`${f.label} filter`}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: filter === f.key }}
+                  testID={`friends-filter-${f.key}`}
                 >
                   <Text style={[styles.chipText, filter === f.key && styles.chipTextActive]}>
                     {f.label}
