@@ -89,13 +89,17 @@ const AboutScreen: React.FC = () => {
       Alert.alert(
         newMode ? 'Developer Mode Enabled' : 'Developer Mode Disabled',
         newMode
-          ? 'Hot wallet options are now available in Add Wallet.'
-          : 'Hot wallet options hidden.',
+          ? 'Dev features unlocked: hot wallet import in Add Wallet, "Following only" toggle on Messages and Groups tabs, and other in-app debug surfaces.'
+          : 'Dev features hidden. Restart the app if any toggle still appears.',
       );
     } else {
-      versionTapTimer.current = setTimeout(() => {
-        versionTapCount.current = 0;
-      }, 1000);
+      // Maestro tapOn cadence on Android emulator is ~400ms each, so 3 taps need >1s. Widen window in dev builds only.
+      versionTapTimer.current = setTimeout(
+        () => {
+          versionTapCount.current = 0;
+        },
+        __DEV__ ? 3000 : 1000,
+      );
     }
   };
 
