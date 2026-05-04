@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, Image, StyleSheet } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import { Zap, MapPin, UserRound } from 'lucide-react-native';
+import { Zap, MapPin, UserRound, Radio } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import type { NostrProfile } from '../types/nostr';
@@ -52,6 +52,19 @@ interface Props {
   onOpenContact: (pubkey: string, profile: NostrProfile | null) => void;
   // Tap a location card → parent opens OSM in the system browser.
   onOpenLocation: (location: SharedLocation) => void;
+  // Live-location bubble extras. The parent owns the live state (most
+  // recent ping, remaining time) so the bubble stays a pure renderer
+  // and doesn't need its own context dependency.
+  //   - `liveLocationLatest`: latest coords seen since the start marker
+  //     landed, keyed by sessionId. Falls back to the marker's coords.
+  //   - `liveLocationStatus`: `active` | `paused` | `ended` per session.
+  //   - `liveLocationRemainingMs`: countdown for the sender's bubble.
+  //   - `onStopLiveLocation`: tapped the in-bubble "Stop" button (sender
+  //     side only — pass `undefined` for receiver bubbles).
+  liveLocationLatest?: Record<string, { location: SharedLocation; ts: number } | undefined>;
+  liveLocationStatus?: Record<string, 'active' | 'paused' | 'ended' | 'expired' | undefined>;
+  liveLocationRemainingMs?: Record<string, number | undefined>;
+  onStopLiveLocation?: (sessionId: string) => void;
   // Tap a GIF or image bubble → parent shows fullscreen modal. Optional —
   // when omitted the cards still render but tap is a no-op.
   onOpenGifFullscreen?: (url: string) => void;
@@ -73,6 +86,10 @@ const MessageBubble: React.FC<Props> = ({
   onPayLightningAddress,
   onOpenContact,
   onOpenLocation,
+  liveLocationLatest,
+  liveLocationStatus,
+  liveLocationRemainingMs,
+  onStopLiveLocation,
   onOpenGifFullscreen,
   onOpenImageFullscreen,
   testIdPrefix,
@@ -106,6 +123,120 @@ const MessageBubble: React.FC<Props> = ({
             accessibilityIgnoresInvertColors
           />
           <Text style={[styles.gifTime, fromMe && styles.gifTimeMe]}>{formatTime(createdAt)}</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (content.kind === 'liveLocationMarker') {
+    const { marker } = content;
+    // The receiver's running view of where the sender is right now —
+    // ConversationScreen feeds this from its kind-20069 subscription.
+    // Falls back to the marker's own coordinates so the bubble always
+    // renders a map even before the first ping has landed.
+    const latest = liveLocationLatest?.[marker.sessionId];
+    const displayLocation: SharedLocation = latest?.location ?? marker.location;
+    const mapUrl = buildStaticMapUrl(displayLocation);
+    const status =
+      liveLocationStatus?.[marker.sessionId] ?? (marker.phase === 'end' ? 'ended' : 'active');
+    const remaining = liveLocationRemainingMs?.[marker.sessionId] ?? null;
+    // Sender bubble while the share is still active gets a Stop button.
+    // Receiver bubbles never see one (no `onStopLiveLocation` plumbed).
+    const showStop = fromMe && status === 'active' && !!onStopLiveLocation;
+    const titleText =
+      marker.phase === 'end' || status === 'ended'
+        ? fromMe
+          ? 'Live location ended'
+          : 'Live location ended'
+        : status === 'paused'
+          ? fromMe
+            ? 'Live location paused'
+            : 'Live location · paused'
+          : fromMe
+            ? 'Sharing live location'
+            : 'Live location';
+    const subtitleText: string | null = (() => {
+      if (marker.phase === 'end' || status === 'ended') {
+        return latest ? `Last update ${formatTime(Math.floor(latest.ts / 1000))}` : null;
+      }
+      if (latest) {
+        const ageMs = Math.max(0, Date.now() - latest.ts);
+        const mins = Math.floor(ageMs / 60_000);
+        const secs = Math.floor((ageMs % 60_000) / 1000);
+        if (mins >= 1) return `Updated ${mins}m ago`;
+        return `Updated ${secs}s ago`;
+      }
+      return 'Waiting for first update…';
+    })();
+    const remainingLabel: string | null = (() => {
+      if (status === 'ended' || marker.phase === 'end') return null;
+      if (remaining === null) return null;
+      if (remaining <= 0) return 'Ending…';
+      const mins = Math.ceil(remaining / 60_000);
+      if (mins < 60) return `${mins} min left`;
+      const hours = Math.floor(mins / 60);
+      const remMin = mins % 60;
+      return remMin === 0 ? `${hours}h left` : `${hours}h ${remMin}m left`;
+    })();
+    return (
+      <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => onOpenLocation(displayLocation)}
+          style={[styles.locationCard, fromMe ? styles.locationCardMe : styles.locationCardThem]}
+          accessibilityLabel={
+            fromMe
+              ? `Sharing live location with peer, ${remainingLabel ?? 'no time remaining'}`
+              : `Receiving live location, ${subtitleText ?? 'waiting'}`
+          }
+          testID={`${testIdPrefix}-live-location-${id}`}
+        >
+          {SenderLabel}
+          <ExpoImage
+            source={{ uri: mapUrl, headers: { 'User-Agent': USER_AGENT } }}
+            style={styles.locationMap}
+            contentFit="cover"
+            cachePolicy="disk"
+            transition={150}
+            accessibilityIgnoresInvertColors
+          />
+          <View style={styles.locationBody}>
+            <View style={styles.locationLabelRow}>
+              <Radio
+                size={14}
+                color={fromMe ? 'rgba(255,255,255,0.85)' : colors.textSupplementary}
+              />
+              <Text style={[styles.locationLabel, fromMe && styles.locationLabelMe]}>
+                {titleText}
+              </Text>
+            </View>
+            <Text style={[styles.locationCoords, fromMe && styles.locationCoordsMe]}>
+              {formatCoordsForDisplay(displayLocation)}
+            </Text>
+            {subtitleText ? (
+              <Text style={[styles.locationAccuracy, fromMe && styles.locationAccuracyMe]}>
+                {subtitleText}
+              </Text>
+            ) : null}
+            {remainingLabel ? (
+              <Text style={[styles.locationAccuracy, fromMe && styles.locationAccuracyMe]}>
+                {remainingLabel}
+              </Text>
+            ) : null}
+            {showStop ? (
+              <TouchableOpacity
+                style={styles.invoicePayButton}
+                onPress={() => onStopLiveLocation?.(marker.sessionId)}
+                accessibilityLabel="Stop sharing live location"
+                testID={`${testIdPrefix}-live-location-stop-${id}`}
+              >
+                <Text style={styles.invoicePayText}>Stop sharing</Text>
+              </TouchableOpacity>
+            ) : null}
+            <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
+              {formatTime(createdAt)}
+            </Text>
+          </View>
         </TouchableOpacity>
       </View>
     );

@@ -11,6 +11,7 @@ import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { WalletProvider, useWallet } from './src/contexts/WalletContext';
 import { NostrProvider } from './src/contexts/NostrContext';
 import { GroupsProvider } from './src/contexts/GroupsContext';
+import { LiveLocationProvider } from './src/contexts/LiveLocationContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
@@ -79,10 +80,16 @@ export default function App() {
                 {/* GroupsProvider sits inside Nostr so groups can subscribe
                     to multi-recipient gift wraps using the active signer. */}
                 <GroupsProvider>
-                  <BottomSheetModalProvider>
-                    <ThemedStatusBar />
-                    <AppNavigator />
-                  </BottomSheetModalProvider>
+                  {/* LiveLocationProvider sits inside Nostr (uses the
+                      signer + sendDirectMessage) but outside the
+                      navigator so an active share survives screen
+                      transitions and pause/resume cycles. */}
+                  <LiveLocationProvider>
+                    <BottomSheetModalProvider>
+                      <ThemedStatusBar />
+                      <AppNavigator />
+                    </BottomSheetModalProvider>
+                  </LiveLocationProvider>
                   {/* BrandedToast: brand-themed wrapper around
                       `react-native-toast-message`. Single mount for the
                       app's toast slot — keeps styling (pink success

@@ -99,7 +99,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       'expo-location',
       {
         locationWhenInUsePermission:
-          'Allow Lightning Piggy to access your location so you can share it in a private message.',
+          'Allow Lightning Piggy to access your location so you can share it (one-shot or live for a chosen duration) in a private message.',
+        // Live-location share runs only while the app is in the
+        // foreground for now. Acceptance criteria mention 3-5 min of
+        // background updates with a notification — wire that up when
+        // the foreground-service plugin lands so we can request
+        // ACCESS_BACKGROUND_LOCATION without scaring iOS reviewers.
         isAndroidBackgroundLocationEnabled: false,
       },
     ],

@@ -1039,3 +1039,82 @@ export function subscribeGroupStateForViewer(input: {
     }
   };
 }
+
+/**
+ * Build an ephemeral kind-20069 live-location ping. Body is NIP-04
+ * encrypted with the sender's secret so only the recipient can read
+ * the coordinates; tags carry `['p', recipient]` for relay routing
+ * (mainstream relays index `#p`) and `['d', sessionId]` so the
+ * receiver's subscription can filter by session — the same sender
+ * may have multiple concurrent shares running to different peers.
+ *
+ * NIP-01 mandates that relays drop events in the 20000-29999 range
+ * after fan-out, which is exactly what we want for a high-frequency
+ * coordinate stream — no relay-side history to clutter the receiver
+ * the next time they open the conversation.
+ */
+export async function createLiveLocationPingEvent(
+  senderSecretKey: Uint8Array,
+  recipientPubkey: string,
+  sessionId: string,
+  payloadJson: string,
+  kind: number,
+): Promise<{ kind: number; created_at: number; tags: string[][]; content: string }> {
+  const ciphertext = await nip04.encrypt(senderSecretKey, recipientPubkey, payloadJson);
+  return {
+    kind,
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [
+      ['p', recipientPubkey],
+      ['d', sessionId],
+    ],
+    content: ciphertext,
+  };
+}
+
+/**
+ * Subscribe to ephemeral kind-N events for the viewer's pubkey, filtered
+ * by sessionId. `since` is set to the live-share start time so we don't
+ * pick up stale pings if a relay (incorrectly) cached one — a defensive
+ * measure since spec-conformant relays will drop ephemerals on disconnect
+ * but real-world relays sometimes hold them briefly in memory.
+ *
+ * Returns an unsubscribe function. The caller is responsible for
+ * decrypting the inbound event content with their own secret key.
+ */
+export function subscribeLiveLocationPings(input: {
+  viewerPubkey: string;
+  senderPubkey: string;
+  sessionId: string;
+  kind: number;
+  /** Unix epoch SECONDS — defaults to now-60 to cope with clock drift. */
+  since?: number;
+  relays: string[];
+  onEvent: (ev: {
+    id: string;
+    pubkey: string;
+    kind: number;
+    created_at: number;
+    tags: string[][];
+    content: string;
+  }) => void;
+}): () => void {
+  trackRelays(input.relays);
+  const filter: Filter = {
+    kinds: [input.kind],
+    authors: [input.senderPubkey],
+    '#p': [input.viewerPubkey],
+    '#d': [input.sessionId],
+    since: input.since ?? Math.floor(Date.now() / 1000) - 60,
+  };
+  const sub = pool.subscribeMany(input.relays, filter, {
+    onevent: (ev) => input.onEvent(ev),
+  });
+  return () => {
+    try {
+      sub.close();
+    } catch {
+      // best-effort
+    }
+  };
+}
