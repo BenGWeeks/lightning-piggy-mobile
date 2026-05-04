@@ -63,6 +63,11 @@ import {
   extractSharedContact,
   formatTime,
 } from '../utils/messageContent';
+import {
+  deliveryStatusFromPublishResult,
+  nextDeliveryStatus,
+  type MessageDeliveryStatus,
+} from '../utils/messageDeliveryStatus';
 
 type ConversationRoute = RouteProp<RootStackParamList, 'Conversation'>;
 type ConversationNavigation = NativeStackNavigationProp<RootStackParamList, 'Conversation'>;
@@ -74,6 +79,7 @@ type Item =
       fromMe: boolean;
       text: string;
       createdAt: number;
+      deliveryStatus?: MessageDeliveryStatus;
     }
   | {
       kind: 'zap';
@@ -90,6 +96,7 @@ type Item =
       fromMe: boolean;
       location: SharedLocation;
       createdAt: number;
+      deliveryStatus?: MessageDeliveryStatus;
     }
   | {
       kind: 'gif';
@@ -97,6 +104,7 @@ type Item =
       fromMe: boolean;
       url: string;
       createdAt: number;
+      deliveryStatus?: MessageDeliveryStatus;
     }
   | {
       kind: 'dayHeader';
@@ -147,7 +155,16 @@ const ConversationScreen: React.FC = () => {
   const { wallets, activeWalletId, activeWallet } = useWallet();
 
   const [messages, setMessages] = useState<
-    { id: string; fromMe: boolean; text: string; createdAt: number }[]
+    {
+      id: string;
+      fromMe: boolean;
+      text: string;
+      createdAt: number;
+      // Only populated for messages that this app instance just sent;
+      // historical messages loaded from the relay cache leave it
+      // undefined and the bubble suppresses the tick row entirely.
+      deliveryStatus?: MessageDeliveryStatus;
+    }[]
   >([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -248,6 +265,7 @@ const ConversationScreen: React.FC = () => {
           fromMe: m.fromMe,
           url: classified.url,
           createdAt: m.createdAt,
+          deliveryStatus: m.deliveryStatus,
         };
       }
       if (classified.kind === 'location') {
@@ -257,6 +275,7 @@ const ConversationScreen: React.FC = () => {
           fromMe: m.fromMe,
           location: classified.location,
           createdAt: m.createdAt,
+          deliveryStatus: m.deliveryStatus,
         };
       }
       return {
@@ -265,6 +284,7 @@ const ConversationScreen: React.FC = () => {
         fromMe: m.fromMe,
         text: m.text,
         createdAt: m.createdAt,
+        deliveryStatus: m.deliveryStatus,
       };
     });
     // Descending order — index 0 is newest. The FlatList is `inverted`, so
@@ -562,28 +582,48 @@ const ConversationScreen: React.FC = () => {
     }
   }, [load]);
 
+  /**
+   * Drives the per-message tick indicator (`MessageDeliveryStatus`).
+   * Mutates the local-message record matching `localId` so the bubble
+   * re-renders with the new tick state. The state-machine guard in
+   * `nextDeliveryStatus` prevents a late callback from regressing a
+   * message that's already been acked.
+   */
+  const updateDeliveryStatus = useCallback((localId: string, next: MessageDeliveryStatus) => {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === localId
+          ? { ...m, deliveryStatus: nextDeliveryStatus(m.deliveryStatus ?? 'sending', next) }
+          : m,
+      ),
+    );
+  }, []);
+
   const handleSend = useCallback(async () => {
     const text = draft.trim();
     if (!text || sending) return;
     setSending(true);
+    // Optimistically render the bubble in the `sending` state so the
+    // tick row paints immediately — the user can confirm the tap was
+    // registered even on a slow relay path. The state flips to `sent`
+    // or `failed` once `sendDirectMessage` resolves.
+    const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const createdAt = Math.floor(Date.now() / 1000);
+    setMessages((prev) => [
+      ...prev,
+      { id: localId, fromMe: true, text, createdAt, deliveryStatus: 'sending' },
+    ]);
+    setDraft('');
     try {
       const result = await sendDirectMessage(pubkey, text);
+      updateDeliveryStatus(localId, deliveryStatusFromPublishResult(result.success));
       if (!result.success) {
         Alert.alert('Send failed', result.error ?? 'Could not send message.');
-        return;
       }
-      setDraft('');
-      const optimistic = {
-        id: `local-${Date.now()}`,
-        fromMe: true,
-        text,
-        createdAt: Math.floor(Date.now() / 1000),
-      };
-      setMessages((prev) => [...prev, optimistic]);
     } finally {
       setSending(false);
     }
-  }, [draft, sending, sendDirectMessage, pubkey]);
+  }, [draft, sending, sendDirectMessage, pubkey, updateDeliveryStatus]);
 
   const handleShareLocation = useCallback(async () => {
     if (sharingLocation) return;
@@ -621,19 +661,21 @@ const ConversationScreen: React.FC = () => {
               onPress: async () => {
                 pressed = true;
                 const text = formatGeoMessage(loc);
+                const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    id: localId,
+                    fromMe: true,
+                    text,
+                    createdAt: Math.floor(Date.now() / 1000),
+                    deliveryStatus: 'sending',
+                  },
+                ]);
                 const sendResult = await sendDirectMessage(pubkey, text);
+                updateDeliveryStatus(localId, deliveryStatusFromPublishResult(sendResult.success));
                 if (!sendResult.success) {
                   Alert.alert('Send failed', sendResult.error ?? 'Could not send location.');
-                } else {
-                  setMessages((prev) => [
-                    ...prev,
-                    {
-                      id: `local-${Date.now()}`,
-                      fromMe: true,
-                      text,
-                      createdAt: Math.floor(Date.now() / 1000),
-                    },
-                  ]);
                 }
                 resolve();
               },
@@ -650,7 +692,7 @@ const ConversationScreen: React.FC = () => {
     } finally {
       setSharingLocation(false);
     }
-  }, [sharingLocation, name, pubkey, sendDirectMessage]);
+  }, [sharingLocation, name, pubkey, sendDirectMessage, updateDeliveryStatus]);
 
   // Shared send-image path for both gallery and camera entry points.
   // Strips EXIF from the picked image, uploads to the user's configured
@@ -662,27 +704,32 @@ const ConversationScreen: React.FC = () => {
       try {
         const scrubbed = await stripImageMetadata(localUri, pickerBase64);
         const url = await uploadImage(scrubbed.uri, signEvent, scrubbed.base64);
-        const sendResult = await sendDirectMessage(pubkey, url);
-        if (!sendResult.success) {
-          Alert.alert('Send failed', sendResult.error ?? 'Could not send image.');
-          return;
-        }
+        // Append optimistically in `sending` BEFORE awaiting the publish
+        // so the bubble paints with a tick row immediately after upload
+        // completes. Failure flips it to `failed` (red exclamation).
+        const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         setMessages((prev) => [
           ...prev,
           {
-            id: `local-${Date.now()}`,
+            id: localId,
             fromMe: true,
             text: url,
             createdAt: Math.floor(Date.now() / 1000),
+            deliveryStatus: 'sending',
           },
         ]);
+        const sendResult = await sendDirectMessage(pubkey, url);
+        updateDeliveryStatus(localId, deliveryStatusFromPublishResult(sendResult.success));
+        if (!sendResult.success) {
+          Alert.alert('Send failed', sendResult.error ?? 'Could not send image.');
+        }
       } catch (error) {
         Alert.alert('Upload failed', error instanceof Error ? error.message : 'Please try again.');
       } finally {
         setUploadingImage(false);
       }
     },
-    [signEvent, sendDirectMessage, pubkey],
+    [signEvent, sendDirectMessage, pubkey, updateDeliveryStatus],
   );
 
   const handlePickAndSendImage = useCallback(async () => {
@@ -739,22 +786,24 @@ const ConversationScreen: React.FC = () => {
       const nprofile = nprofileEncode(friend.pubkey, relayHints);
       const label = friend.name || 'a contact';
       const payload = `Shared contact: ${label}\nnostr:${nprofile}`;
-      const result = await sendDirectMessage(pubkey, payload);
-      if (!result.success) {
-        Alert.alert('Share failed', result.error ?? 'Could not share contact.');
-        return;
-      }
+      const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       setMessages((prev) => [
         ...prev,
         {
-          id: `local-${Date.now()}`,
+          id: localId,
           fromMe: true,
           text: payload,
           createdAt: Math.floor(Date.now() / 1000),
+          deliveryStatus: 'sending',
         },
       ]);
+      const result = await sendDirectMessage(pubkey, payload);
+      updateDeliveryStatus(localId, deliveryStatusFromPublishResult(result.success));
+      if (!result.success) {
+        Alert.alert('Share failed', result.error ?? 'Could not share contact.');
+      }
     },
-    [pubkey, sendDirectMessage, contacts, relays],
+    [pubkey, sendDirectMessage, contacts, relays, updateDeliveryStatus],
   );
 
   const handleSendGif = useCallback(
@@ -762,11 +811,6 @@ const ConversationScreen: React.FC = () => {
       setGifPickerOpen(false);
       setAttachPanelOpen(false);
       const payload = gif.url;
-      const result = await sendDirectMessage(pubkey, payload);
-      if (!result.success) {
-        Alert.alert('Send failed', result.error ?? 'Could not send GIF.');
-        return;
-      }
       // `local-<ms>` on its own collides if two sends land in the same
       // millisecond (e.g. a double-tap on a slow network). Append a
       // short random suffix so the FlatList keyExtractor stays unique.
@@ -778,10 +822,16 @@ const ConversationScreen: React.FC = () => {
           fromMe: true,
           text: payload,
           createdAt: Math.floor(Date.now() / 1000),
+          deliveryStatus: 'sending',
         },
       ]);
+      const result = await sendDirectMessage(pubkey, payload);
+      updateDeliveryStatus(localId, deliveryStatusFromPublishResult(result.success));
+      if (!result.success) {
+        Alert.alert('Send failed', result.error ?? 'Could not send GIF.');
+      }
     },
-    [pubkey, sendDirectMessage],
+    [pubkey, sendDirectMessage, updateDeliveryStatus],
   );
 
   const openLocation = useCallback((loc: SharedLocation) => {
@@ -878,6 +928,11 @@ const ConversationScreen: React.FC = () => {
           onOpenLocation={openLocation}
           onOpenGifFullscreen={setFullscreenGifUrl}
           testIdPrefix="conversation"
+          deliveryStatus={
+            item.kind === 'message' || item.kind === 'gif' || item.kind === 'location'
+              ? item.deliveryStatus
+              : undefined
+          }
         />
       );
     },
@@ -1168,13 +1223,18 @@ const ConversationScreen: React.FC = () => {
           lightningAddress: lightningAddress ?? null,
         }}
         onSent={(payload) => {
+          // ReceiveSheet does its own publish + already-success-only
+          // notify, so this append is post-ack — paint as `sent` rather
+          // than `sending` so the bubble doesn't flash a single grey
+          // tick and immediately upgrade.
           setMessages((prev) => [
             ...prev,
             {
-              id: `local-${Date.now()}`,
+              id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
               fromMe: true,
               text: payload,
               createdAt: Math.floor(Date.now() / 1000),
+              deliveryStatus: 'sent',
             },
           ]);
         }}
