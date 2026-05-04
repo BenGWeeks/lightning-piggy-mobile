@@ -146,6 +146,43 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
     backgroundImage: require('../../assets/images/xapo-logo.png'),
     backgroundImageStyle: 'xapo',
   },
+  // Sports-themed cards (#102). These are placeholder gradient-only
+  // entries so kids can pick a hobby-themed card today; real
+  // illustrations are a designer follow-up. When art lands, add
+  // `backgroundImage` + `backgroundImageStyle` here and the matching
+  // `bgStyle` in `src/themes/cards/index.ts`.
+  tennis: {
+    id: 'tennis',
+    name: 'Tennis',
+    // Lime-green court + crisp white line — classic tennis palette.
+    gradientColors: ['#A8E063', '#56AB2F'],
+    textColor: '#FFFFFF',
+    accentColor: '#FFFFFF',
+  },
+  football: {
+    id: 'football',
+    name: 'Football',
+    // Forest pitch + emerald grass — soccer feel without club IP.
+    gradientColors: ['#1B5E20', '#2E7D32'],
+    textColor: '#FFFFFF',
+    accentColor: '#A5D6A7',
+  },
+  basketball: {
+    id: 'basketball',
+    name: 'Basketball',
+    // Orange ball + black seam contrast.
+    gradientColors: ['#F57C00', '#E65100'],
+    textColor: '#FFFFFF',
+    accentColor: '#212121',
+  },
+  f1: {
+    id: 'f1',
+    name: 'Formula 1',
+    // Silver/gunmetal carbon-fibre with chequered-flag black.
+    gradientColors: ['#9E9E9E', '#212121'],
+    textColor: '#FFFFFF',
+    accentColor: '#E53935',
+  },
 };
 
 export const themeList = Object.values(cardThemes);
