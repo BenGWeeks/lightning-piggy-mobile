@@ -64,18 +64,25 @@ if (onlyEnvVar && targets.length === 0) {
 
 const pool = new SimplePool();
 
+// Sentinel: distinguish "the relay query timed out" from "the relays
+// confirmed there's no existing kind-0". Treating both as "no existing"
+// (the previous behaviour) risks clobbering real metadata when a relay
+// is just slow or unreachable.
+const FETCH_TIMEOUT = Symbol('fetch-timeout');
+
 async function fetchExistingKind0(pubkey) {
   try {
     const events = await Promise.race([
       pool.querySync(RELAYS, { kinds: [0], authors: [pubkey], limit: 5 }),
-      new Promise((resolve) => setTimeout(() => resolve([]), 8000)),
+      new Promise((resolve) => setTimeout(() => resolve(FETCH_TIMEOUT), 8000)),
     ]);
+    if (events === FETCH_TIMEOUT) return FETCH_TIMEOUT;
     if (!events || events.length === 0) return null;
     events.sort((a, b) => b.created_at - a.created_at);
     return events[0];
   } catch (err) {
     console.warn(`  fetch failed: ${err?.message || err}`);
-    return null;
+    return FETCH_TIMEOUT;
   }
 }
 
@@ -83,7 +90,10 @@ function parseContent(content) {
   if (!content) return {};
   try {
     const parsed = JSON.parse(content);
-    return parsed && typeof parsed === 'object' ? parsed : {};
+    // typeof null === 'object' and Array.isArray covers `[]` — both would
+    // produce a surprising spread (numeric keys / null bypass). Reject.
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+    return {};
   } catch {
     return {};
   }
@@ -119,11 +129,16 @@ for (const piggy of targets) {
   console.log(`  picture: ${pictureUrl}`);
 
   const existing = await fetchExistingKind0(pubkey);
+  if (existing === FETCH_TIMEOUT) {
+    console.error(`  ${label}: relay query timed out — refusing to publish (would risk clobbering existing metadata). Re-run when relays are healthy.`);
+    exitCode = 1;
+    continue;
+  }
   const existingContent = existing ? parseContent(existing.content) : {};
   if (existing) {
     console.log(`  existing kind-0 found (created_at=${existing.created_at}, fields=${Object.keys(existingContent).join(',') || '(empty)'})`);
   } else {
-    console.log('  no existing kind-0 — seeding name + display_name from label');
+    console.log('  no existing kind-0 (relays confirmed empty) — seeding name + display_name from label');
   }
 
   // Merge: keep everything, override picture, fill in name/display_name
