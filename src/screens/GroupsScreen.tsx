@@ -19,6 +19,7 @@ import type { Palette } from '../styles/palettes';
 import { useGroups } from '../contexts/GroupsContext';
 import { useNostr } from '../contexts/NostrContext';
 import CreateGroupSheet from '../components/CreateGroupSheet';
+import GroupAvatar, { type ContactInfo } from '../components/GroupAvatar';
 import type { RootStackParamList } from '../navigation/types';
 import type { Group } from '../types/groups';
 
@@ -30,7 +31,38 @@ const GroupsScreen: React.FC = () => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { visibleGroups, deleteGroup, followingOnly, setFollowingOnly, devMode } = useGroups();
-  const { isLoggedIn, refreshDmInbox } = useNostr();
+  const { isLoggedIn, refreshDmInbox, contacts, pubkey: myPubkey } = useNostr();
+
+  // Built once per render and shared by every row's GroupAvatar so we
+  // do O(contacts) per render instead of O(rows × avatars × contacts).
+  // Same idiom MessagesScreen uses (#245).
+  const contactInfoMap = useMemo(() => {
+    const map = new Map<string, ContactInfo>();
+    for (const c of contacts) {
+      map.set(c.pubkey.toLowerCase(), {
+        picture: c.profile?.picture ?? null,
+        name: (c.profile?.displayName || c.profile?.name || c.petname || '').trim() || null,
+        lightningAddress: c.profile?.lud16 ?? null,
+      });
+    }
+    return map;
+  }, [contacts]);
+
+  // Per-group avatar inputs precomputed once per (visibleGroups, myPubkey)
+  // change. Both the displayed member count and the GroupAvatar pubkeys
+  // are derived from the same `pubkeys` array — so they can never drift
+  // (Copilot blocking on PR 365: when myPubkey is null during session
+  // restore, count and cluster size must still agree). Memoizing also
+  // keeps the array reference stable, so React.memo(GroupAvatar) can
+  // skip re-renders during unrelated state churn.
+  const groupAvatarInputs = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const g of visibleGroups) {
+      map.set(g.id, myPubkey ? [myPubkey, ...g.memberPubkeys] : g.memberPubkeys);
+    }
+    return map;
+  }, [visibleGroups, myPubkey]);
+
   const enforceFollowingOnly = followingOnly || !devMode;
   const [createVisible, setCreateVisible] = useState(false);
 
@@ -70,29 +102,35 @@ const GroupsScreen: React.FC = () => {
   );
 
   const renderItem = useCallback(
-    ({ item }: { item: Group }) => (
-      <TouchableOpacity
-        style={styles.row}
-        onPress={() => openGroup(item)}
-        onLongPress={() => handleLongPress(item)}
-        activeOpacity={0.6}
-        accessibilityLabel={`Open group ${item.name}`}
-        testID={`group-row-${item.id}`}
-      >
-        <View style={styles.avatar}>
-          <Text style={styles.avatarLetter}>{(item.name[0] || '?').toUpperCase()}</Text>
-        </View>
-        <View style={styles.info}>
-          <Text style={styles.name} numberOfLines={1}>
-            {item.name}
-          </Text>
-          <Text style={styles.subtitle} numberOfLines={1}>
-            {item.memberPubkeys.length} member{item.memberPubkeys.length === 1 ? '' : 's'}
-          </Text>
-        </View>
-      </TouchableOpacity>
-    ),
-    [openGroup, handleLongPress, styles],
+    ({ item }: { item: Group }) => {
+      const pubkeys = groupAvatarInputs.get(item.id) ?? item.memberPubkeys;
+      return (
+        <TouchableOpacity
+          style={styles.row}
+          onPress={() => openGroup(item)}
+          onLongPress={() => handleLongPress(item)}
+          activeOpacity={0.6}
+          accessibilityLabel={`Open group ${item.name}`}
+          testID={`group-row-${item.id}`}
+        >
+          <GroupAvatar
+            pubkeys={pubkeys}
+            groupName={item.name}
+            size={44}
+            contactInfoMap={contactInfoMap}
+          />
+          <View style={styles.info}>
+            <Text style={styles.name} numberOfLines={1}>
+              {item.name}
+            </Text>
+            <Text style={styles.subtitle} numberOfLines={1}>
+              {pubkeys.length} member{pubkeys.length === 1 ? '' : 's'}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      );
+    },
+    [openGroup, handleLongPress, styles, contactInfoMap, groupAvatarInputs],
   );
 
   return (
@@ -306,19 +344,6 @@ const createStyles = (colors: Palette) =>
       paddingHorizontal: 20,
       paddingVertical: 14,
       gap: 12,
-    },
-    avatar: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      backgroundColor: colors.brandPinkLight,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    avatarLetter: {
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.brandPink,
     },
     info: {
       flex: 1,
