@@ -170,9 +170,10 @@ async function main() {
   const p8 = requireEnv('ASC_API_KEY_P8');
   const appId = requireEnv('ASC_APP_ID');
   const version = requireEnv('ASC_BUILD_VERSION');
-  const whatsNew = requireEnv('WHATS_NEW');
+  const whatsNew = requireEnv('WHATS_NEW').trimEnd();
   const locale = process.env.ASC_LOCALE || 'en-US';
-  const maxWaitSecs = parseInt(process.env.ASC_MAX_WAIT_SECS || '900', 10);
+  const parsedMaxWait = parseInt(process.env.ASC_MAX_WAIT_SECS || '', 10);
+  const maxWaitSecs = Number.isFinite(parsedMaxWait) && parsedMaxWait > 0 ? parsedMaxWait : 900;
 
   const jwt = makeJwt({ keyId, issuerId, privateKeyPem: p8 });
 

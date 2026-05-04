@@ -14,9 +14,10 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
-const REPO_ROOT = path.resolve(new URL('.', import.meta.url).pathname, '..');
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const NOTES_FILE = path.join(REPO_ROOT, 'docs', 'RELEASE_NOTES_NEXT.md');
 const MAX_CHARS = 3900;
 
@@ -95,9 +96,7 @@ function format(bullets) {
   }
   lines.push('- ...and more');
   let result = lines.join('\n');
-  // Single very long bullet (or a residual that still overruns): hard-slice
-  // so the returned value is always <= MAX_CHARS. Without this the ASC PATCH
-  // would 422 on `whatsNew` length.
+  // Last-resort guard: a single very long bullet would still overrun MAX_CHARS and 422 the ASC PATCH.
   if (result.length > MAX_CHARS) {
     const ELLIPSIS = '...';
     result = result.slice(0, MAX_CHARS - ELLIPSIS.length) + ELLIPSIS;
