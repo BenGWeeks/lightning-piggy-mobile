@@ -29,10 +29,12 @@ import * as nwcService from '../services/nwcService';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
+import { applyFilterToImage, type FilterId } from '../utils/imageFilters';
 import SendSheet from '../components/SendSheet';
 import AttachPanel from '../components/AttachPanel';
 import ConversationComposer from '../components/ConversationComposer';
 import GifPickerSheet from '../components/GifPickerSheet';
+import ImageFilterSheet from '../components/ImageFilterSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
 import MessageBubble from '../components/MessageBubble';
 import TransactionDetailSheet, {
@@ -154,6 +156,12 @@ const ConversationScreen: React.FC = () => {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
+  // After the user picks an image (Camera or Gallery) we hold the local
+  // URI here so `ImageFilterSheet` can preview it. Send tap → upload via
+  // `uploadAndSendImage`; Cancel tap → clear and go back to the
+  // conversation. Kept null while no picker flow is in flight (#138).
+  const [pendingImageUri, setPendingImageUri] = useState<string | null>(null);
+  const [pendingImageBase64, setPendingImageBase64] = useState<string | null>(null);
   const [sendSheetOpen, setSendSheetOpen] = useState(false);
   const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState(false);
@@ -653,14 +661,23 @@ const ConversationScreen: React.FC = () => {
   }, [sharingLocation, name, pubkey, sendDirectMessage]);
 
   // Shared send-image path for both gallery and camera entry points.
-  // Strips EXIF from the picked image, uploads to the user's configured
-  // Blossom server (or nostr.build fallback), then DMs the returned URL
-  // to the conversation partner.
+  // Bakes the chosen filter (passthrough today for everything except
+  // Original — see `utils/imageFilters.ts` for the honest scope), strips
+  // EXIF, uploads to the user's configured Blossom server (or
+  // nostr.build fallback), then DMs the returned URL to the conversation
+  // partner.
   const uploadAndSendImage = useCallback(
-    async (localUri: string, pickerBase64?: string | null) => {
+    async (localUri: string, pickerBase64: string | null, filterId: FilterId) => {
       setUploadingImage(true);
       try {
-        const scrubbed = await stripImageMetadata(localUri, pickerBase64);
+        // Filter bake (currently a no-op for non-Original — see #138).
+        // We intentionally drop the picker base64 if the bake produced
+        // a different URI: the original base64 wouldn't match the new
+        // bytes. Passthrough preserves it so `stripImageMetadata` can
+        // skip the re-encode for GIFs.
+        const filteredUri = await applyFilterToImage(localUri, filterId);
+        const baseBase64 = filteredUri === localUri ? pickerBase64 : null;
+        const scrubbed = await stripImageMetadata(filteredUri, baseBase64);
         const url = await uploadImage(scrubbed.uri, signEvent, scrubbed.base64);
         const sendResult = await sendDirectMessage(pubkey, url);
         if (!sendResult.success) {
@@ -676,6 +693,10 @@ const ConversationScreen: React.FC = () => {
             createdAt: Math.floor(Date.now() / 1000),
           },
         ]);
+        // Only clear the pending picker state on success — on failure we
+        // keep the sheet open so the user can retry without re-picking.
+        setPendingImageUri(null);
+        setPendingImageBase64(null);
       } catch (error) {
         Alert.alert('Upload failed', error instanceof Error ? error.message : 'Please try again.');
       } finally {
@@ -702,8 +723,11 @@ const ConversationScreen: React.FC = () => {
       base64: true,
     });
     if (result.canceled || !result.assets?.[0]) return;
-    await uploadAndSendImage(result.assets[0].uri, result.assets[0].base64);
-  }, [isLoggedIn, uploadingImage, sending, uploadAndSendImage]);
+    // Hand off to the filter sheet rather than uploading immediately
+    // (#138). The sheet calls back via `onSend` → `uploadAndSendImage`.
+    setPendingImageUri(result.assets[0].uri);
+    setPendingImageBase64(result.assets[0].base64 ?? null);
+  }, [isLoggedIn, uploadingImage, sending]);
 
   const handleTakeAndSendPhoto = useCallback(async () => {
     if (!isLoggedIn || uploadingImage || sending) return;
@@ -721,8 +745,24 @@ const ConversationScreen: React.FC = () => {
       base64: true,
     });
     if (result.canceled || !result.assets?.[0]) return;
-    await uploadAndSendImage(result.assets[0].uri, result.assets[0].base64);
-  }, [isLoggedIn, uploadingImage, sending, uploadAndSendImage]);
+    setPendingImageUri(result.assets[0].uri);
+    setPendingImageBase64(result.assets[0].base64 ?? null);
+  }, [isLoggedIn, uploadingImage, sending]);
+
+  // Filter sheet callbacks. Cancel clears the picked image; Send hands
+  // the (possibly filtered) URI to the existing upload pipeline.
+  const handleFilterCancel = useCallback(() => {
+    if (uploadingImage) return;
+    setPendingImageUri(null);
+    setPendingImageBase64(null);
+  }, [uploadingImage]);
+
+  const handleFilterSend = useCallback(
+    (uri: string, filterId: FilterId) => {
+      void uploadAndSendImage(uri, pendingImageBase64, filterId);
+    },
+    [pendingImageBase64, uploadAndSendImage],
+  );
 
   // Share another contact's Nostr profile into this conversation. Payload
   // mirrors the ContactProfileSheet → "Share with friend" format: a
@@ -1121,6 +1161,12 @@ const ConversationScreen: React.FC = () => {
           setAttachPanelOpen(false);
         }}
         onSelect={handleSendGif}
+      />
+      <ImageFilterSheet
+        imageUri={pendingImageUri}
+        sending={uploadingImage}
+        onCancel={handleFilterCancel}
+        onSend={handleFilterSend}
       />
       <Modal
         visible={fullscreenGifUrl !== null}

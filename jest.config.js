@@ -35,7 +35,15 @@ module.exports = {
   // first transitive crypto import. The base preset list is reproduced
   // verbatim so this doesn't silently drift if jest-expo updates.
   transformIgnorePatterns: [
-    '/node_modules/(?!(.pnpm|react-native|@react-native|@react-native-community|expo|@expo|@expo-google-fonts|react-navigation|@react-navigation|@sentry/react-native|native-base|nostr-tools|@noble|@scure))',
+    // `rn-color-matrices` and `concat-color-matrices` are the ESM
+    // matrix-data packages behind the image-filter picker (#138).
+    // `imageFilters.ts` imports `rn-color-matrices` directly (rather
+    // than via the `react-native-color-matrix-image-filters` wrapper)
+    // to keep the matrix table free of native-component imports that
+    // trip RN codegen during test transformation. Both packages ship as
+    // bare ESM and break Jest's CommonJS require pipeline unless we let
+    // Babel transform them.
+    '/node_modules/(?!(.pnpm|react-native|@react-native|@react-native-community|expo|@expo|@expo-google-fonts|react-navigation|@react-navigation|@sentry/react-native|native-base|nostr-tools|@noble|@scure|rn-color-matrices|concat-color-matrices))',
     '/node_modules/react-native-reanimated/plugin/',
   ],
   coverageThreshold: {
