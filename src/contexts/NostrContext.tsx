@@ -449,10 +449,18 @@ async function readCachedWithTtl<T>(
 /** Options accepted by `refreshDmInbox`. All fields optional so existing
  * callers continue to work without changes. `signal` lets a screen
  * cancel the refresh on unmount so the decrypt loop stops chewing the
- * JS thread after the user has navigated away (#286). */
+ * JS thread after the user has navigated away (#286).
+ *
+ * `includeNonFollows` bypasses the parental-control follow gate at the
+ * data layer so unfollowed senders' wraps land in `dmInbox`. Only the
+ * dev-mode "Following only" toggle should pass `true` here; production
+ * callers leave it undefined (default = enforce). The cache hydrate
+ * step also honours this — without it, a previous follows-on refresh's
+ * filtered cache would mask new unfollowed entries fetched this round. */
 export interface RefreshDmInboxOptions {
   force?: boolean;
   signal?: AbortSignal;
+  includeNonFollows?: boolean;
 }
 
 interface NostrContextType {
@@ -607,7 +615,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Single-flight guard: coalesce overlapping refreshDmInbox calls (e.g.
   // useFocusEffect firing while a pull-to-refresh is still in-flight) so
   // they don't race on the AsyncStorage wrap-id cache.
-  const dmInboxInFlight = useRef<Promise<void> | null>(null);
+  const dmInboxInFlight = useRef<{
+    promise: Promise<void>;
+    includeNonFollows: boolean;
+  } | null>(null);
   /** `performance.now()` of last successful `refreshDmInbox` completion.
    * Gate for the `DM_INBOX_REFRESH_TTL_MS` throttle so that Messages-tab
    * focus doesn't re-fire full relay queries on every tab bounce. */
@@ -1991,6 +2002,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         return;
       }
       const signal = opts?.signal;
+      // Dev-only "Following only=off" bypass — read once at the top so
+      // the closure captures a stable value across the async work below.
+      // When true, all six follow-gate `continue`s in the decrypt loops
+      // become no-ops AND the cache hydrate skips its filter so the
+      // already-cached unfollowed entries don't get masked.
+      const includeNonFollows = opts?.includeNonFollows === true;
       // Freshness TTL: skip the refresh entirely if the previous one
       // finished within DM_INBOX_REFRESH_TTL_MS, unless the caller
       // explicitly opts into a forced refresh (pull-to-refresh). The
@@ -2002,11 +2019,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           return;
         }
       }
-      // Single-flight: if a refresh is already in flight, piggy-back on it
-      // rather than kicking off a second concurrent fetch that would race
-      // the AsyncStorage wrap-id cache.
+      // Single-flight: piggy-back on in-flight task ONLY when its includeNonFollows matches; otherwise wait then re-run with the wider option.
       if (dmInboxInFlight.current) {
-        return dmInboxInFlight.current;
+        if (dmInboxInFlight.current.includeNonFollows === includeNonFollows) {
+          return dmInboxInFlight.current.promise;
+        }
+        await dmInboxInFlight.current.promise;
       }
 
       // Capture local references once so the closure isn't affected by
@@ -2014,8 +2032,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // has changed by the time we're about to commit, we bail without
       // mutating state to avoid leaking entries into the wrong session.
       const refreshForPubkey = pubkey;
+      // Local helper: encapsulates the follow gate so all seven sites in
+      // the cache hydrate + NIP-04 + NIP-17 decrypt loops + final merge
+      // reuse the same predicate. When includeNonFollows is true the
+      // gate is a no-op (every pubkey passes), so callers can opt out
+      // of the parental-control filter from a single switch.
       const refreshForSigner = signerType;
       const refreshFollows = followPubkeys;
+      const passesFollowGate = (pk: string): boolean => includeNonFollows || refreshFollows.has(pk);
 
       const task = (async () => {
         setDmInboxLoading(true);
@@ -2047,7 +2071,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           // set may have changed since the cache was written; re-apply
           // the filter here so unfollowed senders don't resurrect.
           if (cachedInbox.length > 0) {
-            const filteredCache = cachedInbox.filter((e) => refreshFollows.has(e.partnerPubkey));
+            const filteredCache = cachedInbox.filter((e) => passesFollowGate(e.partnerPubkey));
             setDmInbox(filteredCache);
           }
 
@@ -2085,7 +2109,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               fromMe ? (ev.tags.find((t) => t[0] === 'p')?.[1] ?? '') : ev.pubkey
             ).toLowerCase();
             if (!/^[0-9a-f]{64}$/.test(partnerPubkey)) continue;
-            if (!refreshFollows.has(partnerPubkey)) continue;
+            if (!passesFollowGate(partnerPubkey)) continue;
             k4Targets.push({ ev, fromMe, partnerPubkey });
           }
           // Fast pass — cache lookup only.
@@ -2177,7 +2201,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   // surfacing from cache. Purge the stale entry so we
                   // don't keep dragging it through every refresh until
                   // the 5000-cap LRU finally evicts it.
-                  if (!refreshFollows.has(cached.partnerPubkey)) {
+                  if (!passesFollowGate(cached.partnerPubkey)) {
                     delete cache[wrap.id];
                     unfollowedPurged++;
                     continue;
@@ -2206,7 +2230,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 // B1 — drop non-follows at the data layer. No caching, no
                 // state. The filter is load-bearing ("parental control"),
                 // so it runs here not in the view.
-                if (!refreshFollows.has(partnership.partnerPubkey)) continue;
+                if (!passesFollowGate(partnership.partnerPubkey)) continue;
                 const entry: Nip17CacheEntry = {
                   id: wrap.id,
                   wrapId: wrap.id,
@@ -2261,7 +2285,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   // Cache entry exists → it was from a followed sender when
                   // first stored. Re-check against the *current* follow set
                   // so unfollowed partners don't keep surfacing from cache.
-                  if (!refreshFollows.has(cached.partnerPubkey)) continue;
+                  if (!passesFollowGate(cached.partnerPubkey)) continue;
                   entries.push({
                     id: cached.wrapId,
                     partnerPubkey: cached.partnerPubkey,
@@ -2288,7 +2312,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   // cost is re-decrypting them on the next refresh, but the
                   // silent path is ~1 ms per call and keeps plaintext off
                   // AsyncStorage.
-                  if (!refreshFollows.has(partnership.partnerPubkey)) continue;
+                  if (!passesFollowGate(partnership.partnerPubkey)) continue;
                   const entry: Nip17CacheEntry = {
                     id: wrap.id,
                     wrapId: wrap.id,
@@ -2343,7 +2367,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           // PR B: merge cached-with-fresh, keep at most DM_INBOX_CAP
           // entries (newest-first), then persist + update last-seen.
           const merged = mergeInboxEntries(cachedInbox, entries, DM_INBOX_CAP);
-          const filteredFinal = merged.filter((e) => refreshFollows.has(e.partnerPubkey));
+          const filteredFinal = merged.filter((e) => passesFollowGate(e.partnerPubkey));
 
           // Perf summary: one line per refresh, grep with `\[Perf\] refreshDmInbox`.
           console.log(
@@ -2387,7 +2411,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       })();
 
-      dmInboxInFlight.current = task;
+      dmInboxInFlight.current = { promise: task, includeNonFollows };
       try {
         await task;
         dmInboxLastRefreshAt.current = performance.now();

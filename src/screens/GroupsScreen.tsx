@@ -31,6 +31,7 @@ const GroupsScreen: React.FC = () => {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { visibleGroups, deleteGroup, followingOnly, setFollowingOnly, devMode } = useGroups();
   const { isLoggedIn, refreshDmInbox } = useNostr();
+  const enforceFollowingOnly = followingOnly || !devMode;
   const [createVisible, setCreateVisible] = useState(false);
 
   // On focus, refresh the DM inbox so any new kind-1059 wraps get pulled
@@ -40,9 +41,11 @@ const GroupsScreen: React.FC = () => {
   useFocusEffect(
     useCallback(() => {
       if (!isLoggedIn) return;
-      const handle = InteractionManager.runAfterInteractions(() => refreshDmInbox({ force: true }));
+      const handle = InteractionManager.runAfterInteractions(() =>
+        refreshDmInbox({ force: true, includeNonFollows: !enforceFollowingOnly }),
+      );
       return () => handle.cancel();
-    }, [isLoggedIn, refreshDmInbox]),
+    }, [isLoggedIn, refreshDmInbox, enforceFollowingOnly]),
   );
 
   const openGroup = useCallback(
