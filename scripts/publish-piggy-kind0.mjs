@@ -58,7 +58,9 @@ function nsecFor(envVar) {
 const onlyEnvVar = argv[2];
 const targets = onlyEnvVar ? PIGGIES.filter((p) => p.envVar === onlyEnvVar) : PIGGIES;
 if (onlyEnvVar && targets.length === 0) {
-  console.error(`Unknown env var: ${onlyEnvVar}. Expected one of ${PIGGIES.map((p) => p.envVar).join(', ')}.`);
+  console.error(
+    `Unknown env var: ${onlyEnvVar}. Expected one of ${PIGGIES.map((p) => p.envVar).join(', ')}.`,
+  );
   exit(1);
 }
 
@@ -130,15 +132,21 @@ for (const piggy of targets) {
 
   const existing = await fetchExistingKind0(pubkey);
   if (existing === FETCH_TIMEOUT) {
-    console.error(`  ${label}: relay query timed out — refusing to publish (would risk clobbering existing metadata). Re-run when relays are healthy.`);
+    console.error(
+      `  ${label}: relay query timed out — refusing to publish (would risk clobbering existing metadata). Re-run when relays are healthy.`,
+    );
     exitCode = 1;
     continue;
   }
   const existingContent = existing ? parseContent(existing.content) : {};
   if (existing) {
-    console.log(`  existing kind-0 found (created_at=${existing.created_at}, fields=${Object.keys(existingContent).join(',') || '(empty)'})`);
+    console.log(
+      `  existing kind-0 found (created_at=${existing.created_at}, fields=${Object.keys(existingContent).join(',') || '(empty)'})`,
+    );
   } else {
-    console.log('  no existing kind-0 (relays confirmed empty) — seeding name + display_name from label');
+    console.log(
+      '  no existing kind-0 (relays confirmed empty) — seeding name + display_name from label',
+    );
   }
 
   // Merge: keep everything, override picture, fill in name/display_name
