@@ -25,13 +25,22 @@ import type { Group } from '../types/groups';
 
 type GroupsNavigation = NativeStackNavigationProp<RootStackParamList, 'Groups'>;
 
+// Compose the avatar-cluster source: viewer first (so they show up even on
+// inactive groups where there are no recent senders), then other members.
+// Matches the "X people = X icons" mental model — memberPubkeys excludes
+// the viewer by LP convention, so without prepending, a 1:1 group would
+// render only 1 avatar and a 3-person group only 2. (#363)
+function memberPubkeysWithViewer(myPubkey: string | null, memberPubkeys: string[]): string[] {
+  return myPubkey ? [myPubkey, ...memberPubkeys] : memberPubkeys;
+}
+
 const GroupsScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<GroupsNavigation>();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { visibleGroups, deleteGroup, followingOnly, setFollowingOnly, devMode } = useGroups();
-  const { isLoggedIn, refreshDmInbox, contacts } = useNostr();
+  const { isLoggedIn, refreshDmInbox, contacts, pubkey: myPubkey } = useNostr();
 
   // Built once per render and shared by every row's GroupAvatar so we
   // do O(contacts) per render instead of O(rows × avatars × contacts).
@@ -96,7 +105,7 @@ const GroupsScreen: React.FC = () => {
         testID={`group-row-${item.id}`}
       >
         <GroupAvatar
-          pubkeys={item.memberPubkeys}
+          pubkeys={memberPubkeysWithViewer(myPubkey, item.memberPubkeys)}
           groupName={item.name}
           size={44}
           contactInfoMap={contactInfoMap}
@@ -106,12 +115,13 @@ const GroupsScreen: React.FC = () => {
             {item.name}
           </Text>
           <Text style={styles.subtitle} numberOfLines={1}>
-            {item.memberPubkeys.length} member{item.memberPubkeys.length === 1 ? '' : 's'}
+            {item.memberPubkeys.length + 1} member
+            {item.memberPubkeys.length === 0 ? '' : 's'}
           </Text>
         </View>
       </TouchableOpacity>
     ),
-    [openGroup, handleLongPress, styles, contactInfoMap],
+    [openGroup, handleLongPress, styles, contactInfoMap, myPubkey],
   );
 
   return (
