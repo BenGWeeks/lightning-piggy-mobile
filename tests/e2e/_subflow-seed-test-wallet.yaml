@@ -1,0 +1,166 @@
+appId: com.lightningpiggy.app.dev
+name: Internal — seed a test wallet via the AddWalletWizard
+---
+# Composable subflow that walks the AddWalletWizard with credentials
+# pulled from env vars, so wallet-conditional regression tests don't
+# each have to re-implement the wizard walk inline.
+#
+# Picks the wallet type based on which env var is set:
+#
+#   MAESTRO_TEST_NWC      → Lightning (NWC) wallet via connection string
+#   MAESTRO_TEST_MNEMONIC → On-chain hot wallet via 12/24-word seed
+#                           phrase (requires dev mode — see notes below)
+#
+# Set EXACTLY ONE of those vars per invocation. The flow short-circuits
+# the branches whose var is empty, so a caller can pre-export both vars
+# in their `.env` and let the type be chosen at the call site:
+#
+#   - runFlow:
+#       file: _subflow-seed-test-wallet.yaml
+#       env:
+#         MAESTRO_TEST_NWC: ${MAESTRO_NWC1}
+#         WALLET_NAME: "Seeded NWC"
+#
+# Optional inputs:
+#
+#   WALLET_NAME — alias shown on the wallet card (default: "Test Wallet")
+#
+# The flow assumes the caller has already logged in (via
+# `_subflow-login-as.yaml` or otherwise) and that the Home tab carousel
+# is reachable. It does NOT clear existing wallets — see
+# `_subflow-clear-wallets.yaml` (issue #291 follow-up) for that.
+#
+# IMPORTANT: the mnemonic branch only works when the app is in dev
+# mode (the "Import Seed Phrase" type tile is gated on the `dev_mode`
+# AsyncStorage flag — see `AddWalletWizard.tsx`). Run `test-dev-mode.yaml`
+# once before invoking this subflow with MAESTRO_TEST_MNEMONIC, or the
+# `wallet-type-mnemonic` tap will time out.
+
+# Wait for the Home tab to be ready before opening the carousel.
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 40000
+- tapOn:
+    id: 'tab-home'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Swipe the carousel right until the Add Wallet card is visible. This
+# also handles the case where wallets already exist (they sit before
+# the Add Wallet card in the carousel).
+- scrollUntilVisible:
+    element:
+      id: 'add-wallet-card'
+    direction: RIGHT
+    timeout: 20000
+    speed: 40
+
+- tapOn:
+    id: 'add-wallet-card'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# --- Branch: Lightning (NWC) ---
+# `when: true:` takes a JS-like expression. We wrap the substituted env
+# var in quotes so an unset / empty value collapses to `'' !== ''` →
+# false, and a populated value to e.g. `'nostr+walletconnect://...' !==
+# ''` → true. This is the Maestro idiom for "run when env var set".
+- runFlow:
+    when:
+      true: "'${MAESTRO_TEST_NWC}' !== ''"
+    commands:
+      - tapOn:
+          id: 'wallet-type-nwc'
+      - waitForAnimationToEnd:
+          timeout: 2000
+      # Tap twice — BottomSheetTextInput needs a second tap to take
+      # focus reliably under New Architecture. See
+      # docs/TROUBLESHOOTING.adoc § AddWalletWizard NWC paste pattern.
+      - tapOn:
+          id: 'nwc-url-input'
+      - tapOn:
+          id: 'nwc-url-input'
+      - eraseText:
+          charactersToErase: 500
+      - inputText: ${MAESTRO_TEST_NWC}
+      - pressKey: back
+      - waitForAnimationToEnd:
+          timeout: 1000
+      - tapOn:
+          text: 'Next'
+      - waitForAnimationToEnd:
+          timeout: 5000
+
+# --- Branch: On-chain hot wallet (mnemonic, dev mode only) ---
+- runFlow:
+    when:
+      true: "'${MAESTRO_TEST_MNEMONIC}' !== ''"
+    commands:
+      # Scroll the type list up so the dev-mode-only "Import Seed
+      # Phrase" tile is reachable below the two production tiles.
+      - swipe:
+          start: 50%, 80%
+          end: 50%, 50%
+          duration: 300
+      - waitForAnimationToEnd:
+          timeout: 1000
+      - tapOn:
+          id: 'wallet-type-mnemonic'
+      - waitForAnimationToEnd:
+          timeout: 2000
+      - tapOn:
+          id: 'mnemonic-input'
+      - tapOn:
+          id: 'mnemonic-input'
+      - eraseText:
+          charactersToErase: 500
+      - inputText: ${MAESTRO_TEST_MNEMONIC}
+      - pressKey: back
+      - waitForAnimationToEnd:
+          timeout: 1000
+      - tapOn:
+          text: 'Next'
+      - waitForAnimationToEnd:
+          timeout: 5000
+
+# --- Shared tail: alias → theme → connect ---
+# Both branches converge on the alias step.
+- tapOn:
+    id: 'wallet-alias-input'
+- tapOn:
+    id: 'wallet-alias-input'
+- eraseText:
+    charactersToErase: 100
+- inputText: ${WALLET_NAME}
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- tapOn:
+    text: 'Next'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Reveal the Connect / Add Wallet button (theme grid pushes it below
+# the fold on shorter devices).
+- swipe:
+    start: 50%, 80%
+    end: 50%, 40%
+    duration: 300
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- tapOn:
+    id: 'wizard-connect-button'
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# Wait for the new wallet card to appear in the carousel under the
+# alias the caller chose. Generous timeout because NWC needs to
+# round-trip a get_info call and on-chain needs to derive addresses
+# from the mnemonic.
+- extendedWaitUntil:
+    visible:
+      text: ${WALLET_NAME}
+    timeout: 30000
