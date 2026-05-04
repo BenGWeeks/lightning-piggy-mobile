@@ -208,28 +208,39 @@ Releases are cut by publishing a **GitHub Release** (which creates the tag serve
 
 ==== Version numbering
 
-Three separate numbers, maintained by three different actors — easy to confuse, so documenting the split explicitly:
+The user-visible `X.Y.Z` lives in `package.json` and is read at config time by `app.config.ts` (`version: pkg.version`). One source of truth across all build paths — local `eas build`, GitHub Release publish, `workflow_dispatch` re-runs all read the same value. To bump:
+
+[source,bash]
+----
+npm version patch          # 1.0.0 → 1.0.1
+npm version minor          # 1.0.0 → 1.1.0
+npm version major          # 1.0.0 → 2.0.0
+npm version 1.2.3          # explicit
+git push origin main --follow-tags
+----
+
+`npm version` does three things atomically: writes `package.json`, creates a git commit (`1.0.1`), and creates a tag (`v1.0.1`). Pushing the tag triggers the release workflow if you also publish a GitHub Release for it.
+
+The build number (iOS `CFBundleVersion` / Android `versionCode`) is independent — EAS auto-increments a remote counter on every production build (`eas.json` → `"appVersionSource": "remote"` + `"autoIncrement": true`). It's monotonic, never reused, and not tracked in-repo.
 
 [cols="1,2,3", options="header"]
 |===
-| Number | Maintained by | Notes
+| Number | Source | Notes
 
 | `X.Y.Z` (user-visible version)
-| **Git tag**, applied by `.github/workflows/release.yml`
-| The workflow strips the leading `v` and any `-rcN` suffix from the tag, then writes the result into `version:` in `app.config.ts`. Tag `v1.0.0-rc1` → `version: '1.0.0'`. **Do NOT hand-edit `app.config.ts` before a release** — the workflow overwrites it.
+| `package.json` "version"
+| Bump with `npm version <patch\|minor\|major\|x.y.z>`. Read by `app.config.ts` → applied to iOS `CFBundleShortVersionString` + Android `versionName`. **Don't hand-edit `package.json`** — use `npm version` so the commit + tag stay in sync.
 
 | Build number (iOS) / `versionCode` (Android)
-| **EAS**, via `"autoIncrement": true` in the `production` profile of `eas.json`
-| Auto-bumps on every production build. Monotonic integer, never reused, independent of `X.Y.Z`. Not tracked in-repo.
+| EAS remote counter
+| Auto-bumps per production build. Independent of `X.Y.Z`. Visible in TestFlight as `1.0.0 (13)` — the `(13)` is the counter.
 
-| The in-repo `version:` field in `app.config.ts`
-| The last release workflow run
-| Between releases this is a stale snapshot of the most recent tag's `X.Y.Z` minus any RC suffix. Treat it as read-only; the tag is the source of truth.
-
-| The in-repo `android.versionCode:` field in `app.config.ts`
-| Hand-edited per local prod build (see "Local production builds" below)
-| Floor for the **locally-built** Android `versionCode`. EAS production builds use a separate **remote** counter (`eas.json` → `"appVersionSource": "remote"`) and ignore this field — so the two counters can drift, and the EAS counter is usually well ahead. Bump this manually before each local `--variant release` install whenever the target device already has a higher versionCode installed (e.g. from a prior EAS build).
+| The `android.versionCode:` field in `app.config.ts`
+| Hand-edited per **local** prod build (see "Local production builds" below)
+| Floor for the **locally-built** Android `versionCode`. EAS production builds use the **remote** counter and ignore this field. Bump this manually before each local `--variant release` install whenever the target device already has a higher versionCode installed (e.g. from a prior EAS build).
 |===
+
+NOTE: The pre-`npm version` flow had `app.config.ts` hardcoded to `'1.0.0'` and a `sed` step in `release.yml` that overwrote it from the tag — but the sed only ran on actual GitHub Release events, so `workflow_dispatch` re-runs and local `eas build` invocations always shipped `1.0.0` regardless of the tag. The current flow eliminates that drift.
 
 ==== Local production builds
 
@@ -333,12 +344,13 @@ eas build:list --platform android --status finished --limit 1 \
 
 ==== Cutting a release
 
+. **Bump the version locally first** — `npm version <patch|minor|major|x.y.z>` writes `package.json`, creates a commit, and tags `vX.Y.Z` atomically. Push it: `git push origin main --follow-tags`.
 . Go to https://github.com/BenGWeeks/lightning-piggy-mobile/releases → *Draft a new release*.
-. Choose a tag like `v1.0.1` (create on publish) targeted at `main`. **The tag is the source of truth for the user-visible version** — the workflow strips the leading `v` and sets `version` in `app.config.ts` (which becomes iOS `CFBundleShortVersionString` and Android `versionName`). Pre-release suffixes (e.g. `v1.0.0-rc1`) are stripped to keep the store-facing version a strict `X.Y.Z`.
+. Pick the tag you just pushed (e.g. `v1.0.1`) — don't create a new one here, the npm-version-created tag is what the workflow expects.
 . Write release notes, click *Publish release*.
-. Watch *Actions → Release*. When it finishes, the Release page has the APK and PDF attached; TestFlight has the iOS build.
+. Watch *Actions → Release*. When it finishes, the Release page has the APK and PDF attached; TestFlight has the iOS build (auto-distributed to the Public Beta external group via `eas.json` `submit.production.ios.groups`).
 
-The tag format is `v*` (SemVer). A pre-release tag like `v1.0.0-rc1` publishes as a pre-release via the GitHub UI; the workflow still runs.
+`npm version` accepts pre-release suffixes too: `npm version 1.0.1-rc1` → tag `v1.0.1-rc1`, `package.json` `1.0.1-rc1`. `app.config.ts` reads `package.json` verbatim; if you ship a non-strict-X.Y.Z value, Apple's validator will reject the upload (`CFBundleShortVersionString` must be three numeric components separated by dots). For RC builds, prefer bumping `package.json` to the *target* X.Y.Z and using the GitHub Release page's "Pre-release" checkbox to mark it as such.
 
 ==== Manual re-run without re-tagging
 

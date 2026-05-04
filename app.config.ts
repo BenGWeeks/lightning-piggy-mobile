@@ -1,5 +1,7 @@
 import { ExpoConfig, ConfigContext } from 'expo/config';
 
+import pkg from './package.json';
+
 const APP_VARIANT = process.env.APP_VARIANT;
 const IS_DEV = APP_VARIANT === 'development';
 const IS_PREVIEW = APP_VARIANT === 'preview';
@@ -26,7 +28,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: getAppName(),
   slug: 'lightning-piggy-app',
-  version: '1.0.0',
+  // Single source of truth: bump with `npm version <patch|minor|major|x.y.z>`,
+  // which writes package.json, commits, and tags v<x.y.z> atomically. Apple
+  // CFBundleShortVersionString and Android versionName both pick this up.
+  // Build numbers (CFBundleVersion / versionCode) come from EAS via
+  // appVersionSource: remote + autoIncrement — independent of X.Y.Z.
+  version: pkg.version,
   orientation: 'portrait',
   icon: './assets/icon.png',
   userInterfaceStyle: 'light',

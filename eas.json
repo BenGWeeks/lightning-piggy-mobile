@@ -32,7 +32,8 @@
   "submit": {
     "production": {
       "ios": {
-        "ascAppId": "6762218164"
+        "ascAppId": "6762218164",
+        "groups": ["Public Beta"]
       }
     }
   }
