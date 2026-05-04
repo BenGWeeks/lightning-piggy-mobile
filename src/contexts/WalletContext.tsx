@@ -731,6 +731,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           }));
         } else {
           const raw = await nwcService.listTransactions(walletId);
+          // `null` means we never got a positive answer from the NWC backend
+          // (provider not connected, or every retry threw). Treat as "no
+          // update" — the existing cache is still our best information.
+          // Without this guard a transient relay flake on cold start would
+          // overwrite a 50-row hydrated cache with `[]` and the user would
+          // see "No transactions yet" until the next refresh (#200).
+          if (raw === null) return;
           // Preserve any previously resolved zap sender info so a refresh
           // doesn't re-trigger relay lookups for transactions we've already
           // attributed. Also preserves optimistic counterparty entries
