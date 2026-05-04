@@ -39,6 +39,46 @@ function GlobalIncomingPaymentOverlay() {
   );
 }
 
+// Symmetric outgoing-payment overlay. Reads `sendProgress` from the
+// WalletContext so any future entry-point (Friends quick-zap, deep
+// link, share extension, ...) can drive the same global progress UI
+// without re-implementing the bubbles/spinner JSX in every caller.
+// The originating sheet hands its `onCancel` (abort the in-flight NWC
+// call) and `onDismiss` (close the sheet on success) callbacks in via
+// `reportSendStart`; this component just routes Cancel and OK taps to
+// them and clears the slot afterwards.
+function GlobalSendOverlay() {
+  const { sendProgress, clearSendProgress } = useWallet();
+  // Only fire `onDismiss` on the success path — on error the originating
+  // sheet stays open so the user can retry from the filled-in form. This
+  // is the bit that used to live in `SendSheet.handleOverlayDismiss` as
+  // `if (wasSuccess) onClose()`. Reading `state` straight off the live
+  // `sendProgress` here means we never need a ref-based stale-closure
+  // dance — there's only one callsite, and it reads the latest value.
+  const handleDismiss = () => {
+    const wasSuccess = sendProgress?.state === 'success';
+    const cb = sendProgress?.onDismiss;
+    clearSendProgress();
+    if (wasSuccess) cb?.();
+  };
+  const handleCancel = () => {
+    sendProgress?.onCancel?.();
+    clearSendProgress();
+  };
+  return (
+    <PaymentProgressOverlay
+      key={sendProgress?.at ?? 'idle'}
+      state={sendProgress?.state ?? 'hidden'}
+      direction="send"
+      amountSats={sendProgress?.amountSats}
+      recipientName={sendProgress?.recipientName}
+      errorMessage={sendProgress?.errorMessage}
+      onDismiss={handleDismiss}
+      onCancel={sendProgress?.onCancel ? handleCancel : undefined}
+    />
+  );
+}
+
 // StatusBar needs to live inside ThemeProvider so its style flips with the
 // active scheme; splitting it out keeps the provider tree readable.
 function ThemedStatusBar() {
@@ -91,6 +131,7 @@ export default function App() {
                       direct imports of the underlying lib elsewhere. */}
                   <BrandedToast />
                   <GlobalIncomingPaymentOverlay />
+                  <GlobalSendOverlay />
                   {/* BrandedAlertHost: portal target for the on-brand
                       BrandedAlert dialog. Sits at the root so any sheet /
                       screen that calls `Alert.alert(...)` (the BrandedAlert
