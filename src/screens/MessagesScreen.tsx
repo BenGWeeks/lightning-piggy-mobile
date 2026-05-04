@@ -71,7 +71,18 @@ const MessagesScreen: React.FC = () => {
     refreshDmInbox,
   } = useNostr();
   const { wallets } = useWallet();
-  const { groupSummaries } = useGroups();
+  // followingOnly + setFollowingOnly + devMode are owned by GroupsContext
+  // and shared with the Messages tab so toggling on either screen flips
+  // the same global "Following only" notion. Mirrors the chip wiring in
+  // GroupsScreen — interactive only when devMode is on.
+  const { groupSummaries, followingOnly, setFollowingOnly, devMode } = useGroups();
+  // Track the last-applied followingOnly state so that flipping the
+  // dev-mode chip triggers a force-refresh that asks refreshDmInbox to
+  // bypass the data-layer follow gate. Without this, toggling off would
+  // only widen the screen+summary filter on already-cached entries —
+  // unfollowed senders' wraps that the previous follows-on refresh
+  // dropped at the decrypt loop would stay invisible.
+  const lastAppliedFollowingOnlyRef = useRef<boolean>(true);
   const [search, setSearch] = useState('');
   const [searchExpanded, setSearchExpanded] = useState(false);
   const searchInputRef = useRef<TextInput>(null);
@@ -128,6 +139,16 @@ const MessagesScreen: React.FC = () => {
   // for any wraps that arrive while the user was inside a group.
   const dmInboxLastRefreshAt = useRef<number>(0);
   const DM_INBOX_REFRESH_TTL_MS = 30_000;
+  // Force-refresh the inbox whenever the followingOnly toggle flips so
+  // includeNonFollows is re-applied at the data layer. devMode is also
+  // a dep — leaving it stale could let a non-dev session pass
+  // includeNonFollows=true on the first refresh after a logout/login.
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    if (lastAppliedFollowingOnlyRef.current === followingOnly) return;
+    lastAppliedFollowingOnlyRef.current = followingOnly;
+    refreshDmInbox({ force: true, includeNonFollows: devMode && !followingOnly });
+  }, [followingOnly, devMode, isLoggedIn, refreshDmInbox]);
   useFocusEffect(
     useCallback(() => {
       if (!isLoggedIn) return;
@@ -209,9 +230,13 @@ const MessagesScreen: React.FC = () => {
     // applying it again here guards against stale dmInbox state from
     // before a follow was revoked. The "Following only" rule is
     // load-bearing — keep it enforced everywhere a summary is built.
-    const dm = buildDmSummaries(dmInbox, contacts, followPubkeys);
+    // followingOnly off (only possible when devMode is on; the chip is
+    // non-interactive in production) → pass undefined so buildDmSummaries
+    // skips its follow gate entirely. Filter still runs at the data layer
+    // unless refreshDmInbox is invoked with includeNonFollows: true.
+    const dm = buildDmSummaries(dmInbox, contacts, followingOnly ? followPubkeys : undefined);
     return mergeSummaries(zap, dm);
-  }, [wallets, contacts, dmInbox, followPubkeys]);
+  }, [wallets, contacts, dmInbox, followPubkeys, followingOnly]);
 
   // Following-only is always on by design (parental-control requirement);
   // enforcement lives inside buildDmSummaries + refreshDmInbox. This memo
@@ -230,7 +255,10 @@ const MessagesScreen: React.FC = () => {
     const dmRows: InboxRow[] = conversationSummaries
       .filter((s) => {
         if (s.lastActivityAt < cutoff) return false;
-        if (s.pubkey && !followPubkeys.has(s.pubkey.toLowerCase())) return false;
+        // Defence-in-depth follow gate — only enforced when followingOnly
+        // is on. In production the chip is non-interactive so this is
+        // always true (matches buildDmSummaries above and the data layer).
+        if (followingOnly && s.pubkey && !followPubkeys.has(s.pubkey.toLowerCase())) return false;
         if (!lower) return true;
         return (
           s.name.toLowerCase().includes(lower) ||
@@ -251,7 +279,7 @@ const MessagesScreen: React.FC = () => {
       .map((g) => ({ kind: 'group', summary: g, sortKey: g.activity.lastActivityAt }));
 
     return [...dmRows, ...groupRows].sort((a, b) => b.sortKey - a.sortKey);
-  }, [conversationSummaries, groupSummaries, search, followPubkeys, windowDays]);
+  }, [conversationSummaries, groupSummaries, search, followPubkeys, followingOnly, windowDays]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -408,14 +436,36 @@ const MessagesScreen: React.FC = () => {
       <View style={styles.content}>
         {isLoggedIn && (
           <View style={styles.filterChipRow}>
-            <View
-              style={styles.filterChip}
-              accessibilityLabel="Showing conversations from people you follow only"
-              testID="messages-follows-indicator"
-            >
-              <Users size={14} color={colors.brandPink} />
-              <Text style={styles.filterChipText}>Following only</Text>
-            </View>
+            {devMode ? (
+              <TouchableOpacity
+                style={followingOnly ? styles.filterChip : styles.filterChipOff}
+                onPress={() => setFollowingOnly(!followingOnly)}
+                accessibilityLabel={
+                  followingOnly
+                    ? 'Following-only filter on. Tap to show all conversations (dev mode).'
+                    : 'Following-only filter off. Tap to filter to followed senders only.'
+                }
+                accessibilityRole="button"
+                testID="messages-follows-toggle"
+              >
+                <Users
+                  size={14}
+                  color={followingOnly ? colors.brandPink : colors.textSupplementary}
+                />
+                <Text style={followingOnly ? styles.filterChipText : styles.filterChipTextOff}>
+                  {followingOnly ? 'Following only' : 'All (dev)'}
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <View
+                style={styles.filterChip}
+                accessibilityLabel="Showing conversations from people you follow only"
+                testID="messages-follows-indicator"
+              >
+                <Users size={14} color={colors.brandPink} />
+                <Text style={styles.filterChipText}>Following only</Text>
+              </View>
+            )}
             <TouchableOpacity
               style={styles.filterChipInteractive}
               onPress={cycleWindowDays}
