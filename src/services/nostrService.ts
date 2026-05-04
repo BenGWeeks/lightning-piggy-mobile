@@ -533,17 +533,30 @@ export function createProfileEvent(profileData: {
   };
 }
 
-export async function createDirectMessageEvent(
-  secretKey: Uint8Array,
-  recipientPubkey: string,
-  plaintext: string,
-): Promise<{ kind: number; created_at: number; tags: string[][]; content: string }> {
-  const encrypted = await nip04.encrypt(secretKey, recipientPubkey, plaintext);
+/**
+ * Build the inner kind-14 chat rumor for a 1:1 NIP-17 direct message.
+ * Mirrors `createGroupChatRumor` but with no `subject` tag and exactly
+ * one `p` tag (the recipient). Per NIP-17, both DMs and group chats use
+ * kind-14 — the only thing that distinguishes them is the participant
+ * count, which receivers infer from the `p` tag set (see
+ * `classifyRumor` in `utils/nip17Unwrap.ts`).
+ *
+ * The returned event is unsigned ("rumor"); pass it to
+ * `sendNip17ToManyWithNsec` / `sendNip17ToManyWithSigner` which seal +
+ * gift-wrap it per recipient (and once for the sender, so other devices
+ * see their own outgoing message).
+ */
+export function createDirectMessageRumor(input: {
+  senderPubkey: string;
+  recipientPubkey: string;
+  content: string;
+}): { kind: number; created_at: number; tags: string[][]; content: string; pubkey: string } {
   return {
-    kind: 4,
+    pubkey: input.senderPubkey,
+    kind: 14,
     created_at: Math.floor(Date.now() / 1000),
-    tags: [['p', recipientPubkey]],
-    content: encrypted,
+    tags: [['p', input.recipientPubkey]],
+    content: input.content,
   };
 }
 
@@ -773,7 +786,7 @@ export interface GroupStateEventInput {
 
 /**
  * Build (unsigned) the kind-30200 group-state event. Caller is responsible
- * for signing + publishing — same pattern as createDirectMessageEvent.
+ * for signing + publishing — same pattern as createDirectMessageRumor.
  */
 export function createGroupStateEvent(input: GroupStateEventInput): {
   kind: number;
