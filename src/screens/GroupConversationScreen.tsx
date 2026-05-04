@@ -274,12 +274,15 @@ const GroupConversationScreen: React.FC = () => {
 
   const handlePickAndSendImage = useCallback(async () => {
     if (uploadingImage || sending) return;
+    // Diagnostic logging for #209 — see ConversationScreen.handlePickAndSendImage.
+    console.log('[AttachPanel:group] gallery tile pressed — requesting permission');
     closeAttachPanel();
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       Alert.alert('Permission needed', 'Allow photo library access to send images.');
       return;
     }
+    console.log('[AttachPanel:group] gallery tile — launching image library picker');
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       quality: 1,
@@ -291,12 +294,15 @@ const GroupConversationScreen: React.FC = () => {
 
   const handleTakeAndSendPhoto = useCallback(async () => {
     if (uploadingImage || sending) return;
+    // Diagnostic logging for #209 — see ConversationScreen.handlePickAndSendImage.
+    console.log('[AttachPanel:group] camera tile pressed — requesting permission');
     closeAttachPanel();
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
       Alert.alert('Permission needed', 'Allow camera access to take and send photos.');
       return;
     }
+    console.log('[AttachPanel:group] camera tile — launching camera');
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ['images'],
       quality: 1,
