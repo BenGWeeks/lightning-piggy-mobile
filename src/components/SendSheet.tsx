@@ -23,6 +23,11 @@ import * as Clipboard from 'expo-clipboard';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { useWallet } from '../contexts/WalletContext';
 import { walletLabel } from '../types/wallet';
+import {
+  compatibleWalletsForInvoice,
+  defaultWalletForInvoice,
+  type InvoiceType,
+} from '../utils/walletCapabilities';
 import { useNostr } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createSendSheetStyles } from '../styles/SendSheet.styles';
@@ -151,18 +156,57 @@ const SendSheet: React.FC<Props> = ({
   const needsAmount = scanned && (isLightningAddress(invoiceData || '') || isOnchainAddress);
   const currentSats = parseInt(satsValue) || 0;
 
-  const selectedWalletId = capturedWalletId ?? activeWalletId;
-  const selectedWallet = useMemo(
-    () => wallets.find((w) => w.id === selectedWalletId) ?? null,
-    [wallets, selectedWalletId],
+  // Classify the decoded payment target so the wallet picker can be
+  // scoped to wallets that can actually settle it. `null` while we
+  // haven't scanned/pasted anything yet — pre-scan we don't filter,
+  // because the user may simply be browsing wallets before deciding
+  // what to pay.
+  const invoiceType: InvoiceType | null = !scanned
+    ? null
+    : isOnchainAddress
+      ? 'onchain'
+      : isLightningAddress(invoiceData || '')
+        ? 'lnurl-pay'
+        : 'bolt11';
+
+  // Pre-scan: every wallet is "eligible" for the picker (no filter to
+  // apply yet). Post-scan: scope strictly to wallets whose settlement
+  // path matches the decoded invoice — see walletCapabilities.ts.
+  const eligibleWallets = useMemo(
+    () => (invoiceType === null ? wallets : compatibleWalletsForInvoice(wallets, invoiceType)),
+    [wallets, invoiceType],
   );
+
+  // Resolve the selected wallet:
+  //   - pre-scan, behave like the old picker — honour the user's
+  //     captured pick if any, else the home-carousel active wallet;
+  //   - post-scan, additionally drop a captured/active pick that
+  //     can't actually settle the decoded invoice (#144) and fall
+  //     back to the first eligible wallet so the Pay button isn't
+  //     silently wired to a wallet that will fail.
+  const selectedWallet = useMemo(() => {
+    if (invoiceType === null) {
+      const captured = capturedWalletId ? wallets.find((w) => w.id === capturedWalletId) : null;
+      return captured ?? wallets.find((w) => w.id === activeWalletId) ?? null;
+    }
+    const captured = capturedWalletId
+      ? eligibleWallets.find((w) => w.id === capturedWalletId)
+      : null;
+    if (captured) return captured;
+    return defaultWalletForInvoice(eligibleWallets, activeWalletId, invoiceType);
+  }, [wallets, eligibleWallets, capturedWalletId, activeWalletId, invoiceType]);
   const walletId = selectedWallet?.id ?? null;
   const walletBalance = selectedWallet?.balance ?? null;
   const walletName = selectedWallet ? walletLabel(selectedWallet) : 'Wallet';
 
   useEffect(() => {
     if (visible) {
-      setCapturedWalletId(activeWalletId);
+      // Leave `capturedWalletId` null on each open so the
+      // default-for-invoice rule (active wallet if eligible, else the
+      // first eligible) wins on the first scan/paste — see #144. The
+      // user can still override via the dropdown, which writes through
+      // to capturedWalletId and pins the choice for this send only.
+      setCapturedWalletId(null);
       setDropdownOpen(false);
       setInvoiceData(null);
       setDecoded(null);
@@ -591,6 +635,9 @@ const SendSheet: React.FC<Props> = ({
     setIsOnchainAddress(false);
     setBoltzFees(null);
     setLoadingBoltzFees(false);
+    // Drop the previous invoice's wallet pick so the default-for-invoice
+    // rule re-applies for whatever the user pastes/scans next (#144).
+    setCapturedWalletId(null);
   };
 
   const handleSheetChange = useCallback(
@@ -620,11 +667,17 @@ const SendSheet: React.FC<Props> = ({
   const amountMinSats = onchainViaBoltz ? boltzFees?.minAmount : lnurlParams?.minSats;
   const amountMaxSats = onchainViaBoltz ? boltzFees?.maxAmount : lnurlParams?.maxSats;
 
-  const canSend = isOnchainAddress
-    ? currentSats > 0 && !loadingBoltzFees
-    : needsAmount
-      ? lnurlParams && currentSats > 0 && !resolving
-      : !!invoiceData;
+  // Pay button is disabled if nothing in the wallet list can settle the
+  // current invoice — without this the user would tap Send and crash on
+  // the `walletId!` non-null assertion in handleSend (#144).
+  const hasPayingWallet = !!selectedWallet;
+  const canSend =
+    hasPayingWallet &&
+    (isOnchainAddress
+      ? currentSats > 0 && !loadingBoltzFees
+      : needsAmount
+        ? !!lnurlParams && currentSats > 0 && !resolving
+        : !!invoiceData);
 
   return (
     <>
@@ -671,14 +724,24 @@ const SendSheet: React.FC<Props> = ({
             <View style={styles.innerContent}>
               <Text style={styles.title}>Send</Text>
 
-              {/* Wallet selector */}
-              {wallets.filter((w) => w.isConnected).length > 1 ? (
+              {/* Wallet selector — scoped to wallets that can actually
+               *  settle the decoded invoice (#144). Always render the
+               *  dropdown when 2+ are eligible so the user can switch
+               *  even if the active/default pick happens to be the
+               *  one already shown. */}
+              {scanned && eligibleWallets.length === 0 ? (
+                <Text style={styles.walletLabel} testID="send-no-eligible-wallet">
+                  No wallet can pay this invoice — add a connected NWC wallet.
+                </Text>
+              ) : eligibleWallets.length > 1 ? (
                 <View style={styles.walletDropdownRow}>
                   <Text style={styles.walletLabel}>From:</Text>
                   <View style={styles.walletDropdownWrapper}>
                     <TouchableOpacity
                       style={styles.walletDropdown}
                       onPress={() => setDropdownOpen(!dropdownOpen)}
+                      accessibilityLabel="Select wallet to pay from"
+                      testID="send-wallet-dropdown"
                     >
                       <Text style={styles.walletDropdownText}>{walletName}</Text>
                       {dropdownOpen ? (
@@ -689,30 +752,31 @@ const SendSheet: React.FC<Props> = ({
                     </TouchableOpacity>
                     {dropdownOpen && (
                       <View style={styles.walletDropdownMenu}>
-                        {wallets
-                          .filter((w) => w.isConnected)
-                          .map((w) => (
-                            <TouchableOpacity
-                              key={w.id}
+                        {eligibleWallets.map((w) => (
+                          <TouchableOpacity
+                            key={w.id}
+                            style={[
+                              styles.walletDropdownItem,
+                              selectedWallet?.id === w.id && styles.walletDropdownItemActive,
+                            ]}
+                            onPress={() => {
+                              setCapturedWalletId(w.id);
+                              setDropdownOpen(false);
+                            }}
+                            accessibilityLabel={`Pay from ${walletLabel(w)}`}
+                            testID={`send-wallet-option-${w.id}`}
+                          >
+                            <Text
                               style={[
-                                styles.walletDropdownItem,
-                                capturedWalletId === w.id && styles.walletDropdownItemActive,
+                                styles.walletDropdownItemText,
+                                selectedWallet?.id === w.id && styles.walletDropdownItemTextActive,
                               ]}
-                              onPress={() => {
-                                setCapturedWalletId(w.id);
-                                setDropdownOpen(false);
-                              }}
                             >
-                              <Text
-                                style={[
-                                  styles.walletDropdownItemText,
-                                  capturedWalletId === w.id && styles.walletDropdownItemTextActive,
-                                ]}
-                              >
-                                {walletLabel(w)}
-                              </Text>
-                            </TouchableOpacity>
-                          ))}
+                              {walletLabel(w)}
+                              {w.balance !== null ? ` · ${w.balance.toLocaleString()} sats` : ''}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
                       </View>
                     )}
                   </View>
