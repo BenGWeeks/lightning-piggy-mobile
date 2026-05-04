@@ -875,12 +875,21 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             .map((tx, idx) => ({ tx, idx }))
             .filter(({ tx }) => {
               if (tx.zapCounterparty && typeof tx.zapCounterparty === 'object') return false;
-              // Incoming null is a definitive relay-sweep miss — skip to
-              // avoid re-scanning hundreds of non-zap receipts each refresh.
-              // Outgoing null means only that an earlier run didn't find a
-              // local storage entry — retry, since the entry may have been
-              // written after that run (race) or on another device later.
-              if (tx.zapCounterparty === null && tx.bolt11 && tx.type === 'incoming') return false;
+              // Incoming null is a definitive relay-sweep miss for the
+              // zap-receipt path — but DM-bolt11 attribution (#126) can
+              // populate `zapCounterpartyStorage` later (e.g. the DM
+              // arrives after the first refresh), so retry incoming nulls
+              // when we have a paymentHash to consult storage with. Without
+              // a paymentHash there's nothing to look up — keep the
+              // original short-circuit so we don't re-scan hundreds of
+              // non-zap receipts each refresh.
+              if (
+                tx.zapCounterparty === null &&
+                tx.bolt11 &&
+                tx.type === 'incoming' &&
+                !tx.paymentHash
+              )
+                return false;
               return true;
             });
         }
@@ -908,6 +917,29 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // Accumulator — index-based so we can merge cached txs that lack
       // paymentHash; outgoing attribution still keys off paymentHash inside.
       const resultsByIdx = new Map<number, ZapCounterpartyInfo | null>();
+
+      // ─── DM-bolt11 attribution (#126) ──────────────────────────────────
+      // For incoming pending txs (we generated an invoice, friend paid it
+      // after we DM'd it to them), check zapCounterpartyStorage too —
+      // NostrContext writes a `payment_hash → recipientPubkey` entry at
+      // sendDirectMessage time when the DM body contains a bolt11. The
+      // outgoing path below already does this lookup for the symmetric
+      // case (friend DM'd us an invoice, we paid it). Done before the
+      // relay zap-receipt fetch so a DM-attributed match short-circuits
+      // the heavier remote query.
+      if (incomingPending.length > 0) {
+        const incomingHashes = incomingPending
+          .map(({ tx }) => tx.paymentHash)
+          .filter((h): h is string => !!h);
+        if (incomingHashes.length > 0) {
+          const incomingByHash = await zapCounterpartyStorage.getMany(incomingHashes);
+          for (const { tx, idx } of incomingPending) {
+            if (!tx.paymentHash) continue;
+            const info = incomingByHash.get(tx.paymentHash);
+            if (info) resultsByIdx.set(idx, info);
+          }
+        }
+      }
 
       // Combine app defaults with the user's configured NIP-65 read
       // relays so we hit the relays their contacts actually publish to.
@@ -1082,6 +1114,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const pubkeysToFetch = new Set<string>();
 
       for (const { tx, idx } of incomingPending) {
+        // DM-bolt11 attribution (#126) may have already populated this
+        // index from `zapCounterpartyStorage` above — preserve that and
+        // skip the relay-receipt path so we don't overwrite a real
+        // friend attribution with a `null` zap-miss.
+        if (resultsByIdx.has(idx) && resultsByIdx.get(idx)) continue;
         const receipt = findReceipt(tx);
         if (!receipt) {
           // Negative cache only when we had bolt11 to match with (definitive

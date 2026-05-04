@@ -1,14 +1,23 @@
 /**
- * AsyncStorage-backed cache of resolved Nostr counterparties for outgoing
- * zaps, keyed by payment hash.
+ * AsyncStorage-backed cache of resolved Nostr counterparties for
+ * payments, keyed by payment hash.
  *
- * For incoming zaps, sender attribution is derived from public NIP-57
- * receipts on relays. For outgoing zaps the sender is *us* — what the
- * user actually wants to see is who they paid, and we know that at the
- * moment the zap request is signed (the recipient's pubkey + profile is
- * whatever contact / search-hit triggered the Send). Rather than round
- * trip through relays we record it directly here and the resolver looks
- * it up during transaction refresh.
+ * Two writers populate this store:
+ *
+ *  - `SendSheet` / outgoing zaps — the sender is *us*; the recipient's
+ *    pubkey + profile is whatever contact / search-hit triggered the
+ *    Send. Rather than round-trip through relays we record it directly
+ *    here so the resolver can attribute the outgoing tx without
+ *    re-querying.
+ *
+ *  - `NostrContext` DM scanner (#126) — when a friend DMs us a bolt11
+ *    invoice we map `payment_hash → senderPubkey` so the eventual
+ *    outgoing payment is attributed back to that friend; conversely,
+ *    when we DM an invoice to a friend we map `payment_hash →
+ *    recipientPubkey` so the eventual incoming payment is attributed.
+ *
+ * The store itself doesn't care which writer created an entry — it's a
+ * direction-agnostic `paymentHash → ZapCounterpartyInfo` map.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ZapCounterpartyInfo } from '../types/wallet';
