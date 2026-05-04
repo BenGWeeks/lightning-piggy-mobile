@@ -2520,16 +2520,119 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     let cancelled = false;
     let writeChain: Promise<void> = Promise.resolve();
 
-    const handleWrap = async (wrap: nostrService.RawGiftWrapEvent): Promise<void> => {
+    const handleInboxEvent = async (ev: nostrService.RawInboxDmEvent): Promise<void> => {
+      if (__DEV__) console.log(`[Nostr] live evt kind=${ev.kind} recv ${ev.id.slice(0, 8)}`);
       if (cancelled) return;
-      if (seen.has(wrap.id)) return;
-      seen.add(wrap.id);
+      if (seen.has(ev.id)) {
+        if (__DEV__) console.log(`[Nostr] live evt ${ev.id.slice(0, 8)} dedup-seen`);
+        return;
+      }
+      seen.add(ev.id);
       // Drop oldest ~25% so a long-lived sub under spam doesn't grow the Set unboundedly.
       if (seen.size > SEEN_CAP) {
         const drop = Math.floor(SEEN_CAP / 4);
         const it = seen.values();
         for (let i = 0; i < drop; i++) seen.delete(it.next().value!);
       }
+
+      // NIP-04 (kind-4) — partner is in the envelope; decrypt directly with the active signer.
+      if (ev.kind === 4) {
+        const fromMe = ev.pubkey === viewerPubkey;
+        const recipientTag = ev.tags.find((t) => t[0] === 'p')?.[1]?.toLowerCase();
+        const partnerPubkey = fromMe ? recipientTag : ev.pubkey.toLowerCase();
+        if (!partnerPubkey || !/^[0-9a-f]{64}$/.test(partnerPubkey)) {
+          if (__DEV__) console.log(`[Nostr] live kind-4 ${ev.id.slice(0, 8)} no-partner`);
+          return;
+        }
+        let plaintext = nip04PlaintextCache.get(ev.id);
+        if (plaintext === undefined) {
+          try {
+            if (activeSigner === 'nsec') {
+              const secretKey = await getMemoisedSecretKey(viewerPubkey);
+              if (!secretKey) return;
+              plaintext = await nostrService.decryptNip04WithSecret(
+                secretKey,
+                partnerPubkey,
+                ev.content,
+              );
+            } else if (activeSigner === 'amber') {
+              plaintext = await amberService.requestNip04Decrypt(
+                ev.content,
+                partnerPubkey,
+                viewerPubkey,
+              );
+            } else {
+              return;
+            }
+          } catch (error) {
+            if (__DEV__)
+              console.warn(`[Nostr] live kind-4 ${ev.id.slice(0, 8)} decrypt failed:`, error);
+            return;
+          }
+          if (!plaintext) {
+            if (__DEV__) console.log(`[Nostr] live kind-4 ${ev.id.slice(0, 8)} empty-plaintext`);
+            return;
+          }
+          nip04PlaintextCache.set(ev.id, plaintext);
+        } else if (__DEV__) {
+          console.log(`[Nostr] live kind-4 ${ev.id.slice(0, 8)} dedup-cache`);
+        }
+        if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
+
+        // Follow gate (mirrors refreshDmInbox B1) — incoming kind-4 from a non-followed sender is dropped from inbox state. Outgoing (fromMe) bypasses since we sent it.
+        if (!fromMe && !followPubkeysRef.current.has(partnerPubkey)) {
+          if (__DEV__)
+            console.log(
+              `[Nostr] live kind-4 ${ev.id.slice(0, 8)} dropped by follow-gate (partner=${partnerPubkey.slice(0, 8)})`,
+            );
+          return;
+        }
+
+        const k4InboxEntry: DmInboxEntry = {
+          id: ev.id,
+          partnerPubkey,
+          fromMe,
+          createdAt: ev.created_at,
+          text: plaintext,
+          wireKind: 4,
+        };
+        // No wrap-id cache for kind-4 (plaintext lives in RAM-only LRU); only persist the inbox preview blob. Same writeChain as kind-1059 to serialize concurrent inbox writes.
+        writeChain = writeChain
+          .then(async () => {
+            if (cancelled) return;
+            const inboxRaw = await AsyncStorage.getItem(inboxCacheKey(viewerPubkey));
+            const cachedInbox: DmInboxEntry[] = inboxRaw
+              ? (() => {
+                  try {
+                    const parsed = JSON.parse(inboxRaw);
+                    return Array.isArray(parsed) ? parsed : [];
+                  } catch {
+                    return [];
+                  }
+                })()
+              : [];
+            const merged = mergeInboxEntries(cachedInbox, [k4InboxEntry], DM_INBOX_CAP);
+            await AsyncStorage.setItem(inboxCacheKey(viewerPubkey), JSON.stringify(merged)).catch(
+              () => {},
+            );
+          })
+          .catch((e) => {
+            if (__DEV__) console.warn('[Nostr] live kind-4 persist failed:', e);
+          });
+        await writeChain;
+        if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
+
+        setDmInbox((prev) => mergeInboxEntries(prev, [k4InboxEntry], DM_INBOX_CAP));
+        notifyDmMessage(partnerPubkey);
+        if (__DEV__)
+          console.log(
+            `[Nostr] live kind-4 ${ev.id.slice(0, 8)} surfaced (partner=${partnerPubkey.slice(0, 8)}, fromMe=${fromMe})`,
+          );
+        return;
+      }
+
+      // NIP-17 (kind-1059) — existing gift-wrap unwrap path. Local alias preserves original variable name without renaming through the body below.
+      const wrap = ev;
 
       // Cache short-circuit: if refreshDmInbox already decrypted this
       // wrap and persisted it, the live sub has nothing to do — the
@@ -2548,7 +2651,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const seedCache = safeParseRecord<Nip17CacheEntry>(seedRaw);
         knownWrapIds = new Set(Object.keys(seedCache));
       }
-      if (knownWrapIds.has(wrap.id)) return;
+      if (knownWrapIds.has(wrap.id)) {
+        if (__DEV__) console.log(`[Nostr] live wrap ${wrap.id.slice(0, 8)} dedup-cache`);
+        return;
+      }
 
       const onSkip = (reason: string, wrapId: string) => {
         if (__DEV__) console.warn(`[Nostr] live NIP-17 unwrap skip (${wrapId}): ${reason}`);
@@ -2583,7 +2689,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           return;
         }
       }
-      if (!rumor) return;
+      if (!rumor) {
+        if (__DEV__) console.log(`[Nostr] live wrap ${wrap.id.slice(0, 8)} no-rumor`);
+        return;
+      }
       if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
 
       // Group-route first — multi-recipient rumors are owned by the
@@ -2591,15 +2700,30 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // appendGroupMessage + notifyGroupMessage internally so an open
       // GroupConversationScreen auto-refreshes.
       const routeResult = await tryRouteGroupRumor(rumor, viewerPubkey, wrap.id);
-      if (routeResult.kind !== 'not-group') return;
+      if (routeResult.kind !== 'not-group') {
+        if (__DEV__)
+          console.log(
+            `[Nostr] live wrap ${wrap.id.slice(0, 8)} group-routed (${routeResult.kind})`,
+          );
+        return;
+      }
 
       const partnership = partnerFromRumor(rumor, viewerPubkey);
-      if (!partnership) return;
+      if (!partnership) {
+        if (__DEV__) console.log(`[Nostr] live wrap ${wrap.id.slice(0, 8)} no-partnership`);
+        return;
+      }
 
       // Follow gate (mirrors refreshDmInbox B1) — keeps non-followed
       // sender plaintext off AsyncStorage. Group rumors above don't
       // hit this gate because group membership is its own auth signal.
-      if (!followPubkeysRef.current.has(partnership.partnerPubkey)) return;
+      if (!followPubkeysRef.current.has(partnership.partnerPubkey)) {
+        if (__DEV__)
+          console.log(
+            `[Nostr] live wrap ${wrap.id.slice(0, 8)} dropped by follow-gate (partner=${partnership.partnerPubkey.slice(0, 8)})`,
+          );
+        return;
+      }
 
       const entry: Nip17CacheEntry = {
         id: wrap.id,
@@ -2658,23 +2782,27 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       setDmInbox((prev) => mergeInboxEntries(prev, [inboxEntry], DM_INBOX_CAP));
       notifyDmMessage(partnership.partnerPubkey);
+      if (__DEV__)
+        console.log(
+          `[Nostr] live wrap ${wrap.id.slice(0, 8)} surfaced (partner=${partnership.partnerPubkey.slice(0, 8)})`,
+        );
     };
 
-    const unsubscribe = nostrService.subscribeInboxWrapsForViewer({
+    const unsubscribe = nostrService.subscribeInboxDmsForViewer({
       viewerPubkey,
       relays: readRelays,
-      onEvent: (wrap) => {
-        // Fire-and-forget: handleWrap awaits its own state, and any
+      onEvent: (ev) => {
+        // Fire-and-forget: handleInboxEvent awaits its own state, and any
         // throw is caught + logged here so the sub keeps running.
-        handleWrap(wrap).catch((e) => {
-          if (__DEV__) console.warn('[Nostr] live wrap handler failed:', e);
+        handleInboxEvent(ev).catch((e) => {
+          if (__DEV__) console.warn('[Nostr] live DM handler failed:', e);
         });
       },
     });
 
     if (__DEV__) {
       console.log(
-        `[Nostr] live kind-1059 sub opened for ${viewerPubkey.slice(0, 8)} on ${readRelays.length} relays`,
+        `[Nostr] live DM sub (kinds 4 + 1059) opened for ${viewerPubkey.slice(0, 8)} on ${readRelays.length} relays`,
       );
     }
 
