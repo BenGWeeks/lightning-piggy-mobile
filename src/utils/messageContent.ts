@@ -2,6 +2,7 @@ import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { decodeProfileReference } from '../services/nostrService';
 import { extractGifUrl } from '../services/giphyService';
 import { parseGeoMessage, SharedLocation } from '../services/locationService';
+import { parseLiveLocationMarker, type LiveLocationMarker } from '../services/liveLocationService';
 
 // Bolt11 invoices are self-identifying by their `lnXX` HRP, so detection
 // here matches them with or without the `lightning:` prefix.
@@ -118,11 +119,17 @@ export function formatRelativeFuture(epochMs: number): string {
 export type BubbleContent =
   | { kind: 'text'; text: string }
   | { kind: 'gif'; url: string }
-  | { kind: 'location'; location: SharedLocation };
+  | { kind: 'location'; location: SharedLocation }
+  | { kind: 'liveLocationMarker'; marker: LiveLocationMarker };
 
 export function classifyMessageContent(text: string): BubbleContent {
   const gifUrl = extractGifUrl(text);
   if (gifUrl) return { kind: 'gif', url: gifUrl };
+  // Live-location marker check MUST precede the plain `geo:` snapshot
+  // check — start/end markers also embed a `geo:` URI so they would
+  // otherwise classify as a snapshot and lose the live-share metadata.
+  const marker = parseLiveLocationMarker(text);
+  if (marker) return { kind: 'liveLocationMarker', marker };
   const loc = parseGeoMessage(text);
   if (loc) return { kind: 'location', location: loc };
   return { kind: 'text', text };

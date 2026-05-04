@@ -49,6 +49,21 @@ import {
   SharedLocation,
 } from '../services/locationService';
 import {
+  LIVE_LOCATION_PING_KIND,
+  decodeLivePingPayload,
+  type LiveLocationMarker,
+} from '../services/liveLocationService';
+import { useLiveLocation } from '../contexts/LiveLocationContext';
+import LiveLocationDurationPicker from '../components/LiveLocationDurationPicker';
+import * as SecureStore from 'expo-secure-store';
+import {
+  decodeNsec,
+  decryptNip04WithSecret,
+  subscribeLiveLocationPings,
+  DEFAULT_RELAYS as DEFAULT_NOSTR_RELAYS,
+} from '../services/nostrService';
+import * as amberService from '../services/amberService';
+import {
   fetchProfile,
   nprofileEncode,
   buildProfileRelayHints,
@@ -89,6 +104,13 @@ type Item =
       id: string;
       fromMe: boolean;
       location: SharedLocation;
+      createdAt: number;
+    }
+  | {
+      kind: 'liveLocationMarker';
+      id: string;
+      fromMe: boolean;
+      marker: LiveLocationMarker;
       createdAt: number;
     }
   | {
@@ -141,10 +163,13 @@ const ConversationScreen: React.FC = () => {
     getCachedConversation,
     sendDirectMessage,
     signEvent,
+    signerType,
+    pubkey: myPubkey,
     contacts,
     relays,
   } = useNostr();
   const { wallets, activeWalletId, activeWallet } = useWallet();
+  const { sessionsByRecipient, startShare, stopShare, remainingMsForSession } = useLiveLocation();
 
   const [messages, setMessages] = useState<
     { id: string; fromMe: boolean; text: string; createdAt: number }[]
@@ -209,6 +234,15 @@ const ConversationScreen: React.FC = () => {
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
   const [fullscreenGifUrl, setFullscreenGifUrl] = useState<string | null>(null);
   const [sharingLocation, setSharingLocation] = useState(false);
+  // Live-location chooser sheet (Snapshot vs Share live for…).
+  const [liveLocationPickerOpen, setLiveLocationPickerOpen] = useState(false);
+  // Latest known coordinate per inbound live-share session, keyed by
+  // sessionId. Fed by the kind-20069 subscription below; consumed by
+  // MessageBubble's `liveLocationMarker` branch so the receiver's
+  // bubble updates as new pings arrive.
+  const [liveLocationLatest, setLiveLocationLatest] = useState<
+    Record<string, { location: SharedLocation; ts: number } | undefined>
+  >({});
   // Payment hashes of outgoing invoices the active NWC wallet reports paid.
   const [paidHashes, setPaidHashes] = useState<Set<string>>(() => new Set());
   const listRef = useRef<FlatList<Item>>(null);
@@ -256,6 +290,15 @@ const ConversationScreen: React.FC = () => {
           id: `dm-${m.id}`,
           fromMe: m.fromMe,
           location: classified.location,
+          createdAt: m.createdAt,
+        };
+      }
+      if (classified.kind === 'liveLocationMarker') {
+        return {
+          kind: 'liveLocationMarker',
+          id: `dm-${m.id}`,
+          fromMe: m.fromMe,
+          marker: classified.marker,
           createdAt: m.createdAt,
         };
       }
@@ -359,6 +402,107 @@ const ConversationScreen: React.FC = () => {
   useEffect(() => {
     load(true);
   }, [load]);
+
+  // Subscribe to live-location coordinate pings (kind-20069) for any
+  // *inbound* live-share start marker we've seen in this thread that
+  // hasn't yet been ended. The subscription stays open until either
+  // an end marker arrives or the share's wall-clock window expires —
+  // we close it then so we don't leak relay subs on long chats with
+  // many historical live shares.
+  useEffect(() => {
+    if (!isLoggedIn || !myPubkey) return;
+    const readRelays = relays.filter((r) => r.read).map((r) => r.url);
+    const targetRelays = Array.from(new Set([...readRelays, ...DEFAULT_NOSTR_RELAYS]));
+    // Find inbound (fromMe=false) start markers whose paired end marker
+    // (same sessionId) hasn't arrived AND whose wall-clock window is
+    // still open. The classifier already split markers out into a
+    // dedicated kind, so we walk `items` directly.
+    const seenEnds = new Set<string>();
+    for (const it of items) {
+      if (it.kind !== 'liveLocationMarker') continue;
+      if (it.marker.phase === 'end') seenEnds.add(it.marker.sessionId);
+    }
+    const liveStarts: { sessionId: string; startedAt: number; durationMs: number }[] = [];
+    for (const it of items) {
+      if (it.kind !== 'liveLocationMarker') continue;
+      if (it.fromMe) continue;
+      if (it.marker.phase !== 'start') continue;
+      if (seenEnds.has(it.marker.sessionId)) continue;
+      const expiresAt = it.marker.startedAt + it.marker.durationMs;
+      if (Date.now() >= expiresAt) continue;
+      liveStarts.push({
+        sessionId: it.marker.sessionId,
+        startedAt: it.marker.startedAt,
+        durationMs: it.marker.durationMs,
+      });
+    }
+    if (liveStarts.length === 0) return;
+    const unsubs: Array<() => void> = [];
+    for (const start of liveStarts) {
+      const unsub = subscribeLiveLocationPings({
+        viewerPubkey: myPubkey,
+        senderPubkey: pubkey,
+        sessionId: start.sessionId,
+        kind: LIVE_LOCATION_PING_KIND,
+        // Spec-conformant ephemeral relays drop pings on disconnect so
+        // we get a tiny `since` window; non-conformant relays might
+        // still hold one in memory, so accept anything from this
+        // session's start time onward.
+        since: Math.floor(start.startedAt / 1000),
+        relays: targetRelays,
+        onEvent: async (ev) => {
+          // Decrypt the ciphertext content with whichever signer is
+          // active. Amber goes through the platform IPC; nsec uses the
+          // local secret. Either way the decoded JSON is fed into
+          // `decodeLivePingPayload` which validates ranges.
+          let plaintext: string | null = null;
+          try {
+            if (signerType === 'nsec') {
+              const nsec = await SecureStore.getItemAsync('nostr_nsec');
+              if (!nsec) return;
+              const { secretKey } = decodeNsec(nsec);
+              plaintext = await decryptNip04WithSecret(secretKey, ev.pubkey, ev.content);
+            } else if (signerType === 'amber') {
+              plaintext = await amberService.requestNip04Decrypt(ev.content, ev.pubkey, myPubkey);
+            }
+          } catch {
+            return;
+          }
+          if (!plaintext) return;
+          const payload = decodeLivePingPayload(plaintext);
+          if (!payload || payload.sessionId !== start.sessionId) return;
+          setLiveLocationLatest((prev) => {
+            const existing = prev[start.sessionId];
+            // Reject out-of-order pings — relay fan-out can briefly
+            // re-order events, and the receiver's bubble shouldn't
+            // jump backwards in time.
+            if (existing && existing.ts >= payload.ts) return prev;
+            return {
+              ...prev,
+              [start.sessionId]: {
+                location: {
+                  lat: payload.lat,
+                  lon: payload.lon,
+                  accuracyMeters: payload.accuracy,
+                },
+                ts: payload.ts,
+              },
+            };
+          });
+        },
+      });
+      unsubs.push(unsub);
+    }
+    return () => {
+      for (const unsub of unsubs) {
+        try {
+          unsub();
+        } catch {
+          // best-effort
+        }
+      }
+    };
+  }, [items, isLoggedIn, myPubkey, pubkey, signerType, relays]);
 
   // Jump to the newest message on first content load, and when the user is
   // already near the bottom and a new message arrives. The list is
@@ -585,9 +729,20 @@ const ConversationScreen: React.FC = () => {
     }
   }, [draft, sending, sendDirectMessage, pubkey]);
 
-  const handleShareLocation = useCallback(async () => {
+  // Live-location entry point (#206). The Attach → Location tile now
+  // opens a chooser sheet — snapshot or live for N — instead of going
+  // straight into the snapshot flow. The snapshot path itself is
+  // unchanged; we just pulled the body into `runSnapshotShare()` so
+  // both the chooser and any future direct entry points can call it.
+  const openLocationChooser = useCallback(() => {
     if (sharingLocation) return;
     setAttachPanelOpen(false);
+    setLiveLocationPickerOpen(true);
+  }, [sharingLocation]);
+
+  const handleShareSnapshot = useCallback(async () => {
+    if (sharingLocation) return;
+    setLiveLocationPickerOpen(false);
     setSharingLocation(true);
     try {
       const result = await getCurrentLocation();
@@ -651,6 +806,53 @@ const ConversationScreen: React.FC = () => {
       setSharingLocation(false);
     }
   }, [sharingLocation, name, pubkey, sendDirectMessage]);
+
+  // Live-location: kick off a continuously-updating share. The provider
+  // owns the watcher + ephemeral kind-20069 publishing; we just trigger
+  // it and let the in-thread bubble (rendered via the start marker DM
+  // that the provider sends as a side-effect) drive the visible state.
+  const handleShareLive = useCallback(
+    async (durationMs: number) => {
+      setLiveLocationPickerOpen(false);
+      const result = await startShare(pubkey, durationMs);
+      if (!result.ok) {
+        Alert.alert('Could not start live share', result.error);
+        return;
+      }
+      // Mirror the start marker locally so the bubble appears
+      // instantly without waiting for the relay round-trip on the
+      // sender's own re-fetch.
+      const startedAt = Math.floor(Date.now() / 1000);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `local-livestart-${result.sessionId}`,
+          fromMe: true,
+          text: [
+            '[live-location:start]',
+            JSON.stringify({
+              sessionId: result.sessionId,
+              durationMs,
+              startedAt: startedAt * 1000,
+            }),
+            formatGeoMessage(result.location),
+          ].join('\n'),
+          createdAt: startedAt,
+        },
+      ]);
+    },
+    [pubkey, startShare],
+  );
+
+  const handleStopLive = useCallback(
+    async (sessionId: string) => {
+      const result = await stopShare(sessionId);
+      if (!result.ok) {
+        Alert.alert('Could not stop live share', result.error);
+      }
+    },
+    [stopShare],
+  );
 
   // Shared send-image path for both gallery and camera entry points.
   // Strips EXIF from the picked image, uploads to the user's configured
@@ -796,6 +998,72 @@ const ConversationScreen: React.FC = () => {
     setSendSheetOpen(true);
   }, []);
 
+  // Per-session live-location bubble status. We re-evaluate every time
+  // either the LiveLocationContext map (sender's outgoing sessions) or
+  // the in-thread items (receiver's known markers) change. End markers
+  // pin the status to `ended`; otherwise the sender's session map
+  // wins, and falls back to `active` for inbound shares without a yet-
+  // received end marker.
+  const liveLocationBubbleStatus = useMemo<
+    Record<string, 'active' | 'paused' | 'ended' | 'expired' | undefined>
+  >(() => {
+    const out: Record<string, 'active' | 'paused' | 'ended' | 'expired' | undefined> = {};
+    const seenEndIds = new Set<string>();
+    for (const it of items) {
+      if (it.kind !== 'liveLocationMarker') continue;
+      if (it.marker.phase === 'end') seenEndIds.add(it.marker.sessionId);
+    }
+    for (const it of items) {
+      if (it.kind !== 'liveLocationMarker') continue;
+      const id = it.marker.sessionId;
+      if (seenEndIds.has(id)) {
+        out[id] = 'ended';
+        continue;
+      }
+      // Outgoing session: defer to the live-location context for the
+      // authoritative status (active / paused / expired).
+      const own = sessionsByRecipient.get(pubkey)?.find((s) => s.sessionId === id);
+      if (own) {
+        out[id] = own.status;
+        continue;
+      }
+      // Incoming, no end marker, expiry not reached → active.
+      const expiresAt = it.marker.startedAt + it.marker.durationMs;
+      out[id] = Date.now() >= expiresAt ? 'ended' : 'active';
+    }
+    return out;
+  }, [items, sessionsByRecipient, pubkey]);
+
+  const liveLocationBubbleRemaining = useMemo<Record<string, number | undefined>>(() => {
+    const out: Record<string, number | undefined> = {};
+    const now = Date.now();
+    for (const it of items) {
+      if (it.kind !== 'liveLocationMarker') continue;
+      if (it.marker.phase !== 'start') continue;
+      const id = it.marker.sessionId;
+      // Sender path: prefer the canonical remaining-ms from the
+      // context, since its `startedAt` matches the wall clock the
+      // watcher uses.
+      const fromCtx = remainingMsForSession(id);
+      if (fromCtx !== null) {
+        out[id] = fromCtx;
+        continue;
+      }
+      const expiresAt = it.marker.startedAt + it.marker.durationMs;
+      out[id] = Math.max(0, expiresAt - now);
+    }
+    return out;
+  }, [items, remainingMsForSession]);
+
+  // 1 Hz tick so the "Updated 30 s ago" / "12 min left" labels animate
+  // without us having to fire a render on every coordinate ping. Cheap
+  // — flips a single counter, the bubble subtree is memo'd elsewhere.
+  const [, setSecondTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setSecondTick((n) => (n + 1) % 1000), 1000);
+    return () => clearInterval(id);
+  }, []);
+
   const renderItem = useCallback(
     ({ item }: { item: Item }) => {
       if (item.kind === 'dayHeader') {
@@ -863,7 +1131,9 @@ const ConversationScreen: React.FC = () => {
           ? ({ kind: 'gif', url: item.url } as const)
           : item.kind === 'location'
             ? ({ kind: 'location', location: item.location } as const)
-            : ({ kind: 'text', text: item.text } as const);
+            : item.kind === 'liveLocationMarker'
+              ? ({ kind: 'liveLocationMarker', marker: item.marker } as const)
+              : ({ kind: 'text', text: item.text } as const);
       return (
         <MessageBubble
           id={item.id}
@@ -876,6 +1146,10 @@ const ConversationScreen: React.FC = () => {
           onPayLightningAddress={handlePayInvoice}
           onOpenContact={openSharedContact}
           onOpenLocation={openLocation}
+          liveLocationLatest={liveLocationLatest}
+          liveLocationStatus={liveLocationBubbleStatus}
+          liveLocationRemainingMs={liveLocationBubbleRemaining}
+          onStopLiveLocation={handleStopLive}
           onOpenGifFullscreen={setFullscreenGifUrl}
           testIdPrefix="conversation"
         />
@@ -887,6 +1161,10 @@ const ConversationScreen: React.FC = () => {
       sharedProfiles,
       openSharedContact,
       handlePayInvoice,
+      liveLocationLatest,
+      liveLocationBubbleStatus,
+      liveLocationBubbleRemaining,
+      handleStopLive,
       styles,
       colors,
     ],
@@ -1084,7 +1362,7 @@ const ConversationScreen: React.FC = () => {
           }}
           attachPanel={
             <AttachPanel
-              onShareLocation={handleShareLocation}
+              onShareLocation={openLocationChooser}
               onSendImage={handlePickAndSendImage}
               onTakePhoto={handleTakeAndSendPhoto}
               onSendZap={() => {
@@ -1114,6 +1392,12 @@ const ConversationScreen: React.FC = () => {
           }
         />
       </View>
+      <LiveLocationDurationPicker
+        visible={liveLocationPickerOpen}
+        onClose={() => setLiveLocationPickerOpen(false)}
+        onChooseSnapshot={handleShareSnapshot}
+        onChooseLive={handleShareLive}
+      />
       <GifPickerSheet
         visible={gifPickerOpen}
         onClose={() => {
