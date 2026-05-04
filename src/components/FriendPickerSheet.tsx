@@ -22,6 +22,7 @@ import { useNostr } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import AlphabetBar from './AlphabetBar';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 
 export interface PickedFriend {
   pubkey: string;
@@ -254,7 +255,7 @@ const FriendPickerSheet: React.FC<Props> = ({
           <View style={styles.avatarFallback}>
             <UserRound size={28} color={colors.textBody} strokeWidth={1.75} />
           </View>
-          {item.picture ? (
+          {item.picture && isSupportedImageUrl(item.picture) ? (
             <Image
               source={{ uri: item.picture }}
               style={[StyleSheet.absoluteFillObject, styles.avatarImage]}

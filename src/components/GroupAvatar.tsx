@@ -5,6 +5,7 @@ import { UserRound } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { useNostr } from '../contexts/NostrContext';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 
 /** Per-contact info shared across rows. Picture + name + lightning
  * address are the three fields screens need to render a row plus
@@ -114,7 +115,8 @@ interface SingleAvatarProps {
 
 const SingleAvatar: React.FC<SingleAvatarProps> = ({ picture, colors, innerSize }) => {
   const [errored, setErrored] = useState(false);
-  const showImage = !!picture && !errored;
+  // Pre-filter unsupported URLs (`.svg`, `.heic`, etc.) — see #189.
+  const showImage = !!picture && !errored && isSupportedImageUrl(picture);
   // Thin white ring on every avatar — separates overlapping circles in
   // the stacked cluster and gives picture + placeholder slots the same
   // visual weight.
