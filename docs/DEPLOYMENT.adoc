@@ -468,6 +468,52 @@ With `ascApiKey*` + `ascAppId` populated in `eas.json`, the submit is headless �
 
 CAUTION: The App Store Connect *app-record creation* step still requires interactive Apple ID login (API keys cannot create new apps). Do the one-time record creation in the browser, not via EAS, and you avoid the Apple ID flow entirely afterwards.
 
+==== TestFlight "What to Test" automation
+
+`eas build --auto-submit` ships a build to TestFlight with a blank *What to Test* field — `eas.json` has no slot for it (as of EAS CLI 18) and the underlying `eas submit` does not expose the App Store Connect `betaBuildLocalizations` endpoint either. The release workflow's `set-testflight-whats-new` job fills it in post-submit, sourcing the notes from `docs/RELEASE_NOTES_NEXT.md`.
+
+===== How contributors update the notes
+
+When opening a PR with a user-visible change, append a one-line bullet to `docs/RELEASE_NOTES_NEXT.md` describing what a tester should look for. Pure refactors / CI / docs PRs do not need an entry. The release workflow:
+
+. Reads bullets from `docs/RELEASE_NOTES_NEXT.md` (deduped, capped at 3 900 chars to stay under TestFlight's 4 000-char limit).
+. Falls back to `feat:` / `fix:` / `perf:` commit subjects since the previous tag if the file is empty.
+. Calls App Store Connect's `PATCH /v1/betaBuildLocalizations/{id}` to set the iOS build's `whatsNew` localisation (`en-US`).
+. Archives the bullets into `docs/CHANGELOG.md` and resets `docs/RELEASE_NOTES_NEXT.md` to the placeholder by copying `docs/RELEASE_NOTES_NEXT.template.md`. The reset commit is pushed to `main` with `[skip ci]` so it doesn't kick off another CI run.
+
+If the release tagger forgot to populate the file and no qualifying commits are found, the workflow defaults to `Bug fixes and improvements.` rather than leaving the field blank.
+
+===== One-time GitHub Secrets setup
+
+The job needs the App Store Connect API key (the same `.p8` EAS uses for `eas submit` — but the `.p8` itself lives only on EAS's server, so you have to register it as a GitHub secret too). Add these three secrets at *Settings → Secrets and variables → Actions* on the repo:
+
+[cols="1,3", options="header"]
+|===
+| Secret | Value
+
+| `ASC_API_KEY_ID`
+| The 10-character key identifier from App Store Connect → *Users and Access* → *Integrations* → *Team Keys* (e.g. `ABC1234567`). Same value as `ascApiKeyId` in the `eas.json` snippet above.
+
+| `ASC_API_KEY_ISSUER_ID`
+| The team's issuer UUID, shown above the key list on the same page (e.g. `00000000-0000-0000-0000-000000000000`). Same as `ascApiKeyIssuerId`.
+
+| `ASC_API_KEY_P8`
+| The full PEM contents of the `AuthKey_XXXXXXXXXX.p8` file, including the `-----BEGIN PRIVATE KEY-----` / `-----END PRIVATE KEY-----` lines. Paste the file contents verbatim into the secret value box; GitHub preserves the newlines.
+|===
+
+The numeric App ID (`ASC_APP_ID`) is hard-coded in the workflow because it matches `ascAppId` in `eas.json` and never changes for a given app record.
+
+If any of the three secrets is unset, the job emits a `::warning` and skips silently — the release still succeeds, you just have to fill in *What to Test* by hand for that build via App Store Connect.
+
+===== Why a separate ASC API call (not just an EAS flag)
+
+`eas submit` uses Apple's `pilot` (fastlane) under the hood, which does accept a `changelog` argument — but EAS doesn't surface it through `eas.json` or `eas submit --changelog`. Until Expo wires that through, the post-submit ASC PATCH is the cleanest option that works with `--auto-submit`. Two pieces of code do the work:
+
+* `scripts/build-testflight-changelog.mjs` — assembles the changelog string (notes file → git fallback → default).
+* `scripts/asc-set-whats-new.mjs` — generates an ES256-signed JWT, polls `/v1/builds` until the just-uploaded build appears in App Store Connect (Apple typically takes 5–15 min after EAS reports the submit complete), then PATCHes the localisation.
+
+The polling loop in the second script is bounded by `ASC_MAX_WAIT_SECS` (default 900 s = 15 min). If Apple's processing queue is unusually backed up and the build hasn't appeared in time, the script exits 0 with a warning so the release isn't gated on Apple's queue depth — re-run the same script locally with the same env vars to fill it in once the build is visible.
+
 ==== Local build on macOS (skip the EAS queue)
 
 The free-tier EAS build queue can be slow (60–180 min). A local build on a macOS machine is usually 10–20 minutes. Requires Xcode, Homebrew CocoaPods, and Fastlane installed; EAS-CLI handles the rest.

@@ -113,6 +113,130 @@ jobs:
             --platform android \
             --non-interactive
 
+  set-testflight-whats-new:
+    name: Set TestFlight "What to Test"
+    # iOS-only: the App Store Connect betaBuildLocalizations endpoint has no
+    # Android equivalent (Play Console "What's New" is a separate flow that
+    # eas submit handles natively once Android auto-submit is wired up).
+    # Skip when the build job didn't include iOS.
+    if: contains(fromJSON('["ios","all"]'), needs.build-and-submit.outputs.platform)
+    needs: build-and-submit
+    runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      NODE_NO_WARNINGS: '1'
+    permissions:
+      contents: write   # to push the reset RELEASE_NOTES_NEXT.md back to main
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Need the full ref so we can commit RELEASE_NOTES_NEXT.md back to main.
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Verify ASC API key is wired
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_KEY_ISSUER_ID: ${{ secrets.ASC_API_KEY_ISSUER_ID }}
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+        run: |
+          # The same .p8 EAS uses for `eas submit` is needed here. This is a
+          # one-time GH Secrets setup; see docs/DEPLOYMENT.adoc → "TestFlight
+          # 'What to Test' automation". If absent, soft-skip rather than fail
+          # the release — Ben can fill in "What to Test" manually for this build.
+          if [ -z "$ASC_API_KEY_ID" ] || [ -z "$ASC_API_KEY_ISSUER_ID" ] || [ -z "$ASC_API_KEY_P8" ]; then
+            echo "::warning title=ASC API key not configured::Skipping auto-populate of TestFlight 'What to Test'. Add ASC_API_KEY_ID, ASC_API_KEY_ISSUER_ID, ASC_API_KEY_P8 to repo secrets to enable. See docs/DEPLOYMENT.adoc."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+        id: gate
+
+      - name: Resolve iOS build version from EAS
+        if: steps.gate.outputs.skip != 'true'
+        id: iosbuild
+        run: |
+          # Pick the iOS build EAS just produced for this commit. buildVersion
+          # is the CFBundleVersion (the integer in parens that TestFlight shows
+          # next to the X.Y.Z marketing version).
+          version=$(npx -y -p eas-cli@${{ env.EAS_CLI_VERSION }} eas build:list \
+            --platform ios --status finished --limit 5 --json --non-interactive \
+            | jq -r --arg sha "${{ github.sha }}" \
+                '[.[] | select(.gitCommitHash == $sha)][0].buildVersion // empty')
+          if [ -z "$version" ] || [ "$version" = "null" ]; then
+            echo "::warning title=No iOS build resolved::Could not find a finished iOS build for commit ${{ github.sha }}. Skipping whatsNew."
+            echo "version=" >> "$GITHUB_OUTPUT"
+          else
+            echo "Resolved iOS build version: $version"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build changelog
+        if: steps.gate.outputs.skip != 'true' && steps.iosbuild.outputs.version != ''
+        id: changelog
+        run: |
+          # Capture stdout (the assembled notes) into a file; preserve newlines
+          # for the GH Actions output via a heredoc-delimited multi-line value.
+          node scripts/build-testflight-changelog.mjs > /tmp/whatsnew.txt
+          echo "Assembled changelog:"
+          cat /tmp/whatsnew.txt
+          {
+            echo 'whatsnew<<EOF_WHATSNEW'
+            cat /tmp/whatsnew.txt
+            echo 'EOF_WHATSNEW'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: PATCH whatsNew via App Store Connect API
+        if: steps.gate.outputs.skip != 'true' && steps.iosbuild.outputs.version != ''
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_KEY_ISSUER_ID: ${{ secrets.ASC_API_KEY_ISSUER_ID }}
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+          ASC_APP_ID: '6762218164'   # matches eas.json → submit.production.ios.ascAppId
+          ASC_BUILD_VERSION: ${{ steps.iosbuild.outputs.version }}
+          WHATS_NEW: ${{ steps.changelog.outputs.whatsnew }}
+        run: node scripts/asc-set-whats-new.mjs
+
+      - name: Archive notes + reset RELEASE_NOTES_NEXT.md
+        # Only on a real Release (not a workflow_dispatch re-run) — we don't
+        # want to re-archive the same notes twice.
+        if: github.event_name == 'release' && steps.gate.outputs.skip != 'true' && steps.iosbuild.outputs.version != ''
+        run: |
+          tag="${{ github.event.release.tag_name }}"
+          notes_file="docs/RELEASE_NOTES_NEXT.md"
+          archive_file="docs/CHANGELOG.md"
+          # Skip if the file is empty / placeholder (no bullets shipped).
+          if ! grep -qE '^\s*[-*]\s+\S' "$notes_file"; then
+            echo "No bullets to archive; skipping reset."
+            exit 0
+          fi
+          # Prepend a new section to CHANGELOG.md.
+          {
+            echo "## $tag"
+            echo
+            cat /tmp/whatsnew.txt
+            echo
+            if [ -f "$archive_file" ]; then
+              cat "$archive_file"
+            fi
+          } > "$archive_file.new"
+          mv "$archive_file.new" "$archive_file"
+          # Reset the next-release file to its placeholder state. Using
+          # `cp` from a checked-in template avoids YAML/heredoc indentation
+          # gymnastics that would otherwise prepend spaces to every line.
+          cp docs/RELEASE_NOTES_NEXT.template.md "$notes_file"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add "$notes_file" "$archive_file"
+          git commit -m "chore(release): archive notes for $tag, reset RELEASE_NOTES_NEXT [skip ci]"
+          git push origin HEAD:main
+
   attach-android-apk:
     name: Attach Android APK to Release
     # Only runs on an actual Release event (workflow_dispatch has no release to attach to)
@@ -282,7 +406,7 @@ jobs:
   summary:
     name: Summary
     if: always()
-    needs: [build-and-submit, attach-android-apk, attach-technical-pdf]
+    needs: [build-and-submit, attach-android-apk, attach-technical-pdf, set-testflight-whats-new]
     runs-on: ubuntu-latest
     steps:
       - name: Write summary
