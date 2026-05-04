@@ -610,6 +610,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       } else {
         nwcService.disconnect(walletId);
         await walletStorage.deleteNwcUrl(walletId);
+        // CoinOS-managed wallets carry recovery info (username/password +
+        // server URL) in SecureStore. Drop it alongside the NWC URL so we
+        // don't leak credentials for a wallet the user just removed.
+        await walletStorage.deleteCoinosRecovery(walletId);
       }
 
       const currentList = await walletStorage.getWalletList();

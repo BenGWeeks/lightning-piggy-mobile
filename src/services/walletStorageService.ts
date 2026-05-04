@@ -75,6 +75,57 @@ export async function deleteXpub(walletId: string): Promise<void> {
   await SecureStore.deleteItemAsync(`${ONCHAIN_XPUB_PREFIX}${walletId}`);
 }
 
+// --- CoinOS managed-wallet recovery info ---
+
+// Stored alongside the NWC URL when a wallet is auto-provisioned via the
+// CoinOS managed flow (#287). Persists in SecureStore so the user can
+// re-display it from Wallet Settings → "View recovery info" after the
+// initial mandatory recovery screen. Without this the user cannot recover
+// their CoinOS account from a wiped device. The shape is JSON-serialised.
+const COINOS_RECOVERY_PREFIX = 'coinos_recovery_';
+
+export interface CoinosRecoveryInfo {
+  /** CoinOS instance the account lives on (default `https://coinos.io`,
+   *  or a self-hosted URL the user pointed LP at). */
+  baseUrl: string;
+  username: string;
+  password: string;
+  /** ISO-8601 timestamp captured when the wallet was provisioned. */
+  createdAt: string;
+}
+
+export async function saveCoinosRecovery(
+  walletId: string,
+  info: CoinosRecoveryInfo,
+): Promise<void> {
+  await SecureStore.setItemAsync(
+    `${COINOS_RECOVERY_PREFIX}${walletId}`,
+    JSON.stringify(info),
+    SECURE_OPTIONS,
+  );
+}
+
+export async function getCoinosRecovery(walletId: string): Promise<CoinosRecoveryInfo | null> {
+  const raw = await SecureStore.getItemAsync(`${COINOS_RECOVERY_PREFIX}${walletId}`);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<CoinosRecoveryInfo>;
+    if (!parsed.baseUrl || !parsed.username || !parsed.password) return null;
+    return {
+      baseUrl: parsed.baseUrl,
+      username: parsed.username,
+      password: parsed.password,
+      createdAt: parsed.createdAt ?? new Date(0).toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteCoinosRecovery(walletId: string): Promise<void> {
+  await SecureStore.deleteItemAsync(`${COINOS_RECOVERY_PREFIX}${walletId}`);
+}
+
 // --- On-chain (mnemonic) ---
 
 const ONCHAIN_MNEMONIC_PREFIX = 'onchain_mnemonic_';

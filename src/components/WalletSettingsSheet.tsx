@@ -14,7 +14,8 @@ import type { Palette } from '../styles/palettes';
 import { CardTheme } from '../types/wallet';
 import { themeList } from '../themes/cardThemes';
 import { MiniWalletCard } from './WalletCard';
-import { getXpub, getNwcUrl } from '../services/walletStorageService';
+import { getXpub, getNwcUrl, getCoinosRecovery } from '../services/walletStorageService';
+import CoinosRecoverySheet, { CoinosRecoveryDetails } from './CoinosRecoverySheet';
 
 interface Props {
   walletId: string | null;
@@ -53,6 +54,17 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const [selectedTheme, setSelectedTheme] = useState<CardTheme>('lightning-piggy');
   const [xpubDisplay, setXpubDisplay] = useState<string | null>(null);
   const [relayUrl, setRelayUrl] = useState<string | null>(null);
+  // Whether this NWC wallet was minted via the CoinOS managed-wallet
+  // flow (#287). Set to true when SecureStore has a recovery record
+  // for the wallet id; gates the "View recovery info" + "Migrate to
+  // self-custody" rows.
+  const [hasCoinosRecovery, setHasCoinosRecovery] = useState(false);
+  // Populated lazily when the user taps "View recovery info" — pulls
+  // the username/password from SecureStore and the NWC URL from its
+  // own SecureStore key, then assembles the CoinosRecoveryDetails for
+  // the recovery sheet.
+  const [recoveryDetails, setRecoveryDetails] = useState<CoinosRecoveryDetails | null>(null);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
 
   // Populate fields ONCE when the sheet opens for a given walletId. Using
   // `wallet` as a dep would re-fire on every `wallets` array update (balance
@@ -82,12 +94,38 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
             }
           }
         });
+        // Probe for a CoinOS recovery record so we can light up the
+        // managed-wallet rows below. We only check existence here;
+        // the full record is fetched on-tap to avoid leaving the
+        // password sitting in JS state for the lifetime of the sheet.
+        getCoinosRecovery(walletId).then((rec) => setHasCoinosRecovery(!!rec));
       } else {
         setXpubDisplay(null);
         setRelayUrl(null);
+        setHasCoinosRecovery(false);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [walletId]);
+
+  const handleViewRecovery = useCallback(async () => {
+    if (!walletId) return;
+    setRecoveryError(null);
+    try {
+      const [rec, nwcUrl] = await Promise.all([getCoinosRecovery(walletId), getNwcUrl(walletId)]);
+      if (!rec || !nwcUrl) {
+        setRecoveryError('Recovery info is missing for this wallet.');
+        return;
+      }
+      setRecoveryDetails({
+        baseUrl: rec.baseUrl,
+        username: rec.username,
+        password: rec.password,
+        nwc: nwcUrl,
+      });
+    } catch (e) {
+      setRecoveryError(e instanceof Error ? e.message : 'Failed to load recovery info.');
+    }
   }, [walletId]);
 
   const handleSheetChange = useCallback(
@@ -247,10 +285,47 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
           <Text style={styles.saveButtonText}>Save</Text>
         </TouchableOpacity>
 
+        {/* CoinOS managed-wallet extras (#287). Only shown when this
+            wallet was minted via the auto-provision flow — gated by
+            SecureStore probe in the populate effect above. */}
+        {hasCoinosRecovery && (
+          <View style={styles.coinosBlock}>
+            <TouchableOpacity
+              style={styles.coinosRow}
+              onPress={handleViewRecovery}
+              accessibilityLabel="View CoinOS recovery info"
+              testID="wallet-settings-view-recovery"
+            >
+              <Text style={styles.coinosRowText}>View recovery info</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.coinosRow, styles.coinosRowDisabled]}
+              disabled
+              accessibilityLabel="Migrate to self-custody (coming soon)"
+              testID="wallet-settings-migrate"
+            >
+              <Text style={[styles.coinosRowText, styles.coinosRowTextDisabled]}>
+                Migrate to self-custody
+              </Text>
+              <Text style={styles.coinosRowHint}>Coming soon</Text>
+            </TouchableOpacity>
+            {recoveryError && <Text style={styles.recoveryErrorText}>{recoveryError}</Text>}
+          </View>
+        )}
+
         <TouchableOpacity style={styles.disconnectButton} onPress={handleDisconnect}>
           <Text style={styles.disconnectButtonText}>Remove Wallet</Text>
         </TouchableOpacity>
       </BottomSheetScrollView>
+      {/* Recovery sheet rendered as a sibling so its own
+          BottomSheetModal stack doesn't fight the settings sheet. */}
+      <CoinosRecoverySheet
+        visible={!!recoveryDetails}
+        details={recoveryDetails}
+        requireAcknowledge={false}
+        onAcknowledge={() => setRecoveryDetails(null)}
+        onClose={() => setRecoveryDetails(null)}
+      />
     </BottomSheetModal>
   );
 };
@@ -340,6 +415,41 @@ const createStyles = (colors: Palette) =>
       color: colors.red,
       fontSize: 14,
       fontWeight: '600',
+    },
+    coinosBlock: {
+      marginTop: 16,
+      gap: 8,
+    },
+    coinosRow: {
+      backgroundColor: colors.background,
+      borderRadius: 12,
+      paddingVertical: 14,
+      paddingHorizontal: 16,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    coinosRowDisabled: {
+      opacity: 0.55,
+    },
+    coinosRowText: {
+      color: colors.brandPink,
+      fontSize: 15,
+      fontWeight: '600',
+    },
+    coinosRowTextDisabled: {
+      color: colors.textBody,
+    },
+    coinosRowHint: {
+      color: colors.textSupplementary,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    recoveryErrorText: {
+      color: colors.red,
+      fontSize: 13,
+      fontWeight: '600',
+      textAlign: 'center',
     },
   });
 
