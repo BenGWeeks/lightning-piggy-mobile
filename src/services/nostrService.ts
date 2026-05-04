@@ -645,9 +645,7 @@ export async function fetchInboxDmEvents(
   const allRelays = [...new Set([...relays, ...DEFAULT_RELAYS])];
   trackRelays(allRelays);
   const limit = options.limit ?? 500;
-  // `since` shifted back 2 minutes (Damus clock-drift pad). All three
-  // inbox sub-queries share the same since floor: any relay that
-  // stamped an event slightly-in-our-past still returns it.
+  // `since` shifted back 2 min (Damus clock-drift pad). Applied only to kind-4 filters below; wraps deliberately skip it (see next comment).
   const since = options.since !== undefined ? Math.max(0, options.since - 120) : undefined;
   const sentK4Filter: Filter = { kinds: [4], authors: [myPubkey], limit };
   const recvK4Filter: Filter = { kinds: [4], '#p': [myPubkey], limit };
