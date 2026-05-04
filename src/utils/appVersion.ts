@@ -13,7 +13,8 @@ export const appVersion: string = require('../../package.json').version;
 // Returns null on web and in environments where the native module
 // is unavailable (e.g. some unit-test setups), so callers should
 // gracefully degrade.
-export const appBuildNumber: string | null = Application.nativeBuildVersion;
+// `?? null` normalizes the `undefined` that jest-expo's auto-mock leaks for missing native modules.
+export const appBuildNumber: string | null = Application.nativeBuildVersion ?? null;
 
 // Human-readable label for both the drawer footer and the About screen.
 // Combines the semver with the build number so testers can tell two

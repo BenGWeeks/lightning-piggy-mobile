@@ -47,6 +47,13 @@ const AboutScreen: React.FC = () => {
   const versionTapCount = useRef(0);
   const versionTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Fold dev into the build-number parenthetical so screen readers don't say "(build 13) (dev)".
+  const displayVersionLabel = devMode
+    ? appVersionLabel.endsWith(')')
+      ? `${appVersionLabel.slice(0, -1)}, dev)`
+      : `${appVersionLabel} (dev)`
+    : appVersionLabel;
+
   useEffect(() => {
     AsyncStorage.getItem('dev_mode').then((v) => setDevMode(v === 'true'));
   }, []);
@@ -206,11 +213,10 @@ const AboutScreen: React.FC = () => {
       <TouchableOpacity
         onPress={handleVersionTap}
         activeOpacity={1}
-        accessibilityLabel={`App version ${appVersionLabel}`}
+        accessibilityLabel={`App version ${displayVersionLabel}`}
       >
         <Text style={styles.versionText} testID="version-text">
-          v{appVersionLabel}
-          {devMode ? ' (dev)' : ''}
+          v{displayVersionLabel}
         </Text>
       </TouchableOpacity>
 

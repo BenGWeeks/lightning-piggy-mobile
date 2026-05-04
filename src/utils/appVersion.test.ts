@@ -33,6 +33,16 @@ describe('appVersionLabel', () => {
     });
   });
 
+  it('normalizes undefined (jest-expo auto-mock {}) to null and falls back to bare semver', () => {
+    jest.isolateModules(() => {
+      jest.doMock('expo-application', () => ({}));
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const mod = require('./appVersion');
+      expect(mod.appBuildNumber).toBeNull();
+      expect(mod.appVersionLabel).toBe(mod.appVersion);
+    });
+  });
+
   it('still exposes the bare semver from package.json', () => {
     jest.isolateModules(() => {
       jest.doMock('expo-application', () => ({ nativeBuildVersion: '13' }));
