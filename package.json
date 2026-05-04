@@ -42,6 +42,7 @@
     "electrum-client": "github:BlueWallet/rn-electrum-client",
     "events": "^3.3.0",
     "expo": "~55.0.9",
+    "expo-application": "~55.0.14",
     "expo-camera": "~55.0.11",
     "expo-clipboard": "~55.0.9",
     "expo-contacts": "~55.0.9",

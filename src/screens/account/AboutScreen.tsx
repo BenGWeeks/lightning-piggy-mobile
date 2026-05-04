@@ -24,7 +24,7 @@ import { useThemeColors } from '../../contexts/ThemeContext';
 import type { Palette } from '../../styles/palettes';
 import type { NostrProfile } from '../../types/nostr';
 import { LIGHTNING_PIGGY_TEAM_NPUB, dmRecipient } from '../../constants/npubs';
-import { appVersion } from '../../utils/appVersion';
+import { appVersionLabel } from '../../utils/appVersion';
 
 // Bumped key (#346) to evict pre-avatar caches that pinned an empty avatar circle.
 const TEAM_PROFILE_CACHE_KEY = 'team_profile_cache_v2';
@@ -206,10 +206,10 @@ const AboutScreen: React.FC = () => {
       <TouchableOpacity
         onPress={handleVersionTap}
         activeOpacity={1}
-        accessibilityLabel={`App version ${appVersion}`}
+        accessibilityLabel={`App version ${appVersionLabel}`}
       >
         <Text style={styles.versionText} testID="version-text">
-          v{appVersion}
+          v{appVersionLabel}
           {devMode ? ' (dev)' : ''}
         </Text>
       </TouchableOpacity>
