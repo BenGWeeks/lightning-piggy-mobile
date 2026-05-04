@@ -63,6 +63,13 @@ import {
   extractSharedContact,
   formatTime,
 } from '../utils/messageContent';
+import {
+  parseReactionEvent,
+  reduceReactions,
+  type MessageReactionState,
+  type ReactionRecord,
+} from '../utils/reactions';
+import MessageActionsSheet from '../components/MessageActionsSheet';
 
 type ConversationRoute = RouteProp<RootStackParamList, 'Conversation'>;
 type ConversationNavigation = NativeStackNavigationProp<RootStackParamList, 'Conversation'>;
@@ -74,6 +81,8 @@ type Item =
       fromMe: boolean;
       text: string;
       createdAt: number;
+      rumorId?: string;
+      authorPubkey?: string;
     }
   | {
       kind: 'zap';
@@ -90,6 +99,8 @@ type Item =
       fromMe: boolean;
       location: SharedLocation;
       createdAt: number;
+      rumorId?: string;
+      authorPubkey?: string;
     }
   | {
       kind: 'gif';
@@ -97,6 +108,8 @@ type Item =
       fromMe: boolean;
       url: string;
       createdAt: number;
+      rumorId?: string;
+      authorPubkey?: string;
     }
   | {
       kind: 'dayHeader';
@@ -143,11 +156,26 @@ const ConversationScreen: React.FC = () => {
     signEvent,
     contacts,
     relays,
+    pubkey: viewerPubkey,
+    publishReaction,
+    deleteReaction,
+    fetchReactionsForMessages,
   } = useNostr();
   const { wallets, activeWalletId, activeWallet } = useWallet();
 
   const [messages, setMessages] = useState<
-    { id: string; fromMe: boolean; text: string; createdAt: number }[]
+    {
+      id: string;
+      fromMe: boolean;
+      text: string;
+      createdAt: number;
+      // `rumorId` + `authorPubkey` come from ConversationMessage on the
+      // NIP-17 / NIP-04 path. Optional because optimistic local sends
+      // (`local-…` ids) won't have them until the relay round-trip
+      // returns and `fetchConversation` rewrites with the real ids.
+      rumorId?: string;
+      authorPubkey?: string;
+    }[]
   >([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -241,6 +269,17 @@ const ConversationScreen: React.FC = () => {
       // shape used by the group screen (via `classifyMessageContent`)
       // — keeps gif / geo detection in one place.
       const classified = classifyMessageContent(m.text);
+      // For NIP-17 the `rumorId` is the cross-peer-stable inner kind-14
+      // hash; for NIP-04 it's the same as the wire id. For optimistic
+      // local sends, `m.rumorId` is undefined — long-press still works
+      // (parent gates on rumorId) but reactions can't attach until the
+      // relay round-trip rewrites with the real ids.
+      const rumorId = m.rumorId;
+      // The author of the message — for NIP-17 the inner rumor's pubkey,
+      // for NIP-04 the kind-4 event signer. Falls back to viewerPubkey
+      // for `fromMe` messages on the optimistic path so the per-message
+      // reaction immediately knows who to `p`-tag.
+      const authorPubkey = m.authorPubkey ?? (m.fromMe ? (viewerPubkey ?? undefined) : undefined);
       if (classified.kind === 'gif') {
         return {
           kind: 'gif',
@@ -248,6 +287,8 @@ const ConversationScreen: React.FC = () => {
           fromMe: m.fromMe,
           url: classified.url,
           createdAt: m.createdAt,
+          rumorId,
+          authorPubkey,
         };
       }
       if (classified.kind === 'location') {
@@ -257,6 +298,8 @@ const ConversationScreen: React.FC = () => {
           fromMe: m.fromMe,
           location: classified.location,
           createdAt: m.createdAt,
+          rumorId,
+          authorPubkey,
         };
       }
       return {
@@ -265,6 +308,8 @@ const ConversationScreen: React.FC = () => {
         fromMe: m.fromMe,
         text: m.text,
         createdAt: m.createdAt,
+        rumorId,
+        authorPubkey,
       };
     });
     // Descending order — index 0 is newest. The FlatList is `inverted`, so
@@ -304,7 +349,7 @@ const ConversationScreen: React.FC = () => {
       });
     }
     return withHeaders;
-  }, [messages, zapItems]);
+  }, [messages, zapItems, viewerPubkey]);
 
   // Mount/unmount tracker so the async `load()` below can bail when
   // the user navigates back mid-fetch. Without this, every back-press
@@ -539,6 +584,209 @@ const ConversationScreen: React.FC = () => {
       cancelled = true;
     };
   }, [messages]);
+
+  // ─── Per-message reactions (#205) ──────────────────────────────────
+  // `reactionRecords` is the flat list of every kind-7 we've seen for
+  // any message in this thread; `reactionsByTarget` is the rendered
+  // view (built via `reduceReactions` so dedup + ordering are pure).
+  // We keep them as separate state slots so an optimistic local
+  // append (publish kind-7 → push a synthetic record before relay
+  // round-trip) folds in cleanly without a re-fetch.
+  const [reactionRecords, setReactionRecords] = useState<ReactionRecord[]>([]);
+  const reactionsByTarget = useMemo<Map<string, MessageReactionState>>(
+    () => reduceReactions(reactionRecords, viewerPubkey),
+    [reactionRecords, viewerPubkey],
+  );
+
+  // Track which target ids we've already issued a fetch for. Prevents a
+  // back-pressure loop when a relay is slow and the messages list is
+  // updating from optimistic appends.
+  const reactionFetchScheduledRef = useRef(new Set<string>());
+
+  // Fetch reactions for any new target ids that appear in the messages
+  // list. Targets are the cross-peer-stable ids: `rumorId` for NIP-17
+  // (set by the decrypt path), or the wire id for NIP-04. Optimistic
+  // local sends without a `rumorId` are skipped — they'll get fetched on
+  // the next refresh once the relay returns the real id.
+  useEffect(() => {
+    const targets: string[] = [];
+    for (const m of messages) {
+      const targetId = m.rumorId;
+      if (!targetId) continue;
+      if (reactionFetchScheduledRef.current.has(targetId)) continue;
+      targets.push(targetId);
+      reactionFetchScheduledRef.current.add(targetId);
+    }
+    if (targets.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const events = await fetchReactionsForMessages(targets);
+      if (cancelled || events.length === 0) return;
+      const fresh: ReactionRecord[] = [];
+      for (const ev of events) {
+        const rec = parseReactionEvent(ev);
+        if (rec) fresh.push(rec);
+      }
+      if (fresh.length === 0) return;
+      setReactionRecords((prev) => {
+        // Dedup against prev — same kind-7 event id can come back across
+        // multiple fetch rounds. Cheaper than re-deriving the whole
+        // reduceReactions output, and the reducer dedupes anyway.
+        const seen = new Set(prev.map((r) => r.id));
+        const merged = [...prev];
+        for (const r of fresh) {
+          if (!seen.has(r.id)) {
+            merged.push(r);
+            seen.add(r.id);
+          }
+        }
+        return merged;
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [messages, fetchReactionsForMessages]);
+
+  // The currently-actioned message (long-pressed → MessageActionsSheet
+  // open). Carries everything the sheet + handlers need without forcing
+  // them to re-derive from `messages`. `null` = sheet closed.
+  const [actionsForMessage, setActionsForMessage] = useState<{
+    targetId: string;
+    authorPubkey: string;
+    fromMe: boolean;
+    /** kind-14 (NIP-17 chat) or kind-4 (NIP-04 DM). Goes in the kind-7
+     * `k` tag so receiver clients can filter by reaction-target type. */
+    targetKind: 14 | 4;
+  } | null>(null);
+
+  // Open / close the sheet. Long-press handler in renderItem builds the
+  // descriptor; close clears it. Nothing else touches this state, but
+  // we extract callbacks so the children get stable identities.
+  const closeMessageActions = useCallback(() => setActionsForMessage(null), []);
+
+  // Toggle a reaction emoji for the currently-actioned message. If the
+  // viewer already reacted with this emoji, NIP-09-delete; otherwise
+  // publish a fresh kind-7. Optimistic update on both paths so the pill
+  // row reacts immediately without waiting for the relay round-trip.
+  const handleToggleReaction = useCallback(
+    async (emoji: string, existingReactionId: string | null) => {
+      const target = actionsForMessage;
+      if (!target || !viewerPubkey) {
+        closeMessageActions();
+        return;
+      }
+      closeMessageActions();
+      if (existingReactionId) {
+        // Optimistic remove — drop the record before awaiting publish.
+        setReactionRecords((prev) => prev.filter((r) => r.id !== existingReactionId));
+        const ok = await deleteReaction(existingReactionId);
+        if (!ok) {
+          // Re-fetch to reconcile if the deletion failed — the optimistic
+          // remove was wrong; a full re-fetch is cheaper than threading
+          // rollback state through.
+          reactionFetchScheduledRef.current.delete(target.targetId);
+          const events = await fetchReactionsForMessages([target.targetId]);
+          const fresh = events.map(parseReactionEvent).filter((r): r is ReactionRecord => !!r);
+          setReactionRecords((prev) => {
+            const seen = new Set(prev.map((r) => r.id));
+            const merged = [...prev];
+            for (const r of fresh) {
+              if (!seen.has(r.id)) {
+                merged.push(r);
+                seen.add(r.id);
+              }
+            }
+            return merged;
+          });
+        }
+      } else {
+        // Optimistic add — synthesize a record with a `local-…` id so the
+        // pill renders immediately. `myReactions` will populate when the
+        // real publish returns the actual event id and we replace.
+        const optimisticId = `local-react-${Date.now()}`;
+        const optimistic: ReactionRecord = {
+          id: optimisticId,
+          reactorPubkey: viewerPubkey.toLowerCase(),
+          emoji,
+          createdAt: Math.floor(Date.now() / 1000),
+          targetEventId: target.targetId,
+        };
+        setReactionRecords((prev) => [...prev, optimistic]);
+        const realId = await publishReaction({
+          emoji,
+          targetEventId: target.targetId,
+          targetAuthorPubkey: target.authorPubkey,
+          targetEventKind: target.targetKind,
+        });
+        if (realId) {
+          // Replace the optimistic record with the real one so a later
+          // toggle (NIP-09 delete) can target the published event id,
+          // not the local-only synthesised id.
+          setReactionRecords((prev) =>
+            prev.map((r) => (r.id === optimisticId ? { ...r, id: realId } : r)),
+          );
+        } else {
+          // Publish failed — strip the optimistic record so the pill
+          // disappears and the user can retry.
+          setReactionRecords((prev) => prev.filter((r) => r.id !== optimisticId));
+          Alert.alert(
+            'Reaction failed',
+            'Could not publish your reaction. Check your relays and try again.',
+          );
+        }
+      }
+    },
+    [
+      actionsForMessage,
+      closeMessageActions,
+      viewerPubkey,
+      publishReaction,
+      deleteReaction,
+      fetchReactionsForMessages,
+    ],
+  );
+
+  // Open the SendSheet preset to the bubble's author. We close the
+  // actions sheet first so the SendSheet doesn't open on top of a
+  // bottom sheet (Gorhom doesn't stack two BottomSheetModals cleanly
+  // unless the modal provider's stacking is opted in).
+  const handleZapMessage = useCallback(() => {
+    closeMessageActions();
+    setSendSheetOpen(true);
+  }, [closeMessageActions]);
+
+  // Build the long-press handler for a given message item. Returns
+  // undefined when the item is missing the cross-peer-stable ids the
+  // reaction / zap path needs (optimistic-local sends; pre-#205 cache
+  // entries) — the bubble then renders without a long-press hook.
+  const buildOnLongPress = useCallback(
+    (item: {
+      rumorId?: string;
+      authorPubkey?: string;
+      fromMe: boolean;
+    }): (() => void) | undefined => {
+      if (!item.rumorId || !item.authorPubkey) return undefined;
+      // For 1:1 DMs the rumor is always kind 14 (NIP-17 chat) or kind 4
+      // (NIP-04 DM). We tag the inner kind so receiver clients can
+      // filter; the wire kind on a wrap is 1059, but 14 is what's
+      // semantically meaningful. There's no easy way to distinguish 14
+      // vs 4 here without threading wireKind through, but for the `k`
+      // tag receivers care about the rumor kind, so 14 is the right
+      // default for the NIP-17-only path. NIP-04 reactions still parse
+      // correctly because the `e` tag carries the wire id.
+      const targetKind: 14 | 4 = 14;
+      return () => {
+        setActionsForMessage({
+          targetId: item.rumorId!,
+          authorPubkey: item.authorPubkey!,
+          fromMe: item.fromMe,
+          targetKind,
+        });
+      };
+    },
+    [],
+  );
 
   const openSharedContact = useCallback((pk: string, profile: NostrProfile | null) => {
     const name = profile?.displayName || profile?.name || `${pk.slice(0, 8)}…`;
@@ -864,6 +1112,10 @@ const ConversationScreen: React.FC = () => {
           : item.kind === 'location'
             ? ({ kind: 'location', location: item.location } as const)
             : ({ kind: 'text', text: item.text } as const);
+      // Pull the message's reaction state out of the reduced map keyed
+      // by `rumorId`. Optimistic sends without a `rumorId` get an empty
+      // state — no pills until the relay round-trip lands the real id.
+      const reactions = item.rumorId ? reactionsByTarget.get(item.rumorId) : undefined;
       return (
         <MessageBubble
           id={item.id}
@@ -877,6 +1129,28 @@ const ConversationScreen: React.FC = () => {
           onOpenContact={openSharedContact}
           onOpenLocation={openLocation}
           onOpenGifFullscreen={setFullscreenGifUrl}
+          onLongPress={buildOnLongPress(item)}
+          reactions={reactions}
+          // Tapping a reaction pill toggles via the same handler the
+          // sheet uses, but we have to seed `actionsForMessage` first
+          // so the handler knows which message to act on. Inline this
+          // small helper rather than adding another useCallback layer.
+          onToggleReaction={
+            item.rumorId && item.authorPubkey
+              ? (emoji, existingReactionId) => {
+                  setActionsForMessage({
+                    targetId: item.rumorId!,
+                    authorPubkey: item.authorPubkey!,
+                    fromMe: item.fromMe,
+                    targetKind: 14,
+                  });
+                  // Defer one tick so `actionsForMessage` is committed
+                  // before `handleToggleReaction` reads it. Without this
+                  // the handler runs on the previous (or null) target.
+                  setTimeout(() => handleToggleReaction(emoji, existingReactionId), 0);
+                }
+              : undefined
+          }
           testIdPrefix="conversation"
         />
       );
@@ -889,6 +1163,9 @@ const ConversationScreen: React.FC = () => {
       handlePayInvoice,
       styles,
       colors,
+      reactionsByTarget,
+      buildOnLongPress,
+      handleToggleReaction,
     ],
   );
 
@@ -1205,6 +1482,26 @@ const ConversationScreen: React.FC = () => {
           setDetailTx(null);
           setProfileContact(contact);
         }}
+      />
+      <MessageActionsSheet
+        visible={actionsForMessage !== null}
+        onClose={closeMessageActions}
+        myReactions={
+          actionsForMessage
+            ? (reactionsByTarget.get(actionsForMessage.targetId)?.myReactions ?? {})
+            : {}
+        }
+        onToggleReaction={handleToggleReaction}
+        // Zap is only meaningful for incoming bubbles where the peer
+        // has a lightning route. Hide it for our own outgoing bubbles
+        // (zapping yourself is a no-op product-wise) and when the peer
+        // hasn't published a lud16 (no payment route, button would
+        // dead-end in SendSheet).
+        onZap={
+          actionsForMessage && !actionsForMessage.fromMe && lightningAddress
+            ? handleZapMessage
+            : undefined
+        }
       />
       <ContactProfileSheet
         visible={profileContact !== null}

@@ -1,0 +1,115 @@
+appId: com.lightningpiggy.app.dev
+name: Conversation — long-press a message opens the actions sheet
+---
+# Per-message reactions / zap (#205) gate: long-pressing any visible
+# bubble in a 1:1 conversation opens MessageActionsSheet — a reaction
+# emoji row plus (when the peer has a Lightning route) a Zap CTA.
+#
+# Safety: peer is always Little Piggy (controlled test fixture).
+# This flow only opens the sheet, asserts its surface, and dismisses
+# — it does NOT publish a reaction or kick off a zap, so no relay
+# writes / payment flows are triggered.
+#
+# Why no specific bubble id: the conversation is chat-history-dependent
+# and the latest bubble's testID changes per-run. We use Maestro's
+# `longPressOn` against the canonical text-bubble testID *prefix* via a
+# scrollUntilVisible discovery step — see id: 'conversation-text-…'
+# wiring in MessageBubble.tsx.
+#
+# Run:
+#   maestro --device emulator-5554 test tests/e2e/test-message-actions-sheet.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 15000
+
+# Navigate to Messages → open Little Piggy thread.
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
+- tapOn:
+    text: 'Little Piggy.*'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Make sure we're at the most recent messages (inverted list).
+- runFlow:
+    when:
+      visible:
+        id: 'conversation-scroll-to-bottom'
+    commands:
+      - tapOn:
+          id: 'conversation-scroll-to-bottom'
+      - waitForAnimationToEnd:
+          timeout: 2000
+
+# Long-press on any bubble matching the conversation- testID prefix.
+# We try the text-bubble id first (the most common variant in a chat
+# fixture); the regex-suffix tolerates any rumor-id payload.
+- longPressOn:
+    id: 'conversation-text-.*'
+    optional: true
+
+# Some fixture conversations may only have non-text bubbles (gif /
+# location / image). Fall back to those if the text long-press
+# couldn't find a target. At least ONE of these must exist for the
+# test to be meaningful.
+- runFlow:
+    when:
+      notVisible:
+        id: 'message-actions-emoji-row'
+    commands:
+      - longPressOn:
+          id: 'conversation-gif-.*'
+          optional: true
+- runFlow:
+    when:
+      notVisible:
+        id: 'message-actions-emoji-row'
+    commands:
+      - longPressOn:
+          id: 'conversation-image-.*'
+          optional: true
+
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Assert the actions sheet is up.
+- assertVisible:
+    id: 'message-actions-emoji-row'
+# All six canonical emojis are present.
+- assertVisible:
+    id: 'message-actions-emoji-👍'
+- assertVisible:
+    id: 'message-actions-emoji-❤️'
+- assertVisible:
+    id: 'message-actions-emoji-😄'
+- assertVisible:
+    id: 'message-actions-emoji-😮'
+- assertVisible:
+    id: 'message-actions-emoji-😢'
+- assertVisible:
+    id: 'message-actions-emoji-🙏'
+
+- takeScreenshot: message-actions-sheet-open
+
+# Dismiss the sheet via hardware back. (Tapping the backdrop also
+# works but Maestro can be flaky targeting the BottomSheet backdrop.)
+- back
+- waitForAnimationToEnd:
+    timeout: 1500
+- assertNotVisible:
+    id: 'message-actions-emoji-row'

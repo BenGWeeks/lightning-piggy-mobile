@@ -25,6 +25,7 @@ import {
   unwrapWrapViaNip44,
   type DecodedRumor,
 } from '../utils/nip17Unwrap';
+import { buildReactionEvent, buildReactionDeletionEvent } from '../utils/reactions';
 import {
   findGroupForParticipants,
   reconcileSyntheticGroup,
@@ -79,8 +80,17 @@ const NIP17_CACHE_CAP = 5000;
 const AMBER_NIP17_ENABLED_KEY = 'amber_nip17_enabled';
 
 /** Persistent wrap-id → DmInboxEntry cache. Only ever contains rumors
- * from followed senders — see refreshDmInbox's filter gate. */
-type Nip17CacheEntry = DmInboxEntry & { wrapId: string };
+ * from followed senders — see refreshDmInbox's filter gate.
+ *
+ * `rumorId` and `authorPubkey` are additive (optional) so older cached
+ * entries from before #205 still parse — callers degrade gracefully to
+ * "no reactions on this message until it's re-decrypted from the relay".
+ */
+type Nip17CacheEntry = DmInboxEntry & {
+  wrapId: string;
+  rumorId?: string;
+  authorPubkey?: string;
+};
 
 /**
  * Tiny pub/sub for inbound group messages. NostrContext fires
@@ -569,6 +579,48 @@ interface NostrContextType {
     tags: string[][];
     content: string;
   }) => Promise<SignedEvent | null>;
+  /**
+   * Publish a NIP-25 (kind 7) reaction event tagging the given message.
+   * `targetEventId` MUST be the cross-peer-stable id (rumor id for
+   * NIP-17, raw event id for NIP-04); `targetAuthorPubkey` is the
+   * sender of that message. `targetEventKind` is added as a `k` tag so
+   * receivers can filter by what they reacted to.
+   *
+   * Returns the published event id on success (so the caller can record
+   * `myReactions[emoji]` and later NIP-09 it for toggle), or null on
+   * any signer / publish failure.
+   */
+  publishReaction: (input: {
+    emoji: string;
+    targetEventId: string;
+    targetAuthorPubkey: string;
+    targetEventKind?: number;
+  }) => Promise<string | null>;
+  /**
+   * Publish a NIP-09 deletion (kind 5) retracting one of our own
+   * previously-published reactions. Returns true on publish success.
+   * Receivers MUST verify the deletion's `pubkey` matches the original
+   * reaction's `pubkey` before applying — relays can't enforce that.
+   */
+  deleteReaction: (reactionEventId: string) => Promise<boolean>;
+  /**
+   * Fetch every NIP-25 reaction targeting any of the given message ids.
+   * Returns the raw event payloads — caller passes them to
+   * `parseReactionEvent` + `reduceReactions` to build display state.
+   *
+   * Reads the user's configured relays (`getReadRelays`); falls back to
+   * defaults when none are set.
+   */
+  fetchReactionsForMessages: (targetEventIds: string[]) => Promise<
+    {
+      id: string;
+      pubkey: string;
+      kind: number;
+      content: string;
+      created_at: number;
+      tags: string[][];
+    }[]
+  >;
 }
 
 export interface SignedEvent {
@@ -586,6 +638,28 @@ export interface ConversationMessage {
   fromMe: boolean;
   text: string;
   createdAt: number;
+  /**
+   * For NIP-17 (kind-1059) wraps, this is the inner kind-14 rumor's
+   * canonical event hash — the id BOTH sides see for the same logical
+   * message. Required for cross-peer features like NIP-25 reactions and
+   * NIP-57 zaps that target a specific message: the wrap id (`id` field)
+   * differs per recipient and isn't usable.
+   *
+   * For NIP-04 (kind-4) DMs the wire id IS the shared event id, so this
+   * is left undefined and callers fall back to `id`.
+   *
+   * For optimistic local sends (`local-…` ids) this is also undefined —
+   * the relay will assign the real ids on the next refresh.
+   *
+   * For the partner pubkey, we additionally cache it so callers tagging
+   * an `e`+`p` reaction don't have to look it up. For NIP-04 the partner
+   * is the conversation peer; for NIP-17 it's the rumor's inner sender.
+   */
+  rumorId?: string;
+  /** Sender pubkey of this message — author for NIP-25 reactions' `p`
+   * tag. For incoming messages this is the peer's pubkey. For outgoing
+   * (`fromMe === true`) messages this is the viewer's own pubkey. */
+  authorPubkey?: string;
 }
 
 const NostrContext = createContext<NostrContextType | undefined>(undefined);
@@ -1756,11 +1830,15 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // Merge cached + fresh preserving original event order.
       const orderedByIndex = new Array<ConversationMessage | null>(kind4Events.length).fill(null);
       for (const c of cachedPlaintexts) {
+        // NIP-04: the wire id IS the shared event id (no inner rumor),
+        // so `rumorId === id`. The author is the event's signer (`pubkey`).
         orderedByIndex[c.idx] = {
           id: c.ev.id,
           fromMe: c.fromMe,
           text: c.text,
           createdAt: c.ev.created_at,
+          rumorId: c.ev.id,
+          authorPubkey: c.ev.pubkey.toLowerCase(),
         };
       }
       for (const r of freshResults) {
@@ -1770,6 +1848,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           fromMe: r.fromMe,
           text: r.text,
           createdAt: r.ev.created_at,
+          rumorId: r.ev.id,
+          authorPubkey: r.ev.pubkey.toLowerCase(),
         };
       }
       for (const m of orderedByIndex) if (m !== null) decrypted.push(m);
@@ -1813,6 +1893,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             fromMe: entry.fromMe,
             text: entry.text,
             createdAt: entry.createdAt,
+            // Pre-#205 cache entries don't have these fields; that's fine
+            // — reactions just won't render for those messages until the
+            // cache is repopulated by the next inbox fetch.
+            rumorId: entry.rumorId,
+            authorPubkey: entry.authorPubkey,
           });
         }
         skippedInboxFetch = true;
@@ -1854,6 +1939,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   fromMe: cached.fromMe,
                   text: cached.text,
                   createdAt: cached.createdAt,
+                  rumorId: cached.rumorId,
+                  authorPubkey: cached.authorPubkey,
                 });
                 continue;
               }
@@ -1874,6 +1961,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               // id, not by thread, so later opens of OTHER threads
               // benefit too. Filter to this thread's partner only for
               // the render-side `decrypted` array.
+              // `computeRumorId` lets us tag NIP-25 reactions and zaps
+              // against the inner rumor (the cross-peer-stable id),
+              // not the wrap (per-recipient).
+              const rumorId = nostrService.computeRumorId(rumor);
+              const authorPubkey = rumor.pubkey.toLowerCase();
               const entry: Nip17CacheEntry = {
                 id: wrap.id,
                 wrapId: wrap.id,
@@ -1882,6 +1974,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 createdAt: rumor.created_at,
                 text: rumor.content,
                 wireKind: rumor.kind,
+                rumorId,
+                authorPubkey,
               };
               cache[wrap.id] = entry;
               newlyCached.push(entry);
@@ -1891,6 +1985,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 fromMe: partnership.fromMe,
                 text: rumor.content,
                 createdAt: rumor.created_at,
+                rumorId,
+                authorPubkey,
               });
             }
             if (newlyCached.length > 0) {
@@ -1912,6 +2008,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   fromMe: cached.fromMe,
                   text: cached.text,
                   createdAt: cached.createdAt,
+                  rumorId: cached.rumorId,
+                  authorPubkey: cached.authorPubkey,
                 });
                 continue;
               }
@@ -1934,11 +2032,15 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 if (routeResult.kind !== 'not-group') continue;
                 const partnership = partnerFromRumor(rumor, pubkey);
                 if (!partnership || partnership.partnerPubkey !== normalized) continue;
+                const rumorId = nostrService.computeRumorId(rumor);
+                const authorPubkey = rumor.pubkey.toLowerCase();
                 decrypted.push({
                   id: wrap.id,
                   fromMe: partnership.fromMe,
                   text: rumor.content,
                   createdAt: rumor.created_at,
+                  rumorId,
+                  authorPubkey,
                 });
               } catch (error) {
                 if (__DEV__) console.warn('[Nostr] Amber NIP-17 thread unwrap failed:', error);
@@ -2215,6 +2317,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 // state. The filter is load-bearing ("parental control"),
                 // so it runs here not in the view.
                 if (!refreshFollows.has(partnership.partnerPubkey)) continue;
+                // Compute the inner rumor's canonical id so cross-peer
+                // features (NIP-25 reactions, per-message NIP-57 zaps)
+                // can target it. The wrap id is per-recipient and useless
+                // as a cross-peer identifier — see #205.
+                const rumorId = nostrService.computeRumorId(rumor);
+                const authorPubkey = rumor.pubkey.toLowerCase();
                 const entry: Nip17CacheEntry = {
                   id: wrap.id,
                   wrapId: wrap.id,
@@ -2223,6 +2331,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   createdAt: rumor.created_at,
                   text: rumor.content,
                   wireKind: rumor.kind,
+                  rumorId,
+                  authorPubkey,
                 };
                 cache[wrap.id] = entry;
                 newlyCached.push(entry);
@@ -2297,6 +2407,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   // silent path is ~1 ms per call and keeps plaintext off
                   // AsyncStorage.
                   if (!refreshFollows.has(partnership.partnerPubkey)) continue;
+                  const rumorId = nostrService.computeRumorId(rumor);
+                  const authorPubkey = rumor.pubkey.toLowerCase();
                   const entry: Nip17CacheEntry = {
                     id: wrap.id,
                     wrapId: wrap.id,
@@ -2305,6 +2417,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                     createdAt: rumor.created_at,
                     text: rumor.content,
                     wireKind: rumor.kind,
+                    rumorId,
+                    authorPubkey,
                   };
                   cache[wrap.id] = entry;
                   newlyCached.push(entry);
@@ -2448,6 +2562,74 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [pubkey, isLoggedIn, signerType],
   );
 
+  // Picks the publish target for short reaction / deletion events. We need
+  // the union of the user's own write relays + the defaults so foreign
+  // clients (Damus, Amethyst, …) on disjoint relay sets still see the
+  // reaction. DMs themselves use the same union via `sendDirectMessage`,
+  // so reactions naturally land on the same relay surface as the message
+  // they target.
+  const getReactionPublishRelays = useCallback((): string[] => {
+    const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+    return [...new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS])];
+  }, [relays]);
+
+  const publishReaction = useCallback(
+    async (input: {
+      emoji: string;
+      targetEventId: string;
+      targetAuthorPubkey: string;
+      targetEventKind?: number;
+    }): Promise<string | null> => {
+      if (!pubkey || !isLoggedIn) return null;
+      const unsigned = buildReactionEvent(
+        input.emoji,
+        input.targetEventId,
+        input.targetAuthorPubkey,
+        input.targetEventKind,
+      );
+      const signed = await signEvent(unsigned);
+      if (!signed) return null;
+      try {
+        await nostrService.publishSignedEvent(signed, getReactionPublishRelays());
+        return signed.id;
+      } catch (error) {
+        if (__DEV__) console.warn('[Nostr] publishReaction failed:', error);
+        return null;
+      }
+    },
+    [pubkey, isLoggedIn, signEvent, getReactionPublishRelays],
+  );
+
+  const deleteReaction = useCallback(
+    async (reactionEventId: string): Promise<boolean> => {
+      if (!pubkey || !isLoggedIn) return false;
+      const unsigned = buildReactionDeletionEvent(reactionEventId);
+      const signed = await signEvent(unsigned);
+      if (!signed) return false;
+      try {
+        await nostrService.publishSignedEvent(signed, getReactionPublishRelays());
+        return true;
+      } catch (error) {
+        if (__DEV__) console.warn('[Nostr] deleteReaction failed:', error);
+        return false;
+      }
+    },
+    [pubkey, isLoggedIn, signEvent, getReactionPublishRelays],
+  );
+
+  const fetchReactionsForMessages = useCallback(
+    async (targetEventIds: string[]) => {
+      if (targetEventIds.length === 0) return [];
+      try {
+        return await nostrService.fetchReactions(targetEventIds, getReadRelays());
+      } catch (error) {
+        if (__DEV__) console.warn('[Nostr] fetchReactionsForMessages failed:', error);
+        return [];
+      }
+    },
+    [getReadRelays],
+  );
+
   const contextValue = useMemo(
     () => ({
       isLoggedIn,
@@ -2477,6 +2659,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       refreshDmInbox,
       amberNip44Permission,
       signEvent,
+      publishReaction,
+      deleteReaction,
+      fetchReactionsForMessages,
     }),
     [
       isLoggedIn,
@@ -2506,6 +2691,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       refreshDmInbox,
       amberNip44Permission,
       signEvent,
+      publishReaction,
+      deleteReaction,
+      fetchReactionsForMessages,
     ],
   );
 

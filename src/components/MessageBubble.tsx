@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, TouchableOpacity, Image, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, Pressable, Image, StyleSheet } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Zap, MapPin, UserRound } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -20,6 +20,7 @@ import {
   formatTime,
   formatRelativeFuture,
 } from '../utils/messageContent';
+import type { MessageReactionState } from '../utils/reactions';
 
 interface Props {
   // Identifying fields used for testID stability and parent diffing.
@@ -56,6 +57,23 @@ interface Props {
   // when omitted the cards still render but tap is a no-op.
   onOpenGifFullscreen?: (url: string) => void;
   onOpenImageFullscreen?: (url: string) => void;
+  // Long-press handler — opens the parent's MessageActionsSheet for
+  // per-message reactions + zap. Optional so group bubbles (where the
+  // action sheet is out of scope per #205) can omit it. When omitted the
+  // long-press is a no-op rather than fall back to system text-select.
+  onLongPress?: () => void;
+  // NIP-25 reaction state for THIS message id, or undefined if the
+  // parent hasn't fetched any reactions yet. Renders a compact pill row
+  // beneath the bubble: e.g. "❤️ 2  🔥 1". Tapping a pill toggles the
+  // viewer's own reaction (publish or NIP-09 delete depending on
+  // whether the emoji is in `myReactions`). Pulled from the parent's
+  // `reactionsByMessageId` map.
+  reactions?: MessageReactionState;
+  // Tap handler for a reaction pill. Receives the emoji and (when the
+  // viewer has already reacted) the existing reaction event id so the
+  // parent can NIP-09 delete. Optional — when omitted the pills are
+  // display-only.
+  onToggleReaction?: (emoji: string, existingReactionId: string | null) => void;
   // Test-id prefix lets 1:1 and group bubbles coexist in the same Maestro
   // run with stable selectors. e.g. `conversation` → `conversation-pay-…`.
   testIdPrefix: string;
@@ -75,6 +93,9 @@ const MessageBubble: React.FC<Props> = ({
   onOpenLocation,
   onOpenGifFullscreen,
   onOpenImageFullscreen,
+  onLongPress,
+  reactions,
+  onToggleReaction,
   testIdPrefix,
 }) => {
   const colors = useThemeColors();
@@ -85,12 +106,71 @@ const MessageBubble: React.FC<Props> = ({
   // a single render slot so every variant gets it for free.
   const SenderLabel = senderName ? <Text style={styles.senderLabel}>{senderName}</Text> : null;
 
+  // Reaction pill row — rendered beneath every variant by wrapping the
+  // existing bubble row in a `<View>` so the pills sit on the same axis
+  // as the bubble (left for incoming, right for outgoing). When there
+  // are no reactions OR the parent didn't pass any, this is null and
+  // the bubble renders unchanged.
+  const reactionEmojis = reactions ? Object.keys(reactions.byEmoji) : [];
+  const ReactionRow =
+    reactionEmojis.length > 0 ? (
+      <View
+        style={[styles.reactionRow, fromMe ? styles.reactionRowRight : styles.reactionRowLeft]}
+        testID={`${testIdPrefix}-reactions-${id}`}
+      >
+        {reactionEmojis.map((emoji) => {
+          const reactors = reactions!.byEmoji[emoji];
+          const myReactionId = reactions!.myReactions[emoji] ?? null;
+          const mine = myReactionId !== null;
+          return (
+            <TouchableOpacity
+              key={emoji}
+              activeOpacity={0.7}
+              disabled={!onToggleReaction}
+              onPress={() => onToggleReaction?.(emoji, myReactionId)}
+              style={[styles.reactionPill, mine && styles.reactionPillMine]}
+              accessibilityLabel={
+                mine
+                  ? `Remove your ${emoji} reaction (${reactors.length} total)`
+                  : `Add ${emoji} reaction (${reactors.length} so far)`
+              }
+              testID={`${testIdPrefix}-reaction-${id}-${emoji}`}
+            >
+              <Text style={styles.reactionPillEmoji}>{emoji}</Text>
+              {reactors.length > 1 ? (
+                <Text style={[styles.reactionPillCount, mine && styles.reactionPillCountMine]}>
+                  {reactors.length}
+                </Text>
+              ) : null}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    ) : null;
+
+  // Wrap each variant's bubble row in a small column so the reaction
+  // row can sit immediately under it without breaking the row alignment
+  // (which still flows left/right via the bubbleRow flex). Only used
+  // when there are reactions to render OR the bubble has been long-
+  // pressable — keeps the no-op render path identical to before #205.
+  const wrapWithReactionRow = (bubble: React.ReactElement): React.ReactElement =>
+    ReactionRow ? (
+      <View>
+        {bubble}
+        {ReactionRow}
+      </View>
+    ) : (
+      bubble
+    );
+
   if (content.kind === 'gif') {
-    return (
+    return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={() => onOpenGifFullscreen?.(content.url)}
+          onLongPress={onLongPress}
+          delayLongPress={350}
           style={[styles.gifCard, fromMe ? styles.gifCardMe : styles.gifCardThem]}
           accessibilityLabel={fromMe ? 'GIF sent, tap to expand' : 'GIF received, tap to expand'}
           accessibilityRole="imagebutton"
@@ -107,18 +187,20 @@ const MessageBubble: React.FC<Props> = ({
           />
           <Text style={[styles.gifTime, fromMe && styles.gifTimeMe]}>{formatTime(createdAt)}</Text>
         </TouchableOpacity>
-      </View>
+      </View>,
     );
   }
 
   if (content.kind === 'location') {
     const { location } = content;
     const mapUrl = buildStaticMapUrl(location);
-    return (
+    return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={() => onOpenLocation(location)}
+          onLongPress={onLongPress}
+          delayLongPress={350}
           style={[styles.locationCard, fromMe ? styles.locationCardMe : styles.locationCardThem]}
           accessibilityLabel={fromMe ? 'Location sent' : 'Location received'}
           testID={`${testIdPrefix}-location-${id}`}
@@ -159,7 +241,7 @@ const MessageBubble: React.FC<Props> = ({
             </Text>
           </View>
         </TouchableOpacity>
-      </View>
+      </View>,
     );
   }
 
@@ -168,15 +250,21 @@ const MessageBubble: React.FC<Props> = ({
 
   const imageUrl = extractImageUrl(text);
   if (imageUrl) {
-    return (
+    return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={() => onOpenImageFullscreen?.(imageUrl)}
+          onLongPress={onLongPress}
+          delayLongPress={350}
           style={[styles.imageBubble, fromMe ? styles.imageBubbleMe : styles.imageBubbleThem]}
           accessibilityLabel={fromMe ? 'Image sent' : 'Image received'}
           accessibilityRole={onOpenImageFullscreen ? 'imagebutton' : 'image'}
-          disabled={!onOpenImageFullscreen}
+          // Long-press should still fire even when there's no tap handler
+          // (e.g. group bubble that doesn't expand fullscreen) — disabling
+          // the entire pressable would block both. So only disable when
+          // there's neither a tap nor a long-press handler.
+          disabled={!onOpenImageFullscreen && !onLongPress}
           testID={`${testIdPrefix}-image-${id}`}
         >
           {SenderLabel}
@@ -190,7 +278,7 @@ const MessageBubble: React.FC<Props> = ({
             {formatTime(createdAt)}
           </Text>
         </TouchableOpacity>
-      </View>
+      </View>,
     );
   }
 
@@ -201,9 +289,17 @@ const MessageBubble: React.FC<Props> = ({
       invoice.paymentHash !== null &&
       isInvoicePaid !== undefined &&
       isInvoicePaid(invoice.paymentHash, fromMe);
-    return (
+    return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
-        <View style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}>
+        <Pressable
+          onLongPress={onLongPress}
+          delayLongPress={350}
+          // No `onPress` — invoice cards aren't a tap target as a whole
+          // (the Pay button is the actionable element). Pressable still
+          // observes long-press without breaking the inner button hit.
+          style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}
+          testID={`${testIdPrefix}-invoice-${id}`}
+        >
           {SenderLabel}
           <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
             {fromMe ? 'Invoice sent' : 'Invoice received'}
@@ -252,8 +348,8 @@ const MessageBubble: React.FC<Props> = ({
           <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
             {formatTime(createdAt)}
           </Text>
-        </View>
-      </View>
+        </Pressable>
+      </View>,
     );
   }
 
@@ -262,11 +358,13 @@ const MessageBubble: React.FC<Props> = ({
     const loaded = sharedProfiles ? sharedContact.pubkey in sharedProfiles : false;
     const prof = sharedProfiles?.[sharedContact.pubkey] ?? null;
     const displayName = prof?.displayName || prof?.name || `${sharedContact.pubkey.slice(0, 8)}…`;
-    return (
+    return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
         <TouchableOpacity
           activeOpacity={0.8}
           onPress={() => onOpenContact(sharedContact.pubkey, prof)}
+          onLongPress={onLongPress}
+          delayLongPress={350}
           style={[styles.contactCard, fromMe ? styles.contactCardMe : styles.contactCardThem]}
           accessibilityLabel={`Shared contact ${displayName}`}
           testID={`${testIdPrefix}-contact-${id}`}
@@ -310,15 +408,20 @@ const MessageBubble: React.FC<Props> = ({
             {formatTime(createdAt)}
           </Text>
         </TouchableOpacity>
-      </View>
+      </View>,
     );
   }
 
   const lnAddress = extractLightningAddress(text);
   if (lnAddress) {
-    return (
+    return wrapWithReactionRow(
       <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
-        <View style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}>
+        <Pressable
+          onLongPress={onLongPress}
+          delayLongPress={350}
+          style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}
+          testID={`${testIdPrefix}-lnaddr-${id}`}
+        >
           {SenderLabel}
           <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
             {fromMe ? 'Address sent' : 'Lightning address'}
@@ -340,22 +443,27 @@ const MessageBubble: React.FC<Props> = ({
           <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
             {formatTime(createdAt)}
           </Text>
-        </View>
-      </View>
+        </Pressable>
+      </View>,
     );
   }
 
   // Plain text fallback — no rich content detected.
-  return (
+  return wrapWithReactionRow(
     <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
-      <View style={[styles.bubble, fromMe ? styles.bubbleMe : styles.bubbleThem]}>
+      <Pressable
+        onLongPress={onLongPress}
+        delayLongPress={350}
+        style={[styles.bubble, fromMe ? styles.bubbleMe : styles.bubbleThem]}
+        testID={`${testIdPrefix}-text-${id}`}
+      >
         {SenderLabel}
         <Text style={[styles.bubbleText, fromMe && styles.bubbleTextMe]}>{text}</Text>
         <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
           {formatTime(createdAt)}
         </Text>
-      </View>
-    </View>
+      </Pressable>
+    </View>,
   );
 };
 
@@ -367,6 +475,46 @@ const createStyles = (colors: Palette) =>
     },
     bubbleRowLeft: { justifyContent: 'flex-start' },
     bubbleRowRight: { justifyContent: 'flex-end' },
+    // Reaction pills sit just under the bubble on the same axis
+    // (incoming → left, outgoing → right). Slight negative top margin
+    // pulls them visually closer to the bubble's bottom edge so the
+    // pill reads as attached to the bubble, not a separate row.
+    reactionRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 4,
+      marginTop: -4,
+      marginBottom: 4,
+      paddingHorizontal: 4,
+    },
+    reactionRowLeft: { justifyContent: 'flex-start' },
+    reactionRowRight: { justifyContent: 'flex-end' },
+    reactionPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 3,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 12,
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.divider,
+    },
+    reactionPillMine: {
+      borderColor: colors.brandPink,
+      backgroundColor: colors.brandPink + '22',
+    },
+    reactionPillEmoji: {
+      fontSize: 13,
+    },
+    reactionPillCount: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.textSupplementary,
+    },
+    reactionPillCountMine: {
+      color: colors.brandPink,
+    },
     senderLabel: {
       fontSize: 11,
       fontWeight: '700',
