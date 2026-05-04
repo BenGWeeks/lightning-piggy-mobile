@@ -75,6 +75,13 @@ interface WalletContextType {
   // App state
   isOnboarded: boolean;
   isLoading: boolean;
+  // True once the initial AsyncStorage wallet read has completed (regardless
+  // of whether any wallets were found). Consumers use this to distinguish
+  // "wallets is empty because none exist" from "wallets is empty because we
+  // haven't loaded them yet" — important for cold-start UI gating where the
+  // disabled-style flicker contradicts the buttons' actual interactivity.
+  // See #201.
+  walletsHydrated: boolean;
 
   // User prefs
   currency: FiatCurrency;
@@ -181,6 +188,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [activeWalletId, setActiveWalletId] = useState<string | null>(null);
   const [isOnboarded, setIsOnboarded] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [walletsHydrated, setWalletsHydrated] = useState(false);
   const [currency, setCurrencyState] = useState<FiatCurrency>('USD');
   const [btcPrice, setBtcPrice] = useState<number | null>(null);
   const [lastIncomingPayment, setLastIncomingPayment] = useState<IncomingPayment | null>(null);
@@ -302,6 +310,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           }),
         );
         setWallets(walletStates);
+        // Mark the initial AsyncStorage read complete BEFORE flipping
+        // `isLoading`. Consumers gating cold-start UI (e.g. HomeScreen's
+        // Send/Receive button styles) need to know "we tried to load and
+        // found N wallets" vs "we haven't tried yet" — both have
+        // `wallets.length === 0` but only one is the disabled state.
+        setWalletsHydrated(true);
 
         if (walletStates.length > 0) {
           setActiveWalletId(walletStates[0].id);
@@ -379,6 +393,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // early `setIsLoading(false)` above, make sure the UI still
         // unblocks. Idempotent; React bails on no-op state sets.
         setIsLoading(false);
+        // Flip hydrated as well so consumers don't sit forever in
+        // "loading" state after a startup failure — there are simply
+        // no wallets to show.
+        setWalletsHydrated(true);
       }
     })();
   }, [fetchPrice]);
@@ -1489,6 +1507,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       hasWallets,
       isOnboarded,
       isLoading,
+      walletsHydrated,
       currency,
       setCurrency,
       btcPrice,
@@ -1526,6 +1545,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       activeWalletId,
       isOnboarded,
       isLoading,
+      walletsHydrated,
       currency,
       setCurrency,
       btcPrice,
