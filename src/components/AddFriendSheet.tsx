@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   BackHandler,
@@ -15,7 +16,6 @@ import {
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetScrollView,
-  BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
@@ -163,7 +163,20 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
         {mode === 'paste' ? (
           <View style={styles.pasteContent}>
             <View style={styles.inputRow}>
-              <BottomSheetTextInput
+              {/*
+                Plain RN TextInput rather than BottomSheetTextInput. Issue
+                #146: Maestro's `inputText` drops characters when typing
+                into @gorhom/bottom-sheet's BottomSheetTextInput under the
+                New Architecture (testID lands on the wrapper View, not
+                the native EditText, so the synthetic keystrokes never
+                advance the JS event path). The npub input is exercised
+                by `tests/e2e/test-follow-unfollow.yaml`, where a 63-char
+                bech32 string would otherwise arrive truncated and trip
+                "Invalid public key format". Keyboard tracking for the
+                sheet is preserved by its `keyboardBehavior="interactive"`
+                + `android_keyboardInputMode="adjustResize"` props above.
+              */}
+              <TextInput
                 style={styles.input}
                 placeholder="npub1..."
                 placeholderTextColor={colors.textSupplementary}

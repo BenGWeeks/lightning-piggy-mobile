@@ -2,6 +2,7 @@ import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useSt
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
@@ -467,7 +468,20 @@ const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
         </View>
 
         <Text style={styles.label}>Group Name</Text>
-        <BottomSheetTextInput
+        {/*
+          Plain RN TextInput rather than BottomSheetTextInput. Issue #146:
+          Maestro's `inputText` drops characters when typing into
+          @gorhom/bottom-sheet's BottomSheetTextInput under the New
+          Architecture (testID lands on the wrapper View, not the native
+          EditText). Exercised by `tests/e2e/test-3way-group-create-as-big.yaml`
+          (taps by placeholder `text: 'e.g. Family'` then `inputText: 'Triad'`).
+          Keyboard tracking for the sheet is preserved by its
+          `keyboardBehavior="interactive"` +
+          `android_keyboardInputMode="adjustResize"` props. The
+          `create-group-search` input above stays as BottomSheetTextInput —
+          it is not driven by Maestro `inputText`.
+        */}
+        <TextInput
           style={styles.input}
           placeholder="e.g. Family"
           placeholderTextColor={colors.textSupplementary}

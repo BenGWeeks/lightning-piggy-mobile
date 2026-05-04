@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
@@ -14,7 +15,6 @@ import {
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
   BottomSheetScrollView,
-  BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
@@ -131,7 +131,19 @@ const RenameGroupSheet: React.FC<Props> = ({ visible, groupId, onClose }) => {
       >
         <Text style={styles.title}>Rename Group</Text>
         <Text style={styles.label}>Group Name</Text>
-        <BottomSheetTextInput
+        {/*
+          Plain RN TextInput rather than BottomSheetTextInput. Issue #146:
+          Maestro's `inputText` drops characters when typing into
+          @gorhom/bottom-sheet's BottomSheetTextInput under the New
+          Architecture (testID lands on the wrapper View, not the native
+          EditText). Exercised by `tests/e2e/test-rename-group.yaml` and
+          `tests/e2e/test-3way-group-rename-as-big.yaml`. Keyboard tracking
+          for the sheet is preserved by the manual `Keyboard.addListener`
+          + `keyboardHeight` padding above plus the sheet's own
+          `keyboardBehavior="interactive"` +
+          `android_keyboardInputMode="adjustResize"`.
+        */}
+        <TextInput
           style={styles.input}
           placeholder="Group name"
           placeholderTextColor={colors.textSupplementary}
