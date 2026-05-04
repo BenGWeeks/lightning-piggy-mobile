@@ -61,12 +61,16 @@ describe('coinosService.registerCoinosUser', () => {
   });
 
   it('rejects invalid usernames before hitting the network', async () => {
-    await expect(registerCoinosUser({ username: 'AB', password: 'longenoughpassword' })).rejects.toBeInstanceOf(CoinosError);
+    await expect(
+      registerCoinosUser({ username: 'AB', password: 'longenoughpassword' }),
+    ).rejects.toBeInstanceOf(CoinosError);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('rejects short passwords before hitting the network', async () => {
-    await expect(registerCoinosUser({ username: 'lp_aaaaaaaa', password: 'short' })).rejects.toBeInstanceOf(CoinosError);
+    await expect(
+      registerCoinosUser({ username: 'lp_aaaaaaaa', password: 'short' }),
+    ).rejects.toBeInstanceOf(CoinosError);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -74,7 +78,10 @@ describe('coinosService.registerCoinosUser', () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({ token: 'jwt-abc', sk: 'sk-hex', pubkey: 'pk-hex', username: 'lp_aaaaaaaa' }),
     );
-    const result = await registerCoinosUser({ username: 'lp_aaaaaaaa', password: 'longenoughpassword' });
+    const result = await registerCoinosUser({
+      username: 'lp_aaaaaaaa',
+      password: 'longenoughpassword',
+    });
     expect(result.token).toBe('jwt-abc');
     expect(result.sk).toBe('sk-hex');
     expect(result.pubkey).toBe('pk-hex');

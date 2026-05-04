@@ -78,9 +78,7 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
   // Falls back to `coinosService.suggestUsername()` (random) if the
   // user has no displayname yet.
   const defaultUsername = useMemo(() => {
-    const fromProfile = normaliseToCoinosUsername(
-      profile?.displayName || profile?.name || '',
-    );
+    const fromProfile = normaliseToCoinosUsername(profile?.displayName || profile?.name || '');
     return fromProfile.length >= 3 ? fromProfile : coinosService.suggestUsername();
   }, [profile?.displayName, profile?.name]);
   const [username, setUsername] = useState(defaultUsername);
