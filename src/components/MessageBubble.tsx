@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, Image, StyleSheet } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import { Zap, MapPin, UserRound } from 'lucide-react-native';
+import { Zap, MapPin, UserRound, BarChart3, Check } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import type { NostrProfile } from '../types/nostr';
@@ -20,6 +20,7 @@ import {
   formatTime,
   formatRelativeFuture,
 } from '../utils/messageContent';
+import type { PollAggregate } from '../utils/pollMessage';
 
 interface Props {
   // Identifying fields used for testID stability and parent diffing.
@@ -56,6 +57,14 @@ interface Props {
   // when omitted the cards still render but tap is a no-op.
   onOpenGifFullscreen?: (url: string) => void;
   onOpenImageFullscreen?: (url: string) => void;
+  // Pre-aggregated poll tally keyed by poll-message id. The parent runs
+  // `aggregateVotes` over the conversation history once per messages
+  // update; the bubble looks up its own row by `id`. When `undefined`,
+  // poll bubbles still render but with zero counts (cold start).
+  pollAggregates?: Map<string, PollAggregate>;
+  // Tap an option row on a poll → parent sends the vote message.
+  // Optional: omit on read-only contexts (none currently).
+  onVotePoll?: (pollId: string, optionId: number) => void;
   // Test-id prefix lets 1:1 and group bubbles coexist in the same Maestro
   // run with stable selectors. e.g. `conversation` → `conversation-pay-…`.
   testIdPrefix: string;
@@ -75,6 +84,8 @@ const MessageBubble: React.FC<Props> = ({
   onOpenLocation,
   onOpenGifFullscreen,
   onOpenImageFullscreen,
+  pollAggregates,
+  onVotePoll,
   testIdPrefix,
 }) => {
   const colors = useThemeColors();
@@ -159,6 +170,103 @@ const MessageBubble: React.FC<Props> = ({
             </Text>
           </View>
         </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (content.kind === 'pollVote') {
+    // Vote events are an internal protocol message — they're rolled up
+    // into the referenced poll's tally by the parent's `aggregateVotes`
+    // call, so the in-app conversation never shows them as bubbles.
+    // Foreign clients (Damus, Amethyst) still see a plain-text bubble
+    // because they don't recognise the [POLL_VOTE] prefix; that's an
+    // accepted limitation of the text-encoded MVP.
+    return null;
+  }
+
+  if (content.kind === 'poll') {
+    const { poll } = content;
+    const agg = pollAggregates?.get(id);
+    const total = agg?.totalVotes ?? 0;
+    const myVote = agg?.myVote ?? null;
+    return (
+      <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
+        <View style={[styles.pollCard, fromMe ? styles.pollCardMe : styles.pollCardThem]}>
+          {SenderLabel}
+          <View style={styles.pollHeaderRow}>
+            <BarChart3
+              size={14}
+              color={fromMe ? 'rgba(255,255,255,0.85)' : colors.textSupplementary}
+            />
+            <Text style={[styles.pollLabel, fromMe && styles.pollLabelMe]}>Poll</Text>
+          </View>
+          <Text style={[styles.pollQuestion, fromMe && styles.pollQuestionMe]}>
+            {poll.question}
+          </Text>
+          {poll.options.map((opt) => {
+            // Per-option count + percentage. Falls back to the parsed poll
+            // (zero counts) when the aggregate hasn't been computed yet,
+            // so the bubble lays out fully on cold start instead of
+            // jumping when votes load.
+            const optAgg = agg?.options.find((o) => o.id === opt.id);
+            const count = optAgg?.count ?? 0;
+            const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+            const isMine = myVote === opt.id;
+            return (
+              <TouchableOpacity
+                key={opt.id}
+                activeOpacity={0.85}
+                style={[
+                  styles.pollOptionRow,
+                  isMine && (fromMe ? styles.pollOptionRowMineMe : styles.pollOptionRowMineThem),
+                ]}
+                onPress={() => onVotePoll?.(id, opt.id)}
+                disabled={!onVotePoll}
+                accessibilityLabel={`${opt.text}, ${count} ${count === 1 ? 'vote' : 'votes'}${isMine ? ', your vote' : ''}`}
+                accessibilityState={{ selected: isMine, disabled: !onVotePoll }}
+                testID={`${testIdPrefix}-poll-${id}-option-${opt.id}`}
+              >
+                {/* Background fill bar — width tracks the percentage so
+                    even at total=0 the row collapses to a flat track.
+                    Stays absolute-positioned so the option text sits in
+                    its own layer regardless of percentage width. */}
+                <View
+                  style={[
+                    styles.pollOptionFill,
+                    fromMe ? styles.pollOptionFillMe : styles.pollOptionFillThem,
+                    { width: `${pct}%` },
+                  ]}
+                />
+                <View style={styles.pollOptionContent}>
+                  <Text
+                    style={[styles.pollOptionText, fromMe && styles.pollOptionTextMe]}
+                    numberOfLines={2}
+                  >
+                    {opt.text}
+                  </Text>
+                  <View style={styles.pollOptionMeta}>
+                    {isMine ? (
+                      <Check
+                        size={14}
+                        color={fromMe ? colors.white : colors.brandPink}
+                        strokeWidth={3}
+                      />
+                    ) : null}
+                    <Text style={[styles.pollOptionCount, fromMe && styles.pollOptionCountMe]}>
+                      {total > 0 ? `${pct}% · ${count}` : count}
+                    </Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+          <Text style={[styles.pollFooter, fromMe && styles.pollFooterMe]}>
+            {total === 0 ? 'No votes yet' : `${total} ${total === 1 ? 'vote' : 'votes'}`}
+          </Text>
+          <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
+            {formatTime(createdAt)}
+          </Text>
+        </View>
       </View>
     );
   }
@@ -712,6 +820,123 @@ const createStyles = (colors: Palette) =>
       paddingVertical: 4,
     },
     imageBubbleTimeMe: {
+      color: 'rgba(255,255,255,0.85)',
+    },
+    pollCard: {
+      maxWidth: '85%',
+      minWidth: 260,
+      paddingTop: 12,
+      paddingBottom: 4,
+      paddingHorizontal: 14,
+      borderRadius: 14,
+      borderWidth: 1,
+      gap: 8,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.05,
+      shadowRadius: 2,
+      elevation: 1,
+    },
+    pollCardMe: {
+      backgroundColor: colors.brandPink,
+      borderColor: colors.brandPink,
+    },
+    pollCardThem: {
+      backgroundColor: colors.surface,
+      borderColor: colors.divider,
+    },
+    pollHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    pollLabel: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.textSupplementary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
+    },
+    pollLabelMe: {
+      color: 'rgba(255,255,255,0.85)',
+    },
+    pollQuestion: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: colors.textHeader,
+      marginTop: 2,
+    },
+    pollQuestionMe: {
+      color: colors.white,
+    },
+    pollOptionRow: {
+      borderRadius: 10,
+      overflow: 'hidden',
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.divider,
+      backgroundColor: colors.background,
+      marginTop: 4,
+      minHeight: 40,
+      justifyContent: 'center',
+    },
+    pollOptionRowMineThem: {
+      borderColor: colors.brandPink,
+    },
+    pollOptionRowMineMe: {
+      borderColor: colors.white,
+    },
+    pollOptionFill: {
+      position: 'absolute',
+      top: 0,
+      bottom: 0,
+      left: 0,
+    },
+    pollOptionFillThem: {
+      // Light pink wash for incoming polls — matches brand without
+      // overwhelming the text. Sits behind the row content layer.
+      backgroundColor: 'rgba(232, 62, 140, 0.12)',
+    },
+    pollOptionFillMe: {
+      backgroundColor: 'rgba(255,255,255,0.22)',
+    },
+    pollOptionContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      gap: 8,
+    },
+    pollOptionText: {
+      flex: 1,
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.textBody,
+    },
+    pollOptionTextMe: {
+      color: colors.white,
+    },
+    pollOptionMeta: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    pollOptionCount: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.textSupplementary,
+      minWidth: 24,
+      textAlign: 'right',
+    },
+    pollOptionCountMe: {
+      color: 'rgba(255,255,255,0.9)',
+    },
+    pollFooter: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      marginTop: 4,
+    },
+    pollFooterMe: {
       color: 'rgba(255,255,255,0.85)',
     },
   });
