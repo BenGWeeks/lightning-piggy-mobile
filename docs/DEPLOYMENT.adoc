@@ -815,6 +815,7 @@ Before releasing to production:
 * [ ] Prettier passes: `npm run format:check`
 * [ ] App tested on physical Android device
 * [ ] App tested on physical iOS device (if applicable)
+* [ ] **iOS provisioning profile is up-to-date with all capabilities declared in `app.config.ts`.** When you add a new capability-requiring plugin (NFC, location, contacts, camera, push notifications, etc.), the existing AppStore profile won't automatically include the new entitlement → Xcode signing fails the cloud build with `Provisioning profile … doesn't include the X capability`. Hit by `v1.0.0-rc2` and `v1.0.1-rc1` over NFC. Recovery: enable the capability on the Identifier in https://developer.apple.com/account/resources/identifiers, regenerate the AppStore profile in Profiles, refresh EAS via `eas credentials --platform ios`. Full procedure in `docs/TROUBLESHOOTING.adoc` → "Release workflow fails on iOS with Provisioning profile … doesn't include the … capability".
 * [ ] New git tag chosen (`vX.Y.Z` or `vX.Y.Z-rcN`) — the release workflow writes it into `app.config.ts`; do NOT hand-edit the file
 * [ ] E2E tests pass: `maestro test tests/e2e/`
 * [ ] Git tag created for release version

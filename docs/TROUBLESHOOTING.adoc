@@ -70,6 +70,17 @@ Empty output = nothing in flight; positive output shows projects ahead of you in
 *Why this matters:* GH-Release-driven iOS builds go to TestFlight after EAS finishes + Apple processes (~10 min). For a same-day TestFlight push, kick off in the morning. For a v1.X.Y-rc1 cycle, plan ~3-4 hours from tag-push to "installable in TestFlight". +
 *The only definitive number* is the queue position EAS prints once your build is submitted. Until then, all numbers are estimates from prior runs.
 
+| Release workflow fails on iOS with "Provisioning profile … doesn't include the NFC Tag Reading capability" / "doesn't include the com.apple.developer.nfc.readersession.formats entitlement"
+| Symptom from the failing GH Actions log: `🍏 iOS build failed: The "Run fastlane" step failed because of an error in the Xcode build process` followed by the entitlement-missing lines. Hit by `v1.0.0-rc2` and `v1.0.1-rc1` releases. +
+*Why:* The iOS provisioning profile currently in EAS's credentials store predates the NFC scan/write feature added in PRs #48 / #49. Xcode cross-checks every capability declared in `app.config.ts` (NFC, location, contacts, etc.) against what the profile permits at signing time. The profile doesn't list NFC Tag Reading → build refuses to sign. +
+*Fix (interactive, ~5 min):* +
+1. Sign in to https://developer.apple.com/account/resources/identifiers (Apple Developer Portal). +
+2. Find Identifier `com.lightningpiggy.app` → tap **Edit** → scroll to capabilities → enable **NFC Tag Reading** (and any other capabilities later added in `app.config.ts` plugins). Save. +
+3. Go to **Profiles** → find the production profile (the one EAS auto-created, named like `*[expo] com.lightningpiggy.app AppStore <date>`) → tap **Edit** → it'll auto-pull the new capability → save → **Download** the regenerated profile (you don't need to install it locally). +
+4. From the local repo: `eas credentials --platform ios` → select the production profile slot → choose to **delete the existing profile and re-fetch from Apple** so EAS picks up the new one. +
+5. Re-run the failed release: GH Actions → Release workflow → **Run workflow** → select platform `ios` → tag `v1.0.1-rc1` (or whatever's blocked). +
+*Prevention:* Whenever you add a capability-requiring plugin to `app.config.ts` (NFC, location, contacts, camera, push notifications, etc.), regenerate the iOS profile **before** cutting the next release. The Deployment Checklist in `docs/DEPLOYMENT.adoc` calls this out as a pre-release step.
+
 | Maestro can't tap a third-party signer's FAB / button (Aegis, Clave, etc) — `Element not found` or silent no-op
 | Some signer apps (notably Aegis ≥0.5.0, possibly Clave) ship without accessibility labels on key UI elements like the "+" FAB to add a connection. Maestro's `tapOn: { id: ... }` and `tapOn: { text: ... }` both miss because there's nothing to match. The `index:` selector also ranks unpredictably for un-labelled `ImageView` clickables. +
 *Why coordinates aren't a workaround:* `point: '90%, 91%'` and `adb shell input tap` are forbidden by the project's CLAUDE.md (fragile across screen sizes / OS versions / device profiles). +
