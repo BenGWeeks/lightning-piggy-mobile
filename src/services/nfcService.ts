@@ -5,11 +5,18 @@
  * lightning addresses, and Nostr npub identities. Also supports writing
  * npub identities to NFC tags.
  */
-import NfcManager, { NfcTech, Ndef, TagEvent } from 'react-native-nfc-manager';
+import NfcManager, { NfcTech, NfcEvents, Ndef, TagEvent } from 'react-native-nfc-manager';
 import { Platform, Linking } from 'react-native';
 
 export type NfcTagContent =
+  // bech32-encoded LNURL string (lnurl1…). Type unknown until resolved
+  // (could be a payRequest or withdrawRequest); the caller fetches and
+  // branches on the server's `tag` field.
   | { type: 'lnurl'; data: string }
+  // Plain HTTPS LNURL-withdraw endpoint (per LUD-17 the canonical wire
+  // form is `lnurlw://…`; this is the same URL with the scheme rewritten
+  // to https so it can be GET'd directly). Issue #103.
+  | { type: 'lnurl-withdraw'; data: string }
   | { type: 'lightning-invoice'; data: string }
   | { type: 'lightning-address'; data: string }
   | { type: 'npub'; data: string }
@@ -155,6 +162,30 @@ function isLightningAddress(input: string): boolean {
 }
 
 /**
+ * Rewrite an `lnurlw://`, `lnurlp://` or `keyauth://` scheme to its
+ * resolvable transport form. Per LUD-17 the wallet should swap to
+ * `https://`, except for `.onion` hosts which should use `http://`.
+ * Returns null if the scheme isn't one we recognise.
+ */
+function lud17ToHttp(input: string): string | null {
+  const lower = input.toLowerCase();
+  let scheme: string | null = null;
+  if (lower.startsWith('lnurlw://')) scheme = 'lnurlw://';
+  else if (lower.startsWith('lnurlp://')) scheme = 'lnurlp://';
+  else if (lower.startsWith('keyauth://')) scheme = 'keyauth://';
+  if (!scheme) return null;
+
+  const rest = input.substring(scheme.length);
+  // Determine host (everything up to the first "/", "?" or "#") to
+  // decide between https vs http-on-onion. Don't lowercase the rest —
+  // the path can be case-sensitive on the server (LNbits k1 tokens are).
+  const hostEnd = rest.search(/[/?#]/);
+  const host = (hostEnd === -1 ? rest : rest.substring(0, hostEnd)).toLowerCase();
+  const transport = host.endsWith('.onion') ? 'http://' : 'https://';
+  return transport + rest;
+}
+
+/**
  * Parse raw text from an NFC tag into typed content.
  */
 export function parseNfcContent(raw: string): NfcTagContent {
@@ -165,8 +196,18 @@ export function parseNfcContent(raw: string): NfcTagContent {
     input = input.substring(10);
   }
 
-  // LNURL (bech32-encoded, starts with lnurl1)
-  if (input.toLowerCase().startsWith('lnurl1')) {
+  // LUD-17 LNURL-withdraw scheme (`lnurlw://host/...`). Convert to its
+  // https (or http-on-onion) transport form so the caller can GET it
+  // directly without re-parsing the scheme.
+  const lower = input.toLowerCase();
+  if (lower.startsWith('lnurlw://')) {
+    const url = lud17ToHttp(input);
+    if (url) return { type: 'lnurl-withdraw', data: url };
+  }
+
+  // LNURL (bech32-encoded, starts with lnurl1) — could be pay or
+  // withdraw, the server's response disambiguates.
+  if (lower.startsWith('lnurl1')) {
     return { type: 'lnurl', data: input };
   }
 
@@ -181,10 +222,10 @@ export function parseNfcContent(raw: string): NfcTagContent {
   }
 
   // Nostr npub (with or without nostr: prefix)
-  if (input.toLowerCase().startsWith('nostr:npub1')) {
+  if (lower.startsWith('nostr:npub1')) {
     return { type: 'npub', data: input.substring(6) };
   }
-  if (input.toLowerCase().startsWith('npub1')) {
+  if (lower.startsWith('npub1')) {
     return { type: 'npub', data: input };
   }
 
@@ -267,4 +308,61 @@ export async function writeNpubToTag(npub: string, onTagDetected?: () => void): 
 export function cancelNfcOperation(): void {
   NfcManager.cancelTechnologyRequest().catch(() => {});
   NfcManager.unregisterTagEvent().catch(() => {});
+}
+
+/**
+ * Register a passive foreground tag-discovery listener (issue #103).
+ *
+ * Unlike `scanNfcTag()` which holds an interactive `requestTechnology`
+ * session, this uses Android foreground dispatch / iOS reader-session-
+ * less polling to surface NDEF tag taps while the app is in the active
+ * state. Suitable for "tap a gift-card tag and it just claims" UX.
+ *
+ * IMPORTANT: keep the listener bound to AppState `active` only —
+ * leaving the radio polling in the background drains battery hard. The
+ * caller is responsible for unregistering on background; see
+ * `NfcWithdrawListener` for the canonical wiring.
+ *
+ * @param onTag - invoked with parsed tag content for every discovered
+ *   tag while the listener is registered. Errors thrown from the
+ *   callback are swallowed so a single bad tap can't kill the listener.
+ * @returns an unregister function that tears down both the event
+ *   listener and the underlying tag-event registration.
+ */
+export async function registerForegroundTagListener(
+  onTag: (content: NfcTagContent) => void,
+): Promise<() => void> {
+  if (!(await ensureNfcStarted())) {
+    // No NFC hardware / driver — return a no-op cleanup so the caller's
+    // `useEffect` cleanup path still works without a null check.
+    return () => {};
+  }
+
+  const handler = (tag: TagEvent) => {
+    try {
+      const text = extractNdefText(tag);
+      if (!text) return;
+      const parsed = parseNfcContent(text);
+      onTag(parsed);
+    } catch {
+      // Swallow per-tap errors — logging here would spam in production
+      // for any malformed tag the user happens to brush past.
+    }
+  };
+
+  NfcManager.setEventListener(NfcEvents.DiscoverTag, handler);
+  try {
+    await NfcManager.registerTagEvent();
+  } catch {
+    // registerTagEvent rejects on iOS without a Core NFC entitlement,
+    // and on Android if NFC was disabled between `isEnabled()` and now.
+    // Detach the listener we just attached so we don't leak it.
+    NfcManager.setEventListener(NfcEvents.DiscoverTag, null);
+    return () => {};
+  }
+
+  return () => {
+    NfcManager.setEventListener(NfcEvents.DiscoverTag, null);
+    NfcManager.unregisterTagEvent().catch(() => {});
+  };
 }
