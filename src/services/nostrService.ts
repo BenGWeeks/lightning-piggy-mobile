@@ -986,6 +986,106 @@ function nip44EncryptForRecipient(
 }
 
 /**
+ * Open a persistent relay subscription that streams DM-relevant events
+ * (NIP-04 kind-4 in either direction + NIP-17 kind-1059 wraps p-tagged
+ * to the viewer) as they are published. Mirrors the filter shape of
+ * `fetchInboxDmEvents` so consumers can route incoming events through
+ * the same per-event processing path used by the cold-start
+ * `refreshDmInbox` cache-merge.
+ *
+ * This is layered ALONGSIDE `fetchInboxDmEvents` (issue #188): the
+ * one-shot `querySync` still drains historical state on cold start /
+ * pull-to-refresh; this subscription catches anything published after
+ * that, eliminating the polling loop while preserving the existing
+ * fetch path as a backstop.
+ *
+ * Subscription lifecycle:
+ *  - Caller starts on login / hydrate, stops on logout / unmount.
+ *  - `subscribeMany` keeps the WebSocket alive and re-emits past events
+ *    if a relay reconnects, so we don't manage reconnect ourselves —
+ *    the pool's relay layer handles it. The returned `onclose`-aware
+ *    unsubscribe just disposes the sub handle.
+ *  - `since` (optional) lets the caller pass a recent timestamp to
+ *    avoid re-streaming a full back-catalog on first connect; defaults
+ *    to "now − 60s" if undefined so we still catch events published in
+ *    the brief window between cold-start fetch and sub start.
+ *
+ * Dedup is the caller's responsibility — the same event MAY arrive via
+ * this sub AND a concurrent `fetchInboxDmEvents` call. The intended
+ * dedupe key is the wrap id (`ev.id`), which is what the existing
+ * NIP-17 wrap caches and `mergeInboxEntries` already use.
+ */
+export interface DmInboxSubscriptionInput {
+  myPubkey: string;
+  relays: string[];
+  /** Lower-bound timestamp (epoch seconds). Defaults to `now - 60`. */
+  since?: number;
+  onKind4: (ev: RawDmEvent) => void;
+  onKind1059: (ev: RawGiftWrapEvent) => void;
+  /** Best-effort EOSE callback (one per relay). Optional. */
+  onEose?: () => void;
+}
+
+export function subscribeInboxDmEvents(input: DmInboxSubscriptionInput): () => void {
+  const allRelays = [...new Set([...input.relays, ...DEFAULT_RELAYS])];
+  trackRelays(allRelays);
+  // Damus's clock-drift pad: shift `since` back 2 minutes (matches
+  // fetchInboxDmEvents) so a relay with a slow clock still streams the
+  // edge-case events whose stamp falls just behind our cursor.
+  const nowSec = Math.floor(Date.now() / 1000);
+  const since = Math.max(0, (input.since ?? nowSec - 60) - 120);
+  const sentK4Filter: Filter = { kinds: [4], authors: [input.myPubkey], since };
+  const recvK4Filter: Filter = { kinds: [4], '#p': [input.myPubkey], since };
+  const wrapsFilter: Filter = { kinds: [1059], '#p': [input.myPubkey], since };
+
+  const onevent = (ev: {
+    id: string;
+    pubkey: string;
+    kind: number;
+    created_at: number;
+    tags: string[][];
+    content: string;
+    sig: string;
+  }): void => {
+    try {
+      if (ev.kind === 1059) {
+        input.onKind1059(ev as RawGiftWrapEvent);
+      } else if (ev.kind === 4) {
+        input.onKind4(ev as RawDmEvent);
+      }
+    } catch (err) {
+      if (__DEV__) console.warn('[Nostr] subscribeInboxDmEvents handler threw:', err);
+    }
+  };
+
+  const oneose = (): void => {
+    try {
+      input.onEose?.();
+    } catch {
+      // best-effort
+    }
+  };
+
+  // Three separate subs because subscribeMany takes a single Filter and
+  // the relay-side semantics for `kinds + authors + #p` are an AND, not
+  // an OR — collapsing them would over-filter (only events that are
+  // BOTH authored by us AND p-tag us, which is roughly nothing).
+  const subSentK4 = pool.subscribeMany(allRelays, sentK4Filter, { onevent, oneose });
+  const subRecvK4 = pool.subscribeMany(allRelays, recvK4Filter, { onevent, oneose });
+  const subWraps = pool.subscribeMany(allRelays, wrapsFilter, { onevent, oneose });
+
+  return () => {
+    for (const s of [subSentK4, subRecvK4, subWraps]) {
+      try {
+        s.close();
+      } catch {
+        // best-effort — sub may already be torn down
+      }
+    }
+  };
+}
+
+/**
  * Subscribe to inbound kind-30200 group-state events relevant to the
  * viewer. Two filters are OR-ed together so the viewer sees:
  *

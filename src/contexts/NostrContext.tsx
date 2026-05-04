@@ -2416,6 +2416,89 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!isLoggedIn) setDmInbox([]);
   }, [isLoggedIn]);
 
+  /**
+   * Persistent relay subscription for inbound DM events (#188).
+   *
+   * Layered ALONGSIDE `refreshDmInbox` per the issue's option B: the
+   * one-shot `querySync` still drains historical state on cold start /
+   * pull-to-refresh; this subscription catches anything published
+   * after that, eliminating the focus-driven polling loop.
+   *
+   * Design notes:
+   *  - Lifecycle: starts when the user is hydrated (`pubkey` + `isLoggedIn`)
+   *    and read relays are known; tears down on logout / identity change /
+   *    unmount. The teardown closes every relay sub it opened so we don't
+   *    leak relay quota across logins.
+   *  - Reconnect: handled inside `nostr-tools/SimplePool` — the subs are
+   *    long-lived and the pool re-emits past events on socket reconnect.
+   *    A relay set change (read-relays toggle, NIP-65 update) re-fires
+   *    this effect, which closes the old sub before opening the new one.
+   *  - Dedupe: every incoming wrap fires a debounced
+   *    `refreshDmInbox({ force: true })`. The wrap-id NIP-17 cache (the
+   *    same one the cold-start path uses) makes re-processing cheap — a
+   *    cache hit per wrap, no double decrypt. `mergeInboxEntries` dedupes
+   *    on event id, so the same wrap landing through both the sub and a
+   *    concurrent `fetchInboxDmEvents` call collapses to one inbox row.
+   *  - Single-flight: `refreshDmInbox` already coalesces overlapping
+   *    refreshes via `dmInboxInFlight`; bursts of arrivals through the
+   *    sub piggy-back on the in-flight refresh instead of spawning
+   *    duplicate work.
+   *  - Debounce: 500 ms — a typical message burst (e.g. a friend
+   *    splitting a paragraph into 3 wraps) collapses into a single
+   *    refresh tick instead of 3 back-to-back ones.
+   */
+  const dmSubDebounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const PERSISTENT_DM_SUB_DEBOUNCE_MS = 500;
+  useEffect(() => {
+    if (!isLoggedIn || !pubkey) return;
+    const readRelays = getReadRelays();
+    if (readRelays.length === 0) return;
+
+    const scheduleRefresh = (): void => {
+      if (dmSubDebounceTimer.current) clearTimeout(dmSubDebounceTimer.current);
+      dmSubDebounceTimer.current = setTimeout(() => {
+        dmSubDebounceTimer.current = null;
+        // Force-refresh so the TTL gate doesn't swallow the streamed
+        // event. The single-flight guard means a refresh already in
+        // progress will absorb this trigger instead of racing.
+        refreshDmInbox({ force: true }).catch((err) => {
+          if (__DEV__) console.warn('[Nostr] persistent-sub refresh failed:', err);
+        });
+      }, PERSISTENT_DM_SUB_DEBOUNCE_MS);
+    };
+
+    if (__DEV__) {
+      console.log(
+        `[Nostr] starting persistent DM subscription on ${readRelays.length} relay(s) for ${pubkey.slice(0, 8)}…`,
+      );
+    }
+    const unsubscribe = nostrService.subscribeInboxDmEvents({
+      myPubkey: pubkey,
+      relays: readRelays,
+      onKind4: (_ev) => scheduleRefresh(),
+      onKind1059: (_ev) => scheduleRefresh(),
+    });
+
+    return () => {
+      if (dmSubDebounceTimer.current) {
+        clearTimeout(dmSubDebounceTimer.current);
+        dmSubDebounceTimer.current = null;
+      }
+      try {
+        unsubscribe();
+      } catch (err) {
+        if (__DEV__) console.warn('[Nostr] persistent-sub teardown failed:', err);
+      }
+      if (__DEV__) {
+        console.log(`[Nostr] stopped persistent DM subscription for ${pubkey.slice(0, 8)}…`);
+      }
+    };
+    // `relays` intentionally listed via getReadRelays — a relay-set
+    // change (NIP-65 update / user toggle) closes the old sub and opens
+    // a new one against the new set. `refreshDmInbox` is stable across
+    // these renders thanks to its useCallback deps.
+  }, [isLoggedIn, pubkey, getReadRelays, refreshDmInbox]);
+
   const signEvent = useCallback(
     async (event: {
       kind: number;
