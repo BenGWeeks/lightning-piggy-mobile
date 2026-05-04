@@ -62,6 +62,8 @@ The app uses two storage mechanisms with different security levels:
 
 |===
 
+NOTE: The app also stores **decrypted DM and group-message plaintext** in AsyncStorage to power cold-start rendering of the Messages tab. See <<Decrypted DM Plaintext at Rest (Threat Model)>> below for the full inventory, threat model, and mitigation analysis.
+
 === NWC URL Security
 
 NWC (Nostr Wallet Connect) URLs contain the wallet's secret key and relay information. The app handles these carefully:
@@ -143,3 +145,95 @@ Cached contact data in AsyncStorage is also cleared.
 * All relay connections use `wss://` (WebSocket Secure)
 * Image uploads to nostr.build use HTTPS
 * LNURL-pay callbacks use HTTPS
+
+=== Decrypted DM Plaintext at Rest (Threat Model)
+
+This section documents the threat model around decrypted direct-message and group-message plaintext that the app persists in AsyncStorage to power cold-start rendering, follow-up to issue #192.
+
+==== What is stored, where, and how much
+
+Decrypted Nostr message plaintext lands on disk in five distinct AsyncStorage namespaces. None of these are encrypted at rest.
+
+[cols="3,3,2", options="header"]
+|===
+| Key shape | Contents | Cap
+
+| `amber_nip17_cache_v1`
+| `Record<wrapId, { wrapId, partnerPubkey, fromMe, createdAt, text, wireKind }>` — the plaintext of every NIP-17 gift-wrap (kind 1059) the Amber-signer path has decrypted from a followed sender.
+| 5000 entries (≈1–2 MB JSON blob worst-case)
+
+| `nsec_nip17_cache_v1`
+| Same shape as above, populated by the nsec-signer path. Both keys exist so that switching signer on one device doesn't leak plaintext between identities.
+| 5000 entries
+
+| `nostr_dm_inbox_v1_<userPubkey>`
+| Per-user inbox rollup of `DmInboxEntry` (`{ id, partnerPubkey, fromMe, createdAt, text, wireKind }`) — used to paint Messages from cache on cold start before the relay/decrypt round-trip resolves.
+| 1000 entries (~400 KB)
+
+| `nostr_dm_conv_v1_<userPubkey>_<peerPubkey>`
+| Per-conversation message log; one key per peer the user has opened a thread with.
+| 500 messages per peer (~150 KB)
+
+| `group_messages_<groupId>`
+| Per-group thread log (`GroupMessage[]` — `{ id, senderPubkey, text, createdAt }`).
+| 500 messages per group
+
+| `nostr_group_activity_<userPubkey>`
+| Per-user rollup of `GroupActivity` — most recently `lastText` (decrypted preview shown on the Messages tab list).
+| Bounded by group count
+|===
+
+Aggregate worst-case footprint for a power user with a saturated cache: a few megabytes of decrypted DM and group-message plaintext, persisted indefinitely under the app's private data directory.
+
+==== Threat model
+
+In scope (what the current design protects against):
+
+* **Casual physical access.** Picking up an unlocked phone and tapping around the app does not expose stored plaintext beyond what's already on screen — the data lives in private app storage and isn't surfaced through any export UI.
+* **Other apps on the same device.** Android sandbox + iOS app-private container prevents arbitrary apps from reading another app's `databases/` or `Application Support/` directories.
+* **Cross-account leak on the same install.** Logout (`NostrContext.logout`) explicitly multi-removes every cache listed above, so signing in as another identity cannot read the previous identity's history. The single-blob NIP-17 caches plus per-user-keyed inbox/conv/activity caches are all enumerated and cleared.
+
+Out of scope (what the current design does **not** protect against):
+
+* **Rooted / jailbroken device.** Any process running with root can read `/data/data/app.lightningpiggy/databases/RKStorage` (Android) or the equivalent iOS sandbox path. All stored DM plaintext is exposed.
+* **Forensic extraction.** Tools like Cellebrite, Magnet AXIOM, or `adb backup` against a debug-buildable device can pull AsyncStorage SQLite files even from a powered-off phone (depending on lock state and OS version). Plaintext is recoverable.
+* **Malicious OEM firmware / supply-chain compromise.** A compromised platform that bypasses sandbox enforcement reads plaintext.
+* **Stolen device with known passcode / no passcode.** File-system encryption keys derive from device credentials; an attacker with the passcode bypasses encryption-at-rest of the app sandbox.
+* **Lost device, no logout.** The cache lives on disk for the lifetime of the install. Most users never log out, so the cache accumulates indefinitely. Remote-wipe (e.g. Find My Device) is the only mitigation today.
+
+==== Mitigation options considered
+
+The four mitigations below were evaluated against the constraint that `expo-secure-store` (Keychain on iOS, EncryptedSharedPreferences backed by Android Keystore) is the natural target for hardware-backed encryption.
+
+[cols="1,3,2", options="header"]
+|===
+| Option | Approach | Verdict
+
+| 1. Document + accept
+| Keep AsyncStorage. Document threat model (this section). Rely on logout to clear caches; encourage users to set a strong device passcode.
+| **Recommended for now.** Honest framing. Zero migration risk.
+
+| 2. Move whole cache to SecureStore
+| Replace `AsyncStorage.{get,set}Item` with `SecureStore.{getItemAsync,setItemAsync}` for all six key shapes above.
+| **Not feasible as a single blob.** iOS Keychain items are intended for small secrets (Apple's guidance: keep entries small; performance and reliability suffer beyond a few KB). The 1–2 MB NIP-17 cache plus the 400 KB inbox blob would not write reliably across all iOS versions. Per-entry sharding into 5000+ Keychain items has its own performance and OS-limit concerns.
+
+| 3. Split storage: index in AsyncStorage, plaintext in SecureStore
+| Keep `wrapId → partnerPubkey` mapping in AsyncStorage (cheap to enumerate during inbox refresh). Store only the `text` field per wrap in SecureStore, keyed by `nip17_text_<wrapId>`.
+| **Possible but expensive.** Adds one SecureStore round-trip per cache probe during the refresh-inbox hot path (5000 reads on a saturated cache). Migration helper would have to copy and verify per-entry, then delete the AsyncStorage source. Per-entry SecureStore items are well within Keychain limits but the IO amplification is significant.
+
+| 4. Encrypt-at-rest with key in SecureStore
+| Generate a per-install AES-256 key, store the key in SecureStore, AES-GCM-encrypt every cache blob before `AsyncStorage.setItem`. Decrypt on read.
+| **Best long-term option.** Single SecureStore item (the key, ~32 bytes — well within all platform limits). Cache stays in AsyncStorage so existing IO patterns and size are unchanged. Hardware-backed key isolation provides similar protection to option 2 against forensic extraction. Cost: ~5–20 ms per cache load/save for crypto + a one-shot migration helper that decrypts the legacy plaintext blobs and re-writes them encrypted. Nsec-only signer can derive the key from `nsec`; Amber signer needs a randomly-generated key (Amber doesn't expose the secret key).
+|===
+
+==== Recommendation
+
+Adopt **option 1 (document + accept)** as the immediate response. The current design's protection — app sandbox + logout-clears-everything — is consistent with how most messaging apps on Android/iOS handle DM history at rest, and matches the threat model the user base experiences (single-user device with a passcode, app isn't installed on rooted dev hardware). Migrating to SecureStore speculatively pays a real performance and complexity cost for a threat model the typical user is not in.
+
+File **option 4 (encrypt-at-rest with SecureStore-held key)** as a follow-up issue and pull the trigger on it when any of the following change:
+
+* The user base expands into a regulated or enterprise context.
+* A concrete report surfaces of a Lightning Piggy install on a rooted / forensically-imaged device.
+* Threat-model survey data shows users routinely sharing devices.
+
+Logout-as-mitigation should also be made more discoverable. Consider a follow-up to surface a "Clear DM cache" action in the Messages tab settings that runs the same `multiRemove` logic the logout path uses, but without signing the user out — a low-cost lever for a paranoid user that doesn't require migration.
