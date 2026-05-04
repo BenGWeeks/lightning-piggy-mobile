@@ -566,15 +566,29 @@ const SendSheet: React.FC<Props> = ({
     setSending(false);
   }, []);
 
+  // Track progressState in a ref so handleOverlayDismiss doesn't recapture
+  // it on every state flip. Without this, the `sending` → `success`
+  // transition rebuilds the callback, but Android's touch system can still
+  // fire the previously-cached handler reference for an in-flight tap —
+  // that stale closure reads `wasSuccess === false`, hides the overlay,
+  // and never calls onClose. See #210.
+  const progressStateRef = useRef(progressState);
+  useEffect(() => {
+    progressStateRef.current = progressState;
+  }, [progressState]);
+
   const handleOverlayDismiss = useCallback(() => {
     // Dismissing the overlay after a successful payment also closes the
     // parent sheet. On error we only dismiss the overlay so the user can
     // retry from the filled-in form.
-    const wasSuccess = progressState === 'success';
+    const wasSuccess = progressStateRef.current === 'success';
     setProgressState('hidden');
     setProgressError(undefined);
-    if (wasSuccess) onClose();
-  }, [progressState, onClose]);
+    // Defer the parent close so the overlay's hidden state renders first;
+    // otherwise on a slow JS thread the parent sheet can tear down the
+    // overlay component before the state update completes (#210).
+    if (wasSuccess) setTimeout(() => onClose(), 0);
+  }, [onClose]);
 
   const handleReset = () => {
     setInvoiceData(null);
