@@ -72,8 +72,10 @@ const MessagesScreen: React.FC = () => {
   } = useNostr();
   const { wallets } = useWallet();
   const { groupSummaries, followingOnly, setFollowingOnly, devMode } = useGroups();
+  // Production hard-lock: filter is always enforced unless devMode AND followingOnly=off.
+  const enforceFollowingOnly = followingOnly || !devMode;
   // Tracks last applied value so toggling triggers a data-layer refresh, not just a UI re-filter.
-  const lastAppliedFollowingOnlyRef = useRef<boolean>(true);
+  const lastAppliedEnforceRef = useRef<boolean>(true);
   const [search, setSearch] = useState('');
   const [searchExpanded, setSearchExpanded] = useState(false);
   const searchInputRef = useRef<TextInput>(null);
@@ -130,23 +132,20 @@ const MessagesScreen: React.FC = () => {
   // for any wraps that arrive while the user was inside a group.
   const dmInboxLastRefreshAt = useRef<number>(0);
   const DM_INBOX_REFRESH_TTL_MS = 30_000;
-  // Force-refresh the inbox whenever the followingOnly toggle flips so
-  // includeNonFollows is re-applied at the data layer. devMode is also
-  // a dep — leaving it stale could let a non-dev session pass
-  // includeNonFollows=true on the first refresh after a logout/login.
+  // Force-refresh the inbox whenever the effective enforcement flips so all data-layer paths re-apply.
   useEffect(() => {
     if (!isLoggedIn) return;
-    if (lastAppliedFollowingOnlyRef.current === followingOnly) return;
-    lastAppliedFollowingOnlyRef.current = followingOnly;
-    refreshDmInbox({ force: true, includeNonFollows: devMode && !followingOnly });
-  }, [followingOnly, devMode, isLoggedIn, refreshDmInbox]);
+    if (lastAppliedEnforceRef.current === enforceFollowingOnly) return;
+    lastAppliedEnforceRef.current = enforceFollowingOnly;
+    refreshDmInbox({ force: true, includeNonFollows: !enforceFollowingOnly });
+  }, [enforceFollowingOnly, isLoggedIn, refreshDmInbox]);
   useFocusEffect(
     useCallback(() => {
       if (!isLoggedIn) return;
       const handle = InteractionManager.runAfterInteractions(() => {
         if (Date.now() - dmInboxLastRefreshAt.current >= DM_INBOX_REFRESH_TTL_MS) {
           dmInboxLastRefreshAt.current = Date.now();
-          refreshDmInbox();
+          refreshDmInbox({ includeNonFollows: !enforceFollowingOnly });
         }
 
         const PREFETCH_TTL_MS = 30_000;
@@ -187,7 +186,7 @@ const MessagesScreen: React.FC = () => {
         });
       });
       return () => handle.cancel();
-    }, [isLoggedIn, refreshDmInbox, contacts]),
+    }, [isLoggedIn, refreshDmInbox, contacts, enforceFollowingOnly]),
   );
 
   const followPubkeys = useMemo(() => {
@@ -221,13 +220,14 @@ const MessagesScreen: React.FC = () => {
     // applying it again here guards against stale dmInbox state from
     // before a follow was revoked. The "Following only" rule is
     // load-bearing — keep it enforced everywhere a summary is built.
-    // followingOnly off (only possible when devMode is on; the chip is
-    // non-interactive in production) → pass undefined so buildDmSummaries
-    // skips its follow gate entirely. Filter still runs at the data layer
-    // unless refreshDmInbox is invoked with includeNonFollows: true.
-    const dm = buildDmSummaries(dmInbox, contacts, followingOnly ? followPubkeys : undefined);
+    // Skip follow gate only when devMode AND followingOnly=off (production hard-lock).
+    const dm = buildDmSummaries(
+      dmInbox,
+      contacts,
+      enforceFollowingOnly ? followPubkeys : undefined,
+    );
     return mergeSummaries(zap, dm);
-  }, [wallets, contacts, dmInbox, followPubkeys, followingOnly]);
+  }, [wallets, contacts, dmInbox, followPubkeys, enforceFollowingOnly]);
 
   // Following-only is always on by design (parental-control requirement);
   // enforcement lives inside buildDmSummaries + refreshDmInbox. This memo
@@ -246,10 +246,9 @@ const MessagesScreen: React.FC = () => {
     const dmRows: InboxRow[] = conversationSummaries
       .filter((s) => {
         if (s.lastActivityAt < cutoff) return false;
-        // Defence-in-depth follow gate — only enforced when followingOnly
-        // is on. In production the chip is non-interactive so this is
-        // always true (matches buildDmSummaries above and the data layer).
-        if (followingOnly && s.pubkey && !followPubkeys.has(s.pubkey.toLowerCase())) return false;
+        // Defence-in-depth follow gate using enforceFollowingOnly = followingOnly || !devMode.
+        if (enforceFollowingOnly && s.pubkey && !followPubkeys.has(s.pubkey.toLowerCase()))
+          return false;
         if (!lower) return true;
         return (
           s.name.toLowerCase().includes(lower) ||
@@ -270,7 +269,14 @@ const MessagesScreen: React.FC = () => {
       .map((g) => ({ kind: 'group', summary: g, sortKey: g.activity.lastActivityAt }));
 
     return [...dmRows, ...groupRows].sort((a, b) => b.sortKey - a.sortKey);
-  }, [conversationSummaries, groupSummaries, search, followPubkeys, followingOnly, windowDays]);
+  }, [
+    conversationSummaries,
+    groupSummaries,
+    search,
+    followPubkeys,
+    enforceFollowingOnly,
+    windowDays,
+  ]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -291,11 +297,11 @@ const MessagesScreen: React.FC = () => {
     // UI stuck in the "refreshing" spinner state.
     try {
       await Promise.all([refreshContacts(), refreshProfile({ force: true })]);
-      await refreshDmInbox({ force: true });
+      await refreshDmInbox({ force: true, includeNonFollows: !enforceFollowingOnly });
     } finally {
       setRefreshing(false);
     }
-  }, [refreshContacts, refreshDmInbox, refreshProfile]);
+  }, [refreshContacts, refreshDmInbox, refreshProfile, enforceFollowingOnly]);
 
   const handleConversationPress = useCallback(
     (summary: ConversationSummary) => {

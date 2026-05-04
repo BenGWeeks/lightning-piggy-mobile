@@ -615,7 +615,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Single-flight guard: coalesce overlapping refreshDmInbox calls (e.g.
   // useFocusEffect firing while a pull-to-refresh is still in-flight) so
   // they don't race on the AsyncStorage wrap-id cache.
-  const dmInboxInFlight = useRef<Promise<void> | null>(null);
+  const dmInboxInFlight = useRef<{
+    promise: Promise<void>;
+    includeNonFollows: boolean;
+  } | null>(null);
   /** `performance.now()` of last successful `refreshDmInbox` completion.
    * Gate for the `DM_INBOX_REFRESH_TTL_MS` throttle so that Messages-tab
    * focus doesn't re-fire full relay queries on every tab bounce. */
@@ -2024,11 +2027,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           return;
         }
       }
-      // Single-flight: if a refresh is already in flight, piggy-back on it
-      // rather than kicking off a second concurrent fetch that would race
-      // the AsyncStorage wrap-id cache.
+      // Single-flight: piggy-back on in-flight task ONLY when its includeNonFollows matches; otherwise wait then re-run with the wider option.
       if (dmInboxInFlight.current) {
-        return dmInboxInFlight.current;
+        if (dmInboxInFlight.current.includeNonFollows === includeNonFollows) {
+          return dmInboxInFlight.current.promise;
+        }
+        await dmInboxInFlight.current.promise;
       }
 
       // Capture local references once so the closure isn't affected by
@@ -2413,7 +2417,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       })();
 
-      dmInboxInFlight.current = task;
+      dmInboxInFlight.current = { promise: task, includeNonFollows };
       try {
         await task;
         dmInboxLastRefreshAt.current = performance.now();
