@@ -137,6 +137,20 @@ export const createReceiveSheetStyles = (colors: Palette) =>
       textAlign: 'center',
       paddingHorizontal: 20,
     },
+    invoiceMemoPreview: {
+      // Optional "what's it for" memo confirmation rendered between
+      // the QR amount label and the bolt11 string in the
+      // in-conversation Invoice flow (#211). Italicised + quoted so
+      // it visually reads as the user's note rather than another
+      // system label.
+      color: colors.textBody,
+      fontSize: 13,
+      fontStyle: 'italic',
+      textAlign: 'center',
+      paddingHorizontal: 20,
+      marginTop: -4,
+      marginBottom: 4,
+    },
     buttonRow: {
       flexDirection: 'row',
       gap: 10,

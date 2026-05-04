@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
+import { BottomSheetTextInput } from '@gorhom/bottom-sheet';
 import { ChevronLeft, Delete, ArrowUpDown } from 'lucide-react-native';
 import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -12,7 +13,22 @@ interface Props {
   minSats?: number;
   maxSats?: number;
   confirmLabel?: string;
-  onConfirm: (sats: number) => void;
+  // When set, render an optional single-line memo field beneath the
+  // amount card. The memo is forwarded to `onConfirm` as the second
+  // argument (trimmed). Used by the in-conversation Invoice flow so
+  // the requester can attach a "what's it for" note that ends up in
+  // the bolt11's `description` field and shows on the recipient's
+  // INVOICE bubble (#211). Disabled by default — the standalone
+  // Receive flow on the Home tab doesn't need it.
+  enableMemo?: boolean;
+  initialMemo?: string;
+  memoPlaceholder?: string;
+  /** Soft cap on memo length so we don't try to stuff a 5kb story into
+   *  a bolt11 `d` tag. Defaults to 80 — long enough for "thanks for
+   *  the cab", short enough that the receiver bubble doesn't wrap to
+   *  three lines. */
+  memoMaxLength?: number;
+  onConfirm: (sats: number, memo?: string) => void;
   onBack?: () => void;
 }
 
@@ -35,12 +51,17 @@ const AmountEntryScreen: React.FC<Props> = ({
   minSats,
   maxSats,
   confirmLabel = 'Confirm',
+  enableMemo = false,
+  initialMemo = '',
+  memoPlaceholder = "What's it for? (optional)",
+  memoMaxLength = 80,
   onConfirm,
   onBack,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createAmountEntryStyles(colors), [colors]);
   const { btcPrice, currency } = useWallet();
+  const [memo, setMemo] = useState(initialMemo);
 
   const [primaryUnit, setPrimaryUnit] = useState<Unit>('sats');
   const [satsText, setSatsText] = useState(initialSats > 0 ? String(initialSats) : '');
@@ -302,11 +323,38 @@ const AmountEntryScreen: React.FC<Props> = ({
         {aboveMax ? (
           <Text style={styles.warningText}>Maximum is {maxSats?.toLocaleString()} sats.</Text>
         ) : null}
+
+        {enableMemo ? (
+          // Optional memo for invoice requests (#211). Lives outside the
+          // amount card so it visually separates from the SATS/fiat
+          // entry — focusing it pops the system keyboard, but the
+          // numeric keypad below stays interactive (TouchableOpacity
+          // keypad keys don't steal focus from the memo field, they
+          // just dispatch their press handler). `BottomSheetTextInput`
+          // is needed instead of plain RN `TextInput` so the bottom
+          // sheet's keyboard-aware logic can lift the field above the
+          // IME on Android.
+          <BottomSheetTextInput
+            style={styles.memoInput}
+            value={memo}
+            onChangeText={setMemo}
+            placeholder={memoPlaceholder}
+            placeholderTextColor={colors.textSupplementary}
+            maxLength={memoMaxLength}
+            autoCapitalize="sentences"
+            autoCorrect
+            returnKeyType="done"
+            testID="amount-entry-memo"
+            accessibilityLabel="Invoice memo"
+          />
+        ) : null}
       </View>
 
       <TouchableOpacity
         style={[styles.confirmButton, !canConfirm && styles.confirmButtonDisabled]}
-        onPress={() => canConfirm && onConfirm(currentSats)}
+        onPress={() =>
+          canConfirm && onConfirm(currentSats, enableMemo ? memo.trim() || undefined : undefined)
+        }
         disabled={!canConfirm}
         testID="amount-entry-confirm"
         accessibilityLabel={confirmLabel}

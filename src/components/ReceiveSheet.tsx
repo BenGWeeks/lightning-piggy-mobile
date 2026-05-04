@@ -105,6 +105,11 @@ const ReceiveSheet: React.FC<Props> = ({
   const [paymentReceived, setPaymentReceived] = useState(false);
   const [loading, setLoading] = useState(false);
   const [satsValue, setSatsValue] = useState('');
+  // Optional invoice memo — only collected via the in-conversation
+  // Invoice flow (#211), where AmountEntryScreen renders the memo
+  // input. Empty string everywhere else; the standalone Receive flow
+  // never writes here.
+  const [memoValue, setMemoValue] = useState('');
   const [step, setStep] = useState<Step>('main');
   const [onchainAddress, setOnchainAddress] = useState<string | null>(null);
   const [friendPickerOpen, setFriendPickerOpen] = useState(false);
@@ -130,13 +135,18 @@ const ReceiveSheet: React.FC<Props> = ({
   const lightningAddress = selectedWallet?.lightningAddress ?? null;
 
   const generateInvoice = useCallback(
-    async (sats: number) => {
+    async (sats: number, memo?: string) => {
       setLoading(true);
       setPaymentReceived(false);
       try {
         const wId = capturedWalletId;
         if (!wId) return;
-        const inv = await makeInvoiceForWallet(wId, sats, 'Lightning Piggy');
+        // Default memo "Lightning Piggy" is preserved for the standalone
+        // Receive flow; the in-conversation Invoice flow (#211) passes
+        // a user-typed memo through, which lands in the bolt11
+        // `description` field and renders on the recipient's INVOICE
+        // bubble.
+        const inv = await makeInvoiceForWallet(wId, sats, memo?.trim() || 'Lightning Piggy');
         setInvoice(inv);
 
         // Hand the invoice off to WalletContext.expectPayment, which
@@ -158,7 +168,27 @@ const ReceiveSheet: React.FC<Props> = ({
           await refreshBalanceForWallet(wId);
         }
       } catch (error) {
-        console.warn('Failed to create invoice:', error);
+        // Surface the failure rather than silently leaving the user on
+        // a "Generating…" spinner. Common cases that hit this branch:
+        //   - NWC wallet's relay is unreachable (`ensureConnected`
+        //     resolved to a stale provider that throws on first call)
+        //   - The remote wallet doesn't support `make_invoice` (e.g.
+        //     a read-only NWC connection)
+        // In the in-conversation Invoice flow (#211) the user is
+        // mid-task ("send Emily a 5 k sat invoice"), so dropping them
+        // back to the amount-entry step gives them a chance to retry
+        // or cancel out, instead of stranding them on an empty QR
+        // panel with no error.
+        if (__DEV__) console.warn('Failed to create invoice:', error);
+        const message = error instanceof Error ? error.message : String(error ?? 'Unknown error');
+        Toast.show({
+          type: 'error',
+          text1: "Couldn't generate invoice",
+          text2: message.slice(0, 120),
+          position: 'top',
+          visibilityTime: 4000,
+        });
+        setStep('amount');
       } finally {
         setLoading(false);
       }
@@ -180,6 +210,7 @@ const ReceiveSheet: React.FC<Props> = ({
       // while we weren't polling.
       setOnchainAddress(null);
       setSatsValue('');
+      setMemoValue('');
       setInvoice('');
       setPaymentReceived(false);
       setStep('main');
@@ -242,6 +273,7 @@ const ReceiveSheet: React.FC<Props> = ({
     setInvoice('');
     setPaymentReceived(false);
     setSatsValue('');
+    setMemoValue('');
     if (selectedWallet?.walletType === 'onchain') {
       setMode('address');
       setStep('main');
@@ -475,8 +507,27 @@ const ReceiveSheet: React.FC<Props> = ({
           {step === 'amount' ? (
             <AmountEntryScreen
               initialSats={currentSats}
-              title="Custom amount"
+              // The in-conversation Invoice flow (#211) shows a peer's
+              // name in the title so the user has visual confirmation
+              // they're requesting from the right person. The standalone
+              // Receive flow keeps the generic "Custom amount".
+              title={
+                presetFriend
+                  ? `Request from ${presetFriend.name}`
+                  : presetGroup
+                    ? `Request from ${presetGroup.name}`
+                    : 'Custom amount'
+              }
               confirmLabel="Generate invoice"
+              // Memo only makes sense for an amount-bound bolt11 (it's
+              // the bolt11 `description` field), and only when there's
+              // a clear "what's it for" context — i.e. requesting a
+              // specific amount from a peer or group. Standalone
+              // Receive (no preset) intentionally omits it: that flow
+              // can land on a static lud16 view, and a memo on a
+              // lud16 has nowhere to go.
+              enableMemo={!isOnchainWallet && (!!presetFriend || !!presetGroup)}
+              initialMemo={memoValue}
               onBack={
                 // If the main view has nothing useful to show (no lud16
                 // to display, not an on-chain wallet with an address),
@@ -485,13 +536,14 @@ const ReceiveSheet: React.FC<Props> = ({
                 // down still dismisses the sheet.
                 !lightningAddress && !isOnchainWallet ? undefined : () => setStep('main')
               }
-              onConfirm={(sats) => {
+              onConfirm={(sats, memo) => {
                 setSatsValue(String(sats));
+                setMemoValue(memo ?? '');
                 setStep('main');
                 // User confirmed — generate the invoice straight away.
                 // On-chain skips this: the BIP-21 URI is derived from
                 // currentSats so the QR refreshes on its own.
-                if (sats > 0 && !isOnchainWallet) generateInvoice(sats);
+                if (sats > 0 && !isOnchainWallet) generateInvoice(sats, memo);
               }}
             />
           ) : (
@@ -609,6 +661,16 @@ const ReceiveSheet: React.FC<Props> = ({
                   'Lightning invoice'
                 )}
               </Text>
+              {mode === 'amount' && invoice && memoValue ? (
+                // Surface the memo so the user can see the "what's it
+                // for" they typed is actually attached to the invoice
+                // they're about to send (#211). Truncated to two lines
+                // to keep the sheet from growing if someone pastes a
+                // novella in.
+                <Text style={styles.invoiceMemoPreview} numberOfLines={2}>
+                  {`“${memoValue}”`}
+                </Text>
+              ) : null}
               {mode === 'amount' && invoice ? (
                 <Text style={styles.invoiceText} numberOfLines={2}>
                   {invoice}
