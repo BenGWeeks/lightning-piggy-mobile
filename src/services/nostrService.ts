@@ -367,6 +367,107 @@ export async function publishSignedEvent(
 }
 
 /**
+ * Compute the canonical event hash of a NIP-17 rumor. The rumor is never
+ * signed (per spec), so this just runs nostr-tools' content-hash function
+ * over the same fields a relay would. Used by NostrContext to expose a
+ * stable cross-peer identifier for kind-14 messages — the kind-1059 wrap
+ * id is per-recipient and useless as a target for NIP-25 reactions.
+ */
+export function computeRumorId(rumor: {
+  pubkey: string;
+  created_at: number;
+  kind: number;
+  tags: string[][];
+  content: string;
+}): string {
+  return getEventHash(rumor);
+}
+
+/**
+ * Fetch all NIP-25 (kind 7) reaction events that target any of the given
+ * event ids. Uses `#e` so the relay does the indexing — much cheaper than
+ * grabbing every kind-7 from the reactor and filtering client-side.
+ *
+ * Hard-capped at 1000 results to keep a degenerate "react-spam" bubble
+ * from blowing through the JS heap; in practice DM threads carry tens of
+ * reactions, not thousands. Returns `[]` on any timeout / relay error
+ * (callers fall back to "no reactions known").
+ */
+export async function fetchReactions(
+  targetEventIds: string[],
+  relays: string[],
+): Promise<
+  {
+    id: string;
+    pubkey: string;
+    kind: number;
+    content: string;
+    created_at: number;
+    tags: string[][];
+  }[]
+> {
+  if (targetEventIds.length === 0) return [];
+  const allRelays = [...new Set(relays)];
+  if (allRelays.length === 0) return [];
+  trackRelays(allRelays);
+  const filter: Filter = {
+    kinds: [7],
+    '#e': targetEventIds,
+    limit: 1000,
+  };
+  const events = await withTimeout(pool.querySync(allRelays, filter), 10000);
+  if (!events) return [];
+  return events.map((e) => ({
+    id: e.id,
+    pubkey: e.pubkey,
+    kind: e.kind,
+    content: e.content,
+    created_at: e.created_at,
+    tags: e.tags,
+  }));
+}
+
+/**
+ * Fetch NIP-09 (kind 5) deletion events that retract any of the given
+ * reaction event ids. Used so a peer revoking their reaction (long-press
+ * → tap-again-to-toggle) is reflected in the viewer's UI.
+ *
+ * NIP-09 enforcement: callers MUST verify each returned deletion's
+ * `pubkey` matches the targeted reaction's reactor before applying — a
+ * relay can't enforce that and we don't want a third party retracting
+ * someone else's reaction.
+ */
+export async function fetchReactionDeletions(
+  reactionEventIds: string[],
+  relays: string[],
+): Promise<
+  {
+    id: string;
+    pubkey: string;
+    created_at: number;
+    tags: string[][];
+  }[]
+> {
+  if (reactionEventIds.length === 0) return [];
+  const allRelays = [...new Set(relays)];
+  if (allRelays.length === 0) return [];
+  trackRelays(allRelays);
+  const filter: Filter = {
+    kinds: [5],
+    '#e': reactionEventIds,
+    limit: 1000,
+  };
+  const events = await withTimeout(pool.querySync(allRelays, filter), 10000);
+  if (!events) return [];
+  return events.map((e) => ({
+    id: e.id,
+    pubkey: e.pubkey,
+    created_at: e.created_at,
+    tags: e.tags,
+  }));
+}
+
+/**
  * Parse a NIP-57 zap receipt (kind 9735) to extract the sender pubkey and the
  * comment they typed when zapping. The receipt's `description` tag carries
  * the stringified kind 9734 zap request event; the sender's pubkey is the
