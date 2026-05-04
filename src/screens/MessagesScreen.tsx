@@ -6,10 +6,12 @@ import {
   TouchableOpacity,
   RefreshControl,
   InteractionManager,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import TabBackgroundImage from '../components/TabBackgroundImage';
-import { FlashList } from '@shopify/flash-list';
+import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import Svg, { Path } from 'react-native-svg';
 import { Users, Clock, Search, X } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -378,6 +380,33 @@ const MessagesScreen: React.FC = () => {
     [handleConversationPress, handleGroupPress, contactInfoMap],
   );
 
+  // Auto-scroll to top when a new top row arrives via the live DM sub, but only if the user is already near the top so anyone scrolled down reading older threads isn't interrupted.
+  const listRef = useRef<FlashListRef<InboxRow>>(null);
+  const scrollOffsetRef = useRef(0);
+  const prevTopIdRef = useRef<string | null>(null);
+  const NEAR_TOP_PX = 200;
+  const handleListScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    scrollOffsetRef.current = e.nativeEvent.contentOffset.y;
+  }, []);
+  useEffect(() => {
+    const top = filteredRows[0];
+    const topId = top
+      ? top.kind === 'dm'
+        ? `dm:${top.summary.id}`
+        : `group:${top.summary.group.id}`
+      : null;
+    // Skip the initial mount — only scroll on a *change* of top row, not the first paint.
+    if (
+      topId &&
+      prevTopIdRef.current !== null &&
+      topId !== prevTopIdRef.current &&
+      scrollOffsetRef.current < NEAR_TOP_PX
+    ) {
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    }
+    prevTopIdRef.current = topId;
+  }, [filteredRows]);
+
   return (
     <View style={styles.container}>
       <TabBackgroundImage style={styles.bgImage} />
@@ -490,11 +519,14 @@ const MessagesScreen: React.FC = () => {
           </View>
         ) : (
           <FlashList
+            ref={listRef}
             data={filteredRows}
             keyExtractor={(item) =>
               item.kind === 'dm' ? `dm:${item.summary.id}` : `group:${item.summary.group.id}`
             }
             renderItem={renderItem}
+            onScroll={handleListScroll}
+            scrollEventThrottle={16}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
             ListEmptyComponent={
               <View style={styles.emptyState}>

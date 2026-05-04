@@ -107,6 +107,30 @@ export function subscribeGroupMessages(listener: GroupMessageListener): () => vo
   };
 }
 
+// Sibling pub/sub for inbound 1:1 DM rumors (#349). Fires after a live
+// kind-1059 wrap is decrypted to a single-recipient kind-14 rumor and
+// committed to the inbox cache. The open ConversationScreen subscribes
+// to its peer's pubkey so it can re-fetch and append the new message
+// without waiting for the user to pull-to-refresh. `partnerPubkey` is
+// the other party (lowercase hex); listeners filter on it.
+type DmMessageListener = (partnerPubkey: string) => void;
+const dmMessageListeners = new Set<DmMessageListener>();
+export function notifyDmMessage(partnerPubkey: string): void {
+  for (const l of dmMessageListeners) {
+    try {
+      l(partnerPubkey);
+    } catch (e) {
+      if (__DEV__) console.warn('[Nostr] dm message listener threw:', e);
+    }
+  }
+}
+export function subscribeDmMessages(listener: DmMessageListener): () => void {
+  dmMessageListeners.add(listener);
+  return () => {
+    dmMessageListeners.delete(listener);
+  };
+}
+
 /**
  * Outcome of attempting to route a kind-14 rumor as a group message.
  *
@@ -2484,6 +2508,379 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     if (!isLoggedIn) setDmInbox([]);
   }, [isLoggedIn]);
+
+  // Live mirror of `followPubkeys` for the long-lived kind-1059
+  // subscription below. The sub captures `followPubkeys` at the time
+  // the effect ran; without this ref, a follow added after sub
+  // creation would be invisible to the gate until the sub
+  // reconnected. Reading via ref keeps the gate fresh per event
+  // without thrashing the subscription on every contacts update.
+  const followPubkeysRef = useRef(followPubkeys);
+  useEffect(() => {
+    followPubkeysRef.current = followPubkeys;
+  }, [followPubkeys]);
+
+  // Long-lived kind-1059 (NIP-17 gift wrap) subscription for the
+  // current viewer (#349). Without this, new incoming wraps only
+  // surface via pull-to-refresh or the 30 s-TTL useFocusEffect on
+  // MessagesScreen — which means the user sits on the Messages tab
+  // for up to half a minute after a friend sends a DM with nothing
+  // happening on screen.
+  //
+  // Per-event handler:
+  //  1. Dedupe against (a) a session-scoped `seen` set so the same
+  //     wrap delivered by multiple relays is processed once, and
+  //     (b) the persisted Nip17CacheEntry cache so wraps previously
+  //     decrypted by `refreshDmInbox` short-circuit.
+  //  2. Decrypt with the active signer's NIP-17 helper — same code
+  //     path used by `refreshDmInbox` (`unwrapWrapNsec` for nsec,
+  //     `unwrapWrapViaNip44` + Amber silent-decrypt for Amber).
+  //  3. Try `tryRouteGroupRumor` first. Multi-recipient kind-14
+  //     rumors land in group storage and fire the existing
+  //     `notifyGroupMessage` listener — open GroupConversationScreen
+  //     re-loads automatically.
+  //  4. 1:1 rumors that pass the follow gate are written to the
+  //     persistent NIP-17 wrap cache (so the next inbox / thread open
+  //     can short-circuit), appended to `dmInbox` state, and
+  //     broadcast to `dmMessageListeners` so an open
+  //     ConversationScreen for that peer re-fetches.
+  //
+  // Follow gate: matches `refreshDmInbox`'s default — non-followed
+  // sender wraps are decrypted (so we can group-route them) but NOT
+  // cached or surfaced to dmInbox state. The dev-mode "All (dev)"
+  // toggle still relies on the next pull-to-refresh to surface
+  // unfollowed live wraps; live delivery for that view is a
+  // follow-up. Rationale: caching unfollowed plaintext on disk
+  // violates the "B1 — never cache rumors from non-followed senders"
+  // invariant in `refreshDmInbox`.
+  //
+  // Writes to the wrap + inbox caches go through a serial queue to
+  // avoid racing with `refreshDmInbox` (both read-modify-write the
+  // same AsyncStorage blobs). The queue is per-effect-instance; the
+  // single-flight guard in `refreshDmInbox` serialises on its side.
+  useEffect(() => {
+    if (!isLoggedIn || !pubkey || !signerType) return;
+    const viewerPubkey = pubkey;
+    const activeSigner = signerType;
+    const readRelays = getReadRelays();
+    const seen = new Set<string>();
+    const SEEN_CAP = 4096;
+    // Lazy-populated in-memory mirror of the persisted NIP-17 wrap-id cache. Loaded
+    // on first wrap so we don't JSON.parse the full cache (up to 5000 entries) on every event.
+    let knownWrapIds: Set<string> | null = null;
+    // Lazy mirror of the AMBER_NIP17_ENABLED toggle. Loaded once on the first amber wrap so we don't AsyncStorage.getItem on every event. Tradeoff: if the user toggles the setting *after* the sub starts, the change takes effect on next sub re-establishment (logout/login or signer-type change). Acceptable since the toggle isn't expected to flip mid-session in normal use.
+    let amberNip17EnabledCached: boolean | null = null;
+    let cancelled = false;
+    let writeChain: Promise<void> = Promise.resolve();
+
+    const handleInboxEvent = async (ev: nostrService.RawInboxDmEvent): Promise<void> => {
+      if (__DEV__) console.log(`[Nostr] live evt kind=${ev.kind} recv ${ev.id.slice(0, 8)}`);
+      if (cancelled) return;
+      if (seen.has(ev.id)) {
+        if (__DEV__) console.log(`[Nostr] live evt ${ev.id.slice(0, 8)} dedup-seen`);
+        return;
+      }
+      seen.add(ev.id);
+      // Drop oldest ~25% so a long-lived sub under spam doesn't grow the Set unboundedly.
+      if (seen.size > SEEN_CAP) {
+        const drop = Math.floor(SEEN_CAP / 4);
+        const it = seen.values();
+        for (let i = 0; i < drop; i++) seen.delete(it.next().value!);
+      }
+
+      // NIP-04 (kind-4) — partner is in the envelope; decrypt directly with the active signer.
+      if (ev.kind === 4) {
+        const fromMe = ev.pubkey === viewerPubkey;
+        const recipientTag = ev.tags.find((t) => t[0] === 'p')?.[1]?.toLowerCase();
+        const partnerPubkey = fromMe ? recipientTag : ev.pubkey.toLowerCase();
+        if (!partnerPubkey || !/^[0-9a-f]{64}$/.test(partnerPubkey)) {
+          if (__DEV__) console.log(`[Nostr] live kind-4 ${ev.id.slice(0, 8)} no-partner`);
+          return;
+        }
+        let plaintext = nip04PlaintextCache.get(ev.id);
+        if (plaintext === undefined) {
+          try {
+            if (activeSigner === 'nsec') {
+              const secretKey = await getMemoisedSecretKey(viewerPubkey);
+              if (!secretKey) return;
+              plaintext = await nostrService.decryptNip04WithSecret(
+                secretKey,
+                partnerPubkey,
+                ev.content,
+              );
+            } else if (activeSigner === 'amber') {
+              plaintext = await amberService.requestNip04Decrypt(
+                ev.content,
+                partnerPubkey,
+                viewerPubkey,
+              );
+            } else {
+              return;
+            }
+          } catch (error) {
+            if (__DEV__)
+              console.warn(`[Nostr] live kind-4 ${ev.id.slice(0, 8)} decrypt failed:`, error);
+            return;
+          }
+          if (!plaintext) {
+            if (__DEV__) console.log(`[Nostr] live kind-4 ${ev.id.slice(0, 8)} empty-plaintext`);
+            return;
+          }
+          nip04PlaintextCache.set(ev.id, plaintext);
+        } else if (__DEV__) {
+          console.log(`[Nostr] live kind-4 ${ev.id.slice(0, 8)} dedup-cache`);
+        }
+        if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
+
+        // Follow gate (mirrors refreshDmInbox B1) — incoming kind-4 from a non-followed sender is dropped from inbox state. Outgoing (fromMe) bypasses since we sent it.
+        if (!fromMe && !followPubkeysRef.current.has(partnerPubkey)) {
+          if (__DEV__)
+            console.log(
+              `[Nostr] live kind-4 ${ev.id.slice(0, 8)} dropped by follow-gate (partner=${partnerPubkey.slice(0, 8)})`,
+            );
+          return;
+        }
+
+        const k4InboxEntry: DmInboxEntry = {
+          id: ev.id,
+          partnerPubkey,
+          fromMe,
+          createdAt: ev.created_at,
+          text: plaintext,
+          wireKind: 4,
+        };
+        // No wrap-id cache for kind-4 (plaintext lives in RAM-only LRU); only persist the inbox preview blob. Same writeChain as kind-1059 to serialize concurrent inbox writes. Also bump inboxLastSeenKey so refreshDmInbox's kind-4 `since` filter advances and doesn't re-fetch already-seen events on the next refresh.
+        writeChain = writeChain
+          .then(async () => {
+            if (cancelled) return;
+            const inboxRaw = await AsyncStorage.getItem(inboxCacheKey(viewerPubkey));
+            const cachedInbox: DmInboxEntry[] = inboxRaw
+              ? (() => {
+                  try {
+                    const parsed = JSON.parse(inboxRaw);
+                    return Array.isArray(parsed) ? parsed : [];
+                  } catch {
+                    return [];
+                  }
+                })()
+              : [];
+            const merged = mergeInboxEntries(cachedInbox, [k4InboxEntry], DM_INBOX_CAP);
+            // Re-check after the await: logout may have multiRemove'd these keys while we were reading. Without this, a freshly-decrypted DM would re-populate disk after the user signed out.
+            if (cancelled) return;
+            await AsyncStorage.setItem(inboxCacheKey(viewerPubkey), JSON.stringify(merged)).catch(
+              () => {},
+            );
+            const lastSeenRaw = await AsyncStorage.getItem(inboxLastSeenKey(viewerPubkey));
+            const lastSeen = lastSeenRaw ? Number(lastSeenRaw) : 0;
+            if (ev.created_at > lastSeen) {
+              if (cancelled) return;
+              await AsyncStorage.setItem(
+                inboxLastSeenKey(viewerPubkey),
+                String(ev.created_at),
+              ).catch(() => {});
+            }
+          })
+          .catch((e) => {
+            if (__DEV__) console.warn('[Nostr] live kind-4 persist failed:', e);
+          });
+        await writeChain;
+        if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
+
+        setDmInbox((prev) => mergeInboxEntries(prev, [k4InboxEntry], DM_INBOX_CAP));
+        notifyDmMessage(partnerPubkey);
+        if (__DEV__)
+          console.log(
+            `[Nostr] live kind-4 ${ev.id.slice(0, 8)} surfaced (partner=${partnerPubkey.slice(0, 8)}, fromMe=${fromMe})`,
+          );
+        return;
+      }
+
+      // NIP-17 (kind-1059) — existing gift-wrap unwrap path. Local alias preserves original variable name without renaming through the body below.
+      const wrap = ev;
+
+      // Cache short-circuit: if refreshDmInbox already decrypted this
+      // wrap and persisted it, the live sub has nothing to do — the
+      // event was either delivered before the sub opened or arrived
+      // via two paths (live + a near-simultaneous force-refresh).
+      const cacheKey =
+        activeSigner === 'nsec'
+          ? NSEC_NIP17_CACHE_KEY
+          : activeSigner === 'amber'
+            ? AMBER_NIP17_CACHE_KEY
+            : null;
+      if (!cacheKey) return;
+      if (knownWrapIds === null) {
+        // First wrap — pay the JSON.parse once to seed the in-memory mirror.
+        const seedRaw = await AsyncStorage.getItem(cacheKey);
+        const seedCache = safeParseRecord<Nip17CacheEntry>(seedRaw);
+        knownWrapIds = new Set(Object.keys(seedCache));
+      }
+      if (knownWrapIds.has(wrap.id)) {
+        if (__DEV__) console.log(`[Nostr] live wrap ${wrap.id.slice(0, 8)} dedup-cache`);
+        return;
+      }
+
+      const onSkip = (reason: string, wrapId: string) => {
+        if (__DEV__) console.warn(`[Nostr] live NIP-17 unwrap skip (${wrapId}): ${reason}`);
+      };
+
+      let rumor: DecodedRumor | null = null;
+      if (activeSigner === 'nsec') {
+        const secretKey = await getMemoisedSecretKey(viewerPubkey);
+        if (!secretKey) return;
+        rumor = unwrapWrapNsec(wrap, secretKey, onSkip);
+      } else if (activeSigner === 'amber') {
+        if (amberNip17EnabledCached === null) {
+          amberNip17EnabledCached =
+            (await AsyncStorage.getItem(AMBER_NIP17_ENABLED_KEY)) === 'true';
+        }
+        if (!amberNip17EnabledCached) return;
+        try {
+          rumor = await unwrapWrapViaNip44(
+            wrap,
+            (ct, cp) => amberService.requestNip44DecryptSilent(ct, cp, viewerPubkey),
+            onSkip,
+          );
+        } catch (error) {
+          const code = (error as { code?: string })?.code;
+          const message = (error as Error)?.message ?? '';
+          if (code === 'PERMISSION_NOT_GRANTED' || /PERMISSION_NOT_GRANTED/.test(message)) {
+            // Same flag refreshDmInbox sets — Account screen surfaces
+            // a one-tap grant button; without it, the live sub would
+            // silently fail every wrap until the user re-enabled
+            // Amber's blanket nip44_decrypt.
+            setAmberNip44Permission('denied');
+            return;
+          }
+          if (__DEV__) console.warn('[Nostr] live Amber NIP-17 unwrap failed:', error);
+          return;
+        }
+      }
+      if (!rumor) {
+        if (__DEV__) console.log(`[Nostr] live wrap ${wrap.id.slice(0, 8)} no-rumor`);
+        return;
+      }
+      if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
+
+      // Group-route first — multi-recipient rumors are owned by the
+      // group surface, not the 1:1 inbox. tryRouteGroupRumor handles
+      // appendGroupMessage + notifyGroupMessage internally so an open
+      // GroupConversationScreen auto-refreshes.
+      const routeResult = await tryRouteGroupRumor(rumor, viewerPubkey, wrap.id);
+      if (routeResult.kind !== 'not-group') {
+        if (__DEV__)
+          console.log(
+            `[Nostr] live wrap ${wrap.id.slice(0, 8)} group-routed (${routeResult.kind})`,
+          );
+        return;
+      }
+
+      const partnership = partnerFromRumor(rumor, viewerPubkey);
+      if (!partnership) {
+        if (__DEV__) console.log(`[Nostr] live wrap ${wrap.id.slice(0, 8)} no-partnership`);
+        return;
+      }
+
+      // Follow gate (mirrors refreshDmInbox B1) — keeps non-followed
+      // sender plaintext off AsyncStorage. Group rumors above don't
+      // hit this gate because group membership is its own auth signal.
+      if (!followPubkeysRef.current.has(partnership.partnerPubkey)) {
+        if (__DEV__)
+          console.log(
+            `[Nostr] live wrap ${wrap.id.slice(0, 8)} dropped by follow-gate (partner=${partnership.partnerPubkey.slice(0, 8)})`,
+          );
+        return;
+      }
+
+      const entry: Nip17CacheEntry = {
+        id: wrap.id,
+        wrapId: wrap.id,
+        partnerPubkey: partnership.partnerPubkey,
+        fromMe: partnership.fromMe,
+        createdAt: rumor.created_at,
+        text: rumor.content,
+        wireKind: rumor.kind,
+      };
+      const inboxEntry: DmInboxEntry = {
+        id: entry.id,
+        partnerPubkey: entry.partnerPubkey,
+        fromMe: entry.fromMe,
+        createdAt: entry.createdAt,
+        text: entry.text,
+        wireKind: entry.wireKind,
+      };
+
+      // Serialise read→merge→write of wrap+inbox blobs so concurrent live wraps don't race each other.
+      // The trailing `.catch` is load-bearing: without it a single throw leaves `writeChain` rejected and every later `.then(...)` skips its onFulfilled.
+      writeChain = writeChain
+        .then(async () => {
+          if (cancelled) return;
+          const wrapRaw = await AsyncStorage.getItem(cacheKey);
+          const wrapCache = safeParseRecord<Nip17CacheEntry>(wrapRaw);
+          if (wrapCache[wrap.id]) {
+            knownWrapIds?.add(wrap.id);
+            return;
+          }
+          wrapCache[wrap.id] = entry;
+          // Re-check after each await: logout may have multiRemove'd these keys while we were reading. Without these guards a freshly-decrypted wrap would re-populate disk after the user signed out.
+          if (cancelled) return;
+          await writeNip17Cache(cacheKey, wrapCache);
+          knownWrapIds?.add(wrap.id);
+
+          const inboxRaw = await AsyncStorage.getItem(inboxCacheKey(viewerPubkey));
+          const cachedInbox: DmInboxEntry[] = inboxRaw
+            ? (() => {
+                try {
+                  const parsed = JSON.parse(inboxRaw);
+                  return Array.isArray(parsed) ? parsed : [];
+                } catch {
+                  return [];
+                }
+              })()
+            : [];
+          const merged = mergeInboxEntries(cachedInbox, [inboxEntry], DM_INBOX_CAP);
+          if (cancelled) return;
+          await AsyncStorage.setItem(inboxCacheKey(viewerPubkey), JSON.stringify(merged)).catch(
+            () => {},
+          );
+        })
+        .catch((e) => {
+          if (__DEV__) console.warn('[Nostr] live wrap persist failed:', e);
+        });
+      await writeChain;
+      if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
+
+      setDmInbox((prev) => mergeInboxEntries(prev, [inboxEntry], DM_INBOX_CAP));
+      notifyDmMessage(partnership.partnerPubkey);
+      if (__DEV__)
+        console.log(
+          `[Nostr] live wrap ${wrap.id.slice(0, 8)} surfaced (partner=${partnership.partnerPubkey.slice(0, 8)})`,
+        );
+    };
+
+    const unsubscribe = nostrService.subscribeInboxDmsForViewer({
+      viewerPubkey,
+      relays: readRelays,
+      onEvent: (ev) => {
+        // Fire-and-forget: handleInboxEvent awaits its own state, and any
+        // throw is caught + logged here so the sub keeps running.
+        handleInboxEvent(ev).catch((e) => {
+          if (__DEV__) console.warn('[Nostr] live DM handler failed:', e);
+        });
+      },
+    });
+
+    if (__DEV__) {
+      console.log(
+        `[Nostr] live DM sub (kinds 4 + 1059) opened for ${viewerPubkey.slice(0, 8)} on ${readRelays.length} relays`,
+      );
+    }
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [isLoggedIn, pubkey, signerType, getReadRelays]);
 
   const signEvent = useCallback(
     async (event: {
