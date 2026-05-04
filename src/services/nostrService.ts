@@ -658,17 +658,30 @@ export async function fetchInboxDmEvents(
   const allRelays = [...new Set([...relays, ...DEFAULT_RELAYS])];
   trackRelays(allRelays);
   const limit = options.limit ?? 500;
-  // `since` shifted back 2 minutes (Damus clock-drift pad). All three
-  // inbox sub-queries share the same since floor: any relay that
-  // stamped an event slightly-in-our-past still returns it.
+  // `since` shifted back 2 min (Damus clock-drift pad). Applied only to kind-4 filters below; wraps deliberately skip it (see next comment).
   const since = options.since !== undefined ? Math.max(0, options.since - 120) : undefined;
   const sentK4Filter: Filter = { kinds: [4], authors: [myPubkey], limit };
   const recvK4Filter: Filter = { kinds: [4], '#p': [myPubkey], limit };
+  // NIP-59 (gift-wrap) wraps have RANDOMIZED timestamps within ~2 days
+  // of the real publish time in either direction (per spec, for
+  // plausible deniability). So `wrap.created_at` does NOT track when
+  // the underlying message was sent. Applying `since` to the wraps
+  // filter caused recently-published wraps to be silently dropped at
+  // the relay whenever their random ts < lastSeen — and lastSeen could
+  // itself be a future-dated wrap's random ts (see callers using
+  // Math.max over kind1059.created_at), so the inbox query would
+  // progressively skip more and more wraps as the future-dated cap
+  // ratcheted forward. Symptom: a contact's recent DM is visible inside
+  // the per-conversation thread (which fetches peer-scoped without
+  // `since`) but never appears on the Messages tab inbox list.
+  // Resolution: don't filter wraps by `since` at all. The relay query
+  // is bounded by limit + the `#p:[myPubkey]` filter, and the consumer
+  // dedupes against the persisted wrap-id cache so already-decrypted
+  // wraps short-circuit cheaply.
   const wrapsFilter: Filter = { kinds: [1059], '#p': [myPubkey], limit };
   if (since !== undefined) {
     sentK4Filter.since = since;
     recvK4Filter.since = since;
-    wrapsFilter.since = since;
   }
   try {
     const [sentK4, receivedK4, wraps] = await Promise.all([
