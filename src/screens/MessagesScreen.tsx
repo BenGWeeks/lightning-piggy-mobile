@@ -71,17 +71,8 @@ const MessagesScreen: React.FC = () => {
     refreshDmInbox,
   } = useNostr();
   const { wallets } = useWallet();
-  // followingOnly + setFollowingOnly + devMode are owned by GroupsContext
-  // and shared with the Messages tab so toggling on either screen flips
-  // the same global "Following only" notion. Mirrors the chip wiring in
-  // GroupsScreen — interactive only when devMode is on.
   const { groupSummaries, followingOnly, setFollowingOnly, devMode } = useGroups();
-  // Track the last-applied followingOnly state so that flipping the
-  // dev-mode chip triggers a force-refresh that asks refreshDmInbox to
-  // bypass the data-layer follow gate. Without this, toggling off would
-  // only widen the screen+summary filter on already-cached entries —
-  // unfollowed senders' wraps that the previous follows-on refresh
-  // dropped at the decrypt loop would stay invisible.
+  // Tracks last applied value so toggling triggers a data-layer refresh, not just a UI re-filter.
   const lastAppliedFollowingOnlyRef = useRef<boolean>(true);
   const [search, setSearch] = useState('');
   const [searchExpanded, setSearchExpanded] = useState(false);

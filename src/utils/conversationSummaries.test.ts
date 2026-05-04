@@ -18,7 +18,17 @@ const followedContact: NostrContact = {
   pubkey: FOLLOWED,
   relay: null,
   petname: null,
-  profile: { pubkey: FOLLOWED, npub: '', name: 'Alice', displayName: null, picture: null, banner: null, about: null, lud16: null, nip05: null },
+  profile: {
+    pubkey: FOLLOWED,
+    npub: '',
+    name: 'Alice',
+    displayName: null,
+    picture: null,
+    banner: null,
+    about: null,
+    lud16: null,
+    nip05: null,
+  },
 };
 
 describe('buildDmSummaries follow gate', () => {
