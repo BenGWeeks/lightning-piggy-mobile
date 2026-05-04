@@ -86,14 +86,23 @@ function dedupe(items) {
 function format(bullets) {
   if (bullets.length === 0) return '';
   const lines = bullets.map((b) => `- ${b}`);
-  let joined = lines.join('\n');
+  const joined = lines.join('\n');
   if (joined.length <= MAX_CHARS) return joined;
   // Truncate by dropping bullets from the tail until we fit, then append a hint.
-  while (lines.length > 1 && lines.join('\n').length + '\n- ...and more'.length > MAX_CHARS) {
+  const HINT = '\n- ...and more';
+  while (lines.length > 1 && lines.join('\n').length + HINT.length > MAX_CHARS) {
     lines.pop();
   }
   lines.push('- ...and more');
-  return lines.join('\n');
+  let result = lines.join('\n');
+  // Single very long bullet (or a residual that still overruns): hard-slice
+  // so the returned value is always <= MAX_CHARS. Without this the ASC PATCH
+  // would 422 on `whatsNew` length.
+  if (result.length > MAX_CHARS) {
+    const ELLIPSIS = '...';
+    result = result.slice(0, MAX_CHARS - ELLIPSIS.length) + ELLIPSIS;
+  }
+  return result;
 }
 
 function main() {
