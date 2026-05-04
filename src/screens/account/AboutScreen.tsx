@@ -26,7 +26,8 @@ import type { NostrProfile } from '../../types/nostr';
 import { LIGHTNING_PIGGY_TEAM_NPUB, dmRecipient } from '../../constants/npubs';
 import { appVersion } from '../../utils/appVersion';
 
-const TEAM_PROFILE_CACHE_KEY = 'team_profile_cache';
+// Bumped key (#346) to evict pre-avatar caches that pinned an empty avatar circle.
+const TEAM_PROFILE_CACHE_KEY = 'team_profile_cache_v2';
 
 const AboutScreen: React.FC = () => {
   const colors = useThemeColors();
@@ -36,6 +37,7 @@ const AboutScreen: React.FC = () => {
 
   const [teamProfile, setTeamProfile] = useState<NostrProfile | null>(null);
   const [teamProfileLoading, setTeamProfileLoading] = useState(true);
+  const [teamPictureError, setTeamPictureError] = useState(false);
   const [zapSheetOpen, setZapSheetOpen] = useState(false);
   const [feedbackSheetOpen, setFeedbackSheetOpen] = useState(false);
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
@@ -48,12 +50,19 @@ const AboutScreen: React.FC = () => {
     AsyncStorage.getItem('dev_mode').then((v) => setDevMode(v === 'true'));
   }, []);
 
+  // Clear the load-failure flag whenever the picture URL changes so a refreshed kind-0 retries.
+  useEffect(() => {
+    setTeamPictureError(false);
+  }, [teamProfile?.picture]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const decoded = nip19.decode(LIGHTNING_PIGGY_TEAM_NPUB);
         if (decoded.type !== 'npub') return;
+        // One-shot eviction of the legacy v1 cache (pre-#346); fire-and-forget.
+        AsyncStorage.removeItem('team_profile_cache').catch(() => {});
         const cached = await AsyncStorage.getItem(TEAM_PROFILE_CACHE_KEY);
         if (cached) {
           const parsed = JSON.parse(cached) as NostrProfile;
@@ -118,8 +127,12 @@ const AboutScreen: React.FC = () => {
               />
             )}
             <View style={styles.teamRow}>
-              {teamProfile.picture ? (
-                <Image source={{ uri: teamProfile.picture }} style={styles.teamPicture} />
+              {teamProfile.picture && !teamPictureError ? (
+                <Image
+                  source={{ uri: teamProfile.picture }}
+                  style={styles.teamPicture}
+                  onError={() => setTeamPictureError(true)}
+                />
               ) : (
                 <View style={styles.teamPicturePlaceholder}>
                   <UserRound size={28} color={colors.textBody} strokeWidth={1.75} />
