@@ -1,0 +1,110 @@
+appId: com.lightningpiggy.app.dev
+name: Conversation Swipe-to-Delete (#128)
+---
+# Validates the swipe-left-to-delete affordance on a conversation
+# message. Per #128 the delete is local-only: the message is removed
+# from the cached conversation + dmInbox state, but no NIP-09
+# deletion event is published. The test:
+#
+#   1. opens Little Piggy's conversation as Big Piggy
+#   2. sends a unique test message ("swipe-delete-<run-time>") so
+#      we have a known row to act on
+#   3. swipes that row left to reveal the Delete action
+#   4. taps Delete, then taps the destructive confirm in BrandedAlert
+#   5. asserts the unique text is no longer visible in the thread
+#
+# The unique-suffix message body avoids the per-fixture history
+# (Big↔Little Piggy fixtures contain a backlog from prior test runs)
+# leaking into the assertion. Tests must own their own evidence.
+#
+# Run: maestro test tests/e2e/test-conversation-swipe-delete.yaml
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Make sure we start on Messages tab. Idempotent — if already there,
+# the tap is a no-op.
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Ensure the "All" filter is selected so the peer thread is visible
+# regardless of the user's last filter choice (e.g. "Following only"
+# can hide the test fixture).
+- tapOn:
+    text: 'All'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Open Little Piggy's conversation. The `.*` suffix is a regex because
+# Maestro's `text:` matcher is full-regex in 2.3+; the row usually
+# renders as "<Name> <time-ago>" so the literal suffix would miss.
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 8000
+    visibilityPercentage: 60
+- tapOn:
+    text: 'Little Piggy.*'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Send a unique test message. The string is grep-friendly + uses a
+# small letter set so Maestro's text matcher (regex) doesn't trip on
+# special characters. We'll target this exact text in subsequent
+# steps, so it must NOT collide with anything else in the thread.
+- tapOn:
+    id: 'conversation-input'
+- inputText: 'swipe delete me NOW'
+- tapOn:
+    id: 'conversation-send'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Confirm the message is in the thread before we try to delete it —
+# otherwise a network failure during send would surface as a
+# delete-step failure and read as a regression in the wrong feature.
+- assertVisible:
+    text: 'swipe delete me NOW'
+
+# Swipe the bubble left to reveal the action panel. Anchoring the
+# `from:` to the message text makes the swipe target the row that
+# carries our unique body, not whatever bubble happens to be in the
+# middle of the screen. 400 ms duration matches the perf-suite
+# convention and gives the gesture handler enough motion to clear
+# the dragOffsetFromRightEdge threshold.
+- swipe:
+    from:
+      text: 'swipe delete me NOW'
+    direction: LEFT
+    duration: 400
+- waitForAnimationToEnd:
+    timeout: 1500
+
+# Tap the Delete action revealed by the swipe. Outgoing message →
+# label is "Delete" + accessibilityLabel = "Delete message".
+- tapOn:
+    text: 'Delete'
+
+# BrandedAlert confirmation. branded-alert-button-1 is the destructive
+# confirm (index 1 = second button in the row, which is the action;
+# index 0 is Cancel). Same pattern as _subflow-login-as.yaml's
+# sign-out confirm.
+- assertVisible:
+    id: 'branded-alert'
+- tapOn:
+    id: 'branded-alert-button-1'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Post-condition: the unique message text no longer appears in the
+# thread. assertNotVisible is the right matcher here because
+# scrollUntilVisible would loop until timeout looking for a row that
+# legitimately doesn't exist.
+- assertNotVisible:
+    text: 'swipe delete me NOW'

@@ -534,6 +534,26 @@ interface NostrContextType {
    * merge replaces it once relay returns.
    */
   getCachedConversation: (otherPubkey: string) => Promise<ConversationMessage[]>;
+  /**
+   * Local-only delete: drop one or more messages from this peer's
+   * cached conversation, the in-memory NIP-04 plaintext LRU, the
+   * persisted NIP-17 wrap cache, and the dmInbox state's preview row.
+   * The user-facing surface is the swipe-to-delete affordance on each
+   * message bubble (#128).
+   *
+   * Scope is intentionally local-only: we do NOT publish a NIP-09
+   * deletion event, so other parties keep their copies. The next
+   * `fetchConversation` round-trip will not re-resurrect the deleted
+   * ids because they are no longer in the wrap / NIP-04 caches —
+   * a fresh decrypt of the same wrap on a future force-refresh WILL
+   * re-add it (NIP-17 inbox refresh re-decrypts wraps that aren't in
+   * the cache). Persistent suppression is tracked as a follow-up.
+   *
+   * `eventIds` are the public-facing ids the renderer exposed (kind-4
+   * event id or NIP-17 wrap id, both of which we use as the
+   * `ConversationMessage.id` and the `DmInboxEntry.id`).
+   */
+  deleteConversationMessages: (otherPubkey: string, eventIds: readonly string[]) => Promise<void>;
   dmInbox: DmInboxEntry[];
   dmInboxLoading: boolean;
   /**
@@ -1653,6 +1673,77 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [pubkey],
   );
 
+  const deleteConversationMessages = useCallback(
+    async (otherPubkey: string, eventIds: readonly string[]): Promise<void> => {
+      if (!pubkey) return;
+      if (eventIds.length === 0) return;
+      const normalized = otherPubkey.trim().toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(normalized)) return;
+      const drop = new Set(eventIds);
+
+      // 1. Conversation cache for this peer — `messages.id` matches the
+      //    rendered bubble id 1:1, so a Set check is enough.
+      try {
+        const raw = await AsyncStorage.getItem(convCacheKey(pubkey, normalized));
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            const next = (parsed as ConversationMessage[]).filter((m) => !drop.has(m.id));
+            if (next.length !== parsed.length) {
+              await AsyncStorage.setItem(convCacheKey(pubkey, normalized), JSON.stringify(next));
+            }
+          }
+        }
+      } catch (err) {
+        if (__DEV__)
+          console.warn('[Nostr] deleteConversationMessages: conv cache prune failed', err);
+      }
+
+      // 2. NIP-04 plaintext LRU — purge by event id so a subsequent
+      //    fetchConversation can't repopulate the row from cache hits.
+      //    A future relay re-fetch can still pull and re-decrypt the same
+      //    event, but that's the documented "local-only" semantic.
+      for (const id of drop) nip04PlaintextCache.delete(id);
+
+      // 3. NIP-17 wrap caches (signer-specific). Wrap ids equal the
+      //    rendered ConversationMessage ids for NIP-17 rumors, so the same
+      //    drop-set applies. Walk both caches even if signerType is set —
+      //    a signer switch later in the session still needs the entry gone.
+      for (const cacheKey of [NSEC_NIP17_CACHE_KEY, AMBER_NIP17_CACHE_KEY]) {
+        try {
+          const raw = await AsyncStorage.getItem(cacheKey);
+          if (!raw) continue;
+          const cache = safeParseRecord<Nip17CacheEntry>(raw);
+          let mutated = false;
+          for (const id of drop) {
+            if (cache[id]) {
+              delete cache[id];
+              mutated = true;
+            }
+          }
+          if (mutated) await writeNip17Cache(cacheKey, cache);
+        } catch (err) {
+          if (__DEV__)
+            console.warn(`[Nostr] deleteConversationMessages: ${cacheKey} prune failed`, err);
+        }
+      }
+
+      // 4. dmInbox state + persisted inbox cache — peer-scoped so we
+      //    don't accidentally drop a same-id collision on another peer.
+      //    The Messages-tab preview row may flip to the previous message
+      //    from this peer (or disappear if no other rows remain).
+      setDmInbox((prev) => {
+        const next = prev.filter((e) => !(e.partnerPubkey === normalized && drop.has(e.id)));
+        if (next.length === prev.length) return prev;
+        // Persist alongside the in-memory update so a relaunch doesn't
+        // surface the row again from the old inbox cache blob.
+        AsyncStorage.setItem(inboxCacheKey(pubkey), JSON.stringify(next)).catch(() => {});
+        return next;
+      });
+    },
+    [pubkey],
+  );
+
   const fetchConversation = useCallback(
     async (otherPubkey: string): Promise<ConversationMessage[]> => {
       if (!pubkey || !isLoggedIn) return [];
@@ -2472,6 +2563,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       publishGroupState,
       fetchConversation,
       getCachedConversation,
+      deleteConversationMessages,
       dmInbox,
       dmInboxLoading,
       refreshDmInbox,
@@ -2501,6 +2593,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       publishGroupState,
       fetchConversation,
       getCachedConversation,
+      deleteConversationMessages,
       dmInbox,
       dmInboxLoading,
       refreshDmInbox,
