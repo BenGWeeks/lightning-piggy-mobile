@@ -2517,6 +2517,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // Lazy-populated in-memory mirror of the persisted NIP-17 wrap-id cache. Loaded
     // on first wrap so we don't JSON.parse the full cache (up to 5000 entries) on every event.
     let knownWrapIds: Set<string> | null = null;
+    // Lazy mirror of the AMBER_NIP17_ENABLED toggle. Loaded once on the first amber wrap so we don't AsyncStorage.getItem on every event. Tradeoff: if the user toggles the setting *after* the sub starts, the change takes effect on next sub re-establishment (logout/login or signer-type change). Acceptable since the toggle isn't expected to flip mid-session in normal use.
+    let amberNip17EnabledCached: boolean | null = null;
     let cancelled = false;
     let writeChain: Promise<void> = Promise.resolve();
 
@@ -2596,7 +2598,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           text: plaintext,
           wireKind: 4,
         };
-        // No wrap-id cache for kind-4 (plaintext lives in RAM-only LRU); only persist the inbox preview blob. Same writeChain as kind-1059 to serialize concurrent inbox writes.
+        // No wrap-id cache for kind-4 (plaintext lives in RAM-only LRU); only persist the inbox preview blob. Same writeChain as kind-1059 to serialize concurrent inbox writes. Also bump inboxLastSeenKey so refreshDmInbox's kind-4 `since` filter advances and doesn't re-fetch already-seen events on the next refresh.
         writeChain = writeChain
           .then(async () => {
             if (cancelled) return;
@@ -2612,9 +2614,20 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 })()
               : [];
             const merged = mergeInboxEntries(cachedInbox, [k4InboxEntry], DM_INBOX_CAP);
+            // Re-check after the await: logout may have multiRemove'd these keys while we were reading. Without this, a freshly-decrypted DM would re-populate disk after the user signed out.
+            if (cancelled) return;
             await AsyncStorage.setItem(inboxCacheKey(viewerPubkey), JSON.stringify(merged)).catch(
               () => {},
             );
+            const lastSeenRaw = await AsyncStorage.getItem(inboxLastSeenKey(viewerPubkey));
+            const lastSeen = lastSeenRaw ? Number(lastSeenRaw) : 0;
+            if (ev.created_at > lastSeen) {
+              if (cancelled) return;
+              await AsyncStorage.setItem(
+                inboxLastSeenKey(viewerPubkey),
+                String(ev.created_at),
+              ).catch(() => {});
+            }
           })
           .catch((e) => {
             if (__DEV__) console.warn('[Nostr] live kind-4 persist failed:', e);
@@ -2666,8 +2679,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (!secretKey) return;
         rumor = unwrapWrapNsec(wrap, secretKey, onSkip);
       } else if (activeSigner === 'amber') {
-        const amberEnabled = (await AsyncStorage.getItem(AMBER_NIP17_ENABLED_KEY)) === 'true';
-        if (!amberEnabled) return;
+        if (amberNip17EnabledCached === null) {
+          amberNip17EnabledCached =
+            (await AsyncStorage.getItem(AMBER_NIP17_ENABLED_KEY)) === 'true';
+        }
+        if (!amberNip17EnabledCached) return;
         try {
           rumor = await unwrapWrapViaNip44(
             wrap,
@@ -2755,6 +2771,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             return;
           }
           wrapCache[wrap.id] = entry;
+          // Re-check after each await: logout may have multiRemove'd these keys while we were reading. Without these guards a freshly-decrypted wrap would re-populate disk after the user signed out.
+          if (cancelled) return;
           await writeNip17Cache(cacheKey, wrapCache);
           knownWrapIds?.add(wrap.id);
 
@@ -2770,6 +2788,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               })()
             : [];
           const merged = mergeInboxEntries(cachedInbox, [inboxEntry], DM_INBOX_CAP);
+          if (cancelled) return;
           await AsyncStorage.setItem(inboxCacheKey(viewerPubkey), JSON.stringify(merged)).catch(
             () => {},
           );

@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-// One-shot helper to test PR 360's live kind-1059 subscription.
+// One-shot helper to test the live DM subscription for issue #349.
 //
 // Sends a NIP-17 1:1 message FROM one Piggy fixture TO another via NIP-59
-// gift-wrap, publishing the kind-1059 to the same default relays the app
-// subscribes to. With PR 360 active, the receiving app should render the
-// new conversation row (or new message bubble in an open thread) within
-// a couple of seconds — no pull-to-refresh required.
+// gift-wrap, publishing a kind-1059 to the same default relays the app
+// subscribes to. The live sub watches kinds 4 + 1059 with `'#p':[viewer]`,
+// so the receiving app should render the new conversation row (or a new
+// message bubble in an open thread) within a couple of seconds — no
+// pull-to-refresh required.
 //
 // Usage:
 //   node scripts/send-nip17-test.mjs [text]
@@ -50,7 +51,9 @@ async function main() {
   }
 
   const text = process.argv[2] || `live-sub test ${new Date().toISOString().slice(11, 19)}`;
-  console.error(`[send-nip17-test] from=${fromPk.slice(0, 8)}…  to=${toPk.slice(0, 8)}…  text=${JSON.stringify(text)}`);
+  console.error(
+    `[send-nip17-test] from=${fromPk.slice(0, 8)}…  to=${toPk.slice(0, 8)}…  text=${JSON.stringify(text)}`,
+  );
 
   // nip17.wrapEvent builds the kind-13 seal + kind-1059 gift wrap and
   // returns the kind-1059 finalised event ready to publish.
