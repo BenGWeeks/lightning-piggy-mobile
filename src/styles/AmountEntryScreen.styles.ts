@@ -141,6 +141,23 @@ export const createAmountEntryStyles = (colors: Palette) =>
       textAlign: 'center',
       marginTop: 6,
     },
+    memoInput: {
+      // Single-line "what's it for" field beneath the amount card,
+      // shown only when the parent passes `enableMemo` (currently
+      // the in-conversation Invoice flow — #211). Visually distinct
+      // from the amount card (no fiat/sats pill, no keypad) so users
+      // don't mistake it for another numeric input. Sits inside
+      // `topArea` so it inherits the 16px horizontal padding.
+      marginTop: 12,
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.background,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      fontSize: 15,
+      color: colors.textHeader,
+    },
     confirmButton: {
       marginTop: 16,
       marginHorizontal: 16,
