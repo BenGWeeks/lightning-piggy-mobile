@@ -28,11 +28,12 @@ import { useWallet } from '../contexts/WalletContext';
 import * as nwcService from '../services/nwcService';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
-import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
+import { stripImageMetadata, uploadBlob, uploadImage } from '../services/imageUploadService';
 import SendSheet from '../components/SendSheet';
 import AttachPanel from '../components/AttachPanel';
 import ConversationComposer from '../components/ConversationComposer';
 import GifPickerSheet from '../components/GifPickerSheet';
+import VoiceRecordingSheet from '../components/VoiceRecordingSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
 import MessageBubble from '../components/MessageBubble';
 import TransactionDetailSheet, {
@@ -208,6 +209,8 @@ const ConversationScreen: React.FC = () => {
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
   const [fullscreenGifUrl, setFullscreenGifUrl] = useState<string | null>(null);
+  const [voiceSheetOpen, setVoiceSheetOpen] = useState(false);
+  const [uploadingVoice, setUploadingVoice] = useState(false);
   const [sharingLocation, setSharingLocation] = useState(false);
   // Payment hashes of outgoing invoices the active NWC wallet reports paid.
   const [paidHashes, setPaidHashes] = useState<Set<string>>(() => new Set());
@@ -800,6 +803,42 @@ const ConversationScreen: React.FC = () => {
     [pubkey, sendDirectMessage],
   );
 
+  // Voice-note send (#235): upload the recorded .m4a to Blossom, post the
+  // returned URL as the message body. Other Nostr clients render the URL
+  // as an inline audio player from the file extension; ones that don't
+  // fall back to a tappable link. Inline playback in our own renderer is
+  // a follow-up — not in scope here.
+  const handleSendVoiceNote = useCallback(
+    async (uri: string) => {
+      if (uploadingVoice) return;
+      setUploadingVoice(true);
+      try {
+        const url = await uploadBlob(uri, signEvent);
+        const sendResult = await sendDirectMessage(pubkey, url);
+        if (!sendResult.success) {
+          Alert.alert('Send failed', sendResult.error ?? 'Could not send voice note.');
+          return;
+        }
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            fromMe: true,
+            text: url,
+            createdAt: Math.floor(Date.now() / 1000),
+          },
+        ]);
+        setVoiceSheetOpen(false);
+        setAttachPanelOpen(false);
+      } catch (error) {
+        Alert.alert('Upload failed', error instanceof Error ? error.message : 'Please try again.');
+      } finally {
+        setUploadingVoice(false);
+      }
+    },
+    [pubkey, sendDirectMessage, signEvent, uploadingVoice],
+  );
+
   const openLocation = useCallback((loc: SharedLocation) => {
     const url = buildOsmViewUrl(loc);
     Linking.openURL(url).catch(() => {
@@ -1126,10 +1165,26 @@ const ConversationScreen: React.FC = () => {
                     }
                   : undefined
               }
+              onSendVoiceNote={
+                isLoggedIn
+                  ? () => {
+                      // VoiceRecordingSheet opens over the panel; we
+                      // leave the attach panel mounted so dismissing
+                      // the recording sheet returns the user to it.
+                      setVoiceSheetOpen(true);
+                    }
+                  : undefined
+              }
             />
           }
         />
       </View>
+      <VoiceRecordingSheet
+        visible={voiceSheetOpen}
+        onClose={() => setVoiceSheetOpen(false)}
+        onSend={handleSendVoiceNote}
+        sending={uploadingVoice}
+      />
       <GifPickerSheet
         visible={gifPickerOpen}
         onClose={() => {

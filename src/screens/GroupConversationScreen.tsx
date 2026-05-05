@@ -30,12 +30,13 @@ import ContactProfileSheet from '../components/ContactProfileSheet';
 import AttachPanel from '../components/AttachPanel';
 import ConversationComposer from '../components/ConversationComposer';
 import GifPickerSheet from '../components/GifPickerSheet';
+import VoiceRecordingSheet from '../components/VoiceRecordingSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
 import SendSheet from '../components/SendSheet';
 import FriendPickerSheet, { PickedFriend } from '../components/FriendPickerSheet';
 import MessageBubble from '../components/MessageBubble';
 import { isConfigured as isGifConfigured, type Gif } from '../services/giphyService';
-import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
+import { stripImageMetadata, uploadBlob, uploadImage } from '../services/imageUploadService';
 import {
   getCurrentLocation,
   formatGeoMessage,
@@ -99,6 +100,8 @@ const GroupConversationScreen: React.FC = () => {
   const [invoiceSheetOpen, setInvoiceSheetOpen] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [voiceSheetOpen, setVoiceSheetOpen] = useState(false);
+  const [uploadingVoice, setUploadingVoice] = useState(false);
   const [sharingLocation, setSharingLocation] = useState(false);
   // Sheets surfaced by MessageBubble taps. Mirror the 1:1 conversation
   // wiring (ConversationScreen) so the rich-card affordances work the
@@ -329,6 +332,30 @@ const GroupConversationScreen: React.FC = () => {
       await sendText(gif.url);
     },
     [closeAttachPanel, sendText],
+  );
+
+  // Voice-note send (#235): upload the recorded .m4a to Blossom, post the
+  // returned URL via the group's sendText so it lands in the group thread.
+  // Same pipeline images use today — Blossom is content-addressed and
+  // MIME-agnostic so the rename to uploadBlob is the only churn.
+  const handleSendVoiceNote = useCallback(
+    async (uri: string) => {
+      if (uploadingVoice) return;
+      setUploadingVoice(true);
+      try {
+        const url = await uploadBlob(uri, signEvent);
+        const ok = await sendText(url);
+        if (ok) {
+          setVoiceSheetOpen(false);
+          closeAttachPanel();
+        }
+      } catch (error) {
+        Alert.alert('Upload failed', error instanceof Error ? error.message : 'Please try again.');
+      } finally {
+        setUploadingVoice(false);
+      }
+    },
+    [closeAttachPanel, sendText, signEvent, uploadingVoice],
   );
 
   // Share another contact's Nostr profile into the group. Mirrors the 1:1
@@ -680,6 +707,7 @@ const GroupConversationScreen: React.FC = () => {
               onSendImage={handlePickAndSendImage}
               onTakePhoto={handleTakeAndSendPhoto}
               onSendGif={isGifConfigured() ? () => setGifPickerOpen(true) : undefined}
+              onSendVoiceNote={() => setVoiceSheetOpen(true)}
               // Zap renders but stays disabled — there's no single recipient
               // to zap in a group, but hiding the tile entirely confused
               // users who expected the same set as 1:1 (#237).
@@ -698,6 +726,13 @@ const GroupConversationScreen: React.FC = () => {
           }
         />
       </View>
+
+      <VoiceRecordingSheet
+        visible={voiceSheetOpen}
+        onClose={() => setVoiceSheetOpen(false)}
+        onSend={handleSendVoiceNote}
+        sending={uploadingVoice}
+      />
 
       <RenameGroupSheet
         visible={renameVisible}

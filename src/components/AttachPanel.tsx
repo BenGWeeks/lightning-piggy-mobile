@@ -1,6 +1,15 @@
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { MapPin, Zap, Receipt, UserRound, ImagePlus, Camera, Smile } from 'lucide-react-native';
+import {
+  MapPin,
+  Zap,
+  Receipt,
+  UserRound,
+  ImagePlus,
+  Camera,
+  Smile,
+  Mic,
+} from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 
@@ -25,6 +34,14 @@ interface Props {
   onSendImage?: () => void;
   onTakePhoto?: () => void;
   onSendGif?: () => void;
+  /**
+   * Opens the voice-note recording sheet (#235). Same surface as
+   * Image / Camera / GIF / Location — the sheet records a clip and
+   * uploads it to Blossom; the resulting URL is sent as the message
+   * body so other Nostr clients render an inline audio player from
+   * the file extension.
+   */
+  onSendVoiceNote?: () => void;
 }
 
 interface Tile {
@@ -55,6 +72,7 @@ const AttachPanel: React.FC<Props> = ({
   onSendImage,
   onTakePhoto,
   onSendGif,
+  onSendVoiceNote,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -90,6 +108,14 @@ const AttachPanel: React.FC<Props> = ({
         onPress: onSendGif,
         testID: 'attach-send-gif',
         accessibilityLabel: 'Send a GIF',
+      },
+      onSendVoiceNote && {
+        key: 'voice',
+        label: 'Voice',
+        icon: <Mic size={26} color={colors.white} />,
+        onPress: onSendVoiceNote,
+        testID: 'attach-tile-voice',
+        accessibilityLabel: 'Record and send a voice note',
       },
       {
         key: 'location',
