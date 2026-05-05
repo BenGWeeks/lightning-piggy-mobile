@@ -1475,14 +1475,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             signerNip44Encrypt: (plain, recipient) =>
               amberService.requestNip44Encrypt(plain, recipient, currentUser),
             signerSignSeal: async (unsignedSeal) => {
-              // Strip `pubkey` before handing to Amber — matches the
-              // group-send Amber path. Amber derives the field from
-              // `current_user` and some versions reject events whose
-              // declared pubkey doesn't match the signing identity.
-              const { pubkey: _omit, ...sealForAmber } = unsignedSeal;
-              void _omit;
+              // Keep pubkey on the seal — Amber misroutes kind=13 sign_event Intents without it (#356) and lands on its main Apps screen instead of the Sign Event sheet. Same rule as the group-send Amber path further down.
               const { event: signedEventJson } = await amberService.requestEventSignature(
-                JSON.stringify(sealForAmber),
+                JSON.stringify(unsignedSeal),
                 '',
                 currentUser,
               );
