@@ -427,6 +427,10 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
     >
       <BottomSheetView style={styles.content} testID="voice-recording-sheet">
         <Text style={styles.title}>Voice note</Text>
+        <Text style={styles.unencryptedWarning} testID="voice-unencrypted-warning">
+          Audio is uploaded unencrypted to your Blossom server. Only the link is end-to-end
+          encrypted via NIP-17.
+        </Text>
         <Text style={styles.elapsed} testID="voice-elapsed">
           {elapsedLabel}
         </Text>
@@ -512,6 +516,13 @@ const createStyles = (colors: Palette) =>
       fontSize: 16,
       fontWeight: '700',
       color: colors.textHeader,
+    },
+    unencryptedWarning: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      textAlign: 'center',
+      paddingHorizontal: 4,
+      lineHeight: 16,
     },
     elapsed: {
       fontSize: 32,
