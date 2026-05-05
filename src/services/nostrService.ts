@@ -412,7 +412,12 @@ export async function fetchProfiles(
 
   // Surface incrementally via the caller's onBatch hook. Coalesce sub
   // events that arrive in tight bursts so we don't trigger 100s of
-  // setContacts re-renders — once every 200 ms is enough to feel live.
+  // setContacts re-renders — 500 ms is far enough apart that a typical
+  // bottom-sheet open animation (~250-350 ms) doesn't get re-rendered
+  // mid-slide, but close enough to still feel live to the user. PR #385
+  // originally used 200 ms which caused a visible regression in
+  // FriendPicker open jank (1.49 % → 10.16 %); this is the simpler
+  // alternative to PR #386's InteractionManager defer.
   // The pending timer is tracked so the per-round flush below can clear
   // it (otherwise the flush + a still-pending coalesced fire would
   // double-emit the same snapshot a few hundred ms apart).
@@ -422,7 +427,7 @@ export async function fetchProfiles(
     pendingTimer = setTimeout(() => {
       pendingTimer = null;
       onBatch(new Map(profiles));
-    }, 200);
+    }, 500);
   };
   const flushNow = (): void => {
     if (pendingTimer !== null) {
