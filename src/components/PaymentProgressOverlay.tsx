@@ -491,6 +491,7 @@ export default function PaymentProgressOverlay({
             <TouchableOpacity
               style={styles.okButton}
               onPress={onDismiss}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityLabel="Dismiss payment confirmation"
               testID="payment-overlay-ok"
             >

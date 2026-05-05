@@ -191,52 +191,160 @@ export async function fetchProfile(pubkey: string, relays: string[]): Promise<No
   }
 }
 
-export async function fetchContactList(pubkey: string, relays: string[]): Promise<NostrContact[]> {
-  trackRelays(relays);
-  try {
-    const event = await pool.get(relays, {
-      kinds: [3],
-      authors: [pubkey],
-    });
-    if (!event) return [];
+function tagsToContacts(tags: string[][]): NostrContact[] {
+  return tags
+    .filter((tag) => tag[0] === 'p')
+    .map((tag) => ({
+      pubkey: tag[1],
+      relay: tag[2] || null,
+      petname: tag[3] || null,
+      profile: null,
+    }));
+}
 
-    return event.tags
-      .filter((tag) => tag[0] === 'p')
-      .map((tag) => ({
-        pubkey: tag[1],
-        relay: tag[2] || null,
-        petname: tag[3] || null,
-        profile: null,
-      }));
+function tagsToRelayList(tags: string[][]): RelayConfig[] {
+  return tags
+    .filter((tag) => tag[0] === 'r')
+    .map((tag) => {
+      const url = tag[1];
+      const marker = tag[2];
+      return {
+        url,
+        read: !marker || marker === 'read',
+        write: !marker || marker === 'write',
+      };
+    });
+}
+
+// Race-to-first-event single-event fetch. The previous `pool.get()` based
+// implementation waited for EVERY relay in the set to send EOSE before
+// resolving — on Ben's Pixel 8 / Android 16 with the production relay
+// list this measured ~53 s for kind-3 (#372 logcat trace). Most relays
+// respond in ~1-2 s; the wait was paid against the slowest relay's EOSE.
+//
+// Contract:
+//   - Resolves with the first matching event's parsed value as soon as
+//     ANY relay returns one. This unblocks the caller in ~1-2 s rather
+//     than waiting for the slowest relay's EOSE.
+//   - Resolves with `null` if `softTimeoutMs` elapses with no event seen
+//     at all. `null` is distinct from "got an event with empty tags"
+//     (which parses to e.g. an empty contact list — a legitimate state
+//     for someone who follows nobody). Callers MUST distinguish:
+//       fresh === null  → don't touch the cache (network problem)
+//       fresh === []    → user really has zero contacts; persist + bump TS
+//   - The sub stays open for `keepOpenMs` after first resolve to absorb
+//     any newer events that race the slowest relays. If a strictly newer
+//     event is seen during that window, `onLatest` fires EXACTLY ONCE at
+//     sub close with the latest version — never inline during the stream.
+//     Firing once at the end avoids the race where an inline `onLatest`
+//     callback could overwrite cache that a still-pending `await` is
+//     about to write with the older first result.
+async function fetchSingleLatest<T>(
+  filter: Filter,
+  relays: string[],
+  parse: (tags: string[][]) => T,
+  opts: {
+    softTimeoutMs?: number;
+    keepOpenMs?: number;
+    onLatest?: (parsed: T) => void;
+  } = {},
+): Promise<T | null> {
+  const softTimeoutMs = opts.softTimeoutMs ?? 5000;
+  const keepOpenMs = opts.keepOpenMs ?? 3000;
+  trackRelays(relays);
+
+  return new Promise<T | null>((resolve) => {
+    let firstResolved = false;
+    let bestEvent: { tags: string[][]; created_at: number } | null = null;
+    let firstResolvedCreatedAt: number | null = null;
+
+    const sub = pool.subscribeMany(relays, filter, {
+      onevent: (event: { tags: string[][]; created_at: number }) => {
+        if (!bestEvent || event.created_at > bestEvent.created_at) {
+          bestEvent = event;
+          if (!firstResolved) {
+            firstResolved = true;
+            firstResolvedCreatedAt = event.created_at;
+            resolve(parse(event.tags));
+          }
+          // Newer events keep updating bestEvent for the keepOpenMs
+          // window, but onLatest fires only once at sub close so it
+          // never races an awaiting caller's post-resolve microtask.
+        }
+      },
+    });
+
+    // Soft timeout: if no event has arrived by softTimeoutMs, resolve
+    // with `null` so the caller can distinguish "network couldn't
+    // produce a kind-3" from "kind-3 arrived but is empty". The sub
+    // stays open through keepOpenMs so a late relay can still surface
+    // the event via onLatest.
+    const softTimer = setTimeout(() => {
+      if (!firstResolved) {
+        firstResolved = true;
+        resolve(null);
+      }
+    }, softTimeoutMs);
+
+    // Hard close: at softTimeout + keepOpenMs, fire onLatest with the
+    // bestEvent IFF it's strictly newer than what we resolved with (or
+    // we resolved with null and got something during the keep-open
+    // window), then close the sub.
+    setTimeout(() => {
+      clearTimeout(softTimer);
+      if (opts.onLatest && bestEvent) {
+        const isNewer =
+          firstResolvedCreatedAt === null || bestEvent.created_at > firstResolvedCreatedAt;
+        if (isNewer) {
+          try {
+            opts.onLatest(parse(bestEvent.tags));
+          } catch {
+            // best-effort — onLatest failures must not crash the sub
+          }
+        }
+      }
+      try {
+        sub.close();
+      } catch {
+        // best-effort — sub may already be closed
+      }
+    }, softTimeoutMs + keepOpenMs);
+  });
+}
+
+export async function fetchContactList(
+  pubkey: string,
+  relays: string[],
+  opts?: { onLatest?: (contacts: NostrContact[]) => void },
+): Promise<NostrContact[] | null> {
+  try {
+    return await fetchSingleLatest<NostrContact[]>(
+      { kinds: [3], authors: [pubkey] } as Filter,
+      relays,
+      tagsToContacts,
+      { onLatest: opts?.onLatest },
+    );
   } catch (error) {
     console.warn('Failed to fetch Nostr contact list:', error);
-    return [];
+    return null;
   }
 }
 
-export async function fetchRelayList(pubkey: string, relays: string[]): Promise<RelayConfig[]> {
-  trackRelays(relays);
+export async function fetchRelayList(
+  pubkey: string,
+  relays: string[],
+  opts?: { onLatest?: (relayList: RelayConfig[]) => void },
+): Promise<RelayConfig[] | null> {
   try {
-    const event = await pool.get(relays, {
-      kinds: [10002],
-      authors: [pubkey],
-    });
-    if (!event) return [];
-
-    return event.tags
-      .filter((tag) => tag[0] === 'r')
-      .map((tag) => {
-        const url = tag[1];
-        const marker = tag[2];
-        return {
-          url,
-          read: !marker || marker === 'read',
-          write: !marker || marker === 'write',
-        };
-      });
+    return await fetchSingleLatest<RelayConfig[]>(
+      { kinds: [10002], authors: [pubkey] } as Filter,
+      relays,
+      tagsToRelayList,
+      { onLatest: opts?.onLatest },
+    );
   } catch (error) {
     console.warn('Failed to fetch NIP-65 relay list:', error);
-    return [];
+    return null;
   }
 }
 
@@ -245,6 +353,50 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
     promise,
     new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
   ]);
+}
+
+// Stream a single batch of profile events. Replaces the previous
+// `pool.querySync()`-based pattern which waited for EVERY relay in the
+// set to send EOSE before returning anything. With long lists like
+// Ben's 590-contact set this measured ~31 s for 580/590 profiles in
+// the #372 trace, dominated by per-batch waits against the slowest
+// relay. We instead open a sub, collect events as they arrive (tracking
+// the newest kind-0 per pubkey by created_at), and close after a soft
+// timeout. Events are surfaced to the caller via `onEvent` so the UI
+// can paint each name/avatar the moment it lands instead of waiting
+// for the batch to finish. (#372 follow-up)
+async function fetchProfilesBatch(
+  pubkeys: string[],
+  relays: string[],
+  softTimeoutMs: number,
+  onEvent: (event: { pubkey: string; content: string; created_at: number }) => void,
+): Promise<void> {
+  if (pubkeys.length === 0) return;
+  trackRelays(relays);
+  return new Promise<void>((resolve) => {
+    const best = new Map<string, number>(); // pubkey → best created_at seen
+    let closed = false;
+    const sub = pool.subscribeMany(relays, { kinds: [0], authors: pubkeys } as Filter, {
+      onevent: (ev: { pubkey: string; content: string; created_at: number }) => {
+        // Keep only the newest kind-0 per pubkey — Nostr clients can
+        // re-publish kind-0 with edits and we want the latest.
+        const prev = best.get(ev.pubkey);
+        if (prev !== undefined && ev.created_at <= prev) return;
+        best.set(ev.pubkey, ev.created_at);
+        onEvent(ev);
+      },
+    });
+    setTimeout(() => {
+      if (closed) return;
+      closed = true;
+      try {
+        sub.close();
+      } catch {
+        // best-effort
+      }
+      resolve();
+    }, softTimeoutMs);
+  });
 }
 
 export async function fetchProfiles(
@@ -258,23 +410,57 @@ export async function fetchProfiles(
   // Include profile aggregator relays for better coverage
   const allRelays = [...new Set([...relays, ...PROFILE_RELAYS])];
 
-  const processEvents = (events: { pubkey: string; content: string }[]) => {
-    for (const event of events) {
-      if (profiles.has(event.pubkey)) continue;
-      const parsed = parseProfileContent(event.content);
-      profiles.set(event.pubkey, {
-        pubkey: event.pubkey,
-        npub: npubEncode(event.pubkey),
-        ...parsed,
-      });
+  // Surface incrementally via the caller's onBatch hook. Coalesce sub
+  // events that arrive in tight bursts so we don't trigger 100s of
+  // setContacts re-renders — 500 ms is far enough apart that a typical
+  // bottom-sheet open animation (~250-350 ms) doesn't get re-rendered
+  // mid-slide, but close enough to still feel live to the user. PR #385
+  // originally used 200 ms which caused a visible regression in
+  // FriendPicker open jank (1.49 % → 10.16 %); this is the simpler
+  // alternative to PR #386's InteractionManager defer.
+  // The pending timer is tracked so the per-round flush below can clear
+  // it (otherwise the flush + a still-pending coalesced fire would
+  // double-emit the same snapshot a few hundred ms apart).
+  let pendingTimer: ReturnType<typeof setTimeout> | null = null;
+  const scheduleEmit = (): void => {
+    if (!onBatch || pendingTimer !== null) return;
+    pendingTimer = setTimeout(() => {
+      pendingTimer = null;
+      onBatch(new Map(profiles));
+    }, 500);
+  };
+  const flushNow = (): void => {
+    if (pendingTimer !== null) {
+      clearTimeout(pendingTimer);
+      pendingTimer = null;
     }
+    if (onBatch) onBatch(new Map(profiles));
+  };
+
+  const ingest = (event: { pubkey: string; content: string; created_at: number }): void => {
+    const parsed = parseProfileContent(event.content);
+    profiles.set(event.pubkey, {
+      pubkey: event.pubkey,
+      npub: npubEncode(event.pubkey),
+      ...parsed,
+    });
+    scheduleEmit();
   };
 
   try {
-    // Overall timeout: 120s max for all profile fetching
+    // Overall deadline cap. The streaming sub already times out per
+    // batch; this is the upper bound for the whole multi-batch run.
     const overallDeadline = Date.now() + 120000;
 
-    // Batch in groups of 50, run 3 batches concurrently, 15s timeout per batch
+    // Batch in groups of 50, run up to 3 batches concurrently. Per-batch
+    // soft timeout is 10s for the main pass — same ceiling as the old
+    // pool.querySync ceiling (15s minus a couple of seconds), since
+    // shrinking it further turned a slow-but-valid profile into a 24h
+    // miss when loadContacts() bumps PROFILES_TIMESTAMP_KEY on partial
+    // fetches (Copilot review on PR #385). The streaming pattern is
+    // still the win — events surface to the UI as they arrive instead
+    // of all-at-batch-end, so cold start FEELS fast even though the
+    // worst-case wait per batch is unchanged.
     const batchSize = 50;
     const concurrency = 3;
     const batches: string[][] = [];
@@ -283,29 +469,23 @@ export async function fetchProfiles(
     }
 
     for (let i = 0; i < batches.length; i += concurrency) {
-      // Bail if overall deadline exceeded
       if (Date.now() > overallDeadline) {
         if (__DEV__) console.warn('[Nostr] fetchProfiles: overall timeout reached');
         break;
       }
-      // Yield to event loop between batch rounds so UI stays responsive
-      // Use 50ms delay to give React time to process renders and user input
+      // Yield 50 ms between rounds so React can process renders + user input.
       if (i > 0) await new Promise((r) => setTimeout(r, 50));
-
       const concurrent = batches.slice(i, i + concurrency);
-      const results = await Promise.all(
-        concurrent.map((batch) =>
-          withTimeout(pool.querySync(allRelays, { kinds: [0], authors: batch }), 15000),
-        ),
+      await Promise.all(
+        concurrent.map((batch) => fetchProfilesBatch(batch, allRelays, 10000, ingest)),
       );
-      for (const events of results) {
-        if (events) processEvents(events);
-      }
-      // Notify caller with partial results so UI updates incrementally
-      if (onBatch) onBatch(new Map(profiles));
+      flushNow();
     }
 
-    // Retry pass for missing profiles (smaller batches, longer timeout)
+    // Retry pass for missing profiles. 8s timeout — slow relays that
+    // missed the first round window may still produce on a second look,
+    // and the cost of cache-missing a profile for 24h is much higher
+    // than 8s of additional sub time on cold start.
     const missing = pubkeys.filter((pk) => !profiles.has(pk));
     if (missing.length > 0 && missing.length < pubkeys.length && Date.now() < overallDeadline) {
       if (__DEV__)
@@ -317,19 +497,22 @@ export async function fetchProfiles(
       for (let i = 0; i < retryBatches.length; i += concurrency) {
         if (Date.now() > overallDeadline) break;
         const concurrent = retryBatches.slice(i, i + concurrency);
-        const results = await Promise.all(
-          concurrent.map((batch) =>
-            withTimeout(pool.querySync(allRelays, { kinds: [0], authors: batch }), 10000),
-          ),
+        await Promise.all(
+          concurrent.map((batch) => fetchProfilesBatch(batch, allRelays, 8000, ingest)),
         );
-        for (const events of results) {
-          if (events) processEvents(events);
-        }
-        if (onBatch) onBatch(new Map(profiles));
+        flushNow();
       }
     }
   } catch (error) {
     console.warn('Failed to batch fetch profiles:', error);
+  } finally {
+    // Make sure we don't leave a pending coalesce timer alive after the
+    // function resolves — the caller has the final state in the return
+    // value, so a late fire would just be a duplicate emit.
+    if (pendingTimer !== null) {
+      clearTimeout(pendingTimer);
+      pendingTimer = null;
+    }
   }
 
   return profiles;
@@ -533,17 +716,30 @@ export function createProfileEvent(profileData: {
   };
 }
 
-export async function createDirectMessageEvent(
-  secretKey: Uint8Array,
-  recipientPubkey: string,
-  plaintext: string,
-): Promise<{ kind: number; created_at: number; tags: string[][]; content: string }> {
-  const encrypted = await nip04.encrypt(secretKey, recipientPubkey, plaintext);
+/**
+ * Build the inner kind-14 chat rumor for a 1:1 NIP-17 direct message.
+ * Mirrors `createGroupChatRumor` but with no `subject` tag and exactly
+ * one `p` tag (the recipient). Per NIP-17, both DMs and group chats use
+ * kind-14 — the only thing that distinguishes them is the participant
+ * count, which receivers infer from the `p` tag set (see
+ * `classifyRumor` in `utils/nip17Unwrap.ts`).
+ *
+ * The returned event is unsigned ("rumor"); pass it to
+ * `sendNip17ToManyWithNsec` / `sendNip17ToManyWithSigner` which seal +
+ * gift-wrap it per recipient (and once for the sender, so other devices
+ * see their own outgoing message).
+ */
+export function createDirectMessageRumor(input: {
+  senderPubkey: string;
+  recipientPubkey: string;
+  content: string;
+}): { kind: number; created_at: number; tags: string[][]; content: string; pubkey: string } {
   return {
-    kind: 4,
+    pubkey: input.senderPubkey,
+    kind: 14,
     created_at: Math.floor(Date.now() / 1000),
-    tags: [['p', recipientPubkey]],
-    content: encrypted,
+    tags: [['p', input.recipientPubkey]],
+    content: input.content,
   };
 }
 
@@ -644,18 +840,34 @@ export async function fetchInboxDmEvents(
 ): Promise<FetchedInboxEvents> {
   const allRelays = [...new Set([...relays, ...DEFAULT_RELAYS])];
   trackRelays(allRelays);
-  const limit = options.limit ?? 500;
-  // `since` shifted back 2 minutes (Damus clock-drift pad). All three
-  // inbox sub-queries share the same since floor: any relay that
-  // stamped an event slightly-in-our-past still returns it.
+  // Default to the same cap the live sub uses, so the two paths can't
+  // drift. Callers can lower with `options.limit` if they want to be
+  // explicit. (#383)
+  const limit = options.limit ?? DM_INBOX_LIMIT;
+  // `since` shifted back 2 min (Damus clock-drift pad). Applied only to kind-4 filters below; wraps deliberately skip it (see next comment).
   const since = options.since !== undefined ? Math.max(0, options.since - 120) : undefined;
   const sentK4Filter: Filter = { kinds: [4], authors: [myPubkey], limit };
   const recvK4Filter: Filter = { kinds: [4], '#p': [myPubkey], limit };
+  // NIP-59 (gift-wrap) wraps have RANDOMIZED timestamps within ~2 days
+  // of the real publish time in either direction (per spec, for
+  // plausible deniability). So `wrap.created_at` does NOT track when
+  // the underlying message was sent. Applying `since` to the wraps
+  // filter caused recently-published wraps to be silently dropped at
+  // the relay whenever their random ts < lastSeen — and lastSeen could
+  // itself be a future-dated wrap's random ts (see callers using
+  // Math.max over kind1059.created_at), so the inbox query would
+  // progressively skip more and more wraps as the future-dated cap
+  // ratcheted forward. Symptom: a contact's recent DM is visible inside
+  // the per-conversation thread (which fetches peer-scoped without
+  // `since`) but never appears on the Messages tab inbox list.
+  // Resolution: don't filter wraps by `since` at all. The relay query
+  // is bounded by limit + the `#p:[myPubkey]` filter, and the consumer
+  // dedupes against the persisted wrap-id cache so already-decrypted
+  // wraps short-circuit cheaply.
   const wrapsFilter: Filter = { kinds: [1059], '#p': [myPubkey], limit };
   if (since !== undefined) {
     sentK4Filter.since = since;
     recvK4Filter.since = since;
-    wrapsFilter.since = since;
   }
   try {
     const [sentK4, receivedK4, wraps] = await Promise.all([
@@ -760,7 +972,7 @@ export interface GroupStateEventInput {
 
 /**
  * Build (unsigned) the kind-30200 group-state event. Caller is responsible
- * for signing + publishing — same pattern as createDirectMessageEvent.
+ * for signing + publishing — same pattern as createDirectMessageRumor.
  */
 export function createGroupStateEvent(input: GroupStateEventInput): {
   kind: number;
@@ -1031,6 +1243,90 @@ export function subscribeGroupStateForViewer(input: {
   );
   return () => {
     for (const s of [subPtag, subAuthored]) {
+      try {
+        s.close();
+      } catch {
+        // best-effort
+      }
+    }
+  };
+}
+
+// Live-DM event type. Structurally a generic Nostr event — kind-4
+// (legacy NIP-04) and kind-1059 (NIP-17 gift wrap) share the same
+// shape, the wire kind tells the caller which decrypt path to run.
+export type RawInboxDmEvent = RawGiftWrapEvent;
+
+// Subscribe to inbound DM events (kind-4 NIP-04 + kind-1059 NIP-17
+// gift wraps) addressed to the viewer. Long-lived sub kept open while
+// the user is signed in so the app delivers DMs / group messages live
+// without waiting for the 30 s-TTL `refreshDmInbox` or
+// pull-to-refresh (#349).
+//
+// Notes:
+//  - `#p:[viewerPubkey]` matches the recipient tag set on both kinds;
+//    for kind-1059 the sender's identity is hidden inside the encrypted
+//    seal, and for kind-4 it's in the event envelope, but in either
+//    case the relay-side filter is the recipient tag.
+//  - The filter only catches *incoming* events. Outgoing kind-4 from a
+//    second device authored by the viewer wouldn't tag the viewer in
+//    `#p`, so multi-device sent-event sync still flows through
+//    pull-to-refresh / the next focus-driven `refreshDmInbox`.
+//  - Two SEPARATE subs (one per kind) so we can apply `since` to kind-4
+//    only — NIP-59 randomises kind-1059 wrap.created_at by ±2 days for
+//    plausible deniability, so a server-side `since` cutoff on wraps
+//    silently drops legit fresh messages whose fake timestamp is older
+//    than the cutoff. kind-4 uses real timestamps and tolerates `since`.
+//    See fetchInboxDmEvents at lines ~769-785 for the same reasoning in
+//    the bulk-fetch path. (#383)
+//  - Both kinds get a 1000-event `limit`. Most relays cap at this
+//    anyway; making it explicit aligns the contract and stops a fresh
+//    install from being flooded with the user's entire DM history. (#383)
+//  - 90 days on kind-4 matches the largest UI filter chip ("Last
+//    30/90 days"). Older threads stay reachable via per-conversation
+//    queries when the user opens the thread (those have no `since`).
+//  - Caller is responsible for deduping (e.g. against the persistent
+//    NIP-17 wrap-id cache + the NIP-04 RAM LRU populated by
+//    refreshDmInbox).
+
+// Shared between the live sub (subscribeInboxDmsForViewer) and the bulk
+// fetch (fetchInboxDmEvents) so the two paths can't drift in cap on a
+// future tweak. (#383, Copilot review on PR #384)
+export const DM_INBOX_LIMIT = 1000;
+const DM_INBOX_SINCE_WINDOW_SECONDS = 90 * 24 * 60 * 60; // 90 days
+
+export function subscribeInboxDmsForViewer(input: {
+  viewerPubkey: string;
+  relays: string[];
+  onEvent: (ev: RawInboxDmEvent) => void;
+}): () => void {
+  trackRelays(input.relays);
+  const onevent = (ev: Parameters<typeof input.onEvent>[0]): void => {
+    input.onEvent(ev);
+  };
+  const sinceK4 = Math.floor(Date.now() / 1000) - DM_INBOX_SINCE_WINDOW_SECONDS;
+  const subK4 = pool.subscribeMany(
+    input.relays,
+    {
+      kinds: [4],
+      '#p': [input.viewerPubkey],
+      since: sinceK4,
+      limit: DM_INBOX_LIMIT,
+    } as Filter,
+    { onevent },
+  );
+  const subWraps = pool.subscribeMany(
+    input.relays,
+    {
+      kinds: [1059],
+      '#p': [input.viewerPubkey],
+      // No `since` — NIP-59 random timestamps would drop fresh wraps.
+      limit: DM_INBOX_LIMIT,
+    } as Filter,
+    { onevent },
+  );
+  return () => {
+    for (const s of [subK4, subWraps]) {
       try {
         s.close();
       } catch {

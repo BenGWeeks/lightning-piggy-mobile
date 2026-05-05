@@ -52,10 +52,17 @@ module.exports = [
   {
     // Standalone Node ESM helpers under scripts/ run in Node, not in the
     // React Native runtime, so give them access to Node globals like
-    // setTimeout and process.
+    // setTimeout and process. The Expo lint rules around process.env
+    // (no-dynamic-env-var, no-env-var-destructuring) exist to keep Metro
+    // able to inline EXPO_PUBLIC_* at bundle time — irrelevant for these
+    // standalone CI helpers, so we turn them off here.
     files: ['scripts/**/*.mjs', 'scripts/**/*.js'],
     languageOptions: {
       globals: { ...globals.node },
+    },
+    rules: {
+      'expo/no-dynamic-env-var': 'off',
+      'expo/no-env-var-destructuring': 'off',
     },
   },
   {
