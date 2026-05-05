@@ -1,0 +1,91 @@
+appId: com.lightningpiggy.app.dev
+name: 1:1 DM send via Amber — #373 regression (no Apps-screen detour)
+---
+# Regression coverage for issue #373.
+#
+# Pre-fix symptom (this PR fixes it): tapping Send in a 1:1 conversation
+# while logged in via Amber routed the kind-13 seal sign_event Intent
+# to Amber's main "Applications" launcher instead of its NIP-59 Sign
+# Event sheet, because we were stripping the `pubkey` field from the
+# seal JSON. Send hung; if the user backed out, LP raised:
+#   "Send failed - Amber returned empty signed seal"
+# (or, with a blanket-permission Amber, the request never resolved.)
+#
+# Post-fix: the Intent reaches Amber's sign prompt; with blanket
+# permissions ("Approve basic actions") pre-granted by
+# test-amber-import-key.yaml the seal-sign + nip44Encrypt round-trips
+# resolve silently via Amber's ContentResolver fast-path; the message
+# lands in the thread.
+#
+# This is a direct mirror of test-group-send-amber-356.yaml — same
+# regression class (kind-13 seal misroute), different surface (1:1 DM
+# in PR #334's NIP-17 migration vs group send in #267).
+#
+# Prerequisites (same as test-conversation-keyboard.yaml):
+#   - test-amber-import-key.yaml has run (Amber holds MAESTRO_NSEC,
+#     "Approve basic actions" was selected).
+#   - Little Piggy fixture is reachable from the Messages list (default
+#     Maestro seed). The conversation row is matched by `text: 'Little Piggy.*'` regex — same shape used elsewhere in the suite (e.g. test-conversation-keyboard.yaml). MessagesScreen rows don't have per-row testIDs today, so there's no testID-prefix alternative.
+#   - Metro is serving the branch with the #373 fix on port 8081 and
+#     the LP dev install has reloaded against it.
+#
+# Run:
+#   source .env && \
+#     maestro test -e MAESTRO_NSEC="$MAESTRO_NSEC" \
+#     tests/e2e/test-dm-send-amber-373.yaml
+
+- runFlow: test-login-amber.yaml
+
+# Messages → Little Piggy
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 12000
+    visibilityPercentage: 60
+- tapOn:
+    text: 'Little Piggy.*'
+- waitForAnimationToEnd:
+    timeout: 8000
+
+# Compose a unique message so re-runs don't collide with cached history
+- tapOn:
+    id: 'conversation-input'
+- inputText: 'amber-373-${maestroRunId}'
+- hideKeyboard
+- takeScreenshot:
+    path: /tmp/373-stage1-composed
+
+- tapOn:
+    id: 'conversation-send'
+
+# Allow Amber's ContentResolver fast-path to resolve the seal-sign +
+# nip44Encrypt round-trips. Slightly longer timeout than the group test
+# because the 1:1 wrap path also pings the recipient's read relays.
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# THE #373 ASSERTIONS — pre-fix, the Send tap above produced this
+# BrandedAlert (or hung indefinitely on Amber's Apps screen). Post-fix
+# it must not appear.
+- assertNotVisible:
+    text: 'Send failed'
+- assertNotVisible:
+    text: 'Amber returned empty signed seal'
+- assertNotVisible:
+    text: 'User cancelled the Amber request'
+
+# AND the message must actually land in the thread. The composer
+# clears on success, and the rumor we just signed comes back through
+# the live subscription (#349) or the immediate optimistic insert and
+# renders as a row in the conversation.
+- extendedWaitUntil:
+    visible:
+      text: 'amber-373-${maestroRunId}'
+    timeout: 15000
+- takeScreenshot:
+    path: /tmp/373-stage2-sent
