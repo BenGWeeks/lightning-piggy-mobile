@@ -1,3 +1,4 @@
+import { InteractionManager } from 'react-native';
 import { SimplePool } from 'nostr-tools/pool';
 import {
   generateSecretKey,
@@ -416,12 +417,27 @@ export async function fetchProfiles(
   // The pending timer is tracked so the per-round flush below can clear
   // it (otherwise the flush + a still-pending coalesced fire would
   // double-emit the same snapshot a few hundred ms apart).
+  //
+  // Defer the actual onBatch call via InteractionManager.runAfterInteractions
+  // so a setContacts re-render doesn't land mid-animation (e.g. while the
+  // FriendPicker bottom-sheet is opening). PR #385's perf-suite trace
+  // showed FAB → FriendPicker open jumping from 1.49% → 10.16% modern
+  // jank, almost certainly because onBatch was invalidating the picker's
+  // memoized rows during its slide-up animation. runAfterInteractions
+  // queues the work behind any active animation/gesture/scroll and lets
+  // RN coalesce stacked updates. Worst case adds ~16-300 ms latency to
+  // a profile name/avatar appearing — invisible to the eye, well below
+  // the 200 ms coalesce floor we already accept.
   let pendingTimer: ReturnType<typeof setTimeout> | null = null;
+  const deferredEmit = (snapshot: Map<string, NostrProfile>): void => {
+    if (!onBatch) return;
+    InteractionManager.runAfterInteractions(() => onBatch(snapshot));
+  };
   const scheduleEmit = (): void => {
     if (!onBatch || pendingTimer !== null) return;
     pendingTimer = setTimeout(() => {
       pendingTimer = null;
-      onBatch(new Map(profiles));
+      deferredEmit(new Map(profiles));
     }, 200);
   };
   const flushNow = (): void => {
@@ -429,7 +445,7 @@ export async function fetchProfiles(
       clearTimeout(pendingTimer);
       pendingTimer = null;
     }
-    if (onBatch) onBatch(new Map(profiles));
+    deferredEmit(new Map(profiles));
   };
 
   const ingest = (event: { pubkey: string; content: string; created_at: number }): void => {
