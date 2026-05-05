@@ -573,9 +573,8 @@ const SendSheet: React.FC<Props> = ({
   // that stale closure reads `wasSuccess === false`, hides the overlay,
   // and never calls onClose. See #210.
   const progressStateRef = useRef(progressState);
-  useEffect(() => {
-    progressStateRef.current = progressState;
-  }, [progressState]);
+  // Sync during render (not in a useEffect) so the ref is always current before any tap can fire. A useEffect runs after commit/paint, leaving a window where the OK button is visible but the ref still holds the previous value — which is exactly the race the second-round Copilot review on #210 flagged.
+  progressStateRef.current = progressState;
 
   const handleOverlayDismiss = useCallback(() => {
     // Dismissing the overlay after a successful payment also closes the
