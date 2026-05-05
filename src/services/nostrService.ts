@@ -355,6 +355,50 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
   ]);
 }
 
+// Stream a single batch of profile events. Replaces the previous
+// `pool.querySync()`-based pattern which waited for EVERY relay in the
+// set to send EOSE before returning anything. With long lists like
+// Ben's 590-contact set this measured ~31 s for 580/590 profiles in
+// the #372 trace, dominated by per-batch waits against the slowest
+// relay. We instead open a sub, collect events as they arrive (tracking
+// the newest kind-0 per pubkey by created_at), and close after a soft
+// timeout. Events are surfaced to the caller via `onEvent` so the UI
+// can paint each name/avatar the moment it lands instead of waiting
+// for the batch to finish. (#372 follow-up)
+async function fetchProfilesBatch(
+  pubkeys: string[],
+  relays: string[],
+  softTimeoutMs: number,
+  onEvent: (event: { pubkey: string; content: string; created_at: number }) => void,
+): Promise<void> {
+  if (pubkeys.length === 0) return;
+  trackRelays(relays);
+  return new Promise<void>((resolve) => {
+    const best = new Map<string, number>(); // pubkey → best created_at seen
+    let closed = false;
+    const sub = pool.subscribeMany(relays, { kinds: [0], authors: pubkeys } as Filter, {
+      onevent: (ev: { pubkey: string; content: string; created_at: number }) => {
+        // Keep only the newest kind-0 per pubkey — Nostr clients can
+        // re-publish kind-0 with edits and we want the latest.
+        const prev = best.get(ev.pubkey);
+        if (prev !== undefined && ev.created_at <= prev) return;
+        best.set(ev.pubkey, ev.created_at);
+        onEvent(ev);
+      },
+    });
+    setTimeout(() => {
+      if (closed) return;
+      closed = true;
+      try {
+        sub.close();
+      } catch {
+        // best-effort
+      }
+      resolve();
+    }, softTimeoutMs);
+  });
+}
+
 export async function fetchProfiles(
   pubkeys: string[],
   relays: string[],
@@ -366,23 +410,40 @@ export async function fetchProfiles(
   // Include profile aggregator relays for better coverage
   const allRelays = [...new Set([...relays, ...PROFILE_RELAYS])];
 
-  const processEvents = (events: { pubkey: string; content: string }[]) => {
-    for (const event of events) {
-      if (profiles.has(event.pubkey)) continue;
-      const parsed = parseProfileContent(event.content);
-      profiles.set(event.pubkey, {
-        pubkey: event.pubkey,
-        npub: npubEncode(event.pubkey),
-        ...parsed,
-      });
-    }
+  // Surface incrementally via the caller's onBatch hook. Coalesce sub
+  // events that arrive in tight bursts so we don't trigger 100s of
+  // setContacts re-renders — once every 200 ms is enough to feel live.
+  let pendingEmit = false;
+  const scheduleEmit = (): void => {
+    if (!onBatch || pendingEmit) return;
+    pendingEmit = true;
+    setTimeout(() => {
+      pendingEmit = false;
+      onBatch(new Map(profiles));
+    }, 200);
+  };
+
+  const ingest = (event: { pubkey: string; content: string; created_at: number }): void => {
+    const parsed = parseProfileContent(event.content);
+    profiles.set(event.pubkey, {
+      pubkey: event.pubkey,
+      npub: npubEncode(event.pubkey),
+      ...parsed,
+    });
+    scheduleEmit();
   };
 
   try {
-    // Overall timeout: 120s max for all profile fetching
+    // Overall deadline cap. The streaming sub already times out per
+    // batch; this is the upper bound for the whole multi-batch run.
     const overallDeadline = Date.now() + 120000;
 
-    // Batch in groups of 50, run 3 batches concurrently, 15s timeout per batch
+    // Batch in groups of 50, run up to 3 batches concurrently. The
+    // per-batch streaming sub has a 5 s soft timeout — well below the
+    // old 15 s pool.querySync ceiling because most profiles arrive
+    // within the first second; the residual 4 s is just for slow
+    // relays. Missing profiles are picked up by the retry pass below
+    // with a 3 s timeout.
     const batchSize = 50;
     const concurrency = 3;
     const batches: string[][] = [];
@@ -391,29 +452,25 @@ export async function fetchProfiles(
     }
 
     for (let i = 0; i < batches.length; i += concurrency) {
-      // Bail if overall deadline exceeded
       if (Date.now() > overallDeadline) {
         if (__DEV__) console.warn('[Nostr] fetchProfiles: overall timeout reached');
         break;
       }
-      // Yield to event loop between batch rounds so UI stays responsive
-      // Use 50ms delay to give React time to process renders and user input
+      // Yield 50 ms between rounds so React can process renders + user input.
       if (i > 0) await new Promise((r) => setTimeout(r, 50));
-
       const concurrent = batches.slice(i, i + concurrency);
-      const results = await Promise.all(
-        concurrent.map((batch) =>
-          withTimeout(pool.querySync(allRelays, { kinds: [0], authors: batch }), 15000),
-        ),
+      await Promise.all(
+        concurrent.map((batch) => fetchProfilesBatch(batch, allRelays, 5000, ingest)),
       );
-      for (const events of results) {
-        if (events) processEvents(events);
-      }
-      // Notify caller with partial results so UI updates incrementally
+      // Force a synchronous flush at batch-round boundary so callers
+      // get a guaranteed update even if no new events arrived inside
+      // the 200 ms coalesce window.
       if (onBatch) onBatch(new Map(profiles));
     }
 
-    // Retry pass for missing profiles (smaller batches, longer timeout)
+    // Retry pass for missing profiles (smaller batches, shorter timeout
+    // — relays that didn't have it on the first round usually don't
+    // have it at all, so we only burn 3 s before giving up).
     const missing = pubkeys.filter((pk) => !profiles.has(pk));
     if (missing.length > 0 && missing.length < pubkeys.length && Date.now() < overallDeadline) {
       if (__DEV__)
@@ -425,14 +482,9 @@ export async function fetchProfiles(
       for (let i = 0; i < retryBatches.length; i += concurrency) {
         if (Date.now() > overallDeadline) break;
         const concurrent = retryBatches.slice(i, i + concurrency);
-        const results = await Promise.all(
-          concurrent.map((batch) =>
-            withTimeout(pool.querySync(allRelays, { kinds: [0], authors: batch }), 10000),
-          ),
+        await Promise.all(
+          concurrent.map((batch) => fetchProfilesBatch(batch, allRelays, 3000, ingest)),
         );
-        for (const events of results) {
-          if (events) processEvents(events);
-        }
         if (onBatch) onBatch(new Map(profiles));
       }
     }
