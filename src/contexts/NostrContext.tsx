@@ -31,6 +31,7 @@ import {
 } from '../services/groupRoutingRegistry';
 import { isSyntheticGroupId, syntheticGroupIdForParticipants } from '../utils/syntheticGroupId';
 import { appendGroupMessage, type GroupMessage } from '../services/groupMessagesStorageService';
+import { fireNotification } from '../services/notificationService';
 
 /**
  * Module-level LRU cache for NIP-04 plaintext keyed by event id. Keeps
@@ -245,6 +246,33 @@ async function tryRouteGroupRumor(
     // tick is the practical recovery path; no automatic replay today.
     return { kind: 'group-no-match' };
   }
+
+  // OS notification trigger (#279). Fire-and-forget — the notification
+  // path must NEVER block message persistence. The notificationService:
+  //   - lazily requests permission on first call
+  //   - swallows errors internally
+  //   - applies the user's lock-screen-content privacy preference
+  //   - routes onto the "Messages" Android channel (mute-able from
+  //     system Settings independently of payment notifications)
+  //
+  // TODO(#279): This trigger fires for EVERY routed group rumor,
+  // including ones from the active foreground thread. Suppress when
+  // the user is currently viewing this group (needs an
+  // app-state / current-route signal we don't yet plumb in here).
+  // TODO(#279): Wire the equivalent trigger for 1:1 DM rumors at the
+  // refreshDmInbox call sites (~lines 2034, 2108) once the UX
+  // suppress-when-foreground question is settled.
+  // TODO(#279): Resolve a proper sender display name. We pass the
+  // group name today; per-sender attribution needs a profile lookup
+  // hook from inside this module-scope function (currently only
+  // group + sender pubkey are in scope here).
+  void fireNotification({
+    kind: 'group',
+    title: group.name || 'New group message',
+    body: rumor.content,
+    data: { groupId: group.id },
+  });
+
   return { kind: 'routed' };
 }
 
