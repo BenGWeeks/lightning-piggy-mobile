@@ -69,3 +69,4 @@ Refactors, infra, or pure-UX polish that doesn't correspond to a filed issue can
 
 - See `docs/TROUBLESHOOTING.adoc` for known issues and resolutions
 - When you encounter and resolve a development issue, add it to TROUBLESHOOTING.adoc so future developers (and AI assistants) can reference it
+- If Claude Code's Bash tool starts failing silently (exit 1 or 134 with empty output), run `df -h /tmp` first — a full tmpfs disables Claude Code's shell snapshot; see TROUBLESHOOTING.adoc → "Claude Code Bash tool fails silently … when /tmp is full"
