@@ -31,6 +31,9 @@ import {
 } from '../services/groupRoutingRegistry';
 import { isSyntheticGroupId, syntheticGroupIdForParticipants } from '../utils/syntheticGroupId';
 import { appendGroupMessage, type GroupMessage } from '../services/groupMessagesStorageService';
+import { extractBolt11PaymentHashes } from '../utils/bolt11Hash';
+import * as zapCounterpartyStorage from '../services/zapCounterpartyStorage';
+import type { ZapCounterpartyInfo } from '../types/wallet';
 
 /**
  * Module-level LRU cache for NIP-04 plaintext keyed by event id. Keeps
@@ -1426,6 +1429,36 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // hits a single-point failure the moment that relay is slow.
       const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
       const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
+      const onSent = () => {
+        // DM-bolt11 attribution (#126) — outbound side. If the message
+        // body contains an invoice, record `payment_hash → recipient` so
+        // that when the friend pays it, the incoming wallet tx can be
+        // attributed back to them by the WalletContext zap resolver.
+        const hashes = extractBolt11PaymentHashes(plaintext);
+        if (hashes.length === 0) return;
+        const recipientLc = normalizedRecipientPubkey.toLowerCase();
+        const contact = contacts.find((c) => c.pubkey.toLowerCase() === recipientLc);
+        const info: ZapCounterpartyInfo = {
+          pubkey: recipientLc,
+          profile: contact?.profile
+            ? {
+                npub: contact.profile.npub,
+                name: contact.profile.name,
+                displayName: contact.profile.displayName,
+                picture: contact.profile.picture,
+                nip05: contact.profile.nip05,
+              }
+            : null,
+          comment: '',
+          anonymous: false,
+        };
+        for (const hash of hashes) {
+          attributedBolt11Hashes.current.add(hash);
+          zapCounterpartyStorage
+            .recordOutgoing(hash, info)
+            .catch(() => attributedBolt11Hashes.current.delete(hash));
+        }
+      };
       try {
         const rumor = nostrService.createDirectMessageRumor({
           senderPubkey: pubkey,
@@ -1454,6 +1487,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               error: `Send incomplete — published ${result.wrapsPublished} of ${intended} wraps. ${result.errors[0]}`,
             };
           }
+          onSent();
           return { success: true };
         }
 
@@ -1495,6 +1529,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               error: `Send incomplete — published ${result.wrapsPublished} of ${intended} wraps. ${result.errors[0]}`,
             };
           }
+          onSent();
           return { success: true };
         }
 
@@ -1504,7 +1539,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         return { success: false, error: message };
       }
     },
-    [pubkey, isLoggedIn, signerType, relays],
+    [pubkey, isLoggedIn, signerType, relays, contacts],
   );
 
   /**
@@ -2508,6 +2543,72 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     if (!isLoggedIn) setDmInbox([]);
   }, [isLoggedIn]);
+
+  /**
+   * Tracks payment hashes we've already attributed to a DM counterparty
+   * during this app-session, so the inbox-scan effect doesn't re-write
+   * the same storage entry on every dmInbox / contacts re-render.
+   * Persistent dedup is in `zapCounterpartyStorage` itself — this is just
+   * a per-mount fast-path to skip the load+write cost.
+   */
+  const attributedBolt11Hashes = useRef<Set<string>>(new Set());
+
+  /** Reset the per-session attribution set when identity flips so a
+   * logout / login swap doesn't carry stale hashes across users. */
+  useEffect(() => {
+    attributedBolt11Hashes.current = new Set();
+  }, [pubkey]);
+
+  /**
+   * DM-bolt11 attribution scan (#126). Whenever the dmInbox refreshes,
+   * sweep INBOUND entries for bolt11 invoices and persist
+   * `payment_hash → senderPubkey + profile` to `zapCounterpartyStorage`
+   * so that when the user pays the invoice, the resulting outgoing tx
+   * gets attributed back to the friend who DM'd it (rather than rendering
+   * as an anonymous bolt11 row).
+   *
+   * Outbound attribution (we DM an invoice, friend pays it → incoming
+   * tx attributed to recipient) lives in `sendDirectMessage` below.
+   */
+  useEffect(() => {
+    if (dmInbox.length === 0) return;
+    const contactByPubkey = new Map<string, NostrContact>();
+    for (const c of contacts) contactByPubkey.set(c.pubkey.toLowerCase(), c);
+
+    for (const entry of dmInbox) {
+      // We only attribute the *sender* of an inbound DM. Our own outgoing
+      // DMs are tracked at sendDirectMessage time so we capture the
+      // recipient before the message even leaves the device.
+      if (entry.fromMe) continue;
+      const hashes = extractBolt11PaymentHashes(entry.text);
+      if (hashes.length === 0) continue;
+      const sender = entry.partnerPubkey.toLowerCase();
+      const contact = contactByPubkey.get(sender);
+      const info: ZapCounterpartyInfo = {
+        pubkey: sender,
+        profile: contact?.profile
+          ? {
+              npub: contact.profile.npub,
+              name: contact.profile.name,
+              displayName: contact.profile.displayName,
+              picture: contact.profile.picture,
+              nip05: contact.profile.nip05,
+            }
+          : null,
+        comment: '',
+        anonymous: false,
+      };
+      for (const hash of hashes) {
+        if (attributedBolt11Hashes.current.has(hash)) continue;
+        attributedBolt11Hashes.current.add(hash);
+        // Fire-and-forget: storage failure isn't fatal, the next inbox
+        // refresh will retry (the in-memory dedup set is per-session).
+        zapCounterpartyStorage
+          .recordOutgoing(hash, info)
+          .catch(() => attributedBolt11Hashes.current.delete(hash));
+      }
+    }
+  }, [dmInbox, contacts]);
 
   // Live mirror of `followPubkeys` for the long-lived kind-1059
   // subscription below. The sub captures `followPubkeys` at the time
