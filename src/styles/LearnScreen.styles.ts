@@ -8,10 +8,13 @@ export const createLearnScreenStyles = (colors: Palette) =>
       backgroundColor: colors.background,
     },
     headerBackground: {
-      // Match the pre-#139 fixed 140 px header so the decorative image
-      // shows at the full height the design expects. TabHeader lays out
-      // inside this box at the top; the space below it shows the art.
-      height: 140,
+      // 140 px is the pre-#139 design height that lets the decorative
+      // background image breathe. We use `minHeight` (not a fixed `height`)
+      // so the box grows to fit the new search row added in #151 without
+      // clipping it. When the search input is collapsed the box stays at
+      // 140 px; when expanded the extra row pushes it just below.
+      minHeight: 140,
+      paddingBottom: 8,
       backgroundColor: colors.brandPink,
       overflow: 'hidden',
     },
@@ -21,6 +24,41 @@ export const createLearnScreenStyles = (colors: Palette) =>
     headerOverlay: {
       ...StyleSheet.absoluteFillObject,
       backgroundColor: 'rgba(236, 0, 140, 0.65)', // brandPink with 65% opacity
+    },
+    // Sits below the TabHeader title row, inside the pink header band.
+    // Mirrors the Messages/Friends `headerExtras` + `chipRow` pattern so the
+    // search affordance reads consistently across the four top-level tabs.
+    headerExtras: {
+      paddingHorizontal: 20,
+      paddingTop: 4,
+    },
+    searchRow: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: 'rgba(255,255,255,0.2)',
+      borderRadius: 20,
+      paddingHorizontal: 12,
+      gap: 8,
+    },
+    searchInput: {
+      flex: 1,
+      paddingVertical: 8,
+      fontSize: 15,
+      color: colors.white,
+      fontWeight: '500',
+    },
+    searchToggleRow: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+    },
+    searchToggle: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: 'rgba(255,255,255,0.2)',
+      justifyContent: 'center',
+      alignItems: 'center',
     },
     scrollArea: {
       flex: 1,
@@ -120,6 +158,35 @@ export const createLearnScreenStyles = (colors: Palette) =>
     chipEarnedText: {
       color: colors.greenDark,
       fontSize: 11,
+      fontWeight: '700',
+    },
+    emptyState: {
+      width: '100%',
+      padding: 40,
+      alignItems: 'center',
+      gap: 8,
+    },
+    emptyTitle: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: colors.textHeader,
+      textAlign: 'center',
+    },
+    emptySubtitle: {
+      fontSize: 14,
+      color: colors.textSupplementary,
+      textAlign: 'center',
+    },
+    clearSearchButton: {
+      marginTop: 12,
+      backgroundColor: colors.brandPink,
+      paddingHorizontal: 18,
+      paddingVertical: 10,
+      borderRadius: 100,
+    },
+    clearSearchButtonText: {
+      color: colors.white,
+      fontSize: 13,
       fontWeight: '700',
     },
   });
