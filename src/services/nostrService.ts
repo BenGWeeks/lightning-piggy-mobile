@@ -765,10 +765,10 @@ export async function fetchInboxDmEvents(
 ): Promise<FetchedInboxEvents> {
   const allRelays = [...new Set([...relays, ...DEFAULT_RELAYS])];
   trackRelays(allRelays);
-  // 1000 matches the live-DM-sub cap (subscribeInboxDmsForViewer); both
-  // sit at the typical relay default. Callers can lower with `options.limit`.
-  // (#383)
-  const limit = options.limit ?? 1000;
+  // Default to the same cap the live sub uses, so the two paths can't
+  // drift. Callers can lower with `options.limit` if they want to be
+  // explicit. (#383)
+  const limit = options.limit ?? DM_INBOX_LIMIT;
   // `since` shifted back 2 min (Damus clock-drift pad). Applied only to kind-4 filters below; wraps deliberately skip it (see next comment).
   const since = options.since !== undefined ? Math.max(0, options.since - 120) : undefined;
   const sentK4Filter: Filter = { kinds: [4], authors: [myPubkey], limit };
@@ -1214,7 +1214,10 @@ export type RawInboxDmEvent = RawGiftWrapEvent;
 //    NIP-17 wrap-id cache + the NIP-04 RAM LRU populated by
 //    refreshDmInbox).
 
-const DM_INBOX_LIMIT = 1000;
+// Shared between the live sub (subscribeInboxDmsForViewer) and the bulk
+// fetch (fetchInboxDmEvents) so the two paths can't drift in cap on a
+// future tweak. (#383, Copilot review on PR #384)
+export const DM_INBOX_LIMIT = 1000;
 const DM_INBOX_SINCE_WINDOW_SECONDS = 90 * 24 * 60 * 60; // 90 days
 
 export function subscribeInboxDmsForViewer(input: {
@@ -1223,15 +1226,8 @@ export function subscribeInboxDmsForViewer(input: {
   onEvent: (ev: RawInboxDmEvent) => void;
 }): () => void {
   trackRelays(input.relays);
-  const onevent = (ev: {
-    id: string;
-    kind: number;
-    pubkey: string;
-    tags: string[][];
-    content: string;
-    created_at: number;
-  }): void => {
-    input.onEvent(ev as unknown as RawInboxDmEvent);
+  const onevent = (ev: Parameters<typeof input.onEvent>[0]): void => {
+    input.onEvent(ev);
   };
   const sinceK4 = Math.floor(Date.now() / 1000) - DM_INBOX_SINCE_WINDOW_SECONDS;
   const subK4 = pool.subscribeMany(
