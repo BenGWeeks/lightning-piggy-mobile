@@ -30,12 +30,14 @@ import ContactProfileSheet from '../components/ContactProfileSheet';
 import AttachPanel from '../components/AttachPanel';
 import ConversationComposer from '../components/ConversationComposer';
 import GifPickerSheet from '../components/GifPickerSheet';
+import ImageFilterSheet from '../components/ImageFilterSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
 import SendSheet from '../components/SendSheet';
 import FriendPickerSheet, { PickedFriend } from '../components/FriendPickerSheet';
 import MessageBubble from '../components/MessageBubble';
 import { isConfigured as isGifConfigured, type Gif } from '../services/giphyService';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
+import { applyFilterToImage, type FilterId } from '../utils/imageFilters';
 import {
   getCurrentLocation,
   formatGeoMessage,
@@ -100,6 +102,11 @@ const GroupConversationScreen: React.FC = () => {
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [sharingLocation, setSharingLocation] = useState(false);
+  // After the user picks an image (Camera or Gallery) we hold the local
+  // URI here so `ImageFilterSheet` can preview it. Same pattern as
+  // ConversationScreen — see #138.
+  const [pendingImageUri, setPendingImageUri] = useState<string | null>(null);
+  const [pendingImageBase64, setPendingImageBase64] = useState<string | null>(null);
   // Sheets surfaced by MessageBubble taps. Mirror the 1:1 conversation
   // wiring (ConversationScreen) so the rich-card affordances work the
   // same in groups.
@@ -257,12 +264,19 @@ const GroupConversationScreen: React.FC = () => {
   }, []);
 
   const uploadAndSend = useCallback(
-    async (localUri: string, base64?: string | null) => {
+    async (localUri: string, base64: string | null, filterId: FilterId) => {
       setUploadingImage(true);
       try {
-        const scrubbed = await stripImageMetadata(localUri, base64);
+        // Filter bake (currently a no-op for non-Original — see #138).
+        // Drop the picker base64 if the bake produced new bytes — see
+        // ConversationScreen for the same pattern.
+        const filteredUri = await applyFilterToImage(localUri, filterId);
+        const baseBase64 = filteredUri === localUri ? base64 : null;
+        const scrubbed = await stripImageMetadata(filteredUri, baseBase64);
         const url = await uploadImage(scrubbed.uri, signEvent, scrubbed.base64);
         await sendText(url);
+        setPendingImageUri(null);
+        setPendingImageBase64(null);
       } catch (err) {
         Alert.alert('Upload failed', err instanceof Error ? err.message : 'Please try again.');
       } finally {
@@ -286,8 +300,11 @@ const GroupConversationScreen: React.FC = () => {
       base64: true,
     });
     if (result.canceled || !result.assets?.[0]) return;
-    await uploadAndSend(result.assets[0].uri, result.assets[0].base64);
-  }, [uploadingImage, sending, closeAttachPanel, uploadAndSend]);
+    // Hand off to the filter sheet rather than uploading immediately
+    // (#138). The sheet calls back via `onSend` → `uploadAndSend`.
+    setPendingImageUri(result.assets[0].uri);
+    setPendingImageBase64(result.assets[0].base64 ?? null);
+  }, [uploadingImage, sending, closeAttachPanel]);
 
   const handleTakeAndSendPhoto = useCallback(async () => {
     if (uploadingImage || sending) return;
@@ -303,8 +320,24 @@ const GroupConversationScreen: React.FC = () => {
       base64: true,
     });
     if (result.canceled || !result.assets?.[0]) return;
-    await uploadAndSend(result.assets[0].uri, result.assets[0].base64);
-  }, [uploadingImage, sending, closeAttachPanel, uploadAndSend]);
+    setPendingImageUri(result.assets[0].uri);
+    setPendingImageBase64(result.assets[0].base64 ?? null);
+  }, [uploadingImage, sending, closeAttachPanel]);
+
+  // Filter sheet callbacks. Cancel clears the picked image; Send hands
+  // the (possibly filtered) URI to the existing upload pipeline.
+  const handleFilterCancel = useCallback(() => {
+    if (uploadingImage) return;
+    setPendingImageUri(null);
+    setPendingImageBase64(null);
+  }, [uploadingImage]);
+
+  const handleFilterSend = useCallback(
+    (uri: string, filterId: FilterId) => {
+      void uploadAndSend(uri, pendingImageBase64, filterId);
+    },
+    [pendingImageBase64, uploadAndSend],
+  );
 
   const handleShareLocation = useCallback(async () => {
     if (sharingLocation) return;
@@ -731,6 +764,13 @@ const GroupConversationScreen: React.FC = () => {
         visible={gifPickerOpen}
         onClose={() => setGifPickerOpen(false)}
         onSelect={handleSendGif}
+      />
+
+      <ImageFilterSheet
+        imageUri={pendingImageUri}
+        sending={uploadingImage}
+        onCancel={handleFilterCancel}
+        onSend={handleFilterSend}
       />
 
       <FriendPickerSheet
