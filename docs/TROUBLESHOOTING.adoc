@@ -72,14 +72,16 @@ Empty output = nothing in flight; positive output shows projects ahead of you in
 
 | Release workflow fails on iOS with "Provisioning profile … doesn't include the NFC Tag Reading capability" / "doesn't include the com.apple.developer.nfc.readersession.formats entitlement"
 | Symptom from the failing GH Actions log: `🍏 iOS build failed: The "Run fastlane" step failed because of an error in the Xcode build process` followed by the entitlement-missing lines. Hit by `v1.0.0-rc2` and `v1.0.1-rc1` releases. +
-*Why:* The iOS provisioning profile currently in EAS's credentials store predates the NFC scan/write feature added in PRs #48 / #49. Xcode cross-checks every capability declared in `app.config.ts` (NFC, location, contacts, etc.) against what the profile permits at signing time. The profile doesn't list NFC Tag Reading → build refuses to sign. +
+*Why:* The iOS provisioning profile currently in EAS's credentials store predates the NFC scan/write feature added in PRs #48 / #49. Xcode cross-checks the entitlements written into the build (e.g. `com.apple.developer.nfc.readersession.formats`) against what the profile permits at signing time. The profile doesn't list NFC Tag Reading → build refuses to sign. Only *entitlement-bearing* config-plugins trigger this — in this repo `plugins/withNfc.js` is the only one. Permission-only plugins (`expo-image-picker`, `expo-contacts`, `expo-location`) just add Info.plist usage strings and don't require a profile refresh. +
 *Fix (interactive, ~5 min):* +
 1. Sign in to https://developer.apple.com/account/resources/identifiers (Apple Developer Portal). +
 2. Find Identifier `com.lightningpiggy.app` → tap **Edit** → scroll to capabilities → enable **NFC Tag Reading** (and any other capabilities later added in `app.config.ts` plugins). Save. +
 3. Go to **Profiles** → find the production profile (the one EAS auto-created, named like `*[expo] com.lightningpiggy.app AppStore <date>`) → tap **Edit** → it'll auto-pull the new capability → save → **Download** the regenerated profile (you don't need to install it locally). +
 4. From the local repo: `eas credentials --platform ios` → select the production profile slot → choose to **delete the existing profile and re-fetch from Apple** so EAS picks up the new one. +
 5. Re-run the failed release: GH Actions → Release workflow → **Run workflow** → select platform `ios` → tag `v1.0.1-rc1` (or whatever's blocked). +
-*Prevention:* Whenever you add a capability-requiring plugin to `app.config.ts` (NFC, location, contacts, camera, push notifications, etc.), regenerate the iOS profile **before** cutting the next release. The Deployment Checklist in `docs/DEPLOYMENT.adoc` calls this out as a pre-release step.
+*Prevention:* Whenever you add an *entitlement-bearing* config-plugin to `app.config.ts` (NFC, push notifications, App Groups, Background Modes, etc. — the ones whose plugin actually writes to the iOS entitlements file), regenerate the iOS profile **before** cutting the next release. Permission-string-only plugins (location, contacts, camera/photos) don't require this. The Deployment Checklist in `docs/DEPLOYMENT.adoc` calls this out as a pre-release step.
+
+*Re-running the release after fixing:* Note that GH Actions → Release workflow → **Run workflow** (`workflow_dispatch`) skips the tag-driven version-rewrite step in `release.yml`. Re-running this way against a stale `app.config.ts` (current default `version: '1.0.0'`) can produce a build whose user-visible version doesn't match the intended release tag. Safer paths: re-trigger the original `release` event (re-create or move the tag), or manually update `app.config.ts` `version` before the manual run.
 
 | Maestro can't tap a third-party signer's FAB / button (Aegis, Clave, etc) — `Element not found` or silent no-op
 | Some signer apps (notably Aegis ≥0.5.0, possibly Clave) ship without accessibility labels on key UI elements like the "+" FAB to add a connection. Maestro's `tapOn: { id: ... }` and `tapOn: { text: ... }` both miss because there's nothing to match. The `index:` selector also ranks unpredictably for un-labelled `ImageView` clickables. +
@@ -454,4 +456,52 @@ QT_QPA_PLATFORM=xcb $ANDROID_HOME/emulator/emulator \
 
 | iOS TestFlight upload fails with "Invalid entitlement for core nfc framework... 'NDEF is disallowed'" / "'TAG is missing in the entitlement'"
 | `plugins/withNfc.js` was injecting `com.apple.developer.nfc.readersession.formats = ['NDEF']`, which Apple's at-upload validator started rejecting on iOS SDK >=26 (deployment target 15.1+). The fix is `['TAG']`. NFCTagReaderSession can read/write NDEF via `Tag.queryNDEFStatus()`, and react-native-nfc-manager routes `NfcTech.Ndef` calls through the TAG session under the hood, so `writeNdefMessage()` keeps working unchanged. Symptoms appear ONLY at upload time (build itself succeeds, fastlane pilot fails with `STATE_ERROR.VALIDATION_ERROR (409)`). Distinguish from the *separate* "Provisioning profile doesn't include the NFC Tag Reading capability" error — that one needs the App ID capability toggled in Apple Developer Portal + provisioning profile regenerated; this one is the entitlement *value* in the .ipa.
+
+| Maestro triple-tap (e.g. version label to enable dev mode) silently fails on API 36 emulator
+| Maestro's official supported ceiling is API 34 — three sequential `tapOn` calls on an API 36 image take >1 s end-to-end, exceeding the 1-second window in `handleVersionTap` (and similar in-app tap-counter handlers like add-wallet hot wallet unlock). Symptom: 3 `tapOn`s complete cleanly per Maestro logs but the dev-mode alert never appears. The same flow can also be defeated by an API 36 PackageManager bug that breaks RN dev builds (`Activity class does not exist` on `am start`) — independent of installer attribution, install path, or `adb reboot`. +
+*Fix:* Run E2E + dev work on **API 34**, **`google_apis`** image (NOT `google_play` — saves ~300 MB RAM + the GMS daemons that thrash `system_server`), **`Medium Phone`** device profile (Pixel 9a / Pixel 10 device profiles have a known input-swallowing bug on Linux/macOS/Windows). Bump RAM + heap before first boot so `system_server` doesn't crash under a 150 MB+ RN dev APK install: +
+[source,bash]
+----
+# Install the image once
+$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+  "system-images;android-34;google_apis;x86_64"
+
+# Create the AVD
+echo no | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd \
+  -n LP_API34 -k "system-images;android-34;google_apis;x86_64" \
+  -d "medium_phone" --force
+
+# Bump RAM + heap (default 1.5 GB / 228 MB OOMs on RN dev installs;
+# 4 GB / 1024 MB matches satmo-react-native's validated config)
+sed -i 's/^hw.ramSize=.*/hw.ramSize=4096/' \
+  ~/.android/avd/LP_API34.avd/config.ini
+sed -i 's/^vm.heapSize=.*/vm.heapSize=1024/' \
+  ~/.android/avd/LP_API34.avd/config.ini
+
+# Cold-boot
+$ANDROID_HOME/emulator/emulator -avd LP_API34 \
+  -no-snapshot-load -no-snapshot-save -no-audio -gpu host
+----
+*Disk-space follow-up:* if `adb install` later fails with `INSTALL_FAILED_INSUFFICIENT_STORAGE` (the dev APK + Hermes intermediates need 3-4 GB free), edit `config.ini` to set `disk.dataPartition.size=12G` (default 800M-6G), then cold-boot with `-wipe-data -no-snapshot` (destructive — wipes installed apps + accounts). +
+*Performance bonus:* API 34 lacks the stylus-handwriting service that API 35+ ship, removing one of the two soft-keyboard suppression gates documented above. Re-running `adb shell settings put secure stylus_handwriting_enabled 0` on every cold boot becomes unnecessary. +
+*Reference:* `../satmo-react-native/docs/TROUBLESHOOTING.adoc` — "Emulator with API 36 (Android 16) image refuses to launch the dev build" and "Android emulator System UI isn't responding".
+
+| Pixel device profiles in Android Studio AVD swallow taps (Pixel 9a / Pixel 10)
+| Hardware-profile bug in the Pixel 9a / Pixel 10 device skins — emulator boots and renders fine, app launches and is visible, but mouse clicks (and `adb shell input tap`) are silently dropped. Confirmed cross-platform (Linux / macOS / Windows). The OS image is fine; only the device profile is broken. +
+*Fix:* Delete the Pixel AVD and recreate using the generic **"Medium Phone"** device profile with the same API level. Same OS, working input. +
+*Workaround if you must stay on the Pixel profile:* AVD settings → Graphics → **Software** (not Hardware) → Cold Boot. Works for some configurations, not all. +
+*Reference:* `../satmo-react-native/docs/TROUBLESHOOTING.adoc` — "Mouse clicks / taps don't register in Android emulator (Pixel device profiles)".
+
+| AVD `system_server` crashes / "System UI isn't responding" *after* installing a fresh dev APK
+| Default AVD allocation (RAM 1.5 GB, Dalvik heap 228 MB) is undersized for installing a 150 MB+ React Native dev APK. `kswapd0` burns 40% kernel CPU, `system_server` dies, Binder IPC fails with `No space left on device` (RAM-pressure symptom, NOT disk), every subsequent `adb install` / `pm list packages` / app launch fails until guest reboot. Distinct from the corrupt-overlay entry above — that's after months of use, this is on first install. +
+*Fix:* Bump RAM to 4 GB + Dalvik heap to 1024 MB *before* first boot (Android Studio → Device Manager → edit AVD → Advanced Settings, or edit `~/.android/avd/<AVD>.avd/config.ini` → `hw.ramSize=4096`, `vm.heapSize=1024`, then cold-boot with `-no-snapshot`). Validated against `system_server` crash on 1.5 GB / 228 MB; clean install on 4 GB / 1024 MB. +
+*Prevent recurrence:* use a `google_apis` system image (NOT `google_play`) — drops the Play Store + GMS daemons that consume ~300 MB RAM / 60% CPU. The Play *Services* subset (Google Sign-In, Firebase Auth, FCM) still works; only the storefront and its background daemons are excluded. +
+*Reference:* `../satmo-react-native/docs/TROUBLESHOOTING.adoc` — "Android emulator System UI isn't responding / app stuck on splash" and "AVD `system_server` crashes during `adb install`".
+
+| Claude Code Bash tool fails silently (exit 1 or 134, empty stdout/stderr) when `/tmp` is full
+| Claude Code creates a shell snapshot in `/tmp` at session start; when the volume is full, every Bash tool invocation silently fails. `bash --noprofile --norc -c '…'` and the file-redirect workaround `{ cmd; } > /tmp/out 2>&1; exit 0` also produce no output (the spawned bash never reaches the redirect). `/doctor` does not flag it; only the Write tool surfaces the underlying `ENOSPC` honestly. On a typical Linux dev machine `/tmp` is a tmpfs sized at 50 % of RAM; common culprits are accumulated git worktrees in `/tmp/wt-*` (1-2 GB of `node_modules` each, up to 7+ GB with EAS local-build artifacts), `/tmp/metro-cache`, `/tmp/node-compile-cache`, and signed-but-not-cleaned `*.apk` outputs. +
+*Diagnose:* `df -h /tmp` to confirm full; `du -shx /tmp/* 2>/dev/null \| sort -h \| tail -20` to identify culprits. +
+*Fix:* `rm -rf /tmp/wt-* /tmp/metro-* /tmp/node-compile-cache /tmp/*.apk` (review the list first; these are caches and ephemeral build outputs). Then `git worktree prune` from any repo whose worktrees lived in `/tmp` so the admin entries match reality. Restart Claude Code so it can write a fresh shell snapshot. +
+*Prevent recurrence:* don't create git worktrees in `/tmp` on tmpfs machines. Use `git worktree add ~/.local/share/wt-<name> <branch>` (or `~/wt-*`) — survives reboot and doesn't compete with the tmpfs cap. +
+*False leads to skip:* reinstalling Claude Code, killing leftover `chrome-native-host` processes, removing dangling plugin entries from `~/.claude/settings.json`, switching out of Remote Control mode — none of these fix the underlying full-tmpfs.
 |===

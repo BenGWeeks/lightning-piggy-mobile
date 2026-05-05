@@ -1,0 +1,56 @@
+appId: com.lightningpiggy.app.dev
+name: NIP-17 1:1 DM send (PR #334)
+---
+# Smoke test for PR #334 — verifies the 1:1 DM send path migrated from
+# kind-4 NIP-04 to NIP-17 wraps still produces no "Send failed" alert
+# (#140) and the typed message appears in the open conversation thread.
+# Also covers the Copilot review fix to surface partial-publish failures
+# (only the self-wrap published) instead of treating them as success.
+#
+# Fixture: Big Piggy logged in, sends to Little Piggy. Uses MAESTRO_NSEC
+# (Big Piggy) so a partial-failure path would surface as the Send Alert.
+#
+# Run from the existing app state (do not relaunch — that races the
+# JS bundle load on dev-client builds):
+#   maestro test --env TS=$(date +%H%M%S) tests/e2e/test-nip17-send-1on1.yaml
+
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- assertVisible:
+    id: 'messages-search-toggle'
+
+- scrollUntilVisible:
+    element:
+      text: 'Little Piggy.*'
+    direction: DOWN
+    timeout: 15000
+    visibilityPercentage: 60
+- tapOn:
+    text: 'Little Piggy.*'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'conversation-input'
+- inputText: 'PR334 NIP-17 000622'
+- waitForAnimationToEnd:
+    timeout: 1000
+
+- tapOn:
+    id: 'conversation-send'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Critical: no "Send failed" alert appears (PR #140 + Copilot review #334).
+- assertNotVisible:
+    text: 'Send failed'
+- assertNotVisible:
+    text: 'Send incomplete'
+
+# Optimistic update should put the message in the thread immediately.
+- assertVisible:
+    text: 'PR334 NIP-17 000622'
+
+- takeScreenshot: pr334-nip17-send-success
