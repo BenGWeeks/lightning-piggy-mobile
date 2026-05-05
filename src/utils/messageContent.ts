@@ -2,6 +2,7 @@ import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { decodeProfileReference } from '../services/nostrService';
 import { extractGifUrl } from '../services/giphyService';
 import { parseGeoMessage, SharedLocation } from '../services/locationService';
+import { isPollVoteMessage, parsePoll, type ParsedPoll } from './pollMessage';
 
 // Bolt11 invoices are self-identifying by their `lnXX` HRP, so detection
 // here matches them with or without the `lightning:` prefix.
@@ -118,9 +119,23 @@ export function formatRelativeFuture(epochMs: number): string {
 export type BubbleContent =
   | { kind: 'text'; text: string }
   | { kind: 'gif'; url: string }
-  | { kind: 'location'; location: SharedLocation };
+  | { kind: 'location'; location: SharedLocation }
+  | { kind: 'poll'; poll: ParsedPoll }
+  // Vote messages render as nothing in the conversation list — they're
+  // already aggregated into the referenced poll's tally. Marking the kind
+  // explicitly (rather than dropping at the items level) lets the parent
+  // keep upstream message bookkeeping simple while the bubble decides to
+  // render `null`. Foreign clients still see them as plain text.
+  | { kind: 'pollVote' };
 
 export function classifyMessageContent(text: string): BubbleContent {
+  // Poll detection runs before generic url / geo parsing because the
+  // [POLL] header is unambiguous and cheap to check, and we don't want
+  // a poll body that happens to mention a GIF URL or `geo:` link to
+  // re-route into a different bubble variant.
+  const poll = parsePoll(text);
+  if (poll) return { kind: 'poll', poll };
+  if (isPollVoteMessage(text)) return { kind: 'pollVote' };
   const gifUrl = extractGifUrl(text);
   if (gifUrl) return { kind: 'gif', url: gifUrl };
   const loc = parseGeoMessage(text);

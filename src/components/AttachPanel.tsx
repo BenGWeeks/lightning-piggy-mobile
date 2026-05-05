@@ -1,6 +1,15 @@
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { MapPin, Zap, Receipt, UserRound, ImagePlus, Camera, Smile } from 'lucide-react-native';
+import {
+  MapPin,
+  Zap,
+  Receipt,
+  UserRound,
+  ImagePlus,
+  Camera,
+  Smile,
+  BarChart3,
+} from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 
@@ -25,6 +34,10 @@ interface Props {
   onSendImage?: () => void;
   onTakePhoto?: () => void;
   onSendGif?: () => void;
+  // Optional: opens the PollComposerSheet. Omitted (= tile hidden) when
+  // the host chat doesn't support polls — currently always available
+  // when the rest of the composer is, so the tile is shown by default.
+  onSharePoll?: () => void;
 }
 
 interface Tile {
@@ -55,6 +68,7 @@ const AttachPanel: React.FC<Props> = ({
   onSendImage,
   onTakePhoto,
   onSendGif,
+  onSharePoll,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -125,6 +139,14 @@ const AttachPanel: React.FC<Props> = ({
         onPress: onShareContact,
         testID: 'attach-share-contact',
         accessibilityLabel: "Share a contact's profile",
+      },
+      onSharePoll && {
+        key: 'poll',
+        label: 'Poll',
+        icon: <BarChart3 size={26} color={colors.white} />,
+        onPress: onSharePoll,
+        testID: 'attach-share-poll',
+        accessibilityLabel: 'Share a poll for the recipient to vote on',
       },
     ] as (Tile | false | undefined)[]
   ).filter((t): t is Tile => Boolean(t));

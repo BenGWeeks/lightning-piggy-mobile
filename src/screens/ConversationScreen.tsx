@@ -33,6 +33,7 @@ import SendSheet from '../components/SendSheet';
 import AttachPanel from '../components/AttachPanel';
 import ConversationComposer from '../components/ConversationComposer';
 import GifPickerSheet from '../components/GifPickerSheet';
+import PollComposerSheet from '../components/PollComposerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
 import MessageBubble from '../components/MessageBubble';
 import TransactionDetailSheet, {
@@ -63,6 +64,15 @@ import {
   extractSharedContact,
   formatTime,
 } from '../utils/messageContent';
+import {
+  aggregateVotes,
+  buildVoteMessage,
+  parsePoll,
+  parseVote,
+  type ParsedPoll,
+  type PollAggregate,
+  type PollVoteRecord,
+} from '../utils/pollMessage';
 
 type ConversationRoute = RouteProp<RootStackParamList, 'Conversation'>;
 type ConversationNavigation = NativeStackNavigationProp<RootStackParamList, 'Conversation'>;
@@ -96,6 +106,13 @@ type Item =
       id: string;
       fromMe: boolean;
       url: string;
+      createdAt: number;
+    }
+  | {
+      kind: 'poll';
+      id: string;
+      fromMe: boolean;
+      poll: ParsedPoll;
       createdAt: number;
     }
   | {
@@ -143,6 +160,7 @@ const ConversationScreen: React.FC = () => {
     signEvent,
     contacts,
     relays,
+    pubkey: myPubkey,
   } = useNostr();
   const { wallets, activeWalletId, activeWallet } = useWallet();
 
@@ -207,6 +225,7 @@ const ConversationScreen: React.FC = () => {
   const [invoiceSheetOpen, setInvoiceSheetOpen] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
+  const [pollComposerOpen, setPollComposerOpen] = useState(false);
   const [fullscreenGifUrl, setFullscreenGifUrl] = useState<string | null>(null);
   const [sharingLocation, setSharingLocation] = useState(false);
   // Payment hashes of outgoing invoices the active NWC wallet reports paid.
@@ -236,37 +255,56 @@ const ConversationScreen: React.FC = () => {
   }, [wallets, pubkey]);
 
   const items = useMemo<Item[]>(() => {
-    const msgItems: TimedItem[] = messages.map((m) => {
+    const msgItems: TimedItem[] = [];
+    for (const m of messages) {
       // Classify each raw DM into the variant the renderer expects. Same
       // shape used by the group screen (via `classifyMessageContent`)
-      // — keeps gif / geo detection in one place.
+      // — keeps gif / geo / poll detection in one place.
       const classified = classifyMessageContent(m.text);
+      if (classified.kind === 'pollVote') {
+        // Vote messages aren't shown as bubbles — they're aggregated into
+        // the referenced poll's tally below. Skip the items array entirely
+        // so the FlatList doesn't even render an empty row.
+        continue;
+      }
       if (classified.kind === 'gif') {
-        return {
+        msgItems.push({
           kind: 'gif',
           id: `dm-${m.id}`,
           fromMe: m.fromMe,
           url: classified.url,
           createdAt: m.createdAt,
-        };
+        });
+        continue;
       }
       if (classified.kind === 'location') {
-        return {
+        msgItems.push({
           kind: 'location',
           id: `dm-${m.id}`,
           fromMe: m.fromMe,
           location: classified.location,
           createdAt: m.createdAt,
-        };
+        });
+        continue;
       }
-      return {
+      if (classified.kind === 'poll') {
+        msgItems.push({
+          kind: 'poll',
+          id: `dm-${m.id}`,
+          fromMe: m.fromMe,
+          poll: classified.poll,
+          createdAt: m.createdAt,
+        });
+        continue;
+      }
+      msgItems.push({
         kind: 'message',
         id: `dm-${m.id}`,
         fromMe: m.fromMe,
         text: m.text,
         createdAt: m.createdAt,
-      };
-    });
+      });
+    }
     // Descending order — index 0 is newest. The FlatList is `inverted`, so
     // index 0 renders at the visual bottom (chat default) and the
     // RefreshControl attaches to the visual bottom too, which is what
@@ -305,6 +343,46 @@ const ConversationScreen: React.FC = () => {
     }
     return withHeaders;
   }, [messages, zapItems]);
+
+  // Poll aggregates, keyed by poll-message id. Recomputed when the
+  // messages array changes (votes are conversation messages too, so
+  // every new vote triggers this) — cheap because each poll/vote is a
+  // single regex check + a small Map insert. The viewer pubkey lets the
+  // bubble light up the user's own selection on incoming polls.
+  //
+  // 1:1 wrinkle: the local user's optimistic-append uses a synthetic
+  // `local-…` id rather than their actual hex pubkey. Two names so we
+  // accept votes posted under either label as "mine" (otherwise voting
+  // immediately after the page mounts wouldn't tick the row).
+  const pollAggregates = useMemo<Map<string, PollAggregate>>(() => {
+    const polls: { id: string; poll: ParsedPoll }[] = [];
+    const votes: PollVoteRecord[] = [];
+    for (const m of messages) {
+      const p = parsePoll(m.text);
+      if (p) {
+        polls.push({ id: `dm-${m.id}`, poll: p });
+        continue;
+      }
+      const v = parseVote(m.text);
+      if (v) {
+        // Vote messages can come from either party in a 1:1: outgoing
+        // local optimistic appends (`fromMe=true`) carry the local
+        // viewer's identity even before the rumor lands; incoming
+        // appends are the peer's vote. We don't have per-message
+        // pubkeys on this side, so we synthesise a stable string per
+        // direction. That's enough for the aggregator to treat each
+        // side as one voter (last-write-wins) — exactly the semantics
+        // a 1:1 conversation needs.
+        votes.push({
+          pollId: v.pollId,
+          voter: m.fromMe ? (myPubkey ?? '_me') : `peer:${pubkey}`,
+          optionId: v.optionId,
+          createdAt: m.createdAt,
+        });
+      }
+    }
+    return aggregateVotes(polls, votes, myPubkey ?? '_me');
+  }, [messages, myPubkey, pubkey]);
 
   // Mount/unmount tracker so the async `load()` below can bail when
   // the user navigates back mid-fetch. Without this, every back-press
@@ -807,6 +885,61 @@ const ConversationScreen: React.FC = () => {
     });
   }, []);
 
+  // Poll send: serialised body comes from PollComposerSheet's onSend.
+  // Returns success so the sheet knows whether to dismiss; we mirror the
+  // GIF/contact pattern for the optimistic local-append.
+  const handleSendPoll = useCallback(
+    async (pollBody: string): Promise<boolean> => {
+      const result = await sendDirectMessage(pubkey, pollBody);
+      if (!result.success) {
+        Alert.alert('Send failed', result.error ?? 'Could not send poll.');
+        return false;
+      }
+      const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: localId,
+          fromMe: true,
+          text: pollBody,
+          createdAt: Math.floor(Date.now() / 1000),
+        },
+      ]);
+      return true;
+    },
+    [pubkey, sendDirectMessage],
+  );
+
+  // Poll vote: tapping an option row sends a `[POLL_VOTE] <pollId> <optId>`
+  // follow-up DM. The pollId is the bubble's id (`dm-…` for relay rumors,
+  // `local-…` for optimistic outgoing) — same string the bubble lookups
+  // pollAggregates by, so the renderer reflects the new tally as soon as
+  // the optimistic-append lands.
+  const handleVotePoll = useCallback(
+    async (pollId: string, optionId: number) => {
+      const payload = buildVoteMessage(pollId, optionId);
+      const result = await sendDirectMessage(pubkey, payload);
+      if (!result.success) {
+        // Vote failure is rare and silent-Toast would feel insufficient
+        // for "your vote didn't actually count". Use an Alert so the
+        // user knows to retry.
+        Alert.alert('Vote failed', result.error ?? 'Could not record your vote.');
+        return;
+      }
+      const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: localId,
+          fromMe: true,
+          text: payload,
+          createdAt: Math.floor(Date.now() / 1000),
+        },
+      ]);
+    },
+    [pubkey, sendDirectMessage],
+  );
+
   const handlePayInvoice = useCallback((raw: string) => {
     setInvoiceToPay(raw);
     setSendSheetOpen(true);
@@ -871,15 +1004,18 @@ const ConversationScreen: React.FC = () => {
       }
       // Map the local Item shape to MessageBubble's `BubbleContent`. The
       // Items array was already classified upstream (see the items useMemo
-      // that calls extractGifUrl + parseGeoMessage when assembling) so this
-      // is a flat re-tag — MessageBubble handles the remaining text-format
-      // detection (image / invoice / lnaddr / contact) on render.
+      // that calls extractGifUrl + parseGeoMessage / parsePoll when
+      // assembling) so this is a flat re-tag — MessageBubble handles the
+      // remaining text-format detection (image / invoice / lnaddr /
+      // contact) on render. Vote messages were filtered out upstream.
       const content =
         item.kind === 'gif'
           ? ({ kind: 'gif', url: item.url } as const)
           : item.kind === 'location'
             ? ({ kind: 'location', location: item.location } as const)
-            : ({ kind: 'text', text: item.text } as const);
+            : item.kind === 'poll'
+              ? ({ kind: 'poll', poll: item.poll } as const)
+              : ({ kind: 'text', text: item.text } as const);
       return (
         <MessageBubble
           id={item.id}
@@ -893,6 +1029,8 @@ const ConversationScreen: React.FC = () => {
           onOpenContact={openSharedContact}
           onOpenLocation={openLocation}
           onOpenGifFullscreen={setFullscreenGifUrl}
+          pollAggregates={pollAggregates}
+          onVotePoll={handleVotePoll}
           testIdPrefix="conversation"
         />
       );
@@ -903,6 +1041,8 @@ const ConversationScreen: React.FC = () => {
       sharedProfiles,
       openSharedContact,
       handlePayInvoice,
+      pollAggregates,
+      handleVotePoll,
       styles,
       colors,
     ],
@@ -1126,6 +1266,13 @@ const ConversationScreen: React.FC = () => {
                     }
                   : undefined
               }
+              onSharePoll={() => {
+                // Composer opens over the AttachPanel — close the panel
+                // first so the BottomSheet snaps without competing for
+                // touch focus with the visible attach grid behind it.
+                closeAttachPanel();
+                setPollComposerOpen(true);
+              }}
             />
           }
         />
@@ -1137,6 +1284,11 @@ const ConversationScreen: React.FC = () => {
           setAttachPanelOpen(false);
         }}
         onSelect={handleSendGif}
+      />
+      <PollComposerSheet
+        visible={pollComposerOpen}
+        onClose={() => setPollComposerOpen(false)}
+        onSend={handleSendPoll}
       />
       <Modal
         visible={fullscreenGifUrl !== null}
