@@ -985,6 +985,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             if (!tx.paymentHash || !tx.bolt11) continue;
             if (byHash.has(tx.paymentHash)) continue;
             await zapCounterpartyStorage.recordOutgoingMiss(tx.paymentHash);
+            // Mirror the freshly-persisted negative into the in-memory map so the resolver loop below treats this tx as resolved this pass instead of leaving it `undefined` until the next refresh — closes the "one extra attribution pass per miss" gap Copilot flagged.
+            byHash.set(tx.paymentHash, null);
           }
         }
 

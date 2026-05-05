@@ -93,7 +93,15 @@ export async function recordOutgoingMiss(paymentHash: string): Promise<void> {
 async function record(paymentHash: string, info: ZapCounterpartyInfo | null): Promise<void> {
   if (!paymentHash) return;
   const cache = await load();
-  cache[paymentHash] = { info, savedAt: Date.now() };
+  // Prune stale negatives opportunistically — they're filtered out of every read path, so keeping them around just eats slots toward MAX_ENTRIES and risks evicting still-useful positive attributions when the cache fills.
+  const now = Date.now();
+  for (const k of Object.keys(cache)) {
+    const e = cache[k];
+    if (e.info === null && now - e.savedAt > NEGATIVE_TTL_MS) {
+      delete cache[k];
+    }
+  }
+  cache[paymentHash] = { info, savedAt: now };
 
   const keys = Object.keys(cache);
   if (keys.length > MAX_ENTRIES) {
