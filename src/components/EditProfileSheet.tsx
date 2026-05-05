@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
@@ -233,7 +234,18 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
         </TouchableOpacity>
 
         <Text style={styles.label}>Display Name</Text>
-        <BottomSheetTextInput
+        {/*
+          Plain RN TextInput rather than BottomSheetTextInput. Issue #146:
+          Maestro's `inputText` drops characters when typing into
+          @gorhom/bottom-sheet's BottomSheetTextInput under the New
+          Architecture (testID lands on the wrapper View, not the native
+          EditText). Exercised by `tests/e2e/test-edit-profile.yaml`.
+          The `edit-about` field below stays as BottomSheetTextInput —
+          it is not driven by Maestro `inputText`. Keyboard tracking for
+          the sheet is preserved by its `keyboardBehavior="interactive"`
+          + `android_keyboardInputMode="adjustResize"` props.
+        */}
+        <TextInput
           style={styles.input}
           placeholder="Your name"
           placeholderTextColor={colors.textSupplementary}
@@ -246,7 +258,8 @@ const EditProfileSheet: React.FC<Props> = ({ visible, onClose }) => {
         />
 
         <Text style={styles.label}>Lightning Address</Text>
-        <BottomSheetTextInput
+        {/* Plain RN TextInput — see comment on edit-display-name above (#146). */}
+        <TextInput
           style={styles.input}
           placeholder="you@wallet.com"
           placeholderTextColor={colors.textSupplementary}

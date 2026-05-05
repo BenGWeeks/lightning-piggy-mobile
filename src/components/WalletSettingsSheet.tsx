@@ -1,5 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform, Keyboard } from 'react-native';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  Platform,
+  Keyboard,
+} from 'react-native';
 import { Alert } from './BrandedAlert';
 import {
   BottomSheetModal,
@@ -185,7 +193,19 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         {wallet.walletType === 'nwc' && (
           <>
             <Text style={[styles.label, { marginTop: 20 }]}>Lightning Address</Text>
-            <BottomSheetTextInput
+            {/*
+              Plain RN TextInput rather than BottomSheetTextInput. Issue #146:
+              Maestro's `inputText` drops characters when typing into
+              @gorhom/bottom-sheet's BottomSheetTextInput under the New
+              Architecture (testID lands on the wrapper View, not the native
+              EditText). Exercised by `tests/e2e/test-set-lightning-address.yaml`.
+              The wallet `Alias` input above stays as BottomSheetTextInput —
+              it has no testID and is not driven by Maestro `inputText`.
+              Keyboard tracking for the sheet is preserved by its
+              `keyboardBehavior="interactive"` +
+              `android_keyboardInputMode="adjustResize"` props.
+            */}
+            <TextInput
               style={styles.input}
               value={lnAddress}
               onChangeText={setLnAddress}

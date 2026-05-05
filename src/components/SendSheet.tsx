@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   ActivityIndicator,
   BackHandler,
@@ -14,7 +15,6 @@ import {
   BottomSheetModal,
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
-  BottomSheetTextInput,
   BottomSheetScrollView,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
@@ -774,7 +774,20 @@ const SendSheet: React.FC<Props> = ({
                   </View>
                 ) : (
                   <View style={styles.pasteSection}>
-                    <BottomSheetTextInput
+                    {/*
+                      Plain RN TextInput rather than BottomSheetTextInput.
+                      Issue #146: Maestro's `inputText` drops characters
+                      when typing into @gorhom/bottom-sheet's
+                      BottomSheetTextInput under the New Architecture
+                      (testID lands on the wrapper View, not the native
+                      EditText). Exercised by
+                      `tests/e2e/test-branded-alert.yaml` (paste a bad
+                      bolt11 to surface the validation Alert).
+                      Keyboard tracking for the sheet is preserved by its
+                      `keyboardBehavior="interactive"` +
+                      `android_keyboardInputMode="adjustResize"` props.
+                    */}
+                    <TextInput
                       style={styles.pasteInput}
                       placeholder="Paste invoice, lightning or bitcoin address..."
                       placeholderTextColor={colors.textSupplementary}
@@ -897,8 +910,18 @@ const SendSheet: React.FC<Props> = ({
                   )}
 
                   {/* Memo / comment field for Lightning address payments */}
+                  {/*
+                    Plain RN TextInput rather than BottomSheetTextInput.
+                    Issue #146: Maestro's `inputText` drops characters
+                    when typing into @gorhom/bottom-sheet's
+                    BottomSheetTextInput under the New Architecture.
+                    Exercised by `tests/e2e/test-sendsheet-typing.yaml`.
+                    Keyboard tracking is preserved by the sheet's
+                    `keyboardBehavior="interactive"` +
+                    `android_keyboardInputMode="adjustResize"` props.
+                  */}
                   {needsAmount && (
-                    <BottomSheetTextInput
+                    <TextInput
                       style={styles.memoInput}
                       placeholder={activePubkey ? 'Zap message (optional)' : 'Comment (optional)'}
                       placeholderTextColor={colors.textSupplementary}

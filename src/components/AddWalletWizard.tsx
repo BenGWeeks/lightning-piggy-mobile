@@ -2,6 +2,7 @@ import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
@@ -10,12 +11,7 @@ import {
 } from 'react-native';
 import { Alert } from './BrandedAlert';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import {
-  BottomSheetModal,
-  BottomSheetBackdrop,
-  BottomSheetScrollView,
-  BottomSheetTextInput,
-} from '@gorhom/bottom-sheet';
+import { BottomSheetModal, BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import { useWallet } from '../contexts/WalletContext';
@@ -362,7 +358,23 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                 <Text style={styles.description}>
                   Paste or scan your Nostr Wallet Connect (NWC) connection string.
                 </Text>
-                <BottomSheetTextInput
+                {/*
+                  Plain RN TextInput rather than BottomSheetTextInput. Issue
+                  #146: Maestro's `inputText` drops characters when typing
+                  into @gorhom/bottom-sheet's BottomSheetTextInput under the
+                  New Architecture (testID lands on the wrapper View, not
+                  the native EditText). This wizard's four inputs
+                  (`nwc-url-input`, `xpub-input`, `mnemonic-input`,
+                  `wallet-alias-input`) are all exercised by Maestro
+                  `inputText` flows (`tests/e2e/test-add-nwc-wallet*.yaml`,
+                  `test-add-onchain-wallet.yaml`,
+                  `test-revolut-xapo-cards.yaml`,
+                  `test-add-hot-wallet.yaml`). Keyboard tracking is
+                  preserved by the wizard sheet's
+                  `keyboardBehavior="interactive"` +
+                  `android_keyboardInputMode="adjustResize"` props.
+                */}
+                <TextInput
                   style={styles.nwcInput}
                   placeholder="nostr+walletconnect://..."
                   placeholderTextColor={colors.textSupplementary}
@@ -449,7 +461,8 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                   Paste or scan an extended public key (xpub, ypub, or zpub) to track a whole HD
                   wallet, or a single Bitcoin address (bc1…, 1…, 3…) to watch just that one.
                 </Text>
-                <BottomSheetTextInput
+                {/* Plain RN TextInput — see comment on nwc-url-input above (#146). */}
+                <TextInput
                   style={styles.nwcInput}
                   placeholder="xpub6… or bc1q…"
                   placeholderTextColor={colors.textSupplementary}
@@ -497,7 +510,8 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
               Enter your 12 or 24 word seed phrase. Numbers, colons, and extra whitespace will be
               stripped automatically.
             </Text>
-            <BottomSheetTextInput
+            {/* Plain RN TextInput — see comment on nwc-url-input above (#146). */}
+            <TextInput
               style={[styles.nwcInput, { minHeight: 100 }]}
               placeholder="word1 word2 word3 ..."
               placeholderTextColor={colors.textSupplementary}
@@ -538,7 +552,8 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
             <Text style={styles.description}>
               Give this wallet a name so you can easily identify it.
             </Text>
-            <BottomSheetTextInput
+            {/* Plain RN TextInput — see comment on nwc-url-input above (#146). */}
+            <TextInput
               style={styles.aliasInput}
               placeholder="e.g. My Savings, Spending Wallet"
               placeholderTextColor={colors.textSupplementary}
