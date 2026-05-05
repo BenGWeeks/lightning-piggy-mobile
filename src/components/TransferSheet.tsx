@@ -29,6 +29,15 @@ import { WalletState } from '../types/wallet';
 import * as onchainService from '../services/onchainService';
 import * as boltzService from '../services/boltzService';
 import AmountEntryScreen from './AmountEntryScreen';
+import { Check, Circle, X as XIcon } from 'lucide-react-native';
+import {
+  TransferProgress,
+  advanceTransfer,
+  completeTransfer,
+  failTransfer,
+  idleProgress,
+  startTransfer,
+} from '../utils/transferPhase';
 
 interface Props {
   visible: boolean;
@@ -60,6 +69,12 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const [step, setStep] = useState<Step>('main');
   const [sending, setSending] = useState(false);
   const [progressMsg, setProgressMsg] = useState<string | null>(null);
+  // Issue #62: step-by-step progress display. While `progress.phase`
+  // is anything other than 'idle' the form is replaced by a checklist
+  // showing which step is active / done / failed. The legacy
+  // `progressMsg` is preserved as a sublabel under the active row so
+  // the rich Boltz "swap underway" copy still reaches the user.
+  const [progress, setProgress] = useState<TransferProgress>(() => idleProgress());
   // true once the foreground work is done and the background task has the
   // swap — the sheet becomes a "done, safe to close" confirmation state.
   const [handedOff, setHandedOff] = useState(false);
@@ -225,6 +240,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       setSending(false);
       setHandedOff(false);
       setProgressMsg(null);
+      setProgress(idleProgress());
       setBackgroundError(null);
       setRetryingRecovery(false);
       setRecoveryAcked(false);
@@ -269,6 +285,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
 
   const handleTransfer = async () => {
     if (!sourceId || !destId || !source || !dest || currentSats <= 0) return;
+    if (!transferType) return;
 
     // Local flag shadowing the `handedOff` state — React setState is async,
     // so setHandedOff(true) before return doesn't update the `handedOff`
@@ -357,6 +374,11 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
 
     setSending(true);
     setProgressMsg('Preparing transfer...');
+    // Seed the step-by-step progress display (issue #62). Subsequent
+    // setProgress(advanceTransfer(...)) calls walk the active row down
+    // the list as each underlying step resolves; the existing
+    // setProgressMsg(...) calls keep the per-step sublabel in sync.
+    setProgress(startTransfer(transferType));
     console.log(
       `[Transfer] Starting ${transferType}: ${currentSats} sats from ${source.alias} to ${dest.alias}`,
     );
@@ -386,8 +408,10 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       if (transferType === 'ln-to-ln') {
         setProgressMsg('Creating invoice...');
         const invoice = await makeInvoiceForWallet(destId, currentSats, 'Transfer');
+        setProgress((p) => advanceTransfer(p)); // invoice → pay
         setProgressMsg('Sending payment...');
         await payInvoiceForWallet(sourceId, invoice);
+        setProgress((p) => advanceTransfer(p)); // pay → refresh
       } else if (transferType === 'ln-to-onchain') {
         // Full Boltz reverse swap: LN → on-chain.
         // Foreground: create swap, persist, dispatch LN payment, dismiss sheet.
@@ -395,6 +419,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         setProgressMsg('Creating Boltz swap...');
         const address = await onchainService.getNextReceiveAddress(destId);
         const swap = await boltzService.createReverseSwap(address, currentSats);
+        setProgress((p) => advanceTransfer(p)); // swap → handoff
 
         // Persist full swap state so the claim can be recovered if the
         // app crashes, is force-stopped, or the background task dies.
@@ -488,6 +513,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             "Safe to close — you'll get a notification when the swap completes. " +
             'Progress also appears in your transaction history.',
         );
+        setProgress((p) => completeTransfer(p));
         didHandOff = true;
         setHandedOff(true);
         return;
@@ -511,6 +537,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
           }),
         );
 
+        setProgress((p) => advanceTransfer(p)); // swap → broadcast
         // Foreground: broadcast the on-chain tx (the user's action).
         // Background: wait for Boltz to pay the LN invoice, handle refund path.
         setProgressMsg('Broadcasting on-chain transaction...');
@@ -518,6 +545,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
           `[Transfer] Sending ${swap.expectedAmount} sats on-chain to Boltz address ${swap.address}`,
         );
         await onchainService.sendTransaction(sourceId, swap.address, swap.expectedAmount);
+        setProgress((p) => advanceTransfer(p)); // broadcast → handoff
         const submarineAmount = swap.expectedAmount;
         (async () => {
           try {
@@ -600,6 +628,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             "Safe to close — you'll get a notification when the swap completes. " +
             'Progress also appears in your transaction history.',
         );
+        setProgress((p) => completeTransfer(p));
         didHandOff = true;
         setHandedOff(true);
         return;
@@ -607,6 +636,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         setProgressMsg('Sending on-chain transaction...');
         const address = await onchainService.getNextReceiveAddress(destId);
         await onchainService.sendTransaction(sourceId, address, currentSats);
+        setProgress((p) => advanceTransfer(p)); // broadcast → refresh
       }
 
       setProgressMsg('Refreshing wallets...');
@@ -623,6 +653,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         console.warn('Post-transfer refresh failed — pull to refresh');
       }
 
+      setProgress((p) => completeTransfer(p));
+
       // Only ln-to-ln and onchain-to-onchain reach here — Boltz paths return
       // early after handing off to the background task.
       const settleMsg =
@@ -633,6 +665,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       Alert.alert('Transfer Complete', settleMsg, [{ text: 'OK', onPress: onClose }]);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Transfer failed';
+      setProgress((p) => failTransfer(p, message));
       // "Cannot read property 'reload' of undefined" comes from
       // react-native's HMRClient when Metro drops the dev-client
       // connection. It is NOT a transfer failure — nothing was signed
@@ -749,19 +782,62 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                       : ''}
                   </Text>
                 )}
-                <View style={styles.progressContainer}>
-                  {/* Hide spinner whenever the background errored — even
-                      after the retry succeeded. Re-enabling it would
-                      misrepresent the "Recovery retried" state as still
-                      running. Explicit `=== null` rather than `!x`
-                      because Error.message can be empty string and we
-                      want to suppress the spinner whenever the error
-                      slot is set, regardless of message length. */}
-                  {backgroundError === null && (
-                    <ActivityIndicator size="small" color={colors.brandPink} />
-                  )}
-                  <Text style={styles.progressText}>{progressMsg}</Text>
+                {/* Step-by-step status (issue #62). Walks the steps for the
+                    current transferType and renders ✓ / spinner / ○ per row.
+                    The legacy `progressMsg` becomes a sublabel under the
+                    active row so the rich Boltz "swap underway / safe to
+                    close" copy still surfaces. */}
+                <View style={styles.stepList} testID="transfer-step-list">
+                  {progress.steps.map((s, idx) => {
+                    const isComplete = progress.phase === 'done' || idx < progress.activeIndex;
+                    const isFailed = progress.phase === 'failed' && idx === progress.activeIndex;
+                    const isActive =
+                      progress.phase === 'in-progress' &&
+                      idx === progress.activeIndex &&
+                      backgroundError === null;
+                    const status: 'complete' | 'failed' | 'active' | 'pending' = isComplete
+                      ? 'complete'
+                      : isFailed
+                        ? 'failed'
+                        : isActive
+                          ? 'active'
+                          : 'pending';
+                    return (
+                      <View
+                        key={s.id}
+                        style={styles.stepRow}
+                        testID={`transfer-step-${s.id}`}
+                        accessibilityLabel={`${s.label} ${status}`}
+                      >
+                        <View style={styles.stepIcon}>
+                          {status === 'complete' ? (
+                            <Check size={20} color={colors.brandPink} />
+                          ) : status === 'failed' ? (
+                            <XIcon size={20} color={colors.red} />
+                          ) : status === 'active' ? (
+                            <ActivityIndicator size="small" color={colors.brandPink} />
+                          ) : (
+                            <Circle size={20} color={colors.textSupplementary} />
+                          )}
+                        </View>
+                        <Text
+                          style={[
+                            styles.stepLabel,
+                            status === 'pending' && styles.stepLabelPending,
+                            status === 'failed' && styles.stepLabelFailed,
+                          ]}
+                        >
+                          {s.label}
+                        </Text>
+                      </View>
+                    );
+                  })}
                 </View>
+                {progressMsg && (
+                  <Text style={styles.progressText} testID="transfer-progress-msg">
+                    {progressMsg}
+                  </Text>
+                )}
                 {backgroundError !== null && !recoveryAcked && (
                   <TouchableOpacity
                     style={[styles.closeButton, retryingRecovery && styles.closeButtonDisabled]}
@@ -824,6 +900,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                   style={styles.closeButton}
                   onPress={onClose}
                   accessibilityLabel="Close"
+                  testID="transfer-progress-close"
                 >
                   <Text style={styles.closeButtonText}>Close</Text>
                 </TouchableOpacity>
