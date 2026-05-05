@@ -1275,8 +1275,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             // The balance refresh feeds the generic balance-diff
             // detector as a fallback; run it every tick so a flaky
             // lookup_invoice path still settles detection.
+            //
+            // Tighter timeout than the SDK default (10 s): the poll
+            // tick is 1 s, so a 2.5 s ceiling means at most ~2 ticks
+            // are waiting on any single getBalance reply. Without it,
+            // a single stalled relay reply can blow ~10 s of latency
+            // into payment-detection vs WoS (#133).
             (async () => {
-              const b = await nwcService.getBalance(walletId);
+              const b = await nwcService.getBalance(walletId, { replyTimeoutMs: 2500 });
               if (b !== null) updateWalletInState(walletId, { balance: b });
             })(),
           ]);
