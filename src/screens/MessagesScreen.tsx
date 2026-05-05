@@ -6,10 +6,12 @@ import {
   TouchableOpacity,
   RefreshControl,
   InteractionManager,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import TabBackgroundImage from '../components/TabBackgroundImage';
-import { FlashList } from '@shopify/flash-list';
+import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import Svg, { Path } from 'react-native-svg';
 import { Users, Clock, Search, X } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -71,7 +73,11 @@ const MessagesScreen: React.FC = () => {
     refreshDmInbox,
   } = useNostr();
   const { wallets } = useWallet();
-  const { groupSummaries } = useGroups();
+  const { groupSummaries, followingOnly, setFollowingOnly, devMode } = useGroups();
+  // Production hard-lock: filter is always enforced unless devMode AND followingOnly=off.
+  const enforceFollowingOnly = followingOnly || !devMode;
+  // Tracks last applied value so toggling triggers a data-layer refresh, not just a UI re-filter.
+  const lastAppliedEnforceRef = useRef<boolean>(true);
   const [search, setSearch] = useState('');
   const [searchExpanded, setSearchExpanded] = useState(false);
   const searchInputRef = useRef<TextInput>(null);
@@ -128,13 +134,20 @@ const MessagesScreen: React.FC = () => {
   // for any wraps that arrive while the user was inside a group.
   const dmInboxLastRefreshAt = useRef<number>(0);
   const DM_INBOX_REFRESH_TTL_MS = 30_000;
+  // Force-refresh the inbox whenever the effective enforcement flips so all data-layer paths re-apply.
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    if (lastAppliedEnforceRef.current === enforceFollowingOnly) return;
+    lastAppliedEnforceRef.current = enforceFollowingOnly;
+    refreshDmInbox({ force: true, includeNonFollows: !enforceFollowingOnly });
+  }, [enforceFollowingOnly, isLoggedIn, refreshDmInbox]);
   useFocusEffect(
     useCallback(() => {
       if (!isLoggedIn) return;
       const handle = InteractionManager.runAfterInteractions(() => {
         if (Date.now() - dmInboxLastRefreshAt.current >= DM_INBOX_REFRESH_TTL_MS) {
           dmInboxLastRefreshAt.current = Date.now();
-          refreshDmInbox();
+          refreshDmInbox({ includeNonFollows: !enforceFollowingOnly });
         }
 
         const PREFETCH_TTL_MS = 30_000;
@@ -175,7 +188,7 @@ const MessagesScreen: React.FC = () => {
         });
       });
       return () => handle.cancel();
-    }, [isLoggedIn, refreshDmInbox, contacts]),
+    }, [isLoggedIn, refreshDmInbox, contacts, enforceFollowingOnly]),
   );
 
   const followPubkeys = useMemo(() => {
@@ -209,9 +222,14 @@ const MessagesScreen: React.FC = () => {
     // applying it again here guards against stale dmInbox state from
     // before a follow was revoked. The "Following only" rule is
     // load-bearing — keep it enforced everywhere a summary is built.
-    const dm = buildDmSummaries(dmInbox, contacts, followPubkeys);
+    // Skip follow gate only when devMode AND followingOnly=off (production hard-lock).
+    const dm = buildDmSummaries(
+      dmInbox,
+      contacts,
+      enforceFollowingOnly ? followPubkeys : undefined,
+    );
     return mergeSummaries(zap, dm);
-  }, [wallets, contacts, dmInbox, followPubkeys]);
+  }, [wallets, contacts, dmInbox, followPubkeys, enforceFollowingOnly]);
 
   // Following-only is always on by design (parental-control requirement);
   // enforcement lives inside buildDmSummaries + refreshDmInbox. This memo
@@ -230,7 +248,9 @@ const MessagesScreen: React.FC = () => {
     const dmRows: InboxRow[] = conversationSummaries
       .filter((s) => {
         if (s.lastActivityAt < cutoff) return false;
-        if (s.pubkey && !followPubkeys.has(s.pubkey.toLowerCase())) return false;
+        // Defence-in-depth follow gate using enforceFollowingOnly = followingOnly || !devMode.
+        if (enforceFollowingOnly && s.pubkey && !followPubkeys.has(s.pubkey.toLowerCase()))
+          return false;
         if (!lower) return true;
         return (
           s.name.toLowerCase().includes(lower) ||
@@ -251,7 +271,14 @@ const MessagesScreen: React.FC = () => {
       .map((g) => ({ kind: 'group', summary: g, sortKey: g.activity.lastActivityAt }));
 
     return [...dmRows, ...groupRows].sort((a, b) => b.sortKey - a.sortKey);
-  }, [conversationSummaries, groupSummaries, search, followPubkeys, windowDays]);
+  }, [
+    conversationSummaries,
+    groupSummaries,
+    search,
+    followPubkeys,
+    enforceFollowingOnly,
+    windowDays,
+  ]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -272,11 +299,11 @@ const MessagesScreen: React.FC = () => {
     // UI stuck in the "refreshing" spinner state.
     try {
       await Promise.all([refreshContacts(), refreshProfile({ force: true })]);
-      await refreshDmInbox({ force: true });
+      await refreshDmInbox({ force: true, includeNonFollows: !enforceFollowingOnly });
     } finally {
       setRefreshing(false);
     }
-  }, [refreshContacts, refreshDmInbox, refreshProfile]);
+  }, [refreshContacts, refreshDmInbox, refreshProfile, enforceFollowingOnly]);
 
   const handleConversationPress = useCallback(
     (summary: ConversationSummary) => {
@@ -353,6 +380,33 @@ const MessagesScreen: React.FC = () => {
     [handleConversationPress, handleGroupPress, contactInfoMap],
   );
 
+  // Auto-scroll to top when a new top row arrives via the live DM sub, but only if the user is already near the top so anyone scrolled down reading older threads isn't interrupted.
+  const listRef = useRef<FlashListRef<InboxRow>>(null);
+  const scrollOffsetRef = useRef(0);
+  const prevTopIdRef = useRef<string | null>(null);
+  const NEAR_TOP_PX = 200;
+  const handleListScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    scrollOffsetRef.current = e.nativeEvent.contentOffset.y;
+  }, []);
+  useEffect(() => {
+    const top = filteredRows[0];
+    const topId = top
+      ? top.kind === 'dm'
+        ? `dm:${top.summary.id}`
+        : `group:${top.summary.group.id}`
+      : null;
+    // Skip the initial mount — only scroll on a *change* of top row, not the first paint.
+    if (
+      topId &&
+      prevTopIdRef.current !== null &&
+      topId !== prevTopIdRef.current &&
+      scrollOffsetRef.current < NEAR_TOP_PX
+    ) {
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    }
+    prevTopIdRef.current = topId;
+  }, [filteredRows]);
+
   return (
     <View style={styles.container}>
       <TabBackgroundImage style={styles.bgImage} />
@@ -408,14 +462,36 @@ const MessagesScreen: React.FC = () => {
       <View style={styles.content}>
         {isLoggedIn && (
           <View style={styles.filterChipRow}>
-            <View
-              style={styles.filterChip}
-              accessibilityLabel="Showing conversations from people you follow only"
-              testID="messages-follows-indicator"
-            >
-              <Users size={14} color={colors.brandPink} />
-              <Text style={styles.filterChipText}>Following only</Text>
-            </View>
+            {devMode ? (
+              <TouchableOpacity
+                style={followingOnly ? styles.filterChip : styles.filterChipOff}
+                onPress={() => setFollowingOnly(!followingOnly)}
+                accessibilityLabel={
+                  followingOnly
+                    ? 'Following-only filter on. Tap to show all conversations (dev mode).'
+                    : 'Following-only filter off. Tap to filter to followed senders only.'
+                }
+                accessibilityRole="button"
+                testID="messages-follows-toggle"
+              >
+                <Users
+                  size={14}
+                  color={followingOnly ? colors.brandPink : colors.textSupplementary}
+                />
+                <Text style={followingOnly ? styles.filterChipText : styles.filterChipTextOff}>
+                  {followingOnly ? 'Following only' : 'All (dev)'}
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <View
+                style={styles.filterChip}
+                accessibilityLabel="Showing conversations from people you follow only"
+                testID="messages-follows-indicator"
+              >
+                <Users size={14} color={colors.brandPink} />
+                <Text style={styles.filterChipText}>Following only</Text>
+              </View>
+            )}
             <TouchableOpacity
               style={styles.filterChipInteractive}
               onPress={cycleWindowDays}
@@ -443,11 +519,14 @@ const MessagesScreen: React.FC = () => {
           </View>
         ) : (
           <FlashList
+            ref={listRef}
             data={filteredRows}
             keyExtractor={(item) =>
               item.kind === 'dm' ? `dm:${item.summary.id}` : `group:${item.summary.group.id}`
             }
             renderItem={renderItem}
+            onScroll={handleListScroll}
+            scrollEventThrottle={16}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
             ListEmptyComponent={
               <View style={styles.emptyState}>
