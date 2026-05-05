@@ -118,9 +118,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
   android: {
     adaptiveIcon: {
+      // Dev variant uses a flat blue backgroundColor so it's visibly
+      // distinct in the launcher next to a production install. The
+      // backgroundImage takes precedence in Expo's adaptive-icon
+      // template, so we deliberately drop it for dev — that lets the
+      // backgroundColor line up against the foreground piggy and you
+      // can see at a glance which icon is which when both are
+      // installed alongside each other.
       backgroundColor: IS_DEV ? '#4A90D9' : '#E6F4FE',
       foregroundImage: './assets/android-icon-foreground.png',
-      backgroundImage: './assets/android-icon-background.png',
+      ...(IS_DEV ? {} : { backgroundImage: './assets/android-icon-background.png' }),
       monochromeImage: './assets/android-icon-monochrome.png',
     },
     predictiveBackGestureEnabled: false,
