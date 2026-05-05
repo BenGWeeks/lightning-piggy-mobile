@@ -107,7 +107,11 @@ class AmberSignerModule : Module() {
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse("nostrsigner:${Uri.encode(eventJson)}"))
                 intent.`package` = AMBER_PACKAGE
                 intent.putExtra("type", "sign_event")
-                intent.putExtra("id", eventId)
+                // Empty `id` makes Amber silently reject kind-13 (NIP-17 seal) intents
+                // — the dialog never opens and no entry lands in Amber's Activity log.
+                // Mirror handleCryptoOp's UUID fallback so seal/wrap signing reaches
+                // the approval flow and shows up correctly.
+                intent.putExtra("id", eventId.ifEmpty { java.util.UUID.randomUUID().toString() })
                 intent.putExtra("current_user", currentUser)
                 activity.startActivityForResult(intent, REQUEST_CODE_SIGN_EVENT)
             }
