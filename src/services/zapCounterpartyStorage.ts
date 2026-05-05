@@ -66,15 +66,24 @@ async function persist(cache: CacheShape): Promise<void> {
 }
 
 /**
- * Record counterparty info for a payment we just made. Evicts the
- * oldest entries if we cross `MAX_ENTRIES`.
+ * Record counterparty info for a payment, keyed by payment hash. Used
+ * by both directions: outgoing (we paid X), and the inbound-DM-bolt11
+ * scanner (X DM'd us an invoice). Evicts the oldest entries if we cross
+ * `MAX_ENTRIES`. Idempotent — repeated writes with equivalent info are
+ * a no-op (no `writeVersion` bump, no AsyncStorage write), so the
+ * inbox-scan effect can safely re-run on every dmInbox / contacts
+ * re-render without churning the cache.
  */
-export async function recordOutgoing(
+export async function recordCounterparty(
   paymentHash: string,
   info: ZapCounterpartyInfo,
 ): Promise<void> {
   if (!paymentHash) return;
   const cache = await load();
+  const existing = cache[paymentHash];
+  if (existing && counterpartyInfoEqual(existing.info, info)) {
+    return;
+  }
   cache[paymentHash] = { info, savedAt: Date.now() };
 
   const keys = Object.keys(cache);
@@ -86,6 +95,18 @@ export async function recordOutgoing(
 
   writeVersion++;
   await persist(cache);
+}
+
+/** Backwards-compatible alias for SendSheet / outgoing-zap callers that already use `recordOutgoing`. New callers should prefer the direction-agnostic `recordCounterparty`. */
+export const recordOutgoing = recordCounterparty;
+
+function counterpartyInfoEqual(a: ZapCounterpartyInfo, b: ZapCounterpartyInfo): boolean {
+  if (a.pubkey !== b.pubkey) return false;
+  if (a.comment !== b.comment) return false;
+  if (a.anonymous !== b.anonymous) return false;
+  // Profile shape: identity by npub is sufficient — fields like name/picture flux without changing who the counterparty is.
+  if ((a.profile?.npub ?? null) !== (b.profile?.npub ?? null)) return false;
+  return true;
 }
 
 export async function getByPaymentHash(paymentHash: string): Promise<ZapCounterpartyInfo | null> {

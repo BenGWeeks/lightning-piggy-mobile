@@ -927,6 +927,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // case (friend DM'd us an invoice, we paid it). Done before the
       // relay zap-receipt fetch so a DM-attributed match short-circuits
       // the heavier remote query.
+      // Filter incomingPending down to whatever the DM-bolt11 storage didn't already answer; the relay zap-receipt fetch below only needs to look at the still-unresolved indices. If storage answered everything, we can skip the relay round-trip entirely.
+      let incomingPendingUnresolved = incomingPending;
       if (incomingPending.length > 0) {
         const incomingHashes = incomingPending
           .map(({ tx }) => tx.paymentHash)
@@ -938,6 +940,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             const info = incomingByHash.get(tx.paymentHash);
             if (info) resultsByIdx.set(idx, info);
           }
+          incomingPendingUnresolved = incomingPending.filter(
+            ({ tx }) => !tx.paymentHash || !incomingByHash.has(tx.paymentHash),
+          );
         }
       }
 
@@ -1027,8 +1032,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       }
 
-      if (incomingPending.length === 0) {
-        // Nothing to fetch from relays — commit the outgoing results and bail.
+      if (incomingPendingUnresolved.length === 0) {
+        // Nothing left to fetch from relays — every incoming pending tx was either absent (no incoming) or resolved by zapCounterpartyStorage above. Commit results and bail before the heavier remote query.
         if (__DEV__ && resultsByIdx.size > 0) {
           const attributed = [...resultsByIdx.values()].filter((v) => v !== null).length;
           console.log(
@@ -1113,11 +1118,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const parsedEntries: ParsedEntry[] = [];
       const pubkeysToFetch = new Set<string>();
 
-      for (const { tx, idx } of incomingPending) {
-        // DM-bolt11 attribution (#126) may have already populated this
-        // index from `zapCounterpartyStorage` above — preserve that and
-        // skip the relay-receipt path so we don't overwrite a real
-        // friend attribution with a `null` zap-miss.
+      for (const { tx, idx } of incomingPendingUnresolved) {
+        // Defensive: even within the unresolved subset, a positive resultsByIdx hit short-circuits the relay-receipt path so we never overwrite a real friend attribution with a `null` zap-miss.
         if (resultsByIdx.has(idx) && resultsByIdx.get(idx)) continue;
         const receipt = findReceipt(tx);
         if (!receipt) {
