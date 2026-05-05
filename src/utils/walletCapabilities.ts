@@ -46,10 +46,8 @@ export function canSettleInvoiceType(wallet: WalletState, invoiceType: InvoiceTy
       // Lightning settlement only — must be a connected NWC wallet.
       return wallet.walletType === 'nwc' && wallet.isConnected;
     case 'onchain':
-      // Direct on-chain (any on-chain wallet can broadcast / build a
-      // PSBT — even xpub-only wallets surface the address-derivation +
-      // PSBT-export flow), or Boltz reverse swap from a connected NWC.
-      if (wallet.walletType === 'onchain') return true;
+      // Direct on-chain settlement only works for hot wallets (mnemonic-imported) — `SendSheet.handleSend` checks `onchainImportMethod === 'mnemonic'` before calling `onchainService.sendTransaction()`, and xpub-only wallets have no signing key on the device. Or via a connected NWC + Boltz reverse swap.
+      if (wallet.walletType === 'onchain') return wallet.onchainImportMethod === 'mnemonic';
       return wallet.walletType === 'nwc' && wallet.isConnected;
   }
 }

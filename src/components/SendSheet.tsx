@@ -731,7 +731,9 @@ const SendSheet: React.FC<Props> = ({
                *  one already shown. */}
               {scanned && eligibleWallets.length === 0 ? (
                 <Text style={styles.walletLabel} testID="send-no-eligible-wallet">
-                  No wallet can pay this invoice — add a connected NWC wallet.
+                  {invoiceType === 'onchain'
+                    ? 'No wallet can pay this on-chain address — add a connected NWC wallet (for a Boltz reverse swap) or import a hot on-chain wallet via mnemonic.'
+                    : 'No wallet can pay this invoice — add a connected NWC wallet.'}
                 </Text>
               ) : eligibleWallets.length > 1 ? (
                 <View style={styles.walletDropdownRow}>
@@ -773,7 +775,9 @@ const SendSheet: React.FC<Props> = ({
                               ]}
                             >
                               {walletLabel(w)}
-                              {w.balance !== null ? ` · ${w.balance.toLocaleString()} sats` : ''}
+                              {w.balance !== null && !w.hideBalance
+                                ? ` · ${w.balance.toLocaleString()} sats`
+                                : ''}
                             </Text>
                           </TouchableOpacity>
                         ))}

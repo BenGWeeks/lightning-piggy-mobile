@@ -60,9 +60,11 @@ describe('canSettleInvoiceType', () => {
   );
 
   describe('on-chain settlement', () => {
-    it('accepts on-chain wallets directly (xpub or hot)', () => {
-      expect(canSettleInvoiceType(ONCHAIN_XPUB, 'onchain')).toBe(true);
+    it('accepts hot on-chain wallets (mnemonic-imported) — SendSheet has a direct broadcast path for them', () => {
       expect(canSettleInvoiceType(ONCHAIN_HOT, 'onchain')).toBe(true);
+    });
+    it('rejects xpub-only on-chain wallets — watch-only, no signing key, SendSheet.handleSend gates `onchainService.sendTransaction` on `onchainImportMethod === "mnemonic"`', () => {
+      expect(canSettleInvoiceType(ONCHAIN_XPUB, 'onchain')).toBe(false);
     });
     it('accepts a connected NWC wallet (Boltz reverse swap)', () => {
       expect(canSettleInvoiceType(NWC_CONNECTED, 'onchain')).toBe(true);
@@ -84,10 +86,9 @@ describe('compatibleWalletsForInvoice', () => {
     expect(compatibleWalletsForInvoice(wallets, 'lnurl-pay').map((w) => w.id)).toEqual(['nwc-up']);
   });
 
-  it('returns on-chain wallets + connected NWC for on-chain addresses', () => {
+  it('returns hot on-chain + connected NWC for on-chain addresses (xpub watch-only excluded)', () => {
     expect(compatibleWalletsForInvoice(wallets, 'onchain').map((w) => w.id)).toEqual([
       'nwc-up',
-      'onchain-xpub',
       'onchain-hot',
     ]);
   });
@@ -97,7 +98,6 @@ describe('compatibleWalletsForInvoice', () => {
     expect(compatibleWalletsForInvoice(reordered, 'onchain').map((w) => w.id)).toEqual([
       'onchain-hot',
       'nwc-up',
-      'onchain-xpub',
     ]);
   });
 
