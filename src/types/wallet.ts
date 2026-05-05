@@ -12,7 +12,16 @@ export type CardTheme =
   | 'primal'
   | 'coinos'
   | 'revolut'
-  | 'xapo';
+  | 'xapo'
+  // Sports-themed cards (#102). Placeholder gradient-only entries — real
+  // illustrations are a designer follow-up; once added, set
+  // `backgroundImage` + `backgroundImageStyle` on each entry in
+  // `src/themes/cardThemes.ts` and register a `bgStyle` in
+  // `src/themes/cards/index.ts`.
+  | 'tennis'
+  | 'football'
+  | 'basketball'
+  | 'f1';
 
 export type WalletType = 'nwc' | 'onchain';
 
