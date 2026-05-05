@@ -12,6 +12,7 @@
     "android:preview": "APP_VARIANT=preview expo run:android --variant release",
     "ios": "expo run:ios",
     "ios:dev": "APP_VARIANT=development expo run:ios",
+    "ios:preview": "APP_VARIANT=preview expo run:ios --configuration Release",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts,.tsx",
