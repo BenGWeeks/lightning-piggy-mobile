@@ -1,8 +1,28 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { WalletMetadata } from '../types/wallet';
+import { perAccountKey } from './perAccountStorage';
 
-const WALLET_LIST_KEY = 'wallet_list';
+// Per-account namespacing landed with multi-account switching (#288).
+// Wallets are scoped to the active Nostr identity so signing into a
+// second identity gets a fresh wallet list rather than inheriting the
+// previous user's NWC connections. Pre-multi-account installs ran the
+// `migrateToPerAccountStorage` helper at first launch which copied the
+// global `wallet_list` into `wallet_list_${activePubkey}`.
+//
+// `getActivePubkey()` is read from the in-memory mirror published by
+// NostrContext (via setActivePubkey below). When null (rare race
+// during cold boot before identity hydrates) we fall back to the bare
+// global key so legacy single-account installs keep working until the
+// migration completes.
+let _activePubkey: string | null = null;
+export function setActivePubkeyForWalletStorage(pk: string | null): void {
+  _activePubkey = pk;
+}
+const WALLET_LIST_KEY_BASE = 'wallet_list';
+function walletListKey(): string {
+  return perAccountKey(WALLET_LIST_KEY_BASE, _activePubkey);
+}
 const NWC_URL_PREFIX = 'nwc_url_';
 const ONCHAIN_XPUB_PREFIX = 'onchain_xpub_';
 const ELECTRUM_SERVER_KEY = 'electrum_server';
@@ -34,7 +54,7 @@ const SECURE_OPTIONS: SecureStore.SecureStoreOptions = {
 };
 
 export async function getWalletList(): Promise<WalletMetadata[]> {
-  const json = await AsyncStorage.getItem(WALLET_LIST_KEY);
+  const json = await AsyncStorage.getItem(walletListKey());
   if (!json) return [];
   try {
     return JSON.parse(json);
@@ -44,7 +64,7 @@ export async function getWalletList(): Promise<WalletMetadata[]> {
 }
 
 export async function saveWalletList(wallets: WalletMetadata[]): Promise<void> {
-  await AsyncStorage.setItem(WALLET_LIST_KEY, JSON.stringify(wallets));
+  await AsyncStorage.setItem(walletListKey(), JSON.stringify(wallets));
 }
 
 // --- NWC ---
