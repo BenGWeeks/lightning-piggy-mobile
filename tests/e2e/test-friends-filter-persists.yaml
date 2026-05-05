@@ -6,7 +6,9 @@ name: Friends tab — filter selection persists across app restart (#311)
 # launch. Default is `all` on a brand-new install (no stored value).
 #
 # testIDs come from FriendsScreen.tsx — `friends-filter-{key}` where
-# key is one of 'all', 'nostr', 'contacts'.
+# key is one of 'all', 'nostr', 'contacts'. The hidden marker
+# `friends-filter-active-{key}` reflects which filter is currently
+# applied; assertVisible against it is the proof of persistence.
 #
 # Run: maestro --device emulator-5554 test tests/e2e/test-friends-filter-persists.yaml
 
@@ -26,7 +28,16 @@ name: Friends tab — filter selection persists across app restart (#311)
 - waitForAnimationToEnd:
     timeout: 2000
 
-# Cold-restart the app — clearState:false preserves AsyncStorage.
+# Sanity check: the active marker reflects the just-tapped chip.
+- assertVisible:
+    id: 'friends-filter-active-nostr'
+
+# Cold-restart the app. `stopApp` first ensures JS is reloaded
+# (without it, `launchApp` against an already-running app may not
+# re-run mount effects, so the test could pass even if persistence
+# is broken). `clearState:false` preserves AsyncStorage so the
+# persisted filter value survives.
+- stopApp
 - launchApp:
     clearState: false
 - waitForAnimationToEnd:
@@ -37,12 +48,13 @@ name: Friends tab — filter selection persists across app restart (#311)
 - waitForAnimationToEnd:
     timeout: 5000
 
-# The Nostr chip must still be visible (every chip is — what we really
-# care about is its `selected` accessibilityState, which Maestro can't
-# query directly; the visible/tappable assertion plus the persisted
-# write is sufficient for this regression guard).
+# Real assertion: the active marker reflects `nostr` — proves the
+# persisted value was read on mount and applied. assertNotVisible on
+# the `all` marker rules out the "default fallback" false positive.
 - assertVisible:
-    id: 'friends-filter-nostr'
+    id: 'friends-filter-active-nostr'
+- assertNotVisible:
+    id: 'friends-filter-active-all'
 
 # Restore the default so subsequent test runs start from `all`.
 - tapOn:

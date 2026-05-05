@@ -115,10 +115,11 @@ const FriendsScreen: React.FC = () => {
   }, []);
 
   // Restore the persisted Friends-tab filter selection on mount so it
-  // survives app restarts (#311). Mirrors the AsyncStorage pattern used
-  // by MessagesScreen for `messages_show_zap_counterparties` (#147 / PR
-  // #305). Falls back to 'all' if the stored value is missing or not a
-  // recognised Filter — same default as a brand-new install.
+  // survives app restarts (#311). Mirrors the AsyncStorage pattern
+  // used for `messages_window_days` in MessagesScreen — get on mount,
+  // setItem on every change. Falls back to 'all' if the stored value
+  // is missing or not a recognised Filter — same default as a
+  // brand-new install.
   useEffect(() => {
     AsyncStorage.getItem(FILTER_STORAGE_KEY)
       .then((v) => {
@@ -388,6 +389,9 @@ const FriendsScreen: React.FC = () => {
                   </Text>
                 </TouchableOpacity>
               ))}
+              {/* Hidden marker so Maestro can assert WHICH filter is active (e.g. after a cold restart) without relying on accessibilityState, which RN exposes inconsistently across Android versions. */}
+              <View testID={`friends-filter-active-${filter}`} accessibilityElementsHidden />
+
               <TouchableOpacity
                 style={styles.searchToggle}
                 onPress={() => {
