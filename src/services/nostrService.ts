@@ -533,17 +533,30 @@ export function createProfileEvent(profileData: {
   };
 }
 
-export async function createDirectMessageEvent(
-  secretKey: Uint8Array,
-  recipientPubkey: string,
-  plaintext: string,
-): Promise<{ kind: number; created_at: number; tags: string[][]; content: string }> {
-  const encrypted = await nip04.encrypt(secretKey, recipientPubkey, plaintext);
+/**
+ * Build the inner kind-14 chat rumor for a 1:1 NIP-17 direct message.
+ * Mirrors `createGroupChatRumor` but with no `subject` tag and exactly
+ * one `p` tag (the recipient). Per NIP-17, both DMs and group chats use
+ * kind-14 — the only thing that distinguishes them is the participant
+ * count, which receivers infer from the `p` tag set (see
+ * `classifyRumor` in `utils/nip17Unwrap.ts`).
+ *
+ * The returned event is unsigned ("rumor"); pass it to
+ * `sendNip17ToManyWithNsec` / `sendNip17ToManyWithSigner` which seal +
+ * gift-wrap it per recipient (and once for the sender, so other devices
+ * see their own outgoing message).
+ */
+export function createDirectMessageRumor(input: {
+  senderPubkey: string;
+  recipientPubkey: string;
+  content: string;
+}): { kind: number; created_at: number; tags: string[][]; content: string; pubkey: string } {
   return {
-    kind: 4,
+    pubkey: input.senderPubkey,
+    kind: 14,
     created_at: Math.floor(Date.now() / 1000),
-    tags: [['p', recipientPubkey]],
-    content: encrypted,
+    tags: [['p', input.recipientPubkey]],
+    content: input.content,
   };
 }
 
@@ -645,17 +658,30 @@ export async function fetchInboxDmEvents(
   const allRelays = [...new Set([...relays, ...DEFAULT_RELAYS])];
   trackRelays(allRelays);
   const limit = options.limit ?? 500;
-  // `since` shifted back 2 minutes (Damus clock-drift pad). All three
-  // inbox sub-queries share the same since floor: any relay that
-  // stamped an event slightly-in-our-past still returns it.
+  // `since` shifted back 2 min (Damus clock-drift pad). Applied only to kind-4 filters below; wraps deliberately skip it (see next comment).
   const since = options.since !== undefined ? Math.max(0, options.since - 120) : undefined;
   const sentK4Filter: Filter = { kinds: [4], authors: [myPubkey], limit };
   const recvK4Filter: Filter = { kinds: [4], '#p': [myPubkey], limit };
+  // NIP-59 (gift-wrap) wraps have RANDOMIZED timestamps within ~2 days
+  // of the real publish time in either direction (per spec, for
+  // plausible deniability). So `wrap.created_at` does NOT track when
+  // the underlying message was sent. Applying `since` to the wraps
+  // filter caused recently-published wraps to be silently dropped at
+  // the relay whenever their random ts < lastSeen — and lastSeen could
+  // itself be a future-dated wrap's random ts (see callers using
+  // Math.max over kind1059.created_at), so the inbox query would
+  // progressively skip more and more wraps as the future-dated cap
+  // ratcheted forward. Symptom: a contact's recent DM is visible inside
+  // the per-conversation thread (which fetches peer-scoped without
+  // `since`) but never appears on the Messages tab inbox list.
+  // Resolution: don't filter wraps by `since` at all. The relay query
+  // is bounded by limit + the `#p:[myPubkey]` filter, and the consumer
+  // dedupes against the persisted wrap-id cache so already-decrypted
+  // wraps short-circuit cheaply.
   const wrapsFilter: Filter = { kinds: [1059], '#p': [myPubkey], limit };
   if (since !== undefined) {
     sentK4Filter.since = since;
     recvK4Filter.since = since;
-    wrapsFilter.since = since;
   }
   try {
     const [sentK4, receivedK4, wraps] = await Promise.all([
@@ -760,7 +786,7 @@ export interface GroupStateEventInput {
 
 /**
  * Build (unsigned) the kind-30200 group-state event. Caller is responsible
- * for signing + publishing — same pattern as createDirectMessageEvent.
+ * for signing + publishing — same pattern as createDirectMessageRumor.
  */
 export function createGroupStateEvent(input: GroupStateEventInput): {
   kind: number;
@@ -1036,6 +1062,57 @@ export function subscribeGroupStateForViewer(input: {
       } catch {
         // best-effort
       }
+    }
+  };
+}
+
+// Live-DM event type. Structurally a generic Nostr event — kind-4
+// (legacy NIP-04) and kind-1059 (NIP-17 gift wrap) share the same
+// shape, the wire kind tells the caller which decrypt path to run.
+export type RawInboxDmEvent = RawGiftWrapEvent;
+
+// Subscribe to inbound DM events (kind-4 NIP-04 + kind-1059 NIP-17
+// gift wraps) addressed to the viewer. Long-lived sub kept open while
+// the user is signed in so the app delivers DMs / group messages live
+// without waiting for the 30 s-TTL `refreshDmInbox` or
+// pull-to-refresh (#349).
+//
+// Notes:
+//  - `#p:[viewerPubkey]` matches the recipient tag set on both kinds;
+//    for kind-1059 the sender's identity is hidden inside the encrypted
+//    seal, and for kind-4 it's in the event envelope, but in either
+//    case the relay-side filter is the recipient tag.
+//  - The filter only catches *incoming* events. Outgoing kind-4 from a
+//    second device authored by the viewer wouldn't tag the viewer in
+//    `#p`, so multi-device sent-event sync still flows through
+//    pull-to-refresh / the next focus-driven `refreshDmInbox`.
+//  - No `since` filter — NIP-59 randomises wrap.created_at by ~2 days
+//    for plausible deniability, so a since cutoff would silently drop
+//    fresh wraps. Same reasoning as fetchInboxDmEvents above; kind-4
+//    inherits the same no-since policy for symmetry.
+//  - Caller is responsible for deduping (e.g. against the persistent
+//    NIP-17 wrap-id cache + the NIP-04 RAM LRU populated by
+//    refreshDmInbox).
+export function subscribeInboxDmsForViewer(input: {
+  viewerPubkey: string;
+  relays: string[];
+  onEvent: (ev: RawInboxDmEvent) => void;
+}): () => void {
+  trackRelays(input.relays);
+  const sub = pool.subscribeMany(
+    input.relays,
+    { kinds: [4, 1059], '#p': [input.viewerPubkey] } as Filter,
+    {
+      onevent: (ev) => {
+        input.onEvent(ev as unknown as RawInboxDmEvent);
+      },
+    },
+  );
+  return () => {
+    try {
+      sub.close();
+    } catch {
+      // best-effort
     }
   };
 }
