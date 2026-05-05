@@ -36,7 +36,7 @@ The app uses two storage mechanisms with different security levels:
 
 ==== AsyncStorage (Unencrypted)
 
-`@react-native-async-storage/async-storage` stores non-sensitive data:
+`@react-native-async-storage/async-storage` stores mostly non-sensitive data — the keys below contain pubkeys, settings, and public profile metadata. The notable exception is decrypted DM + group-message plaintext, which the app caches under additional keys to power cold-start rendering; see <<Decrypted DM Plaintext at Rest (Threat Model)>> for the full inventory and rationale.
 
 [cols="2,3", options="header"]
 |===
@@ -62,7 +62,7 @@ The app uses two storage mechanisms with different security levels:
 
 |===
 
-NOTE: The app also stores **decrypted DM and group-message plaintext** in AsyncStorage to power cold-start rendering of the Messages tab. See <<Decrypted DM Plaintext at Rest (Threat Model)>> below for the full inventory, threat model, and mitigation analysis.
+NOTE: The app also stores **decrypted DM and group-message plaintext** in AsyncStorage to power cold-start rendering of both the Messages tab (DM + group previews) and `GroupConversationScreen` (per-group thread log under `group_messages_<groupId>`). See <<Decrypted DM Plaintext at Rest (Threat Model)>> below for the full inventory, threat model, and mitigation analysis.
 
 === NWC URL Security
 
@@ -152,7 +152,7 @@ This section documents the threat model around decrypted direct-message and grou
 
 ==== What is stored, where, and how much
 
-Decrypted Nostr message plaintext lands on disk in five distinct AsyncStorage namespaces. None of these are encrypted at rest.
+Decrypted Nostr message plaintext lands on disk in six distinct AsyncStorage namespaces. None of these are encrypted at rest.
 
 [cols="3,3,2", options="header"]
 |===
@@ -191,7 +191,7 @@ In scope (what the current design protects against):
 
 * **Casual physical access.** Picking up an unlocked phone and tapping around the app does not expose stored plaintext beyond what's already on screen — the data lives in private app storage and isn't surfaced through any export UI.
 * **Other apps on the same device.** Android sandbox + iOS app-private container prevents arbitrary apps from reading another app's `databases/` or `Application Support/` directories.
-* **Cross-account leak on the same install.** Logout (`NostrContext.logout`) explicitly multi-removes every cache listed above, so signing in as another identity cannot read the previous identity's history. The single-blob NIP-17 caches plus per-user-keyed inbox/conv/activity caches are all enumerated and cleared.
+* **Cross-account leak on the same install.** Logout (`NostrContext.logout`) explicitly multi-removes every cache listed above, so signing in as another identity cannot read the previous identity's history. The single-blob NIP-17 caches, the per-user-keyed inbox/conv/activity caches, and every `group_messages_<groupId>` blob (collected via an `AsyncStorage.getAllKeys()` prefix scan) are all enumerated and cleared.
 
 Out of scope (what the current design does **not** protect against):
 
