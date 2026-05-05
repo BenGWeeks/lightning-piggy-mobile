@@ -58,7 +58,9 @@ export async function getSendThreshold(): Promise<number | null> {
     const raw = await AsyncStorage.getItem(HIGH_VALUE_SEND_THRESHOLD_STORAGE_KEY);
     if (raw === null) return DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS;
     if (raw === OFF_SENTINEL) return null;
-    const parsed = parseInt(raw, 10);
+    // Strictly numeric — parseInt('10000oops', 10) is 10000, which would silently honour a corrupt stored value instead of falling back to the default.
+    if (!/^\d+$/.test(raw)) return DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS;
+    const parsed = Number(raw);
     if (!Number.isFinite(parsed) || parsed <= 0) {
       return DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS;
     }

@@ -371,11 +371,14 @@ const SendSheet: React.FC<Props> = ({
     // High-value confirmation gate (issue #82). Prompt the user before we
     // touch the abort controller / spinner / progress overlay so a Cancel
     // tap leaves the form exactly as it was. The amount used here matches
-    // what the user is actually authorising:
-    //   - Lightning addresses + on-chain → typed amount (currentSats)
-    //   - BOLT11 with embedded amount   → decoded.amountSats
-    //   - BOLT11 zero-amount (rare)     → falls back to currentSats
-    const authorisedAmount = currentSats > 0 ? currentSats : (decoded?.amountSats ?? 0);
+    // what the user is actually authorising — BOLT11's embedded amount
+    // wins because that's the value `payInvoiceForWallet(...)` will pull
+    // from the invoice; a leftover `satsValue` from a previous entry
+    // would otherwise mis-state the confirmation. Only fall back to the
+    // typed `currentSats` for zero-amount invoices, Lightning addresses,
+    // and on-chain flows where there is no embedded amount to honour.
+    const decodedAmount = decoded?.amountSats ?? 0;
+    const authorisedAmount = decodedAmount > 0 ? decodedAmount : currentSats;
     const threshold = await getSendThreshold();
     if (shouldConfirmSend(authorisedAmount, threshold)) {
       const recipientLabel =
