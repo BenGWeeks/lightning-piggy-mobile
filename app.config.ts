@@ -141,10 +141,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // currently installed on any target device, or the local install
     // fails with INSTALL_FAILED_VERSION_DOWNGRADE.
     //
-    // Bump this manually before each local prod install. The cloud
-    // counter is currently at 34 (per the most recent published EAS
-    // production build); 35 here is one above that so the next local
-    // build produces a sideload-able APK.
+    // Bump rule: set to `(latest cloud versionCode) + 1`. Get the
+    // current cloud value with:
+    //   eas build:list --platform android --status finished --limit 1
     //
     // See docs/DEPLOYMENT.adoc → "Local production builds".
     versionCode: 35,
