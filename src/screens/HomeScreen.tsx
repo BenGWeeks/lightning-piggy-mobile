@@ -208,13 +208,18 @@ const HomeScreen: React.FC = () => {
   // AsyncStorage read, `wallets` is `[]` and `activeWallet` is `null` —
   // not because the user has no wallets, but because we haven't loaded
   // them yet. Rendering the buttons in the faded `actionButtonDisabled`
-  // style during that window contradicts their actual interactivity
-  // (taps still work) and looks broken. Suppress the disabled style
-  // until hydration completes; if it turns out there really are no
-  // wallets, the empty state below replaces this UI anyway. See #201.
-  const showReceiveDisabled = walletsHydrated && !hasActiveConnection;
-  const showTransferDisabled = walletsHydrated && !canTransfer;
-  const showSendDisabled = walletsHydrated && !canSend;
+  // style during that window looks broken; suppress it until hydration
+  // completes. If it turns out there really are no wallets, the empty
+  // state below replaces this UI anyway. See #201.
+  //
+  // Single source of truth per button — `isXDisabled` drives BOTH the
+  // disabled style AND the `disabled` prop so visual state always
+  // matches interactivity. During hydration both come out `false` so
+  // the buttons render neutral AND remain tappable; the receive sheet
+  // / transfer flow handles "wallets not loaded yet" gracefully.
+  const isReceiveDisabled = walletsHydrated && !hasActiveConnection;
+  const isTransferDisabled = walletsHydrated && !canTransfer;
+  const isSendDisabled = walletsHydrated && !canSend;
 
   return (
     <View style={styles.container}>
@@ -248,9 +253,9 @@ const HomeScreen: React.FC = () => {
         {/* Send/Receive/Transfer buttons */}
         <View style={styles.buttonRow}>
           <TouchableOpacity
-            style={[styles.actionButton, showReceiveDisabled && styles.actionButtonDisabled]}
+            style={[styles.actionButton, isReceiveDisabled && styles.actionButtonDisabled]}
             onPress={() => setReceiveOpen(true)}
-            disabled={!hasActiveConnection}
+            disabled={isReceiveDisabled}
             accessibilityLabel="Receive"
             testID="btn-receive"
           >
@@ -260,9 +265,9 @@ const HomeScreen: React.FC = () => {
             <Text style={styles.actionText}>Receive</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.actionButton, showTransferDisabled && styles.actionButtonDisabled]}
+            style={[styles.actionButton, isTransferDisabled && styles.actionButtonDisabled]}
             onPress={() => setTransferOpen(true)}
-            disabled={!canTransfer}
+            disabled={isTransferDisabled}
             accessibilityLabel="Transfer"
             testID="btn-transfer"
           >
@@ -272,9 +277,9 @@ const HomeScreen: React.FC = () => {
             <Text style={styles.actionText}>Transfer</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.actionButton, showSendDisabled && styles.actionButtonDisabled]}
+            style={[styles.actionButton, isSendDisabled && styles.actionButtonDisabled]}
             onPress={() => setSendOpen(true)}
-            disabled={!canSend}
+            disabled={isSendDisabled}
             accessibilityLabel="Send"
             testID="btn-send"
           >

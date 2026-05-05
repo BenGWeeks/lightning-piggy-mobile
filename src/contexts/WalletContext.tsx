@@ -389,14 +389,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         });
       } catch (error) {
         console.warn('Wallet startup failed:', error);
-        // Safety net: if something threw BEFORE we reached the
-        // early `setIsLoading(false)` above, make sure the UI still
-        // unblocks. Idempotent; React bails on no-op state sets.
-        setIsLoading(false);
-        // Flip hydrated as well so consumers don't sit forever in
-        // "loading" state after a startup failure — there are simply
-        // no wallets to show.
+        // Order matches the success path: flip `walletsHydrated` first so consumers observing the loading-state change can already trust hydration is complete; only then unblock the UI via `setIsLoading(false)`. Idempotent; React bails on no-op state sets.
         setWalletsHydrated(true);
+        setIsLoading(false);
       }
     })();
   }, [fetchPrice]);
