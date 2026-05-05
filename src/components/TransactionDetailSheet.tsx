@@ -9,7 +9,7 @@ import {
 } from '@gorhom/bottom-sheet';
 import * as SecureStore from 'expo-secure-store';
 import * as Clipboard from 'expo-clipboard';
-import Toast from 'react-native-toast-message';
+import Toast from './BrandedToast';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';

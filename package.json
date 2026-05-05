@@ -15,7 +15,11 @@
     "format:check": "prettier --check \"src/**/*.{ts,tsx,json}\"",
     "format": "prettier --write \"src/**/*.{ts,tsx,json}\"",
     "test": "jest",
-    "test:coverage": "jest --coverage --coverageReporters=json-summary --coverageReporters=text"
+    "test:coverage": "jest --coverage --coverageReporters=json-summary --coverageReporters=text",
+    "perf": "bash scripts/perf-suite.sh",
+    "perf:pixel": "bash scripts/perf-suite-pixel.sh",
+    "perf:pixel:quick": "SAMPLES=1 bash scripts/perf-suite-pixel.sh",
+    "perf:pixel:long": "SAMPLES=5 bash scripts/perf-suite-pixel.sh"
   },
   "dependencies": {
     "@bitcoinerlab/secp256k1": "^1.2.0",

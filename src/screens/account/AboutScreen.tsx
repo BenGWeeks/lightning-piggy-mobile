@@ -5,11 +5,11 @@ import {
   Image,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   ActivityIndicator,
   Linking,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Alert } from '../../components/BrandedAlert';
 import * as nip19 from 'nostr-tools/nip19';
 import { UserRound } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
@@ -26,7 +26,9 @@ import type { NostrProfile } from '../../types/nostr';
 import { LIGHTNING_PIGGY_TEAM_NPUB, dmRecipient } from '../../constants/npubs';
 import { appVersion } from '../../utils/appVersion';
 
-const TEAM_PROFILE_CACHE_KEY = 'team_profile_cache';
+// Bumped key (#346) to evict pre-avatar caches that pinned an empty avatar circle.
+const TEAM_PROFILE_CACHE_KEY = 'team_profile_cache_v2';
+const LEGACY_TEAM_PROFILE_CACHE_KEY = 'team_profile_cache';
 
 const AboutScreen: React.FC = () => {
   const colors = useThemeColors();
@@ -36,6 +38,7 @@ const AboutScreen: React.FC = () => {
 
   const [teamProfile, setTeamProfile] = useState<NostrProfile | null>(null);
   const [teamProfileLoading, setTeamProfileLoading] = useState(true);
+  const [teamPictureError, setTeamPictureError] = useState(false);
   const [zapSheetOpen, setZapSheetOpen] = useState(false);
   const [feedbackSheetOpen, setFeedbackSheetOpen] = useState(false);
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
@@ -48,24 +51,43 @@ const AboutScreen: React.FC = () => {
     AsyncStorage.getItem('dev_mode').then((v) => setDevMode(v === 'true'));
   }, []);
 
+  // Clear the load-failure flag whenever the picture URL changes so a refreshed kind-0 retries.
+  useEffect(() => {
+    setTeamPictureError(false);
+  }, [teamProfile?.picture]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const decoded = nip19.decode(LIGHTNING_PIGGY_TEAM_NPUB);
         if (decoded.type !== 'npub') return;
-        const cached = await AsyncStorage.getItem(TEAM_PROFILE_CACHE_KEY);
+        // Read v2 first, then fall back to the pre-#346 unversioned key so an offline upgrade keeps a cached profile.
+        let cached = await AsyncStorage.getItem(TEAM_PROFILE_CACHE_KEY);
+        let cameFromLegacy = false;
+        if (!cached) {
+          cached = await AsyncStorage.getItem(LEGACY_TEAM_PROFILE_CACHE_KEY);
+          cameFromLegacy = cached != null;
+        }
         if (cached) {
           const parsed = JSON.parse(cached) as NostrProfile;
           if (!cancelled) {
             setTeamProfile(parsed);
             setTeamProfileLoading(false);
           }
+          // Migrate the legacy cache forward so subsequent mounts hit v2 directly.
+          if (cameFromLegacy) {
+            await AsyncStorage.setItem(TEAM_PROFILE_CACHE_KEY, cached);
+          }
         }
         const fetched = await fetchProfile(decoded.data, DEFAULT_RELAYS);
         if (!cancelled && fetched) {
           setTeamProfile(fetched);
           await AsyncStorage.setItem(TEAM_PROFILE_CACHE_KEY, JSON.stringify(fetched));
+        }
+        // Only evict the legacy key after v2 is populated, so an offline upgrade never strands the user with no cache.
+        if (await AsyncStorage.getItem(TEAM_PROFILE_CACHE_KEY)) {
+          AsyncStorage.removeItem(LEGACY_TEAM_PROFILE_CACHE_KEY).catch(() => {});
         }
       } catch (error) {
         console.warn('Failed to fetch team profile:', error);
@@ -89,13 +111,17 @@ const AboutScreen: React.FC = () => {
       Alert.alert(
         newMode ? 'Developer Mode Enabled' : 'Developer Mode Disabled',
         newMode
-          ? 'Hot wallet options are now available in Add Wallet.'
-          : 'Hot wallet options hidden.',
+          ? 'Dev features unlocked: hot wallet import in Add Wallet, "Following only" toggle on Messages and Groups tabs, and other in-app debug surfaces.'
+          : 'Dev features hidden. Restart the app if any toggle still appears.',
       );
     } else {
-      versionTapTimer.current = setTimeout(() => {
-        versionTapCount.current = 0;
-      }, 1000);
+      // Maestro tapOn cadence on Android emulator is ~400ms each, so 3 taps need >1s. Widen window in dev builds only.
+      versionTapTimer.current = setTimeout(
+        () => {
+          versionTapCount.current = 0;
+        },
+        __DEV__ ? 3000 : 1000,
+      );
     }
   };
 
@@ -114,8 +140,12 @@ const AboutScreen: React.FC = () => {
               />
             )}
             <View style={styles.teamRow}>
-              {teamProfile.picture ? (
-                <Image source={{ uri: teamProfile.picture }} style={styles.teamPicture} />
+              {teamProfile.picture && !teamPictureError ? (
+                <Image
+                  source={{ uri: teamProfile.picture }}
+                  style={styles.teamPicture}
+                  onError={() => setTeamPictureError(true)}
+                />
               ) : (
                 <View style={styles.teamPicturePlaceholder}>
                   <UserRound size={28} color={colors.textBody} strokeWidth={1.75} />
@@ -191,10 +221,6 @@ const AboutScreen: React.FC = () => {
           initialAddress={teamProfile.lud16}
           initialPicture={teamProfile.picture || undefined}
           recipientPubkey={teamProfile.pubkey}
-          // Preset amount pills on the amount-entry step so kids can tap
-          // a sensible team-zap value (21 / 100 / 1k / 10k sats) instead
-          // of typing one and accidentally sending too much.
-          suggestedAmounts={[21, 100, 1000, 10000]}
         />
       )}
       <FeedbackSheet

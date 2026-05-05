@@ -61,12 +61,16 @@ else
   echo "      Run 'npm run test:coverage' first for accurate ranking." >&2
 fi
 
-# All TS/TSX files under src/. Bash-3.2 portable (no `mapfile`).
+# Files in scope for unit testing: src/services, src/utils, src/contexts.
+# Components are excluded — they're tested via Maestro flows (mocking
+# Reanimated + bottom-sheet + Image for unit tests is high-effort,
+# low-payoff). Matches `collectCoverageFrom` in jest.config.js.
+# Bash-3.2 portable (no `mapfile`).
 FILES=()
 while IFS= read -r line; do
   FILES+=("$line")
-done < <(find src -type f \( -name '*.ts' -o -name '*.tsx' \) \
-  ! -name '*.test.ts' ! -name '*.test.tsx' ! -name '*.d.ts' | sort)
+done < <(find src/services src/utils src/contexts -type f \( -name '*.ts' -o -name '*.tsx' \) \
+  ! -name '*.test.ts' ! -name '*.test.tsx' ! -name '*.d.ts' 2>/dev/null | sort)
 
 # Extract coverage pct for a path (returns "0" if not present or no coverage run).
 # Pure awk parse of the JSON — no python required. coverage-summary.json is

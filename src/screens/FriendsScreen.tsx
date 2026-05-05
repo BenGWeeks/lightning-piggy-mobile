@@ -13,7 +13,8 @@ import TabBackgroundImage from '../components/TabBackgroundImage';
 import { Alert } from '../components/BrandedAlert';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { Users } from 'lucide-react-native';
+import { Users, Search, X } from 'lucide-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation, CompositeNavigationProp, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -35,6 +36,10 @@ type FriendsNavigation = CompositeNavigationProp<
 >;
 
 type Filter = 'all' | 'nostr' | 'contacts';
+const FILTER_STORAGE_KEY = 'friends_filter';
+const FILTER_VALUES: readonly Filter[] = ['all', 'nostr', 'contacts'] as const;
+const isFilter = (v: string | null): v is Filter =>
+  v !== null && (FILTER_VALUES as readonly string[]).includes(v);
 
 // Cached at module scope so every keystroke doesn't construct a fresh
 // Intl.Collator (5-10× slower than reusing one). 'base' sensitivity is
@@ -107,6 +112,25 @@ const FriendsScreen: React.FC = () => {
     fetchPhoneContacts()
       .then(setPhoneContacts)
       .catch(() => {});
+  }, []);
+
+  // Restore the persisted Friends-tab filter selection on mount so it
+  // survives app restarts (#311). Mirrors the AsyncStorage pattern
+  // used for `messages_window_days` in MessagesScreen — get on mount,
+  // setItem on every change. Falls back to 'all' if the stored value
+  // is missing or not a recognised Filter — same default as a
+  // brand-new install.
+  useEffect(() => {
+    AsyncStorage.getItem(FILTER_STORAGE_KEY)
+      .then((v) => {
+        if (isFilter(v)) setFilter(v);
+      })
+      .catch(() => {});
+  }, []);
+
+  const setFilterAndPersist = useCallback((next: Filter) => {
+    setFilter(next);
+    AsyncStorage.setItem(FILTER_STORAGE_KEY, next).catch(() => {});
   }, []);
 
   // Force-refresh the own-profile kind-0 on focus so the top-right
@@ -323,15 +347,7 @@ const FriendsScreen: React.FC = () => {
         <View style={styles.chipRow}>
           {searchExpanded ? (
             <View style={styles.searchRow}>
-              <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
-                <Circle cx="11" cy="11" r="8" stroke="rgba(255,255,255,0.7)" strokeWidth={2} />
-                <Path
-                  d="m21 21-4.3-4.3"
-                  stroke="rgba(255,255,255,0.7)"
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                />
-              </Svg>
+              <Search size={16} color="rgba(255,255,255,0.7)" strokeWidth={2} />
               <TextInput
                 ref={searchInputRef}
                 style={styles.searchInput}
@@ -353,14 +369,7 @@ const FriendsScreen: React.FC = () => {
                 accessibilityLabel="Close search"
                 testID="close-search"
               >
-                <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
-                  <Path
-                    d="M18 6 6 18M6 6l12 12"
-                    stroke="rgba(255,255,255,0.8)"
-                    strokeWidth={2.5}
-                    strokeLinecap="round"
-                  />
-                </Svg>
+                <X size={16} color="rgba(255,255,255,0.8)" strokeWidth={2.5} />
               </TouchableOpacity>
             </View>
           ) : (
@@ -369,13 +378,20 @@ const FriendsScreen: React.FC = () => {
                 <TouchableOpacity
                   key={f.key}
                   style={[styles.chip, filter === f.key && styles.chipActive]}
-                  onPress={() => setFilter(f.key)}
+                  onPress={() => setFilterAndPersist(f.key)}
+                  accessibilityLabel={`${f.label} filter`}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: filter === f.key }}
+                  testID={`friends-filter-${f.key}`}
                 >
                   <Text style={[styles.chipText, filter === f.key && styles.chipTextActive]}>
                     {f.label}
                   </Text>
                 </TouchableOpacity>
               ))}
+              {/* Hidden marker so Maestro can assert WHICH filter is active (e.g. after a cold restart) without relying on accessibilityState, which RN exposes inconsistently across Android versions. */}
+              <View testID={`friends-filter-active-${filter}`} accessibilityElementsHidden />
+
               <TouchableOpacity
                 style={styles.searchToggle}
                 onPress={() => {
@@ -385,15 +401,7 @@ const FriendsScreen: React.FC = () => {
                 accessibilityLabel="Search friends"
                 testID="search-toggle"
               >
-                <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                  <Circle cx="11" cy="11" r="8" stroke="rgba(255,255,255,0.8)" strokeWidth={2} />
-                  <Path
-                    d="m21 21-4.3-4.3"
-                    stroke="rgba(255,255,255,0.8)"
-                    strokeWidth={2}
-                    strokeLinecap="round"
-                  />
-                </Svg>
+                <Search size={18} color="rgba(255,255,255,0.8)" strokeWidth={2} />
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.addButton}

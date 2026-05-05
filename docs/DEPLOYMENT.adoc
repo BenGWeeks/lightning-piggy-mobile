@@ -80,7 +80,17 @@ install you don't want to lose data on):
 #
 # EXPO_NO_DOCTOR=1 skips the pre-flight version-compatibility checker
 # which is noisy on minor-mismatch deps and not relevant to signing.
-EXPO_NO_DOCTOR=1 eas build --local --platform android --profile production --non-interactive
+#
+# TMPDIR="$HOME/eas-tmp" is REQUIRED on hosts with /tmp on tmpfs
+# (default Ubuntu/Debian setup, 12 GB cap). The EAS local builder
+# generates ~9 GB of native-lib intermediates during the multi-arch
+# APK assembly (arm64 + armv7 + x86 + x86_64), and Gradle crashes with
+# `UncheckedIOException: Could not add entry ... to cache fileHashes.bin`
+# the moment tmpfs hits 100 %. Pointing TMPDIR at disk-backed storage
+# gives Gradle the ~10 GB of headroom it needs. ($HOME instead of ~ is
+# unambiguous across shells / non-interactive runners.)
+mkdir -p "$HOME/eas-tmp"
+TMPDIR="$HOME/eas-tmp" EXPO_NO_DOCTOR=1 eas build --local --platform android --profile production --non-interactive
 
 # Install over the existing app — preserves user data (Nostr nsec,
 # wallet pairings, conversation cache).
@@ -89,6 +99,15 @@ adb -s <serial> install -r android/app/build/outputs/apk/release/app-release.apk
 
 Build time: ~10-15 min fresh, ~2-3 min on a warm gradle cache. No
 cloud queue, no Metro, no fresh-login required on the device.
+
+If the build fails partway with `UncheckedIOException: Could not add
+entry ... fileHashes.bin` (or any I/O error inside the Gradle cache),
+check `df -h /tmp` first — if it's at or near 100 % the
+`TMPDIR="$HOME/eas-tmp"` knob above is what you're missing. The
+`$HOME/eas-tmp` working tree can be deleted between builds
+(`rm -rf "$HOME/eas-tmp"`) to reclaim disk; the next `mkdir -p` and
+Gradle will re-create everything (including hidden entries like
+`.gradle`) before the next build.
 
 ===== Verify the install actually committed
 

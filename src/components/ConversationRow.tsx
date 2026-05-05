@@ -9,7 +9,11 @@ import { conversationPreview, formatConversationTimestamp } from '../utils/conve
 
 interface Props {
   summary: ConversationSummary;
-  onPress?: () => void;
+  // Receives `summary` so the parent can pass a single stable handler
+  // reference across all rows (no fresh arrow per render). Without this,
+  // React.memo's prop comparison saw a new onPress every render and
+  // re-rendered the row even when its data hadn't changed (#300 follow-up).
+  onPress?: (summary: ConversationSummary) => void;
 }
 
 const ConversationRow: React.FC<Props> = ({ summary, onPress }) => {
@@ -23,11 +27,18 @@ const ConversationRow: React.FC<Props> = ({ summary, onPress }) => {
   const showImage = !!summary.picture && !avatarError;
   const timestamp = formatConversationTimestamp(summary.lastActivityAt);
   const preview = conversationPreview(summary);
+  // Bind the row's summary into the parent handler at the leaf so the
+  // <TouchableOpacity> sees a stable callback per render, while the
+  // parent still hands us a single handler.
+  const handlePress = useMemo(
+    () => (onPress ? () => onPress(summary) : undefined),
+    [onPress, summary],
+  );
 
   return (
     <TouchableOpacity
       style={styles.container}
-      onPress={onPress}
+      onPress={handlePress}
       activeOpacity={onPress ? 0.6 : 1}
       accessibilityLabel={`Conversation with ${summary.name}`}
       testID={`conversation-row-${summary.id}`}

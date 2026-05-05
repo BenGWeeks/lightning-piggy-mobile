@@ -39,6 +39,46 @@ adb shell ime set com.google.android.inputmethod.latin/com.android.inputmethod.l
 | `npx expo start` fails but `npm start` works
 | The `start` script includes `--dev-client` which is required for custom native modules. Always use `npm start`.
 
+| EAS local production build crashes mid-Gradle with `UncheckedIOException: Could not add entry ... to cache fileHashes.bin`
+| `/tmp` is on tmpfs (default Ubuntu/Debian) capped at ~12 GB. The EAS local builder generates ~9 GB of native-lib intermediates during the multi-arch APK assembly (arm64 + armv7 + x86 + x86_64). When tmpfs hits 100 %, Gradle's incremental-cache writer throws on the next `fileHashes.bin` flush and the entire build aborts. +
+*Symptom:* `tail -3 /tmp/eas-build.log` shows the IOException; `df -h /tmp` shows tmpfs at 100 %; the build PID is gone with no APK at `android/app/build/outputs/apk/release/app-release.apk`. +
+*Fix:* point Gradle at disk-backed storage via `TMPDIR`: +
+[source,bash]
+----
+mkdir -p "$HOME/eas-tmp"
+TMPDIR="$HOME/eas-tmp" EXPO_NO_DOCTOR=1 \
+  eas build --local --platform android --profile production --non-interactive
+----
+*Cleanup:* `rm -rf "$HOME/eas-tmp"` between builds when you want to reclaim disk; the next run's `mkdir -p` and Gradle will re-create everything, including hidden entries such as `.gradle` or `.expo`. The EAS-CLI checkout under `$TMPDIR/eas-build-local-nodejs/` is also safe to delete between runs. Full recipe + rationale in `docs/DEPLOYMENT.adoc` → "Local production builds".
+
+| "How long is the EAS iOS build queue right now?" — no public API
+| EAS doesn't expose live queue depth via API; status.expo.dev only reports operational/degraded. Best signals: +
+1. **Last completed-build duration** — proxy for current load: +
+[source,bash]
+----
+NODE_NO_WARNINGS=1 eas build:list --platform ios --status finished --limit 1 --non-interactive \
+  | grep -E "Started at|Finished at"
+----
+Subtract the two timestamps. Free-tier iOS production has historically been ~2-3 hours wall-time. +
+2. **Are any builds currently queued?** +
+[source,bash]
+----
+NODE_NO_WARNINGS=1 eas build:list --status in-queue --status in-progress --limit 10 --non-interactive
+----
+Empty output = nothing in flight; positive output shows projects ahead of you in the shared queue. +
+3. **EAS dashboard** — https://expo.dev/accounts/bengweeks/projects/lightning-piggy-app/builds renders queue position client-side once a build is in flight; the initial HTML doesn't include it. +
+*Why this matters:* GH-Release-driven iOS builds go to TestFlight after EAS finishes + Apple processes (~10 min). For a same-day TestFlight push, kick off in the morning. For a v1.X.Y-rc1 cycle, plan ~3-4 hours from tag-push to "installable in TestFlight". +
+*The only definitive number* is the queue position EAS prints once your build is submitted. Until then, all numbers are estimates from prior runs.
+
+| Maestro can't tap a third-party signer's FAB / button (Aegis, Clave, etc) — `Element not found` or silent no-op
+| Some signer apps (notably Aegis ≥0.5.0, possibly Clave) ship without accessibility labels on key UI elements like the "+" FAB to add a connection. Maestro's `tapOn: { id: ... }` and `tapOn: { text: ... }` both miss because there's nothing to match. The `index:` selector also ranks unpredictably for un-labelled `ImageView` clickables. +
+*Why coordinates aren't a workaround:* `point: '90%, 91%'` and `adb shell input tap` are forbidden by the project's CLAUDE.md (fragile across screen sizes / OS versions / device profiles). +
+*Workarounds:* +
+1. Drive the signer setup manually before kicking off the Maestro flow — pre-pair the signer with the test nsec via its own UI, then have Maestro start from a state where the signer is ready. +
+2. File the missing a11y label upstream and pin the older signer version where the bug doesn't apply. +
+3. Use a signer that exposes a11y selectors (per the 2026-05 review, Nowser surfaces tappable elements with `accessibilityLabel` / resource-id, so Maestro can drive its connection-add flow without coordinate fallbacks). +
+*Validated this session:* PR #284 (NIP-46 / Clave) reaches the QR pairing screen + verifies the spec-compliant `nostrconnect://` URI fully via Maestro; the bunker-side approval cannot be Maestro-driven on Aegis until Aegis ships a `testTag` / `accessibilityLabel` on the FAB. Manual handoff is the supported path today.
+
 | Metro not connecting to device over USB
 | Run `adb reverse tcp:8081 tcp:8081` for USB port forwarding before launching the app.
 
@@ -68,6 +108,18 @@ Always follow merges that add/remove icon or asset files with a `--clear` restar
 | Characters dropped / visually deleted while typing into a `TextInput` inside a `@gorhom/bottom-sheet` modal
 | Plain React Native `TextInput` loses keystrokes when placed inside `BottomSheetView` / `BottomSheetModal` — the sheet container is animated by `react-native-reanimated` and can re-render while the IME is mid-composition, dropping characters. The symptom looks like the input "friendly deletes" letters you just typed. +
 *Fix:* use `BottomSheetTextInput` from `@gorhom/bottom-sheet` (not `TextInput` from `react-native`) for every input inside a bottom-sheet subtree. It hooks into the sheet's keyboard + animation context and keeps keystrokes intact. All sheets in this repo (FeedbackSheet, TransferSheet, AddWalletWizard, EditProfileSheet, AddFriendSheet, NostrLoginSheet, and — as of #96 — SendSheet) follow this pattern. If you add a new sheet, grep `BottomSheetTextInput` for the canonical import site.
+
+| Maestro `inputText` drops characters in plain `TextInput`
+| Generic char-drop, not the BottomSheetTextInput-specific failure below. Maestro's `adb shell input text "$value"` synthesizes keystrokes faster than Android's IME composition pipeline can absorb them — long strings (>8-12 chars) lose chars in the middle. Affects the SDK 55 New Architecture especially. +
+*Workaround:* split the input into ~8-character chunks across multiple `inputText` steps:
+[source,yaml]
+----
+- inputText: "justowl3"
+- inputText: "@primal"
+- inputText: ".net"
+----
+The IME finishes composing each chunk before the next one starts. For nsec / npub / NWC URLs (60-90 chars) this is too painful — use the clipboard-paste pattern (next entry). +
+*When chunking is fine:* short text (lightning addresses, group names, search queries). When clipboard-paste is required: any 30+ char secret / URL.
 
 | Maestro `inputText` doesn't update React state in `BottomSheetTextInput`
 | `BottomSheetTextInput` from `@gorhom/bottom-sheet` doesn't always trigger `onChangeText` when Maestro uses `inputText`. The text appears visually in the input but the React state stays empty, causing validation to fail. Under React Native's New Architecture (Fabric, default in SDK 55) the `testID` lands on the wrapper View rather than the native `EditText`, so the synthetic `adb shell input text` keystrokes don't advance the JS event path. **Do not** replace with regular `TextInput` — the bottom sheet needs its own input to adjust when the keyboard opens. +
@@ -388,4 +440,52 @@ QT_QPA_PLATFORM=xcb $ANDROID_HOME/emulator/emulator \
 *What you gain:* the `userdata-qemu.img.qcow2` file goes from a multi-GB accumulated overlay (often 7 GB+ after months of use) back to a thin overlay regenerated from the system image's userdata. +
 *Don't waste time on these false leads first:* (a) `adb reboot` won't help — the corrupt overlay is what re-mounts on every boot. (b) Switching GPU mode won't help — the GPU init phase succeeds; the failure is in Android userspace boot. (c) Increasing AVD RAM won't help — `system_server` isn't OOM, it's hanging on the corrupt overlay. (d) Re-running `expo prebuild` won't help — this is an emulator state issue, not an app build issue. +
 *Verify clean boot:* `adb -s emulator-5554 shell getprop sys.boot_completed` returns `1` (with a stable trailing newline) and `adb devices` shows `device` (not `offline`) consistently for >30 s. UI rendering should be smooth — if you see frame stutters and a `Process system isn't responding` dialog, you're probably on `swiftshader_indirect` (software GL) and need to re-launch with `-gpu host` now that the overlay is clean.
+
+| Maestro triple-tap (e.g. version label to enable dev mode) silently fails on API 36 emulator
+| Maestro's official supported ceiling is API 34 — three sequential `tapOn` calls on an API 36 image take >1 s end-to-end, exceeding the 1-second window in `handleVersionTap` (and similar in-app tap-counter handlers like add-wallet hot wallet unlock). Symptom: 3 `tapOn`s complete cleanly per Maestro logs but the dev-mode alert never appears. The same flow can also be defeated by an API 36 PackageManager bug that breaks RN dev builds (`Activity class does not exist` on `am start`) — independent of installer attribution, install path, or `adb reboot`. +
+*Fix:* Run E2E + dev work on **API 34**, **`google_apis`** image (NOT `google_play` — saves ~300 MB RAM + the GMS daemons that thrash `system_server`), **`Medium Phone`** device profile (Pixel 9a / Pixel 10 device profiles have a known input-swallowing bug on Linux/macOS/Windows). Bump RAM + heap before first boot so `system_server` doesn't crash under a 150 MB+ RN dev APK install: +
+[source,bash]
+----
+# Install the image once
+$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+  "system-images;android-34;google_apis;x86_64"
+
+# Create the AVD
+echo no | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd \
+  -n LP_API34 -k "system-images;android-34;google_apis;x86_64" \
+  -d "medium_phone" --force
+
+# Bump RAM + heap (default 1.5 GB / 228 MB OOMs on RN dev installs;
+# 4 GB / 1024 MB matches satmo-react-native's validated config)
+sed -i 's/^hw.ramSize=.*/hw.ramSize=4096/' \
+  ~/.android/avd/LP_API34.avd/config.ini
+sed -i 's/^vm.heapSize=.*/vm.heapSize=1024/' \
+  ~/.android/avd/LP_API34.avd/config.ini
+
+# Cold-boot
+$ANDROID_HOME/emulator/emulator -avd LP_API34 \
+  -no-snapshot-load -no-snapshot-save -no-audio -gpu host
+----
+*Disk-space follow-up:* if `adb install` later fails with `INSTALL_FAILED_INSUFFICIENT_STORAGE` (the dev APK + Hermes intermediates need 3-4 GB free), edit `config.ini` to set `disk.dataPartition.size=12G` (default 800M-6G), then cold-boot with `-wipe-data -no-snapshot` (destructive — wipes installed apps + accounts). +
+*Performance bonus:* API 34 lacks the stylus-handwriting service that API 35+ ship, removing one of the two soft-keyboard suppression gates documented above. Re-running `adb shell settings put secure stylus_handwriting_enabled 0` on every cold boot becomes unnecessary. +
+*Reference:* `../satmo-react-native/docs/TROUBLESHOOTING.adoc` — "Emulator with API 36 (Android 16) image refuses to launch the dev build" and "Android emulator System UI isn't responding".
+
+| Pixel device profiles in Android Studio AVD swallow taps (Pixel 9a / Pixel 10)
+| Hardware-profile bug in the Pixel 9a / Pixel 10 device skins — emulator boots and renders fine, app launches and is visible, but mouse clicks (and `adb shell input tap`) are silently dropped. Confirmed cross-platform (Linux / macOS / Windows). The OS image is fine; only the device profile is broken. +
+*Fix:* Delete the Pixel AVD and recreate using the generic **"Medium Phone"** device profile with the same API level. Same OS, working input. +
+*Workaround if you must stay on the Pixel profile:* AVD settings → Graphics → **Software** (not Hardware) → Cold Boot. Works for some configurations, not all. +
+*Reference:* `../satmo-react-native/docs/TROUBLESHOOTING.adoc` — "Mouse clicks / taps don't register in Android emulator (Pixel device profiles)".
+
+| AVD `system_server` crashes / "System UI isn't responding" *after* installing a fresh dev APK
+| Default AVD allocation (RAM 1.5 GB, Dalvik heap 228 MB) is undersized for installing a 150 MB+ React Native dev APK. `kswapd0` burns 40% kernel CPU, `system_server` dies, Binder IPC fails with `No space left on device` (RAM-pressure symptom, NOT disk), every subsequent `adb install` / `pm list packages` / app launch fails until guest reboot. Distinct from the corrupt-overlay entry above — that's after months of use, this is on first install. +
+*Fix:* Bump RAM to 4 GB + Dalvik heap to 1024 MB *before* first boot (Android Studio → Device Manager → edit AVD → Advanced Settings, or edit `~/.android/avd/<AVD>.avd/config.ini` → `hw.ramSize=4096`, `vm.heapSize=1024`, then cold-boot with `-no-snapshot`). Validated against `system_server` crash on 1.5 GB / 228 MB; clean install on 4 GB / 1024 MB. +
+*Prevent recurrence:* use a `google_apis` system image (NOT `google_play`) — drops the Play Store + GMS daemons that consume ~300 MB RAM / 60% CPU. The Play *Services* subset (Google Sign-In, Firebase Auth, FCM) still works; only the storefront and its background daemons are excluded. +
+*Reference:* `../satmo-react-native/docs/TROUBLESHOOTING.adoc` — "Android emulator System UI isn't responding / app stuck on splash" and "AVD `system_server` crashes during `adb install`".
+
+| Claude Code Bash tool fails silently (exit 1 or 134, empty stdout/stderr) when `/tmp` is full
+| Claude Code creates a shell snapshot in `/tmp` at session start; when the volume is full, every Bash tool invocation silently fails. `bash --noprofile --norc -c '…'` and the file-redirect workaround `{ cmd; } > /tmp/out 2>&1; exit 0` also produce no output (the spawned bash never reaches the redirect). `/doctor` does not flag it; only the Write tool surfaces the underlying `ENOSPC` honestly. On a typical Linux dev machine `/tmp` is a tmpfs sized at 50 % of RAM; common culprits are accumulated git worktrees in `/tmp/wt-*` (1-2 GB of `node_modules` each, up to 7+ GB with EAS local-build artifacts), `/tmp/metro-cache`, `/tmp/node-compile-cache`, and signed-but-not-cleaned `*.apk` outputs. +
+*Diagnose:* `df -h /tmp` to confirm full; `du -shx /tmp/* 2>/dev/null \| sort -h \| tail -20` to identify culprits. +
+*Fix:* `rm -rf /tmp/wt-* /tmp/metro-* /tmp/node-compile-cache /tmp/*.apk` (review the list first; these are caches and ephemeral build outputs). Then `git worktree prune` from any repo whose worktrees lived in `/tmp` so the admin entries match reality. Restart Claude Code so it can write a fresh shell snapshot. +
+*Prevent recurrence:* don't create git worktrees in `/tmp` on tmpfs machines. Use `git worktree add ~/.local/share/wt-<name> <branch>` (or `~/wt-*`) — survives reboot and doesn't compete with the tmpfs cap. +
+*False leads to skip:* reinstalling Claude Code, killing leftover `chrome-native-host` processes, removing dangling plugin entries from `~/.claude/settings.json`, switching out of Remote Control mode — none of these fix the underlying full-tmpfs.
 |===

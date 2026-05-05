@@ -10,7 +10,7 @@
 import * as SecureStore from 'expo-secure-store';
 import * as bitcoin from 'bitcoinjs-lib';
 import * as ecc from '@bitcoinerlab/secp256k1';
-import Toast from 'react-native-toast-message';
+import Toast from '../components/BrandedToast';
 import * as boltzService from './boltzService';
 
 // Required for bitcoinjs-lib to derive output scripts from taproot (bech32m)

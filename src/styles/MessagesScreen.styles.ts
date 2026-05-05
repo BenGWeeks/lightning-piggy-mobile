@@ -54,6 +54,26 @@ export const createMessagesScreenStyles = (colors: Palette) =>
       borderRadius: 14,
       backgroundColor: 'rgba(229, 34, 120, 0.1)',
     },
+    // Off-state for the dev-only Following-only toggle. Mirrors
+    // GroupsScreen's matching style — desaturated background + outline
+    // makes the "filter is OFF" state visually loud so a forgotten
+    // toggle doesn't blend into a normal-looking chip row.
+    filterChipOff: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 14,
+      backgroundColor: 'rgba(0, 0, 0, 0.05)',
+      borderWidth: 1,
+      borderColor: 'rgba(0, 0, 0, 0.1)',
+    },
+    filterChipTextOff: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.textSupplementary,
+    },
     filterChipInteractive: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -64,6 +84,21 @@ export const createMessagesScreenStyles = (colors: Palette) =>
       backgroundColor: 'rgba(229, 34, 120, 0.1)',
       borderWidth: 1,
       borderColor: 'rgba(229, 34, 120, 0.3)',
+    },
+    // Filled variant for an "on" toggleable chip (e.g. the Zaps filter
+    // chip when zap counterparties are unioned into the inbox). Same
+    // footprint as filterChipInteractive so layout doesn't shift; just
+    // a stronger background + border to read as "active".
+    filterChipInteractiveOn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 14,
+      backgroundColor: 'rgba(229, 34, 120, 0.25)',
+      borderWidth: 1,
+      borderColor: colors.brandPink,
     },
     filterChipText: {
       fontSize: 13,

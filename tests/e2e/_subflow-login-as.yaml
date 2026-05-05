@@ -31,8 +31,15 @@ name: Internal — login as the nsec passed via MAESTRO_NSEC
     optional: true
 - waitForAnimationToEnd:
     timeout: 2000
+# The Sign-Out confirmation is now a BrandedAlert (PR #234), not the
+# native Android Alert. Tap its CONFIRM button by full testID rather
+# than `text: 'Sign Out'`, which also matched the still-visible
+# drawer-sign-out menu row underneath and caused the alert to re-open
+# (drawer-row-profile then never appeared because the alert was modal).
+# branded-alert-button-1 is the confirm button (index 1 = destructive
+# action; index 0 is Cancel).
 - tapOn:
-    text: 'Sign Out'
+    id: 'branded-alert-button-1'
     optional: true
 - waitForAnimationToEnd:
     timeout: 3000
