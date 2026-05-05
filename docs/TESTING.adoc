@@ -192,7 +192,7 @@ Available subflows:
 `MAESTRO_TEST_NWC` → Lightning (NWC) wallet via connection string. +
 `MAESTRO_TEST_MNEMONIC` → On-chain hot wallet via 12/24-word seed phrase. *Requires dev mode enabled in the app* — run `test-dev-mode.yaml` once first.
 
-Optional `WALLET_NAME` (default "Test Wallet") sets the alias shown on the wallet card. The flow asserts that alias appears in the carousel before returning.
+Required `WALLET_NAME` sets the alias shown on the wallet card. The flow asserts that alias appears in the carousel before returning. Maestro's `${VAR}` interpolation has no robust default-fallback across versions, so an unset value leaves the literal `${WALLET_NAME}` in the alias field and the visibility assertion never matches — pass it explicitly via `runFlow.env`.
 
 |===
 

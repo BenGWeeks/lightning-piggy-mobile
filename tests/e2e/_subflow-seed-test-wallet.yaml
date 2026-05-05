@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID:-com.lightningpiggy.app.dev}
 name: Internal — seed a test wallet via the AddWalletWizard
 ---
 # Composable subflow that walks the AddWalletWizard with credentials
@@ -23,7 +23,12 @@ name: Internal — seed a test wallet via the AddWalletWizard
 #
 # Optional inputs:
 #
-#   WALLET_NAME — alias shown on the wallet card (default: "Test Wallet")
+#   WALLET_NAME — alias shown on the wallet card. REQUIRED: pass via
+#                 the calling `runFlow.env` block. Maestro's `${VAR}`
+#                 interpolation has no default-fallback that's robust
+#                 across versions, so an unset value leaves the literal
+#                 `${WALLET_NAME}` in the alias input and the
+#                 visibility assertion never matches.
 #
 # The flow assumes the caller has already logged in (via
 # `_subflow-login-as.yaml` or otherwise) and that the Home tab carousel
@@ -93,9 +98,14 @@ name: Internal — seed a test wallet via the AddWalletWizard
           timeout: 5000
 
 # --- Branch: On-chain hot wallet (mnemonic, dev mode only) ---
+# Guarded on `MAESTRO_TEST_NWC === ''` too: if the caller has both vars
+# exported (e.g. shared `.env`) the NWC branch above runs first and
+# advances the wizard past the type-selection screen, so this branch
+# would no longer find `wallet-type-mnemonic` to tap. NWC wins by
+# convention.
 - runFlow:
     when:
-      true: "'${MAESTRO_TEST_MNEMONIC}' !== ''"
+      true: "'${MAESTRO_TEST_MNEMONIC}' !== '' && '${MAESTRO_TEST_NWC}' === ''"
     commands:
       # Scroll the type list up so the dev-mode-only "Import Seed
       # Phrase" tile is reachable below the two production tiles.
