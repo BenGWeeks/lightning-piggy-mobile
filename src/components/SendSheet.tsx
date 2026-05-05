@@ -33,7 +33,6 @@ import * as boltzService from '../services/boltzService';
 import * as onchainService from '../services/onchainService';
 import { npubEncode } from '../services/nostrService';
 import { recordOutgoing as recordOutgoingCounterparty } from '../services/zapCounterpartyStorage';
-import PaymentProgressOverlay, { PaymentProgressState } from './PaymentProgressOverlay';
 import AmountEntryScreen from './AmountEntryScreen';
 
 interface Props {
@@ -109,6 +108,10 @@ const SendSheet: React.FC<Props> = ({
     wallets,
     btcPrice,
     currency,
+    reportSendStart,
+    reportSendSuccess,
+    reportSendError,
+    clearSendProgress,
   } = useWallet();
   const { signZapRequest, contacts } = useNostr();
   const [capturedWalletId, setCapturedWalletId] = useState<string | null>(null);
@@ -129,11 +132,16 @@ const SendSheet: React.FC<Props> = ({
   const [activePubkey, setActivePubkey] = useState(recipientPubkey);
   const [activePicture, setActivePicture] = useState(initialPicture);
   const [isOnchainAddress, setIsOnchainAddress] = useState(false);
+
+  // If the parent unmounts SendSheet while a send result is still hoisted in WalletContext (success overlay open, navigation tear-down, etc.), the app-root overlay keeps rendering with callbacks bound to a sheet that no longer exists. Clear the global slot on teardown so it can't outlive its owner.
+  useEffect(() => {
+    return () => {
+      clearSendProgress();
+    };
+  }, [clearSendProgress]);
   const [boltzFees, setBoltzFees] = useState<boltzService.SwapFees | null>(null);
   const [loadingBoltzFees, setLoadingBoltzFees] = useState(false);
   const [onchainFeeEstimate, setOnchainFeeEstimate] = useState<string | null>(null);
-  const [progressState, setProgressState] = useState<PaymentProgressState>('hidden');
-  const [progressError, setProgressError] = useState<string | undefined>(undefined);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   // Per-send AbortController so the Cancel button on PaymentProgressOverlay
   // can abort the NWC call's publish → reply-timeout → poll-for-preimage
@@ -375,8 +383,18 @@ const SendSheet: React.FC<Props> = ({
     paymentAbortRef.current = abortController;
     const signal = abortController.signal;
     setSending(true);
-    setProgressError(undefined);
-    setProgressState('sending');
+    // Drive the global overlay through WalletContext so any future
+    // entry-point (Friends quick-zap, deep link, ...) can surface the
+    // same UI without re-rendering the overlay locally. `onDismiss` is
+    // only invoked on success — on error the global overlay clears its
+    // state but leaves the SendSheet open so the user can retry from
+    // the filled-in form (see GlobalSendOverlay in App.tsx). #136.
+    reportSendStart({
+      amountSats: currentSats || decoded?.amountSats || undefined,
+      recipientName,
+      onCancel: handleCancelPayment,
+      onDismiss: onClose,
+    });
     try {
       if (isOnchainAddress) {
         if (currentSats <= 0) {
@@ -530,7 +548,10 @@ const SendSheet: React.FC<Props> = ({
         })();
       }
       if (signal.aborted) return;
-      setProgressState('success');
+      reportSendSuccess({
+        amountSats: currentSats || decoded?.amountSats || undefined,
+        recipientName,
+      });
     } catch (error) {
       // User-initiated cancel via PaymentProgressOverlay's Cancel button:
       // the overlay has already been hidden by handleCancelPayment, so
@@ -539,8 +560,10 @@ const SendSheet: React.FC<Props> = ({
         return;
       }
       const message = error instanceof Error ? error.message : 'Payment failed';
-      setProgressError(message);
-      setProgressState('error');
+      reportSendError(message, {
+        amountSats: currentSats || decoded?.amountSats || undefined,
+        recipientName,
+      });
     } finally {
       // Only clear state if this invocation is still the active one.
       // A cancel-then-resend can leave the first (aborted) handleSend
@@ -559,22 +582,14 @@ const SendSheet: React.FC<Props> = ({
     // Abort the NWC pay_invoice chain and hide the overlay so the user
     // can edit / retry / close from the filled-in SendSheet. Keep
     // `sending` true-ish in the background until the aborted promise
-    // resolves in handleSend's finally, which will flip it off.
+    // resolves in handleSend's finally, which will flip it off. The
+    // overlay is hidden by the GlobalSendOverlay's Cancel handler
+    // (which clears `sendProgress`) — we don't need to clear it again
+    // here.
     paymentAbortRef.current?.abort();
-    setProgressState('hidden');
-    setProgressError(undefined);
+    clearSendProgress();
     setSending(false);
-  }, []);
-
-  const handleOverlayDismiss = useCallback(() => {
-    // Dismissing the overlay after a successful payment also closes the
-    // parent sheet. On error we only dismiss the overlay so the user can
-    // retry from the filled-in form.
-    const wasSuccess = progressState === 'success';
-    setProgressState('hidden');
-    setProgressError(undefined);
-    if (wasSuccess) onClose();
-  }, [progressState, onClose]);
+  }, [clearSendProgress]);
 
   const handleReset = () => {
     setInvoiceData(null);
@@ -627,341 +642,327 @@ const SendSheet: React.FC<Props> = ({
       : !!invoiceData;
 
   return (
-    <>
-      <BottomSheetModal
-        ref={bottomSheetRef}
-        onChange={handleSheetChange}
-        enablePanDownToClose
-        backdropComponent={renderBackdrop}
-        handleIndicatorStyle={styles.handleIndicator}
-        backgroundStyle={styles.sheetBackground}
-        keyboardBehavior="interactive"
-        keyboardBlurBehavior="restore"
-        android_keyboardInputMode="adjustResize"
-      >
-        {/* AmountEntryScreen is a fixed-height component (card + button +
-         *  4-row keypad) — wrap it in a plain BottomSheetView so the
-         *  sheet's dynamic sizing measures the full intrinsic height.
-         *  Wrapping inside a BottomSheetScrollView caused the sheet's
-         *  height and the ScrollView's content height to become
-         *  circular references, clipping the keypad's last row. */}
-        {step === 'amount' ? (
-          <BottomSheetView style={styles.content}>
-            <AmountEntryScreen
-              initialSats={currentSats}
-              title="Enter amount"
-              minSats={amountMinSats}
-              maxSats={amountMaxSats}
-              confirmLabel="Done"
-              onBack={() => setStep('main')}
-              onConfirm={(sats) => {
-                setSatsValue(String(sats));
-                setStep('main');
-              }}
-            />
-          </BottomSheetView>
-        ) : (
-          <BottomSheetScrollView
-            contentContainerStyle={[
-              styles.content,
-              { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
-            ]}
-            keyboardShouldPersistTaps="handled"
-          >
-            <View style={styles.innerContent}>
-              <Text style={styles.title}>Send</Text>
+    <BottomSheetModal
+      ref={bottomSheetRef}
+      onChange={handleSheetChange}
+      enablePanDownToClose
+      backdropComponent={renderBackdrop}
+      handleIndicatorStyle={styles.handleIndicator}
+      backgroundStyle={styles.sheetBackground}
+      keyboardBehavior="interactive"
+      keyboardBlurBehavior="restore"
+      android_keyboardInputMode="adjustResize"
+    >
+      {/* AmountEntryScreen is a fixed-height component (card + button +
+       *  4-row keypad) — wrap it in a plain BottomSheetView so the
+       *  sheet's dynamic sizing measures the full intrinsic height.
+       *  Wrapping inside a BottomSheetScrollView caused the sheet's
+       *  height and the ScrollView's content height to become
+       *  circular references, clipping the keypad's last row. */}
+      {step === 'amount' ? (
+        <BottomSheetView style={styles.content}>
+          <AmountEntryScreen
+            initialSats={currentSats}
+            title="Enter amount"
+            minSats={amountMinSats}
+            maxSats={amountMaxSats}
+            confirmLabel="Done"
+            onBack={() => setStep('main')}
+            onConfirm={(sats) => {
+              setSatsValue(String(sats));
+              setStep('main');
+            }}
+          />
+        </BottomSheetView>
+      ) : (
+        <BottomSheetScrollView
+          contentContainerStyle={[
+            styles.content,
+            { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
+          ]}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.innerContent}>
+            <Text style={styles.title}>Send</Text>
 
-              {/* Wallet selector */}
-              {wallets.filter((w) => w.isConnected).length > 1 ? (
-                <View style={styles.walletDropdownRow}>
-                  <Text style={styles.walletLabel}>From:</Text>
-                  <View style={styles.walletDropdownWrapper}>
-                    <TouchableOpacity
-                      style={styles.walletDropdown}
-                      onPress={() => setDropdownOpen(!dropdownOpen)}
-                    >
-                      <Text style={styles.walletDropdownText}>{walletName}</Text>
-                      {dropdownOpen ? (
-                        <ChevronUp size={16} color={colors.white} />
-                      ) : (
-                        <ChevronDown size={16} color={colors.white} />
-                      )}
-                    </TouchableOpacity>
-                    {dropdownOpen && (
-                      <View style={styles.walletDropdownMenu}>
-                        {wallets
-                          .filter((w) => w.isConnected)
-                          .map((w) => (
-                            <TouchableOpacity
-                              key={w.id}
-                              style={[
-                                styles.walletDropdownItem,
-                                capturedWalletId === w.id && styles.walletDropdownItemActive,
-                              ]}
-                              onPress={() => {
-                                setCapturedWalletId(w.id);
-                                setDropdownOpen(false);
-                              }}
-                            >
-                              <Text
-                                style={[
-                                  styles.walletDropdownItemText,
-                                  capturedWalletId === w.id && styles.walletDropdownItemTextActive,
-                                ]}
-                              >
-                                {walletLabel(w)}
-                              </Text>
-                            </TouchableOpacity>
-                          ))}
-                      </View>
-                    )}
-                  </View>
-                </View>
-              ) : (
-                <Text style={styles.walletLabel}>From: {walletName}</Text>
-              )}
-
-              {/* Mode tabs */}
-              {!scanned && (
-                <View style={styles.tabRow}>
+            {/* Wallet selector */}
+            {wallets.filter((w) => w.isConnected).length > 1 ? (
+              <View style={styles.walletDropdownRow}>
+                <Text style={styles.walletLabel}>From:</Text>
+                <View style={styles.walletDropdownWrapper}>
                   <TouchableOpacity
-                    style={[styles.tab, inputMode === 'scan' && styles.tabActive]}
-                    onPress={() => setInputMode('scan')}
-                    accessibilityLabel="Scan tab"
-                    testID="send-tab-scan"
+                    style={styles.walletDropdown}
+                    onPress={() => setDropdownOpen(!dropdownOpen)}
                   >
-                    <Text style={[styles.tabText, inputMode === 'scan' && styles.tabTextActive]}>
-                      Scan
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.tab, inputMode === 'paste' && styles.tabActive]}
-                    onPress={() => setInputMode('paste')}
-                    accessibilityLabel="Input tab"
-                    testID="send-tab-input"
-                  >
-                    <Text style={[styles.tabText, inputMode === 'paste' && styles.tabTextActive]}>
-                      Input
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {/* Scanner or paste input */}
-              {!scanned ? (
-                inputMode === 'scan' ? (
-                  <View style={styles.cameraContainer}>
-                    {!permission.granted ? (
-                      <View style={styles.permissionContainer}>
-                        <Text style={styles.permissionText}>
-                          Camera access needed to scan QR codes
-                        </Text>
-                        <TouchableOpacity
-                          style={styles.permissionButton}
-                          onPress={requestPermission}
-                        >
-                          <Text style={styles.permissionButtonText}>Grant Permission</Text>
-                        </TouchableOpacity>
-                      </View>
+                    <Text style={styles.walletDropdownText}>{walletName}</Text>
+                    {dropdownOpen ? (
+                      <ChevronUp size={16} color={colors.white} />
                     ) : (
-                      <CameraView
-                        style={styles.camera}
-                        facing="back"
-                        barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-                        onBarcodeScanned={handleBarCodeScanned}
-                      />
+                      <ChevronDown size={16} color={colors.white} />
                     )}
-                  </View>
-                ) : (
-                  <View style={styles.pasteSection}>
-                    <BottomSheetTextInput
-                      style={styles.pasteInput}
-                      placeholder="Paste invoice, lightning or bitcoin address..."
-                      placeholderTextColor={colors.textSupplementary}
-                      value={pasteText}
-                      onChangeText={setPasteText}
-                      multiline
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      accessibilityLabel="Paste invoice or address"
-                      testID="send-paste-input"
-                    />
-                    <View style={styles.pasteButtonRow}>
-                      <TouchableOpacity
-                        style={styles.pasteButton}
-                        onPress={handlePaste}
-                        accessibilityLabel="Paste from clipboard"
-                        testID="send-paste-clipboard"
-                      >
-                        <Text style={styles.pasteButtonText}>Paste from clipboard</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.goButton, !pasteText.trim() && styles.goButtonDisabled]}
-                        onPress={handlePasteSubmit}
-                        disabled={!pasteText.trim()}
-                        accessibilityLabel="Go — process pasted invoice or address"
-                        testID="send-paste-go"
-                      >
-                        <Text style={styles.goButtonText}>Go</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                )
-              ) : (
-                /* Invoice/address detected - show details */
-                <View style={styles.detailsCard}>
-                  {activePicture && (
-                    <Image source={{ uri: activePicture }} style={styles.recipientPicture} />
-                  )}
-                  {decoded?.description ? (
-                    <Text style={styles.detailDescription}>{decoded.description}</Text>
-                  ) : null}
-
-                  {needsAmount ? (
-                    /* Lightning address or on-chain: amount is entered on a dedicated step */
-                    <View style={styles.amountSection}>
-                      {resolving ? (
-                        <ActivityIndicator size="small" color={colors.brandPink} />
-                      ) : lnurlParams || isOnchainAddress ? (
-                        <TouchableOpacity
-                          style={styles.amountPickerRow}
-                          onPress={() => setStep('amount')}
-                          testID="send-amount-picker"
-                          accessibilityLabel="Enter amount"
-                        >
-                          {currentSats > 0 ? (
-                            <>
-                              <Text style={styles.amountPickerValue}>
-                                {currentSats.toLocaleString()} sats
-                              </Text>
-                              {btcPrice ? (
-                                <Text style={styles.amountPickerFiat}>
-                                  {satsToFiatString(currentSats, btcPrice, currency)}
-                                </Text>
-                              ) : null}
-                            </>
-                          ) : (
-                            <Text style={styles.amountPickerPlaceholder}>Enter amount</Text>
-                          )}
-                        </TouchableOpacity>
-                      ) : null}
-                      {lnurlParams ? (
-                        <Text style={styles.rangeText}>
-                          {lnurlParams.minSats.toLocaleString()} –{' '}
-                          {lnurlParams.maxSats.toLocaleString()} sats
-                        </Text>
-                      ) : null}
-                    </View>
-                  ) : decoded?.amountSats !== null && decoded?.amountSats !== undefined ? (
-                    /* Bolt11 with amount */
-                    <View style={styles.amountDisplay}>
-                      <Text style={styles.amountValue}>
-                        {decoded.amountSats.toLocaleString()} sats
-                      </Text>
-                      {btcPrice ? (
-                        <Text style={styles.amountFiat}>
-                          {satsToFiatString(decoded.amountSats, btcPrice, currency)}
-                        </Text>
-                      ) : null}
-                    </View>
-                  ) : (
-                    <Text style={styles.amountValue}>Amount not specified</Text>
-                  )}
-
-                  {isOnchainAddress && invoiceData ? (
-                    <Text style={styles.detailAddress}>
-                      <Text style={styles.addressHighlight}>{invoiceData.slice(0, 6)}</Text>
-                      {invoiceData.slice(6, -6)}
-                      <Text style={styles.addressHighlight}>{invoiceData.slice(-6)}</Text>
-                    </Text>
-                  ) : isLightningAddress(invoiceData || '') ? (
-                    <Text style={styles.detailAddress}>{invoiceData}</Text>
-                  ) : (
-                    <Text style={styles.invoiceText} numberOfLines={3}>
-                      {invoiceData}
-                    </Text>
-                  )}
-
-                  {/* Fee estimate for on-chain addresses */}
-                  {isOnchainAddress && currentSats > 0 && (
-                    <Text style={styles.feeText}>
-                      {selectedWallet?.walletType === 'onchain' &&
-                      selectedWallet?.onchainImportMethod === 'mnemonic'
-                        ? (onchainFeeEstimate ?? 'Estimating fee...')
-                        : loadingBoltzFees
-                          ? 'Loading fees...'
-                          : boltzFees
-                            ? `Swap fee: ~${boltzService.calculateSwapFee(currentSats, boltzFees).toLocaleString()} sats \u00B7 ~10-60 min`
-                            : 'Fee estimate unavailable'}
-                    </Text>
-                  )}
-
-                  {/* Memo / comment field for Lightning address payments */}
-                  {needsAmount && (
-                    <BottomSheetTextInput
-                      style={styles.memoInput}
-                      placeholder={activePubkey ? 'Zap message (optional)' : 'Comment (optional)'}
-                      placeholderTextColor={colors.textSupplementary}
-                      value={memo}
-                      onChangeText={setMemo}
-                      maxLength={lnurlParams?.commentAllowed || 150}
-                      autoCorrect
-                      testID="sendsheet-memo-input"
-                      accessibilityLabel="Zap message"
-                    />
-                  )}
-
-                  <TouchableOpacity onPress={handleReset}>
-                    <Text style={styles.resetText}>Scan / paste different invoice</Text>
                   </TouchableOpacity>
+                  {dropdownOpen && (
+                    <View style={styles.walletDropdownMenu}>
+                      {wallets
+                        .filter((w) => w.isConnected)
+                        .map((w) => (
+                          <TouchableOpacity
+                            key={w.id}
+                            style={[
+                              styles.walletDropdownItem,
+                              capturedWalletId === w.id && styles.walletDropdownItemActive,
+                            ]}
+                            onPress={() => {
+                              setCapturedWalletId(w.id);
+                              setDropdownOpen(false);
+                            }}
+                          >
+                            <Text
+                              style={[
+                                styles.walletDropdownItemText,
+                                capturedWalletId === w.id && styles.walletDropdownItemTextActive,
+                              ]}
+                            >
+                              {walletLabel(w)}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                    </View>
+                  )}
                 </View>
-              )}
+              </View>
+            ) : (
+              <Text style={styles.walletLabel}>From: {walletName}</Text>
+            )}
 
-              {/* Balance */}
-              {walletBalance !== null && btcPrice !== null && (
-                <Text style={styles.balanceText}>
-                  Balance: {walletBalance.toLocaleString()} sats (
-                  {satsToFiatString(walletBalance, btcPrice, currency)})
-                </Text>
-              )}
-
-              {/* Action buttons */}
-              <View style={styles.buttonRow}>
+            {/* Mode tabs */}
+            {!scanned && (
+              <View style={styles.tabRow}>
                 <TouchableOpacity
-                  style={styles.cancelButton}
-                  onPress={() => {
-                    handleReset();
-                    onClose();
-                  }}
+                  style={[styles.tab, inputMode === 'scan' && styles.tabActive]}
+                  onPress={() => setInputMode('scan')}
+                  accessibilityLabel="Scan tab"
+                  testID="send-tab-scan"
                 >
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                  <Text style={[styles.tabText, inputMode === 'scan' && styles.tabTextActive]}>
+                    Scan
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.sendButton, (!canSend || sending) && styles.sendButtonDisabled]}
-                  onPress={handleSend}
-                  disabled={!canSend || sending}
+                  style={[styles.tab, inputMode === 'paste' && styles.tabActive]}
+                  onPress={() => setInputMode('paste')}
+                  accessibilityLabel="Input tab"
+                  testID="send-tab-input"
                 >
-                  {sending ? (
-                    <ActivityIndicator color={colors.brandPink} />
-                  ) : (
-                    <Text style={styles.sendButtonText}>Send</Text>
-                  )}
+                  <Text style={[styles.tabText, inputMode === 'paste' && styles.tabTextActive]}>
+                    Input
+                  </Text>
                 </TouchableOpacity>
               </View>
+            )}
+
+            {/* Scanner or paste input */}
+            {!scanned ? (
+              inputMode === 'scan' ? (
+                <View style={styles.cameraContainer}>
+                  {!permission.granted ? (
+                    <View style={styles.permissionContainer}>
+                      <Text style={styles.permissionText}>
+                        Camera access needed to scan QR codes
+                      </Text>
+                      <TouchableOpacity style={styles.permissionButton} onPress={requestPermission}>
+                        <Text style={styles.permissionButtonText}>Grant Permission</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <CameraView
+                      style={styles.camera}
+                      facing="back"
+                      barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+                      onBarcodeScanned={handleBarCodeScanned}
+                    />
+                  )}
+                </View>
+              ) : (
+                <View style={styles.pasteSection}>
+                  <BottomSheetTextInput
+                    style={styles.pasteInput}
+                    placeholder="Paste invoice, lightning or bitcoin address..."
+                    placeholderTextColor={colors.textSupplementary}
+                    value={pasteText}
+                    onChangeText={setPasteText}
+                    multiline
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    accessibilityLabel="Paste invoice or address"
+                    testID="send-paste-input"
+                  />
+                  <View style={styles.pasteButtonRow}>
+                    <TouchableOpacity
+                      style={styles.pasteButton}
+                      onPress={handlePaste}
+                      accessibilityLabel="Paste from clipboard"
+                      testID="send-paste-clipboard"
+                    >
+                      <Text style={styles.pasteButtonText}>Paste from clipboard</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.goButton, !pasteText.trim() && styles.goButtonDisabled]}
+                      onPress={handlePasteSubmit}
+                      disabled={!pasteText.trim()}
+                      accessibilityLabel="Go — process pasted invoice or address"
+                      testID="send-paste-go"
+                    >
+                      <Text style={styles.goButtonText}>Go</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )
+            ) : (
+              /* Invoice/address detected - show details */
+              <View style={styles.detailsCard}>
+                {activePicture && (
+                  <Image source={{ uri: activePicture }} style={styles.recipientPicture} />
+                )}
+                {decoded?.description ? (
+                  <Text style={styles.detailDescription}>{decoded.description}</Text>
+                ) : null}
+
+                {needsAmount ? (
+                  /* Lightning address or on-chain: amount is entered on a dedicated step */
+                  <View style={styles.amountSection}>
+                    {resolving ? (
+                      <ActivityIndicator size="small" color={colors.brandPink} />
+                    ) : lnurlParams || isOnchainAddress ? (
+                      <TouchableOpacity
+                        style={styles.amountPickerRow}
+                        onPress={() => setStep('amount')}
+                        testID="send-amount-picker"
+                        accessibilityLabel="Enter amount"
+                      >
+                        {currentSats > 0 ? (
+                          <>
+                            <Text style={styles.amountPickerValue}>
+                              {currentSats.toLocaleString()} sats
+                            </Text>
+                            {btcPrice ? (
+                              <Text style={styles.amountPickerFiat}>
+                                {satsToFiatString(currentSats, btcPrice, currency)}
+                              </Text>
+                            ) : null}
+                          </>
+                        ) : (
+                          <Text style={styles.amountPickerPlaceholder}>Enter amount</Text>
+                        )}
+                      </TouchableOpacity>
+                    ) : null}
+                    {lnurlParams ? (
+                      <Text style={styles.rangeText}>
+                        {lnurlParams.minSats.toLocaleString()} –{' '}
+                        {lnurlParams.maxSats.toLocaleString()} sats
+                      </Text>
+                    ) : null}
+                  </View>
+                ) : decoded?.amountSats !== null && decoded?.amountSats !== undefined ? (
+                  /* Bolt11 with amount */
+                  <View style={styles.amountDisplay}>
+                    <Text style={styles.amountValue}>
+                      {decoded.amountSats.toLocaleString()} sats
+                    </Text>
+                    {btcPrice ? (
+                      <Text style={styles.amountFiat}>
+                        {satsToFiatString(decoded.amountSats, btcPrice, currency)}
+                      </Text>
+                    ) : null}
+                  </View>
+                ) : (
+                  <Text style={styles.amountValue}>Amount not specified</Text>
+                )}
+
+                {isOnchainAddress && invoiceData ? (
+                  <Text style={styles.detailAddress}>
+                    <Text style={styles.addressHighlight}>{invoiceData.slice(0, 6)}</Text>
+                    {invoiceData.slice(6, -6)}
+                    <Text style={styles.addressHighlight}>{invoiceData.slice(-6)}</Text>
+                  </Text>
+                ) : isLightningAddress(invoiceData || '') ? (
+                  <Text style={styles.detailAddress}>{invoiceData}</Text>
+                ) : (
+                  <Text style={styles.invoiceText} numberOfLines={3}>
+                    {invoiceData}
+                  </Text>
+                )}
+
+                {/* Fee estimate for on-chain addresses */}
+                {isOnchainAddress && currentSats > 0 && (
+                  <Text style={styles.feeText}>
+                    {selectedWallet?.walletType === 'onchain' &&
+                    selectedWallet?.onchainImportMethod === 'mnemonic'
+                      ? (onchainFeeEstimate ?? 'Estimating fee...')
+                      : loadingBoltzFees
+                        ? 'Loading fees...'
+                        : boltzFees
+                          ? `Swap fee: ~${boltzService.calculateSwapFee(currentSats, boltzFees).toLocaleString()} sats \u00B7 ~10-60 min`
+                          : 'Fee estimate unavailable'}
+                  </Text>
+                )}
+
+                {/* Memo / comment field for Lightning address payments */}
+                {needsAmount && (
+                  <BottomSheetTextInput
+                    style={styles.memoInput}
+                    placeholder={activePubkey ? 'Zap message (optional)' : 'Comment (optional)'}
+                    placeholderTextColor={colors.textSupplementary}
+                    value={memo}
+                    onChangeText={setMemo}
+                    maxLength={lnurlParams?.commentAllowed || 150}
+                    autoCorrect
+                    testID="sendsheet-memo-input"
+                    accessibilityLabel="Zap message"
+                  />
+                )}
+
+                <TouchableOpacity onPress={handleReset}>
+                  <Text style={styles.resetText}>Scan / paste different invoice</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Balance */}
+            {walletBalance !== null && btcPrice !== null && (
+              <Text style={styles.balanceText}>
+                Balance: {walletBalance.toLocaleString()} sats (
+                {satsToFiatString(walletBalance, btcPrice, currency)})
+              </Text>
+            )}
+
+            {/* Action buttons */}
+            <View style={styles.buttonRow}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => {
+                  handleReset();
+                  onClose();
+                }}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.sendButton, (!canSend || sending) && styles.sendButtonDisabled]}
+                onPress={handleSend}
+                disabled={!canSend || sending}
+              >
+                {sending ? (
+                  <ActivityIndicator color={colors.brandPink} />
+                ) : (
+                  <Text style={styles.sendButtonText}>Send</Text>
+                )}
+              </TouchableOpacity>
             </View>
-          </BottomSheetScrollView>
-        )}
-      </BottomSheetModal>
-      <PaymentProgressOverlay
-        state={progressState}
-        direction="send"
-        amountSats={currentSats || decoded?.amountSats || undefined}
-        recipientName={recipientName}
-        errorMessage={progressError}
-        onDismiss={handleOverlayDismiss}
-        onCancel={handleCancelPayment}
-      />
-    </>
+          </View>
+        </BottomSheetScrollView>
+      )}
+    </BottomSheetModal>
   );
 };
 

@@ -40,6 +40,39 @@ export interface IncomingPayment {
   paymentHash: string | null;
 }
 
+/**
+ * Outgoing payment overlay state. Mirrors `lastIncomingPayment` but for
+ * the sending flow — hoisted out of `SendSheet` so any future entry-point
+ * (Friends quick-zap, share-extension, deep-link, etc.) can drive the
+ * same global progress UI without duplicating the bubbles/spinner JSX
+ * inside every caller.
+ *
+ * `state` mirrors the values `PaymentProgressOverlay` accepts other than
+ * `'hidden'` — the absence of a `SendProgress` value already represents
+ * the hidden state, so a non-null entry implies the overlay is visible.
+ *
+ * Callbacks ride along with the state so the global overlay (mounted
+ * once at app root) can route Cancel taps back to the originating
+ * caller's AbortController and Dismiss taps back to the originating
+ * sheet's `onClose`. Receive doesn't need this because dismissal there
+ * just clears `lastIncomingPayment`; send dismissal must close the
+ * parent SendSheet on success but leave it open on error so the user
+ * can retry from the filled-in form.
+ */
+export interface SendProgress {
+  state: 'sending' | 'success' | 'error';
+  amountSats?: number;
+  recipientName?: string;
+  errorMessage?: string;
+  /** Cancel link shown beneath the spinner during `sending`. */
+  onCancel?: () => void;
+  /** Invoked when the user taps OK / Dismiss after success or error. */
+  onDismiss?: () => void;
+  // Stable React key so a second send within the same caller session
+  // remounts the overlay and re-arms its entry animations.
+  at: number;
+}
+
 const CURRENCY_KEY = 'user_fiat_currency';
 
 // The #P-tagged outgoing zap-receipt relay fetch is expensive (500-event
@@ -168,6 +201,20 @@ interface WalletContextType {
     durationMs?: number,
   ) => void;
 
+  // Outgoing payment overlay state. Symmetric with
+  // `lastIncomingPayment` — set by the active send flow so the
+  // app-root `GlobalSendOverlay` can render the spinner / success /
+  // error UI regardless of which screen invoked the send. See the
+  // `SendProgress` JSDoc above for the rationale.
+  sendProgress: SendProgress | null;
+  reportSendStart: (args: Omit<SendProgress, 'state' | 'at' | 'errorMessage'>) => void;
+  reportSendSuccess: (args?: { amountSats?: number; recipientName?: string }) => void;
+  reportSendError: (
+    errorMessage: string,
+    args?: { amountSats?: number; recipientName?: string },
+  ) => void;
+  clearSendProgress: () => void;
+
   // Legacy compatibility
   isConnected: boolean;
   balance: number | null;
@@ -184,6 +231,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [currency, setCurrencyState] = useState<FiatCurrency>('USD');
   const [btcPrice, setBtcPrice] = useState<number | null>(null);
   const [lastIncomingPayment, setLastIncomingPayment] = useState<IncomingPayment | null>(null);
+  const [sendProgress, setSendProgress] = useState<SendProgress | null>(null);
   const priceInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   // Per-wallet baseline balances. Used to decide whether a balance
   // change is an incoming payment (increment) or the local consequence
@@ -1211,6 +1259,69 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const clearLastIncomingPayment = useCallback(() => setLastIncomingPayment(null), []);
 
+  const clearSendProgress = useCallback(() => setSendProgress(null), []);
+
+  // Reporting actions for the send overlay. Each transition (start →
+  // success/error) replaces the prior `sendProgress` with a new object
+  // (incl. fresh `at` timestamp) so the global overlay re-keys and the
+  // entry/icon animations re-arm. Success/error preserve the original
+  // amountSats / recipientName / callbacks unless explicitly overridden,
+  // so callers don't have to thread the same values through every step.
+  const reportSendStart = useCallback(
+    (args: Omit<SendProgress, 'state' | 'at' | 'errorMessage'>) => {
+      setSendProgress({
+        state: 'sending',
+        amountSats: args.amountSats,
+        recipientName: args.recipientName,
+        onCancel: args.onCancel,
+        onDismiss: args.onDismiss,
+        at: Date.now(),
+      });
+    },
+    [],
+  );
+
+  const reportSendSuccess = useCallback(
+    (args?: { amountSats?: number; recipientName?: string }) => {
+      setSendProgress((prev) =>
+        prev
+          ? {
+              ...prev,
+              state: 'success',
+              amountSats: args?.amountSats ?? prev.amountSats,
+              recipientName: args?.recipientName ?? prev.recipientName,
+              errorMessage: undefined,
+              // Cancel link is irrelevant once we've succeeded; clear
+              // it so a stray tap during the success animation can't
+              // re-fire the abort handler.
+              onCancel: undefined,
+              at: Date.now(),
+            }
+          : prev,
+      );
+    },
+    [],
+  );
+
+  const reportSendError = useCallback(
+    (errorMessage: string, args?: { amountSats?: number; recipientName?: string }) => {
+      setSendProgress((prev) =>
+        prev
+          ? {
+              ...prev,
+              state: 'error',
+              errorMessage,
+              amountSats: args?.amountSats ?? prev.amountSats,
+              recipientName: args?.recipientName ?? prev.recipientName,
+              onCancel: undefined,
+              at: Date.now(),
+            }
+          : prev,
+      );
+    },
+    [],
+  );
+
   // In-flight "I'm expecting a payment on this invoice" poll state.
   // Only one at a time — a new expectPayment() replaces the previous.
   // The balance-diff detector still runs independently, so even if this
@@ -1512,6 +1623,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       lastIncomingPayment,
       clearLastIncomingPayment,
       expectPayment,
+      sendProgress,
+      reportSendStart,
+      reportSendSuccess,
+      reportSendError,
+      clearSendProgress,
       isConnected,
       balance,
       walletAlias,
@@ -1549,6 +1665,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       lastIncomingPayment,
       clearLastIncomingPayment,
       expectPayment,
+      sendProgress,
+      reportSendStart,
+      reportSendSuccess,
+      reportSendError,
+      clearSendProgress,
     ],
   );
 
