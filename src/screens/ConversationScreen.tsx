@@ -703,12 +703,20 @@ const ConversationScreen: React.FC = () => {
 
   const handlePickAndSendImage = useCallback(async () => {
     if (!isLoggedIn || uploadingImage || sending) return;
+    // Diagnostic logging for #209 — users have reported tapping the
+    // Gallery tile sometimes opens the Amber signer instead of the
+    // image picker. The flow here goes nowhere near Amber, so the logs
+    // below will tell us in logcat whether the picker ever launched
+    // (i.e. is something else racing in front of it on the user's
+    // device, or is the tap not even reaching this handler).
+    console.log('[AttachPanel] gallery tile pressed — requesting permission');
     setAttachPanelOpen(false);
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       Alert.alert('Permission needed', 'Allow photo library access to send images.');
       return;
     }
+    console.log('[AttachPanel] gallery tile — launching image library picker');
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       quality: 1,
@@ -723,12 +731,15 @@ const ConversationScreen: React.FC = () => {
 
   const handleTakeAndSendPhoto = useCallback(async () => {
     if (!isLoggedIn || uploadingImage || sending) return;
+    // Diagnostic logging for #209 — see comment in handlePickAndSendImage.
+    console.log('[AttachPanel] camera tile pressed — requesting permission');
     setAttachPanelOpen(false);
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
       Alert.alert('Permission needed', 'Allow camera access to take and send photos.');
       return;
     }
+    console.log('[AttachPanel] camera tile — launching camera');
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ['images'],
       quality: 1,
