@@ -835,7 +835,10 @@ export async function fetchInboxDmEvents(
 ): Promise<FetchedInboxEvents> {
   const allRelays = [...new Set([...relays, ...DEFAULT_RELAYS])];
   trackRelays(allRelays);
-  const limit = options.limit ?? 500;
+  // Default to the same cap the live sub uses, so the two paths can't
+  // drift. Callers can lower with `options.limit` if they want to be
+  // explicit. (#383)
+  const limit = options.limit ?? DM_INBOX_LIMIT;
   // `since` shifted back 2 min (Damus clock-drift pad). Applied only to kind-4 filters below; wraps deliberately skip it (see next comment).
   const since = options.since !== undefined ? Math.max(0, options.since - 120) : undefined;
   const sentK4Filter: Filter = { kinds: [4], authors: [myPubkey], limit };
@@ -1264,33 +1267,66 @@ export type RawInboxDmEvent = RawGiftWrapEvent;
 //    second device authored by the viewer wouldn't tag the viewer in
 //    `#p`, so multi-device sent-event sync still flows through
 //    pull-to-refresh / the next focus-driven `refreshDmInbox`.
-//  - No `since` filter — NIP-59 randomises wrap.created_at by ~2 days
-//    for plausible deniability, so a since cutoff would silently drop
-//    fresh wraps. Same reasoning as fetchInboxDmEvents above; kind-4
-//    inherits the same no-since policy for symmetry.
+//  - Two SEPARATE subs (one per kind) so we can apply `since` to kind-4
+//    only — NIP-59 randomises kind-1059 wrap.created_at by ±2 days for
+//    plausible deniability, so a server-side `since` cutoff on wraps
+//    silently drops legit fresh messages whose fake timestamp is older
+//    than the cutoff. kind-4 uses real timestamps and tolerates `since`.
+//    See fetchInboxDmEvents at lines ~769-785 for the same reasoning in
+//    the bulk-fetch path. (#383)
+//  - Both kinds get a 1000-event `limit`. Most relays cap at this
+//    anyway; making it explicit aligns the contract and stops a fresh
+//    install from being flooded with the user's entire DM history. (#383)
+//  - 90 days on kind-4 matches the largest UI filter chip ("Last
+//    30/90 days"). Older threads stay reachable via per-conversation
+//    queries when the user opens the thread (those have no `since`).
 //  - Caller is responsible for deduping (e.g. against the persistent
 //    NIP-17 wrap-id cache + the NIP-04 RAM LRU populated by
 //    refreshDmInbox).
+
+// Shared between the live sub (subscribeInboxDmsForViewer) and the bulk
+// fetch (fetchInboxDmEvents) so the two paths can't drift in cap on a
+// future tweak. (#383, Copilot review on PR #384)
+export const DM_INBOX_LIMIT = 1000;
+const DM_INBOX_SINCE_WINDOW_SECONDS = 90 * 24 * 60 * 60; // 90 days
+
 export function subscribeInboxDmsForViewer(input: {
   viewerPubkey: string;
   relays: string[];
   onEvent: (ev: RawInboxDmEvent) => void;
 }): () => void {
   trackRelays(input.relays);
-  const sub = pool.subscribeMany(
+  const onevent = (ev: Parameters<typeof input.onEvent>[0]): void => {
+    input.onEvent(ev);
+  };
+  const sinceK4 = Math.floor(Date.now() / 1000) - DM_INBOX_SINCE_WINDOW_SECONDS;
+  const subK4 = pool.subscribeMany(
     input.relays,
-    { kinds: [4, 1059], '#p': [input.viewerPubkey] } as Filter,
     {
-      onevent: (ev) => {
-        input.onEvent(ev as unknown as RawInboxDmEvent);
-      },
-    },
+      kinds: [4],
+      '#p': [input.viewerPubkey],
+      since: sinceK4,
+      limit: DM_INBOX_LIMIT,
+    } as Filter,
+    { onevent },
+  );
+  const subWraps = pool.subscribeMany(
+    input.relays,
+    {
+      kinds: [1059],
+      '#p': [input.viewerPubkey],
+      // No `since` — NIP-59 random timestamps would drop fresh wraps.
+      limit: DM_INBOX_LIMIT,
+    } as Filter,
+    { onevent },
   );
   return () => {
-    try {
-      sub.close();
-    } catch {
-      // best-effort
+    for (const s of [subK4, subWraps]) {
+      try {
+        s.close();
+      } catch {
+        // best-effort
+      }
     }
   };
 }
