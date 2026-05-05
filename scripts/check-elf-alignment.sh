@@ -8,8 +8,9 @@
 #   bash scripts/check-elf-alignment.sh path/to/app-debug.apk
 #
 # Exits 0 iff every .so in lib/arm64-v8a/ is aligned to 0x4000 or higher.
-# Older 32-bit ABIs (armeabi-v7a, x86) are reported but not gated, since
-# Pixel-class devices don't load them.
+# Older 32-bit ABIs (armeabi-v7a, x86) are skipped entirely — Pixel-class
+# devices don't load them so their alignment is irrelevant to the warning
+# this script is auditing for.
 #
 # CI hint: invoke this after `expo run:android` / `eas build --local` against
 # the produced APK to gate merges on alignment regressions.
@@ -27,7 +28,10 @@ if ! command -v readelf >/dev/null; then
 fi
 
 THRESHOLD=$((16 * 1024))   # 16 KB = 0x4000
-TMPDIR=$(mktemp -d)
+# Portable mktemp: GNU coreutils accepts `mktemp -d` with no template,
+# but BSD/macOS mktemp requires either a positional template or `-t`.
+# `mktemp -d -t alignelf.XXXXXX` works on both.
+TMPDIR=$(mktemp -d -t alignelf.XXXXXX)
 trap 'rm -rf "$TMPDIR"' EXIT
 
 failed=0
@@ -35,7 +39,8 @@ arm64_total=0
 arm64_aligned=0
 
 # Collect arm64-v8a libs (the only ones Pixel-class devices load).
-# Other ABIs are reported but ignored for the gate.
+# Other ABIs are skipped entirely — the warning we're auditing for
+# only cares about the libs the device will actually mmap.
 while IFS= read -r so; do
   case "$so" in
     lib/arm64-v8a/*) ;;
