@@ -938,6 +938,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const hashes = outgoingPending
           .map(({ tx }) => tx.paymentHash)
           .filter((h): h is string => !!h);
+        // Storage hits include fresh negative cache entries (info === null):
+        // those mean an earlier launch already ran the relay scan and found
+        // nothing — keep skipping until the negative TTL expires (issue #127).
         const byHash = await zapCounterpartyStorage.getMany(hashes);
 
         const unmatched = outgoingPending.filter(
@@ -986,24 +989,38 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               anonymous: commentTag?.anonymous ?? false,
             });
           }
+          // Persist negative attributions for any tx that survived the relay
+          // scan still unmatched. Without this we'd re-run the 500-event
+          // filter on every cold start (issue #127). Only safe to write the
+          // negative when we actually consulted relays — a no-bolt11 tx or a
+          // rate-limit-skipped run is "didn't try" and must not poison cache.
+          for (const { tx } of unmatched) {
+            if (!tx.paymentHash || !tx.bolt11) continue;
+            if (byHash.has(tx.paymentHash)) continue;
+            await zapCounterpartyStorage.recordOutgoingMiss(tx.paymentHash);
+            // Mirror the freshly-persisted negative into the in-memory map so the resolver loop below treats this tx as resolved this pass instead of leaving it `undefined` until the next refresh — closes the "one extra attribution pass per miss" gap Copilot flagged.
+            byHash.set(tx.paymentHash, null);
+          }
         }
 
         for (const { tx, idx } of outgoingPending) {
           if (!tx.paymentHash) continue;
-          const info = byHash.get(tx.paymentHash);
-          if (info) {
-            resultsByIdx.set(idx, info);
-          }
-          // No negative-cache for outgoing: the local storage entry is the
-          // only source of truth, and a miss may just mean the record was
-          // written after this resolver run. Let the next refresh retry.
+          if (!byHash.has(tx.paymentHash)) continue;
+          // Hit may be a positive attribution OR a fresh negative cache
+          // (null) — both should propagate so the in-memory tx records
+          // the result and we don't keep retrying mid-session.
+          resultsByIdx.set(idx, byHash.get(tx.paymentHash) ?? null);
         }
         if (__DEV__) {
-          const storageHits = outgoingPending.filter(
-            ({ tx }) => tx.paymentHash && byHash.has(tx.paymentHash),
-          ).length;
+          let storageHits = 0;
+          let storageMisses = 0;
+          for (const { tx } of outgoingPending) {
+            if (!tx.paymentHash || !byHash.has(tx.paymentHash)) continue;
+            if (byHash.get(tx.paymentHash) === null) storageMisses++;
+            else storageHits++;
+          }
           console.log(
-            `[Zap/${walletAlias}] outgoing: storage hit ${storageHits}/${outgoingPending.length}`,
+            `[Zap/${walletAlias}] outgoing: storage hit ${storageHits}/${outgoingPending.length} (negative-cached ${storageMisses})`,
           );
         }
       }
