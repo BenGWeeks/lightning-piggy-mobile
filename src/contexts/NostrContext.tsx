@@ -1890,11 +1890,15 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const wrapCache = safeParseRecord<Nip17CacheEntry>(wrapCacheRaw);
       const cachedWrapEntries = Object.values(wrapCache);
       let skippedInboxFetch = false;
+      let fastPathTouched = 0;
       if (cachedWrapEntries.length > 0) {
         // Cache populated — serve peer-matching wraps directly, skip relay fetch.
         for (const entry of cachedWrapEntries) {
           nip17CacheHits++;
           if (entry.partnerPubkey !== normalized) continue;
+          // LRU touch (#193) — opening this thread is a "use" of these entries; without the touch they age out FIFO and a thread the user re-opens regularly can be evicted just because newer wraps arrived first.
+          touchNip17CacheEntry(wrapCache, entry.wrapId);
+          fastPathTouched++;
           decrypted.push({
             id: entry.wrapId,
             fromMe: entry.fromMe,
@@ -1903,6 +1907,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           });
         }
         skippedInboxFetch = true;
+      }
+      // Persist the touched-cache so LRU order survives restarts.
+      if (fastPathTouched > 0 && signerWrapCacheKey) {
+        await writeNip17Cache(signerWrapCacheKey, wrapCache);
       }
       const inboxLastSeenForWraps = skippedInboxFetch
         ? undefined
@@ -1931,11 +1939,15 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             const cache = safeParseRecord<Nip17CacheEntry>(raw);
             const newlyCached: Nip17CacheEntry[] = [];
             let nip17Decrypted = 0;
+            let threadTouched = 0;
             for (const wrap of kind1059) {
               const cached = cache[wrap.id];
               if (cached) {
                 nip17CacheHits++;
                 if (cached.partnerPubkey !== normalized) continue;
+                // LRU touch (#193) — see fast-path above for rationale.
+                touchNip17CacheEntry(cache, wrap.id);
+                threadTouched++;
                 decrypted.push({
                   id: wrap.id,
                   fromMe: cached.fromMe,
@@ -1980,7 +1992,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 createdAt: rumor.created_at,
               });
             }
-            if (newlyCached.length > 0) {
+            if (newlyCached.length > 0 || threadTouched > 0) {
               await writeNip17Cache(NSEC_NIP17_CACHE_KEY, cache);
             }
           }
@@ -1989,11 +2001,15 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           if (amberEnabled) {
             const raw = await AsyncStorage.getItem(AMBER_NIP17_CACHE_KEY);
             const cache = safeParseRecord<Nip17CacheEntry>(raw);
+            let threadTouched = 0;
             for (const wrap of kind1059) {
               const cached = cache[wrap.id];
               if (cached) {
                 nip17CacheHits++;
                 if (cached.partnerPubkey !== normalized) continue;
+                // LRU touch (#193) — see fast-path above for rationale.
+                touchNip17CacheEntry(cache, wrap.id);
+                threadTouched++;
                 decrypted.push({
                   id: wrap.id,
                   fromMe: cached.fromMe,
@@ -2030,6 +2046,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               } catch (error) {
                 if (__DEV__) console.warn('[Nostr] Amber NIP-17 thread unwrap failed:', error);
               }
+            }
+            if (threadTouched > 0) {
+              await writeNip17Cache(AMBER_NIP17_CACHE_KEY, cache);
             }
           }
         }
@@ -2381,6 +2400,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               let permissionDenied = false;
               let nip17Iterated = 0;
               let touched = 0;
+              let unfollowedPurged = 0;
 
               for (const wrap of kind1059) {
                 // Periodic yield + abort check (#286) — see the nsec
@@ -2392,10 +2412,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 const cached = cache[wrap.id];
                 if (cached) {
                   nip17Hits++;
-                  // Cache entry exists → it was from a followed sender when
-                  // first stored. Re-check against the *current* follow set
-                  // so unfollowed partners don't keep surfacing from cache.
-                  if (!passesFollowGate(cached.partnerPubkey)) continue;
+                  // Cache entry exists → it was from a followed sender when first stored. Re-check against the *current* follow set; if the partner is no longer followed, purge the entry so we don't keep dragging it through every refresh until the 5000-cap LRU finally evicts it (mirrors the nsec branch).
+                  if (!passesFollowGate(cached.partnerPubkey)) {
+                    delete cache[wrap.id];
+                    unfollowedPurged++;
+                    continue;
+                  }
                   // LRU touch (#193) — see nsec branch for rationale.
                   touchNip17CacheEntry(cache, wrap.id);
                   touched++;
@@ -2464,9 +2486,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
               setAmberNip44Permission(permissionDenied ? 'denied' : 'granted');
 
-              // Persist on new entries OR LRU touches (#193) — touches
-              // reorder insertion order which we need on disk.
-              if (newlyCached.length > 0 || touched > 0) {
+              // Persist on new entries, LRU touches (#193 — touches reorder insertion order which we need on disk), or unfollowed-partner purges (so the purge survives the next launch).
+              if (newlyCached.length > 0 || touched > 0 || unfollowedPurged > 0) {
                 nip17Evictions += await writeNip17Cache(AMBER_NIP17_CACHE_KEY, cache);
               }
               nip17CacheSize = Object.keys(cache).length;
