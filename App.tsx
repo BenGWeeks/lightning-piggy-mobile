@@ -34,6 +34,9 @@ function GlobalIncomingPaymentOverlay() {
       state={lastIncomingPayment ? 'success' : 'hidden'}
       direction="receive"
       amountSats={lastIncomingPayment?.amountSats}
+      // Forwarded so the overlay can render an on-chain-specific
+      // subtitle hint (mempool / unconfirmed) — see #134.
+      receiveSource={lastIncomingPayment?.source}
       onDismiss={clearLastIncomingPayment}
     />
   );

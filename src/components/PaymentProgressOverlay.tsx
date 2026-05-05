@@ -31,6 +31,10 @@ import { lightPalette, type Palette } from '../styles/palettes';
 
 export type PaymentProgressState = 'sending' | 'success' | 'error' | 'hidden';
 export type PaymentDirection = 'send' | 'receive';
+/** Which rail delivered an incoming payment — used by the receive
+ * overlay to show a small hint after the amount (e.g. "1 confirmation
+ * pending" for on-chain). Defaults to lightning when omitted. #134. */
+export type ReceiveSource = 'lightning' | 'onchain';
 
 interface Props {
   state: PaymentProgressState;
@@ -38,6 +42,8 @@ interface Props {
   amountSats?: number;
   recipientName?: string;
   errorMessage?: string;
+  /** Only meaningful when `direction === 'receive'`. */
+  receiveSource?: ReceiveSource;
   onDismiss: () => void;
   /** If provided, a "Cancel" link renders beneath the spinner during
    * the `sending` state. Used to abort long-running NWC payments when
@@ -274,6 +280,7 @@ export default function PaymentProgressOverlay({
   amountSats,
   recipientName,
   errorMessage,
+  receiveSource,
   onDismiss,
   onCancel,
 }: Props) {
@@ -390,6 +397,15 @@ export default function PaymentProgressOverlay({
     subtitle = humanizedError.message;
   }
 
+  // On-chain incoming payments are detected at the mempool stage
+  // (see WalletContext on-chain poll, #134). Surface a small hint so
+  // users understand the credit is unconfirmed — the celebration is
+  // informational, not a balance commitment.
+  const onchainHint =
+    isReceive && state === 'success' && receiveSource === 'onchain'
+      ? 'On-chain · 1 confirmation pending'
+      : undefined;
+
   // Android expects a stable `onRequestClose` for hardware-back behaviour
   // — passing `undefined` intermittently can warn and makes the button
   // feel inconsistent. Always provide a handler; swallow the back press
@@ -453,6 +469,11 @@ export default function PaymentProgressOverlay({
 
           <Text style={styles.title}>{title}</Text>
           {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+          {onchainHint ? (
+            <Text style={styles.hint} testID="payment-overlay-onchain-hint">
+              {onchainHint}
+            </Text>
+          ) : null}
 
           {/* Error detail toggle: the humanised subtitle is shown by
            *  default; tapping "Show details" reveals the raw error for
@@ -574,6 +595,17 @@ const createStyles = (colors: Palette) =>
       fontSize: 14,
       color: colors.textSupplementary,
       textAlign: 'center',
+    },
+    hint: {
+      // Used for the on-chain mempool-pending tag (#134). Sits below
+      // the subtitle, brand-pink so it reads as a status flag rather
+      // than another fact about the payment.
+      marginTop: -6,
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.brandPink,
+      textAlign: 'center',
+      letterSpacing: 0.3,
     },
     okButton: {
       marginTop: 12,

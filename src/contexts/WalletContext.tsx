@@ -38,7 +38,19 @@ export interface IncomingPayment {
   // receive). Consumers can use this to distinguish "exactly this
   // invoice settled" from "something credited the wallet".
   paymentHash: string | null;
+  // Which rail delivered this credit. Lets the overlay surface a
+  // small visual distinction (#134) — on-chain receives include a
+  // mempool/confirmation hint subtitle so users know an unconfirmed
+  // tx isn't yet final, while lightning lands instantly settled.
+  source: 'lightning' | 'onchain';
 }
+
+// Re-export the rail classifier from its own module. Lives outside
+// WalletContext so tests can import it without dragging the full
+// transitive native-module surface (BDK / bitcoinjs / SecureStore /
+// AsyncStorage) into the test runner. See incomingPaymentSource.ts.
+export { incomingPaymentSourceFor } from './incomingPaymentSource';
+import { incomingPaymentSourceFor } from './incomingPaymentSource';
 
 const CURRENCY_KEY = 'user_fiat_currency';
 
@@ -1292,6 +1304,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 amountSats: expectedAmountSats,
                 at: Date.now(),
                 paymentHash,
+                // expectPayment is invoice-poll based — only ever wired
+                // up by the Lightning ReceiveSheet. On-chain receives
+                // arrive via the balance-diff path below.
+                source: 'lightning',
               });
             }
             stopExpectedPayment();
@@ -1392,8 +1408,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           at: Date.now(),
           // Balance-diff path doesn't know which invoice settled — only
           // expectPayment can attribute by hash. Lightning-address /
-          // multi-invoice receives land here.
+          // multi-invoice receives land here, as do all on-chain
+          // mempool credits (#134).
           paymentHash: null,
+          source: incomingPaymentSourceFor(wallet.walletType),
         });
       } else if (bal < prev) {
         // Outgoing payment or reorg adjustment — silently rebase.
@@ -1415,9 +1433,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   //     fast poll (1 s for 3 min) takes over when the user is
   //     *actively* waiting on a specific invoice.
   //
-  // On-chain is skipped — BDK sync is expensive and not safe to run
-  // every 30 s; #134 tracks the on-chain variant of this coverage.
-  // True background / app-closed delivery needs OS push (#45).
+  // On-chain has its own slower coverage loop below (see ONCHAIN_POLL_MS) —
+  // BDK / Electrum sync is too expensive to run on the same 30 s cadence,
+  // so it gets a separate, gentler interval. True background / app-closed
+  // delivery still needs OS push (#45).
   // Track the active wallet's connection state as an explicit dep so
   // the poll starts/stops when a wallet reconnects without the active
   // id changing. (Previous version only re-ran on `activeWalletId`
@@ -1473,6 +1492,86 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       sub.remove();
     };
   }, [activeWalletId, activeWalletConnected, updateWalletInState]);
+
+  // On-chain incoming-payment coverage (#134). Mirrors the NWC poll
+  // above but on a much gentler cadence — Esplora / BDK Electrum syncs
+  // are an order of magnitude more expensive than NWC `getBalance`, so
+  // we trade detection latency for server politeness. Specifically:
+  //
+  //   - Foreground resume → one-shot refresh of every on-chain wallet
+  //     so a tx that landed while backgrounded is detected immediately
+  //     on return.
+  //   - 2-minute slow poll while the app is foregrounded → catches
+  //     mempool credits arriving while the user lingers on Friends /
+  //     Home / anywhere else. Mempool (0-conf) detection is intentional:
+  //     the celebration is informational, not a balance commitment, and
+  //     waiting 10+ min for first confirmation would defeat the "sender
+  //     just paid me" UX. Esplora's `mempool_stats` is already included
+  //     in `syncSingleAddressViaEsplora`'s balance, so 0-conf credits
+  //     trip the existing balance-diff detector with zero extra work.
+  //
+  // We sweep ALL on-chain wallets, not just the active one — incoming
+  // funds to any of the user's wallets warrant a celebration, mirroring
+  // the balance-diff detector's per-wallet behaviour.
+  const ONCHAIN_POLL_MS = 2 * 60 * 1000;
+
+  // Track count of on-chain wallets as the dep so this effect re-arms
+  // when the user adds / removes an on-chain wallet, but doesn't tear
+  // down on every balance tick (the full `wallets` array would).
+  const onchainWalletCount = wallets.filter((w) => w.walletType === 'onchain').length;
+
+  useEffect(() => {
+    if (onchainWalletCount === 0) return;
+
+    const refreshAll = () => {
+      // Re-read through walletsRef so additions/removals between the
+      // effect run and this tick are honoured without re-arming the
+      // entire poll.
+      const onchain = walletsRef.current.filter((w) => w.walletType === 'onchain');
+      for (const w of onchain) {
+        onchainService
+          .getBalance(w.id)
+          .then((b) => {
+            if (b !== null) updateWalletInState(w.id, { balance: b });
+          })
+          .catch(() => {
+            // Transient Electrum / Esplora failures are routine; the
+            // next tick will retry. Log only in dev so we don't spam
+            // production with noise from a flaky third-party service.
+            if (__DEV__) console.log(`[Wallet] on-chain balance refresh failed for ${w.id}`);
+          });
+      }
+    };
+
+    let interval: ReturnType<typeof setInterval> | null = null;
+    const startPoll = () => {
+      if (interval) return;
+      interval = setInterval(refreshAll, ONCHAIN_POLL_MS);
+    };
+    const stopPoll = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+
+    if (AppState.currentState === 'active') {
+      refreshAll();
+      startPoll();
+    }
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') {
+        refreshAll();
+        startPoll();
+      } else {
+        stopPoll();
+      }
+    });
+    return () => {
+      stopPoll();
+      sub.remove();
+    };
+  }, [onchainWalletCount, updateWalletInState]);
 
   // Stable context value — without `useMemo` here the inline `{{...}}`
   // literal produced a fresh object identity on every render of
