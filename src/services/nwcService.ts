@@ -424,9 +424,22 @@ export async function getInfo(walletId: string): Promise<{ alias: string; lud16?
   }
 }
 
-export async function listTransactions(walletId: string): Promise<any[]> {
+/**
+ * Fetch the recent transaction list for a wallet.
+ *
+ * Returns:
+ *   - `Array` (possibly empty) when the backend answered. An empty array is
+ *     positive confirmation that the wallet truly has no history in the
+ *     `limit: 50` window.
+ *   - `null` when we couldn't get a positive answer — either the provider
+ *     wasn't connected, or every retry attempt threw / timed out. Callers
+ *     MUST treat `null` as "no update" and preserve any existing cache;
+ *     overwriting with `[]` here would silently destroy a hydrated cache
+ *     after a transient relay flake (#200).
+ */
+export async function listTransactions(walletId: string): Promise<any[] | null> {
   let provider = await ensureConnected(walletId);
-  if (!provider) return [];
+  if (!provider) return null;
   // Retry up to 3 times. The LNbits Nostrclient relay has a sporadic
   // transport race where the first request after startup (or after a
   // period of inactivity) is silently dropped — the server never logs
@@ -455,7 +468,9 @@ export async function listTransactions(walletId: string): Promise<any[]> {
       }
     }
   }
-  return [];
+  // All retries exhausted — signal "no answer" rather than "empty history"
+  // so the caller doesn't wipe a non-empty cached list (#200).
+  return null;
 }
 
 // A BOLT-11 payment hash is a SHA-256 digest — 64 hex chars.
