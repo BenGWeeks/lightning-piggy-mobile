@@ -451,4 +451,52 @@ QT_QPA_PLATFORM=xcb $ANDROID_HOME/emulator/emulator \
 *What you gain:* the `userdata-qemu.img.qcow2` file goes from a multi-GB accumulated overlay (often 7 GB+ after months of use) back to a thin overlay regenerated from the system image's userdata. +
 *Don't waste time on these false leads first:* (a) `adb reboot` won't help — the corrupt overlay is what re-mounts on every boot. (b) Switching GPU mode won't help — the GPU init phase succeeds; the failure is in Android userspace boot. (c) Increasing AVD RAM won't help — `system_server` isn't OOM, it's hanging on the corrupt overlay. (d) Re-running `expo prebuild` won't help — this is an emulator state issue, not an app build issue. +
 *Verify clean boot:* `adb -s emulator-5554 shell getprop sys.boot_completed` returns `1` (with a stable trailing newline) and `adb devices` shows `device` (not `offline`) consistently for >30 s. UI rendering should be smooth — if you see frame stutters and a `Process system isn't responding` dialog, you're probably on `swiftshader_indirect` (software GL) and need to re-launch with `-gpu host` now that the overlay is clean.
+
+| Maestro triple-tap (e.g. version label to enable dev mode) silently fails on API 36 emulator
+| Maestro's official supported ceiling is API 34 — three sequential `tapOn` calls on an API 36 image take >1 s end-to-end, exceeding the 1-second window in `handleVersionTap` (and similar in-app tap-counter handlers like add-wallet hot wallet unlock). Symptom: 3 `tapOn`s complete cleanly per Maestro logs but the dev-mode alert never appears. The same flow can also be defeated by an API 36 PackageManager bug that breaks RN dev builds (`Activity class does not exist` on `am start`) — independent of installer attribution, install path, or `adb reboot`. +
+*Fix:* Run E2E + dev work on **API 34**, **`google_apis`** image (NOT `google_play` — saves ~300 MB RAM + the GMS daemons that thrash `system_server`), **`Medium Phone`** device profile (Pixel 9a / Pixel 10 device profiles have a known input-swallowing bug on Linux/macOS/Windows). Bump RAM + heap before first boot so `system_server` doesn't crash under a 150 MB+ RN dev APK install: +
+[source,bash]
+----
+# Install the image once
+$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+  "system-images;android-34;google_apis;x86_64"
+
+# Create the AVD
+echo no | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd \
+  -n LP_API34 -k "system-images;android-34;google_apis;x86_64" \
+  -d "medium_phone" --force
+
+# Bump RAM + heap (default 1.5 GB / 228 MB OOMs on RN dev installs;
+# 4 GB / 1024 MB matches satmo-react-native's validated config)
+sed -i 's/^hw.ramSize=.*/hw.ramSize=4096/' \
+  ~/.android/avd/LP_API34.avd/config.ini
+sed -i 's/^vm.heapSize=.*/vm.heapSize=1024/' \
+  ~/.android/avd/LP_API34.avd/config.ini
+
+# Cold-boot
+$ANDROID_HOME/emulator/emulator -avd LP_API34 \
+  -no-snapshot-load -no-snapshot-save -no-audio -gpu host
+----
+*Disk-space follow-up:* if `adb install` later fails with `INSTALL_FAILED_INSUFFICIENT_STORAGE` (the dev APK + Hermes intermediates need 3-4 GB free), edit `config.ini` to set `disk.dataPartition.size=12G` (default 800M-6G), then cold-boot with `-wipe-data -no-snapshot` (destructive — wipes installed apps + accounts). +
+*Performance bonus:* API 34 lacks the stylus-handwriting service that API 35+ ship, removing one of the two soft-keyboard suppression gates documented above. Re-running `adb shell settings put secure stylus_handwriting_enabled 0` on every cold boot becomes unnecessary. +
+*Reference:* `../satmo-react-native/docs/TROUBLESHOOTING.adoc` — "Emulator with API 36 (Android 16) image refuses to launch the dev build" and "Android emulator System UI isn't responding".
+
+| Pixel device profiles in Android Studio AVD swallow taps (Pixel 9a / Pixel 10)
+| Hardware-profile bug in the Pixel 9a / Pixel 10 device skins — emulator boots and renders fine, app launches and is visible, but mouse clicks (and `adb shell input tap`) are silently dropped. Confirmed cross-platform (Linux / macOS / Windows). The OS image is fine; only the device profile is broken. +
+*Fix:* Delete the Pixel AVD and recreate using the generic **"Medium Phone"** device profile with the same API level. Same OS, working input. +
+*Workaround if you must stay on the Pixel profile:* AVD settings → Graphics → **Software** (not Hardware) → Cold Boot. Works for some configurations, not all. +
+*Reference:* `../satmo-react-native/docs/TROUBLESHOOTING.adoc` — "Mouse clicks / taps don't register in Android emulator (Pixel device profiles)".
+
+| AVD `system_server` crashes / "System UI isn't responding" *after* installing a fresh dev APK
+| Default AVD allocation (RAM 1.5 GB, Dalvik heap 228 MB) is undersized for installing a 150 MB+ React Native dev APK. `kswapd0` burns 40% kernel CPU, `system_server` dies, Binder IPC fails with `No space left on device` (RAM-pressure symptom, NOT disk), every subsequent `adb install` / `pm list packages` / app launch fails until guest reboot. Distinct from the corrupt-overlay entry above — that's after months of use, this is on first install. +
+*Fix:* Bump RAM to 4 GB + Dalvik heap to 1024 MB *before* first boot (Android Studio → Device Manager → edit AVD → Advanced Settings, or edit `~/.android/avd/<AVD>.avd/config.ini` → `hw.ramSize=4096`, `vm.heapSize=1024`, then cold-boot with `-no-snapshot`). Validated against `system_server` crash on 1.5 GB / 228 MB; clean install on 4 GB / 1024 MB. +
+*Prevent recurrence:* use a `google_apis` system image (NOT `google_play`) — drops the Play Store + GMS daemons that consume ~300 MB RAM / 60% CPU. The Play *Services* subset (Google Sign-In, Firebase Auth, FCM) still works; only the storefront and its background daemons are excluded. +
+*Reference:* `../satmo-react-native/docs/TROUBLESHOOTING.adoc` — "Android emulator System UI isn't responding / app stuck on splash" and "AVD `system_server` crashes during `adb install`".
+
+| Claude Code Bash tool fails silently (exit 1 or 134, empty stdout/stderr) when `/tmp` is full
+| Claude Code creates a shell snapshot in `/tmp` at session start; when the volume is full, every Bash tool invocation silently fails. `bash --noprofile --norc -c '…'` and the file-redirect workaround `{ cmd; } > /tmp/out 2>&1; exit 0` also produce no output (the spawned bash never reaches the redirect). `/doctor` does not flag it; only the Write tool surfaces the underlying `ENOSPC` honestly. On a typical Linux dev machine `/tmp` is a tmpfs sized at 50 % of RAM; common culprits are accumulated git worktrees in `/tmp/wt-*` (1-2 GB of `node_modules` each, up to 7+ GB with EAS local-build artifacts), `/tmp/metro-cache`, `/tmp/node-compile-cache`, and signed-but-not-cleaned `*.apk` outputs. +
+*Diagnose:* `df -h /tmp` to confirm full; `du -shx /tmp/* 2>/dev/null \| sort -h \| tail -20` to identify culprits. +
+*Fix:* `rm -rf /tmp/wt-* /tmp/metro-* /tmp/node-compile-cache /tmp/*.apk` (review the list first; these are caches and ephemeral build outputs). Then `git worktree prune` from any repo whose worktrees lived in `/tmp` so the admin entries match reality. Restart Claude Code so it can write a fresh shell snapshot. +
+*Prevent recurrence:* don't create git worktrees in `/tmp` on tmpfs machines. Use `git worktree add ~/.local/share/wt-<name> <branch>` (or `~/wt-*`) — survives reboot and doesn't compete with the tmpfs cap. +
+*False leads to skip:* reinstalling Claude Code, killing leftover `chrome-native-host` processes, removing dangling plugin entries from `~/.claude/settings.json`, switching out of Remote Control mode — none of these fix the underlying full-tmpfs.
 |===
