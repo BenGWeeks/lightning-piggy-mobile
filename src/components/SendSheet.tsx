@@ -132,6 +132,13 @@ const SendSheet: React.FC<Props> = ({
   const [activePubkey, setActivePubkey] = useState(recipientPubkey);
   const [activePicture, setActivePicture] = useState(initialPicture);
   const [isOnchainAddress, setIsOnchainAddress] = useState(false);
+
+  // If the parent unmounts SendSheet while a send result is still hoisted in WalletContext (success overlay open, navigation tear-down, etc.), the app-root overlay keeps rendering with callbacks bound to a sheet that no longer exists. Clear the global slot on teardown so it can't outlive its owner.
+  useEffect(() => {
+    return () => {
+      clearSendProgress();
+    };
+  }, [clearSendProgress]);
   const [boltzFees, setBoltzFees] = useState<boltzService.SwapFees | null>(null);
   const [loadingBoltzFees, setLoadingBoltzFees] = useState(false);
   const [onchainFeeEstimate, setOnchainFeeEstimate] = useState<string | null>(null);
