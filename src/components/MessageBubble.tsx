@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, Image, StyleSheet } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import { Zap, MapPin, UserRound } from 'lucide-react-native';
+import { Zap, MapPin, UserRound, Check, CheckCheck, AlertCircle } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import type { NostrProfile } from '../types/nostr';
@@ -20,6 +20,7 @@ import {
   formatTime,
   formatRelativeFuture,
 } from '../utils/messageContent';
+import type { MessageDeliveryStatus } from '../utils/messageDeliveryStatus';
 
 interface Props {
   // Identifying fields used for testID stability and parent diffing.
@@ -59,6 +60,11 @@ interface Props {
   // Test-id prefix lets 1:1 and group bubbles coexist in the same Maestro
   // run with stable selectors. e.g. `conversation` → `conversation-pay-…`.
   testIdPrefix: string;
+  // WhatsApp-style delivery indicator for `fromMe` bubbles only — see
+  // `MessageDeliveryStatus`. `undefined` (the default for incoming bubbles
+  // and for historical messages loaded from the relay cache without a
+  // local-send record) suppresses the tick row entirely. Issue #110.
+  deliveryStatus?: MessageDeliveryStatus;
 }
 
 const MessageBubble: React.FC<Props> = ({
@@ -76,6 +82,7 @@ const MessageBubble: React.FC<Props> = ({
   onOpenGifFullscreen,
   onOpenImageFullscreen,
   testIdPrefix,
+  deliveryStatus,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -84,6 +91,29 @@ const MessageBubble: React.FC<Props> = ({
   // identical to existing GroupConversationScreen behaviour. Pulled into
   // a single render slot so every variant gets it for free.
   const SenderLabel = senderName ? <Text style={styles.senderLabel}>{senderName}</Text> : null;
+
+  // WhatsApp-style tick row for outgoing bubbles. Pulled out so every
+  // variant (text / image / invoice / contact / gif / location) renders
+  // the same indicator without duplicating the icon-by-status switch.
+  // Lucide icons aren't sized via fontSize, so we keep them inline with
+  // the timestamp through a flex row in the per-variant time wrapper.
+  const renderTicks = (): React.ReactNode => {
+    if (!fromMe || !deliveryStatus) return null;
+    return (
+      <DeliveryTicks
+        status={deliveryStatus}
+        // Brand-pink bubbles use a translucent-white tone; the few
+        // outgoing variants whose footer sits on a non-pink background
+        // (gif, image, location — the time text uses textSupplementary
+        // there too via gifTimeMe / imageBubbleTimeMe overrides) re-use
+        // the same translucent ramp because the bubble surface beneath
+        // is still brand-pink. Failed always renders red regardless of
+        // surface so it can't be missed.
+        colors={colors}
+        testID={`${testIdPrefix}-ticks-${id}`}
+      />
+    );
+  };
 
   if (content.kind === 'gif') {
     return (
@@ -105,7 +135,12 @@ const MessageBubble: React.FC<Props> = ({
             transition={150}
             accessibilityIgnoresInvertColors
           />
-          <Text style={[styles.gifTime, fromMe && styles.gifTimeMe]}>{formatTime(createdAt)}</Text>
+          <View style={[styles.gifFooter, fromMe && styles.gifFooterMe]}>
+            <Text style={[styles.gifTime, fromMe && styles.gifTimeMe]}>
+              {formatTime(createdAt)}
+            </Text>
+            {renderTicks()}
+          </View>
         </TouchableOpacity>
       </View>
     );
@@ -154,9 +189,12 @@ const MessageBubble: React.FC<Props> = ({
                 OpenStreetMap
               </Text>
             )}
-            <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-              {formatTime(createdAt)}
-            </Text>
+            <View style={styles.timeRow}>
+              <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
+                {formatTime(createdAt)}
+              </Text>
+              {renderTicks()}
+            </View>
           </View>
         </TouchableOpacity>
       </View>
@@ -186,9 +224,12 @@ const MessageBubble: React.FC<Props> = ({
             resizeMode="cover"
             accessibilityLabel="Shared image"
           />
-          <Text style={[styles.imageBubbleTime, fromMe && styles.imageBubbleTimeMe]}>
-            {formatTime(createdAt)}
-          </Text>
+          <View style={[styles.imageBubbleFooter, fromMe && styles.imageBubbleFooterMe]}>
+            <Text style={[styles.imageBubbleTime, fromMe && styles.imageBubbleTimeMe]}>
+              {formatTime(createdAt)}
+            </Text>
+            {renderTicks()}
+          </View>
         </TouchableOpacity>
       </View>
     );
@@ -249,9 +290,12 @@ const MessageBubble: React.FC<Props> = ({
               <Text style={styles.invoicePayText}>Pay</Text>
             </TouchableOpacity>
           )}
-          <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-            {formatTime(createdAt)}
-          </Text>
+          <View style={styles.timeRow}>
+            <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
+              {formatTime(createdAt)}
+            </Text>
+            {renderTicks()}
+          </View>
         </View>
       </View>
     );
@@ -306,9 +350,12 @@ const MessageBubble: React.FC<Props> = ({
               ) : null}
             </View>
           </View>
-          <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-            {formatTime(createdAt)}
-          </Text>
+          <View style={styles.timeRow}>
+            <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
+              {formatTime(createdAt)}
+            </Text>
+            {renderTicks()}
+          </View>
         </TouchableOpacity>
       </View>
     );
@@ -337,9 +384,12 @@ const MessageBubble: React.FC<Props> = ({
               <Text style={styles.invoicePayText}>Pay</Text>
             </TouchableOpacity>
           )}
-          <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-            {formatTime(createdAt)}
-          </Text>
+          <View style={styles.timeRow}>
+            <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
+              {formatTime(createdAt)}
+            </Text>
+            {renderTicks()}
+          </View>
         </View>
       </View>
     );
@@ -351,13 +401,90 @@ const MessageBubble: React.FC<Props> = ({
       <View style={[styles.bubble, fromMe ? styles.bubbleMe : styles.bubbleThem]}>
         {SenderLabel}
         <Text style={[styles.bubbleText, fromMe && styles.bubbleTextMe]}>{text}</Text>
-        <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
-          {formatTime(createdAt)}
-        </Text>
+        <View style={styles.timeRow}>
+          <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
+            {formatTime(createdAt)}
+          </Text>
+          {renderTicks()}
+        </View>
       </View>
     </View>
   );
 };
+
+/**
+ * Tick row for outgoing bubbles. Renders a Lucide icon next to the
+ * timestamp, coloured by status:
+ *
+ *  - sending  → single grey check (greyed out — not yet acknowledged)
+ *  - sent     → single check, on-bubble accent
+ *  - delivered → double check (CheckCheck), on-bubble accent
+ *  - failed   → AlertCircle in brand red (high contrast)
+ *
+ * `accessibilityLabel` lets the bubble be queried by Maestro and read
+ * aloud by screen readers — useful both for testing and for a11y.
+ */
+type DeliveryTicksProps = {
+  status: MessageDeliveryStatus;
+  colors: Palette;
+  testID?: string;
+};
+
+const DeliveryTicks: React.FC<DeliveryTicksProps> = ({ status, colors, testID }) => {
+  // 12px matches the timestamp font-size so the icon optically aligns
+  // with the time text on the same line.
+  const iconSize = 12;
+
+  // Outgoing bubbles use a brand-pink surface, so default the icon tint
+  // to a translucent-white that mirrors `bubbleTimeMe`. The 'failed'
+  // state uses brand red regardless of surface — it's the one state we
+  // want the user to spot at a glance.
+  const accent = 'rgba(255,255,255,0.85)';
+  const muted = 'rgba(255,255,255,0.55)';
+  const failedColor = colors.red;
+
+  const a11yLabel: Record<MessageDeliveryStatus, string> = {
+    sending: 'Sending',
+    sent: 'Sent',
+    delivered: 'Delivered',
+    failed: 'Send failed',
+  };
+
+  let icon: React.ReactNode;
+  switch (status) {
+    case 'sending':
+      icon = <Check size={iconSize} color={muted} strokeWidth={2.5} />;
+      break;
+    case 'sent':
+      icon = <Check size={iconSize} color={accent} strokeWidth={2.5} />;
+      break;
+    case 'delivered':
+      icon = <CheckCheck size={iconSize} color={accent} strokeWidth={2.5} />;
+      break;
+    case 'failed':
+      icon = <AlertCircle size={iconSize} color={failedColor} strokeWidth={2.5} />;
+      break;
+  }
+
+  return (
+    <View
+      style={ticksStyles.row}
+      accessibilityLabel={a11yLabel[status]}
+      accessibilityRole="image"
+      testID={testID}
+    >
+      {icon}
+    </View>
+  );
+};
+
+const ticksStyles = StyleSheet.create({
+  row: {
+    marginLeft: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+});
 
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
@@ -401,11 +528,18 @@ const createStyles = (colors: Palette) =>
     bubbleTime: {
       fontSize: 10,
       color: colors.textSupplementary,
-      marginTop: 4,
-      alignSelf: 'flex-end',
     },
     bubbleTimeMe: {
       color: 'rgba(255,255,255,0.85)',
+    },
+    // Wraps the timestamp + (optional) delivery ticks in a single
+    // bottom-right row. Replaces the prior `marginTop:4 / alignSelf:flex-end`
+    // direct on `bubbleTime` so the icon sits inline with the time text.
+    timeRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      alignSelf: 'flex-end',
+      marginTop: 4,
     },
     invoiceCard: {
       maxWidth: '85%',
@@ -610,12 +744,21 @@ const createStyles = (colors: Palette) =>
       height: 240,
       backgroundColor: colors.background,
     },
-    gifTime: {
-      fontSize: 10,
-      color: colors.textSupplementary,
+    // The gif card has a full-bleed image, so the time + ticks need
+    // their own padded footer to sit inside the rounded rect rather
+    // than over the image. Footer padding is unconditional; the
+    // `Me` variant exists only so theme overrides can hook here later.
+    gifFooter: {
+      flexDirection: 'row',
+      alignItems: 'center',
       alignSelf: 'flex-end',
       paddingHorizontal: 14,
       paddingVertical: 4,
+    },
+    gifFooterMe: {},
+    gifTime: {
+      fontSize: 10,
+      color: colors.textSupplementary,
     },
     gifTimeMe: {
       color: 'rgba(255,255,255,0.85)',
@@ -704,12 +847,20 @@ const createStyles = (colors: Palette) =>
       height: 240,
       backgroundColor: colors.background,
     },
-    imageBubbleTime: {
-      fontSize: 10,
-      color: colors.textSupplementary,
+    // Mirrors gifFooter — see the comment there. Image bubbles also
+    // have a full-bleed image so the timestamp + ticks need their own
+    // padded footer beneath it.
+    imageBubbleFooter: {
+      flexDirection: 'row',
+      alignItems: 'center',
       alignSelf: 'flex-end',
       paddingHorizontal: 14,
       paddingVertical: 4,
+    },
+    imageBubbleFooterMe: {},
+    imageBubbleTime: {
+      fontSize: 10,
+      color: colors.textSupplementary,
     },
     imageBubbleTimeMe: {
       color: 'rgba(255,255,255,0.85)',
