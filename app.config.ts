@@ -1,4 +1,9 @@
 import { ExpoConfig, ConfigContext } from 'expo/config';
+// Single source of truth for the marketing version — `npm version <bump>`
+// updates package.json, which then flows into both the in-app version
+// label (via src/utils/appVersion.ts) and the native binary's
+// CFBundleShortVersionString / android.versionName below.
+import pkg from './package.json';
 
 const APP_VARIANT = process.env.APP_VARIANT;
 const IS_DEV = APP_VARIANT === 'development';
@@ -26,7 +31,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: getAppName(),
   slug: 'lightning-piggy-app',
-  version: '1.0.0',
+  version: pkg.version,
   orientation: 'portrait',
   icon: './assets/icon.png',
   userInterfaceStyle: 'light',

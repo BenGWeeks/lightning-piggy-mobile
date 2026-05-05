@@ -194,17 +194,76 @@ export function disconnect(walletId: string): void {
   clearFailedLookupCache(walletId);
 }
 
-export async function getBalance(walletId: string): Promise<number | null> {
+/**
+ * Race a promise against a timeout, rejecting with a "reply timeout"
+ * shaped Error if the deadline fires first. The underlying promise is
+ * left to settle in the background — the SDK's own NIP-47 subscription
+ * still cleans itself up on its own (longer) timeout, so the leak is
+ * bounded.
+ *
+ * Used to put a tighter ceiling on `getBalance` than the @getalby/sdk's
+ * hardcoded 10s `replyTimeout` for call sites where stale UI > ~2 s is
+ * more disruptive than missing one balance refresh (e.g. the 1 s post-
+ * payment poll loop in WalletContext — see #133).
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${ms}ms`));
+    }, ms);
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
+export interface GetBalanceOptions {
+  /**
+   * Per-call ceiling for the underlying NIP-47 round trip. When unset,
+   * defers to the SDK's own 10 s `replyTimeout` AND keeps the 2-attempt
+   * retry loop. When set, the call runs *without* retries so the ceiling
+   * is a true upper bound (one attempt × replyTimeoutMs).
+   *
+   * Currently only the post-payment poll in `WalletContext.expectPayment`
+   * passes this (`replyTimeoutMs: 2500`) — that path is tick-gated by
+   * a 1 s `expectPayment` interval + an `inFlight` guard, so a stalled
+   * read would block the next tick. Quick give-up + a fresh poll on the
+   * next tick beats waiting 10 s for a reply that may never arrive. The
+   * 30 s foreground refresh and per-wallet refresh deliberately stay on
+   * the default (with retries) — they're not tick-gated, so a slower-
+   * but-more-reliable read is the better tradeoff there. (#133)
+   */
+  replyTimeoutMs?: number;
+}
+
+export async function getBalance(
+  walletId: string,
+  options: GetBalanceOptions = {},
+): Promise<number | null> {
   const provider = await ensureConnected(walletId);
   if (!provider) return null;
   try {
-    // Retry twice on slow relays so a single timeout doesn't show the
-    // wallet as "Disconnected" / flash a null balance.
-    const b = await withRetry(() => provider.getBalance(), {
-      label: `getBalance(${walletId})`,
-      attempts: 2,
-      delayMs: 1500,
-    });
+    // When replyTimeoutMs is set, run a single attempt so the timeout is a true total ceiling (1 × replyTimeoutMs). Without it, retry twice on slow relays so a single timeout doesn't flash "Disconnected" / null balance — the SDK's own 10 s replyTimeout still bounds each attempt.
+    const b = await withRetry(
+      () => {
+        const call = provider.getBalance();
+        return options.replyTimeoutMs !== undefined
+          ? withTimeout(call, options.replyTimeoutMs, `getBalance(${walletId})`)
+          : call;
+      },
+      {
+        label: `getBalance(${walletId})`,
+        attempts: options.replyTimeoutMs !== undefined ? 1 : 2,
+        delayMs: 1500,
+      },
+    );
     return b.balance;
   } catch (error) {
     console.warn(`getBalance error for ${walletId}:`, error);

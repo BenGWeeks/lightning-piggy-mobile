@@ -59,9 +59,11 @@ jobs:
 
       - name: Set user-visible version from Release tag
         # Triggered Releases set tag_name (e.g. "v1.0.1"). Strip the leading "v"
-        # and write into app.config.ts so iOS CFBundleShortVersionString and
-        # Android versionName both pick it up. Build numbers (CFBundleVersion /
-        # versionCode) come from EAS via appVersionSource: remote + autoIncrement.
+        # and write into package.json — app.config.ts reads `version: pkg.version`,
+        # so iOS CFBundleShortVersionString, Android versionName, and the in-app
+        # version label (src/utils/appVersion.ts) all pick it up from the same
+        # source of truth. Build numbers (CFBundleVersion / versionCode) come
+        # from EAS via appVersionSource: remote + autoIncrement.
         if: github.event_name == 'release'
         run: |
           TAG="${{ github.event.release.tag_name }}"
@@ -71,8 +73,12 @@ jobs:
           # history / Release page for traceability.
           VERSION="${VERSION%%-*}"
           echo "Setting version to $VERSION (from tag $TAG)"
-          sed -i "s/version: '[^']*'/version: '$VERSION'/" app.config.ts
-          git diff app.config.ts
+          # `npm version --no-git-tag-version` rewrites package.json's version
+          # field in place without creating a commit/tag (the Release tag
+          # already exists). --allow-same-version covers the case where
+          # package.json was bumped manually before tagging.
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          git diff package.json
 
       - name: Quality gates
         run: |

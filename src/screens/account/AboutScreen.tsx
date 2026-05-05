@@ -24,7 +24,7 @@ import { useThemeColors } from '../../contexts/ThemeContext';
 import type { Palette } from '../../styles/palettes';
 import type { NostrProfile } from '../../types/nostr';
 import { LIGHTNING_PIGGY_TEAM_NPUB, dmRecipient } from '../../constants/npubs';
-import { appVersion } from '../../utils/appVersion';
+import { appVersionLabel } from '../../utils/appVersion';
 
 // Bumped key (#346) to evict pre-avatar caches that pinned an empty avatar circle.
 const TEAM_PROFILE_CACHE_KEY = 'team_profile_cache_v2';
@@ -46,6 +46,13 @@ const AboutScreen: React.FC = () => {
   const [devMode, setDevMode] = useState(false);
   const versionTapCount = useRef(0);
   const versionTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Fold dev into the build-number parenthetical so screen readers don't say "(build 13) (dev)".
+  const displayVersionLabel = devMode
+    ? appVersionLabel.endsWith(')')
+      ? `${appVersionLabel.slice(0, -1)}, dev)`
+      : `${appVersionLabel} (dev)`
+    : appVersionLabel;
 
   useEffect(() => {
     AsyncStorage.getItem('dev_mode').then((v) => setDevMode(v === 'true'));
@@ -206,11 +213,10 @@ const AboutScreen: React.FC = () => {
       <TouchableOpacity
         onPress={handleVersionTap}
         activeOpacity={1}
-        accessibilityLabel={`App version ${appVersion}`}
+        accessibilityLabel={`App version ${displayVersionLabel}`}
       >
         <Text style={styles.versionText} testID="version-text">
-          v{appVersion}
-          {devMode ? ' (dev)' : ''}
+          v{displayVersionLabel}
         </Text>
       </TouchableOpacity>
 
