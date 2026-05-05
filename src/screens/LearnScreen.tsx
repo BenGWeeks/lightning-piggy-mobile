@@ -65,6 +65,16 @@ const LearnScreen: React.FC<Props> = ({ navigation }) => {
     setSearchExpanded(false);
   }, []);
 
+  // AppNavigator uses freezeOnBlur:true (no unmountOnBlur), so React state survives tab switches. Reset the search UI on blur so navigating away and back returns to the all-courses default — matches the AC for #151.
+  useFocusEffect(
+    useCallback(
+      () => () => {
+        closeSearch();
+      },
+      [closeSearch],
+    ),
+  );
+
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -123,7 +133,9 @@ const LearnScreen: React.FC<Props> = ({ navigation }) => {
       <ScrollView style={styles.scrollArea} contentContainerStyle={styles.grid}>
         {filteredCourses.length === 0 ? (
           <View style={styles.emptyState} testID="learn-empty-state">
-            <Text style={styles.emptyTitle}>No courses match &ldquo;{search.trim()}&rdquo;</Text>
+            <Text style={styles.emptyTitle}>
+              No courses match &ldquo;{deferredSearch.trim()}&rdquo;
+            </Text>
             <Text style={styles.emptySubtitle}>Try a different search term.</Text>
             <TouchableOpacity
               style={styles.clearSearchButton}
