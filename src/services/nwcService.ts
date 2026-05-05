@@ -227,11 +227,18 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 export interface GetBalanceOptions {
   /**
    * Per-call ceiling for the underlying NIP-47 round trip. When unset,
-   * defers to the SDK's own 10 s `replyTimeout`. Polling sites (post-
-   * payment refresh, periodic refresh) pass a tighter value (2-3 s) so a
-   * stalled relay reply doesn't queue up behind the next tick — the
-   * next poll will refetch anyway, so a quick give-up + retry beats
-   * waiting 10 s for a reply that may never arrive (#133).
+   * defers to the SDK's own 10 s `replyTimeout` AND keeps the 2-attempt
+   * retry loop. When set, the call runs *without* retries so the ceiling
+   * is a true upper bound (one attempt × replyTimeoutMs).
+   *
+   * Currently only the post-payment poll in `WalletContext.expectPayment`
+   * passes this (`replyTimeoutMs: 2500`) — that path is tick-gated by
+   * a 1 s `expectPayment` interval + an `inFlight` guard, so a stalled
+   * read would block the next tick. Quick give-up + a fresh poll on the
+   * next tick beats waiting 10 s for a reply that may never arrive. The
+   * 30 s foreground refresh and per-wallet refresh deliberately stay on
+   * the default (with retries) — they're not tick-gated, so a slower-
+   * but-more-reliable read is the better tradeoff there. (#133)
    */
   replyTimeoutMs?: number;
 }
@@ -243,8 +250,7 @@ export async function getBalance(
   const provider = await ensureConnected(walletId);
   if (!provider) return null;
   try {
-    // Retry twice on slow relays so a single timeout doesn't show the
-    // wallet as "Disconnected" / flash a null balance.
+    // When replyTimeoutMs is set, run a single attempt so the timeout is a true total ceiling (1 × replyTimeoutMs). Without it, retry twice on slow relays so a single timeout doesn't flash "Disconnected" / null balance — the SDK's own 10 s replyTimeout still bounds each attempt.
     const b = await withRetry(
       () => {
         const call = provider.getBalance();
@@ -254,7 +260,7 @@ export async function getBalance(
       },
       {
         label: `getBalance(${walletId})`,
-        attempts: 2,
+        attempts: options.replyTimeoutMs !== undefined ? 1 : 2,
         delayMs: 1500,
       },
     );
