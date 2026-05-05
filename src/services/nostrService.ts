@@ -413,14 +413,23 @@ export async function fetchProfiles(
   // Surface incrementally via the caller's onBatch hook. Coalesce sub
   // events that arrive in tight bursts so we don't trigger 100s of
   // setContacts re-renders — once every 200 ms is enough to feel live.
-  let pendingEmit = false;
+  // The pending timer is tracked so the per-round flush below can clear
+  // it (otherwise the flush + a still-pending coalesced fire would
+  // double-emit the same snapshot a few hundred ms apart).
+  let pendingTimer: ReturnType<typeof setTimeout> | null = null;
   const scheduleEmit = (): void => {
-    if (!onBatch || pendingEmit) return;
-    pendingEmit = true;
-    setTimeout(() => {
-      pendingEmit = false;
+    if (!onBatch || pendingTimer !== null) return;
+    pendingTimer = setTimeout(() => {
+      pendingTimer = null;
       onBatch(new Map(profiles));
     }, 200);
+  };
+  const flushNow = (): void => {
+    if (pendingTimer !== null) {
+      clearTimeout(pendingTimer);
+      pendingTimer = null;
+    }
+    if (onBatch) onBatch(new Map(profiles));
   };
 
   const ingest = (event: { pubkey: string; content: string; created_at: number }): void => {
@@ -438,12 +447,15 @@ export async function fetchProfiles(
     // batch; this is the upper bound for the whole multi-batch run.
     const overallDeadline = Date.now() + 120000;
 
-    // Batch in groups of 50, run up to 3 batches concurrently. The
-    // per-batch streaming sub has a 5 s soft timeout — well below the
-    // old 15 s pool.querySync ceiling because most profiles arrive
-    // within the first second; the residual 4 s is just for slow
-    // relays. Missing profiles are picked up by the retry pass below
-    // with a 3 s timeout.
+    // Batch in groups of 50, run up to 3 batches concurrently. Per-batch
+    // soft timeout is 10s for the main pass — same ceiling as the old
+    // pool.querySync ceiling (15s minus a couple of seconds), since
+    // shrinking it further turned a slow-but-valid profile into a 24h
+    // miss when loadContacts() bumps PROFILES_TIMESTAMP_KEY on partial
+    // fetches (Copilot review on PR #385). The streaming pattern is
+    // still the win — events surface to the UI as they arrive instead
+    // of all-at-batch-end, so cold start FEELS fast even though the
+    // worst-case wait per batch is unchanged.
     const batchSize = 50;
     const concurrency = 3;
     const batches: string[][] = [];
@@ -460,17 +472,15 @@ export async function fetchProfiles(
       if (i > 0) await new Promise((r) => setTimeout(r, 50));
       const concurrent = batches.slice(i, i + concurrency);
       await Promise.all(
-        concurrent.map((batch) => fetchProfilesBatch(batch, allRelays, 5000, ingest)),
+        concurrent.map((batch) => fetchProfilesBatch(batch, allRelays, 10000, ingest)),
       );
-      // Force a synchronous flush at batch-round boundary so callers
-      // get a guaranteed update even if no new events arrived inside
-      // the 200 ms coalesce window.
-      if (onBatch) onBatch(new Map(profiles));
+      flushNow();
     }
 
-    // Retry pass for missing profiles (smaller batches, shorter timeout
-    // — relays that didn't have it on the first round usually don't
-    // have it at all, so we only burn 3 s before giving up).
+    // Retry pass for missing profiles. 8s timeout — slow relays that
+    // missed the first round window may still produce on a second look,
+    // and the cost of cache-missing a profile for 24h is much higher
+    // than 8s of additional sub time on cold start.
     const missing = pubkeys.filter((pk) => !profiles.has(pk));
     if (missing.length > 0 && missing.length < pubkeys.length && Date.now() < overallDeadline) {
       if (__DEV__)
@@ -483,13 +493,21 @@ export async function fetchProfiles(
         if (Date.now() > overallDeadline) break;
         const concurrent = retryBatches.slice(i, i + concurrency);
         await Promise.all(
-          concurrent.map((batch) => fetchProfilesBatch(batch, allRelays, 3000, ingest)),
+          concurrent.map((batch) => fetchProfilesBatch(batch, allRelays, 8000, ingest)),
         );
-        if (onBatch) onBatch(new Map(profiles));
+        flushNow();
       }
     }
   } catch (error) {
     console.warn('Failed to batch fetch profiles:', error);
+  } finally {
+    // Make sure we don't leave a pending coalesce timer alive after the
+    // function resolves — the caller has the final state in the return
+    // value, so a late fire would just be a duplicate emit.
+    if (pendingTimer !== null) {
+      clearTimeout(pendingTimer);
+      pendingTimer = null;
+    }
   }
 
   return profiles;
