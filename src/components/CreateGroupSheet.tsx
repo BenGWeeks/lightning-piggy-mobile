@@ -26,6 +26,7 @@ import { useGroups } from '../contexts/GroupsContext';
 import type { Group } from '../types/groups';
 import type { NostrContact } from '../types/nostr';
 import AlphabetBar from './AlphabetBar';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 
 interface Props {
   visible: boolean;
@@ -71,15 +72,15 @@ const MemberRow = React.memo<MemberRowProps>(
         testID={`member-row-${contact.pubkey.slice(0, 12)}`}
       >
         <View style={styles.avatar}>
-          {contact.profile?.picture ? (
+          {isSupportedImageUrl(contact.profile?.picture) ? (
             <Image
-              source={{ uri: contact.profile.picture }}
+              source={{ uri: contact.profile!.picture! }}
               style={styles.avatarImage}
               // memory-disk + recyclingKey match the canonical avatar
               // caching policy (see ConversationRow / ContactListItem /
               // GroupAvatar). Standardised in #245.
               cachePolicy="memory-disk"
-              recyclingKey={contact.profile.picture}
+              recyclingKey={contact.profile!.picture!}
               // First frame only for animated WebP / GIF avatars.
               // Without this, expo-image spawns a FrameDecoderExe
               // thread per animated avatar and decodes every frame on
@@ -434,12 +435,12 @@ const CreateGroupSheet: React.FC<Props> = ({ visible, onClose, onCreated }) => {
           <View style={styles.avatarStrip}>
             {visibleAvatars.map((c) => (
               <View key={c.pubkey} style={styles.summaryAvatar}>
-                {c.profile?.picture ? (
+                {isSupportedImageUrl(c.profile?.picture) ? (
                   <Image
-                    source={{ uri: c.profile.picture }}
+                    source={{ uri: c.profile!.picture! }}
                     style={styles.summaryAvatarImage}
                     cachePolicy="memory-disk"
-                    recyclingKey={c.profile.picture}
+                    recyclingKey={c.profile!.picture!}
                     autoplay={false}
                   />
                 ) : (
