@@ -13,10 +13,34 @@ import type { WalletState } from '../types/wallet';
  * imported from a mnemonic (xpub-only wallets are watch-only and
  * have no signing key).
  *
- * Keep this exhaustive when adding new `WalletType`s.
+ * Switch with `assertNever` so adding a new `WalletType` (or new `OnchainImportMethod`) becomes a compile error here, not a silent runtime `false`.
  */
 export function isSendableWallet(w: WalletState): boolean {
-  if (w.walletType === 'nwc') return true;
-  if (w.walletType === 'onchain') return w.onchainImportMethod === 'mnemonic';
-  return false;
+  switch (w.walletType) {
+    case 'nwc':
+      return true;
+    case 'onchain':
+      return isSendableOnchainImportMethod(w.onchainImportMethod);
+    default: {
+      // assertNever — adding a new WalletType becomes a compile error here, not a silent runtime `false`.
+      const _exhaustive: never = w.walletType;
+      return _exhaustive;
+    }
+  }
+}
+
+// 'mnemonic' has signing keys today. 'generated' is reserved in the type for future hot-wallet support but no codepath creates one yet, so treat it as not-sendable until the create/back-up/sign path lands. 'xpub' is watch-only.
+function isSendableOnchainImportMethod(method: WalletState['onchainImportMethod']): boolean {
+  switch (method) {
+    case 'mnemonic':
+      return true;
+    case 'generated':
+    case 'xpub':
+    case undefined:
+      return false;
+    default: {
+      const _exhaustive: never = method;
+      return _exhaustive;
+    }
+  }
 }
