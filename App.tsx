@@ -17,6 +17,7 @@ import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
 import BootSplash from './src/components/BootSplash';
 import { BrandedAlertHost } from './src/components/BrandedAlert';
 import { BrandedToast } from './src/components/BrandedToast';
+import NfcWithdrawListener from './src/components/NfcWithdrawListener';
 
 // Renders the global incoming-payment celebration on top of the nav
 // stack. Lives inside the WalletProvider so it can subscribe to the
@@ -91,6 +92,13 @@ export default function App() {
                       direct imports of the underlying lib elsewhere. */}
                   <BrandedToast />
                   <GlobalIncomingPaymentOverlay />
+                  {/* NfcWithdrawListener: passive foreground NFC tag
+                      listener that auto-claims LNURL-withdraw tags
+                      (gift cards, bounty stickers) into the active
+                      wallet. Lives inside WalletProvider so it can
+                      `makeInvoice`. AppState-gated so we don't poll
+                      the NFC radio in the background. Issue #103. */}
+                  <NfcWithdrawListener />
                   {/* BrandedAlertHost: portal target for the on-brand
                       BrandedAlert dialog. Sits at the root so any sheet /
                       screen that calls `Alert.alert(...)` (the BrandedAlert

@@ -153,6 +153,43 @@ export function decodeLnurl(lnurl: string): string {
 }
 
 /**
+ * Resolve an LNURL endpoint URL (https://… or http://…onion) to either
+ * pay or withdraw parameters. The bech32 `LNURL1…` flow goes through
+ * `resolveLnurl` which decodes first; the `lnurlw://…` (LUD-17) flow
+ * arrives here directly with the scheme already rewritten.
+ */
+export async function resolveLnurlUrl(
+  url: string,
+): Promise<
+  | { tag: 'payRequest'; params: LnurlPayParams }
+  | { tag: 'withdrawRequest'; params: LnurlWithdrawParams }
+> {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error('Invalid LNURL endpoint URL');
+  }
+  // Mirror the scheme gate from `decodeLnurl`: HTTPS, or HTTP only on
+  // a `.onion` host. Without this, a plain `http://attacker/lnurlw`
+  // tag would silently leak the user's invoice.
+  const isHttps = parsed.protocol === 'https:';
+  const isHttpOnion = parsed.protocol === 'http:' && parsed.hostname.endsWith('.onion');
+  if (!isHttps && !isHttpOnion) {
+    throw new Error('LNURL endpoint must be HTTPS, or HTTP on a .onion host');
+  }
+
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    throw new Error(`Failed to resolve LNURL (${response.status})`);
+  }
+
+  const data = await response.json();
+  return parseLnurlResponse(data);
+}
+
+/**
  * Resolve an LNURL string to either pay or withdraw parameters.
  * Returns an object with a `tag` field indicating the type.
  */
@@ -170,11 +207,40 @@ export async function resolveLnurl(
   }
 
   const data = await response.json();
+  return parseLnurlResponse(data);
+}
 
+// Loose shape — the LNURL spec leaves a lot optional and the field set
+// differs between pay/withdraw branches; keeping this as a Partial gives
+// us a single helper that handles both without weakening the public
+// callers' return types.
+type LnurlServerResponse = Partial<{
+  tag: string;
+  callback: string;
+  minSendable: number;
+  maxSendable: number;
+  metadata: string;
+  commentAllowed: number;
+  allowsNostr: boolean;
+  nostrPubkey: string;
+  k1: string;
+  minWithdrawable: number;
+  maxWithdrawable: number;
+  defaultDescription: string;
+}>;
+
+function parseLnurlResponse(
+  data: LnurlServerResponse,
+):
+  | { tag: 'payRequest'; params: LnurlPayParams }
+  | { tag: 'withdrawRequest'; params: LnurlWithdrawParams } {
   if (data.tag === 'payRequest') {
+    if (!data.callback || data.minSendable == null || data.maxSendable == null) {
+      throw new Error('Invalid LNURL-pay response: missing required fields');
+    }
     let description = '';
     try {
-      const metadata = JSON.parse(data.metadata);
+      const metadata = JSON.parse(data.metadata ?? '[]');
       const textEntry = metadata.find((m: [string, string]) => m[0] === 'text/plain');
       if (textEntry) description = textEntry[1];
     } catch {}
@@ -194,6 +260,14 @@ export async function resolveLnurl(
   }
 
   if (data.tag === 'withdrawRequest') {
+    if (
+      !data.callback ||
+      !data.k1 ||
+      data.minWithdrawable == null ||
+      data.maxWithdrawable == null
+    ) {
+      throw new Error('Invalid LNURL-withdraw response: missing required fields');
+    }
     return {
       tag: 'withdrawRequest',
       params: {
@@ -206,7 +280,7 @@ export async function resolveLnurl(
     };
   }
 
-  throw new Error(`Unsupported LNURL tag: ${data.tag}`);
+  throw new Error(`Unsupported LNURL tag: ${data.tag ?? 'unknown'}`);
 }
 
 /**
@@ -299,4 +373,51 @@ export async function fetchInvoice(
   }
 
   return data.pr;
+}
+
+/**
+ * Hand a bolt11 invoice back to an LNURL-withdraw service so it can pay
+ * (and thereby "claim") the funds into the wallet that issued the
+ * invoice. Per LUD-03 the wallet GETs `<callback>?k1=<k1>&pr=<bolt11>`.
+ *
+ * The server replies with `{status:"OK"}` on success or
+ * `{status:"ERROR", reason:"..."}` if the request was rejected (already
+ * claimed, expired k1, invoice amount outside min/max, etc.). We surface
+ * the reason verbatim so the UI can show "already claimed" cleanly per
+ * the issue's risk note.
+ *
+ * Issue #103.
+ */
+export async function claimLnurlWithdraw(
+  callback: string,
+  k1: string,
+  bolt11: string,
+): Promise<void> {
+  let callbackUrl: URL;
+  try {
+    callbackUrl = new URL(callback);
+  } catch {
+    throw new Error('Invalid LNURL-withdraw callback URL');
+  }
+  // Same scheme gate as `resolveLnurlUrl` — never POST an invoice over
+  // unauthenticated HTTP unless we're addressing a Tor hidden service.
+  const isHttps = callbackUrl.protocol === 'https:';
+  const isHttpOnion = callbackUrl.protocol === 'http:' && callbackUrl.hostname.endsWith('.onion');
+  if (!isHttps && !isHttpOnion) {
+    throw new Error('LNURL-withdraw callback must be HTTPS, or HTTP on a .onion host');
+  }
+
+  callbackUrl.searchParams.set('k1', k1);
+  callbackUrl.searchParams.set('pr', bolt11);
+
+  const response = await fetch(callbackUrl.toString());
+  if (!response.ok) {
+    throw new Error(`LNURL-withdraw callback failed (${response.status})`);
+  }
+  const data: { status?: string; reason?: string } = await response.json();
+  if (data.status !== 'OK') {
+    // Surface the server's `reason` so the user sees "already used",
+    // "amount too high", etc., rather than a generic failure.
+    throw new Error(data.reason || 'LNURL-withdraw was rejected by the service');
+  }
 }
