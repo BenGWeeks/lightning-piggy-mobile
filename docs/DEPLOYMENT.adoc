@@ -242,15 +242,13 @@ The right command depends on which case you're in.
 
 ===== Case 1 (recommended): keep existing data on an EAS-built device
 
-Use `eas build --local --profile production`. This runs **EAS's exact production pipeline** on your machine (instead of in the cloud) — it fetches the EAS upload keystore down at build time, runs prebuild against `appVersionSource: "remote"` so versionCode pulls from the EAS counter, and emits an APK that the device treats as a normal upgrade of the existing install:
+Use `eas build --local --profile production`. This runs **EAS's production pipeline** on your machine — it fetches the EAS upload keystore at build time so the APK signature matches your existing install, and emits a sideload-able `.apk`:
 
 [source,bash]
 ----
 # Builds an .apk in the repo root (e.g. build-1733864000123.apk) without
-# installing. EAS's autoIncrement bumps the remote versionCode by one and
-# tags this build with it — so the artifact is always strictly higher
-# than whatever's on the device. Build runs on this machine; only the
-# keystore + counter come from EAS.
+# installing. The signing keystore comes from EAS — that's what makes
+# the APK a valid upgrade for an existing EAS-installed app.
 eas build --local --profile production --platform android --non-interactive
 
 # Then sideload to the Pixel. `adb -s` takes the adb serial here (NOT
@@ -260,9 +258,22 @@ adb -s <serial> install -r build-*.apk
 
 Side-loading this way preserves all app data (`/data/data/com.lightningpiggy.app/` is left untouched on upgrade). Wallets, Nostr login, message history all survive.
 
+**Important: bump `versionCode` in `app.config.ts` *before* the build.** `appVersionSource: "remote"` in `eas.json` only affects EAS *cloud* builds — `eas build --local` reads `versionCode` directly from `app.config.ts`, just like `expo run:android --variant release` does. So if the cloud counter has run ahead of the local floor (which it always does after a few cloud releases), the locally-built APK gets a number behind the device's installed version and `adb install -r` rejects it:
+
+[source]
+----
+INSTALL_FAILED_VERSION_DOWNGRADE: Update version code N is older than current M
+----
+
+Workflow:
+
+. Check the latest cloud-built versionCode: `eas build:list --platform android --status finished --limit 1`
+. Bump `android.versionCode` in `app.config.ts` to **(latest-EAS) + 1** (commit this — the bump persists harmlessly across releases since the cloud pipeline ignores it)
+. Run `eas build --local --profile production` and sideload the resulting APK
+
 Caveats:
-* Burns one EAS build counter increment per local prod build. Costs nothing financially (local builds don't count against the EAS plan), but the published `versionCode` numbers stop being a clean count of cloud-built APKs.
 * First run can be slow — eas-cli has to fetch the keystore + run a clean Gradle build (~5–10 min). Subsequent runs are incremental.
+* Local builds do *not* burn the EAS cloud counter; only cloud builds (`eas build --profile production` without `--local`) increment that.
 
 ===== Case 2: standalone local prod build (fresh device or OK to wipe data)
 
@@ -275,7 +286,7 @@ INSTALL_FAILED_UPDATE_INCOMPATIBLE: Existing package signatures do not match new
 
 The `-r -d` flags don't bypass this; it's a security guarantee, not a flag. Either `adb uninstall com.lightningpiggy.app` first (wipes data), or use Case 1.
 
-A second gotcha: the locally-built versionCode does not auto-increment. The local pipeline reads `android.versionCode` from `app.config.ts` (whose default is `1`) — so the device under test, which is usually running a high-20s EAS-built versionCode, rejects the install:
+A second gotcha: the locally-built versionCode does not auto-increment. The local pipeline reads `android.versionCode` from `app.config.ts` directly — so a device under test that's running an EAS-built versionCode well ahead of the local floor rejects the install:
 
 [source]
 ----
