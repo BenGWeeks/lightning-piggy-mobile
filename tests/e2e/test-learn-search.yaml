@@ -1,0 +1,77 @@
+appId: com.lightningpiggy.app.dev
+name: Learn Search Filters Course Grid by Title / Mission Text
+---
+# Verifies that the Learn-tab search input filters the course grid by
+# matching the typed query against course titles, descriptions, and the
+# titles + descriptions of nested missions.
+#
+# The catalog ships with a "The Inflation Monster" mission inside the
+# "The Money Problem" course (src/data/courses.json), so typing
+# "inflation" should leave that course visible while filtering out the
+# wallet-themed and Satoshi courses. When we clear the search the full
+# grid should come back.
+#
+# Run: maestro test tests/e2e/test-learn-search.yaml
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Land on the Learn tab
+- tapOn:
+    id: 'tab-learn'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Sanity: a course we expect to be filtered OUT is currently visible.
+- assertVisible: 'Satoshi Nakamoto'
+
+# Open the search input. Optional in case the prior step already left it
+# expanded.
+- tapOn:
+    id: 'learn-search-toggle'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Clear stale text, type the query.
+- tapOn:
+    id: 'learn-search-input'
+- eraseText: 50
+- inputText: 'inflation'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+# The matching course stays visible.
+- extendedWaitUntil:
+    visible: 'The Money Problem'
+    timeout: 5000
+
+# A non-matching course is filtered out of the grid.
+- assertNotVisible: 'Satoshi Nakamoto'
+
+# Clear the search via the Close (X) button — the catalog comes back.
+- tapOn:
+    id: 'learn-close-search'
+- waitForAnimationToEnd:
+    timeout: 1000
+- assertVisible: 'Satoshi Nakamoto'
+
+# Empty-state path: type a query that matches nothing in the catalog.
+- tapOn:
+    id: 'learn-search-toggle'
+- tapOn:
+    id: 'learn-search-input'
+- eraseText: 50
+- inputText: 'zzznotacourse'
+- waitForAnimationToEnd:
+    timeout: 1500
+- assertVisible:
+    id: 'learn-empty-state'
+
+# Clearing from inside the empty state via "Clear search" returns to the
+# default catalog view.
+- tapOn:
+    id: 'learn-clear-search'
+- waitForAnimationToEnd:
+    timeout: 1000
+- assertVisible: 'Satoshi Nakamoto'
