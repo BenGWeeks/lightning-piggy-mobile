@@ -26,6 +26,7 @@ import WalletSettingsSheet from '../components/WalletSettingsSheet';
 import TabHeader from '../components/TabHeader';
 import { ArrowDownIcon, ArrowUpIcon, ArrowLeftRightIcon } from '../components/icons/ArrowIcons';
 import { createHomeScreenStyles } from '../styles/HomeScreen.styles';
+import { isSendableWallet } from '../utils/walletCapabilities';
 import type { MainTabParamList } from '../navigation/types';
 
 const HomeScreen: React.FC = () => {
@@ -196,12 +197,12 @@ const HomeScreen: React.FC = () => {
   // enough.
   const hasActiveConnection = !!activeWallet;
   const canSend = hasActiveConnection && !isWatchOnly;
-  // Transfer requires at least 1 wallet that can send + 1 other wallet
-  const hasSendableWallet = wallets.some(
-    (w) =>
-      (w.walletType === 'nwc' && w.isConnected) ||
-      (w.walletType === 'onchain' && w.onchainImportMethod === 'mnemonic'),
-  );
+  // Transfer requires at least 1 wallet that can send + 1 other wallet.
+  // `isSendableWallet` mirrors the per-wallet rule used by `canSend`
+  // above — in particular it does NOT gate NWC wallets on the
+  // transient `isConnected` flag, which was the root cause of #199 /
+  // #302 where Transfer stayed greyed out while Send worked fine.
+  const hasSendableWallet = wallets.some(isSendableWallet);
   const canTransfer = hasSendableWallet && wallets.length >= 2;
 
   // Cold-start gating: until the WalletContext finishes its initial
