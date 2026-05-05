@@ -8,7 +8,10 @@
   "scripts": {
     "start": "EXPO_NO_DEVTOOLS=1 expo start --dev-client",
     "android": "expo run:android",
+    "android:dev": "APP_VARIANT=development expo run:android --variant debug",
+    "android:preview": "APP_VARIANT=preview expo run:android --variant release",
     "ios": "expo run:ios",
+    "ios:dev": "APP_VARIANT=development expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts,.tsx",

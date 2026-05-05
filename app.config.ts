@@ -5,7 +5,14 @@ import { ExpoConfig, ConfigContext } from 'expo/config';
 // CFBundleShortVersionString / android.versionName below.
 import pkg from './package.json';
 
-const APP_VARIANT = process.env.APP_VARIANT;
+// Default to the development variant for local builds when APP_VARIANT
+// is unset, so a one-line `npm run android` (or a forgetful prebuild)
+// still produces the .dev applicationId + (Dev) label and installs
+// alongside an existing production EAS install rather than colliding
+// with it. EAS sets EAS_BUILD=1 in its build env, and each EAS profile
+// in eas.json sets APP_VARIANT explicitly when it should — so this
+// fallback only fires for local invocations that didn't specify.
+const APP_VARIANT = process.env.APP_VARIANT ?? (process.env.EAS_BUILD ? undefined : 'development');
 const IS_DEV = APP_VARIANT === 'development';
 const IS_PREVIEW = APP_VARIANT === 'preview';
 
