@@ -796,23 +796,82 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const contactsCacheFresh = !opts?.force && contactsAgeMs < CACHE_MAX_AGE_MS;
       const cacheFresh = cacheAgeMs < CACHE_MAX_AGE_MS;
 
+      // Persist relay-fetched contacts back to AsyncStorage. Hoisted so
+      // both the stale-while-revalidate path and the no-cache path can
+      // call it.
+      const persistContacts = (contacts: NostrContact[]): void => {
+        InteractionManager.runAfterInteractions(() => {
+          AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(contacts)).catch(() => {});
+          AsyncStorage.setItem(CONTACTS_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
+        });
+      };
+
       let fetchedContacts: NostrContact[];
       if (contactsCacheFresh && cachedContacts) {
+        // Cache fully fresh — skip the relay fetch entirely.
         fetchedContacts = cachedContacts;
         if (__DEV__)
           console.log(
             `[Nostr] fetchContactList: skipped (cache fresh @ ${Math.round(contactsAgeMs / 1000)}s old, ${fetchedContacts.length} contacts)`,
           );
+      } else if (cachedContacts && !opts?.force) {
+        // Stale-while-revalidate: paint immediately from the (stale)
+        // cache so the follow-gate / Friends tab / contact-tab UIs
+        // surface useful data within ms of app open instead of waiting
+        // for the relay fetch (#372 — that wait was ~53s on cold start).
+        // The relay fetch fires in the background and overwrites the
+        // cache + state when it returns.
+        fetchedContacts = cachedContacts;
+        if (__DEV__)
+          console.log(
+            `[Nostr] fetchContactList: stale-while-revalidate (${Math.round(contactsAgeMs / 1000)}s old, ${fetchedContacts.length} contacts) — refreshing in background`,
+          );
+        nostrService
+          .fetchContactList(pk, relayUrls)
+          .then((fresh) => {
+            if (fresh.length === 0) return;
+            if (__DEV__)
+              console.log(
+                `[Nostr] fetchContactList background refresh: ${Date.now() - t0}ms, ${fresh.length} contacts`,
+              );
+            persistContacts(fresh);
+            startTransition(() =>
+              setContacts(
+                fresh.map((c) => ({
+                  ...c,
+                  profile: cachedProfileMap[c.pubkey] ?? c.profile,
+                })),
+              ),
+            );
+          })
+          .catch(() => {
+            /* silent — caller already painted from cache */
+          });
       } else {
-        fetchedContacts = await nostrService.fetchContactList(pk, relayUrls);
+        // No cache (or forced refresh) — must block on the relay fetch.
+        // fetchContactList itself is now race-to-first (resolves on the
+        // first matching event from any relay), so this typically lands
+        // in <2s instead of waiting for every relay's EOSE.
+        fetchedContacts = await nostrService.fetchContactList(pk, relayUrls, {
+          onLatest: (newer) => {
+            // A newer kind-3 arrived after first paint — re-render and
+            // overwrite the cache.
+            persistContacts(newer);
+            startTransition(() =>
+              setContacts(
+                newer.map((c) => ({
+                  ...c,
+                  profile: cachedProfileMap[c.pubkey] ?? c.profile,
+                })),
+              ),
+            );
+          },
+        });
         if (__DEV__)
           console.log(
             `[Nostr] fetchContactList: ${Date.now() - t0}ms, ${fetchedContacts.length} contacts`,
           );
-        InteractionManager.runAfterInteractions(() => {
-          AsyncStorage.setItem(CONTACTS_CACHE_KEY, JSON.stringify(fetchedContacts)).catch(() => {});
-          AsyncStorage.setItem(CONTACTS_TIMESTAMP_KEY, Date.now().toString()).catch(() => {});
-        });
+        persistContacts(fetchedContacts);
       }
 
       startTransition(() =>

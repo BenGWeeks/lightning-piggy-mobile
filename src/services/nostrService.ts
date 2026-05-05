@@ -191,49 +191,132 @@ export async function fetchProfile(pubkey: string, relays: string[]): Promise<No
   }
 }
 
-export async function fetchContactList(pubkey: string, relays: string[]): Promise<NostrContact[]> {
-  trackRelays(relays);
-  try {
-    const event = await pool.get(relays, {
-      kinds: [3],
-      authors: [pubkey],
-    });
-    if (!event) return [];
+function tagsToContacts(tags: string[][]): NostrContact[] {
+  return tags
+    .filter((tag) => tag[0] === 'p')
+    .map((tag) => ({
+      pubkey: tag[1],
+      relay: tag[2] || null,
+      petname: tag[3] || null,
+      profile: null,
+    }));
+}
 
-    return event.tags
-      .filter((tag) => tag[0] === 'p')
-      .map((tag) => ({
-        pubkey: tag[1],
-        relay: tag[2] || null,
-        petname: tag[3] || null,
-        profile: null,
-      }));
+function tagsToRelayList(tags: string[][]): RelayConfig[] {
+  return tags
+    .filter((tag) => tag[0] === 'r')
+    .map((tag) => {
+      const url = tag[1];
+      const marker = tag[2];
+      return {
+        url,
+        read: !marker || marker === 'read',
+        write: !marker || marker === 'write',
+      };
+    });
+}
+
+// Race-to-first-event single-event fetch. The previous `pool.get()` based
+// implementation waited for EVERY relay in the set to send EOSE before
+// resolving — on Ben's Pixel 8 / Android 16 with the production relay
+// list this measured ~53 s for kind-3 (#372 logcat trace). Most relays
+// respond in ~1-2 s; the wait was paid against the slowest relay's EOSE.
+// We instead resolve as soon as ANY relay returns the first matching
+// event, with a hard upper bound of `softTimeoutMs`. If `onLatest` is
+// provided, newer events that arrive AFTER the promise resolves still
+// fire the callback for up to `keepOpenMs`, so the caller can update
+// caches if the user's kind-3 / kind-10002 was just rewritten on another
+// device. The sub is closed in all paths.
+async function fetchSingleLatest<T>(
+  filter: Filter,
+  relays: string[],
+  parse: (tags: string[][]) => T,
+  emptyValue: T,
+  opts: {
+    softTimeoutMs?: number;
+    keepOpenMs?: number;
+    onLatest?: (parsed: T) => void;
+  } = {},
+): Promise<T> {
+  const softTimeoutMs = opts.softTimeoutMs ?? 5000;
+  const keepOpenMs = opts.keepOpenMs ?? 3000;
+  trackRelays(relays);
+
+  return new Promise<T>((resolve) => {
+    let firstResolved = false;
+    let bestEvent: { tags: string[][]; created_at: number } | null = null;
+
+    const sub = pool.subscribeMany(relays, filter, {
+      onevent: (event: { tags: string[][]; created_at: number }) => {
+        if (!bestEvent || event.created_at > bestEvent.created_at) {
+          bestEvent = event;
+          if (!firstResolved) {
+            firstResolved = true;
+            resolve(parse(event.tags));
+          } else if (opts.onLatest) {
+            // Newer version arrived after first paint — let the caller
+            // update its cache without re-running the whole fetch.
+            opts.onLatest(parse(event.tags));
+          }
+        }
+      },
+    });
+
+    // Soft timeout: if no event has arrived by `softTimeoutMs`, give up
+    // and resolve with the empty value. The sub stays open through
+    // `keepOpenMs` so a slow-but-eventual relay's response can still
+    // populate the cache via onLatest.
+    const softTimer = setTimeout(() => {
+      if (!firstResolved) {
+        firstResolved = true;
+        resolve(emptyValue);
+      }
+    }, softTimeoutMs);
+
+    // Hard close: stop listening after softTimeout + keepOpenMs.
+    setTimeout(() => {
+      clearTimeout(softTimer);
+      try {
+        sub.close();
+      } catch {
+        // Best-effort — sub may already be closed.
+      }
+    }, softTimeoutMs + keepOpenMs);
+  });
+}
+
+export async function fetchContactList(
+  pubkey: string,
+  relays: string[],
+  opts?: { onLatest?: (contacts: NostrContact[]) => void },
+): Promise<NostrContact[]> {
+  try {
+    return await fetchSingleLatest<NostrContact[]>(
+      { kinds: [3], authors: [pubkey] } as Filter,
+      relays,
+      tagsToContacts,
+      [],
+      { onLatest: opts?.onLatest },
+    );
   } catch (error) {
     console.warn('Failed to fetch Nostr contact list:', error);
     return [];
   }
 }
 
-export async function fetchRelayList(pubkey: string, relays: string[]): Promise<RelayConfig[]> {
-  trackRelays(relays);
+export async function fetchRelayList(
+  pubkey: string,
+  relays: string[],
+  opts?: { onLatest?: (relayList: RelayConfig[]) => void },
+): Promise<RelayConfig[]> {
   try {
-    const event = await pool.get(relays, {
-      kinds: [10002],
-      authors: [pubkey],
-    });
-    if (!event) return [];
-
-    return event.tags
-      .filter((tag) => tag[0] === 'r')
-      .map((tag) => {
-        const url = tag[1];
-        const marker = tag[2];
-        return {
-          url,
-          read: !marker || marker === 'read',
-          write: !marker || marker === 'write',
-        };
-      });
+    return await fetchSingleLatest<RelayConfig[]>(
+      { kinds: [10002], authors: [pubkey] } as Filter,
+      relays,
+      tagsToRelayList,
+      [],
+      { onLatest: opts?.onLatest },
+    );
   } catch (error) {
     console.warn('Failed to fetch NIP-65 relay list:', error);
     return [];
