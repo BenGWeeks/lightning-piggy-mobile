@@ -23,6 +23,7 @@ import { useNostr } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { appVersion } from '../utils/appVersion';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 import type { AccountDrawerParamList } from '../navigation/types';
 
 interface SectionRow {
@@ -126,7 +127,7 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
         {/* Header — enlarged avatar + display name + npub */}
         <View style={styles.header}>
           <View style={styles.avatarLarge}>
-            {profile?.picture ? (
+            {profile?.picture && isSupportedImageUrl(profile.picture) ? (
               <Image
                 source={{ uri: profile.picture }}
                 style={styles.avatarImage}

@@ -6,6 +6,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import type { ConversationSummary } from '../utils/conversationSummaries';
 import { conversationPreview, formatConversationTimestamp } from '../utils/conversationSummaries';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 
 interface Props {
   summary: ConversationSummary;
@@ -24,7 +25,8 @@ const ConversationRow: React.FC<Props> = ({ summary, onPress }) => {
     setAvatarError(false);
   }, [summary.picture]);
 
-  const showImage = !!summary.picture && !avatarError;
+  // Pre-filter unsupported URLs (`.svg`, `.heic`, etc.) — see #189.
+  const showImage = !!summary.picture && !avatarError && isSupportedImageUrl(summary.picture);
   const timestamp = formatConversationTimestamp(summary.lastActivityAt);
   const preview = conversationPreview(summary);
   // Bind the row's summary into the parent handler at the leaf so the

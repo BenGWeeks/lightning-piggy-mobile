@@ -28,6 +28,7 @@ import { useNostr } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import FriendPickerSheet, { PickedFriend } from './FriendPickerSheet';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 
 interface ContactData {
   pubkey: string | null;
@@ -251,7 +252,7 @@ const ContactProfileSheet: React.FC<Props> = ({
       <BottomSheetView style={styles.content}>
         {/* Banner with handle overlay */}
         <View style={styles.bannerContainer}>
-          {contact.banner ? (
+          {contact.banner && isSupportedImageUrl(contact.banner) ? (
             <Image source={{ uri: contact.banner }} style={styles.bannerImage} cachePolicy="disk" />
           ) : (
             <View style={styles.bannerPlaceholder} />
@@ -261,9 +262,10 @@ const ContactProfileSheet: React.FC<Props> = ({
           </View>
         </View>
 
-        {/* Avatar */}
+        {/* Avatar — pre-filter unsupported URLs (`.svg`, `.heic`, etc.)
+            so BitmapFactory never tries to decode them; see #189. */}
         <View style={styles.avatarContainer}>
-          {contact.picture && !avatarError ? (
+          {contact.picture && !avatarError && isSupportedImageUrl(contact.picture) ? (
             <Image
               source={{ uri: contact.picture }}
               style={styles.avatar}

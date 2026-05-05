@@ -3,6 +3,7 @@ import { TouchableOpacity, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import { UserRound } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 
 interface Props {
   uri?: string | null;
@@ -20,7 +21,7 @@ const ProfileIcon: React.FC<Props> = ({ uri, size = 36, onPress }) => {
       testID="profile-icon"
     >
       <View style={[styles.container, { width: size, height: size, borderRadius: size / 2 }]}>
-        {uri ? (
+        {uri && isSupportedImageUrl(uri) ? (
           <Image
             source={{ uri }}
             style={{ width: size, height: size, borderRadius: size / 2 }}

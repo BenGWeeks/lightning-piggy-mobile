@@ -16,6 +16,7 @@ import ContactProfileSheet from './ContactProfileSheet';
 import SendSheet from './SendSheet';
 import TransactionTypeIcon from './TransactionTypeIcon';
 import { getTxCategory } from '../utils/txCategory';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 import type { WalletTransaction, ZapCounterpartyInfo } from '../types/wallet';
 import type { RootStackParamList } from '../navigation/types';
 
@@ -264,7 +265,7 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
             accessibilityLabel={`Open details for ${primary}`}
           >
             <View style={styles.avatarWrap}>
-              {counterpartyAvatar ? (
+              {counterpartyAvatar && isSupportedImageUrl(counterpartyAvatar) ? (
                 <Image
                   source={{ uri: counterpartyAvatar }}
                   style={styles.avatar}
