@@ -221,30 +221,42 @@ function tagsToRelayList(tags: string[][]): RelayConfig[] {
 // resolving — on Ben's Pixel 8 / Android 16 with the production relay
 // list this measured ~53 s for kind-3 (#372 logcat trace). Most relays
 // respond in ~1-2 s; the wait was paid against the slowest relay's EOSE.
-// We instead resolve as soon as ANY relay returns the first matching
-// event, with a hard upper bound of `softTimeoutMs`. If `onLatest` is
-// provided, newer events that arrive AFTER the promise resolves still
-// fire the callback for up to `keepOpenMs`, so the caller can update
-// caches if the user's kind-3 / kind-10002 was just rewritten on another
-// device. The sub is closed in all paths.
+//
+// Contract:
+//   - Resolves with the first matching event's parsed value as soon as
+//     ANY relay returns one. This unblocks the caller in ~1-2 s rather
+//     than waiting for the slowest relay's EOSE.
+//   - Resolves with `null` if `softTimeoutMs` elapses with no event seen
+//     at all. `null` is distinct from "got an event with empty tags"
+//     (which parses to e.g. an empty contact list — a legitimate state
+//     for someone who follows nobody). Callers MUST distinguish:
+//       fresh === null  → don't touch the cache (network problem)
+//       fresh === []    → user really has zero contacts; persist + bump TS
+//   - The sub stays open for `keepOpenMs` after first resolve to absorb
+//     any newer events that race the slowest relays. If a strictly newer
+//     event is seen during that window, `onLatest` fires EXACTLY ONCE at
+//     sub close with the latest version — never inline during the stream.
+//     Firing once at the end avoids the race where an inline `onLatest`
+//     callback could overwrite cache that a still-pending `await` is
+//     about to write with the older first result.
 async function fetchSingleLatest<T>(
   filter: Filter,
   relays: string[],
   parse: (tags: string[][]) => T,
-  emptyValue: T,
   opts: {
     softTimeoutMs?: number;
     keepOpenMs?: number;
     onLatest?: (parsed: T) => void;
   } = {},
-): Promise<T> {
+): Promise<T | null> {
   const softTimeoutMs = opts.softTimeoutMs ?? 5000;
   const keepOpenMs = opts.keepOpenMs ?? 3000;
   trackRelays(relays);
 
-  return new Promise<T>((resolve) => {
+  return new Promise<T | null>((resolve) => {
     let firstResolved = false;
     let bestEvent: { tags: string[][]; created_at: number } | null = null;
+    let firstResolvedCreatedAt: number | null = null;
 
     const sub = pool.subscribeMany(relays, filter, {
       onevent: (event: { tags: string[][]; created_at: number }) => {
@@ -252,34 +264,49 @@ async function fetchSingleLatest<T>(
           bestEvent = event;
           if (!firstResolved) {
             firstResolved = true;
+            firstResolvedCreatedAt = event.created_at;
             resolve(parse(event.tags));
-          } else if (opts.onLatest) {
-            // Newer version arrived after first paint — let the caller
-            // update its cache without re-running the whole fetch.
-            opts.onLatest(parse(event.tags));
           }
+          // Newer events keep updating bestEvent for the keepOpenMs
+          // window, but onLatest fires only once at sub close so it
+          // never races an awaiting caller's post-resolve microtask.
         }
       },
     });
 
-    // Soft timeout: if no event has arrived by `softTimeoutMs`, give up
-    // and resolve with the empty value. The sub stays open through
-    // `keepOpenMs` so a slow-but-eventual relay's response can still
-    // populate the cache via onLatest.
+    // Soft timeout: if no event has arrived by softTimeoutMs, resolve
+    // with `null` so the caller can distinguish "network couldn't
+    // produce a kind-3" from "kind-3 arrived but is empty". The sub
+    // stays open through keepOpenMs so a late relay can still surface
+    // the event via onLatest.
     const softTimer = setTimeout(() => {
       if (!firstResolved) {
         firstResolved = true;
-        resolve(emptyValue);
+        resolve(null);
       }
     }, softTimeoutMs);
 
-    // Hard close: stop listening after softTimeout + keepOpenMs.
+    // Hard close: at softTimeout + keepOpenMs, fire onLatest with the
+    // bestEvent IFF it's strictly newer than what we resolved with (or
+    // we resolved with null and got something during the keep-open
+    // window), then close the sub.
     setTimeout(() => {
       clearTimeout(softTimer);
+      if (opts.onLatest && bestEvent) {
+        const isNewer =
+          firstResolvedCreatedAt === null || bestEvent.created_at > firstResolvedCreatedAt;
+        if (isNewer) {
+          try {
+            opts.onLatest(parse(bestEvent.tags));
+          } catch {
+            // best-effort — onLatest failures must not crash the sub
+          }
+        }
+      }
       try {
         sub.close();
       } catch {
-        // Best-effort — sub may already be closed.
+        // best-effort — sub may already be closed
       }
     }, softTimeoutMs + keepOpenMs);
   });
@@ -289,18 +316,17 @@ export async function fetchContactList(
   pubkey: string,
   relays: string[],
   opts?: { onLatest?: (contacts: NostrContact[]) => void },
-): Promise<NostrContact[]> {
+): Promise<NostrContact[] | null> {
   try {
     return await fetchSingleLatest<NostrContact[]>(
       { kinds: [3], authors: [pubkey] } as Filter,
       relays,
       tagsToContacts,
-      [],
       { onLatest: opts?.onLatest },
     );
   } catch (error) {
     console.warn('Failed to fetch Nostr contact list:', error);
-    return [];
+    return null;
   }
 }
 
@@ -308,18 +334,17 @@ export async function fetchRelayList(
   pubkey: string,
   relays: string[],
   opts?: { onLatest?: (relayList: RelayConfig[]) => void },
-): Promise<RelayConfig[]> {
+): Promise<RelayConfig[] | null> {
   try {
     return await fetchSingleLatest<RelayConfig[]>(
       { kinds: [10002], authors: [pubkey] } as Filter,
       relays,
       tagsToRelayList,
-      [],
       { onLatest: opts?.onLatest },
     );
   } catch (error) {
     console.warn('Failed to fetch NIP-65 relay list:', error);
-    return [];
+    return null;
   }
 }
 

@@ -829,7 +829,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         nostrService
           .fetchContactList(pk, relayUrls)
           .then((fresh) => {
-            if (fresh.length === 0) return;
+            // null = network couldn't produce a kind-3; keep the cached
+            // value, don't touch the timestamp. An empty array is a
+            // legitimate state (user follows nobody) and DOES persist
+            // so the cache reflects truth and the timestamp bumps.
+            if (fresh === null) return;
             if (__DEV__)
               console.log(
                 `[Nostr] fetchContactList background refresh: ${Date.now() - t0}ms, ${fresh.length} contacts`,
@@ -852,10 +856,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         // fetchContactList itself is now race-to-first (resolves on the
         // first matching event from any relay), so this typically lands
         // in <2s instead of waiting for every relay's EOSE.
-        fetchedContacts = await nostrService.fetchContactList(pk, relayUrls, {
+        const fetched = await nostrService.fetchContactList(pk, relayUrls, {
           onLatest: (newer) => {
-            // A newer kind-3 arrived after first paint — re-render and
-            // overwrite the cache.
+            // A newer kind-3 arrived during the keep-open window after
+            // first paint — re-render and overwrite the cache. Fires
+            // once at sub close, after our await has resumed and our
+            // own persistContacts has run, so we're safely "newer".
             persistContacts(newer);
             startTransition(() =>
               setContacts(
@@ -867,11 +873,23 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             );
           },
         });
-        if (__DEV__)
-          console.log(
-            `[Nostr] fetchContactList: ${Date.now() - t0}ms, ${fetchedContacts.length} contacts`,
-          );
-        persistContacts(fetchedContacts);
+        if (fetched === null) {
+          // Relay timeout with no cached fallback — paint empty for
+          // now and do NOT persist (so we don't poison the cache with
+          // a network blip).
+          fetchedContacts = [];
+          if (__DEV__)
+            console.log(
+              `[Nostr] fetchContactList: timed out, ${Date.now() - t0}ms, painting empty (cache untouched)`,
+            );
+        } else {
+          fetchedContacts = fetched;
+          if (__DEV__)
+            console.log(
+              `[Nostr] fetchContactList: ${Date.now() - t0}ms, ${fetchedContacts.length} contacts`,
+            );
+          persistContacts(fetchedContacts);
+        }
       }
 
       startTransition(() =>
@@ -966,6 +984,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
     }
     const relayList = await nostrService.fetchRelayList(pk, nostrService.DEFAULT_RELAYS);
+    if (relayList === null) {
+      // Network couldn't produce a kind-10002 — fall back to defaults
+      // and DON'T persist (so we don't poison the cache with a blip).
+      if (__DEV__) console.log(`[Nostr] fetchRelayList: timed out, using defaults`);
+      return nostrService.DEFAULT_RELAYS;
+    }
     if (__DEV__)
       console.log(`[Nostr] fetchRelayList: ${Date.now() - t0}ms, ${relayList.length} relays`);
     setRelays(relayList);
