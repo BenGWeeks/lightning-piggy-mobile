@@ -13,3 +13,13 @@
 if (typeof global !== 'undefined') {
   global.__DEV__ = true;
 }
+
+// AsyncStorage's native module isn't linked in the Jest environment.
+// The package ships an in-memory mock for exactly this case — wire it
+// up here so any test that touches storage (e.g. sendThresholdService
+// in #82) gets a working get/set/clear without each test file having
+// to add its own jest.mock(...) boilerplate.
+jest.mock(
+  '@react-native-async-storage/async-storage',
+  () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
+);

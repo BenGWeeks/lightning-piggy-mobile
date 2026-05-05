@@ -27,6 +27,7 @@ import { useNostr } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createSendSheetStyles } from '../styles/SendSheet.styles';
 import { satsToFiatString } from '../services/fiatService';
+import { getSendThreshold, shouldConfirmSend } from '../services/sendThresholdService';
 import { ChevronUp, ChevronDown } from 'lucide-react-native';
 import { resolveLightningAddress, fetchInvoice, LnurlPayParams } from '../services/lnurlService';
 import * as boltzService from '../services/boltzService';
@@ -367,6 +368,38 @@ const SendSheet: React.FC<Props> = ({
 
   const handleSend = async () => {
     if (!invoiceData) return;
+    // High-value confirmation gate (issue #82). Prompt the user before we
+    // touch the abort controller / spinner / progress overlay so a Cancel
+    // tap leaves the form exactly as it was. The amount used here matches
+    // what the user is actually authorising — BOLT11's embedded amount
+    // wins because that's the value `payInvoiceForWallet(...)` will pull
+    // from the invoice; a leftover `satsValue` from a previous entry
+    // would otherwise mis-state the confirmation. Only fall back to the
+    // typed `currentSats` for zero-amount invoices, Lightning addresses,
+    // and on-chain flows where there is no embedded amount to honour.
+    const decodedAmount = decoded?.amountSats ?? 0;
+    const authorisedAmount = decodedAmount > 0 ? decodedAmount : currentSats;
+    const threshold = await getSendThreshold();
+    if (shouldConfirmSend(authorisedAmount, threshold)) {
+      const recipientLabel =
+        recipientName ||
+        (isLightningAddress(invoiceData) ? invoiceData : null) ||
+        decoded?.description ||
+        'this recipient';
+      const fiat =
+        btcPrice !== null ? ` (${satsToFiatString(authorisedAmount, btcPrice, currency)})` : '';
+      const confirmed = await new Promise<boolean>((resolve) => {
+        Alert.alert(
+          'Confirm large send',
+          `You're about to send ${authorisedAmount.toLocaleString()} sats${fiat} to ${recipientLabel}. Tap Confirm to proceed.`,
+          [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Confirm', onPress: () => resolve(true) },
+          ],
+        );
+      });
+      if (!confirmed) return;
+    }
     // Abort any stale in-flight send (shouldn't happen in normal flow,
     // but guards against a cancel-then-resend race where the previous
     // controller is still referenced).
