@@ -3,10 +3,12 @@ name: Messages Zaps Filter Chip Toggles On and Off
 ---
 # Verifies the "Zaps" filter chip on the Messages inbox (#147). The chip
 # defaults to OFF (DMs only) and tapping it unions zap counterparties
-# back into the conversation list. We only assert chip visibility +
-# tappability + accessibility-state flip — confirming the underlying
-# row-set change requires a known zap-only counterparty fixture in the
-# wallet history, which the standard Piggy login fixtures don't seed.
+# back into the conversation list. This flow asserts the toggle's
+# *state* via the hidden `messages-zaps-toggle-{on,off}` marker — the
+# visible chip is always present regardless of state, so without the
+# marker the test can't distinguish "tap registered" from "tap missed".
+# The underlying row-set change requires a known zap-only counterparty
+# fixture in the wallet history (out of scope for this flow).
 #
 # Preconditions:
 #   - Logged in (nsec or Amber).
@@ -22,22 +24,28 @@ name: Messages Zaps Filter Chip Toggles On and Off
 - waitForAnimationToEnd:
     timeout: 3000
 
-# The Zaps chip should be present (OFF by default — DMs-only inbox).
+# Default state: chip visible, marker reads "off".
 - assertVisible:
     id: 'messages-zaps-toggle'
+- assertVisible:
+    id: 'messages-zaps-toggle-off'
 
-# Tap to enable — chip should flip to "Hide..." accessibility label.
+# Tap to enable — marker should flip to "on" + the "off" marker should disappear.
 - tapOn:
     id: 'messages-zaps-toggle'
 - waitForAnimationToEnd:
     timeout: 1000
 - assertVisible:
-    id: 'messages-zaps-toggle'
+    id: 'messages-zaps-toggle-on'
+- assertNotVisible:
+    id: 'messages-zaps-toggle-off'
 
-# Tap again to disable — back to default DMs-only state.
+# Tap again to disable — back to "off".
 - tapOn:
     id: 'messages-zaps-toggle'
 - waitForAnimationToEnd:
     timeout: 1000
 - assertVisible:
-    id: 'messages-zaps-toggle'
+    id: 'messages-zaps-toggle-off'
+- assertNotVisible:
+    id: 'messages-zaps-toggle-on'

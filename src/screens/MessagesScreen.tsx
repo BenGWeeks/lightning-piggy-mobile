@@ -93,12 +93,16 @@ const MessagesScreen: React.FC = () => {
   const [showZapCounterparties, setShowZapCounterparties] = useState(false);
 
   useEffect(() => {
-    AsyncStorage.getItem('messages_window_days').then((v) => {
-      if (v === '90') setWindowDays(90);
-    });
-    AsyncStorage.getItem('messages_show_zap_counterparties').then((v) => {
-      if (v === '1') setShowZapCounterparties(true);
-    });
+    AsyncStorage.getItem('messages_window_days')
+      .then((v) => {
+        if (v === '90') setWindowDays(90);
+      })
+      .catch(() => {});
+    AsyncStorage.getItem('messages_show_zap_counterparties')
+      .then((v) => {
+        if (v === '1') setShowZapCounterparties(true);
+      })
+      .catch(() => {});
   }, []);
 
   const cycleWindowDays = useCallback(() => {
@@ -109,13 +113,21 @@ const MessagesScreen: React.FC = () => {
     });
   }, []);
 
+  // Side-effect (AsyncStorage.setItem) lives OUTSIDE the functional updater. React can call updaters multiple times during a render in StrictMode/concurrent rendering, which would double-fire the setItem with the wrong value. Persist via a downstream useEffect on the state, with a ref-gate to skip the initial-mount write that would otherwise clobber the just-loaded persisted value with the default.
   const toggleShowZapCounterparties = useCallback(() => {
-    setShowZapCounterparties((prev) => {
-      const next = !prev;
-      AsyncStorage.setItem('messages_show_zap_counterparties', next ? '1' : '0').catch(() => {});
-      return next;
-    });
+    setShowZapCounterparties((prev) => !prev);
   }, []);
+  const showZapCounterpartiesHydrated = useRef(false);
+  useEffect(() => {
+    if (!showZapCounterpartiesHydrated.current) {
+      showZapCounterpartiesHydrated.current = true;
+      return;
+    }
+    AsyncStorage.setItem(
+      'messages_show_zap_counterparties',
+      showZapCounterparties ? '1' : '0',
+    ).catch(() => {});
+  }, [showZapCounterparties]);
 
   // Defer the refresh until the Messages tab's transition animation
   // and first-paint have finished. The refresh itself (relay fetches
@@ -546,6 +558,11 @@ const MessagesScreen: React.FC = () => {
               <Zap size={14} color={colors.brandPink} />
               <Text style={styles.filterChipText}>Zaps</Text>
             </TouchableOpacity>
+            {/* Hidden marker so Maestro can assert WHICH state the toggle is in (chip is always visible regardless), without relying on accessibilityState which RN exposes inconsistently across Android versions. */}
+            <View
+              testID={`messages-zaps-toggle-${showZapCounterparties ? 'on' : 'off'}`}
+              accessibilityElementsHidden
+            />
           </View>
         )}
         {!isLoggedIn ? (
