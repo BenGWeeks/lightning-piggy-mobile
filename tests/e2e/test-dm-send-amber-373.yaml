@@ -25,7 +25,7 @@ name: 1:1 DM send via Amber — #373 regression (no Apps-screen detour)
 #   - test-amber-import-key.yaml has run (Amber holds MAESTRO_NSEC,
 #     "Approve basic actions" was selected).
 #   - Little Piggy fixture is reachable from the Messages list (default
-#     Maestro seed). The flow only matches the Piggy testID prefix.
+#     Maestro seed). The conversation row is matched by `text: 'Little Piggy.*'` regex — same shape used elsewhere in the suite (e.g. test-conversation-keyboard.yaml). MessagesScreen rows don't have per-row testIDs today, so there's no testID-prefix alternative.
 #   - Metro is serving the branch with the #373 fix on port 8081 and
 #     the LP dev install has reloaded against it.
 #
