@@ -3007,9 +3007,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // via two paths (live + a near-simultaneous force-refresh).
       const cacheKey =
         activeSigner === 'nsec'
-          ? NSEC_NIP17_CACHE_KEY
+          ? perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, viewerPubkey)
           : activeSigner === 'amber'
-            ? AMBER_NIP17_CACHE_KEY
+            ? perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, viewerPubkey)
             : null;
       if (!cacheKey) return;
       if (knownWrapIds === null) {
@@ -3035,7 +3035,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       } else if (activeSigner === 'amber') {
         if (amberNip17EnabledCached === null) {
           amberNip17EnabledCached =
-            (await AsyncStorage.getItem(AMBER_NIP17_ENABLED_KEY)) === 'true';
+            (await AsyncStorage.getItem(
+              perAccountKey(AMBER_NIP17_ENABLED_KEY_BASE, viewerPubkey),
+            )) === 'true';
         }
         if (!amberNip17EnabledCached) return;
         try {
