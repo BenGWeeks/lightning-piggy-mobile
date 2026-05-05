@@ -23,7 +23,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostr, subscribeDmMessages } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import * as nwcService from '../services/nwcService';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -379,6 +379,22 @@ const ConversationScreen: React.FC = () => {
   useEffect(() => {
     load(true);
   }, [load]);
+
+  // Live updates: NostrContext fires `subscribeDmMessages` after a
+  // kind-1059 wrap arrives via the long-lived relay sub and decrypts
+  // to a 1:1 rumor for this thread's peer (#349). Re-fetching the
+  // conversation is cheap because the new wrap is now in the
+  // persistent NIP-17 cache, so fetchConversation short-circuits the
+  // relay round-trip and the thread re-renders within one tick.
+  useEffect(() => {
+    if (!pubkey) return;
+    const target = pubkey.toLowerCase();
+    const unsubscribe = subscribeDmMessages((partnerPubkey) => {
+      if (partnerPubkey !== target) return;
+      load(false);
+    });
+    return unsubscribe;
+  }, [pubkey, load]);
 
   // Jump to the newest message on first content load, and when the user is
   // already near the bottom and a new message arrives. The list is
