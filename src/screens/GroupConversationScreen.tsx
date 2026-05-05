@@ -34,6 +34,7 @@ import ReceiveSheet from '../components/ReceiveSheet';
 import SendSheet from '../components/SendSheet';
 import FriendPickerSheet, { PickedFriend } from '../components/FriendPickerSheet';
 import MessageBubble from '../components/MessageBubble';
+import MessageRow from '../components/MessageRow';
 import { isConfigured as isGifConfigured, type Gif } from '../services/giphyService';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 import {
@@ -51,6 +52,7 @@ import {
 import {
   appendGroupMessage,
   loadGroupMessages,
+  removeGroupMessages,
   type GroupMessage,
 } from '../services/groupMessagesStorageService';
 import {
@@ -456,6 +458,25 @@ const GroupConversationScreen: React.FC = () => {
     };
   }, [messages]);
 
+  // Local-only delete (#128). Mirrors ConversationScreen.handleDeleteMessage:
+  // optimistically drop from in-memory state, then prune the persisted
+  // group cache. Skip the storage call for the brief window between
+  // optimistic-append and the inbound NIP-17 round-trip — a `local_…`
+  // id only ever lives in memory, so removeGroupMessages is a no-op
+  // for it (it filters by id and writes nothing if no rows changed).
+  const handleDeleteGroupMessage = useCallback(
+    async (messageId: string) => {
+      if (!group) return;
+      setMessages((prev) => prev.filter((m) => m.id !== messageId));
+      try {
+        await removeGroupMessages(group.id, [messageId]);
+      } catch (err) {
+        if (__DEV__) console.warn('[GroupConversation] delete failed', err);
+      }
+    },
+    [group],
+  );
+
   // Pre-classify message content once per messages update so renderMessage
   // (a FlatList renderItem) doesn't call classifyMessageContent on every
   // frame for every visible bubble. Mirror of ConversationScreen's items
@@ -477,20 +498,27 @@ const GroupConversationScreen: React.FC = () => {
       // front; image / invoice / lnaddr / contact ride on the text variant
       // and detect at render time.
       return (
-        <MessageBubble
-          id={item.id}
+        <MessageRow
+          messageId={item.id}
           fromMe={fromMe}
-          createdAt={item.createdAt}
-          content={item.content}
-          senderName={senderName}
-          sharedProfiles={sharedProfiles}
-          onPayInvoice={handlePayInvoice}
-          onPayLightningAddress={handlePayInvoice}
-          onOpenContact={openSharedContact}
-          onOpenLocation={openLocation}
-          onOpenGifFullscreen={setFullscreenGifUrl}
-          testIdPrefix="group-conversation"
-        />
+          peerLabel={senderName ?? 'the sender'}
+          onConfirmDelete={() => handleDeleteGroupMessage(item.id)}
+        >
+          <MessageBubble
+            id={item.id}
+            fromMe={fromMe}
+            createdAt={item.createdAt}
+            content={item.content}
+            senderName={senderName}
+            sharedProfiles={sharedProfiles}
+            onPayInvoice={handlePayInvoice}
+            onPayLightningAddress={handlePayInvoice}
+            onOpenContact={openSharedContact}
+            onOpenLocation={openLocation}
+            onOpenGifFullscreen={setFullscreenGifUrl}
+            testIdPrefix="group-conversation"
+          />
+        </MessageRow>
       );
     },
     [
@@ -500,6 +528,7 @@ const GroupConversationScreen: React.FC = () => {
       handlePayInvoice,
       openSharedContact,
       openLocation,
+      handleDeleteGroupMessage,
     ],
   );
 

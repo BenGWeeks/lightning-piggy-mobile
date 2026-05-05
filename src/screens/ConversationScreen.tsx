@@ -35,6 +35,7 @@ import ConversationComposer from '../components/ConversationComposer';
 import GifPickerSheet from '../components/GifPickerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
 import MessageBubble from '../components/MessageBubble';
+import MessageRow from '../components/MessageRow';
 import TransactionDetailSheet, {
   TransactionDetailData,
   CounterpartyContact,
@@ -139,6 +140,7 @@ const ConversationScreen: React.FC = () => {
     isLoggedIn,
     fetchConversation,
     getCachedConversation,
+    deleteConversationMessages,
     sendDirectMessage,
     signEvent,
     contacts,
@@ -812,6 +814,26 @@ const ConversationScreen: React.FC = () => {
     setSendSheetOpen(true);
   }, []);
 
+  // Local-only delete (#128). The renderer prefixes Item ids with `dm-`
+  // (and groupable Item shapes with their kind tag) so undo the prefix
+  // before handing the raw event id to the storage layer. Optimistic
+  // local rows (`local-…`) only live in component state, so the
+  // context call is a no-op for them — still safe to call. We also
+  // drop the row from `messages` immediately so the FlatList doesn't
+  // briefly re-show it before the next fetchConversation pass.
+  const handleDeleteMessage = useCallback(
+    async (rawMessageId: string) => {
+      setMessages((prev) => prev.filter((m) => m.id !== rawMessageId));
+      if (rawMessageId.startsWith('local-')) return;
+      try {
+        await deleteConversationMessages(pubkey, [rawMessageId]);
+      } catch (err) {
+        if (__DEV__) console.warn('[Conversation] delete failed', err);
+      }
+    },
+    [deleteConversationMessages, pubkey],
+  );
+
   const renderItem = useCallback(
     ({ item }: { item: Item }) => {
       if (item.kind === 'dayHeader') {
@@ -880,21 +902,32 @@ const ConversationScreen: React.FC = () => {
           : item.kind === 'location'
             ? ({ kind: 'location', location: item.location } as const)
             : ({ kind: 'text', text: item.text } as const);
+      // Item ids are prefixed (e.g. `dm-<eventId>`) for FlatList stability.
+      // The storage layer keys on the raw event id, so strip the prefix
+      // before handing off to the delete handler.
+      const rawMessageId = item.id.startsWith('dm-') ? item.id.slice(3) : item.id;
       return (
-        <MessageBubble
-          id={item.id}
+        <MessageRow
+          messageId={rawMessageId}
           fromMe={item.fromMe}
-          createdAt={item.createdAt}
-          content={content}
-          sharedProfiles={sharedProfiles}
-          isInvoicePaid={isInvoicePaid}
-          onPayInvoice={handlePayInvoice}
-          onPayLightningAddress={handlePayInvoice}
-          onOpenContact={openSharedContact}
-          onOpenLocation={openLocation}
-          onOpenGifFullscreen={setFullscreenGifUrl}
-          testIdPrefix="conversation"
-        />
+          peerLabel={name}
+          onConfirmDelete={() => handleDeleteMessage(rawMessageId)}
+        >
+          <MessageBubble
+            id={item.id}
+            fromMe={item.fromMe}
+            createdAt={item.createdAt}
+            content={content}
+            sharedProfiles={sharedProfiles}
+            isInvoicePaid={isInvoicePaid}
+            onPayInvoice={handlePayInvoice}
+            onPayLightningAddress={handlePayInvoice}
+            onOpenContact={openSharedContact}
+            onOpenLocation={openLocation}
+            onOpenGifFullscreen={setFullscreenGifUrl}
+            testIdPrefix="conversation"
+          />
+        </MessageRow>
       );
     },
     [
@@ -903,6 +936,8 @@ const ConversationScreen: React.FC = () => {
       sharedProfiles,
       openSharedContact,
       handlePayInvoice,
+      handleDeleteMessage,
+      name,
       styles,
       colors,
     ],

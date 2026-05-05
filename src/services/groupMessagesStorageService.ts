@@ -57,3 +57,31 @@ export async function appendGroupMessage(
 export async function clearGroupMessages(groupId: string): Promise<void> {
   await AsyncStorage.removeItem(KEY(groupId));
 }
+
+/**
+ * Local-only delete: drop one or more messages from the persisted group
+ * cache. The user-facing surface is the swipe-to-delete affordance on
+ * each bubble (#128). Scope is intentionally local: we don't publish a
+ * NIP-09 deletion event yet, so other members keep the message in their
+ * own caches and the next inbound NIP-17 wrap with the same id will
+ * NOT re-resurrect this entry (its wrap is already in the inbox cache;
+ * the dedup-by-id append guards against dupes, and removal here doesn't
+ * write a tombstone — see follow-up tracked in the issue body).
+ *
+ * Returns the post-removal list so callers can update local state in one
+ * await without a follow-up `loadGroupMessages` round-trip.
+ */
+export async function removeGroupMessages(
+  groupId: string,
+  ids: readonly string[],
+): Promise<GroupMessage[]> {
+  if (ids.length === 0) return loadGroupMessages(groupId);
+  const existing = await loadGroupMessages(groupId);
+  const drop = new Set(ids);
+  const next = existing.filter((m) => !drop.has(m.id));
+  // Skip the write when nothing changed — avoids touching AsyncStorage
+  // for a stale or already-deleted id.
+  if (next.length === existing.length) return existing;
+  await AsyncStorage.setItem(KEY(groupId), JSON.stringify(next));
+  return next;
+}
