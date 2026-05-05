@@ -286,8 +286,10 @@ const AmountEntryScreen: React.FC<Props> = ({
             testID="amount-entry-swap"
             accessibilityLabel={`Switch primary to ${secondaryUnitLabel}`}
             accessibilityRole="button"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
-            <ArrowUpDown size={20} color={colors.textSupplementary} />
+            <ArrowUpDown size={22} color={colors.brandPink} />
+            <Text style={styles.swapButtonLabel}>{secondaryUnitLabel}</Text>
           </TouchableOpacity>
         </View>
 
