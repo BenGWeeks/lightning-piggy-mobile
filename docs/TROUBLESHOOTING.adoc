@@ -51,6 +51,21 @@ TMPDIR="$HOME/eas-tmp" EXPO_NO_DOCTOR=1 \
 ----
 *Cleanup:* `rm -rf "$HOME/eas-tmp"` between builds when you want to reclaim disk; the next run's `mkdir -p` and Gradle will re-create everything, including hidden entries such as `.gradle` or `.expo`. The EAS-CLI checkout under `$TMPDIR/eas-build-local-nodejs/` is also safe to delete between runs. Full recipe + rationale in `docs/DEPLOYMENT.adoc` → "Local production builds".
 
+| `eas build --local` produces an APK that fails to install with `INSTALL_FAILED_VERSION_DOWNGRADE` despite a fresh `eas build:version:set`
+| `eas.json` has `cli.appVersionSource: "remote"` — so **both cloud and local builds** fetch the versionCode from EAS's server-side counter and (with `autoIncrement: true` on the production profile) bump it. The `app.config.ts` `versionCode` floor is ignored — eas-cli prints a warning saying so on every build. Three sharp edges interact: +
+*1. Race between `set` and `build`.* `eas build:version:set` makes an async API write; `eas build --local` fetches+increments via a separate API call. If you start the build immediately after the set, the build's read can hit the server before the write commits, so the APK comes out as `(old counter) + 1` instead of `(new counter) + 1`. *Fix:* run `eas build:version:get --platform android --profile production` after `set` and before `build`, and only proceed once it reports the value you set. +
+*2. The `set` prompt is interactive only.* Piping (`<<<`, `printf | …`) errors with "Input is required, but stdin is not readable". Use `script -qfc 'eas build:version:set --platform android --profile production' /dev/null <<<'NN'` for TTY emulation — but the prompt's pre-filled default may concatenate with your keystrokes (saw "5078" rendered when intent was "50"); always confirm the result with `:get` after. Or just run it interactively in a real shell. +
+*3. The device floor is sticky.* Once you install versionCode N on a device, you cannot downgrade to versionCode < N without uninstalling (which loses all app data: wallets, Nostr login, message history). `adb install -r -d` (allow-downgrade) is a no-op for non-debuggable production APKs on Android 14+. So if dev's local production build ever overshoots (e.g. counter accidentally bumped to 5078), all future cloud releases <5078 fail to install on that one device until uninstall+reinstall. *Mitigation:* keep the EAS counter conservative and bump in single digits when forced — never bulk-set to a future-proof high number. +
+*Symptom + diagnosis sequence:* +
+[source,bash]
+----
+adb -s <serial> install -r build-*.apk
+# → Failure [INSTALL_FAILED_VERSION_DOWNGRADE: Update version code 28 is older than current 34]
+adb -s <serial> shell dumpsys package com.lightningpiggy.app | grep -E versionCode  # what's on device
+APP_VARIANT=production eas build:version:get --platform android --profile production  # what's on server
+----
+If the server counter is < device versionCode, bump it (`set`) and rebuild. The APK in hand cannot be re-stamped — `versionCode` is signed into the manifest, repackaging breaks the EAS keystore signature.
+
 | "How long is the EAS iOS build queue right now?" — no public API
 | EAS doesn't expose live queue depth via API; status.expo.dev only reports operational/degraded. Best signals: +
 1. **Last completed-build duration** — proxy for current load: +
