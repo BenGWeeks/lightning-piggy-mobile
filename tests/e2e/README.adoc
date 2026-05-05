@@ -37,6 +37,9 @@ testID suffixes (first 12 hex chars of the pubkey, matching the
 | Little Piggy | `d9b33280ba73`   | `MAESTRO_NSEC2`. The default
                                     `MEMBER_PUBKEY_PREFIX` for the
                                     `test-create-leave-group.yaml` flow.
+| Evil Piggy   | `0b747589`       | `MAESTRO_NSEC4`. Used as an
+                                    untrusted/non-followed sender in
+                                    follow-gate / spam-filter coverage.
 |===
 
 The "Triad" fixture group (created by
