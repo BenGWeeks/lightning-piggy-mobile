@@ -488,4 +488,11 @@ $ANDROID_HOME/emulator/emulator -avd LP_API34 \
 *Fix:* `rm -rf /tmp/wt-* /tmp/metro-* /tmp/node-compile-cache /tmp/*.apk` (review the list first; these are caches and ephemeral build outputs). Then `git worktree prune` from any repo whose worktrees lived in `/tmp` so the admin entries match reality. Restart Claude Code so it can write a fresh shell snapshot. +
 *Prevent recurrence:* don't create git worktrees in `/tmp` on tmpfs machines. Use `git worktree add ~/.local/share/wt-<name> <branch>` (or `~/wt-*`) — survives reboot and doesn't compete with the tmpfs cap. +
 *False leads to skip:* reinstalling Claude Code, killing leftover `chrome-native-host` processes, removing dangling plugin entries from `~/.claude/settings.json`, switching out of Remote Control mode — none of these fix the underlying full-tmpfs.
+
+| Android 16 KB page-size compatibility warning on Pixel 8 / Android 16
+| Local debug builds via `npm run android:dev` show an Android-system "this app isn't 16 KB-compatible" dialog before any LP UI renders. The dialog enumerates several `.so` files (libreactnative, libreanimated, libgesturehandler, libavif_android, libworklets, libnative-filters, libdispatch) but most of those are actually 16 KB-aligned in the APK — the dialog's list is misleading and includes libs from other installed packages, plus at least one (`libdispatch.so`) that isn't in our APK at all. +
+*Diagnose:* run `bash scripts/check-elf-alignment.sh android/app/build/outputs/apk/debug/app-debug.apk` — exits non-zero if any arm64-v8a `.so` has a PT_LOAD segment aligned below 16 KB (0x4000). +
+*Real culprit (as of issue #377):* `libbdkffi.so` from `bdk-rn`, the Bitcoin Dev Kit FFI lib. Prebuilt with an older Rust + NDK toolchain that emits 4 KB-aligned ELFs. Used only in `src/services/onchainService.ts` for on-chain wallet support. +
+*Fix paths (issue #377 has the full menu):* a) rebuild the prebuilt in the `bdk-rn` fork with NDK r27+ + `cargo-ndk` ≥0.17, b) replace `bdk-rn` with an actively-maintained alternative, c) post-install patch via `lld --max-page-size=16384` (brittle), d) defer until Google's Play Store enforcement deadline. +
+*Workaround in the meantime:* test on the Android 14 emulator (no enforcement); EAS production builds aren't blocked because the warning appears only on debuggable installs.
 |===
