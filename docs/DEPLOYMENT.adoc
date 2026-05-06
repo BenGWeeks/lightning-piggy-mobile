@@ -567,9 +567,9 @@ Ad-hoc distribution installs a signed IPA onto a specific iPhone without going t
 * **Identifier type:** App IDs → App
 * **Description:** `Lightning Piggy Preview`
 * **Bundle ID (Explicit):** `com.lightningpiggy.app.preview`
-* Leave capabilities at defaults.
+* **Capabilities:** match the production bundle ID's capability set. Today the only iOS-side capability the app declares (per `ios/.../*.entitlements`) is **NFC Tag Reading** — tick that box. Other permissions (camera, contacts, microphone, photos) are handled via Info.plist usage strings, not capabilities, so they don't need toggling here.
 +
-(The production bundle ID gets auto-registered by EAS on the first iOS build, but the preview variant needs manual registration because the ad-hoc build path doesn't auto-create it.)
+(The production bundle ID gets auto-registered by EAS on the first iOS build, but the preview variant needs manual registration because the ad-hoc build path doesn't auto-create it. Missing the NFC capability surfaces as a confusing fastlane failure mid-build: `Provisioning profile ... doesn't include the NFC Tag Reading capability` / `... doesn't include the com.apple.developer.nfc.readersession.formats entitlement`. Fix is to enable it on the identifier and re-run the build — EAS auto-regenerates the provisioning profile.)
 
 . Register each tester's device UDID once via `eas device:create`:
 +
