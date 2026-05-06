@@ -3,7 +3,7 @@
 // sender's own NIP-17 self-wrap echoed back from the relay never
 // collided with the `local_<ts>_<rnd>` id we optimistically inserted
 // on send — so a single user-intent send produced two rows in the
-// thread (observed as the duplicate Miss Piggy GIF in production).
+// thread (the duplicate-GIF symptom that prompted the fix).
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
@@ -82,6 +82,29 @@ describe('appendGroupMessage — local_* vs wrap-id reconciliation (#402)', () =
     const ids = after.map((m) => m.id);
     expect(ids.filter((id) => id.startsWith('local_'))).toHaveLength(1);
     expect(ids).toContain('w'.repeat(64));
+  });
+
+  it('consumes the closest-createdAt local_* when two identical sends are pending and wraps arrive out-of-order', async () => {
+    // Two optimistic sends at t and t+10. The relay echoes the t+10
+    // wrap *first*; reconciliation should consume the t+10 local row,
+    // not the t row that happens to come earlier in map iteration.
+    const t = 1700000000;
+    await appendGroupMessage(GROUP, local('local_1_aaa', 'lol', t));
+    await appendGroupMessage(GROUP, local('local_2_bbb', 'lol', t + 10));
+    const after = await appendGroupMessage(GROUP, wrap('w'.repeat(64), 'lol', t + 11));
+    const ids = after.map((m) => m.id);
+    expect(ids).toContain('local_1_aaa');
+    expect(ids).not.toContain('local_2_bbb');
+    expect(ids).toContain('w'.repeat(64));
+  });
+
+  it('matches local_* even when the inbound wrap has lowercase senderPubkey and the optimistic row used mixed case', async () => {
+    const t = 1700000000;
+    const mixed = SENDER.toUpperCase();
+    await appendGroupMessage(GROUP, local('local_1_aaa', 'hello', t, mixed));
+    const after = await appendGroupMessage(GROUP, wrap('w'.repeat(64), 'hello', t + 1));
+    expect(after).toHaveLength(1);
+    expect(after[0].id).toBe('w'.repeat(64));
   });
 });
 

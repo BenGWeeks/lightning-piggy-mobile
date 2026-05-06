@@ -41,7 +41,7 @@ export async function loadGroupMessages(groupId: string): Promise<GroupMessage[]
 // without this, the sender's own NIP-17 self-wrap echo arrives with the
 // gift-wrap hex id, which never collides with the local_<ts>_<rnd> id we
 // optimistically appended on send — so both rows persisted and the user
-// saw the same message twice (e.g. the duplicate Miss Piggy GIF).
+// saw the same message (e.g. a GIF) twice.
 const LOCAL_ECHO_MATCH_WINDOW_SECS = 30;
 
 export async function appendGroupMessage(
@@ -55,21 +55,27 @@ export async function appendGroupMessage(
   // When a real (non-local_) event arrives, look for a pending optimistic
   // local_* row from the same sender with identical text and a close-enough
   // createdAt — and replace it with the real one rather than appending
-  // alongside. We delete-then-set on the new key. Only the FIRST matching
-  // local row is consumed so back-to-back identical sends still keep both
-  // optimistic rows until each one's own real event arrives.
+  // alongside. Pick the closest createdAt match so back-to-back identical
+  // sends are matched in order even when relay echoes arrive out-of-order.
+  // senderPubkey is lowercased on both sides because inbound rumors are
+  // lowercased upstream while optimistic locals may use the viewer pubkey
+  // as-is.
   if (!message.id.startsWith('local_')) {
+    const targetSender = message.senderPubkey.toLowerCase();
+    let bestKey: string | null = null;
+    let bestDelta = Infinity;
     for (const [k, m] of map) {
-      if (
-        k.startsWith('local_') &&
-        m.senderPubkey === message.senderPubkey &&
-        m.text === message.text &&
-        Math.abs(m.createdAt - message.createdAt) <= LOCAL_ECHO_MATCH_WINDOW_SECS
-      ) {
-        map.delete(k);
-        break;
+      if (!k.startsWith('local_')) continue;
+      if (m.senderPubkey.toLowerCase() !== targetSender) continue;
+      if (m.text !== message.text) continue;
+      const delta = Math.abs(m.createdAt - message.createdAt);
+      if (delta > LOCAL_ECHO_MATCH_WINDOW_SECS) continue;
+      if (delta < bestDelta) {
+        bestDelta = delta;
+        bestKey = k;
       }
     }
+    if (bestKey !== null) map.delete(bestKey);
   }
 
   // Dedup on id; keep the newer copy when ids collide (createdAt wins).
