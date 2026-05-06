@@ -2462,14 +2462,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               nip17CacheSize = Object.keys(cache).length;
             }
           } else if (refreshForSigner === 'amber' && kind1059.length > 0) {
-            const amberEnabled = (await AsyncStorage.getItem(AMBER_NIP17_ENABLED_KEY)) === 'true';
-            if (!amberEnabled) {
-              if (__DEV__) {
-                console.log(
-                  `[Nostr] Skipping ${kind1059.length} NIP-17 wrap(s) — Account toggle is off`,
-                );
-              }
-            } else {
+            // Always run the unwrap loop — Amber's silent content-resolver
+            // path returns PERMISSION_NOT_GRANTED on the first wrap if the
+            // user hasn't granted nip44_decrypt yet, which we surface via
+            // setAmberNip44Permission('denied') so NostrScreen can show
+            // the one-shot "Grant permission in Amber" button. Closes #404.
+            {
               // Persistent cache keyed by wrap id. Only ever contains rumors
               // from *followed* senders — see the filter gate below.
               const raw = await AsyncStorage.getItem(AMBER_NIP17_CACHE_KEY);
