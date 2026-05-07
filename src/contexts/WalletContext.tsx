@@ -357,13 +357,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
               const result = await nwcService.connect(wallet.id, nwcUrl);
               if (result.success) {
-                if (!firstWalletConnectLogged) {
-                  firstWalletConnectLogged = true;
-                  console.log(
-                    `[Perf] wallet connected: ${wallet.id.slice(0, 8)} in ${Date.now() - WALLET_MODULE_LOAD_T0}ms from JS bundle load`,
-                  );
+                // Try getInfo but don't let a failure prevent the wallet from being marked Connected — the relay handshake is what determines functional connectivity, not whether getInfo round-tripped successfully.
+                let info: Awaited<ReturnType<typeof nwcService.getInfo>> | null = null;
+                try {
+                  info = await nwcService.getInfo(wallet.id);
+                } catch (e) {
+                  if (__DEV__) console.warn(`[NWC] getInfo failed for ${wallet.id.slice(0, 8)}`, e);
                 }
-                const info = await nwcService.getInfo(wallet.id);
                 const lud16 = parseNwcLud16(nwcUrl);
 
                 setWallets((prev) =>
@@ -384,6 +384,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                       : w,
                   ),
                 );
+                // Log AFTER setWallets so the marker matches the moment the UI actually flips to Connected (not just the moment connect() resolved). Gated by firstWalletConnectLogged so a second wallet's connect doesn't double-log this run.
+                if (!firstWalletConnectLogged) {
+                  firstWalletConnectLogged = true;
+                  console.log(
+                    `[Perf] wallet connected: ${wallet.id.slice(0, 8)} in ${Date.now() - WALLET_MODULE_LOAD_T0}ms from JS bundle load`,
+                  );
+                }
               }
             } catch (error) {
               console.warn(`Failed to connect wallet ${wallet.alias} (${wallet.id}):`, error);
