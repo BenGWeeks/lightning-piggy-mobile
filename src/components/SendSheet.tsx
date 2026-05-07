@@ -241,7 +241,10 @@ const SendSheet: React.FC<Props> = ({
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
     const showSub = Keyboard.addListener(showEvent, (e) => {
       setKeyboardHeight(e.endCoordinates.height);
-      setTimeout(() => scrollRef.current?.scrollToEnd?.({ animated: true }), 100);
+      // Don't scrollToEnd here — that fires for every focus, including the
+      // paste field near the top of the sheet, and would shove the paste
+      // input out of view. The memo input has its own onFocus scroller for
+      // the only case where end-scroll is actually wanted.
     });
     const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
     return () => {
