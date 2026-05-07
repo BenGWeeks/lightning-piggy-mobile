@@ -488,7 +488,9 @@ const ContactProfileSheet: React.FC<Props> = ({
               onPress={() => setNfcWriteVisible(true)}
               disabled={!nfcSupported}
               accessibilityLabel={
-                nfcSupported ? 'Write to NFC tag' : 'Write to NFC tag (not supported on this device)'
+                nfcSupported
+                  ? 'Write to NFC tag'
+                  : 'Write to NFC tag (not supported on this device)'
               }
               accessibilityState={{ disabled: !nfcSupported }}
               testID="contact-nfc-write-button"
