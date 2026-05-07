@@ -104,13 +104,11 @@ class AmberSignerModule : Module() {
                 requestCode = REQUEST_CODE_SIGN_EVENT,
                 promise = promise,
             ) { activity ->
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("nostrsigner:${Uri.encode(eventJson)}"))
+                // Don't Uri.encode the JSON — Amber 4.x parses intent.data as already-decoded JSON. URL-encoded payloads silently fail AmberEvent.fromJson, the intent gets dropped, and Amber falls back to its Applications screen instead of opening the sign sheet. NIP-55 / Damus / Citrine all pass raw JSON.
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("nostrsigner:$eventJson"))
                 intent.`package` = AMBER_PACKAGE
                 intent.putExtra("type", "sign_event")
-                // Empty `id` makes Amber silently reject kind-13 (NIP-17 seal) intents
-                // — the dialog never opens and no entry lands in Amber's Activity log.
-                // Mirror handleCryptoOp's UUID fallback so seal/wrap signing reaches
-                // the approval flow and shows up correctly.
+                // Empty `id` makes Amber silently reject kind-13 (NIP-17 seal) intents — UUID fallback so seal/wrap signing reaches the approval flow.
                 intent.putExtra("id", eventId.ifEmpty { java.util.UUID.randomUUID().toString() })
                 intent.putExtra("current_user", currentUser)
                 activity.startActivityForResult(intent, REQUEST_CODE_SIGN_EVENT)
@@ -226,7 +224,8 @@ class AmberSignerModule : Module() {
             requestCode = requestCode,
             promise = promise,
         ) { activity ->
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("nostrsigner:${Uri.encode(payload)}"))
+            // Raw payload, not Uri.encode'd — same reason as signEvent above.
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("nostrsigner:$payload"))
             intent.`package` = AMBER_PACKAGE
             intent.putExtra("type", type)
             intent.putExtra("id", java.util.UUID.randomUUID().toString())
