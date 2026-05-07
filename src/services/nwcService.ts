@@ -35,6 +35,20 @@ export function createAbortError(message = 'Payment cancelled'): Error {
   return err;
 }
 
+export const REPLY_TIMEOUT_ERROR_NAME = 'ReplyTimeoutError';
+
+export function createReplyTimeoutError(
+  message = 'Wallet did not reply in time; payment may still be in flight',
+): Error {
+  const err = new Error(message);
+  err.name = REPLY_TIMEOUT_ERROR_NAME;
+  return err;
+}
+
+export function isReplyTimeoutError(error: unknown): boolean {
+  return (error as Error)?.name === REPLY_TIMEOUT_ERROR_NAME;
+}
+
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) throw createAbortError();
 }
@@ -127,6 +141,7 @@ export function validateNwcUrl(url: string): { valid: boolean; error?: string } 
 export async function connect(
   walletId: string,
   nwcUrl: string,
+  onEnabled?: () => void,
 ): Promise<{ success: boolean; balance?: number; error?: string }> {
   const validation = validateNwcUrl(nwcUrl);
   if (!validation.valid) {
@@ -155,8 +170,13 @@ export async function connect(
     providers.set(walletId, provider);
     nwcUrls.set(walletId, nwcUrl.trim());
 
-    // Allow relay connection to stabilize before first request
-    await new Promise((r) => setTimeout(r, 500));
+    // Guard the consumer callback so a UI-side throw can't unwind into our
+    // catch block and falsely tear down a healthy provider.
+    try {
+      onEnabled?.();
+    } catch (cbErr) {
+      if (__DEV__) console.warn('[NWC] onEnabled callback threw — connection unaffected', cbErr);
+    }
 
     // Try to get initial balance, but don't fail the connection if it times out
     let balance: number | undefined;
@@ -194,17 +214,76 @@ export function disconnect(walletId: string): void {
   clearFailedLookupCache(walletId);
 }
 
-export async function getBalance(walletId: string): Promise<number | null> {
+/**
+ * Race a promise against a timeout, rejecting with a "reply timeout"
+ * shaped Error if the deadline fires first. The underlying promise is
+ * left to settle in the background — the SDK's own NIP-47 subscription
+ * still cleans itself up on its own (longer) timeout, so the leak is
+ * bounded.
+ *
+ * Used to put a tighter ceiling on `getBalance` than the @getalby/sdk's
+ * hardcoded 10s `replyTimeout` for call sites where stale UI > ~2 s is
+ * more disruptive than missing one balance refresh (e.g. the 1 s post-
+ * payment poll loop in WalletContext — see #133).
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${ms}ms`));
+    }, ms);
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
+export interface GetBalanceOptions {
+  /**
+   * Per-call ceiling for the underlying NIP-47 round trip. When unset,
+   * defers to the SDK's own 10 s `replyTimeout` AND keeps the 2-attempt
+   * retry loop. When set, the call runs *without* retries so the ceiling
+   * is a true upper bound (one attempt × replyTimeoutMs).
+   *
+   * Currently only the post-payment poll in `WalletContext.expectPayment`
+   * passes this (`replyTimeoutMs: 2500`) — that path is tick-gated by
+   * a 1 s `expectPayment` interval + an `inFlight` guard, so a stalled
+   * read would block the next tick. Quick give-up + a fresh poll on the
+   * next tick beats waiting 10 s for a reply that may never arrive. The
+   * 30 s foreground refresh and per-wallet refresh deliberately stay on
+   * the default (with retries) — they're not tick-gated, so a slower-
+   * but-more-reliable read is the better tradeoff there. (#133)
+   */
+  replyTimeoutMs?: number;
+}
+
+export async function getBalance(
+  walletId: string,
+  options: GetBalanceOptions = {},
+): Promise<number | null> {
   const provider = await ensureConnected(walletId);
   if (!provider) return null;
   try {
-    // Retry twice on slow relays so a single timeout doesn't show the
-    // wallet as "Disconnected" / flash a null balance.
-    const b = await withRetry(() => provider.getBalance(), {
-      label: `getBalance(${walletId})`,
-      attempts: 2,
-      delayMs: 1500,
-    });
+    // When replyTimeoutMs is set, run a single attempt so the timeout is a true total ceiling (1 × replyTimeoutMs). Without it, retry twice on slow relays so a single timeout doesn't flash "Disconnected" / null balance — the SDK's own 10 s replyTimeout still bounds each attempt.
+    const b = await withRetry(
+      () => {
+        const call = provider.getBalance();
+        return options.replyTimeoutMs !== undefined
+          ? withTimeout(call, options.replyTimeoutMs, `getBalance(${walletId})`)
+          : call;
+      },
+      {
+        label: `getBalance(${walletId})`,
+        attempts: options.replyTimeoutMs !== undefined ? 1 : 2,
+        delayMs: 1500,
+      },
+    );
     return b.balance;
   } catch (error) {
     console.warn(`getBalance error for ${walletId}:`, error);
@@ -304,16 +383,66 @@ async function ensureConnected(walletId: string): Promise<NostrWebLNProvider | n
   return provider;
 }
 
+const PAY_INVOICE_REPLY_TIMEOUT_MS = 90_000;
+
+type Nip47Internals = {
+  executeNip47Request: <T>(
+    method: string,
+    params: unknown,
+    validator: (result: T) => boolean,
+    timeoutValues?: { replyTimeout?: number; publishTimeout?: number },
+  ) => Promise<T>;
+};
+
+async function sendPaymentWithTimeout(
+  provider: NostrWebLNProvider,
+  bolt11: string,
+): Promise<{ preimage: string }> {
+  // Runtime guard — `executeNip47Request` is a private @getalby/sdk surface;
+  // if a future SDK update removes it, fall back to the public sendPayment.
+  const client = provider.client as unknown as Nip47Internals | undefined;
+  if (!client || typeof client.executeNip47Request !== 'function') {
+    if (__DEV__)
+      console.warn(
+        '[NWC] executeNip47Request unavailable — falling back to public sendPayment (no per-call timeout)',
+      );
+    const fallback = await provider.sendPayment(bolt11);
+    if (!fallback || typeof fallback.preimage !== 'string' || fallback.preimage.length === 0) {
+      throw new Error('pay_invoice returned no preimage');
+    }
+    return { preimage: fallback.preimage };
+  }
+  const result = await client.executeNip47Request<{ preimage: string }>(
+    'pay_invoice',
+    { invoice: bolt11 },
+    // Validator: require a non-empty string preimage so { preimage: undefined }
+    // can't be silently treated as success.
+    (r) => !!r && typeof r.preimage === 'string' && r.preimage.length > 0,
+    { replyTimeout: PAY_INVOICE_REPLY_TIMEOUT_MS },
+  );
+  return { preimage: result.preimage };
+}
+
+export interface PayInvoiceOptions {
+  signal?: AbortSignal;
+  onReplyTimeout?: () => void;
+}
+
 export async function payInvoice(
   walletId: string,
   bolt11: string,
-  signal?: AbortSignal,
+  signalOrOptions?: AbortSignal | PayInvoiceOptions,
 ): Promise<{ preimage: string }> {
+  const options: PayInvoiceOptions =
+    signalOrOptions && 'aborted' in signalOrOptions
+      ? { signal: signalOrOptions as AbortSignal }
+      : ((signalOrOptions as PayInvoiceOptions | undefined) ?? {});
+  const { signal, onReplyTimeout } = options;
   throwIfAborted(signal);
   let provider = await ensureConnected(walletId);
   if (!provider) throw new Error('Not connected');
   try {
-    const result = await provider.sendPayment(bolt11);
+    const result = await sendPaymentWithTimeout(provider, bolt11);
     throwIfAborted(signal);
     return { preimage: result.preimage };
   } catch (error) {
@@ -349,7 +478,7 @@ export async function payInvoice(
         }
       }
       throwIfAborted(signal);
-      const result = await provider.sendPayment(bolt11);
+      const result = await sendPaymentWithTimeout(provider, bolt11);
       return { preimage: result.preimage };
     }
     if (msg.includes('reply timeout')) {
@@ -366,7 +495,8 @@ export async function payInvoice(
       // Poll lookupInvoice to check if it completes within 5 minutes.
       console.log('[NWC] pay_invoice timed out, polling for completion...');
       const paymentHash = extractPaymentHash(bolt11);
-      if (!paymentHash) throw error;
+      if (!paymentHash) throw createReplyTimeoutError();
+      onReplyTimeout?.();
       const deadline = Date.now() + 5 * 60 * 1000;
       while (Date.now() < deadline) {
         // abortableSleep rejects with AbortError when the caller cancels,
@@ -391,6 +521,7 @@ export async function payInvoice(
           // Any other lookupInvoice failure — keep polling.
         }
       }
+      throw createReplyTimeoutError();
     }
     throw error;
   }
