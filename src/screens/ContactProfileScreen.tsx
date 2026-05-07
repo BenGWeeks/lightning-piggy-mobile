@@ -67,6 +67,7 @@ const ContactProfileScreen: React.FC = () => {
   const [contact, setContact] = useState<ContactProfileBodyData>(route.params.contact);
   const [following, setFollowing] = useState(false);
   const [loadingFollow, setLoadingFollow] = useState(false);
+  const [savingLnAddress, setSavingLnAddress] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
   const [avatarLoaded, setAvatarLoaded] = useState(false);
   const [editingLnAddress, setEditingLnAddress] = useState(false);
@@ -77,6 +78,15 @@ const ContactProfileScreen: React.FC = () => {
   const [sharing, setSharing] = useState(false);
   const [nfcWriteVisible, setNfcWriteVisible] = useState(false);
   const [nfcSupported, setNfcSupported] = useState(false);
+
+  // React Navigation may reuse this screen instance and only update params
+  // when navigating to ContactProfile while it's already in the stack.
+  // Re-sync the local `contact` state when the param identity changes so
+  // derived state (lnAddressDraft, avatar load, fetched bio) doesn't go stale.
+  const paramContact = route.params.contact;
+  useEffect(() => {
+    setContact(paramContact);
+  }, [paramContact]);
 
   const npub = useMemo(
     () => (contact.pubkey ? npubEncode(contact.pubkey) : null),
@@ -352,10 +362,29 @@ const ContactProfileScreen: React.FC = () => {
               />
               <TouchableOpacity
                 style={styles.lnAddressSaveButton}
-                onPress={() => {
+                disabled={savingLnAddress}
+                onPress={async () => {
                   const trimmed = lnAddressDraft.trim();
-                  if (trimmed) handleSetLightningAddress(trimmed);
-                  setEditingLnAddress(false);
+                  if (!trimmed) {
+                    setEditingLnAddress(false);
+                    return;
+                  }
+                  setSavingLnAddress(true);
+                  try {
+                    await handleSetLightningAddress(trimmed);
+                    // Only exit edit mode after a successful save so the
+                    // user can retry without retyping if persistence fails.
+                    setEditingLnAddress(false);
+                  } catch {
+                    Toast.show({
+                      type: 'error',
+                      text1: 'Failed to save lightning address',
+                      position: 'top',
+                      visibilityTime: 3000,
+                    });
+                  } finally {
+                    setSavingLnAddress(false);
+                  }
                 }}
               >
                 <Text style={styles.lnAddressSaveText}>
