@@ -363,6 +363,8 @@ const ContactProfileSheet: React.FC<Props> = ({
               style={[styles.followButton, following && styles.followingButton]}
               onPress={handleFollowToggle}
               disabled={loadingFollow}
+              accessibilityLabel={following ? 'Unfollow' : 'Follow'}
+              testID="profile-sheet-follow-button"
             >
               <Text
                 style={[styles.followButtonText, following && styles.followingButtonText]}
@@ -394,7 +396,12 @@ const ContactProfileSheet: React.FC<Props> = ({
             </TouchableOpacity>
           )}
           {contact.lightningAddress && onZap && (
-            <TouchableOpacity style={styles.zapButton} onPress={onZap}>
+            <TouchableOpacity
+              style={styles.zapButton}
+              onPress={onZap}
+              accessibilityLabel="Zap"
+              testID="profile-sheet-zap-button"
+            >
               <Zap size={20} color={colors.white} fill={colors.white} />
               <Text style={styles.zapButtonText} numberOfLines={1}>
                 Zap
