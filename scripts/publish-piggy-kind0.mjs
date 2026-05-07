@@ -149,9 +149,13 @@ for (const piggy of targets) {
     );
   }
 
-  // Merge: keep everything, override picture, fill in name/display_name
-  // only when the existing event has nothing there.
-  const merged = { ...existingContent, picture: pictureUrl };
+  // Merge: keep everything, override picture + lud16 (test fixture),
+  // fill in name/display_name only when the existing event has nothing there.
+  const merged = {
+    ...existingContent,
+    picture: pictureUrl,
+    lud16: 'ben.weeks@bank.weeksfamily.me',
+  };
   if (!merged.name) merged.name = label;
   if (!merged.display_name) merged.display_name = label;
 
