@@ -60,6 +60,7 @@ import AmountEntryScreen from './AmountEntryScreen';
 import * as boltzService from '../services/boltzService';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
+import { getDefaultOnchainWalletId } from '../services/walletStorageService';
 
 interface Props {
   visible: boolean;
@@ -210,7 +211,12 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
    * user gets a warning.
    */
   const pickRefundDestination = useCallback(async (): Promise<string | null> => {
-    const onchainWallet = wallets.find((w) => w.walletType === 'onchain');
+    // Honour the user's chosen default first; fall back to the first
+    // on-chain wallet if the default is unset / no longer exists.
+    const defaultId = await getDefaultOnchainWalletId();
+    const onchainWallets = wallets.filter((w) => w.walletType === 'onchain');
+    const onchainWallet =
+      onchainWallets.find((w) => w.id === defaultId) ?? onchainWallets[0] ?? null;
     if (!onchainWallet) return null;
     try {
       return await onchainService.getNextReceiveAddress(onchainWallet.id);

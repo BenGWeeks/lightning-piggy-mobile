@@ -6,6 +6,7 @@ const WALLET_LIST_KEY = 'wallet_list';
 const NWC_URL_PREFIX = 'nwc_url_';
 const ONCHAIN_XPUB_PREFIX = 'onchain_xpub_';
 const ELECTRUM_SERVER_KEY = 'electrum_server';
+const DEFAULT_ONCHAIN_WALLET_ID_KEY = 'default_onchain_wallet_id_v1';
 const BLOSSOM_SERVER_KEY = 'blossom_server';
 const LEGACY_NWC_KEY = 'nwc_connection_url';
 const ONBOARDING_KEY = 'onboarding_complete';
@@ -100,6 +101,20 @@ export async function getElectrumServer(): Promise<string> {
 
 export async function setElectrumServer(url: string): Promise<void> {
   await AsyncStorage.setItem(ELECTRUM_SERVER_KEY, url);
+}
+
+// --- Default on-chain wallet (for Boltz refunds + future on-chain destinations) ---
+
+export async function getDefaultOnchainWalletId(): Promise<string | null> {
+  return AsyncStorage.getItem(DEFAULT_ONCHAIN_WALLET_ID_KEY);
+}
+
+export async function setDefaultOnchainWalletId(walletId: string | null): Promise<void> {
+  if (walletId === null) {
+    await AsyncStorage.removeItem(DEFAULT_ONCHAIN_WALLET_ID_KEY);
+  } else {
+    await AsyncStorage.setItem(DEFAULT_ONCHAIN_WALLET_ID_KEY, walletId);
+  }
 }
 
 // --- Blossom media server ---
