@@ -1,9 +1,10 @@
 import { CURRENCIES, CURRENCY_LIST, formatFiat, satsToFiat } from './fiatService';
 
-// CoinGecko's `simple/supported_vs_currencies` response captured 2026-05-07.
-// Reproduce locally with:
+// Hard-coded snapshot of CoinGecko's `simple/supported_vs_currencies`
+// captured 2026-05-07. This pins the codes we ship against a known
+// support set at the time of capture — it does NOT detect upstream
+// changes automatically. Re-snapshot manually when adding new codes:
 //   curl -s 'https://api.coingecko.com/api/v3/simple/supported_vs_currencies'
-// If CoinGecko removes a code we ship, this test catches it before users do.
 const COINGECKO_SUPPORTED = new Set([
   'btc',
   'eth',
