@@ -1293,24 +1293,25 @@ export type RawInboxDmEvent = RawGiftWrapEvent;
 // fetch (fetchInboxDmEvents) so the two paths can't drift in cap on a
 // future tweak. (#383, Copilot review on PR #384)
 export const DM_INBOX_LIMIT = 1000;
-const DM_INBOX_SINCE_WINDOW_SECONDS = 90 * 24 * 60 * 60; // 90 days
+// Live sub never looks further back than this — caps cold-start restream cost when inboxLastSeen is very stale (e.g. user hasn't opened the app in weeks). The bulk fetch (fetchInboxDmEvents) handles deeper backfill on tab open.
+const DM_LIVE_SUB_MAX_LOOKBACK_SECONDS = 7 * 24 * 60 * 60; // 7 days
 
 export function subscribeInboxDmsForViewer(input: {
   viewerPubkey: string;
   relays: string[];
   onEvent: (ev: RawInboxDmEvent) => void;
-  // Optional kind-4 `since` cursor (unix seconds). When provided, the kind-4 filter pins to `max(sinceK4, providedSince - 120s safety buffer)` so a heavy DM history doesn't restream 90 days every cold start. If absent, falls back to the 90-day window.
+  // Optional kind-4 `since` cursor (unix seconds). When provided, the kind-4 filter pins to `max(now-7d, providedSince - 120s safety buffer)` so a heavy or stale DM history doesn't restream weeks of events every cold start. If absent, falls back to the 7-day floor.
   sinceK4?: number;
 }): () => void {
   trackRelays(input.relays);
   const onevent = (ev: Parameters<typeof input.onEvent>[0]): void => {
     input.onEvent(ev);
   };
-  const sinceK4Default = Math.floor(Date.now() / 1000) - DM_INBOX_SINCE_WINDOW_SECONDS;
-  const sinceK4 =
-    input.sinceK4 !== undefined
-      ? Math.max(sinceK4Default, Math.max(0, input.sinceK4 - 120))
-      : sinceK4Default;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const lookbackFloor = nowSec - DM_LIVE_SUB_MAX_LOOKBACK_SECONDS;
+  const requested =
+    input.sinceK4 !== undefined ? Math.max(0, input.sinceK4 - 120) : lookbackFloor;
+  const sinceK4 = Math.max(lookbackFloor, requested);
   const subK4 = pool.subscribeMany(
     input.relays,
     {
