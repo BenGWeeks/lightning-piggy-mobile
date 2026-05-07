@@ -42,6 +42,9 @@ if ! $ADB shell pm path "$PKG" >/dev/null 2>&1; then
   exit 1
 fi
 
+# Dev variant fetches its JS bundle from Metro at localhost:8081. Without an adb reverse, the device's `localhost` resolves to the device itself and the bundle fetch fails — every sample times out before any [Perf] markers fire. Idempotent on prod where Metro is irrelevant.
+$ADB reverse tcp:8081 tcp:8081 >/dev/null 2>&1 || true
+
 # Resolve the launcher activity automatically — works for either app variant.
 LAUNCHER=$($ADB shell cmd package resolve-activity --brief -c android.intent.category.LAUNCHER "$PKG" 2>/dev/null | tail -1 | tr -d '\r')
 if [[ -z "$LAUNCHER" || "$LAUNCHER" != */* ]]; then
