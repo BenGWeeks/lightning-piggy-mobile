@@ -22,11 +22,10 @@ import { useNostr } from '../contexts/NostrContext';
 import TabHeader from '../components/TabHeader';
 import { useThemeColors } from '../contexts/ThemeContext';
 import ContactListItem, { CONTACT_LIST_ITEM_HEIGHT } from '../components/ContactListItem';
-import ContactProfileSheet from '../components/ContactProfileSheet';
 import AddFriendSheet from '../components/AddFriendSheet';
 import SendSheet from '../components/SendSheet';
 import AlphabetBar from '../components/AlphabetBar';
-import { fetchPhoneContacts, PhoneContact, setLightningAddress } from '../services/contactsService';
+import { fetchPhoneContacts, PhoneContact } from '../services/contactsService';
 import { createFriendsScreenStyles } from '../styles/FriendsScreen.styles';
 import type { MainTabParamList, RootStackParamList } from '../navigation/types';
 
@@ -74,8 +73,6 @@ const FriendsScreen: React.FC = () => {
   const searchInputRef = useRef<TextInput>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [phoneContacts, setPhoneContacts] = useState<PhoneContact[]>([]);
-  const [selectedContact, setSelectedContact] = useState<ListItem | null>(null);
-  const [profileSheetVisible, setProfileSheetVisible] = useState(false);
   const [addFriendVisible, setAddFriendVisible] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
   const [zapTarget, setZapTarget] = useState<ListItem | null>(null);
@@ -148,6 +145,17 @@ const FriendsScreen: React.FC = () => {
       const handle = InteractionManager.runAfterInteractions(() => refreshProfile());
       return () => handle.cancel();
     }, [isLoggedIn, refreshProfile]),
+  );
+
+  // Re-fetch phone contacts on focus so a Lightning-address edit
+  // applied in ContactProfileScreen is reflected here when the user
+  // returns. Cheap (AsyncStorage read + a bit of Contacts API merge).
+  useFocusEffect(
+    useCallback(() => {
+      fetchPhoneContacts()
+        .then(setPhoneContacts)
+        .catch(() => {});
+    }, []),
   );
 
   // Step 1: build + sort the full list. This memo invalidates only when
@@ -303,10 +311,24 @@ const FriendsScreen: React.FC = () => {
     setSendOpen(true);
   }, []);
 
-  const handleContactPress = useCallback((item: ListItem) => {
-    setSelectedContact(item);
-    setProfileSheetVisible(true);
-  }, []);
+  const handleContactPress = useCallback(
+    (item: ListItem) => {
+      const phoneContactId = item.source === 'contacts' ? item.id.replace('phone-', '') : undefined;
+      navigation.navigate('ContactProfile', {
+        contact: {
+          pubkey: item.pubkey,
+          name: item.name,
+          picture: item.picture,
+          banner: item.banner,
+          nip05: item.nip05,
+          lightningAddress: item.lightningAddress,
+          source: item.source,
+        },
+        phoneContactId,
+      });
+    },
+    [navigation],
+  );
 
   const handleAddFriend = useCallback(
     async (npubOrHex: string) => {
@@ -505,52 +527,6 @@ const FriendsScreen: React.FC = () => {
           </View>
         )}
       </View>
-
-      <ContactProfileSheet
-        visible={profileSheetVisible}
-        onClose={() => {
-          setProfileSheetVisible(false);
-          setSelectedContact(null);
-        }}
-        contact={selectedContact}
-        onZap={
-          selectedContact?.lightningAddress
-            ? () => {
-                setProfileSheetVisible(false);
-                handleZap(selectedContact);
-              }
-            : undefined
-        }
-        onMessage={
-          selectedContact?.pubkey
-            ? () => {
-                const c = selectedContact;
-                setProfileSheetVisible(false);
-                setSelectedContact(null);
-                navigation.navigate('Conversation', {
-                  pubkey: c.pubkey!,
-                  name: c.name,
-                  picture: c.picture,
-                  lightningAddress: c.lightningAddress,
-                });
-              }
-            : undefined
-        }
-        onSetLightningAddress={
-          selectedContact?.source === 'contacts'
-            ? async (address: string) => {
-                const phoneId = selectedContact.id.replace('phone-', '');
-                await setLightningAddress(phoneId, address);
-                setPhoneContacts((prev) =>
-                  prev.map((c) => (c.id === phoneId ? { ...c, lightningAddress: address } : c)),
-                );
-                setSelectedContact((prev) =>
-                  prev ? { ...prev, lightningAddress: address } : prev,
-                );
-              }
-            : undefined
-        }
-      />
 
       <AddFriendSheet
         visible={addFriendVisible}

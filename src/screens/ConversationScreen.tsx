@@ -37,9 +37,7 @@ import ReceiveSheet from '../components/ReceiveSheet';
 import MessageBubble from '../components/MessageBubble';
 import TransactionDetailSheet, {
   TransactionDetailData,
-  CounterpartyContact,
 } from '../components/TransactionDetailSheet';
-import ContactProfileSheet from '../components/ContactProfileSheet';
 import FriendPickerSheet, { PickedFriend } from '../components/FriendPickerSheet';
 import {
   getCurrentLocation,
@@ -158,7 +156,6 @@ const ConversationScreen: React.FC = () => {
   const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState(false);
   const [detailTx, setDetailTx] = useState<TransactionDetailData | null>(null);
-  const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
   // Profiles resolved from `nostr:` contact references the other party
   // has shared in this conversation. Keyed by hex pubkey; a `null` value
   // means we tried and the kind-0 lookup came back empty.
@@ -556,18 +553,23 @@ const ConversationScreen: React.FC = () => {
     };
   }, [messages]);
 
-  const openSharedContact = useCallback((pk: string, profile: NostrProfile | null) => {
-    const name = profile?.displayName || profile?.name || `${pk.slice(0, 8)}…`;
-    setProfileContact({
-      pubkey: pk,
-      name,
-      picture: profile?.picture ?? null,
-      banner: profile?.banner ?? null,
-      nip05: profile?.nip05 ?? null,
-      lightningAddress: profile?.lud16 ?? null,
-      source: 'nostr',
-    });
-  }, []);
+  const openSharedContact = useCallback(
+    (pk: string, profile: NostrProfile | null) => {
+      const name = profile?.displayName || profile?.name || `${pk.slice(0, 8)}…`;
+      navigation.navigate('ContactProfile', {
+        contact: {
+          pubkey: pk,
+          name,
+          picture: profile?.picture ?? null,
+          banner: profile?.banner ?? null,
+          nip05: profile?.nip05 ?? null,
+          lightningAddress: profile?.lud16 ?? null,
+          source: 'nostr',
+        },
+      });
+    },
+    [navigation],
+  );
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -958,14 +960,16 @@ const ConversationScreen: React.FC = () => {
           style={styles.headerPeer}
           onPress={() => {
             const known = contacts.find((c) => c.pubkey === pubkey)?.profile ?? null;
-            setProfileContact({
-              pubkey,
-              name,
-              picture: known?.picture ?? picture ?? null,
-              banner: known?.banner ?? null,
-              nip05: known?.nip05 ?? null,
-              lightningAddress: known?.lud16 ?? lightningAddress ?? null,
-              source: 'nostr',
+            navigation.navigate('ContactProfile', {
+              contact: {
+                pubkey,
+                name,
+                picture: known?.picture ?? picture ?? null,
+                banner: known?.banner ?? null,
+                nip05: known?.nip05 ?? null,
+                lightningAddress: known?.lud16 ?? lightningAddress ?? null,
+                source: 'nostr',
+              },
             });
           }}
           accessibilityLabel={`Open ${name}'s profile`}
@@ -1220,35 +1224,8 @@ const ConversationScreen: React.FC = () => {
         onClose={() => setDetailTx(null)}
         onCounterpartyPress={(contact) => {
           setDetailTx(null);
-          setProfileContact(contact);
+          navigation.navigate('ContactProfile', { contact });
         }}
-      />
-      <ContactProfileSheet
-        visible={profileContact !== null}
-        onClose={() => setProfileContact(null)}
-        contact={profileContact}
-        onMessage={
-          profileContact && profileContact.pubkey !== pubkey
-            ? () => {
-                const c = profileContact;
-                setProfileContact(null);
-                navigation.replace('Conversation', {
-                  pubkey: c.pubkey,
-                  name: c.name,
-                  picture: c.picture,
-                  lightningAddress: c.lightningAddress,
-                });
-              }
-            : undefined
-        }
-        onZap={
-          profileContact?.lightningAddress
-            ? () => {
-                setProfileContact(null);
-                setSendSheetOpen(true);
-              }
-            : undefined
-        }
       />
     </View>
   );

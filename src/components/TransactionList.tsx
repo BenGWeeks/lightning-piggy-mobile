@@ -12,7 +12,6 @@ import TransactionDetailSheet, {
   TransactionDetailData,
   CounterpartyContact,
 } from './TransactionDetailSheet';
-import ContactProfileSheet from './ContactProfileSheet';
 import SendSheet from './SendSheet';
 import TransactionTypeIcon from './TransactionTypeIcon';
 import { getTxCategory } from '../utils/txCategory';
@@ -139,7 +138,6 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
   };
   const [showAll, setShowAll] = useState(false);
   const [detail, setDetail] = useState<TransactionDetailData | null>(null);
-  const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
   const [zapContact, setZapContact] = useState<CounterpartyContact | null>(null);
 
   // Collapse the list back to the initial N rows when the active wallet
@@ -327,7 +325,7 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
         onClose={() => setDetail(null)}
         onCounterpartyPress={(contact) => {
           setDetail(null);
-          setProfileContact(contact);
+          navigation.navigate('ContactProfile', { contact });
         }}
         onZapCounterparty={(contact) => {
           setDetail(null);
@@ -342,34 +340,6 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
             lightningAddress: contact.lightningAddress,
           });
         }}
-      />
-      <ContactProfileSheet
-        visible={profileContact !== null}
-        onClose={() => setProfileContact(null)}
-        contact={profileContact}
-        onMessage={
-          profileContact
-            ? () => {
-                const c = profileContact;
-                setProfileContact(null);
-                navigation.navigate('Conversation', {
-                  pubkey: c.pubkey,
-                  name: c.name,
-                  picture: c.picture,
-                  lightningAddress: c.lightningAddress,
-                });
-              }
-            : undefined
-        }
-        onZap={
-          profileContact?.lightningAddress
-            ? () => {
-                const c = profileContact;
-                setProfileContact(null);
-                setZapContact(c);
-              }
-            : undefined
-        }
       />
       <SendSheet
         visible={zapContact !== null}

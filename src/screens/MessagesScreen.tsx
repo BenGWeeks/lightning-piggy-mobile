@@ -25,7 +25,6 @@ import { useGroups } from '../contexts/GroupsContext';
 import ConversationRow from '../components/ConversationRow';
 import GroupRow from '../components/GroupRow';
 import type { ContactInfo } from '../components/GroupAvatar';
-import ContactProfileSheet from '../components/ContactProfileSheet';
 import FriendPickerSheet, { type PickedFriend } from '../components/FriendPickerSheet';
 import CreateGroupSheet from '../components/CreateGroupSheet';
 import type { GroupSummary } from '../types/groups';
@@ -46,17 +45,6 @@ type MessagesNavigation = CompositeNavigationProp<
   BottomTabNavigationProp<MainTabParamList, 'Messages'>,
   NativeStackNavigationProp<RootStackParamList>
 >;
-
-interface AnonContact {
-  id: string;
-  name: string;
-  picture: string | null;
-  banner: string | null;
-  nip05: string | null;
-  lightningAddress: string | null;
-  pubkey: string | null;
-  source: 'nostr' | 'contacts';
-}
 
 const MessagesScreen: React.FC = () => {
   const colors = useThemeColors();
@@ -91,7 +79,6 @@ const MessagesScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [pickerVisible, setPickerVisible] = useState(false);
   const [createGroupVisible, setCreateGroupVisible] = useState(false);
-  const [anonSheetContact, setAnonSheetContact] = useState<AnonContact | null>(null);
   const [windowDays, setWindowDays] = useState<30 | 90>(30);
   // Default OFF so the inbox starts as DMs-only (#147). When ON, the
   // memo below re-merges zap-counterparty rows into the conversation
@@ -412,17 +399,18 @@ const MessagesScreen: React.FC = () => {
         });
         return;
       }
-      // Anonymous zap: no pubkey to thread against. Surface what we have via
-      // the profile sheet so the user can at least see the zap metadata.
-      setAnonSheetContact({
-        id: `conv-${summary.id}`,
-        name: summary.name,
-        picture,
-        banner: null,
-        nip05: summary.nip05,
-        lightningAddress,
-        pubkey: null,
-        source: 'nostr',
+      // Anonymous zap: no pubkey to thread against. Surface what we have on
+      // the contact profile screen so the user can at least see the metadata.
+      navigation.navigate('ContactProfile', {
+        contact: {
+          pubkey: null,
+          name: summary.name,
+          picture,
+          banner: null,
+          nip05: summary.nip05,
+          lightningAddress,
+          source: 'nostr',
+        },
       });
     },
     [contactInfoMap, navigation],
@@ -692,12 +680,6 @@ const MessagesScreen: React.FC = () => {
           setCreateGroupVisible(false);
           navigation.navigate('GroupConversation', { groupId: group.id });
         }}
-      />
-
-      <ContactProfileSheet
-        visible={anonSheetContact !== null}
-        onClose={() => setAnonSheetContact(null)}
-        contact={anonSheetContact}
       />
     </View>
   );
