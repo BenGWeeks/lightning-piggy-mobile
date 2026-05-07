@@ -996,6 +996,7 @@ const ConversationScreen: React.FC = () => {
         ) : (
           <FlatList
             ref={listRef}
+            style={styles.flex}
             data={items}
             keyExtractor={(it) => it.id}
             renderItem={renderItem}
