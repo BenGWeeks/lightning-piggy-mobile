@@ -1,24 +1,17 @@
 appId: com.lightningpiggy.app.dev
-name: Add NWC Wallet Test
+name: Add NWC Wallet (hardened for emulator)
 ---
-# Tests adding a Lightning wallet via NWC connection string.
-# Run with either NWC URL:
-#   source .env && maestro test -e MAESTRO_NWC="$MAESTRO_NWC1" -e WALLET_NAME="Wallet 1" tests/e2e/test-add-nwc-wallet.yaml
-#   source .env && maestro test -e MAESTRO_NWC="$MAESTRO_NWC2" -e WALLET_NAME="Wallet 2" tests/e2e/test-add-nwc-wallet.yaml
-
-# Wait for app to be ready
 - extendedWaitUntil:
     visible:
       id: 'tab-home'
     timeout: 40000
 
-# Ensure we're on Home
 - tapOn:
     id: 'tab-home'
 - waitForAnimationToEnd:
     timeout: 3000
 
-# Swipe carousel right until Add Wallet card is visible
+# Carousel may already be on Add Wallet card or need swiping. Try direct tap first; if not found, scrollUntilVisible.
 - scrollUntilVisible:
     element:
       id: 'add-wallet-card'
@@ -26,20 +19,20 @@ name: Add NWC Wallet Test
     timeout: 20000
     speed: 40
 
-# Tap the Add Wallet card
 - tapOn:
     id: 'add-wallet-card'
-- waitForAnimationToEnd:
-    timeout: 3000
+- extendedWaitUntil:
+    visible:
+      id: 'wallet-type-nwc'
+    timeout: 8000
 
-# Select Lightning (NWC) wallet type
 - tapOn:
     id: 'wallet-type-nwc'
-- waitForAnimationToEnd:
-    timeout: 2000
+- extendedWaitUntil:
+    visible:
+      id: 'nwc-url-input'
+    timeout: 8000
 
-# Enter the NWC connection string
-# Tap twice to ensure focus — BottomSheetTextInput needs this for onChangeText
 - tapOn:
     id: 'nwc-url-input'
 - tapOn:
@@ -49,15 +42,16 @@ name: Add NWC Wallet Test
 - inputText: ${MAESTRO_NWC}
 - pressKey: back
 - waitForAnimationToEnd:
-    timeout: 1000
+    timeout: 1500
 
-# Tap Next to proceed to alias step
 - tapOn:
     text: 'Next'
-- waitForAnimationToEnd:
-    timeout: 5000
+# Bump from 5s to 25s — NWC validation + sheet expansion both take time on emulator
+- extendedWaitUntil:
+    visible:
+      id: 'wallet-alias-input'
+    timeout: 25000
 
-# Enter wallet alias
 - tapOn:
     id: 'wallet-alias-input'
 - tapOn:
@@ -67,34 +61,29 @@ name: Add NWC Wallet Test
 - inputText: ${WALLET_NAME}
 - pressKey: back
 - waitForAnimationToEnd:
-    timeout: 1000
+    timeout: 1500
 
-# Tap Next to proceed to theme step
 - tapOn:
     text: 'Next'
-- waitForAnimationToEnd:
-    timeout: 2000
+- extendedWaitUntil:
+    visible:
+      id: 'wizard-connect-button'
+    timeout: 15000
 
-# Scroll down in the bottom sheet to reveal Connect button
+# Connect button may be off-screen, scroll to ensure it's tappable
 - swipe:
     start: 50%, 80%
     end: 50%, 40%
     duration: 300
 - waitForAnimationToEnd:
-    timeout: 1000
+    timeout: 1500
 
-# Tap Connect
 - tapOn:
     id: 'wizard-connect-button'
-- waitForAnimationToEnd:
-    timeout: 15000
-
-# Verify the wallet is connected
 - extendedWaitUntil:
     visible:
       text: 'Connected'
-    timeout: 20000
+    timeout: 30000
 
-# Verify the wallet alias appears
 - assertVisible:
     text: ${WALLET_NAME}

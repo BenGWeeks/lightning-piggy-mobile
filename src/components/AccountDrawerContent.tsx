@@ -22,7 +22,7 @@ import { DrawerContentScrollView } from '@react-navigation/drawer';
 import { useNostr } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
-import { appVersion } from '../utils/appVersion';
+import { appVersionLabel } from '../utils/appVersion';
 import type { AccountDrawerParamList } from '../navigation/types';
 
 interface SectionRow {
@@ -226,7 +226,7 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
       {/* Footer — pinned version string */}
       <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
         <Text style={styles.versionText} testID="drawer-version">
-          v{appVersion}
+          v{appVersionLabel}
         </Text>
       </View>
 

@@ -13,6 +13,7 @@ import * as nwcService from '../services/nwcService';
 import * as nostrService from '../services/nostrService';
 import * as lnurlService from '../services/lnurlService';
 import * as zapCounterpartyStorage from '../services/zapCounterpartyStorage';
+import * as zapSenderProfileStorage from '../services/zapSenderProfileStorage';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
@@ -25,6 +26,10 @@ import {
   ZapCounterpartyInfo,
   walletLabel,
 } from '../types/wallet';
+
+// Captured at module-evaluation time, which is the closest proxy we have to "JS bundle started executing after app launch". Used by the [Perf] wallet-connect marker so perf scripts can report time-from-launch-to-first-NWC-connect without needing a separate launch timestamp source.
+const WALLET_MODULE_LOAD_T0 = Date.now();
+let firstWalletConnectLogged = false;
 
 export interface IncomingPayment {
   walletId: string;
@@ -75,6 +80,13 @@ interface WalletContextType {
   // App state
   isOnboarded: boolean;
   isLoading: boolean;
+  // True once the initial AsyncStorage wallet read has completed (regardless
+  // of whether any wallets were found). Consumers use this to distinguish
+  // "wallets is empty because none exist" from "wallets is empty because we
+  // haven't loaded them yet" — important for cold-start UI gating where the
+  // disabled-style flicker contradicts the buttons' actual interactivity.
+  // See #201.
+  walletsHydrated: boolean;
 
   // User prefs
   currency: FiatCurrency;
@@ -115,14 +127,17 @@ interface WalletContextType {
 
   // Payment actions (operate on active wallet)
   makeInvoice: (amount: number, memo?: string) => Promise<string>;
-  payInvoice: (bolt11: string, signal?: AbortSignal) => Promise<{ preimage: string }>;
+  payInvoice: (
+    bolt11: string,
+    signalOrOptions?: AbortSignal | nwcService.PayInvoiceOptions,
+  ) => Promise<{ preimage: string }>;
 
   // Payment actions with explicit wallet ID (for sheets)
   makeInvoiceForWallet: (walletId: string, amount: number, memo?: string) => Promise<string>;
   payInvoiceForWallet: (
     walletId: string,
     bolt11: string,
-    signal?: AbortSignal,
+    signalOrOptions?: AbortSignal | nwcService.PayInvoiceOptions,
   ) => Promise<{ preimage: string }>;
   refreshBalanceForWallet: (walletId: string) => Promise<void>;
   fetchTransactionsForWallet: (walletId: string) => Promise<void>;
@@ -181,6 +196,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [activeWalletId, setActiveWalletId] = useState<string | null>(null);
   const [isOnboarded, setIsOnboarded] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [walletsHydrated, setWalletsHydrated] = useState(false);
   const [currency, setCurrencyState] = useState<FiatCurrency>('USD');
   const [btcPrice, setBtcPrice] = useState<number | null>(null);
   const [lastIncomingPayment, setLastIncomingPayment] = useState<IncomingPayment | null>(null);
@@ -302,6 +318,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           }),
         );
         setWallets(walletStates);
+        // Mark the initial AsyncStorage read complete BEFORE flipping
+        // `isLoading`. Consumers gating cold-start UI (e.g. HomeScreen's
+        // Send/Receive button styles) need to know "we tried to load and
+        // found N wallets" vs "we haven't tried yet" — both have
+        // `wallets.length === 0` but only one is the disabled state.
+        setWalletsHydrated(true);
 
         if (walletStates.length > 0) {
           setActiveWalletId(walletStates[0].id);
@@ -337,9 +359,24 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               const nwcUrl = await walletStorage.getNwcUrl(wallet.id);
               if (!nwcUrl) return;
 
-              const result = await nwcService.connect(wallet.id, nwcUrl);
+              const result = await nwcService.connect(wallet.id, nwcUrl, () => {
+                setWallets((prev) =>
+                  prev.map((w) => (w.id === wallet.id ? { ...w, isConnected: true } : w)),
+                );
+                if (!firstWalletConnectLogged) {
+                  firstWalletConnectLogged = true;
+                  console.log(
+                    `[Perf] wallet connected: ${wallet.id.slice(0, 8)} in ${Date.now() - WALLET_MODULE_LOAD_T0}ms from JS bundle load`,
+                  );
+                }
+              });
               if (result.success) {
-                const info = await nwcService.getInfo(wallet.id);
+                let info: Awaited<ReturnType<typeof nwcService.getInfo>> | null = null;
+                try {
+                  info = await nwcService.getInfo(wallet.id);
+                } catch (e) {
+                  if (__DEV__) console.warn(`[NWC] getInfo failed for ${wallet.id.slice(0, 8)}`, e);
+                }
                 const lud16 = parseNwcLud16(nwcUrl);
 
                 setWallets((prev) =>
@@ -348,13 +385,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                       ? {
                           ...w,
                           isConnected: true,
-                          balance: result.balance ?? null,
-                          walletAlias: info?.alias || null,
-                          // Prefer any user-set / previously-persisted
-                          // address — a manual override in Wallet
-                          // Settings must survive every startup, even
-                          // when the NWC URL still carries a `lud16=`
-                          // that resolves to the provider's default.
+                          balance: result.balance ?? w.balance ?? null,
+                          walletAlias: info?.alias || w.walletAlias || null,
                           lightningAddress: w.lightningAddress || lud16 || info?.lud16 || null,
                         }
                       : w,
@@ -375,9 +407,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         });
       } catch (error) {
         console.warn('Wallet startup failed:', error);
-        // Safety net: if something threw BEFORE we reached the
-        // early `setIsLoading(false)` above, make sure the UI still
-        // unblocks. Idempotent; React bails on no-op state sets.
+        // Order matches the success path: flip `walletsHydrated` first so consumers observing the loading-state change can already trust hydration is complete; only then unblock the UI via `setIsLoading(false)`. Idempotent; React bails on no-op state sets.
+        setWalletsHydrated(true);
         setIsLoading(false);
       }
     })();
@@ -929,6 +960,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const hashes = outgoingPending
           .map(({ tx }) => tx.paymentHash)
           .filter((h): h is string => !!h);
+        // Storage hits include fresh negative cache entries (info === null):
+        // those mean an earlier launch already ran the relay scan and found
+        // nothing — keep skipping until the negative TTL expires (issue #127).
         const byHash = await zapCounterpartyStorage.getMany(hashes);
 
         const unmatched = outgoingPending.filter(
@@ -959,15 +993,25 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             const commentTag = nostrService.parseZapReceipt(r);
             let profile: ZapCounterpartyInfo['profile'] = null;
             if (recipientPubkey) {
-              const p = await nostrService.fetchProfile(recipientPubkey, queryRelays);
-              if (p) {
-                profile = {
-                  npub: p.npub,
-                  name: p.name,
-                  displayName: p.displayName,
-                  picture: p.picture,
-                  nip05: p.nip05,
-                };
+              // Same persistent-cache shortcut as the incoming branch
+              // — saves the kind-0 round-trip when this recipient was
+              // resolved on a previous cold start (#95).
+              const hit = await zapSenderProfileStorage.get(recipientPubkey);
+              if (hit) {
+                profile = hit;
+              } else {
+                const p = await nostrService.fetchProfile(recipientPubkey, queryRelays);
+                if (p) {
+                  profile = {
+                    npub: p.npub,
+                    name: p.name,
+                    displayName: p.displayName,
+                    picture: p.picture,
+                    nip05: p.nip05,
+                  };
+                  // Write-through for the next cold start.
+                  void zapSenderProfileStorage.setMany(new Map([[recipientPubkey, profile]]));
+                }
               }
             }
             byHash.set(tx.paymentHash!, {
@@ -977,24 +1021,38 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               anonymous: commentTag?.anonymous ?? false,
             });
           }
+          // Persist negative attributions for any tx that survived the relay
+          // scan still unmatched. Without this we'd re-run the 500-event
+          // filter on every cold start (issue #127). Only safe to write the
+          // negative when we actually consulted relays — a no-bolt11 tx or a
+          // rate-limit-skipped run is "didn't try" and must not poison cache.
+          for (const { tx } of unmatched) {
+            if (!tx.paymentHash || !tx.bolt11) continue;
+            if (byHash.has(tx.paymentHash)) continue;
+            await zapCounterpartyStorage.recordOutgoingMiss(tx.paymentHash);
+            // Mirror the freshly-persisted negative into the in-memory map so the resolver loop below treats this tx as resolved this pass instead of leaving it `undefined` until the next refresh — closes the "one extra attribution pass per miss" gap Copilot flagged.
+            byHash.set(tx.paymentHash, null);
+          }
         }
 
         for (const { tx, idx } of outgoingPending) {
           if (!tx.paymentHash) continue;
-          const info = byHash.get(tx.paymentHash);
-          if (info) {
-            resultsByIdx.set(idx, info);
-          }
-          // No negative-cache for outgoing: the local storage entry is the
-          // only source of truth, and a miss may just mean the record was
-          // written after this resolver run. Let the next refresh retry.
+          if (!byHash.has(tx.paymentHash)) continue;
+          // Hit may be a positive attribution OR a fresh negative cache
+          // (null) — both should propagate so the in-memory tx records
+          // the result and we don't keep retrying mid-session.
+          resultsByIdx.set(idx, byHash.get(tx.paymentHash) ?? null);
         }
         if (__DEV__) {
-          const storageHits = outgoingPending.filter(
-            ({ tx }) => tx.paymentHash && byHash.has(tx.paymentHash),
-          ).length;
+          let storageHits = 0;
+          let storageMisses = 0;
+          for (const { tx } of outgoingPending) {
+            if (!tx.paymentHash || !byHash.has(tx.paymentHash)) continue;
+            if (byHash.get(tx.paymentHash) === null) storageMisses++;
+            else storageHits++;
+          }
           console.log(
-            `[Zap/${walletAlias}] outgoing: storage hit ${storageHits}/${outgoingPending.length}`,
+            `[Zap/${walletAlias}] outgoing: storage hit ${storageHits}/${outgoingPending.length} (negative-cached ${storageMisses})`,
           );
         }
       }
@@ -1108,13 +1166,42 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (parsed.senderPubkey && !parsed.anonymous) pubkeysToFetch.add(parsed.senderPubkey);
       }
 
-      // Batch profile fetch. Returns a Map keyed by pubkey.
-      const profileMap =
+      // Persistent cache hit first — strangers' kind-0 events change
+      // infrequently and the relay round-trip is the slow part of the
+      // first cold-start render of TransactionList (#95). Anything served
+      // from AsyncStorage skips the relay query entirely.
+      const cached =
         pubkeysToFetch.size > 0
-          ? await nostrService.fetchProfiles([...pubkeysToFetch], queryRelays)
+          ? await zapSenderProfileStorage.getMany([...pubkeysToFetch])
+          : new Map<string, zapSenderProfileStorage.CachedZapSenderProfile>();
+      const stillToFetch = [...pubkeysToFetch].filter((pk) => !cached.has(pk));
+
+      // Batch profile fetch (relays). Returns a Map keyed by pubkey.
+      const profileMap =
+        stillToFetch.length > 0
+          ? await nostrService.fetchProfiles(stillToFetch, queryRelays)
           : undefined;
 
+      // Write-through any newly-resolved profiles so the next cold start
+      // serves them from disk.
+      if (profileMap && profileMap.size > 0) {
+        const toPersist = new Map<string, zapSenderProfileStorage.CachedZapSenderProfile>();
+        for (const [pk, p] of profileMap) {
+          toPersist.set(pk, {
+            npub: p.npub,
+            name: p.name,
+            displayName: p.displayName,
+            picture: p.picture,
+            nip05: p.nip05,
+          });
+        }
+        // Fire-and-forget — don't block UI updates on the AsyncStorage write.
+        void zapSenderProfileStorage.setMany(toPersist);
+      }
+
       const toCounterpartyProfile = (pk: string): ZapCounterpartyInfo['profile'] => {
+        const hit = cached.get(pk);
+        if (hit) return hit;
         const p = profileMap?.get(pk);
         if (!p) return null;
         return {
@@ -1188,9 +1275,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   const payInvoice = useCallback(
-    async (bolt11: string, signal?: AbortSignal) => {
+    async (bolt11: string, signalOrOptions?: AbortSignal | nwcService.PayInvoiceOptions) => {
       if (!activeWalletId) throw new Error('No active wallet');
-      return nwcService.payInvoice(activeWalletId, bolt11, signal);
+      return nwcService.payInvoice(activeWalletId, bolt11, signalOrOptions);
     },
     [activeWalletId],
   );
@@ -1203,8 +1290,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   const payInvoiceForWallet = useCallback(
-    async (walletId: string, bolt11: string, signal?: AbortSignal) => {
-      return nwcService.payInvoice(walletId, bolt11, signal);
+    async (
+      walletId: string,
+      bolt11: string,
+      signalOrOptions?: AbortSignal | nwcService.PayInvoiceOptions,
+    ) => {
+      return nwcService.payInvoice(walletId, bolt11, signalOrOptions);
     },
     [],
   );
@@ -1266,8 +1357,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             // The balance refresh feeds the generic balance-diff
             // detector as a fallback; run it every tick so a flaky
             // lookup_invoice path still settles detection.
+            //
+            // Tighter timeout than the SDK default (10 s): the poll
+            // tick is 1 s, so a 2.5 s ceiling means at most ~2 ticks
+            // are waiting on any single getBalance reply. Without it,
+            // a single stalled relay reply can blow ~10 s of latency
+            // into payment-detection vs WoS (#133).
             (async () => {
-              const b = await nwcService.getBalance(walletId);
+              const b = await nwcService.getBalance(walletId, { replyTimeoutMs: 2500 });
               if (b !== null) updateWalletInState(walletId, { balance: b });
             })(),
           ]);
@@ -1493,6 +1590,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       hasWallets,
       isOnboarded,
       isLoading,
+      walletsHydrated,
       currency,
       setCurrency,
       btcPrice,
@@ -1530,6 +1628,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       activeWalletId,
       isOnboarded,
       isLoading,
+      walletsHydrated,
       currency,
       setCurrency,
       btcPrice,
