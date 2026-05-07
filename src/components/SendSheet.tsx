@@ -34,6 +34,7 @@ import * as boltzService from '../services/boltzService';
 import * as onchainService from '../services/onchainService';
 import { npubEncode } from '../services/nostrService';
 import { recordOutgoing as recordOutgoingCounterparty } from '../services/zapCounterpartyStorage';
+import { isReplyTimeoutError } from '../services/nwcService';
 import PaymentProgressOverlay, { PaymentProgressState } from './PaymentProgressOverlay';
 import AmountEntryScreen from './AmountEntryScreen';
 
@@ -140,6 +141,7 @@ const SendSheet: React.FC<Props> = ({
   // can abort the NWC call's publish → reply-timeout → poll-for-preimage
   // chain without waiting ~5 minutes for it to give up on its own (#175).
   const paymentAbortRef = useRef<AbortController | null>(null);
+  const dismissedInFlightRef = useRef(false);
 
   // No explicit snapPoints — gorhom v5's `enableDynamicSizing={true}`
   // default sizes the sheet to its content. Trailing action buttons
@@ -386,6 +388,7 @@ const SendSheet: React.FC<Props> = ({
       memo: string;
       bolt11: string;
     } | null = null;
+    dismissedInFlightRef.current = false;
     try {
       if (isOnchainAddress) {
         if (currentSats <= 0) {
@@ -402,7 +405,10 @@ const SendSheet: React.FC<Props> = ({
         } else {
           // Boltz reverse swap: Lightning → on-chain
           const swap = await boltzService.createReverseSwap(invoiceData, currentSats);
-          await payInvoiceForWallet(walletId!, swap.invoice, signal);
+          await payInvoiceForWallet(walletId!, swap.invoice, {
+            signal,
+            onReplyTimeout: handleReplyTimeout,
+          });
           const lockup = await boltzService.waitForLockup(swap.id, 120000);
           await boltzService.claimSwap(swap, lockup, invoiceData);
         }
@@ -481,7 +487,10 @@ const SendSheet: React.FC<Props> = ({
           }
         }
 
-        await payInvoiceForWallet(walletId!, bolt11, signal);
+        await payInvoiceForWallet(walletId!, bolt11, {
+          signal,
+          onReplyTimeout: handleReplyTimeout,
+        });
 
         if (__DEV__)
           console.log(
@@ -514,7 +523,10 @@ const SendSheet: React.FC<Props> = ({
           }
         }
       } else {
-        await payInvoiceForWallet(walletId!, invoiceData, signal);
+        await payInvoiceForWallet(walletId!, invoiceData, {
+          signal,
+          onReplyTimeout: handleReplyTimeout,
+        });
       }
       if (walletId) {
         // Refresh both balance and tx list so the user sees the send
@@ -542,6 +554,7 @@ const SendSheet: React.FC<Props> = ({
         })();
       }
       if (signal.aborted) return;
+      if (dismissedInFlightRef.current) return;
       setProgressState('success');
     } catch (error) {
       // User-initiated cancel via PaymentProgressOverlay's Cancel button:
@@ -550,6 +563,16 @@ const SendSheet: React.FC<Props> = ({
       if ((error as Error)?.name === 'AbortError' || signal.aborted) {
         return;
       }
+      if (isReplyTimeoutError(error)) {
+        // Reply timeout: the HTLC is likely still in flight. Don't mark the
+        // optimistic row as failed; let the next listTransactions reconcile
+        // it to its real state.
+        if (dismissedInFlightRef.current) return;
+        setProgressError(undefined);
+        setProgressState('in-flight-extended');
+        return;
+      }
+      if (dismissedInFlightRef.current) return;
       if (inFlightZap) {
         const nowSec = Math.floor(Date.now() / 1000);
         addPendingTransaction(inFlightZap.walletId, {
@@ -583,6 +606,11 @@ const SendSheet: React.FC<Props> = ({
     }
   };
 
+  const handleReplyTimeout = useCallback(() => {
+    setProgressError(undefined);
+    setProgressState((prev) => (prev === 'sending' ? 'in-flight-extended' : prev));
+  }, []);
+
   const handleCancelPayment = useCallback(() => {
     // Abort the NWC pay_invoice chain and hide the overlay so the user
     // can edit / retry / close from the filled-in SendSheet. Keep
@@ -608,13 +636,17 @@ const SendSheet: React.FC<Props> = ({
     // Dismissing the overlay after a successful payment also closes the
     // parent sheet. On error we only dismiss the overlay so the user can
     // retry from the filled-in form.
-    const wasSuccess = progressStateRef.current === 'success';
+    const prevState = progressStateRef.current;
+    const shouldCloseParent = prevState === 'success' || prevState === 'in-flight-extended';
+    if (prevState === 'in-flight-extended') {
+      dismissedInFlightRef.current = true;
+    }
     setProgressState('hidden');
     setProgressError(undefined);
     // Defer the parent close so the overlay's hidden state renders first;
     // otherwise on a slow JS thread the parent sheet can tear down the
     // overlay component before the state update completes (#210).
-    if (wasSuccess) setTimeout(() => onClose(), 0);
+    if (shouldCloseParent) setTimeout(() => onClose(), 0);
   }, [onClose]);
 
   const handleReset = () => {

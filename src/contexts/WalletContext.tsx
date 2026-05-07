@@ -126,14 +126,17 @@ interface WalletContextType {
 
   // Payment actions (operate on active wallet)
   makeInvoice: (amount: number, memo?: string) => Promise<string>;
-  payInvoice: (bolt11: string, signal?: AbortSignal) => Promise<{ preimage: string }>;
+  payInvoice: (
+    bolt11: string,
+    signalOrOptions?: AbortSignal | nwcService.PayInvoiceOptions,
+  ) => Promise<{ preimage: string }>;
 
   // Payment actions with explicit wallet ID (for sheets)
   makeInvoiceForWallet: (walletId: string, amount: number, memo?: string) => Promise<string>;
   payInvoiceForWallet: (
     walletId: string,
     bolt11: string,
-    signal?: AbortSignal,
+    signalOrOptions?: AbortSignal | nwcService.PayInvoiceOptions,
   ) => Promise<{ preimage: string }>;
   refreshBalanceForWallet: (walletId: string) => Promise<void>;
   fetchTransactionsForWallet: (walletId: string) => Promise<void>;
@@ -1254,9 +1257,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   const payInvoice = useCallback(
-    async (bolt11: string, signal?: AbortSignal) => {
+    async (bolt11: string, signalOrOptions?: AbortSignal | nwcService.PayInvoiceOptions) => {
       if (!activeWalletId) throw new Error('No active wallet');
-      return nwcService.payInvoice(activeWalletId, bolt11, signal);
+      return nwcService.payInvoice(activeWalletId, bolt11, signalOrOptions);
     },
     [activeWalletId],
   );
@@ -1269,8 +1272,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   const payInvoiceForWallet = useCallback(
-    async (walletId: string, bolt11: string, signal?: AbortSignal) => {
-      return nwcService.payInvoice(walletId, bolt11, signal);
+    async (
+      walletId: string,
+      bolt11: string,
+      signalOrOptions?: AbortSignal | nwcService.PayInvoiceOptions,
+    ) => {
+      return nwcService.payInvoice(walletId, bolt11, signalOrOptions);
     },
     [],
   );
