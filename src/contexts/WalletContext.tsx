@@ -11,6 +11,7 @@ import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nwcService from '../services/nwcService';
 import * as nostrService from '../services/nostrService';
+import { initialiseSendThresholdForNewInstall } from '../services/sendThresholdService';
 import * as lnurlService from '../services/lnurlService';
 import * as zapCounterpartyStorage from '../services/zapCounterpartyStorage';
 import * as zapSenderProfileStorage from '../services/zapSenderProfileStorage';
@@ -294,6 +295,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           const onboardedAfterMigration = await walletStorage.isOnboarded();
           setIsOnboarded(onboardedAfterMigration);
         }
+
+        // Distinguish new-install vs upgrade for the high-value-send
+        // confirmation default — runs after migrateLegacy so the install-
+        // state signals (wallet_list, onboarding_complete) are stable.
+        // Idempotent; short-circuits once initialised (#82 acceptance).
+        await initialiseSendThresholdForNewInstall();
 
         // Load and reconnect all wallets
         const walletList = await walletStorage.getWalletList();

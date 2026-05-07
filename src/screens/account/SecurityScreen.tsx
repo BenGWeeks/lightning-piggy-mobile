@@ -14,13 +14,13 @@ import {
 // Preset thresholds for the radio rows (sats). `null` = "Off".
 const PRESETS: { value: number | null; label: string; sublabel: string }[] = [
   { value: null, label: 'Off', sublabel: 'Never confirm — every send is one-tap' },
-  { value: 1_000, label: '1,000 sats', sublabel: '~£0.50 — confirm anything over this' },
+  { value: 1_000, label: '1,000 sats', sublabel: '~£0.50 — confirm at or above this' },
   {
     value: DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS,
     label: '10,000 sats',
-    sublabel: '~£5 — default; confirm anything over this',
+    sublabel: '~£5 — default; confirm at or above this',
   },
-  { value: 100_000, label: '100,000 sats', sublabel: '~£50 — confirm anything over this' },
+  { value: 100_000, label: '100,000 sats', sublabel: '~£50 — confirm at or above this' },
 ];
 
 const SecurityScreen: React.FC = () => {
@@ -65,7 +65,7 @@ const SecurityScreen: React.FC = () => {
         </Text>
       </View>
       <Text style={sharedAccountStyles.fieldHint}>
-        Show a "Are you sure?" prompt before dispatching a Lightning payment or wallet transfer at
+        Show an "Are you sure?" prompt before dispatching a Lightning payment or wallet transfer at
         or above this many sats. Smaller sends stay one-tap. Default: 10,000 sats.
       </Text>
 

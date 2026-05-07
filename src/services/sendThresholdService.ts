@@ -5,24 +5,23 @@
  * trigger an explicit "are you sure?" confirmation dialog before being
  * dispatched. Below the threshold, sends stay snappy / one-tap.
  *
- * For this PR the threshold is a hardcoded default with an AsyncStorage
- * override hook — a full Account → Security UI to tune it (Off / 1k / 10k /
- * 100k / Custom) is tracked as a follow-up. The storage key + helpers are
- * shipped now so the future settings screen has a stable API to bind to.
+ * Configurable via Account → Security (`SecurityScreen`): Off / 1k / 10k /
+ * 100k / Custom. The default 10,000-sat threshold applies to **new installs
+ * only** — `initialiseSendThresholdForNewInstall` runs once on cold-start
+ * and writes the "Off" sentinel for existing installs (anything with an
+ * already-populated `wallet_list` or `onboarding_complete` flag), so
+ * upgraders keep their previous one-tap behaviour and have to opt in to
+ * confirmations from the Security screen.
  *
  * Acceptance bullet from the issue:
  *   "Default threshold applied for new users only."
- *
- * Honoured implicitly: existing installs that have never written the
- * storage key inherit the new default, but any explicit user choice
- * (including `null` for "Off") is preserved across upgrades.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 /** Default threshold in sats (~£5 at typical prices). Issue #82. */
 export const DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS = 10_000;
 
-/** AsyncStorage key the future settings UI will read/write. */
+/** AsyncStorage key the Account → Security settings UI reads/writes. */
 export const HIGH_VALUE_SEND_THRESHOLD_STORAGE_KEY = 'send_threshold_sats_v1';
 
 /**
@@ -74,18 +73,47 @@ export async function getSendThreshold(): Promise<number | null> {
 
 /**
  * Persist the user's chosen threshold. Pass `null` to disable confirmations.
- * Used by the (future) Account → Security settings screen.
+ * Used by the Account → Security settings screen (`SecurityScreen`).
  */
 export async function setSendThreshold(thresholdSats: number | null): Promise<void> {
   if (thresholdSats === null) {
     await AsyncStorage.setItem(HIGH_VALUE_SEND_THRESHOLD_STORAGE_KEY, OFF_SENTINEL);
     return;
   }
-  if (!Number.isFinite(thresholdSats) || thresholdSats <= 0) {
+  // Floor first, then validate the floored integer — rejects fractional
+  // inputs like 0.5 (which floored to 0 would land us in the silent-fallback
+  // branch) and non-finite values consistently.
+  const floored = Math.floor(thresholdSats);
+  if (!Number.isFinite(floored) || floored < 1) {
     throw new Error(`Invalid send threshold: ${thresholdSats}`);
   }
-  await AsyncStorage.setItem(
-    HIGH_VALUE_SEND_THRESHOLD_STORAGE_KEY,
-    String(Math.floor(thresholdSats)),
-  );
+  await AsyncStorage.setItem(HIGH_VALUE_SEND_THRESHOLD_STORAGE_KEY, String(floored));
+}
+
+/**
+ * One-time-on-cold-start initialisation: distinguish a fresh install from
+ * an upgrade so the 10k default only applies to new users.
+ *
+ * - **Fresh install** (no `wallet_list` and no `onboarding_complete`):
+ *   leave the storage key unset → `getSendThreshold` returns the 10k
+ *   default.
+ * - **Upgrade** (either of those keys is present): write the "Off"
+ *   sentinel so the previously-frictionless behaviour is preserved.
+ *   Existing users opt into confirmations from Account → Security.
+ *
+ * Idempotent: short-circuits once the storage key is populated (with
+ * either a number or the OFF sentinel). Safe to call on every cold
+ * start; intended to run after `migrateLegacy()` so the install-state
+ * signals are stable.
+ */
+export async function initialiseSendThresholdForNewInstall(): Promise<void> {
+  const existing = await AsyncStorage.getItem(HIGH_VALUE_SEND_THRESHOLD_STORAGE_KEY);
+  if (existing !== null) return; // Already initialised — nothing to do.
+  const walletList = await AsyncStorage.getItem('wallet_list');
+  const onboarded = await AsyncStorage.getItem('onboarding_complete');
+  const isUpgrade = (walletList && walletList !== '[]') || onboarded === 'true';
+  if (isUpgrade) {
+    await AsyncStorage.setItem(HIGH_VALUE_SEND_THRESHOLD_STORAGE_KEY, OFF_SENTINEL);
+  }
+  // Fresh install path: leave key unset; getSendThreshold returns the default.
 }
