@@ -68,10 +68,10 @@ const GroupRow: React.FC<Props> = ({ summary, onPress, contactInfoMap }) => {
   }, [activity, contacts, contactInfoMap, myPubkey, group.memberPubkeys.length]);
 
   // Avatar pubkeys: lead with recent senders so the people who've been
-  // talking show up first. Top up with non-sender members until we have
-  // up to 3 slots filled — otherwise a group where only the viewer has
-  // posted would render a single placeholder (the viewer isn't in
-  // their own follow list, so we have no kind:0 picture for them).
+  // talking show up first. Top up from [viewer, ...members] so the cluster
+  // size matches the actual people-count in the group (#363) — without
+  // the viewer prefix, an inactive 1:1 group would render a single avatar
+  // and a 3-person group only 2.
   const avatarPubkeys = useMemo(() => {
     const out: string[] = [];
     const seen = new Set<string>();
@@ -82,7 +82,8 @@ const GroupRow: React.FC<Props> = ({ summary, onPress, contactInfoMap }) => {
       out.push(lc);
       if (out.length === 3) return out;
     }
-    for (const pk of group.memberPubkeys) {
+    const fillSources = myPubkey ? [myPubkey, ...group.memberPubkeys] : group.memberPubkeys;
+    for (const pk of fillSources) {
       const lc = pk.toLowerCase();
       if (seen.has(lc)) continue;
       seen.add(lc);
@@ -90,7 +91,7 @@ const GroupRow: React.FC<Props> = ({ summary, onPress, contactInfoMap }) => {
       if (out.length === 3) break;
     }
     return out;
-  }, [activity.recentSenderPubkeys, group.memberPubkeys]);
+  }, [activity.recentSenderPubkeys, group.memberPubkeys, myPubkey]);
 
   return (
     <TouchableOpacity
