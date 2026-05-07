@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Publishes (or refreshes) the kind-0 profile metadata for each Piggy
-// test-fixture identity, setting `picture` to the tinted piggy avatar
-// hosted in this repo. Existing kind-0 fields (name, display_name,
-// lud16, about, banner, nip05, etc.) are fetched from DEFAULT_RELAYS
-// and merged so we don't clobber them.
+// test-fixture identity. Sets `picture` to the tinted piggy avatar
+// hosted in this repo and `lud16` to FIXTURE_LUD16 so test flows can
+// trigger zap / SendSheet paths against the Piggies. Other existing
+// kind-0 fields (name, display_name, about, banner, nip05, etc.) are
+// fetched from DEFAULT_RELAYS and merged so we don't clobber them.
 //
 // Usage:
 //   node scripts/publish-piggy-kind0.mjs              # publish all four
@@ -32,6 +33,11 @@ const RELAYS = [
 
 const BRANCH = env.BRANCH || 'main';
 const RAW_BASE = `https://raw.githubusercontent.com/BenGWeeks/lightning-piggy-mobile/${BRANCH}/tests/e2e/fixtures`;
+
+// All Piggies share a single fixture LUD16 so tests can trigger zap /
+// SendSheet flows; resolves to Ben's own LNbits wallet so test sats
+// route somewhere benign rather than to a stranger.
+const FIXTURE_LUD16 = 'ben.weeks@bank.weeksfamily.me';
 
 // Each Piggy maps to (env var, fixture filename, friendly label). Label is
 // only used for log lines — we never overwrite an existing `name` /
@@ -154,7 +160,7 @@ for (const piggy of targets) {
   const merged = {
     ...existingContent,
     picture: pictureUrl,
-    lud16: 'ben.weeks@bank.weeksfamily.me',
+    lud16: FIXTURE_LUD16,
   };
   if (!merged.name) merged.name = label;
   if (!merged.display_name) merged.display_name = label;
