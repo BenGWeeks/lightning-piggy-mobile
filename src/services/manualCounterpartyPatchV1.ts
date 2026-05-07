@@ -44,9 +44,18 @@ const PATCHES: Patch[] = [
   },
 ];
 
-export async function applyManualCounterpartyPatchV1(): Promise<void> {
+export interface AppliedPatch {
+  walletId: string;
+  paymentHash: string;
+  pubkey: string;
+  npub: string;
+  name: string;
+}
+
+export async function applyManualCounterpartyPatchV1(): Promise<AppliedPatch[]> {
+  const applied: AppliedPatch[] = [];
   try {
-    if (await AsyncStorage.getItem(PATCH_KEY)) return;
+    if (await AsyncStorage.getItem(PATCH_KEY)) return applied;
 
     const wallets = await walletStorage.getWalletList();
     const txCachesByWalletId: Record<string, WalletTransaction[]> = {};
@@ -60,7 +69,6 @@ export async function applyManualCounterpartyPatchV1(): Promise<void> {
       }
     }
 
-    let applied = 0;
     for (const patch of PATCHES) {
       let pubkey: string;
       try {
@@ -71,7 +79,7 @@ export async function applyManualCounterpartyPatchV1(): Promise<void> {
         continue;
       }
 
-      for (const txs of Object.values(txCachesByWalletId)) {
+      for (const [walletId, txs] of Object.entries(txCachesByWalletId)) {
         for (const tx of txs) {
           if (tx.type !== 'outgoing') continue;
           if (Math.abs(tx.amount) !== patch.amountSats) continue;
@@ -90,17 +98,24 @@ export async function applyManualCounterpartyPatchV1(): Promise<void> {
             comment: '',
             anonymous: false,
           });
-          applied += 1;
+          applied.push({
+            walletId,
+            paymentHash: tx.paymentHash,
+            pubkey,
+            npub: patch.npub,
+            name: patch.name,
+          });
         }
       }
     }
 
     await AsyncStorage.setItem(PATCH_KEY, '1');
     if (__DEV__) {
-      console.log(`[ManualPatch] v1 applied: ${applied} transaction(s) attributed`);
+      console.log(`[ManualPatch] v1 applied: ${applied.length} transaction(s) attributed`);
     }
   } catch (e) {
     if (__DEV__) console.warn('[ManualPatch] v1 failed:', e);
     // Don't set the flag — let it retry on next launch
   }
+  return applied;
 }
