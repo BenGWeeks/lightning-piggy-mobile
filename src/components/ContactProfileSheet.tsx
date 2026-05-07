@@ -482,14 +482,21 @@ const ContactProfileSheet: React.FC<Props> = ({
               </Svg>
             </TouchableOpacity>
           )}
-          {contact.pubkey && nfcSupported && (
+          {contact.pubkey && (
             <TouchableOpacity
-              style={styles.iconButton}
+              style={[styles.iconButton, !nfcSupported && styles.iconButtonDisabled]}
               onPress={() => setNfcWriteVisible(true)}
-              accessibilityLabel="Write to NFC tag"
+              disabled={!nfcSupported}
+              accessibilityLabel={
+                nfcSupported ? 'Write to NFC tag' : 'Write to NFC tag (not supported on this device)'
+              }
+              accessibilityState={{ disabled: !nfcSupported }}
               testID="contact-nfc-write-button"
             >
-              <NfcIcon size={18} color={colors.brandPink} />
+              <NfcIcon
+                size={18}
+                color={nfcSupported ? colors.brandPink : colors.textSupplementary}
+              />
             </TouchableOpacity>
           )}
         </View>
@@ -730,6 +737,10 @@ const createStyles = (colors: Palette) =>
       borderColor: colors.brandPink,
       justifyContent: 'center',
       alignItems: 'center',
+    },
+    iconButtonDisabled: {
+      borderColor: colors.textSupplementary,
+      opacity: 0.6,
     },
   });
 
