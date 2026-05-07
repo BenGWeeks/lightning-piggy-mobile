@@ -1299,12 +1299,18 @@ export function subscribeInboxDmsForViewer(input: {
   viewerPubkey: string;
   relays: string[];
   onEvent: (ev: RawInboxDmEvent) => void;
+  // Optional kind-4 `since` cursor (unix seconds). When provided, the kind-4 filter pins to `max(sinceK4, providedSince - 120s safety buffer)` so a heavy DM history doesn't restream 90 days every cold start. If absent, falls back to the 90-day window.
+  sinceK4?: number;
 }): () => void {
   trackRelays(input.relays);
   const onevent = (ev: Parameters<typeof input.onEvent>[0]): void => {
     input.onEvent(ev);
   };
-  const sinceK4 = Math.floor(Date.now() / 1000) - DM_INBOX_SINCE_WINDOW_SECONDS;
+  const sinceK4Default = Math.floor(Date.now() / 1000) - DM_INBOX_SINCE_WINDOW_SECONDS;
+  const sinceK4 =
+    input.sinceK4 !== undefined
+      ? Math.max(sinceK4Default, Math.max(0, input.sinceK4 - 120))
+      : sinceK4Default;
   const subK4 = pool.subscribeMany(
     input.relays,
     {

@@ -2984,27 +2984,39 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         );
     };
 
-    const unsubscribe = nostrService.subscribeInboxDmsForViewer({
-      viewerPubkey,
-      relays: readRelays,
-      onEvent: (ev) => {
-        // Fire-and-forget: handleInboxEvent awaits its own state, and any
-        // throw is caught + logged here so the sub keeps running.
-        handleInboxEvent(ev).catch((e) => {
-          if (__DEV__) console.warn('[Nostr] live DM handler failed:', e);
-        });
-      },
-    });
-
-    if (__DEV__) {
-      console.log(
-        `[Nostr] live DM sub (kinds 4 + 1059) opened for ${viewerPubkey.slice(0, 8)} on ${readRelays.length} relays`,
-      );
-    }
+    // Load the persisted kind-4 lastSeen cursor before opening the sub so the relay only re-streams events the user hasn't seen yet — without this, a heavy DM history floods the JS thread with hundreds of `live evt kind=4` deliveries on every cold start (each one a NIP-04 decrypt round-trip + setDmInbox re-render).
+    let unsubscribe: (() => void) | null = null;
+    (async () => {
+      let sinceK4: number | undefined;
+      try {
+        const raw = await AsyncStorage.getItem(inboxLastSeenKey(viewerPubkey));
+        const parsed = raw ? Number(raw) : NaN;
+        if (Number.isFinite(parsed) && parsed > 0) sinceK4 = parsed;
+      } catch {
+        // best-effort
+      }
+      if (cancelled) return;
+      unsubscribe = nostrService.subscribeInboxDmsForViewer({
+        viewerPubkey,
+        relays: readRelays,
+        sinceK4,
+        onEvent: (ev) => {
+          // Fire-and-forget: handleInboxEvent awaits its own state, and any throw is caught + logged here so the sub keeps running.
+          handleInboxEvent(ev).catch((e) => {
+            if (__DEV__) console.warn('[Nostr] live DM handler failed:', e);
+          });
+        },
+      });
+      if (__DEV__) {
+        console.log(
+          `[Nostr] live DM sub (kinds 4 + 1059) opened for ${viewerPubkey.slice(0, 8)} on ${readRelays.length} relays, sinceK4=${sinceK4 ?? 'default-90d'}`,
+        );
+      }
+    })();
 
     return () => {
       cancelled = true;
-      unsubscribe();
+      if (unsubscribe) unsubscribe();
     };
   }, [isLoggedIn, pubkey, signerType, getReadRelays]);
 
