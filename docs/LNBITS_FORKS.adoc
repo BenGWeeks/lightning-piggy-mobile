@@ -1,0 +1,99 @@
+== LNbits Weeks-family forks
+
+Lightning Piggy's production server `bank.weeksfamily.me` runs three LNbits extensions in patched form, served from forks under https://github.com/BenGWeeks[BenGWeeks]. This document explains why each fork exists, what's patched, how the LNbits server is configured to install from them, and how to maintain them as upstream evolves.
+
+=== Why fork
+
+Three bugs in upstream LNbits extensions affected zap reliability and NWC stability badly enough that we couldn't wait for the maintainers to land fixes. Each bug has an upstream issue + open PR; until those merge, our patched builds are the production-shipping version.
+
+[cols="2,2,3,1", options="header"]
+|===
+| Extension | Bug | Upstream PR | Severity
+
+| `lnurlp` | `send_to_relay` closes the websocket without waiting for the relay's NIP-20 OK frame, and the per-relay tasks are fire-and-forget — kind-9735 zap receipts are silently dropped on most publish attempts. | https://github.com/lnbits/lnurlp/pull/133[#133] (issue https://github.com/lnbits/lnurlp/issues/132[#132]) | High — most outgoing zaps lost their receipt
+| `nostrclient` | `router.py`'s message-publish path doesn't return a NIP-01 `OK` / `CLOSED` frame to the local client. Anything publishing through the Nostrclient endpoint (notably `nwcprovider`) can't tell whether the publish was accepted. | https://github.com/lnbits/nostrclient/pull/68[#68] (issue https://github.com/lnbits/nostrclient/issues/52[#52]) | Medium — silent failures masquerading as success
+| `nwcprovider` | `_process_invoice`'s post-`pay_invoice` wait loop only breaks on `.success`. Failed payments (e.g. expired BOLT11s during Boltz reverse-swap claims) loop forever at ~20 RPS, hammering the funding source. | https://github.com/lnbits/nwcprovider/pull/40[#40] (issue https://github.com/lnbits/nwcprovider/issues/39[#39]) | High — observed as a 7-hour log flood
+| `nwcprovider` | `bolt11_decode` runs synchronously inside `list_transactions`, blocking the asyncio event loop long enough that other extensions (notably `nostrclient` relay keep-alives) miss their windows. | https://github.com/lnbits/nwcprovider/pull/37[#37] (issue https://github.com/lnbits/nwcprovider/issues/35[#35]) | Medium — contributes to relay-publish flakiness
+|===
+
+`nostrclient` also folds in three small UI improvements from open Ben PRs that aren't load-bearing but make the relay-management page substantially more usable.
+
+=== Fork layout
+
+Each fork follows the same convention:
+
+[cols="1,2,2", options="header"]
+|===
+| Fork | Branch | Manifest URL
+
+| https://github.com/BenGWeeks/lnurlp[`BenGWeeks/lnurlp`]
+| `weeks-family`
+| https://raw.githubusercontent.com/BenGWeeks/lnurlp/weeks-family/extensions.json
+
+| https://github.com/BenGWeeks/nostrclient[`BenGWeeks/nostrclient`]
+| `weeks-family`
+| https://raw.githubusercontent.com/BenGWeeks/nostrclient/weeks-family/extensions.json
+
+| https://github.com/BenGWeeks/nwcprovider[`BenGWeeks/nwcprovider`]
+| `weeks-family`
+| https://raw.githubusercontent.com/BenGWeeks/nwcprovider/weeks-family/extensions.json
+|===
+
+`main` on every fork is kept as a clean upstream mirror — never touched. All patches live on `weeks-family`. Tags on `weeks-family` follow the convention `v<upstream-version>-wf<n>` (e.g. `v1.3.0-wf2`); the matching `extensions.json` entry uses the corresponding `+wf<n>` build-metadata suffix in `version` (`1.3.0+wf2`) so semver sorts the patched build above the bare upstream release.
+
+The display name in each fork's `config.json` is suffixed with ` (Weeks)` (e.g. `Pay Links (Weeks)`) so the running tile in the LNbits Extensions page is visually distinct from a vanilla install.
+
+=== LNbits configuration
+
+Server `bank.weeksfamily.me`'s Extensions panel lists five sources, _in this order_:
+
+. `https://raw.githubusercontent.com/BenGWeeks/lnurlp/weeks-family/extensions.json`
+. `https://raw.githubusercontent.com/BenGWeeks/nostrclient/weeks-family/extensions.json`
+. `https://raw.githubusercontent.com/BenGWeeks/nwcprovider/weeks-family/extensions.json`
+. `https://raw.githubusercontent.com/bengweeks/allowance/main/extensions.json`
+. `https://raw.githubusercontent.com/lnbits/lnbits-extensions/main/extensions.json`
+
+Order matters. LNbits' source-merge logic (`InstallableExtension._get_installable_extensions`) takes the first manifest's `name` / `icon` / `short_description` for each `id` and folds subsequent manifests' releases into the version dropdown. The Weeks-family manifests are listed first so the `(Weeks)` label wins the tile; the official manifest is last so its releases still appear as alternative versions in the dropdown.
+
+The chip UI doesn't support drag-reordering — to change order, remove all entries with the `❌` button and re-add in the desired sequence, or `PATCH /admin/api/v1/settings` directly.
+
+=== Adding a new patch
+
+. Branch from `weeks-family` on the relevant fork.
+. Apply the change. Keep code comments minimal — patch rationale belongs in the commit message / upstream PR.
+. Open a PR upstream first (`lnbits/<repo>`) so the patch has a path to disappear from `weeks-family` over time.
+. Cherry-pick that PR's commit onto `weeks-family`.
+. Bump the `version` in `config.json` (e.g. `1.3.0+wf2` → `1.3.0+wf3`).
+. Tag (e.g. `git tag v1.3.0-wf3 && git push origin v1.3.0-wf3`).
+. Update the entry in `extensions.json` at the branch root: bump `version`, `archive` URL, and `hash` (the SHA-256 of the new tag's archive).
+. Push the branch.
+. Restart `bank.weeksfamily.me` (or wait up to an hour for the manifest cache to expire), then upgrade the extension in the UI.
+
+The SHA is computed from the tag's archive:
+
+----
+curl -sL https://github.com/BenGWeeks/<repo>/archive/refs/tags/<tag>.zip | sha256sum
+----
+
+=== Rebasing onto a new upstream release
+
+When upstream cuts a new release (e.g. `lnbits/lnurlp` v1.4.0):
+
+. `git fetch upstream --tags && git checkout weeks-family`
+. `git rebase v1.4.0` — patches reapply if upstream hasn't refactored the affected functions. If a conflict arises, it usually means the upstream code now does something close to what our patch does; verify whether the patch is still needed before resolving.
+. Bump `config.json::version` to `1.4.0+wf1` (resetting the `wf` counter on a base bump).
+. Tag `v1.4.0-wf1`, push branch (force-with-lease since rebase rewrote history) and tag.
+. Refresh `extensions.json` with the new version + archive URL + SHA-256.
+
+Drop a patch from `weeks-family` once the equivalent upstream PR merges into a release the rebase brings in. The goal is for `weeks-family` to eventually be a trivial commit on top of upstream.
+
+=== Risks / known limitations
+
+* *DB schema*: every patch currently in `weeks-family` is logic-only — none touch `migrations.py`, `db.py`, or model fields. The patched build is byte-compatible with vanilla. If a future patch needs schema changes, document the migration on the fork's release notes.
+* *Cache lag*: LNbits caches the manifest list for one hour. Allow time after publishing a manifest update or restart the server to bust the cache.
+* *Operator hygiene*: the burden moves from "patch script every restart" to "rebase quarterly". Subscribe to upstream releases on each fork so the rebase queue stays visible.
+* *Maintainer trust*: anyone with write access to `BenGWeeks/<fork>` can ship code into bank.weeksfamily.me through the manifest. Branch protection on `weeks-family` is the recommended mitigation.
+
+=== Patch scripts (deprecated)
+
+The `scripts/fix_*.py` patch scripts that used to apply these fixes inside the running container are now superseded by the fork-and-install flow described above. They remain in the repo as an emergency rollback path but should not be run on a server already using the Weeks-family manifests — running them on top of `+wf` builds would produce an inconsistent installation.
