@@ -298,38 +298,98 @@ const ContactProfileScreen: React.FC = () => {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Banner + avatar identity card. */}
-        {contact.banner ? (
-          <View style={styles.bannerContainer}>
+        {/* Banner — contact's own if set, else the brand pink-ostrich texture. */}
+        <View style={styles.bannerContainer}>
+          {contact.banner ? (
             <Image
               source={{ uri: contact.banner }}
               style={styles.bannerImage}
               cachePolicy="memory-disk"
-              recyclingKey={contact.banner ?? undefined}
+              recyclingKey={contact.banner}
               autoplay={false}
-            />
-          </View>
-        ) : (
-          <View style={styles.bannerSpacer} />
-        )}
-
-        <View style={contact.banner ? styles.avatarContainer : styles.avatarContainerNoBanner}>
-          {contact.picture && !avatarError ? (
-            <Image
-              source={{ uri: contact.picture }}
-              style={styles.avatar}
-              cachePolicy="memory-disk"
-              transition={200}
-              recyclingKey={contact.picture ?? undefined}
-              autoplay={false}
-              onError={() => setAvatarError(true)}
-              onLoad={() => setAvatarLoaded(true)}
             />
           ) : (
-            <View style={styles.avatarDefault}>
-              <UserRound size={40} color={colors.textBody} strokeWidth={1.5} />
-            </View>
+            <Image
+              source={require('../../assets/images/friends-bg.png')}
+              style={styles.bannerImage}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+            />
           )}
+        </View>
+
+        {/* Identity row — avatar left, action buttons + Follow pill right. */}
+        <View style={styles.identityRow}>
+          <View style={styles.avatarContainer}>
+            {contact.picture && !avatarError ? (
+              <Image
+                source={{ uri: contact.picture }}
+                style={styles.avatar}
+                cachePolicy="memory-disk"
+                transition={200}
+                recyclingKey={contact.picture}
+                autoplay={false}
+                onError={() => setAvatarError(true)}
+                onLoad={() => setAvatarLoaded(true)}
+              />
+            ) : (
+              <View style={styles.avatarDefault}>
+                <UserRound size={48} color={colors.textBody} strokeWidth={1.5} />
+              </View>
+            )}
+          </View>
+
+          <View style={styles.identityActionsBlock}>
+            <View style={styles.actionIconGroup}>
+              {npub && (
+                <TouchableOpacity
+                  style={styles.actionIconButton}
+                  onPress={() => setQrSheetOpen(true)}
+                  accessibilityLabel="Show QR code"
+                  testID="contact-profile-qr-button"
+                >
+                  <QrCode size={20} color={colors.brandPink} />
+                </TouchableOpacity>
+              )}
+              {contact.lightningAddress && (
+                <TouchableOpacity
+                  style={styles.actionIconButton}
+                  onPress={handleZap}
+                  accessibilityLabel="Zap"
+                  testID="contact-profile-zap-button"
+                >
+                  <Zap size={20} color={colors.brandPink} />
+                </TouchableOpacity>
+              )}
+              {contact.pubkey && (
+                <TouchableOpacity
+                  style={styles.actionIconButton}
+                  onPress={handleMessage}
+                  accessibilityLabel="Message"
+                  testID="contact-profile-message-button"
+                >
+                  <MessageCircle size={20} color={colors.brandPink} />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {showFollowButton && (
+              <TouchableOpacity
+                style={[styles.followButton, following && styles.followingButton]}
+                onPress={handleFollowToggle}
+                disabled={loadingFollow}
+                accessibilityLabel={following ? 'Unfollow' : 'Follow'}
+                testID="contact-profile-follow-button"
+              >
+                <Text
+                  style={[styles.followButtonText, following && styles.followingButtonText]}
+                  numberOfLines={1}
+                >
+                  {loadingFollow ? '...' : following ? 'Following' : 'Follow'}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
         <Text style={styles.name} numberOfLines={1}>
@@ -426,59 +486,6 @@ const ContactProfileScreen: React.FC = () => {
             <Copy size={14} color={colors.brandPink} />
           </TouchableOpacity>
         ) : null}
-
-        {/* Primal-style action row: icons flush-left, Follow pill right. */}
-        <View style={styles.actionRow}>
-          <View style={styles.actionIconGroup}>
-            {npub && (
-              <TouchableOpacity
-                style={styles.actionIconButton}
-                onPress={() => setQrSheetOpen(true)}
-                accessibilityLabel="Show QR code"
-                testID="contact-profile-qr-button"
-              >
-                <QrCode size={20} color={colors.brandPink} />
-              </TouchableOpacity>
-            )}
-            {contact.lightningAddress && (
-              <TouchableOpacity
-                style={styles.actionIconButton}
-                onPress={handleZap}
-                accessibilityLabel="Zap"
-                testID="contact-profile-zap-button"
-              >
-                <Zap size={20} color={colors.brandPink} />
-              </TouchableOpacity>
-            )}
-            {contact.pubkey && (
-              <TouchableOpacity
-                style={styles.actionIconButton}
-                onPress={handleMessage}
-                accessibilityLabel="Message"
-                testID="contact-profile-message-button"
-              >
-                <MessageCircle size={20} color={colors.brandPink} />
-              </TouchableOpacity>
-            )}
-          </View>
-
-          {showFollowButton && (
-            <TouchableOpacity
-              style={[styles.followButton, following && styles.followingButton]}
-              onPress={handleFollowToggle}
-              disabled={loadingFollow}
-              accessibilityLabel={following ? 'Unfollow' : 'Follow'}
-              testID="contact-profile-follow-button"
-            >
-              <Text
-                style={[styles.followButtonText, following && styles.followingButtonText]}
-                numberOfLines={1}
-              >
-                {loadingFollow ? '...' : following ? 'Following' : 'Follow'}
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
 
         {/* Description / about. */}
         {contact.about && contact.about.trim().length > 0 && (
@@ -600,54 +607,55 @@ const createStyles = (colors: Palette) =>
     },
     bannerContainer: {
       width: '100%',
-      height: 140,
+      height: 160,
       overflow: 'hidden',
       backgroundColor: colors.brandPinkLight,
-    },
-    bannerSpacer: {
-      width: '100%',
-      height: 16,
     },
     bannerImage: {
       width: '100%',
       height: '100%',
     },
-    avatarContainer: {
-      marginTop: -36,
-      marginLeft: 16,
-      borderRadius: 39,
-      borderWidth: 3,
-      borderColor: colors.surface,
-      overflow: 'hidden',
-      backgroundColor: colors.background,
+    identityRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      paddingHorizontal: 16,
+      marginTop: -48,
+      gap: 12,
     },
-    avatarContainerNoBanner: {
-      marginTop: 8,
-      marginLeft: 16,
-      borderRadius: 39,
+    identityActionsBlock: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingBottom: 6,
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    avatarContainer: {
+      borderRadius: 51,
       borderWidth: 3,
       borderColor: colors.surface,
       overflow: 'hidden',
       backgroundColor: colors.background,
     },
     avatar: {
-      width: 72,
-      height: 72,
-      borderRadius: 36,
+      width: 96,
+      height: 96,
+      borderRadius: 48,
     },
     avatarDefault: {
-      width: 72,
-      height: 72,
-      borderRadius: 36,
+      width: 96,
+      height: 96,
+      borderRadius: 48,
       backgroundColor: colors.background,
       justifyContent: 'center',
       alignItems: 'center',
     },
     name: {
-      fontSize: 22,
+      fontSize: 24,
       fontWeight: '700',
       color: colors.textHeader,
-      marginTop: 10,
+      marginTop: 12,
       paddingHorizontal: 16,
     },
     nip05: {
@@ -706,13 +714,6 @@ const createStyles = (colors: Palette) =>
       fontSize: 14,
       fontWeight: '600',
       color: colors.white,
-    },
-    actionRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingHorizontal: 16,
-      marginTop: 16,
     },
     actionIconGroup: {
       flexDirection: 'row',
