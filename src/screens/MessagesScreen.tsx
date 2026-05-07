@@ -169,20 +169,35 @@ const MessagesScreen: React.FC = () => {
   // for any wraps that arrive while the user was inside a group.
   const dmInboxLastRefreshAt = useRef<number>(0);
   const DM_INBOX_REFRESH_TTL_MS = 30_000;
+  // Aborts the in-flight refreshDmInbox when the user leaves Messages, so the NIP-17 unwrap loop releases the JS thread quickly instead of grinding through hundreds of cached wraps after blur. See #412 for the perceived "tabs feel locked during refresh" symptom.
+  const refreshAbortRef = useRef<AbortController | null>(null);
+  const newRefreshSignal = useCallback((): AbortSignal => {
+    refreshAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    refreshAbortRef.current = ctrl;
+    return ctrl.signal;
+  }, []);
   // Force-refresh the inbox whenever the effective enforcement flips so all data-layer paths re-apply.
   useEffect(() => {
     if (!isLoggedIn) return;
     if (lastAppliedEnforceRef.current === enforceFollowingOnly) return;
     lastAppliedEnforceRef.current = enforceFollowingOnly;
-    refreshDmInbox({ force: true, includeNonFollows: !enforceFollowingOnly });
-  }, [enforceFollowingOnly, isLoggedIn, refreshDmInbox]);
+    refreshDmInbox({
+      force: true,
+      includeNonFollows: !enforceFollowingOnly,
+      signal: newRefreshSignal(),
+    });
+  }, [enforceFollowingOnly, isLoggedIn, refreshDmInbox, newRefreshSignal]);
   useFocusEffect(
     useCallback(() => {
       if (!isLoggedIn) return;
       const handle = InteractionManager.runAfterInteractions(() => {
         if (Date.now() - dmInboxLastRefreshAt.current >= DM_INBOX_REFRESH_TTL_MS) {
           dmInboxLastRefreshAt.current = Date.now();
-          refreshDmInbox({ includeNonFollows: !enforceFollowingOnly });
+          refreshDmInbox({
+            includeNonFollows: !enforceFollowingOnly,
+            signal: newRefreshSignal(),
+          });
         }
 
         const PREFETCH_TTL_MS = 30_000;
@@ -222,8 +237,13 @@ const MessagesScreen: React.FC = () => {
           // user-visible regression.
         });
       });
-      return () => handle.cancel();
-    }, [isLoggedIn, refreshDmInbox, contacts, enforceFollowingOnly]),
+      return () => {
+        handle.cancel();
+        // Abort an in-flight unwrap loop on tab blur so the JS thread isn't busy decrypting wraps the user no longer needs to see right now. The next focus will re-trigger refresh subject to the 30 s TTL gate.
+        refreshAbortRef.current?.abort();
+        refreshAbortRef.current = null;
+      };
+    }, [isLoggedIn, refreshDmInbox, contacts, enforceFollowingOnly, newRefreshSignal]),
   );
 
   const followPubkeys = useMemo(() => {
@@ -350,11 +370,18 @@ const MessagesScreen: React.FC = () => {
     // UI stuck in the "refreshing" spinner state.
     try {
       await Promise.all([refreshContacts(), refreshProfile({ force: true })]);
-      await refreshDmInbox({ force: true, includeNonFollows: !enforceFollowingOnly });
+      await refreshDmInbox({
+        force: true,
+        includeNonFollows: !enforceFollowingOnly,
+        signal: newRefreshSignal(),
+      });
+    } catch (err) {
+      // AbortError is expected when the user navigates away mid-refresh — swallow silently and let the next focus re-trigger as needed. Other errors bubble through; the finally block still resets the spinner.
+      if ((err as Error)?.name !== 'AbortError') throw err;
     } finally {
       setRefreshing(false);
     }
-  }, [refreshContacts, refreshDmInbox, refreshProfile, enforceFollowingOnly]);
+  }, [refreshContacts, refreshDmInbox, refreshProfile, enforceFollowingOnly, newRefreshSignal]);
 
   const handleConversationPress = useCallback(
     (summary: ConversationSummary) => {
