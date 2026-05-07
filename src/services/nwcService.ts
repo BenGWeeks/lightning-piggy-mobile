@@ -156,7 +156,13 @@ export async function connect(
     providers.set(walletId, provider);
     nwcUrls.set(walletId, nwcUrl.trim());
 
-    onEnabled?.();
+    // Guard the consumer callback so a UI-side throw can't unwind into our
+    // catch block and falsely tear down a healthy provider.
+    try {
+      onEnabled?.();
+    } catch (cbErr) {
+      if (__DEV__) console.warn('[NWC] onEnabled callback threw — connection unaffected', cbErr);
+    }
 
     // Try to get initial balance, but don't fail the connection if it times out
     let balance: number | undefined;
