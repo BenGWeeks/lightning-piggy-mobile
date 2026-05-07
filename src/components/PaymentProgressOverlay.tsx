@@ -29,7 +29,12 @@ import { Check, X } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { lightPalette, type Palette } from '../styles/palettes';
 
-export type PaymentProgressState = 'sending' | 'success' | 'error' | 'hidden';
+export type PaymentProgressState =
+  | 'sending'
+  | 'in-flight-extended'
+  | 'success'
+  | 'error'
+  | 'hidden';
 export type PaymentDirection = 'send' | 'receive';
 
 interface Props {
@@ -343,7 +348,7 @@ export default function PaymentProgressOverlay({
         withTiming(0, { duration: 0 }),
         withSpring(1, { damping: 10, stiffness: 220 }),
       );
-    } else if (state === 'sending') {
+    } else if (state === 'sending' || state === 'in-flight-extended') {
       colorProgress.value = 0;
       iconScale.value = 0;
       confettiArmed.value = 0;
@@ -388,6 +393,10 @@ export default function PaymentProgressOverlay({
   } else if (state === 'error') {
     title = 'Payment failed';
     subtitle = humanizedError.message;
+  } else if (state === 'in-flight-extended') {
+    title = 'Still in flight';
+    subtitle =
+      'Lightning payments via bridge nodes can take 1–2 min. The result will appear in your transactions once the network settles.';
   }
 
   // Android expects a stable `onRequestClose` for hardware-back behaviour
@@ -399,6 +408,8 @@ export default function PaymentProgressOverlay({
     if (state === 'sending') return;
     onDismiss();
   };
+
+  const showSpinner = state === 'sending' || state === 'in-flight-extended';
 
   return (
     <Modal
@@ -437,7 +448,7 @@ export default function PaymentProgressOverlay({
         </View>
 
         <Animated.View style={[styles.card, cardAnimatedStyle]}>
-          {state === 'sending' && (
+          {showSpinner && (
             <ActivityIndicator size="large" color={colors.brandPink} style={styles.iconSlot} />
           )}
           {state === 'success' && (
@@ -492,10 +503,20 @@ export default function PaymentProgressOverlay({
               style={styles.okButton}
               onPress={onDismiss}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              accessibilityLabel="Dismiss payment confirmation"
+              accessibilityLabel={
+                state === 'in-flight-extended'
+                  ? 'Continue in background'
+                  : 'Dismiss payment confirmation'
+              }
               testID="payment-overlay-ok"
             >
-              <Text style={styles.okButtonText}>{state === 'error' ? 'Dismiss' : 'OK'}</Text>
+              <Text style={styles.okButtonText}>
+                {state === 'in-flight-extended'
+                  ? 'Continue in background'
+                  : state === 'error'
+                    ? 'Dismiss'
+                    : 'OK'}
+              </Text>
             </TouchableOpacity>
           ) : onCancel ? (
             <TouchableOpacity
