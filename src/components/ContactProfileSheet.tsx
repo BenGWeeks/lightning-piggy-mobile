@@ -29,6 +29,7 @@ import { useNostr } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import FriendPickerSheet, { PickedFriend } from './FriendPickerSheet';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 
 interface ContactData {
   pubkey: string | null;
@@ -67,6 +68,30 @@ const ContactProfileSheet: React.FC<Props> = ({
     () => (contact?.pubkey ? npubEncode(contact.pubkey) : null),
     [contact?.pubkey],
   );
+  // Performance instrumentation (dev only). Logged once on the first
+  // render where `visible` is true so perf scripts can time
+  // tap-on-contact -> sheet rendered. Mirrors the FriendsScreen pattern.
+  const firstRenderLogged = useRef(false);
+  const visibleSinceMs = useRef<number | null>(null);
+  // Stamp the visibleSince timestamp + emit the first-render marker in an
+  // effect (not during render) so we don't mutate a ref during render and
+  // stay friendly to concurrent rendering / StrictMode double-invocation.
+  useEffect(() => {
+    if (!visible) {
+      // Reset on close so a re-open re-times the next first render.
+      visibleSinceMs.current = null;
+      firstRenderLogged.current = false;
+      return;
+    }
+    if (visibleSinceMs.current === null) {
+      visibleSinceMs.current = Date.now();
+    }
+    if (!__DEV__) return;
+    if (firstRenderLogged.current) return;
+    firstRenderLogged.current = true;
+    const since = visibleSinceMs.current ?? Date.now();
+    console.log(`[Perf] ContactProfileSheet first render: ${Date.now() - since}ms from visible`);
+  }, [visible]);
   const { contacts, followContact, unfollowContact, sendDirectMessage, relays } = useNostr();
   const [following, setFollowing] = useState(false);
   const [loadingFollow, setLoadingFollow] = useState(false);
@@ -268,7 +293,7 @@ const ContactProfileSheet: React.FC<Props> = ({
       <BottomSheetView style={styles.content}>
         {/* Banner with handle overlay */}
         <View style={styles.bannerContainer}>
-          {contact.banner ? (
+          {contact.banner && isSupportedImageUrl(contact.banner) ? (
             <Image source={{ uri: contact.banner }} style={styles.bannerImage} cachePolicy="disk" />
           ) : (
             <View style={styles.bannerPlaceholder} />
@@ -278,9 +303,10 @@ const ContactProfileSheet: React.FC<Props> = ({
           </View>
         </View>
 
-        {/* Avatar */}
+        {/* Avatar — pre-filter unsupported URLs (`.svg`, `.heic`, etc.)
+            so BitmapFactory never tries to decode them; see #189. */}
         <View style={styles.avatarContainer}>
-          {contact.picture && !avatarError ? (
+          {contact.picture && !avatarError && isSupportedImageUrl(contact.picture) ? (
             <Image
               source={{ uri: contact.picture }}
               style={styles.avatar}
