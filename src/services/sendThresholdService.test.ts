@@ -101,9 +101,7 @@ describe('initialiseSendThresholdForNewInstall', () => {
 
   it('leaves the key unset for a fresh install (no wallet_list, no onboarding_complete)', async () => {
     await initialiseSendThresholdForNewInstall();
-    await expect(
-      AsyncStorage.getItem(HIGH_VALUE_SEND_THRESHOLD_STORAGE_KEY),
-    ).resolves.toBeNull();
+    await expect(AsyncStorage.getItem(HIGH_VALUE_SEND_THRESHOLD_STORAGE_KEY)).resolves.toBeNull();
     // Subsequent getSendThreshold returns the 10k default.
     await expect(getSendThreshold()).resolves.toBe(DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS);
   });
@@ -123,9 +121,7 @@ describe('initialiseSendThresholdForNewInstall', () => {
   it('treats an empty wallet_list ("[]") as fresh install', async () => {
     await AsyncStorage.setItem('wallet_list', '[]');
     await initialiseSendThresholdForNewInstall();
-    await expect(
-      AsyncStorage.getItem(HIGH_VALUE_SEND_THRESHOLD_STORAGE_KEY),
-    ).resolves.toBeNull();
+    await expect(AsyncStorage.getItem(HIGH_VALUE_SEND_THRESHOLD_STORAGE_KEY)).resolves.toBeNull();
   });
 
   it('is idempotent — does not overwrite an existing user choice', async () => {
