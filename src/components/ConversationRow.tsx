@@ -6,10 +6,15 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import type { ConversationSummary } from '../utils/conversationSummaries';
 import { conversationPreview, formatConversationTimestamp } from '../utils/conversationSummaries';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 
 interface Props {
   summary: ConversationSummary;
-  onPress?: () => void;
+  // Receives `summary` so the parent can pass a single stable handler
+  // reference across all rows (no fresh arrow per render). Without this,
+  // React.memo's prop comparison saw a new onPress every render and
+  // re-rendered the row even when its data hadn't changed (#300 follow-up).
+  onPress?: (summary: ConversationSummary) => void;
 }
 
 const ConversationRow: React.FC<Props> = ({ summary, onPress }) => {
@@ -20,14 +25,22 @@ const ConversationRow: React.FC<Props> = ({ summary, onPress }) => {
     setAvatarError(false);
   }, [summary.picture]);
 
-  const showImage = !!summary.picture && !avatarError;
+  // Pre-filter unsupported URLs (`.svg`, `.heic`, etc.) — see #189.
+  const showImage = !!summary.picture && !avatarError && isSupportedImageUrl(summary.picture);
   const timestamp = formatConversationTimestamp(summary.lastActivityAt);
   const preview = conversationPreview(summary);
+  // Bind the row's summary into the parent handler at the leaf so the
+  // <TouchableOpacity> sees a stable callback per render, while the
+  // parent still hands us a single handler.
+  const handlePress = useMemo(
+    () => (onPress ? () => onPress(summary) : undefined),
+    [onPress, summary],
+  );
 
   return (
     <TouchableOpacity
       style={styles.container}
-      onPress={onPress}
+      onPress={handlePress}
       activeOpacity={onPress ? 0.6 : 1}
       accessibilityLabel={`Conversation with ${summary.name}`}
       testID={`conversation-row-${summary.id}`}

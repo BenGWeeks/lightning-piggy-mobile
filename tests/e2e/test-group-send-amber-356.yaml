@@ -1,0 +1,83 @@
+appId: com.lightningpiggy.app.dev
+name: Group send via Amber — #356 regression (no Send-failed alert)
+---
+# Regression coverage for issue #356.
+#
+# Pre-fix symptom (PR #357 fixes it): tapping Send in a group thread
+# while logged in via Amber routed the kind-13 seal sign_event Intent
+# to Amber's main "Applications" launcher instead of its NIP-59 Sign
+# Event sheet, because we were stripping the `pubkey` field from the
+# seal JSON. The user backed out, LP raised:
+#   "Send failed - User cancelled the Amber request"
+#
+# Post-fix: the Intent reaches Amber's sign prompt; with blanket
+# permissions ("Approve basic actions") pre-granted by
+# test-amber-import-key.yaml the per-recipient signEvent +
+# nip44Encrypt round-trips resolve silently via Amber's
+# ContentResolver fast-path; the message lands in the thread.
+#
+# Prerequisites (same as test-group-send-via-amber.yaml):
+#   - test-amber-import-key.yaml has run (Amber holds MAESTRO_NSEC,
+#     "Approve basic actions" was selected).
+#   - test-3way-group-create-as-big.yaml has run as the same identity
+#     so a group named "Triad" exists and is cached locally.
+#   - Metro is serving the branch with the #357 fix on port 8081 and
+#     the LP dev install has reloaded against it.
+#
+# Run:
+#   source .env && \
+#     maestro test -e MAESTRO_NSEC="$MAESTRO_NSEC" \
+#     tests/e2e/test-group-send-amber-356.yaml
+
+- runFlow: test-login-amber.yaml
+
+# Friends → Groups → Triad
+- tapOn:
+    id: 'tab-friends'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'groups-button'
+- waitForAnimationToEnd:
+    timeout: 3000
+- extendedWaitUntil:
+    visible:
+      text: 'Triad'
+    timeout: 30000
+- tapOn:
+    text: 'Triad'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Compose a unique message so re-runs don't collide with cached history
+- tapOn:
+    id: 'group-message-input'
+- inputText: 'amber-356-${maestroRunId}'
+- hideKeyboard
+- takeScreenshot:
+    path: /tmp/356-stage1-composed
+- tapOn:
+    id: 'group-send-button'
+
+# Allow Amber's ContentResolver fast-path to resolve all the
+# per-recipient round-trips (sub-second with blanket permissions).
+- waitForAnimationToEnd:
+    timeout: 8000
+
+# THE #356 ASSERTIONS — pre-fix, the Send tap above produced this
+# BrandedAlert. Post-fix it must not appear.
+- assertNotVisible:
+    text: 'Send failed'
+- assertNotVisible:
+    text: 'User cancelled the Amber request'
+
+# AND the message must actually land in the thread. The composer
+# clears on success, and the rumor we just signed comes back through
+# the live subscription (or the immediate optimistic insert) and
+# renders as a row in the conversation.
+- extendedWaitUntil:
+    visible:
+      text: 'amber-356-${maestroRunId}'
+    timeout: 15000
+- takeScreenshot:
+    path: /tmp/356-stage2-sent

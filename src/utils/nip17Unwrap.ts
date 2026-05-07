@@ -209,6 +209,29 @@ export function partnerFromRumor(
 }
 
 /**
+ * Extract the value of the rumor's `subject` tag (NIP-14 / NIP-17 spec
+ * "the current name/topic of the conversation"), or null if absent /
+ * empty / non-string. Trimmed; subjects that whitespace-collapse to
+ * empty are returned as null so callers can use `?? fallback` cleanly.
+ *
+ * Used by the spec-aligned group-routing fallback: when a kind-14
+ * arrives from a foreign client (Amethyst, 0xchat) that doesn't know
+ * about LP's kind-30200 group-state event, the `subject` is the only
+ * source of truth for the conversation's name.
+ */
+export function subjectFromRumor(rumor: DecodedRumor): string | null {
+  for (const t of rumor.tags) {
+    if (t[0] !== 'subject') continue;
+    const v = t[1];
+    if (typeof v !== 'string') continue;
+    const trimmed = v.trim();
+    if (trimmed.length === 0) continue;
+    return trimmed;
+  }
+  return null;
+}
+
+/**
  * Extract the full set of pubkeys participating in a kind-14 rumor.
  * Includes the sender (`rumor.pubkey`) plus every well-formed `p` tag
  * value, lowercased and deduplicated.

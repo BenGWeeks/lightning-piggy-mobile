@@ -80,7 +80,17 @@ install you don't want to lose data on):
 #
 # EXPO_NO_DOCTOR=1 skips the pre-flight version-compatibility checker
 # which is noisy on minor-mismatch deps and not relevant to signing.
-EXPO_NO_DOCTOR=1 eas build --local --platform android --profile production --non-interactive
+#
+# TMPDIR="$HOME/eas-tmp" is REQUIRED on hosts with /tmp on tmpfs
+# (default Ubuntu/Debian setup, 12 GB cap). The EAS local builder
+# generates ~9 GB of native-lib intermediates during the multi-arch
+# APK assembly (arm64 + armv7 + x86 + x86_64), and Gradle crashes with
+# `UncheckedIOException: Could not add entry ... to cache fileHashes.bin`
+# the moment tmpfs hits 100 %. Pointing TMPDIR at disk-backed storage
+# gives Gradle the ~10 GB of headroom it needs. ($HOME instead of ~ is
+# unambiguous across shells / non-interactive runners.)
+mkdir -p "$HOME/eas-tmp"
+TMPDIR="$HOME/eas-tmp" EXPO_NO_DOCTOR=1 eas build --local --platform android --profile production --non-interactive
 
 # Install over the existing app — preserves user data (Nostr nsec,
 # wallet pairings, conversation cache).
@@ -89,6 +99,15 @@ adb -s <serial> install -r android/app/build/outputs/apk/release/app-release.apk
 
 Build time: ~10-15 min fresh, ~2-3 min on a warm gradle cache. No
 cloud queue, no Metro, no fresh-login required on the device.
+
+If the build fails partway with `UncheckedIOException: Could not add
+entry ... fileHashes.bin` (or any I/O error inside the Gradle cache),
+check `df -h /tmp` first — if it's at or near 100 % the
+`TMPDIR="$HOME/eas-tmp"` knob above is what you're missing. The
+`$HOME/eas-tmp` working tree can be deleted between builds
+(`rm -rf "$HOME/eas-tmp"`) to reclaim disk; the next `mkdir -p` and
+Gradle will re-create everything (including hidden entries like
+`.gradle`) before the next build.
 
 ===== Verify the install actually committed
 
@@ -223,15 +242,13 @@ The right command depends on which case you're in.
 
 ===== Case 1 (recommended): keep existing data on an EAS-built device
 
-Use `eas build --local --profile production`. This runs **EAS's exact production pipeline** on your machine (instead of in the cloud) — it fetches the EAS upload keystore down at build time, runs prebuild against `appVersionSource: "remote"` so versionCode pulls from the EAS counter, and emits an APK that the device treats as a normal upgrade of the existing install:
+Use `eas build --local --profile production`. This runs **EAS's production pipeline** on your machine — it fetches the EAS upload keystore at build time so the APK signature matches your existing install, and emits a sideload-able `.apk`:
 
 [source,bash]
 ----
 # Builds an .apk in the repo root (e.g. build-1733864000123.apk) without
-# installing. EAS's autoIncrement bumps the remote versionCode by one and
-# tags this build with it — so the artifact is always strictly higher
-# than whatever's on the device. Build runs on this machine; only the
-# keystore + counter come from EAS.
+# installing. The signing keystore comes from EAS — that's what makes
+# the APK a valid upgrade for an existing EAS-installed app.
 eas build --local --profile production --platform android --non-interactive
 
 # Then sideload to the Pixel. `adb -s` takes the adb serial here (NOT
@@ -241,9 +258,22 @@ adb -s <serial> install -r build-*.apk
 
 Side-loading this way preserves all app data (`/data/data/com.lightningpiggy.app/` is left untouched on upgrade). Wallets, Nostr login, message history all survive.
 
+**Important: bump `versionCode` in `app.config.ts` *before* the build.** `appVersionSource: "remote"` in `eas.json` only affects EAS *cloud* builds — `eas build --local` reads `versionCode` directly from `app.config.ts`, just like `expo run:android --variant release` does. So if the cloud counter has run ahead of the local floor (which it always does after a few cloud releases), the locally-built APK gets a number behind the device's installed version and `adb install -r` rejects it:
+
+[source]
+----
+INSTALL_FAILED_VERSION_DOWNGRADE: Update version code N is older than current M
+----
+
+Workflow:
+
+. Check the latest cloud-built versionCode: `eas build:list --platform android --status finished --limit 1`
+. Bump `android.versionCode` in `app.config.ts` to **(latest-EAS) + 1** (commit this — the bump persists harmlessly across releases since the cloud pipeline ignores it)
+. Run `eas build --local --profile production` and sideload the resulting APK
+
 Caveats:
-* Burns one EAS build counter increment per local prod build. Costs nothing financially (local builds don't count against the EAS plan), but the published `versionCode` numbers stop being a clean count of cloud-built APKs.
 * First run can be slow — eas-cli has to fetch the keystore + run a clean Gradle build (~5–10 min). Subsequent runs are incremental.
+* Local builds do *not* burn the EAS cloud counter; only cloud builds (`eas build --profile production` without `--local`) increment that.
 
 ===== Case 2: standalone local prod build (fresh device or OK to wipe data)
 
@@ -256,7 +286,7 @@ INSTALL_FAILED_UPDATE_INCOMPATIBLE: Existing package signatures do not match new
 
 The `-r -d` flags don't bypass this; it's a security guarantee, not a flag. Either `adb uninstall com.lightningpiggy.app` first (wipes data), or use Case 1.
 
-A second gotcha: the locally-built versionCode does not auto-increment. The local pipeline reads `android.versionCode` from `app.config.ts` (whose default is `1`) — so the device under test, which is usually running a high-20s EAS-built versionCode, rejects the install:
+A second gotcha: the locally-built versionCode does not auto-increment. The local pipeline reads `android.versionCode` from `app.config.ts` directly — so a device under test that's running an EAS-built versionCode well ahead of the local floor rejects the install:
 
 [source]
 ----
@@ -315,7 +345,7 @@ eas build:list --platform android --status finished --limit 1 \
 ==== Cutting a release
 
 . Go to https://github.com/BenGWeeks/lightning-piggy-mobile/releases → *Draft a new release*.
-. Choose a tag like `v1.0.1` (create on publish) targeted at `main`. **The tag is the source of truth for the user-visible version** — the workflow strips the leading `v` and sets `version` in `app.config.ts` (which becomes iOS `CFBundleShortVersionString` and Android `versionName`). Pre-release suffixes (e.g. `v1.0.0-rc1`) are stripped to keep the store-facing version a strict `X.Y.Z`.
+. Choose a tag like `v1.0.1` (create on publish) targeted at `main`. **The tag is the source of truth for the user-visible version** — the workflow strips the leading `v` and writes it into `package.json` via `npm version --no-git-tag-version`. `app.config.ts` reads `version: pkg.version`, so iOS `CFBundleShortVersionString`, Android `versionName`, and the in-app version label (drawer + About screen, via `src/utils/appVersion.ts`) all flow from that single value. Pre-release suffixes (e.g. `v1.0.0-rc1`) are stripped to keep the store-facing version a strict `X.Y.Z`.
 . Write release notes, click *Publish release*.
 . Watch *Actions → Release*. When it finishes, the Release page has the APK and PDF attached; TestFlight has the iOS build.
 
@@ -449,6 +479,52 @@ With `ascApiKey*` + `ascAppId` populated in `eas.json`, the submit is headless �
 
 CAUTION: The App Store Connect *app-record creation* step still requires interactive Apple ID login (API keys cannot create new apps). Do the one-time record creation in the browser, not via EAS, and you avoid the Apple ID flow entirely afterwards.
 
+==== TestFlight "What to Test" automation
+
+`eas build --auto-submit` ships a build to TestFlight with a blank *What to Test* field — `eas.json` has no slot for it (as of EAS CLI 18) and the underlying `eas submit` does not expose the App Store Connect `betaBuildLocalizations` endpoint either. The release workflow's `set-testflight-whats-new` job fills it in post-submit, sourcing the notes from `docs/RELEASE_NOTES_NEXT.md`.
+
+===== How contributors update the notes
+
+When opening a PR with a user-visible change, append a one-line bullet to `docs/RELEASE_NOTES_NEXT.md` describing what a tester should look for. Pure refactors / CI / docs PRs do not need an entry. The release workflow:
+
+. Reads bullets from `docs/RELEASE_NOTES_NEXT.md` (deduped, capped at 3 900 chars to stay under TestFlight's 4 000-char limit).
+. Falls back to `feat:` / `fix:` / `perf:` commit subjects since the previous tag if the file is empty.
+. Calls App Store Connect's `PATCH /v1/betaBuildLocalizations/{id}` to set the iOS build's `whatsNew` localisation (`en-US`).
+. Archives the bullets into `docs/CHANGELOG.md` and resets `docs/RELEASE_NOTES_NEXT.md` to the placeholder by copying `docs/RELEASE_NOTES_NEXT.template.md`. The reset commit is pushed to `main` with `[skip ci]` so it doesn't kick off another CI run.
+
+If the release tagger forgot to populate the file and no qualifying commits are found, the workflow defaults to `Bug fixes and improvements.` rather than leaving the field blank.
+
+===== One-time GitHub Secrets setup
+
+The job needs the App Store Connect API key (the same `.p8` EAS uses for `eas submit` — but the `.p8` itself lives only on EAS's server, so you have to register it as a GitHub secret too). Add these three secrets at *Settings → Secrets and variables → Actions* on the repo:
+
+[cols="1,3", options="header"]
+|===
+| Secret | Value
+
+| `ASC_API_KEY_ID`
+| The 10-character key identifier from App Store Connect → *Users and Access* → *Integrations* → *Team Keys* (e.g. `ABC1234567`). Same value as `ascApiKeyId` in the `eas.json` snippet above.
+
+| `ASC_API_KEY_ISSUER_ID`
+| The team's issuer UUID, shown above the key list on the same page (e.g. `00000000-0000-0000-0000-000000000000`). Same as `ascApiKeyIssuerId`.
+
+| `ASC_API_KEY_P8`
+| The full PEM contents of the `AuthKey_XXXXXXXXXX.p8` file, including the `-----BEGIN PRIVATE KEY-----` / `-----END PRIVATE KEY-----` lines. Paste the file contents verbatim into the secret value box; GitHub preserves the newlines.
+|===
+
+The numeric App ID (`ASC_APP_ID`) is hard-coded in the workflow because it matches `ascAppId` in `eas.json` and never changes for a given app record.
+
+If any of the three secrets is unset, the job emits a `::warning` and skips silently — the release still succeeds, you just have to fill in *What to Test* by hand for that build via App Store Connect.
+
+===== Why a separate ASC API call (not just an EAS flag)
+
+`eas submit` uses Apple's `pilot` (fastlane) under the hood, which does accept a `changelog` argument — but EAS doesn't surface it through `eas.json` or `eas submit --changelog`. Until Expo wires that through, the post-submit ASC PATCH is the cleanest option that works with `--auto-submit`. Two pieces of code do the work:
+
+* `scripts/build-testflight-changelog.mjs` — assembles the changelog string (notes file → git fallback → default).
+* `scripts/asc-set-whats-new.mjs` — generates an ES256-signed JWT, polls `/v1/builds` until the just-uploaded build appears in App Store Connect (Apple typically takes 5–15 min after EAS reports the submit complete), then PATCHes the localisation.
+
+The polling loop in the second script is bounded by `ASC_MAX_WAIT_SECS` (default 900 s = 15 min). If Apple's processing queue is unusually backed up and the build hasn't appeared in time, the script exits 0 with a warning so the release isn't gated on Apple's queue depth — re-run the same script locally with the same env vars to fill it in once the build is visible.
+
 ==== Local build on macOS (skip the EAS queue)
 
 The free-tier EAS build queue can be slow (60–180 min). A local build on a macOS machine is usually 10–20 minutes. Requires Xcode, Homebrew CocoaPods, and Fastlane installed; EAS-CLI handles the rest.
@@ -491,9 +567,9 @@ Ad-hoc distribution installs a signed IPA onto a specific iPhone without going t
 * **Identifier type:** App IDs → App
 * **Description:** `Lightning Piggy Preview`
 * **Bundle ID (Explicit):** `com.lightningpiggy.app.preview`
-* Leave capabilities at defaults.
+* **Capabilities:** match the production bundle ID's capability set. Today the only iOS-side capability the app declares (per `ios/.../*.entitlements`) is **NFC Tag Reading** — tick that box. Other permissions (camera, contacts, microphone, photos) are handled via Info.plist usage strings, not capabilities, so they don't need toggling here.
 +
-(The production bundle ID gets auto-registered by EAS on the first iOS build, but the preview variant needs manual registration because the ad-hoc build path doesn't auto-create it.)
+(The production bundle ID gets auto-registered by EAS on the first iOS build, but the preview variant needs manual registration because the ad-hoc build path doesn't auto-create it. Missing the NFC capability surfaces as a confusing fastlane failure mid-build: `Provisioning profile ... doesn't include the NFC Tag Reading capability` / `... doesn't include the com.apple.developer.nfc.readersession.formats entitlement`. Fix is to enable it on the identifier and re-run the build — EAS auto-regenerates the provisioning profile.)
 
 . Register each tester's device UDID once via `eas device:create`:
 +

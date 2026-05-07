@@ -23,7 +23,13 @@ npm run format
 
 === Unit Testing with Jest
 
-Unit tests run in Node (jsdom) via https://jestjs.io[Jest] with the `jest-expo` preset and https://callstack.github.io/react-native-testing-library/[`@testing-library/react-native`]. Test files live next to source as `*.test.ts` / `*.test.tsx`, or under `tests/unit/`.
+Unit tests run in Node (jsdom) via https://jestjs.io[Jest] with the `jest-expo` preset and https://callstack.github.io/react-native-testing-library/[`@testing-library/react-native`].
+
+**Test files MUST live next to the source as `<file>.test.ts` / `<file>.test.tsx`** (co-located convention). The centralised `tests/unit/` directory is NOT scanned — `jest.config.js`'s `testMatch` is `<rootDir>/src/**/*.test.{ts,tsx}` only. Co-location surfaces missing tests at a glance, keeps tests with their subject when files move, and shortens the relative imports.
+
+For cross-cutting tests (touching multiple files), put them next to the file whose API the test most directly exercises. Example: `src/services/nostrService.test.ts` covers the outgoing wire format; `src/utils/nip17Unwrap.test.ts` covers the incoming parser; `src/utils/syntheticGroupId.test.ts` covers the room-key derivation — even though all three relate to NIP-17 interop.
+
+**Coverage scope:** `src/services`, `src/utils`, `src/contexts` only. Components are excluded (they're tested via Maestro pixel/flow tests instead — mocking Reanimated + bottom-sheet + `expo-image` for unit tests is high-effort, low-payoff).
 
 ==== Running Locally
 
@@ -166,6 +172,45 @@ Instead, always use accessibility-based selectors:
 |===
 
 If a component is missing an accessibility label, add one to the source code rather than working around it with coordinates.
+
+===== Composable Subflows
+
+Subflows are reusable Maestro flows whose filenames are prefixed with an underscore (e.g. `_subflow-login-as.yaml`). They aren't picked up by `maestro test tests/e2e/` directly — callers `runFlow:` them as a step inside a regular test flow. Use them whenever multiple tests share a setup walk.
+
+Available subflows:
+
+[cols="2,3", options="header"]
+|===
+| Subflow | Purpose
+
+| `_subflow-login-as.yaml`
+| Force-stop the app, sign out any prior session, then sign in via the nsec passed in `MAESTRO_NSEC`. Used by every multi-actor flow.
+
+| `_subflow-seed-test-wallet.yaml`
+| Walk the AddWalletWizard to seed a test wallet so wallet-conditional tests (Send, Receive, Transfer, cached-tx, etc.) don't have to re-implement the wizard inline. Picks the wallet type based on which env var is non-empty:
+
+`MAESTRO_TEST_NWC` → Lightning (NWC) wallet via connection string. +
+`MAESTRO_TEST_MNEMONIC` → On-chain hot wallet via 12/24-word seed phrase. *Requires dev mode enabled in the app* — run `test-dev-mode.yaml` once first.
+
+Required `WALLET_NAME` sets the alias shown on the wallet card. The flow asserts that alias appears in the carousel before returning. Maestro's `${VAR}` interpolation has no robust default-fallback across versions, so an unset value leaves the literal `${WALLET_NAME}` in the alias field and the visibility assertion never matches — pass it explicitly via `runFlow.env`.
+
+|===
+
+Example invocation from a wallet-conditional test:
+
+[source,yaml]
+----
+- runFlow: _subflow-login-as.yaml
+- runFlow:
+    file: _subflow-seed-test-wallet.yaml
+    env:
+      MAESTRO_TEST_NWC: ${MAESTRO_NWC1}
+      WALLET_NAME: "Seeded NWC"
+
+# ... continue with wallet-dependent assertions ...
+----
+
+The required env vars (`MAESTRO_TEST_NWC`, `MAESTRO_TEST_MNEMONIC`) live alongside the rest of the Maestro fixtures in `.env.example`. Leave them blank in your local `.env` if you don't run wallet-conditional flows.
 
 ===== Accessibility Conventions
 
