@@ -175,25 +175,12 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
         contentContainerStyle={styles.scrollContent}
         scrollIndicatorInsets={{ right: 1 }}
       >
-        {/* Header — Primal-style: large active avatar + small switcher
-            avatars + ⋯ button on the same row, then display name + npub
-            below. The small avatars are tappable shortcuts; the ⋯ opens
-            the full AccountSwitcherSheet (#288). */}
+        {/* Header — Primal-style: switcher avatars stack from the left,
+            active avatar sits flush-right next to the ⋯ button. Small
+            avatars are sized so 4-5 fit before the row hits the menu;
+            ⋯ opens AccountSwitcherSheet for the full list. (#288) */}
         <View style={styles.header}>
           <View style={styles.headerAvatarRow}>
-            <View style={styles.avatarLarge}>
-              {profile?.picture && isSupportedImageUrl(profile.picture) ? (
-                <Image
-                  source={{ uri: profile.picture }}
-                  style={styles.avatarImage}
-                  cachePolicy="disk"
-                />
-              ) : (
-                <View style={[styles.avatarImage, styles.avatarPlaceholder]}>
-                  <UserRound size={40} color={colors.textBody} strokeWidth={1.75} />
-                </View>
-              )}
-            </View>
             {isLoggedIn && otherIdentities.length > 0 && (
               <View style={styles.switcherAvatars}>
                 {otherIdentities.map((id) => {
@@ -216,7 +203,7 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
                         />
                       ) : (
                         <View style={[styles.avatarSmallImage, styles.avatarPlaceholder]}>
-                          <UserRound size={18} color={colors.textBody} strokeWidth={1.75} />
+                          <UserRound size={14} color={colors.textBody} strokeWidth={1.75} />
                         </View>
                       )}
                     </TouchableOpacity>
@@ -224,6 +211,21 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
                 })}
               </View>
             )}
+            {/* Active identity flush-right next to ⋯ — most-prominent slot
+                adjacent to the menu trigger. */}
+            <View style={[styles.avatarLarge, styles.avatarLargeRight]}>
+              {profile?.picture && isSupportedImageUrl(profile.picture) ? (
+                <Image
+                  source={{ uri: profile.picture }}
+                  style={styles.avatarImage}
+                  cachePolicy="disk"
+                />
+              ) : (
+                <View style={[styles.avatarImage, styles.avatarPlaceholder]}>
+                  <UserRound size={28} color={colors.textBody} strokeWidth={1.75} />
+                </View>
+              )}
+            </View>
             {isLoggedIn && (
               <TouchableOpacity
                 style={styles.moreButton}
@@ -367,38 +369,41 @@ const createStyles = (colors: Palette) =>
       marginBottom: 12,
     },
     avatarLarge: {
-      width: 64,
-      height: 64,
-      borderRadius: 32,
+      width: 48,
+      height: 48,
+      borderRadius: 24,
       overflow: 'hidden',
       backgroundColor: 'rgba(0,0,0,0.05)',
     },
+    avatarLargeRight: {
+      // Active avatar sits flush-right adjacent to the ⋯ button.
+      marginRight: 8,
+    },
     avatarImage: {
-      width: 64,
-      height: 64,
-      borderRadius: 32,
+      width: 48,
+      height: 48,
+      borderRadius: 24,
     },
     switcherAvatars: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 6,
-      // Push the small avatars flush-right (just to the left of the ⋯
-      // button) instead of stacking next to the large avatar — gives
-      // the active identity visual breathing room. #288 design tweak.
-      marginLeft: 'auto',
-      marginRight: 8,
+      gap: 4,
+      // Switcher avatars flow from the left and push the active+menu pair
+      // flush-right via marginRight: 'auto'. Hugs the screen edge so 4-5
+      // small avatars fit on a typical device width.
+      marginRight: 'auto',
     },
     avatarSmall: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
+      width: 28,
+      height: 28,
+      borderRadius: 14,
       overflow: 'hidden',
       backgroundColor: 'rgba(0,0,0,0.05)',
     },
     avatarSmallImage: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
+      width: 28,
+      height: 28,
+      borderRadius: 14,
     },
     moreButton: {
       width: 36,
