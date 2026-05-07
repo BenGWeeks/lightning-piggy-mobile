@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import { Alert } from '../../components/BrandedAlert';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { X as XIcon } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
@@ -109,11 +108,9 @@ const NostrScreen: React.FC = () => {
     [removeUserRelay],
   );
   const [blossomServer, setBlossomServerInput] = useState(DEFAULT_BLOSSOM_SERVER);
-  const [amberNip17Enabled, setAmberNip17Enabled] = useState(false);
 
   useEffect(() => {
     getBlossomServer().then(setBlossomServerInput);
-    AsyncStorage.getItem('amber_nip17_enabled').then((v) => setAmberNip17Enabled(v === 'true'));
   }, []);
 
   const handleBlossomSave = async () => {
@@ -121,14 +118,6 @@ const NostrScreen: React.FC = () => {
     setBlossomServerInput(normalized);
     await setBlossomServer(normalized);
   };
-
-  const toggleAmberNip17 = useCallback(() => {
-    setAmberNip17Enabled((prev) => {
-      const next = !prev;
-      AsyncStorage.setItem('amber_nip17_enabled', next ? 'true' : 'false').catch(() => {});
-      return next;
-    });
-  }, []);
 
   const grantAmberNip44Permission = useCallback(async () => {
     if (!profile?.pubkey) throw new Error('No profile pubkey — log in first.');
@@ -259,65 +248,33 @@ const NostrScreen: React.FC = () => {
         server works — e.g. blossom.primal.net or nostr.build.
       </Text>
 
-      {signerType === 'amber' && (
+      {signerType === 'amber' && amberNip44Permission === 'denied' && (
         <>
           <Text style={[sharedAccountStyles.sectionLabel, { marginTop: 24 }]}>
             Encrypted Messages (NIP-17)
           </Text>
-          <View style={sharedAccountStyles.sslRow}>
-            <Text style={sharedAccountStyles.sslLabel}>Enable NIP-17 on Amber</Text>
-            <TouchableOpacity
-              style={[
-                sharedAccountStyles.sslToggle,
-                amberNip17Enabled && sharedAccountStyles.sslToggleActive,
-              ]}
-              onPress={toggleAmberNip17}
-              testID="amber-nip17-toggle"
-              accessibilityLabel="Enable NIP-17 messages on Amber"
-              accessibilityRole="switch"
-              accessibilityState={{ checked: amberNip17Enabled }}
-            >
-              <View
-                style={[
-                  sharedAccountStyles.sslToggleThumb,
-                  amberNip17Enabled && sharedAccountStyles.sslToggleThumbActive,
-                ]}
-              />
-            </TouchableOpacity>
-          </View>
-          <Text style={sharedAccountStyles.fieldHint}>
-            NIP-17 gift-wrapped messages hide sender metadata from relays, but each one requires a
-            NIP-44 decrypt via Amber. When you first enable this, Amber will ask to approve — tap
-            &quot;Remember my choice&quot; so subsequent messages load silently. Messages from
-            people you don&apos;t follow stay hidden.
+          <Text style={[sharedAccountStyles.fieldHint, { color: colors.brandPink }]}>
+            Amber hasn&apos;t granted NIP-44 decrypt permission to this app yet — tap below to grant
+            it. One dialog, then subsequent encrypted messages decrypt silently. Messages from
+            people you don&apos;t follow stay hidden either way.
           </Text>
-          {amberNip17Enabled && amberNip44Permission === 'denied' && (
-            <>
-              <Text
-                style={[sharedAccountStyles.fieldHint, { color: colors.brandPink, marginTop: 8 }]}
-              >
-                Amber hasn&apos;t granted NIP-44 decrypt permission to this app yet — tap the button
-                below to grant it. One dialog, then subsequent messages decrypt silently.
-              </Text>
-              <TouchableOpacity
-                style={[sharedAccountStyles.saveButton, { marginTop: 8 }]}
-                onPress={async () => {
-                  try {
-                    await grantAmberNip44Permission();
-                  } catch (e) {
-                    Alert.alert(
-                      'Amber permission',
-                      e instanceof Error ? e.message : 'Could not grant NIP-44 permission.',
-                    );
-                  }
-                }}
-                accessibilityLabel="Grant Amber NIP-44 permission"
-                testID="amber-nip17-grant"
-              >
-                <Text style={sharedAccountStyles.saveButtonText}>Grant permission in Amber</Text>
-              </TouchableOpacity>
-            </>
-          )}
+          <TouchableOpacity
+            style={[sharedAccountStyles.saveButton, { marginTop: 8 }]}
+            onPress={async () => {
+              try {
+                await grantAmberNip44Permission();
+              } catch (e) {
+                Alert.alert(
+                  'Amber permission',
+                  e instanceof Error ? e.message : 'Could not grant NIP-44 permission.',
+                );
+              }
+            }}
+            accessibilityLabel="Grant Amber NIP-44 permission"
+            testID="amber-nip17-grant"
+          >
+            <Text style={sharedAccountStyles.saveButtonText}>Grant permission in Amber</Text>
+          </TouchableOpacity>
         </>
       )}
     </AccountScreenLayout>

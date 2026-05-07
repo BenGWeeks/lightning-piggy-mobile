@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useRef, useDeferredValue } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useDeferredValue, useEffect } from 'react';
 import { View, Text, Image, TouchableOpacity, ScrollView, TextInput } from 'react-native';
 import TabHeader from '../components/TabHeader';
 import { useFocusEffect } from '@react-navigation/native';
@@ -38,6 +38,13 @@ const courseMatches = (course: Course, lowerQuery: string): boolean => {
 
 const LearnScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
+  // First-render marker: fires once per mount when the first commit lands. Used by scripts/perf-startup.sh to measure tap-to-render latency for tab-learn.
+  const learnRenderLoggedRef = useRef(false);
+  useEffect(() => {
+    if (learnRenderLoggedRef.current) return;
+    learnRenderLoggedRef.current = true;
+    console.log(`[Perf] LearnScreen first render`);
+  }, []);
   const styles = useMemo(() => createLearnScreenStyles(colors), [colors]);
   const [progress, setProgress] = useState<LearnProgress>({ completedMissions: [] });
   const [search, setSearch] = useState('');
