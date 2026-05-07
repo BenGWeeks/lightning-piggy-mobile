@@ -382,8 +382,11 @@ const createStyles = (colors: Palette) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
-      marginLeft: 12,
-      flex: 1,
+      // Push the small avatars flush-right (just to the left of the ⋯
+      // button) instead of stacking next to the large avatar — gives
+      // the active identity visual breathing room. #288 design tweak.
+      marginLeft: 'auto',
+      marginRight: 8,
     },
     avatarSmall: {
       width: 36,
