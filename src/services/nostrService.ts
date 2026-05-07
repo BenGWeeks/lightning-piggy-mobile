@@ -1342,3 +1342,51 @@ export function subscribeInboxDmsForViewer(input: {
     }
   };
 }
+
+// Raw kind-1 note for the friend-feed embed on ContactProfileScreen.
+// Lean shape: just the fields the preview cards actually render.
+export interface RawAuthorNote {
+  id: string;
+  pubkey: string;
+  created_at: number;
+  content: string;
+}
+
+// Subscribe to an author's recent kind-1 notes. Mirrors the
+// subscribeInboxDmsForViewer pattern: returns a cleanup function the
+// caller invokes on unmount. Events stream in via `onEvent` ordered by
+// relay arrival (NOT created_at) — caller is responsible for sorting.
+export function subscribeAuthorNotes(input: {
+  authorPubkey: string;
+  relays: string[];
+  limit?: number;
+  onEvent: (note: RawAuthorNote) => void;
+}): () => void {
+  trackRelays(input.relays);
+  const limit = input.limit ?? 30;
+  const sub = pool.subscribeMany(
+    input.relays,
+    {
+      kinds: [1],
+      authors: [input.authorPubkey],
+      limit,
+    } as Filter,
+    {
+      onevent: (ev: { id: string; pubkey: string; created_at: number; content: string }) => {
+        input.onEvent({
+          id: ev.id,
+          pubkey: ev.pubkey,
+          created_at: ev.created_at,
+          content: ev.content,
+        });
+      },
+    },
+  );
+  return () => {
+    try {
+      sub.close();
+    } catch {
+      // best-effort — sub may already be closed
+    }
+  };
+}
