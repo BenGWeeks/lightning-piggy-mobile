@@ -67,6 +67,30 @@ const ContactProfileSheet: React.FC<Props> = ({
     () => (contact?.pubkey ? npubEncode(contact.pubkey) : null),
     [contact?.pubkey],
   );
+  // Performance instrumentation (dev only). Logged once on the first
+  // render where `visible` is true so perf scripts can time
+  // tap-on-contact -> sheet rendered. Mirrors the FriendsScreen pattern.
+  const firstRenderLogged = useRef(false);
+  const visibleSinceMs = useRef<number | null>(null);
+  // Stamp the visibleSince timestamp + emit the first-render marker in an
+  // effect (not during render) so we don't mutate a ref during render and
+  // stay friendly to concurrent rendering / StrictMode double-invocation.
+  useEffect(() => {
+    if (!visible) {
+      // Reset on close so a re-open re-times the next first render.
+      visibleSinceMs.current = null;
+      firstRenderLogged.current = false;
+      return;
+    }
+    if (visibleSinceMs.current === null) {
+      visibleSinceMs.current = Date.now();
+    }
+    if (!__DEV__) return;
+    if (firstRenderLogged.current) return;
+    firstRenderLogged.current = true;
+    const since = visibleSinceMs.current ?? Date.now();
+    console.log(`[Perf] ContactProfileSheet first render: ${Date.now() - since}ms from visible`);
+  }, [visible]);
   const { contacts, followContact, unfollowContact, sendDirectMessage, relays } = useNostr();
   const [following, setFollowing] = useState(false);
   const [loadingFollow, setLoadingFollow] = useState(false);
