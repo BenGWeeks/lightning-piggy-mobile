@@ -214,6 +214,40 @@ export const createTransferSheetStyles = (colors: Palette) =>
       textAlign: 'center',
       flex: 1,
     },
+    // --- Step list (issue #62) ---
+    stepList: {
+      alignSelf: 'stretch',
+      gap: 12,
+      paddingVertical: 12,
+      paddingHorizontal: 20,
+      backgroundColor: colors.background,
+      borderRadius: 12,
+      marginTop: 8,
+    },
+    stepRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    stepIcon: {
+      width: 24,
+      height: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    stepLabel: {
+      fontSize: 15,
+      color: colors.textBody,
+      fontWeight: '600',
+      flex: 1,
+    },
+    stepLabelPending: {
+      color: colors.textSupplementary,
+      fontWeight: '500',
+    },
+    stepLabelFailed: {
+      color: colors.red,
+    },
     buttonRow: {
       flexDirection: 'row',
       gap: 20,
