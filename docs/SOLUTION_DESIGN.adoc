@@ -274,6 +274,33 @@ Multiple layers protect against NWC relay disconnections:
 2. **Connection polling**: Every 30 seconds, poll `isWalletConnected()` and update the wallet card status dot
 3. **Publish patch**: Monkey-patch the relay pool to not wait for NIP-20 OK responses (lnbits/nostrclient#52 workaround, can be removed once lnbits/nostrclient#68 is merged)
 
+=== Honest Payment-State UX
+
+Lightning HTLCs that traverse hold-invoice routers (e.g. Boltz Mini for LN→RBTC bridges that Geyser's Rootstock crowdfunding uses) can stay locked for 60–120 seconds while the off-chain leg confirms. RSK target block time is ~24 s with exponential variance; ~5 % of blocks land beyond 72 s, ~1 % beyond 110 s. The recipient sees the payment settle at preimage reveal; the sender's app doesn't see anything until the NIP-47 reply event lands on Nostr.
+
+If the app applies a hard local timeout shorter than the worst-case settle, two failure modes follow:
+
+1. **False "failed" message** — the user sees an error, but the HTLC is still in flight. Risk of double-pay; user panics; recipient eventually gets paid and sender wonders where the sats went.
+2. **Misleading "Cancel" affordance** — once an HTLC is on a route, the sender genuinely cannot cancel it. The action only stops *waiting*; the lock keeps ticking.
+
+The honest design (see #410, #428):
+
+* **Reply timeout = 90 s.** Catches ~95 % of RSK Poisson tails. Beyond that, switch to "still in flight" state rather than "failed". (Initial bump in #427.)
+* **Modal action = "Continue in background"**, styled as a real button with proper hit affordance. NOT "Cancel".
+* **In-flight UI copy**: "Lightning payments via bridge nodes can take 1–2 min. The result will appear in your transactions once the network settles."
+* **Optimistic-row reconciliation**: dismissing the overlay does NOT remove the optimistic transaction row from `wallets[].transactions`. The next `fetchTransactionsForWallet` (already triggered on tab focus + pull-to-refresh) reconciles by `paymentHash` — if the LNbits ledger now shows the payment as settled, the row updates from optimistic to confirmed; if it shows failed, the row goes red (#426).
+* **Reply-event listening (deferred)**: the longer-term shape is to drop the local timer entirely and react to the eventual NIP-47 reply event whenever it arrives — no matter how late. Deferred to a follow-up under #410 because it requires extending the Alby SDK wrapper to keep a long-lived listener post-`payInvoice`.
+
+Distinguishes three failure classes:
+
+[cols="1,2", options="header"]
+|===
+| Reply state | UX
+| NWC error response (`payment_error`) within 90 s | Red toast + bubble red (#426) — payment definitively failed
+| Reply timeout (90 s, no response) | "Still in flight" + "Continue in background" — let the network settle
+| NWC reply success | Green tick + bubble green
+|===
+
 === Hot Wallet Support (Developer Mode)
 
 Hot wallet (mnemonic import) is available behind a **developer mode** toggle:
