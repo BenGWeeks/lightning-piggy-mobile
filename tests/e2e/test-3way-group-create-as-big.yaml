@@ -31,22 +31,7 @@ name: 3-way group chat — Big Piggy creates "Triad"
 - waitForAnimationToEnd:
     timeout: 2000
 
-# Name the group. NOTE: tapOn the placeholder text rather than the
-# testID — `BottomSheetTextInput` from @gorhom/bottom-sheet doesn't
-# propagate `testID` to the underlying native view in a way Maestro
-# can match (same caveat is documented in docs/TROUBLESHOOTING.adoc
-# for `friend-picker-search` / `gif-search-input`). The placeholder
-# is unique within this sheet so it's a reliable hit.
-- tapOn:
-    text: 'e.g. Family'
-- inputText: 'Triad'
-# `hideKeyboard` hangs forever inside @gorhom's BottomSheetTextInput
-# because the sheet captures the blur event. `pressKey: back` reliably
-# closes the IME without dismissing the sheet itself.
-- pressKey: back
-- waitForAnimationToEnd:
-    timeout: 1500
-
+# Step 1 of the wizard (issue #249): pick members first, then name.
 # Select Little Piggy + Middle Piggy from the friends list. We address
 # them by member-row testID (slice of pubkey hex) — see CreateGroupSheet.
 # scrollUntilVisible because Big follows ~50+ accounts and Little/Middle
@@ -69,6 +54,28 @@ name: 3-way group chat — Big Piggy creates "Triad"
     id: 'member-row-4b2fcb4e3c30'
 - waitForAnimationToEnd:
     timeout: 1000
+
+# Advance to step 2 (name the group).
+- tapOn:
+    id: 'create-group-next'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+# Name the group. NOTE: tapOn the placeholder text rather than the
+# testID — `BottomSheetTextInput` from @gorhom/bottom-sheet doesn't
+# propagate `testID` to the underlying native view in a way Maestro
+# can match (same caveat is documented in docs/TROUBLESHOOTING.adoc
+# for `friend-picker-search` / `gif-search-input`). The placeholder
+# is unique within this sheet so it's a reliable hit.
+- tapOn:
+    text: 'e.g. Family'
+- inputText: 'Triad'
+# `hideKeyboard` hangs forever inside @gorhom's BottomSheetTextInput
+# because the sheet captures the blur event. `pressKey: back` reliably
+# closes the IME without dismissing the sheet itself.
+- pressKey: back
+- waitForAnimationToEnd:
+    timeout: 1500
 
 - tapOn:
     id: 'create-group-submit'

@@ -5,10 +5,10 @@ import {
   StyleSheet,
   ActivityIndicator,
   BackHandler,
-  Alert,
   Keyboard,
   Platform,
 } from 'react-native';
+import { Alert } from './BrandedAlert';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,

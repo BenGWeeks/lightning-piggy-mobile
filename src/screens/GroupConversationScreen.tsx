@@ -5,23 +5,18 @@ import {
   TouchableOpacity,
   StyleSheet,
   FlatList,
-  TextInput,
-  Alert,
+  Image,
   ActivityIndicator,
   Linking,
   Modal,
   Pressable,
 } from 'react-native';
-import {
-  KeyboardController,
-  KeyboardStickyView,
-  useReanimatedKeyboardAnimation,
-} from 'react-native-keyboard-controller';
-import Animated, { useAnimatedStyle } from 'react-native-reanimated';
+import { Alert } from '../components/BrandedAlert';
+import { KeyboardController } from 'react-native-keyboard-controller';
 import { Image as ExpoImage } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import Svg, { Path } from 'react-native-svg';
-import { LogOut, Plus } from 'lucide-react-native';
+import { LogOut } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -33,6 +28,7 @@ import RenameGroupSheet from '../components/RenameGroupSheet';
 import GroupMembersSheet from '../components/GroupMembersSheet';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import AttachPanel from '../components/AttachPanel';
+import ConversationComposer from '../components/ConversationComposer';
 import GifPickerSheet from '../components/GifPickerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
 import SendSheet from '../components/SendSheet';
@@ -83,33 +79,15 @@ interface MemberRow {
 
 const GroupConversationScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
-  // Mirrors the canonical chat-composer pattern from ConversationScreen.
-  // KeyboardAvoidingView with `behavior=undefined` on Android (the prior
-  // implementation) is a no-op — the composer sat behind the IME instead
-  // of riding above it. KeyboardStickyView from react-native-keyboard-
-  // controller floats the composer flush against the keyboard's top edge,
-  // and the animated paddingBottom shrinks the safe-area inset to 0 as
-  // the keyboard opens (so the composer hugs the keyboard instead of
-  // leaving an inset-sized gap). Requires `react-native-edge-to-edge`'s
-  // `WindowInsetsCompat` listener to be installed (see #194 / app.config.ts
-  // → withEdgeToEdge plugin) so the IME inset is visible to RNKC.
-  const keyboard = useReanimatedKeyboardAnimation();
-  const composerSafeAreaStyle = useAnimatedStyle(() => ({
-    paddingBottom: 8 + Math.max(insets.bottom * (1 + keyboard.progress.value * -1), 0),
-  }));
+  // Composer + keyboard handling now live inside ConversationComposer
+  // (#251) — no per-screen useReanimatedKeyboardAnimation /
+  // useAnimatedStyle plumbing needed.
   const navigation = useNavigation<GroupConversationNavigation>();
   const route = useRoute<GroupConversationRoute>();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { getGroup, deleteGroup } = useGroups();
-  const {
-    contacts,
-    sendGroupMessage,
-    pubkey: myPubkey,
-    refreshDmInbox,
-    signEvent,
-    relays,
-  } = useNostr();
+  const { contacts, sendGroupMessage, pubkey: myPubkey, signEvent, relays } = useNostr();
   const [renameVisible, setRenameVisible] = useState(false);
   const [membersSheetVisible, setMembersSheetVisible] = useState(false);
   const [draft, setDraft] = useState('');
@@ -180,15 +158,13 @@ const GroupConversationScreen: React.FC = () => {
     return unsubscribe;
   }, [group]);
 
-  // Force-refresh the DM inbox on mount so the NIP-17 decrypt loop runs
-  // and routes any pending kind-14 group rumors into local storage. The
-  // `subscribeGroupMessages` hook above will then pick them up live.
-  // Force-mode skips the `since` filter (NIP-59 wraps have a randomised
-  // created_at — see refreshDmInbox's comment).
-  useEffect(() => {
-    if (!group) return;
-    refreshDmInbox({ force: true }).catch(() => {});
-  }, [group, refreshDmInbox]);
+  // NOTE: We used to call refreshDmInbox({ force: true }) on mount here
+  // to drain any pending kind-14 group rumors before the live subscription
+  // kicked in. That cost 3-25 s of JS-thread blocking depending on inbox
+  // size — perceived as freeze on back-tap (#286). The live subscription
+  // (`subscribeGroupMessages` above) handles delivery for any wraps that
+  // land while the screen is open; missed wraps from before mount get
+  // drained on the next MessagesScreen focus or app-foreground refresh.
 
   const members: MemberRow[] = useMemo(() => {
     if (!group) return [];
@@ -584,6 +560,11 @@ const GroupConversationScreen: React.FC = () => {
   };
 
   return (
+    // Outer wrapper used to be a KeyboardAvoidingView — that was a no-op
+    // on Android (behavior=undefined) and let the composer slide behind
+    // the IME (#250). The shared ConversationComposer (#251) now owns
+    // the keyboard-handling via KeyboardStickyView, so the screen's own
+    // wrapper is just a plain View that stacks header + content + composer.
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <View style={styles.titleRow}>
@@ -666,14 +647,34 @@ const GroupConversationScreen: React.FC = () => {
           />
         )}
 
-        {/* KeyboardStickyView floats the composer (and the AttachPanel
-            when open) above the IME on Android 15+ edge-to-edge. Same
-            canonical chat pattern as ConversationScreen.tsx. The
-            AttachPanel intentionally lives INSIDE the sticky view so
-            its intrinsic height drives the sticky's total height — the
-            panel + composer together rise to the IME's top edge. */}
-        <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
-          {attachPanelOpen ? (
+        {/* Composer + attach panel + IME-aware safe area now live in the
+            shared ConversationComposer (#251). Style overrides preserve
+            the group-specific look (paper-plane Send button, transparent
+            attach button, 12 dp horizontal padding). */}
+        <ConversationComposer
+          value={draft}
+          onChangeText={setDraft}
+          onSend={handleSend}
+          sending={sending}
+          onAttachToggle={() => (attachPanelOpen ? closeAttachPanel() : openAttachPanel())}
+          attachOpen={attachPanelOpen}
+          attachDisabled={sharingLocation || uploadingImage}
+          attachLoading={sharingLocation || uploadingImage}
+          onInputFocus={closeAttachPanel}
+          placeholder="Type a message…"
+          sendButtonVariant="paper-plane"
+          composerPaddingHorizontal={12}
+          accessibilityLabels={{
+            input: 'Group message input',
+            attach: 'Attach',
+            send: 'Send group message',
+          }}
+          testIDs={{
+            input: 'group-message-input',
+            attach: 'group-attach-button',
+            send: 'group-send-button',
+          }}
+          attachPanel={
             <AttachPanel
               onShareLocation={handleShareLocation}
               onSendImage={handlePickAndSendImage}
@@ -694,57 +695,8 @@ const GroupConversationScreen: React.FC = () => {
                 setContactPickerOpen(true);
               }}
             />
-          ) : null}
-
-          <Animated.View style={[styles.composer, composerSafeAreaStyle]}>
-            <TouchableOpacity
-              style={styles.attachButton}
-              onPress={() => (attachPanelOpen ? closeAttachPanel() : openAttachPanel())}
-              disabled={sending || sharingLocation || uploadingImage}
-              accessibilityLabel="Attach"
-              testID="group-attach-button"
-            >
-              {sharingLocation || uploadingImage ? (
-                <ActivityIndicator color={colors.brandPink} />
-              ) : (
-                <Plus size={22} color={colors.brandPink} />
-              )}
-            </TouchableOpacity>
-            <TextInput
-              style={styles.input}
-              placeholder="Type a message…"
-              placeholderTextColor={colors.textSupplementary}
-              value={draft}
-              onChangeText={setDraft}
-              onFocus={closeAttachPanel}
-              multiline
-              accessibilityLabel="Group message input"
-              testID="group-message-input"
-              editable={!sending}
-            />
-            <TouchableOpacity
-              style={[styles.sendButton, (!draft.trim() || sending) && styles.sendButtonDisabled]}
-              onPress={handleSend}
-              disabled={!draft.trim() || sending}
-              accessibilityLabel="Send group message"
-              testID="group-send-button"
-            >
-              {sending ? (
-                <ActivityIndicator color={colors.white} />
-              ) : (
-                <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-                  <Path
-                    d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z"
-                    stroke={colors.white}
-                    strokeWidth={2}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </Svg>
-              )}
-            </TouchableOpacity>
-          </Animated.View>
-        </KeyboardStickyView>
+          }
+        />
       </View>
 
       <RenameGroupSheet
@@ -927,45 +879,9 @@ const createStyles = (colors: Palette) =>
       width: '100%',
       height: '100%',
     },
-    composer: {
-      flexDirection: 'row',
-      alignItems: 'flex-end',
-      paddingHorizontal: 12,
-      paddingTop: 8,
-      gap: 8,
-      backgroundColor: colors.surface,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.divider,
-    },
-    attachButton: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    input: {
-      flex: 1,
-      minHeight: 40,
-      maxHeight: 120,
-      backgroundColor: colors.background,
-      borderRadius: 20,
-      paddingHorizontal: 14,
-      paddingVertical: 10,
-      fontSize: 15,
-      color: colors.textBody,
-    },
-    sendButton: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      backgroundColor: colors.brandPink,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    sendButtonDisabled: {
-      opacity: 0.4,
-    },
+    // composer + input + attachButton + sendButton + sendButtonDisabled
+    // moved to ConversationComposer (#251) — kept in sync with the 1:1
+    // screen via that shared component.
     emptyState: {
       padding: 40,
       alignItems: 'center',

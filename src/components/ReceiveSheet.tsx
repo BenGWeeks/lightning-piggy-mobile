@@ -17,7 +17,7 @@ import {
 import { ChevronUp, ChevronDown, Check, Copy, Share2, Send } from 'lucide-react-native';
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
-import Toast from 'react-native-toast-message';
+import Toast from './BrandedToast';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';

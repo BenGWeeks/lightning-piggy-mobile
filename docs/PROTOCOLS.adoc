@@ -1,0 +1,82 @@
+== Nostr Protocol State
+
+This page documents which Nostr Improvement Proposals (NIPs) Lightning Piggy Mobile implements, in which direction (send / receive), and any deprecation timelines.
+
+=== DM Protocol State
+
+==== Summary
+
+Lightning Piggy ships **NIP-17 gift-wrapped DMs** (kind-1059 → 13 → 14) as the **only** outbound 1:1 messaging path. Legacy **NIP-04** (kind 4) events are **read** for backward-compatibility with peers on older clients but are **never sent**. Group chats also use NIP-17 (a multi-`p`-tag kind-14 rumor).
+
+[cols="1,1,1,3", options="header"]
+|===
+| Direction | NIP-04 (kind 4) | NIP-17 (kind 1059 → 13 → 14) | Notes
+
+| Send (1:1 DM) | ❌ removed | ✅ only path | `sendDirectMessage` in `src/contexts/NostrContext.tsx`
+| Send (group) | n/a — never supported | ✅ only path | `sendGroupMessage` in `src/contexts/NostrContext.tsx`
+| Receive (display) | ✅ kept | ✅ kept | `fetchConversation`, `refreshDmInbox` query both kinds and merge into one thread sorted by the rumor's `created_at`
+|===
+
+==== Why NIP-17
+
+* NIP-04 is marked `unrecommended` at the top of the NIP itself. AES-256-CBC, no metadata protection — sender pubkey, `created_at`, recipient `p` tag are all on the wire in plaintext.
+* NIP-17 wraps each kind-14 rumor in a kind-13 seal inside a kind-1059 gift wrap. The outer wrap exposes only a random ephemeral pubkey, a `created_at` randomised up to 2 days in the past, the `kind: 1059` tag, and the recipient `p` tag. Sender identity, message kind, true send time, and any tags on the rumor are all hidden from relays and observers.
+* Encryption throughout NIP-17 is **NIP-44** v2 (secp256k1 ECDH → HKDF → ChaCha20 + HMAC-SHA256).
+
+==== Send path (outgoing)
+
+* Inner rumor is built by `createDirectMessageRumor` (1:1) or `createGroupChatRumor` (groups) — both produce a `kind: 14` event with a `pubkey` field but no signature.
+* `sendNip17ToManyWithNsec` (nsec signer) seals + wraps the rumor for each recipient via `nostr-tools` `nip59.wrapManyEvents`, which also wraps for the sender so the message lands in the user's own inbox on other devices.
+* `sendNip17ToManyWithSigner` (Amber signer) does the same SEQUENTIALLY because Amber's native module rejects concurrent intents with `BUSY`. Per recipient: 1× `nip44Encrypt` + 1× `signEvent` for the seal; the gift wrap is signed locally with a fresh ephemeral key (never the user's key) so it does not need a signer round-trip.
+* Wraps are published in parallel via `pool.publish` to the union of the user's NIP-65 write relays and `DEFAULT_RELAYS`.
+
+==== Receive path (display)
+
+The Messages tab fetches both protocols on focus and on conversation open:
+
+* `fetchInboxDmEvents` queries three filters in parallel:
++
+[source]
+----
+{ kinds: [4],    authors: [me] }   // outgoing legacy DMs
+{ kinds: [4],    '#p':     [me] }   // incoming legacy DMs
+{ kinds: [1059], '#p':     [me] }   // gift wraps addressed to us
+----
+* Kind-4 events are NIP-04-decrypted with the appropriate signer (`nip04.decrypt` for nsec, Amber's `nip04Decrypt` IPC for Amber) and merged into the per-peer thread.
+* Kind-1059 wraps are unwrapped via `unwrapWrapNsec` (nsec) or `unwrapWrapViaNip44` (Amber) — both perform the full NIP-17 verification chain: signature check on the wrap, NIP-44-decrypt the wrap to a kind-13 seal, NIP-44-decrypt the seal to a kind-14 rumor, and assert `rumor.pubkey === seal.pubkey` (the spec MUST that prevents sender-spoofing on a tampered rumor).
+* `classifyRumor` then routes 1:1 rumors into the per-peer DM thread and multi-recipient rumors into the matching group room.
+* Threads sort by the **rumor's** `created_at`, never the gift wrap's (the wrap timestamp is intentionally fake per the spec).
+
+==== Deprecation timeline for NIP-04 reads
+
+We will keep the kind-4 read filter and the `nip04.decrypt` codepath until both of:
+
+. The user research signal that no active contacts are still on NIP-04-only clients (Damus is the relevant laggard at the time of writing).
+. The kind-4 plaintext cache (`nip04PlaintextCache` LRU + the per-thread persisted cache) for a representative active user shows zero new fresh-decrypt entries for at least 90 days, evidenced by the `[Perf] fetchConversation` log line `k4=N (hits=0, fresh=0)`.
+
+There is no scheduled removal date. Removal will be announced one release ahead in the GitHub Release notes and the read filter will land behind a feature flag for one release before the codepath itself is deleted.
+
+==== Interop notes
+
+* **Damus** (as of April 2026 master) does not subscribe to kind 1059 — its `HomeModel` filter is kind-4-only. A message Lightning Piggy sends to a Damus-only peer will not appear in their UI until Damus ships NIP-17. Other major clients (Amethyst, 0xchat, Snort, Coracle, Primal) accept NIP-17 and will display Lightning Piggy's outgoing DMs.
+* The `subject` tag on a kind-14 is what 0xchat / Amethyst / Quartz read to display the conversation title — `createGroupChatRumor` always emits one; `createDirectMessageRumor` deliberately omits it (a 1:1 thread has no name). See issue #271 for the cross-client subject-tag interop work.
+* Lightning Piggy does **not** publish a kind-10050 NIP-17 DM relay-list event. We rely on the user's existing NIP-65 write-relay list plus the DEFAULT_RELAYS fallback. If a recipient publishes their own kind-10050 we do not currently honour it — they must accept wraps on at least one relay we publish to.
+
+==== Code references
+
+|===
+| Path | What it does
+
+| `src/services/nostrService.ts` :: `createDirectMessageRumor` | Builds the unsigned kind-14 rumor for a 1:1 DM. Single `p` tag, no subject.
+| `src/services/nostrService.ts` :: `createGroupChatRumor` | Builds the unsigned kind-14 rumor for a group message. `subject` tag + one `p` tag per member.
+| `src/services/nostrService.ts` :: `sendNip17ToManyWithNsec` | nsec NIP-17 send. Seals + wraps via `nip59.wrapManyEvents`, publishes in parallel.
+| `src/services/nostrService.ts` :: `sendNip17ToManyWithSigner` | Amber NIP-17 send. Sequential signer loop (BUSY guard), parallel publish.
+| `src/services/nostrService.ts` :: `fetchInboxDmEvents` | Fetches kind-4 (in/out) + kind-1059 (in) in three parallel filters.
+| `src/services/nostrService.ts` :: `unwrapGiftWrap` | nsec unwrap via `nip59.unwrapEvent`. Used in single-event paths.
+| `src/utils/nip17Unwrap.ts` :: `unwrapWrapNsec` / `unwrapWrapViaNip44` | Two-layer NIP-17 unwrap with full verification + skip-and-log on failure.
+| `src/utils/nip17Unwrap.ts` :: `classifyRumor` | Routes a decoded rumor to a 1:1 DM thread or a group room based on the participant set.
+| `src/contexts/NostrContext.tsx` :: `sendDirectMessage` | Application-level 1:1 send. Calls `sendNip17ToMany*` with a one-element recipient list.
+| `src/contexts/NostrContext.tsx` :: `sendGroupMessage` | Application-level group send. Calls `sendNip17ToMany*` with the full member list.
+| `src/contexts/NostrContext.tsx` :: `fetchConversation` / `refreshDmInbox` | Application-level receive paths. Decrypt both protocols, merge into the per-peer thread.
+| `src/services/nostrService.ts` :: `decryptNip04WithSecret` + `nip04` import | Read-only NIP-04 decrypt. Retained for backward-compatibility per the deprecation timeline above.
+|===

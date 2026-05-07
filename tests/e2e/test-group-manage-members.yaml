@@ -27,6 +27,13 @@ name: Group manage-members sheet — open + add picker + remove flow
     clearState: false
 - waitForAnimationToEnd:
     timeout: 30000
+# Dev-client bundle reload after launchApp can take 20–60 s on AVD;
+# wait for the tab bar to render before any tap. Matches the pattern
+# in _subflow-login-as.yaml (extendedWaitUntil on tab-home post-login).
+- extendedWaitUntil:
+    visible:
+      id: 'tab-messages'
+    timeout: 60000
 
 # Land on the Messages tab and open the Triad fixture group. We
 # scrollUntilVisible because Big follows ~50+ accounts and Triad may

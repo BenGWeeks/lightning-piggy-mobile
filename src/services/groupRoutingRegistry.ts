@@ -28,6 +28,44 @@ export function getKnownGroups(): readonly Group[] {
 }
 
 /**
+ * Reconcile a synthetic NIP-17 room (kind-14 from a foreign client with
+ * no matching kind-30200) into local state. GroupsContext registers a
+ * handler at mount time; NostrContext invokes it from the route-rumor
+ * fallback path when the registry's exact-match lookup misses but the
+ * rumor carries a `subject` tag.
+ *
+ * Returns the resolved Group (existing or freshly-created) on success,
+ * null when no handler is registered (typically only during cold
+ * boot / logout) so callers can no-op cleanly.
+ *
+ * Implementation MUST be idempotent on (groupId, name): subsequent
+ * kind-14s from the same room invoke this with the same id and the
+ * latest subject — a no-op when nothing changed, a name update when
+ * the subject was edited (NIP-17: "the newest subject in the chat
+ * room is the subject of the conversation").
+ */
+export interface SyntheticRoomInput {
+  groupId: string;
+  name: string;
+  /** All participants OTHER than the viewer (matches Group.memberPubkeys). */
+  memberPubkeys: string[];
+  /** seconds — the kind-14's created_at, for newest-wins subject resolution. */
+  createdAtSec: number;
+}
+
+type SyntheticReconciler = (input: SyntheticRoomInput) => Promise<Group | null>;
+let syntheticReconciler: SyntheticReconciler | null = null;
+
+export function setSyntheticGroupReconciler(fn: SyntheticReconciler | null): void {
+  syntheticReconciler = fn;
+}
+
+export async function reconcileSyntheticGroup(input: SyntheticRoomInput): Promise<Group | null> {
+  if (!syntheticReconciler) return null;
+  return syntheticReconciler(input);
+}
+
+/**
  * Find a group whose membership matches the given participant set.
  *
  * `otherParticipants` is the rumor's full participant set with the

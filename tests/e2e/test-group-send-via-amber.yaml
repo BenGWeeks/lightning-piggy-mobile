@@ -1,0 +1,81 @@
+appId: com.lightningpiggy.app.dev
+name: Group send via Amber — regression for issue #247
+---
+# Regression coverage for issue #247
+# (https://github.com/BenGWeeks/lightning-piggy-mobile/issues/247).
+#
+# Before the fix, sendGroupMessage hard-rejected any signer other than
+# nsec with the toast text:
+#   "Group messages currently require an nsec login (Amber not yet supported)"
+# This flow logs in via Amber, opens an existing group thread, taps Send,
+# and asserts that error string is NOT visible.
+#
+# What this flow CAN check (in CI / on bare emulator):
+#   - The blocker toast no longer appears.
+#   - The composer reaches the send-tap state with an Amber session active.
+#
+# What this flow CANNOT check end-to-end:
+#   - The actual gift-wrap publish to relays. The Amber path requires N
+#     signEvent + N nip44Encrypt round-trips; if Amber doesn't have
+#     blanket "sign_event" / "nip44_encrypt" permissions pre-approved
+#     for this app, each one opens a separate approval dialog. Maestro
+#     can't reliably sequence that many Amber dialogs across screen
+#     sizes / Amber versions, and on a real Pixel the user just needs
+#     to tap through them. Manual verification of "message lands on
+#     other devices in the thread" is on Ben.
+#
+# Prerequisites:
+#   - test-amber-import-key.yaml has been run (Amber has the test nsec
+#     and "Approve basic actions" was selected, so common ops resolve
+#     silently via Amber's ContentResolver fast-path).
+#   - test-3way-group-create-as-big.yaml has been run as the same
+#     identity that's now in Amber, so a group named "Triad" exists
+#     and the device has it cached locally.
+#
+# Run:
+#   source .env && \
+#     maestro test -e MAESTRO_NSEC="$MAESTRO_NSEC" \
+#     tests/e2e/test-group-send-via-amber.yaml
+
+- runFlow: test-login-amber.yaml
+
+# Navigate to Friends → Groups → Triad
+- tapOn:
+    id: 'tab-friends'
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'groups-button'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- extendedWaitUntil:
+    visible:
+      text: 'Triad'
+    timeout: 30000
+- tapOn:
+    text: 'Triad'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Compose a unique message so re-runs don't collide with cached history
+- tapOn:
+    id: 'group-message-input'
+- inputText: 'amber-group-send-${maestroRunId}'
+- hideKeyboard
+- tapOn:
+    id: 'group-send-button'
+
+# Give Amber's ContentResolver fast-path a moment to resolve the
+# per-recipient signEvent + nip44Encrypt calls. With blanket permissions
+# this is sub-second; without them, Amber's UI is now in front of the
+# user and they need to tap through the per-event dialogs.
+- waitForAnimationToEnd:
+    timeout: 8000
+
+# THE REGRESSION ASSERTION — pre-fix the Send tap above produced this
+# Alert. Post-fix it must not appear.
+- assertNotVisible:
+    text: 'Amber not yet supported'
+- assertNotVisible:
+    text: 'Group messages currently require an nsec login'

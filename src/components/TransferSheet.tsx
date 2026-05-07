@@ -19,7 +19,7 @@ import {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import * as SecureStore from 'expo-secure-store';
-import Toast from 'react-native-toast-message';
+import Toast from './BrandedToast';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';

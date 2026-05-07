@@ -33,6 +33,7 @@ import * as boltzService from '../services/boltzService';
 import * as onchainService from '../services/onchainService';
 import { npubEncode } from '../services/nostrService';
 import { recordOutgoing as recordOutgoingCounterparty } from '../services/zapCounterpartyStorage';
+import { isReplyTimeoutError } from '../services/nwcService';
 import PaymentProgressOverlay, { PaymentProgressState } from './PaymentProgressOverlay';
 import AmountEntryScreen from './AmountEntryScreen';
 
@@ -43,13 +44,6 @@ interface Props {
   initialPicture?: string;
   recipientPubkey?: string;
   recipientName?: string;
-  /**
-   * Optional preset amount pills forwarded to AmountEntryScreen.
-   * Tapping one fills both sats + fiat. Useful when the calling flow
-   * has a small set of sensible defaults the user is likely to pick.
-   * Call sites that omit the prop render the amount step unchanged.
-   */
-  suggestedAmounts?: number[];
 }
 
 type InputMode = 'scan' | 'paste';
@@ -104,7 +98,6 @@ const SendSheet: React.FC<Props> = ({
   initialPicture,
   recipientPubkey,
   recipientName,
-  suggestedAmounts,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createSendSheetStyles(colors), [colors]);
@@ -147,6 +140,7 @@ const SendSheet: React.FC<Props> = ({
   // can abort the NWC call's publish → reply-timeout → poll-for-preimage
   // chain without waiting ~5 minutes for it to give up on its own (#175).
   const paymentAbortRef = useRef<AbortController | null>(null);
+  const dismissedInFlightRef = useRef(false);
 
   // No explicit snapPoints — gorhom v5's `enableDynamicSizing={true}`
   // default sizes the sheet to its content. Trailing action buttons
@@ -385,6 +379,7 @@ const SendSheet: React.FC<Props> = ({
     setSending(true);
     setProgressError(undefined);
     setProgressState('sending');
+    dismissedInFlightRef.current = false;
     try {
       if (isOnchainAddress) {
         if (currentSats <= 0) {
@@ -401,7 +396,10 @@ const SendSheet: React.FC<Props> = ({
         } else {
           // Boltz reverse swap: Lightning → on-chain
           const swap = await boltzService.createReverseSwap(invoiceData, currentSats);
-          await payInvoiceForWallet(walletId!, swap.invoice, signal);
+          await payInvoiceForWallet(walletId!, swap.invoice, {
+            signal,
+            onReplyTimeout: handleReplyTimeout,
+          });
           const lockup = await boltzService.waitForLockup(swap.id, 120000);
           await boltzService.claimSwap(swap, lockup, invoiceData);
         }
@@ -431,9 +429,21 @@ const SendSheet: React.FC<Props> = ({
 
         // NIP-57 zap: sign a zap request if this is a Nostr contact and the server supports it
         if (activePubkey && lnurlParams.allowsNostr) {
-          const zapRequestJson = await signZapRequest(activePubkey, currentSats, memo);
-          if (zapRequestJson) {
-            invoiceOptions.nostr = zapRequestJson;
+          try {
+            const zapRequestJson = await signZapRequest(activePubkey, currentSats, memo);
+            if (zapRequestJson) {
+              invoiceOptions.nostr = zapRequestJson;
+            } else if (__DEV__) {
+              console.warn(
+                `[Zap-send] signZapRequest returned empty for recipient=${activePubkey.slice(0, 8)} — payment will go through as a plain LN send (no kind-9735 receipt published on Nostr); local attribution still works because the counterparty is persisted below whenever activePubkey is set`,
+              );
+            }
+          } catch (e) {
+            // Don't let a signer failure block the payment — fall through to a plain LN send. The local-storage path below still records the counterparty when activePubkey is set, so the row will show the recipient even though there's no NIP-57 receipt on Nostr.
+            console.warn(
+              `[Zap-send] signZapRequest threw for recipient=${activePubkey.slice(0, 8)}:`,
+              e,
+            );
           }
         }
 
@@ -443,18 +453,18 @@ const SendSheet: React.FC<Props> = ({
         }
 
         const bolt11 = await fetchInvoice(lnurlParams.callback, currentSats, invoiceOptions);
-        await payInvoiceForWallet(walletId!, bolt11, signal);
+        await payInvoiceForWallet(walletId!, bolt11, {
+          signal,
+          onReplyTimeout: handleReplyTimeout,
+        });
 
         if (__DEV__)
           console.log(
             `[Zap-send] paid ${currentSats} sats · allowsNostr=${!!lnurlParams.allowsNostr} activePubkey=${activePubkey ? activePubkey.slice(0, 8) + '…' : 'none'} hasZapRequest=${!!invoiceOptions.nostr}`,
           );
 
-        // If this was a NIP-57 zap, persist the recipient we just paid so
-        // the transaction list can render "Sent to [Name]" on refresh.
-        // The public zap receipt identifies us as sender, not the person
-        // we paid — we're the only party that actually knows who got it.
-        if (invoiceOptions.nostr && activePubkey) {
+        // Persist the recipient locally whenever we know who we're paying — i.e. when activePubkey is set (Friends → Zap, ConversationScreen send, anything that arrived with a recipientPubkey prop). Decoupled from invoiceOptions.nostr so a signer failure or an LNURL server with allowsNostr=false doesn't strip the recipient's name from the transaction row. The Nostr-side path (zap receipt) is still emitted when invoiceOptions.nostr is set; this just guarantees local UI attribution even when the on-network NIP-57 receipt path is broken.
+        if (activePubkey) {
           try {
             const decoded = bolt11Decode(bolt11);
             const hashSection = decoded.sections?.find(
@@ -510,7 +520,10 @@ const SendSheet: React.FC<Props> = ({
           }
         }
       } else {
-        await payInvoiceForWallet(walletId!, invoiceData, signal);
+        await payInvoiceForWallet(walletId!, invoiceData, {
+          signal,
+          onReplyTimeout: handleReplyTimeout,
+        });
       }
       if (walletId) {
         // Refresh both balance and tx list so the user sees the send
@@ -538,6 +551,7 @@ const SendSheet: React.FC<Props> = ({
         })();
       }
       if (signal.aborted) return;
+      if (dismissedInFlightRef.current) return;
       setProgressState('success');
     } catch (error) {
       // User-initiated cancel via PaymentProgressOverlay's Cancel button:
@@ -546,6 +560,13 @@ const SendSheet: React.FC<Props> = ({
       if ((error as Error)?.name === 'AbortError' || signal.aborted) {
         return;
       }
+      if (isReplyTimeoutError(error)) {
+        if (dismissedInFlightRef.current) return;
+        setProgressError(undefined);
+        setProgressState('in-flight-extended');
+        return;
+      }
+      if (dismissedInFlightRef.current) return;
       const message = error instanceof Error ? error.message : 'Payment failed';
       setProgressError(message);
       setProgressState('error');
@@ -563,6 +584,11 @@ const SendSheet: React.FC<Props> = ({
     }
   };
 
+  const handleReplyTimeout = useCallback(() => {
+    setProgressError(undefined);
+    setProgressState((prev) => (prev === 'sending' ? 'in-flight-extended' : prev));
+  }, []);
+
   const handleCancelPayment = useCallback(() => {
     // Abort the NWC pay_invoice chain and hide the overlay so the user
     // can edit / retry / close from the filled-in SendSheet. Keep
@@ -574,15 +600,32 @@ const SendSheet: React.FC<Props> = ({
     setSending(false);
   }, []);
 
+  // Track progressState in a ref so handleOverlayDismiss doesn't recapture
+  // it on every state flip. Without this, the `sending` → `success`
+  // transition rebuilds the callback, but Android's touch system can still
+  // fire the previously-cached handler reference for an in-flight tap —
+  // that stale closure reads `wasSuccess === false`, hides the overlay,
+  // and never calls onClose. See #210.
+  const progressStateRef = useRef(progressState);
+  // Sync during render (not in a useEffect) so the ref is always current before any tap can fire. A useEffect runs after commit/paint, leaving a window where the OK button is visible but the ref still holds the previous value — which is exactly the race the second-round Copilot review on #210 flagged.
+  progressStateRef.current = progressState;
+
   const handleOverlayDismiss = useCallback(() => {
     // Dismissing the overlay after a successful payment also closes the
     // parent sheet. On error we only dismiss the overlay so the user can
     // retry from the filled-in form.
-    const wasSuccess = progressState === 'success';
+    const prevState = progressStateRef.current;
+    const shouldCloseParent = prevState === 'success' || prevState === 'in-flight-extended';
+    if (prevState === 'in-flight-extended') {
+      dismissedInFlightRef.current = true;
+    }
     setProgressState('hidden');
     setProgressError(undefined);
-    if (wasSuccess) onClose();
-  }, [progressState, onClose]);
+    // Defer the parent close so the overlay's hidden state renders first;
+    // otherwise on a slow JS thread the parent sheet can tear down the
+    // overlay component before the state update completes (#210).
+    if (shouldCloseParent) setTimeout(() => onClose(), 0);
+  }, [onClose]);
 
   const handleReset = () => {
     setInvoiceData(null);
@@ -661,7 +704,6 @@ const SendSheet: React.FC<Props> = ({
               minSats={amountMinSats}
               maxSats={amountMaxSats}
               confirmLabel="Done"
-              suggestedAmounts={suggestedAmounts}
               onBack={() => setStep('main')}
               onConfirm={(sats) => {
                 setSatsValue(String(sats));

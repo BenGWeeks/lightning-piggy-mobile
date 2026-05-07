@@ -1,20 +1,10 @@
 // Light and dark colour palettes. The key set must stay identical between the
 // two objects so every `colors.X` lookup resolves in either theme. Add new
 // entries to both palettes.
-//
-// `__DEV__` brand-pink swap: in dev builds the brand-pink + its light tint
-// flip to a blue pair. Lets developers tell apart a dev / cloud / production
-// install at a glance — the colour shift is visible everywhere brand-pink
-// appears (app icon swap is per-build via `app.config.ts`, this handles
-// every in-app surface that reads from the theme palette).
-
-const DEV_BRAND_PRIMARY = '#4A90D9';
-const DEV_BRAND_PRIMARY_LIGHT_LIGHT = '#E3F0FF';
-const DEV_BRAND_PRIMARY_LIGHT_DARK = '#0E2240';
 
 export const lightPalette = {
-  brandPink: __DEV__ ? DEV_BRAND_PRIMARY : '#EC008C',
-  brandPinkLight: __DEV__ ? DEV_BRAND_PRIMARY_LIGHT_LIGHT : '#FFF0F5',
+  brandPink: '#EC008C',
+  brandPinkLight: '#FFF0F5',
   white: '#FFFFFF',
   background: '#F5F5F5',
   surface: '#FFFFFF',
@@ -34,15 +24,13 @@ export const lightPalette = {
   zapYellow: '#FFC107',
 };
 
-// Dark palette: keep the Lightning Piggy brand hot-pink in production
-// (dev builds override it to dev-blue via the `__DEV__` swap above —
-// same as the light palette), swap the greyscale chrome for tuned
-// dark-grey values (AA contrast against white text). `white` keeps
-// its literal name since many components use it as an explicit
-// foreground colour on pink/orange backgrounds.
+// Dark palette: keep the Lightning Piggy brand hot-pink intact, swap the
+// greyscale chrome for tuned dark-grey values (AA contrast against white
+// text). `white` keeps its literal name since many components use it as
+// an explicit foreground colour on pink/orange backgrounds.
 export const darkPalette: typeof lightPalette = {
-  brandPink: __DEV__ ? DEV_BRAND_PRIMARY : '#EC008C',
-  brandPinkLight: __DEV__ ? DEV_BRAND_PRIMARY_LIGHT_DARK : '#3A1028',
+  brandPink: '#EC008C',
+  brandPinkLight: '#3A1028',
   white: '#FFFFFF',
   background: '#0E1013',
   surface: '#1A1D21',
