@@ -423,9 +423,21 @@ const SendSheet: React.FC<Props> = ({
 
         // NIP-57 zap: sign a zap request if this is a Nostr contact and the server supports it
         if (activePubkey && lnurlParams.allowsNostr) {
-          const zapRequestJson = await signZapRequest(activePubkey, currentSats, memo);
-          if (zapRequestJson) {
-            invoiceOptions.nostr = zapRequestJson;
+          try {
+            const zapRequestJson = await signZapRequest(activePubkey, currentSats, memo);
+            if (zapRequestJson) {
+              invoiceOptions.nostr = zapRequestJson;
+            } else if (__DEV__) {
+              console.warn(
+                `[Zap-send] signZapRequest returned empty for recipient=${activePubkey.slice(0, 8)} — payment will go through as a plain LN send (no kind-9735 receipt published, resolver fallback can't recover the row)`,
+              );
+            }
+          } catch (e) {
+            // Don't let a signer failure block the payment — fall through to a plain LN send. The local-storage path below still records the counterparty when activePubkey is set, so the row will show the recipient even though there's no NIP-57 receipt on Nostr.
+            console.warn(
+              `[Zap-send] signZapRequest threw for recipient=${activePubkey.slice(0, 8)}:`,
+              e,
+            );
           }
         }
 
@@ -442,11 +454,8 @@ const SendSheet: React.FC<Props> = ({
             `[Zap-send] paid ${currentSats} sats · allowsNostr=${!!lnurlParams.allowsNostr} activePubkey=${activePubkey ? activePubkey.slice(0, 8) + '…' : 'none'} hasZapRequest=${!!invoiceOptions.nostr}`,
           );
 
-        // If this was a NIP-57 zap, persist the recipient we just paid so
-        // the transaction list can render "Sent to [Name]" on refresh.
-        // The public zap receipt identifies us as sender, not the person
-        // we paid — we're the only party that actually knows who got it.
-        if (invoiceOptions.nostr && activePubkey) {
+        // Persist the recipient locally whenever we know who we're paying — i.e. when activePubkey is set (Friends → Zap, ConversationScreen send, anything that arrived with a recipientPubkey prop). Decoupled from invoiceOptions.nostr so a signer failure or an LNURL server with allowsNostr=false doesn't strip the recipient's name from the transaction row. The Nostr-side path (zap receipt) is still emitted when invoiceOptions.nostr is set; this just guarantees local UI attribution even when the on-network NIP-57 receipt path is broken.
+        if (activePubkey) {
           try {
             const decoded = bolt11Decode(bolt11);
             const hashSection = decoded.sections?.find(
