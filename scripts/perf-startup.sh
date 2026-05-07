@@ -75,6 +75,20 @@ for t in home messages learn friends; do
   write_tab_flow "$t"
 done
 
+# Warm Maestro before sample 1 — every `maestro test` invocation pays a fresh JVM cold-start (~5–10 s on Linux). Running a no-op flow once at the start "burns" that cost into the warmup phase rather than into sample 1's tab-home column. Subsequent tests reuse the same daemon-cached JVM via Maestro 2.x's daemon mode.
+if ! maestro --version >/dev/null 2>&1; then
+  echo "WARN: maestro not on PATH — tab-nav columns will time out" >&2
+else
+  echo "→ warming Maestro (one-shot no-op flow)..."
+  cat > "$OUT/warmup.yaml" <<EOF
+appId: $PKG
+---
+- launchApp:
+    clearState: false
+EOF
+  maestro --device "$DEVICE" test "$OUT/warmup.yaml" >"$OUT/maestro-warmup.log" 2>&1 || true
+fi
+
 # ---- helpers ----------------------------------------------------------------
 
 now_ms() { date +%s%3N; }
@@ -150,25 +164,17 @@ run_sample() {
 
   local home_ms msgs_ms learn_ms friends_ms
 
-  # Home tap — no unique perf marker, so we time the Maestro round-trip.
-  local t0
-  t0=$(now_ms)
-  maestro --device "$DEVICE" test "$OUT/tap-home.yaml" > "$OUT/maestro-home.log" 2>&1 || true
-  home_ms=$(( $(now_ms) - t0 ))
-
-  msgs_ms=$(tap_and_time messages 'ReactNativeJS.*\[Perf\] refreshDmInbox' "$since_ts")
-
-  t0=$(now_ms)
-  maestro --device "$DEVICE" test "$OUT/tap-learn.yaml" > "$OUT/maestro-learn.log" 2>&1 || true
-  learn_ms=$(( $(now_ms) - t0 ))
-
+  # Each tab times "tap dispatch → screen first commits its initial render", using a `[Perf] X first render` marker each tab screen logs once on mount. Maestro JVM cold-start (~5–10 s per invocation) is in every measurement as a constant baseline; before/after comparisons within the same script run are still valid because that baseline cancels.
+  home_ms=$(tap_and_time home 'ReactNativeJS.*\[Perf\] HomeScreen first render' "$since_ts")
+  msgs_ms=$(tap_and_time messages 'ReactNativeJS.*\[Perf\] MessagesScreen first render' "$since_ts")
+  learn_ms=$(tap_and_time learn 'ReactNativeJS.*\[Perf\] LearnScreen first render' "$since_ts")
   friends_ms=$(tap_and_time friends 'ReactNativeJS.*\[Perf\] FriendsList first render' "$since_ts")
 
   echo "  cold_total=${total_time}ms  wait=${wait_time}ms  wallet=${wallet_ms:-TIMEOUT}ms  responsive=${responsive_ms:-TIMEOUT}ms"
   echo "  home=${home_ms:-—}ms  messages=${msgs_ms:-—}ms  learn=${learn_ms:-—}ms  friends=${friends_ms:-—}ms"
 
   $ADB logcat -d -t "$since_ts" 2>/dev/null \
-    | grep -E "ReactNativeJS.*\[Perf\] (wallet connected|refreshDmInbox|nip17-cache|FriendsList first render|fetchProfiles|fetchInboxDmEvents)" \
+    | grep -E "ReactNativeJS.*\[Perf\] (wallet connected|refreshDmInbox|nip17-cache|HomeScreen first render|MessagesScreen first render|LearnScreen first render|FriendsList first render|fetchProfiles|fetchInboxDmEvents)" \
     > "$OUT/sample-$n.log" 2>/dev/null || true
 
   ROWS+=("$n|${total_time:-—}|${wait_time:-—}|${wallet_ms:-—}|${responsive_ms:-—}|${home_ms:-—}|${msgs_ms:-—}|${learn_ms:-—}|${friends_ms:-—}")
@@ -219,9 +225,7 @@ done
   echo "- **WaitTime** — TotalTime + any pre-launch system overhead."
   echo "- **time-to-wallet** — wall clock from launch to the first \`[Perf] wallet connected\` line — i.e. how long until the active NWC wallet flips from Disconnected to Connected. Tracks issue #410."
   echo "- **time-to-responsive** — wall clock from launch to the first \`[Perf] refreshDmInbox\` completion line. This is what the user *feels* — the screen is on, but new messages are still draining."
-  echo "- **tab-messages** — wall clock from Maestro's tap dispatch to the next \`refreshDmInbox\` log line."
-  echo "- **tab-friends** — wall clock from tap dispatch to the next \`FriendsList first render\` log line."
-  echo "- **tab-home / tab-learn** — full Maestro-flow round-trip (~5 s JVM overhead included). Treat these as upper-bounds; they don't fire a unique perf line so we can't subtract Maestro out."
+  echo "- **tab-X** — wall clock from \`maestro test\` invocation to the next \`[Perf] X first render\` log line. Includes Maestro's per-invocation JVM cold-start (~5–10 s) as a constant baseline; before/after comparisons of the same metric within one run are still valid."
   echo
   echo "Per-sample logs in \`$OUT/sample-N.log\`."
 } | tee "$OUT/summary.md"

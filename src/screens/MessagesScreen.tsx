@@ -60,6 +60,13 @@ interface AnonContact {
 
 const MessagesScreen: React.FC = () => {
   const colors = useThemeColors();
+  // First-render marker: fires once per mount when the first commit lands. Distinct from refreshDmInbox completion (which fires later, after relay round-trip). Used by scripts/perf-startup.sh to measure tap-to-render latency for tab-messages.
+  const messagesRenderLoggedRef = useRef(false);
+  useEffect(() => {
+    if (messagesRenderLoggedRef.current) return;
+    messagesRenderLoggedRef.current = true;
+    console.log(`[Perf] MessagesScreen first render`);
+  }, []);
   const styles = useMemo(() => createMessagesScreenStyles(colors), [colors]);
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<MessagesNavigation>();
