@@ -23,6 +23,7 @@ import * as Clipboard from 'expo-clipboard';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { useWallet } from '../contexts/WalletContext';
 import { walletLabel } from '../types/wallet';
+import type { ZapCounterpartyInfo } from '../types/wallet';
 import { useNostr } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createSendSheetStyles } from '../styles/SendSheet.styles';
@@ -377,6 +378,14 @@ const SendSheet: React.FC<Props> = ({
     setSending(true);
     setProgressError(undefined);
     setProgressState('sending');
+    let inFlightZap: {
+      walletId: string;
+      paymentHash: string;
+      counterparty: ZapCounterpartyInfo;
+      amountSats: number;
+      memo: string;
+      bolt11: string;
+    } | null = null;
     try {
       if (isOnchainAddress) {
         if (currentSats <= 0) {
@@ -435,18 +444,8 @@ const SendSheet: React.FC<Props> = ({
         }
 
         const bolt11 = await fetchInvoice(lnurlParams.callback, currentSats, invoiceOptions);
-        await payInvoiceForWallet(walletId!, bolt11, signal);
 
-        if (__DEV__)
-          console.log(
-            `[Zap-send] paid ${currentSats} sats · allowsNostr=${!!lnurlParams.allowsNostr} activePubkey=${activePubkey ? activePubkey.slice(0, 8) + '…' : 'none'} hasZapRequest=${!!invoiceOptions.nostr}`,
-          );
-
-        // If this was a NIP-57 zap, persist the recipient we just paid so
-        // the transaction list can render "Sent to [Name]" on refresh.
-        // The public zap receipt identifies us as sender, not the person
-        // we paid — we're the only party that actually knows who got it.
-        if (invoiceOptions.nostr && activePubkey) {
+        if (invoiceOptions.nostr && activePubkey && walletId) {
           try {
             const decoded = bolt11Decode(bolt11);
             const hashSection = decoded.sections?.find(
@@ -456,7 +455,7 @@ const SendSheet: React.FC<Props> = ({
             if (paymentHash) {
               const contact = contacts.find((c) => c.pubkey === activePubkey);
               const p = contact?.profile ?? null;
-              const counterparty = {
+              const counterparty: ZapCounterpartyInfo = {
                 pubkey: activePubkey,
                 profile: {
                   npub: npubEncode(activePubkey),
@@ -468,35 +467,48 @@ const SendSheet: React.FC<Props> = ({
                 comment: memo,
                 anonymous: false,
               };
-              await recordOutgoingCounterparty(paymentHash, counterparty);
-              if (__DEV__)
-                console.log(`[Zap-send] stored counterparty for ph=${paymentHash.slice(0, 12)}…`);
-              // Optimistic insert: surface the outgoing zap in ConversationScreen
-              // (and the transaction list) without waiting for LNbits to flush
-              // the tx and the next resolver pass. The subsequent
-              // fetchTransactionsForWallet refresh reconciles by paymentHash —
-              // see WalletContext's counterpartyByHash loop which preserves
-              // this attribution across refreshes.
-              if (walletId) {
-                const nowSec = Math.floor(Date.now() / 1000);
-                // Convention throughout the app: amount is a POSITIVE magnitude
-                // and `type` alone carries direction (see TransferSheet's
-                // optimistic inserts, ConversationScreen's zapItems, and every
-                // TransactionDetail consumer — all read Math.abs(tx.amount)).
-                addPendingTransaction(walletId, {
-                  type: 'outgoing',
-                  amount: currentSats,
-                  description: memo || undefined,
-                  created_at: nowSec,
-                  settled_at: nowSec,
-                  paymentHash,
-                  bolt11,
-                  invoice: bolt11,
-                  zapCounterparty: counterparty,
-                  optimistic: true,
-                });
-              }
+              inFlightZap = {
+                walletId,
+                paymentHash,
+                counterparty,
+                amountSats: currentSats,
+                memo,
+                bolt11,
+              };
             }
+          } catch (e) {
+            if (__DEV__) console.warn('[Zap-send] decode failed:', e);
+          }
+        }
+
+        await payInvoiceForWallet(walletId!, bolt11, signal);
+
+        if (__DEV__)
+          console.log(
+            `[Zap-send] paid ${currentSats} sats · allowsNostr=${!!lnurlParams.allowsNostr} activePubkey=${activePubkey ? activePubkey.slice(0, 8) + '…' : 'none'} hasZapRequest=${!!invoiceOptions.nostr}`,
+          );
+
+        if (inFlightZap) {
+          try {
+            await recordOutgoingCounterparty(inFlightZap.paymentHash, inFlightZap.counterparty);
+            if (__DEV__)
+              console.log(
+                `[Zap-send] stored counterparty for ph=${inFlightZap.paymentHash.slice(0, 12)}…`,
+              );
+            const nowSec = Math.floor(Date.now() / 1000);
+            addPendingTransaction(inFlightZap.walletId, {
+              type: 'outgoing',
+              amount: inFlightZap.amountSats,
+              description: inFlightZap.memo || undefined,
+              created_at: nowSec,
+              settled_at: nowSec,
+              paymentHash: inFlightZap.paymentHash,
+              bolt11: inFlightZap.bolt11,
+              invoice: inFlightZap.bolt11,
+              zapCounterparty: inFlightZap.counterparty,
+              optimistic: true,
+              status: 'success',
+            });
           } catch (e) {
             if (__DEV__) console.warn('[Zap-send] store failed:', e);
           }
@@ -537,6 +549,22 @@ const SendSheet: React.FC<Props> = ({
       // just let the send complete silently without surfacing an error.
       if ((error as Error)?.name === 'AbortError' || signal.aborted) {
         return;
+      }
+      if (inFlightZap) {
+        const nowSec = Math.floor(Date.now() / 1000);
+        addPendingTransaction(inFlightZap.walletId, {
+          type: 'outgoing',
+          amount: inFlightZap.amountSats,
+          description: inFlightZap.memo || undefined,
+          created_at: nowSec,
+          settled_at: nowSec,
+          paymentHash: inFlightZap.paymentHash,
+          bolt11: inFlightZap.bolt11,
+          invoice: inFlightZap.bolt11,
+          zapCounterparty: inFlightZap.counterparty,
+          optimistic: true,
+          status: 'failed',
+        });
       }
       const message = error instanceof Error ? error.message : 'Payment failed';
       setProgressError(message);

@@ -93,6 +93,7 @@ export interface WalletTransaction {
    * real tx arrives (matched by paymentHash).
    */
   optimistic?: boolean;
+  status?: 'success' | 'failed';
 }
 
 /** Format wallet name with type suffix for dropdowns */

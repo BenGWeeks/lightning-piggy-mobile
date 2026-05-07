@@ -140,6 +140,7 @@ interface WalletContextType {
 
   // Transaction helpers
   addPendingTransaction: (walletId: string, tx: WalletTransaction) => void;
+  markPendingTransactionFailed: (walletId: string, paymentHash: string) => void;
 
   // On-chain actions
   getReceiveAddress: (walletId: string) => Promise<string>;
@@ -263,6 +264,28 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const addPendingTransaction = useCallback((walletId: string, tx: WalletTransaction) => {
     setWallets((prev) =>
       prev.map((w) => (w.id === walletId ? { ...w, transactions: [tx, ...w.transactions] } : w)),
+    );
+  }, []);
+
+  const markPendingTransactionFailed = useCallback((walletId: string, paymentHash: string) => {
+    setWallets((prev) =>
+      prev.map((w) => {
+        if (w.id !== walletId) return w;
+        let touched = false;
+        const next = w.transactions.map((t) => {
+          if (
+            t.optimistic &&
+            t.type === 'outgoing' &&
+            t.paymentHash === paymentHash &&
+            t.status !== 'failed'
+          ) {
+            touched = true;
+            return { ...t, status: 'failed' as const };
+          }
+          return t;
+        });
+        return touched ? { ...w, transactions: next } : w;
+      }),
     );
   }, []);
 
@@ -1562,6 +1585,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       refreshBalanceForWallet,
       fetchTransactionsForWallet,
       addPendingTransaction,
+      markPendingTransactionFailed,
       getReceiveAddress,
       lastIncomingPayment,
       clearLastIncomingPayment,
@@ -1600,6 +1624,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       refreshBalanceForWallet,
       fetchTransactionsForWallet,
       addPendingTransaction,
+      markPendingTransactionFailed,
       getReceiveAddress,
       lastIncomingPayment,
       clearLastIncomingPayment,

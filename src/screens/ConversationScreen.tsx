@@ -17,7 +17,7 @@ import {
 import { Alert } from '../components/BrandedAlert';
 import { KeyboardController } from 'react-native-keyboard-controller';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { Zap, ArrowDown } from 'lucide-react-native';
+import { Zap, ArrowDown, XCircle } from 'lucide-react-native';
 import { Image as ExpoImage } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -828,13 +828,16 @@ const ConversationScreen: React.FC = () => {
       // 1:1-specific Item kind: groups don't pair zap receipts to a single
       // peer, so MessageBubble doesn't carry this case.
       if (item.kind === 'zap') {
+        const failed = item.fromMe && item.tx.status === 'failed';
+        const meCardStyle = failed ? styles.zapCardMeFailed : styles.zapCardMe;
+        const zapIconColor = failed ? colors.red : item.fromMe ? colors.brandPink : colors.white;
         return (
           <View style={[styles.zapRow, item.fromMe ? styles.zapRowRight : styles.zapRowLeft]}>
             <TouchableOpacity
               activeOpacity={0.8}
               onPress={() => setDetailTx(item.tx)}
-              style={[styles.zapCard, item.fromMe ? styles.zapCardMe : styles.zapCardThem]}
-              accessibilityLabel={item.fromMe ? 'Zap sent' : 'Zap received'}
+              style={[styles.zapCard, item.fromMe ? meCardStyle : styles.zapCardThem]}
+              accessibilityLabel={failed ? 'Zap failed' : item.fromMe ? 'Zap sent' : 'Zap received'}
               testID={`conversation-zap-${item.id}`}
             >
               <View
@@ -843,16 +846,21 @@ const ConversationScreen: React.FC = () => {
                   item.fromMe ? styles.zapCardIconBadgeMe : styles.zapCardIconBadgeThem,
                 ]}
               >
-                <Zap
-                  size={18}
-                  color={item.fromMe ? colors.brandPink : colors.white}
-                  fill={item.fromMe ? colors.brandPink : colors.white}
-                />
+                <Zap size={18} color={zapIconColor} fill={zapIconColor} />
               </View>
               <View style={styles.zapCardBody}>
-                <Text style={[styles.zapCardLabel, item.fromMe && styles.zapCardLabelMe]}>
-                  {item.fromMe ? 'Zap sent' : 'Zap received'}
-                </Text>
+                <View style={styles.zapCardHeaderRow}>
+                  <Text style={[styles.zapCardLabel, item.fromMe && styles.zapCardLabelMe]}>
+                    {failed ? 'Zap failed' : item.fromMe ? 'Zap sent' : 'Zap received'}
+                  </Text>
+                  {failed ? (
+                    <XCircle
+                      size={14}
+                      color={colors.white}
+                      testID={`conversation-zap-failed-${item.id}`}
+                    />
+                  ) : null}
+                </View>
                 <Text style={[styles.zapCardAmount, item.fromMe && styles.zapCardAmountMe]}>
                   {item.amountSats.toLocaleString()} sats
                 </Text>
@@ -1405,6 +1413,10 @@ const createStyles = (colors: Palette) =>
     zapCardMe: {
       backgroundColor: colors.brandPink,
       borderColor: colors.brandPink,
+    },
+    zapCardMeFailed: {
+      backgroundColor: colors.red,
+      borderColor: colors.red,
     },
     zapCardThem: {
       backgroundColor: colors.surface,

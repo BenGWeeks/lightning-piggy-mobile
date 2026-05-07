@@ -42,6 +42,7 @@ export interface TransactionDetailData {
   feesSats?: number;
   swapId?: string;
   zapCounterparty?: ZapCounterpartyInfo | null;
+  status?: 'success' | 'failed';
 }
 
 export interface CounterpartyContact {
