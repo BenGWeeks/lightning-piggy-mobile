@@ -116,9 +116,11 @@ describe('satsToFiat', () => {
 
 describe('formatFiat', () => {
   it('formats USD with two decimals', () => {
-    // Use a non-locale-sensitive shape: assert leading symbol + digits
+    // Locale-tolerant: some Intl locales render the decimal separator
+    // as a comma (e.g. de-DE → "12,34"). Accept either separator so the
+    // test is stable across CI/dev environments.
     const out = formatFiat(12.34, 'USD');
-    expect(out).toMatch(/12\.34/);
+    expect(out).toMatch(/12[.,]34/);
   });
 
   it('shows "< $0.01" sentinel for sub-cent positive amounts', () => {

@@ -56,13 +56,11 @@ const DisplayScreen: React.FC = () => {
     );
   };
 
-  return (
-    <AccountScreenLayout
-      title="Currency"
-      // FlatList must own its own scroll — disable the layout's outer
-      // ScrollView scroll so the list is the only scroll surface.
-      scrollViewProps={{ scrollEnabled: false }}
-    >
+  // Render the section label + search input inside the FlatList header
+  // so the FlatList is the only scrollable surface on this screen and
+  // RN doesn't warn about VirtualizedList nested inside a ScrollView.
+  const listHeader = (
+    <>
       <Text style={sharedAccountStyles.sectionLabel}>Currency</Text>
       <View style={styles.searchRow}>
         <Search size={18} color={colors.textSupplementary} />
@@ -78,11 +76,17 @@ const DisplayScreen: React.FC = () => {
           testID="currency-search"
         />
       </View>
+    </>
+  );
+
+  return (
+    <AccountScreenLayout title="Currency" scrollable={false}>
       <View style={styles.listCard}>
         <FlatList
           data={filtered}
           keyExtractor={(c) => c.code}
           renderItem={renderItem}
+          ListHeaderComponent={listHeader}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
           ListEmptyComponent={
             <View style={styles.empty}>
@@ -118,12 +122,10 @@ const createStyles = (colors: Palette) =>
       fontWeight: '500',
     },
     listCard: {
+      flex: 1,
       backgroundColor: colors.surface,
       borderRadius: 16,
       overflow: 'hidden',
-      // Constrain so the list scrolls inside the pink screen instead of
-      // pushing the back chevron off the top.
-      maxHeight: 520,
     },
     row: {
       flexDirection: 'row',
