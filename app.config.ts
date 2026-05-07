@@ -1,6 +1,18 @@
 import { ExpoConfig, ConfigContext } from 'expo/config';
+// Single source of truth for the marketing version — `npm version <bump>`
+// updates package.json, which then flows into both the in-app version
+// label (via src/utils/appVersion.ts) and the native binary's
+// CFBundleShortVersionString / android.versionName below.
+import pkg from './package.json';
 
-const APP_VARIANT = process.env.APP_VARIANT;
+// Default to the development variant for local builds when APP_VARIANT
+// is unset, so a one-line `npm run android` (or a forgetful prebuild)
+// still produces the .dev applicationId + (Dev) label and installs
+// alongside an existing production EAS install rather than colliding
+// with it. EAS sets EAS_BUILD=1 in its build env, and each EAS profile
+// in eas.json sets APP_VARIANT explicitly when it should — so this
+// fallback only fires for local invocations that didn't specify.
+const APP_VARIANT = process.env.APP_VARIANT ?? (process.env.EAS_BUILD ? undefined : 'development');
 const IS_DEV = APP_VARIANT === 'development';
 const IS_PREVIEW = APP_VARIANT === 'preview';
 
@@ -26,7 +38,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: getAppName(),
   slug: 'lightning-piggy-app',
-  version: '1.0.0',
+  version: pkg.version,
   orientation: 'portrait',
   icon: './assets/icon.png',
   userInterfaceStyle: 'light',
@@ -106,22 +118,35 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
   android: {
     adaptiveIcon: {
+      // Dev variant uses a flat blue backgroundColor so it's visibly
+      // distinct in the launcher next to a production install. The
+      // backgroundImage takes precedence in Expo's adaptive-icon
+      // template, so we deliberately drop it for dev — that lets the
+      // backgroundColor line up against the foreground piggy and you
+      // can see at a glance which icon is which when both are
+      // installed alongside each other.
       backgroundColor: IS_DEV ? '#4A90D9' : '#E6F4FE',
       foregroundImage: './assets/android-icon-foreground.png',
-      backgroundImage: './assets/android-icon-background.png',
+      ...(IS_DEV ? {} : { backgroundImage: './assets/android-icon-background.png' }),
       monochromeImage: './assets/android-icon-monochrome.png',
     },
     predictiveBackGestureEnabled: false,
     package: getAndroidPackage(),
-    // Floor for the local-build versionCode. EAS production builds use
-    // their own remote autoIncrement counter (`eas.json` →
-    // `appVersionSource: "remote"`) and ignore this. Local
-    // `expo run:android --variant release` reads it directly — bump it
-    // by one before each local prod install when the previous APK on
-    // the target device was higher than this value, otherwise the
-    // install fails with INSTALL_FAILED_VERSION_DOWNGRADE. See
-    // docs/DEPLOYMENT.adoc → "Local production builds".
-    versionCode: 24,
+    // Floor for the local-build versionCode. EAS *cloud* production
+    // builds use a separate remote counter (`eas.json` →
+    // `appVersionSource: "remote"`) and ignore this. EAS *local* builds
+    // (`eas build --local`) and `expo run:android --variant release`
+    // BOTH read it directly — `appVersionSource: "remote"` only affects
+    // cloud builds. So this floor must be ≥ the highest versionCode
+    // currently installed on any target device, or the local install
+    // fails with INSTALL_FAILED_VERSION_DOWNGRADE.
+    //
+    // Bump rule: set to `(latest cloud versionCode) + 1`. Get the
+    // current cloud value with:
+    //   eas build:list --platform android --status finished --limit 1
+    //
+    // See docs/DEPLOYMENT.adoc → "Local production builds".
+    versionCode: 35,
   },
   web: {
     favicon: './assets/favicon.png',
