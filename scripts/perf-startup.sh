@@ -145,25 +145,24 @@ run_sample() {
   local responsive_ms
   responsive_ms=$(wait_for_log 'ReactNativeJS.*\[Perf\] refreshDmInbox' "$since_ts" "$launch_start")
 
-  local home_ms="" msgs_ms="" learn_ms="" friends_ms=""
-  if [[ -n "$responsive_ms" ]]; then
-    sleep 0.5
+  # Tab-nav timing always runs — refreshDmInbox doesn't fire on cold-start (it only fires once Messages is opened), so gating tab-nav on time-to-responsive previously left the columns blank. Tabs are independently useful: tab-messages itself fires refreshDmInbox, tab-friends fires the FriendsList marker, and tab-home/tab-learn measure the Maestro round-trip as an upper bound. We give a small fixed settle for the cold-start UI to render before tapping.
+  sleep 1.5
 
-    # Home tap — no unique perf marker, so we use a short fixed settle.
-    # Document this caveat in the summary.
-    local t0
-    t0=$(now_ms)
-    maestro --device "$DEVICE" test "$OUT/tap-home.yaml" > "$OUT/maestro-home.log" 2>&1 || true
-    home_ms=$(( $(now_ms) - t0 ))
+  local home_ms msgs_ms learn_ms friends_ms
 
-    msgs_ms=$(tap_and_time messages 'ReactNativeJS.*\[Perf\] refreshDmInbox' "$since_ts")
+  # Home tap — no unique perf marker, so we time the Maestro round-trip.
+  local t0
+  t0=$(now_ms)
+  maestro --device "$DEVICE" test "$OUT/tap-home.yaml" > "$OUT/maestro-home.log" 2>&1 || true
+  home_ms=$(( $(now_ms) - t0 ))
 
-    t0=$(now_ms)
-    maestro --device "$DEVICE" test "$OUT/tap-learn.yaml" > "$OUT/maestro-learn.log" 2>&1 || true
-    learn_ms=$(( $(now_ms) - t0 ))
+  msgs_ms=$(tap_and_time messages 'ReactNativeJS.*\[Perf\] refreshDmInbox' "$since_ts")
 
-    friends_ms=$(tap_and_time friends 'ReactNativeJS.*\[Perf\] FriendsList first render' "$since_ts")
-  fi
+  t0=$(now_ms)
+  maestro --device "$DEVICE" test "$OUT/tap-learn.yaml" > "$OUT/maestro-learn.log" 2>&1 || true
+  learn_ms=$(( $(now_ms) - t0 ))
+
+  friends_ms=$(tap_and_time friends 'ReactNativeJS.*\[Perf\] FriendsList first render' "$since_ts")
 
   echo "  cold_total=${total_time}ms  wait=${wait_time}ms  wallet=${wallet_ms:-TIMEOUT}ms  responsive=${responsive_ms:-TIMEOUT}ms"
   echo "  home=${home_ms:-—}ms  messages=${msgs_ms:-—}ms  learn=${learn_ms:-—}ms  friends=${friends_ms:-—}ms"
