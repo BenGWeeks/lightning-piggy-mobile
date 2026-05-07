@@ -17,6 +17,7 @@ import {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import Svg, { Circle, Path } from 'react-native-svg';
+import QRCode from 'react-native-qrcode-svg';
 import { Zap, Copy, Share2, UserRound } from 'lucide-react-native';
 import NfcIcon from './icons/NfcIcon';
 import NfcWriteSheet from './NfcWriteSheet';
@@ -28,6 +29,7 @@ import { useNostr } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import FriendPickerSheet, { PickedFriend } from './FriendPickerSheet';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 
 interface ContactData {
   pubkey: string | null;
@@ -59,7 +61,37 @@ const ContactProfileSheet: React.FC<Props> = ({
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
-  const snapPoints = useMemo(() => ['55%'], []);
+  // Bumped from 55% to 80% to accommodate the 160px npub QR rendered
+  // between NIP-05 and the npub copy row.
+  const snapPoints = useMemo(() => ['80%'], []);
+  const npub = useMemo(
+    () => (contact?.pubkey ? npubEncode(contact.pubkey) : null),
+    [contact?.pubkey],
+  );
+  // Performance instrumentation (dev only). Logged once on the first
+  // render where `visible` is true so perf scripts can time
+  // tap-on-contact -> sheet rendered. Mirrors the FriendsScreen pattern.
+  const firstRenderLogged = useRef(false);
+  const visibleSinceMs = useRef<number | null>(null);
+  // Stamp the visibleSince timestamp + emit the first-render marker in an
+  // effect (not during render) so we don't mutate a ref during render and
+  // stay friendly to concurrent rendering / StrictMode double-invocation.
+  useEffect(() => {
+    if (!visible) {
+      // Reset on close so a re-open re-times the next first render.
+      visibleSinceMs.current = null;
+      firstRenderLogged.current = false;
+      return;
+    }
+    if (visibleSinceMs.current === null) {
+      visibleSinceMs.current = Date.now();
+    }
+    if (!__DEV__) return;
+    if (firstRenderLogged.current) return;
+    firstRenderLogged.current = true;
+    const since = visibleSinceMs.current ?? Date.now();
+    console.log(`[Perf] ContactProfileSheet first render: ${Date.now() - since}ms from visible`);
+  }, [visible]);
   const { contacts, followContact, unfollowContact, sendDirectMessage, relays } = useNostr();
   const [following, setFollowing] = useState(false);
   const [loadingFollow, setLoadingFollow] = useState(false);
@@ -166,8 +198,25 @@ const ContactProfileSheet: React.FC<Props> = ({
   };
 
   const handleCopyNpub = async () => {
-    if (!contact?.pubkey) return;
-    await Clipboard.setStringAsync(npubEncode(contact.pubkey));
+    if (!npub) return;
+    await Clipboard.setStringAsync(npub);
+    Toast.show({
+      type: 'success',
+      text1: 'Public key copied',
+      position: 'top',
+      visibilityTime: 1800,
+    });
+  };
+
+  const handleCopyLnAddress = async () => {
+    if (!contact?.lightningAddress) return;
+    await Clipboard.setStringAsync(contact.lightningAddress);
+    Toast.show({
+      type: 'success',
+      text1: 'Lightning address copied',
+      position: 'top',
+      visibilityTime: 1800,
+    });
   };
 
   const handleShare = useCallback(() => {
@@ -218,9 +267,7 @@ const ContactProfileSheet: React.FC<Props> = ({
   );
 
   const handleViewProfile = useCallback(async () => {
-    if (!contact?.pubkey) return;
-    const npub = npubEncode(contact.pubkey);
-    // Try nostr: URI first (NIP-21), fall back to Primal web URL
+    if (!npub) return;
     const nostrUri = `nostr:${npub}`;
     const canOpen = await Linking.canOpenURL(nostrUri);
     if (canOpen) {
@@ -228,16 +275,11 @@ const ContactProfileSheet: React.FC<Props> = ({
     } else {
       Linking.openURL(`https://primal.net/p/${npub}`);
     }
-  }, [contact?.pubkey]);
+  }, [npub]);
 
   if (!contact) return null;
 
-  const npubDisplay = contact.pubkey
-    ? (() => {
-        const full = npubEncode(contact.pubkey);
-        return `${full.slice(0, 16)}...${full.slice(-8)}`;
-      })()
-    : null;
+  const npubDisplay = npub ? `${npub.slice(0, 16)}...${npub.slice(-8)}` : null;
 
   return (
     <BottomSheetModal
@@ -251,7 +293,7 @@ const ContactProfileSheet: React.FC<Props> = ({
       <BottomSheetView style={styles.content}>
         {/* Banner with handle overlay */}
         <View style={styles.bannerContainer}>
-          {contact.banner ? (
+          {contact.banner && isSupportedImageUrl(contact.banner) ? (
             <Image source={{ uri: contact.banner }} style={styles.bannerImage} cachePolicy="disk" />
           ) : (
             <View style={styles.bannerPlaceholder} />
@@ -261,9 +303,10 @@ const ContactProfileSheet: React.FC<Props> = ({
           </View>
         </View>
 
-        {/* Avatar */}
+        {/* Avatar — pre-filter unsupported URLs (`.svg`, `.heic`, etc.)
+            so BitmapFactory never tries to decode them; see #189. */}
         <View style={styles.avatarContainer}>
-          {contact.picture && !avatarError ? (
+          {contact.picture && !avatarError && isSupportedImageUrl(contact.picture) ? (
             <Image
               source={{ uri: contact.picture }}
               style={styles.avatar}
@@ -291,9 +334,29 @@ const ContactProfileSheet: React.FC<Props> = ({
           </Text>
         )}
 
+        {/* QR code of the friend's npub. nostr:-prefixed so any NIP-21
+            scanner (Damus, Amethyst, Primal, 0xchat) opens the profile
+            directly. Forced black-on-white for scan reliability across
+            light/dark themes — matches QrSheet's convention. */}
+        {npub && (
+          <View
+            style={styles.qrContainer}
+            accessible
+            accessibilityRole="image"
+            accessibilityLabel="Friend npub QR code"
+          >
+            <QRCode value={`nostr:${npub}`} size={160} backgroundColor="#FFFFFF" color="#000000" />
+          </View>
+        )}
+
         {/* npub */}
         {npubDisplay && (
-          <TouchableOpacity style={styles.npubRow} onPress={handleCopyNpub}>
+          <TouchableOpacity
+            style={styles.npubRow}
+            onPress={handleCopyNpub}
+            accessibilityLabel="Copy npub"
+            testID="contact-copy-npub-button"
+          >
             <Text style={styles.npubText}>{npubDisplay}</Text>
             <Copy size={20} color={colors.brandPink} />
           </TouchableOpacity>
@@ -351,9 +414,17 @@ const ContactProfileSheet: React.FC<Props> = ({
             </TouchableOpacity>
           )
         ) : contact.lightningAddress ? (
-          <Text style={styles.lightningAddress} numberOfLines={1}>
-            {contact.lightningAddress}
-          </Text>
+          <TouchableOpacity
+            style={styles.lnAddressRow}
+            onPress={handleCopyLnAddress}
+            accessibilityLabel="Copy Lightning address"
+            testID="contact-copy-lud16-button"
+          >
+            <Text style={styles.lightningAddress} numberOfLines={1}>
+              {contact.lightningAddress}
+            </Text>
+            <Copy size={14} color={colors.brandPink} />
+          </TouchableOpacity>
         ) : null}
 
         {/* Action buttons */}
@@ -363,8 +434,13 @@ const ContactProfileSheet: React.FC<Props> = ({
               style={[styles.followButton, following && styles.followingButton]}
               onPress={handleFollowToggle}
               disabled={loadingFollow}
+              accessibilityLabel={following ? 'Unfollow' : 'Follow'}
+              testID="profile-sheet-follow-button"
             >
-              <Text style={[styles.followButtonText, following && styles.followingButtonText]}>
+              <Text
+                style={[styles.followButtonText, following && styles.followingButtonText]}
+                numberOfLines={1}
+              >
                 {loadingFollow ? '...' : following ? 'Unfollow' : 'Follow'}
               </Text>
             </TouchableOpacity>
@@ -385,13 +461,22 @@ const ContactProfileSheet: React.FC<Props> = ({
                   strokeLinejoin="round"
                 />
               </Svg>
-              <Text style={styles.messageButtonText}>Message</Text>
+              <Text style={styles.messageButtonText} numberOfLines={1}>
+                Message
+              </Text>
             </TouchableOpacity>
           )}
           {contact.lightningAddress && onZap && (
-            <TouchableOpacity style={styles.zapButton} onPress={onZap}>
+            <TouchableOpacity
+              style={styles.zapButton}
+              onPress={onZap}
+              accessibilityLabel="Zap"
+              testID="profile-sheet-zap-button"
+            >
               <Zap size={20} color={colors.white} fill={colors.white} />
-              <Text style={styles.zapButtonText}>Zap</Text>
+              <Text style={styles.zapButtonText} numberOfLines={1}>
+                Zap
+              </Text>
             </TouchableOpacity>
           )}
           {contact.pubkey && (
@@ -423,14 +508,23 @@ const ContactProfileSheet: React.FC<Props> = ({
               </Svg>
             </TouchableOpacity>
           )}
-          {contact.pubkey && nfcSupported && (
+          {contact.pubkey && (
             <TouchableOpacity
-              style={styles.iconButton}
+              style={[styles.iconButton, !nfcSupported && styles.iconButtonDisabled]}
               onPress={() => setNfcWriteVisible(true)}
-              accessibilityLabel="Write to NFC tag"
+              disabled={!nfcSupported}
+              accessibilityLabel={
+                nfcSupported
+                  ? 'Write to NFC tag'
+                  : 'Write to NFC tag (not supported on this device)'
+              }
+              accessibilityState={{ disabled: !nfcSupported }}
               testID="contact-nfc-write-button"
             >
-              <NfcIcon size={18} color={colors.brandPink} />
+              <NfcIcon
+                size={18}
+                color={nfcSupported ? colors.brandPink : colors.textSupplementary}
+              />
             </TouchableOpacity>
           )}
         </View>
@@ -438,11 +532,11 @@ const ContactProfileSheet: React.FC<Props> = ({
             tag. The friend can then tap the tag against another device
             to be added on Nostr — same payload as the existing share
             flow but routed through hardware. */}
-        {contact.pubkey && (
+        {npub && (
           <NfcWriteSheet
             visible={nfcWriteVisible}
             onClose={() => setNfcWriteVisible(false)}
-            npub={npubEncode(contact.pubkey)}
+            npub={npub}
             displayName={contact.name}
           />
         )}
@@ -534,6 +628,12 @@ const createStyles = (colors: Palette) =>
       color: colors.brandPink,
       marginTop: 2,
     },
+    qrContainer: {
+      marginTop: 12,
+      padding: 12,
+      backgroundColor: colors.white,
+      borderRadius: 12,
+    },
     npubRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -593,12 +693,19 @@ const createStyles = (colors: Palette) =>
     },
     actionRow: {
       flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'center',
       gap: 8,
       marginTop: 20,
       paddingHorizontal: 16,
+      // alignSelf:'stretch' so the row claims the full sheet width even
+      // though parent has alignItems:'center' — otherwise the row sizes
+      // itself to its children and flexWrap never triggers.
+      alignSelf: 'stretch',
     },
     followButton: {
-      paddingHorizontal: 14,
+      flexShrink: 1,
+      paddingHorizontal: 12,
       paddingVertical: 12,
       borderRadius: 10,
       borderWidth: 1.5,
@@ -620,10 +727,11 @@ const createStyles = (colors: Palette) =>
     },
     zapButton: {
       flexDirection: 'row',
+      flexShrink: 1,
       alignItems: 'center',
       justifyContent: 'center',
       gap: 4,
-      paddingHorizontal: 14,
+      paddingHorizontal: 12,
       paddingVertical: 12,
       borderRadius: 10,
       backgroundColor: colors.brandPink,
@@ -635,10 +743,11 @@ const createStyles = (colors: Palette) =>
     },
     messageButton: {
       flexDirection: 'row',
+      flexShrink: 1,
       alignItems: 'center',
       justifyContent: 'center',
       gap: 4,
-      paddingHorizontal: 14,
+      paddingHorizontal: 12,
       paddingVertical: 12,
       borderRadius: 10,
       backgroundColor: colors.brandPink,
@@ -656,6 +765,10 @@ const createStyles = (colors: Palette) =>
       borderColor: colors.brandPink,
       justifyContent: 'center',
       alignItems: 'center',
+    },
+    iconButtonDisabled: {
+      borderColor: colors.textSupplementary,
+      opacity: 0.6,
     },
   });
 

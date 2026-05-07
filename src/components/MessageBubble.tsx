@@ -21,6 +21,7 @@ import {
   formatRelativeFuture,
 } from '../utils/messageContent';
 import type { MessageDeliveryStatus } from '../utils/messageDeliveryStatus';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 
 interface Props {
   // Identifying fields used for testID stability and parent diffing.
@@ -328,7 +329,7 @@ const MessageBubble: React.FC<Props> = ({
                 the icon to guarantee contrast against the light avatar BG. */}
             <View style={[styles.contactAvatar, styles.contactAvatarFallback]}>
               <UserRound size={26} color={colors.textBody} strokeWidth={1.75} />
-              {prof?.picture ? (
+              {prof?.picture && isSupportedImageUrl(prof.picture) ? (
                 <Image
                   source={{ uri: prof.picture }}
                   style={[StyleSheet.absoluteFillObject, { borderRadius: 22 }]}
