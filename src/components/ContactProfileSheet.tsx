@@ -605,6 +605,10 @@ const createStyles = (colors: Palette) =>
       gap: 8,
       marginTop: 20,
       paddingHorizontal: 16,
+      // alignSelf:'stretch' so the row claims the full sheet width even
+      // though parent has alignItems:'center' — otherwise the row sizes
+      // itself to its children and flexWrap never triggers.
+      alignSelf: 'stretch',
     },
     followButton: {
       flexShrink: 1,
