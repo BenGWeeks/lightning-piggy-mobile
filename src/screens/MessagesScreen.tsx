@@ -177,6 +177,12 @@ const MessagesScreen: React.FC = () => {
     refreshAbortRef.current = ctrl;
     return ctrl.signal;
   }, []);
+  // Read `enforceFollowingOnly` via a ref inside the DM-refresh focus effect so the callback's deps don't include it (and don't invalidate when, in future, this might depend on contact changes too). The focus cleanup must only run on actual blur, not on every dep change, otherwise an in-flight unwrap loop would be aborted prematurely. (#413 review)
+  const enforceFollowingOnlyRef = useRef(enforceFollowingOnly);
+  useEffect(() => {
+    enforceFollowingOnlyRef.current = enforceFollowingOnly;
+  }, [enforceFollowingOnly]);
+
   // Force-refresh the inbox whenever the effective enforcement flips so all data-layer paths re-apply.
   useEffect(() => {
     if (!isLoggedIn) return;
@@ -188,29 +194,45 @@ const MessagesScreen: React.FC = () => {
       signal: newRefreshSignal(),
     });
   }, [enforceFollowingOnly, isLoggedIn, refreshDmInbox, newRefreshSignal]);
+
   useFocusEffect(
     useCallback(() => {
       if (!isLoggedIn) return;
       const handle = InteractionManager.runAfterInteractions(() => {
-        if (Date.now() - dmInboxLastRefreshAt.current >= DM_INBOX_REFRESH_TTL_MS) {
-          dmInboxLastRefreshAt.current = Date.now();
-          refreshDmInbox({
-            includeNonFollows: !enforceFollowingOnly,
-            signal: newRefreshSignal(),
+        if (Date.now() - dmInboxLastRefreshAt.current < DM_INBOX_REFRESH_TTL_MS) return;
+        // Bump the TTL marker only after the refresh resolves successfully — if it's aborted (tab blur) or throws, leave the marker untouched so the next focus retries instead of suppressing for 30 s. (#413 review)
+        const startedAt = Date.now();
+        refreshDmInbox({
+          includeNonFollows: !enforceFollowingOnlyRef.current,
+          signal: newRefreshSignal(),
+        })
+          .then(() => {
+            dmInboxLastRefreshAt.current = startedAt;
+          })
+          .catch(() => {
+            // Abort or relay error — TTL untouched, next focus retries.
           });
-        }
+      });
+      return () => {
+        handle.cancel();
+        // Abort an in-flight unwrap loop on tab blur so the JS thread isn't busy decrypting wraps the user no longer needs to see right now. The next focus will re-trigger refresh subject to the 30 s TTL gate.
+        refreshAbortRef.current?.abort();
+        refreshAbortRef.current = null;
+      };
+    }, [isLoggedIn, refreshDmInbox, newRefreshSignal]),
+  );
 
+  // Avatar prefetch is split into its own focus effect so it can depend on `contacts` (the content it iterates) without invalidating the DM-refresh callback above. (#413 review)
+  useFocusEffect(
+    useCallback(() => {
+      if (!isLoggedIn) return;
+      const handle = InteractionManager.runAfterInteractions(() => {
         const PREFETCH_TTL_MS = 30_000;
         if (Date.now() - lastAvatarPrefetchAt.current < PREFETCH_TTL_MS) return;
 
-        // Match FriendPickerSheet's `friends` memo: drop entries with
-        // no resolved name (the picker hides them), sort by first
-        // Latin letter then by lower-case name, then take the first
-        // 50. That's the set the user will see in the initial sheet
-        // viewport — prefetching them is the relevant warm-up.
+        // Match FriendPickerSheet's `friends` memo: drop entries with no resolved name (the picker hides them), sort by first Latin letter then by lower-case name, then take the first 50. That's the set the user will see in the initial sheet viewport — prefetching them is the relevant warm-up.
         //
-        // firstAlpha mirrors FriendPickerSheet's local helper: NFKD-
-        // normalise + uppercase, return first [A-Z] char or '#'.
+        // firstAlpha mirrors FriendPickerSheet's local helper: NFKD-normalise + uppercase, return first [A-Z] char or '#'.
         const firstAlpha = (n: string): string => {
           const m = n.normalize('NFKD').toUpperCase().match(/[A-Z]/);
           return m ? m[0] : '#';
@@ -232,18 +254,11 @@ const MessagesScreen: React.FC = () => {
 
         lastAvatarPrefetchAt.current = Date.now();
         ExpoImage.prefetch(avatarUrls, 'memory-disk').catch(() => {
-          // Prefetch failures are silent — falls back to on-demand
-          // decode at sheet open time, the un-fixed behaviour. No
-          // user-visible regression.
+          // Prefetch failures are silent — falls back to on-demand decode at sheet open time, the un-fixed behaviour. No user-visible regression.
         });
       });
-      return () => {
-        handle.cancel();
-        // Abort an in-flight unwrap loop on tab blur so the JS thread isn't busy decrypting wraps the user no longer needs to see right now. The next focus will re-trigger refresh subject to the 30 s TTL gate.
-        refreshAbortRef.current?.abort();
-        refreshAbortRef.current = null;
-      };
-    }, [isLoggedIn, refreshDmInbox, contacts, enforceFollowingOnly, newRefreshSignal]),
+      return () => handle.cancel();
+    }, [isLoggedIn, contacts]),
   );
 
   const followPubkeys = useMemo(() => {
@@ -370,18 +385,18 @@ const MessagesScreen: React.FC = () => {
     // UI stuck in the "refreshing" spinner state.
     try {
       await Promise.all([refreshContacts(), refreshProfile({ force: true })]);
+      // Pull-to-refresh deliberately does NOT call newRefreshSignal() here. If a focus refresh is already in flight, refreshDmInbox's single-flight guard returns the existing promise; aborting that promise via newRefreshSignal() then awaiting it would resolve to AbortError and never start a fresh refresh — making pull-to-refresh a no-op whenever a focus refresh was running. We let the in-flight one finish (its result is what the user wants anyway) and only kick off a new refresh if none is running. The focus-effect signal still aborts on blur, which covers the original snappiness goal. (#413 review)
       await refreshDmInbox({
         force: true,
         includeNonFollows: !enforceFollowingOnly,
-        signal: newRefreshSignal(),
       });
     } catch (err) {
-      // AbortError is expected when the user navigates away mid-refresh — swallow silently and let the next focus re-trigger as needed. Other errors bubble through; the finally block still resets the spinner.
+      // AbortError is expected when the user navigates away mid-refresh (the focus-effect signal fires) — swallow silently and let the next focus re-trigger as needed. Other errors bubble through; the finally block still resets the spinner.
       if ((err as Error)?.name !== 'AbortError') throw err;
     } finally {
       setRefreshing(false);
     }
-  }, [refreshContacts, refreshDmInbox, refreshProfile, enforceFollowingOnly, newRefreshSignal]);
+  }, [refreshContacts, refreshDmInbox, refreshProfile, enforceFollowingOnly]);
 
   const handleConversationPress = useCallback(
     (summary: ConversationSummary) => {
