@@ -512,4 +512,33 @@ $ANDROID_HOME/emulator/emulator -avd LP_API34 \
 *Real culprit (as of issue #377):* `libbdkffi.so` from `bdk-rn`, the Bitcoin Dev Kit FFI lib. Prebuilt with an older Rust + NDK toolchain that emits 4 KB-aligned ELFs. Used only in `src/services/onchainService.ts` for on-chain wallet support. +
 *Fix paths (issue #377 has the full menu):* a) rebuild the prebuilt in the `bdk-rn` fork with NDK r27+ + `cargo-ndk` ≥0.17, b) replace `bdk-rn` with an actively-maintained alternative, c) post-install patch via `lld --max-page-size=16384` (brittle), d) defer until Google's Play Store enforcement deadline. +
 *Workaround in the meantime:* test on the Android 14 emulator (no enforcement); EAS production builds aren't blocked because the warning appears only on debuggable installs.
+
+| Lightning payment shows "failed" in the UI but recipient says it was paid
+| Symptom: `pay_invoice` via NWC shows the "Sending payment" overlay, then flips
+to "failed" after ~30-60 s, but the recipient (e.g. Geyser, an LNURL store)
+confirms the invoice was paid. Pull-to-refresh on Home shows the payment in
+transaction history. +
+*Root cause:* mismatch between LN settlement time and the in-app reply-timer.
+The Alby SDK's NWC `pay_invoice` reply timeout is 60 s by default; if the route
+picks up a hold-invoice node (typically Boltz when paying anything that bridges
+to Rootstock — Geyser's "All-or-Nothing" Rootstock crowdfunding is the most
+common case), the HTLC stays locked while the off-chain leg confirms. RSK target
+block time is ~24 s, but block intervals follow an exponential distribution so
+5 % of blocks land beyond 72 s and 1 % beyond 110 s. A normal Lightning payment
+that happens to traverse Boltz Mini for an LN-to-RBTC swap can therefore take
+60-90 s to settle even when nothing is "broken". +
+*Diagnose on your LND:* `lncli listpayments --include_incomplete --max_payments
+5` — find the hash; `htlcs[0].route.hops[].pub_key` and check whether the
+second-to-last hop is Boltz Mini
+(`03e9c5157126b8049ad235bdade8db97a473b5760b34781b8c870bd2ba34dbfcf8`). If it
+is, the wait is the RSK confirmation, not your node. +
+*Fix (partial):* PR #427 raises the in-app reply timeout to 90 s, which catches
+typical RSK exponential tails but still mis-reports the rare 100 s+ outliers.
+The deeper fix is to drop the local timer entirely and react only to the
+eventual NIP-47 reply event landing on Nostr — tracked under #410. +
+*UX gotcha (#428):* the "Cancel" action in the progress overlay does not
+actually cancel the LN HTLC — once the payment is on a route the sender cannot
+stop it. Tapping "Cancel" only stops the UI from waiting; the HTLC continues,
+and the recipient may be paid minutes later. The button is being relabelled to
+"Continue in background".
 |===
