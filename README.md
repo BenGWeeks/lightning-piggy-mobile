@@ -51,10 +51,10 @@ Lightning Piggy Mobile implements the following open standards. See [docs/STANDA
 | Standard                                                           | Name                                                          |
 | ------------------------------------------------------------------ | ------------------------------------------------------------- |
 | [NIP-01](https://github.com/nostr-protocol/nips/blob/master/01.md) | Basic Protocol (relays, events, subscriptions)                |
-| [NIP-04](https://github.com/nostr-protocol/nips/blob/master/04.md) | Encrypted Direct Messages                                     |
+| [NIP-04](https://github.com/nostr-protocol/nips/blob/master/04.md) | Encrypted Direct Messages (legacy — inbound read only; outbound migrated to NIP-17 in #334) |
 | [NIP-05](https://github.com/nostr-protocol/nips/blob/master/05.md) | DNS Identity Verification                                     |
 | [NIP-14](https://github.com/nostr-protocol/nips/blob/master/14.md) | Subject Tag (used as group-chat name)                         |
-| [NIP-17](https://github.com/nostr-protocol/nips/blob/master/17.md) | Private Direct Messages (sealed + multi-recipient group chat) |
+| [NIP-17](https://github.com/nostr-protocol/nips/blob/master/17.md) | Private Direct Messages — canonical 1:1 and multi-recipient group chat (sealed via NIP-44 + gift-wrapped per recipient) |
 | [NIP-19](https://github.com/nostr-protocol/nips/blob/master/19.md) | Bech32-encoded Entities (`npub`, `nsec`)                      |
 | [NIP-20](https://github.com/nostr-protocol/nips/blob/master/20.md) | Command Results (OK messages)                                 |
 | [NIP-21](https://github.com/nostr-protocol/nips/blob/master/21.md) | `nostr:` URI Scheme                                           |
