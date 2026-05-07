@@ -429,7 +429,7 @@ const SendSheet: React.FC<Props> = ({
               invoiceOptions.nostr = zapRequestJson;
             } else if (__DEV__) {
               console.warn(
-                `[Zap-send] signZapRequest returned empty for recipient=${activePubkey.slice(0, 8)} — payment will go through as a plain LN send (no kind-9735 receipt published, resolver fallback can't recover the row)`,
+                `[Zap-send] signZapRequest returned empty for recipient=${activePubkey.slice(0, 8)} — payment will go through as a plain LN send (no kind-9735 receipt published on Nostr); local attribution still works because the counterparty is persisted below whenever activePubkey is set`,
               );
             }
           } catch (e) {
