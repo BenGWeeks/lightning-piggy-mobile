@@ -71,9 +71,10 @@ appId: $PKG
 EOF
 }
 
-for t in home messages learn friends; do
+for t in messages learn friends; do
   write_tab_flow "$t"
 done
+# tab-home is intentionally not measured per tap: Home is the default tab so it mounts during cold-start, its `[Perf] HomeScreen first render` marker fires once at app launch, and tapping the Home tab afterwards (with `freezeOnBlur: true` keeping it mounted) does not trigger a re-render or re-fire the marker. The cold-start time-to-Home is implicitly captured in `time-to-wallet` / `time-to-responsive` already.
 
 # Warm Maestro before sample 1 — every `maestro test` invocation pays a fresh JVM cold-start (~5–10 s on Linux). Running a no-op flow once at the start "burns" that cost into the warmup phase rather than into sample 1's tab-home column. Subsequent tests reuse the same daemon-cached JVM via Maestro 2.x's daemon mode.
 if ! maestro --version >/dev/null 2>&1; then
@@ -114,16 +115,24 @@ wait_for_log() {
 # on timeout).  The Maestro process itself takes ~5–10 s of JVM warmup, so
 # we time the *log marker*, not the maestro CLI exit; the marker is what
 # matches the user's perceived "tab is now responsive" moment.
+#
+# The since_ts arg is IGNORED — we compute a fresh device-side timestamp
+# right before invoking maestro so wait_for_log only matches markers
+# emitted AFTER tap dispatch. The previous shape used the sample-wide
+# since_ts and matched markers that fired during cold-start (before any
+# tap), which was especially wrong for tab-home because Home is the
+# initial tab and HomeScreen's first-render marker fires during launch.
 tap_and_time() {
   local tab=$1
   local marker=$2
-  local since_ts=$3
+  local fresh_since_ts
+  fresh_since_ts=$($ADB shell 'date +%m-%d\ %H:%M:%S.000' | tr -d '\r')
   local t0
   t0=$(now_ms)
   maestro --device "$DEVICE" test "$OUT/tap-$tab.yaml" > "$OUT/maestro-$tab.log" 2>&1 &
   local maestro_pid=$!
   local elapsed
-  elapsed=$(wait_for_log "$marker" "$since_ts" "$t0")
+  elapsed=$(wait_for_log "$marker" "$fresh_since_ts" "$t0")
   wait "$maestro_pid" 2>/dev/null || true
   echo "$elapsed"
 }
@@ -162,22 +171,21 @@ run_sample() {
   # Tab-nav timing always runs — refreshDmInbox doesn't fire on cold-start (it only fires once Messages is opened), so gating tab-nav on time-to-responsive previously left the columns blank. Tabs are independently useful: tab-messages itself fires refreshDmInbox, tab-friends fires the FriendsList marker, and tab-home/tab-learn measure the Maestro round-trip as an upper bound. We give a small fixed settle for the cold-start UI to render before tapping.
   sleep 1.5
 
-  local home_ms msgs_ms learn_ms friends_ms
+  local msgs_ms learn_ms friends_ms
 
-  # Each tab times "tap dispatch → screen first commits its initial render", using a `[Perf] X first render` marker each tab screen logs once on mount. Maestro JVM cold-start (~5–10 s per invocation) is in every measurement as a constant baseline; before/after comparisons within the same script run are still valid because that baseline cancels.
-  home_ms=$(tap_and_time home 'ReactNativeJS.*\[Perf\] HomeScreen first render' "$since_ts")
-  msgs_ms=$(tap_and_time messages 'ReactNativeJS.*\[Perf\] MessagesScreen first render' "$since_ts")
-  learn_ms=$(tap_and_time learn 'ReactNativeJS.*\[Perf\] LearnScreen first render' "$since_ts")
-  friends_ms=$(tap_and_time friends 'ReactNativeJS.*\[Perf\] FriendsList first render' "$since_ts")
+  # Each tab times "tap dispatch → screen first commits its initial render", using a `[Perf] X first render` marker each tab screen logs once on mount. tap_and_time computes a fresh device-side `since_ts` at tap dispatch so log lines emitted before the tap (e.g. HomeScreen's marker during cold-start) don't false-positive the wait. Maestro JVM cold-start (~5–10 s per invocation) is in every measurement as a constant baseline; before/after comparisons within the same script run are still valid because that baseline cancels.
+  msgs_ms=$(tap_and_time messages 'ReactNativeJS.*\[Perf\] MessagesScreen first render')
+  learn_ms=$(tap_and_time learn 'ReactNativeJS.*\[Perf\] LearnScreen first render')
+  friends_ms=$(tap_and_time friends 'ReactNativeJS.*\[Perf\] FriendsList first render')
 
   echo "  cold_total=${total_time}ms  wait=${wait_time}ms  wallet=${wallet_ms:-TIMEOUT}ms  responsive=${responsive_ms:-TIMEOUT}ms"
-  echo "  home=${home_ms:-—}ms  messages=${msgs_ms:-—}ms  learn=${learn_ms:-—}ms  friends=${friends_ms:-—}ms"
+  echo "  messages=${msgs_ms:-—}ms  learn=${learn_ms:-—}ms  friends=${friends_ms:-—}ms"
 
   $ADB logcat -d -t "$since_ts" 2>/dev/null \
     | grep -E "ReactNativeJS.*\[Perf\] (wallet connected|refreshDmInbox|nip17-cache|HomeScreen first render|MessagesScreen first render|LearnScreen first render|FriendsList first render|fetchProfiles|fetchInboxDmEvents)" \
     > "$OUT/sample-$n.log" 2>/dev/null || true
 
-  ROWS+=("$n|${total_time:-—}|${wait_time:-—}|${wallet_ms:-—}|${responsive_ms:-—}|${home_ms:-—}|${msgs_ms:-—}|${learn_ms:-—}|${friends_ms:-—}")
+  ROWS+=("$n|${total_time:-—}|${wait_time:-—}|${wallet_ms:-—}|${responsive_ms:-—}|${msgs_ms:-—}|${learn_ms:-—}|${friends_ms:-—}")
 }
 
 # ---- median across N integer samples ---------------------------------------
@@ -201,10 +209,10 @@ done
 
 # ---- summary table ---------------------------------------------------------
 
-declare -a colA colB colW colC colD colE colF colG
+declare -a colA colB colW colC colE colF colG
 for row in "${ROWS[@]}"; do
-  IFS='|' read -r _ a b w c d e f g <<<"$row"
-  colA+=("$a"); colB+=("$b"); colW+=("$w"); colC+=("$c"); colD+=("$d"); colE+=("$e"); colF+=("$f"); colG+=("$g")
+  IFS='|' read -r _ a b w c e f g <<<"$row"
+  colA+=("$a"); colB+=("$b"); colW+=("$w"); colC+=("$c"); colE+=("$e"); colF+=("$f"); colG+=("$g")
 done
 
 {
@@ -212,13 +220,13 @@ done
   echo
   echo "device: \`$DEVICE\` · package: \`$PKG\` · samples: $SAMPLES"
   echo
-  echo "| sample | TotalTime | WaitTime | time-to-wallet | time-to-responsive | tab-home | tab-messages | tab-learn | tab-friends |"
-  echo "|--------|-----------|----------|----------------|--------------------|----------|--------------|-----------|-------------|"
+  echo "| sample | TotalTime | WaitTime | time-to-wallet | time-to-responsive | tab-messages | tab-learn | tab-friends |"
+  echo "|--------|-----------|----------|----------------|--------------------|--------------|-----------|-------------|"
   for row in "${ROWS[@]}"; do
-    IFS='|' read -r n a b w c d e f g <<<"$row"
-    echo "| $n | ${a}ms | ${b}ms | ${w}ms | ${c}ms | ${d}ms | ${e}ms | ${f}ms | ${g}ms |"
+    IFS='|' read -r n a b w c e f g <<<"$row"
+    echo "| $n | ${a}ms | ${b}ms | ${w}ms | ${c}ms | ${e}ms | ${f}ms | ${g}ms |"
   done
-  echo "| **median** | $(median_of "${colA[@]}")ms | $(median_of "${colB[@]}")ms | $(median_of "${colW[@]}")ms | $(median_of "${colC[@]}")ms | $(median_of "${colD[@]}")ms | $(median_of "${colE[@]}")ms | $(median_of "${colF[@]}")ms | $(median_of "${colG[@]}")ms |"
+  echo "| **median** | $(median_of "${colA[@]}")ms | $(median_of "${colB[@]}")ms | $(median_of "${colW[@]}")ms | $(median_of "${colC[@]}")ms | $(median_of "${colE[@]}")ms | $(median_of "${colF[@]}")ms | $(median_of "${colG[@]}")ms |"
   echo
   echo "Definitions:"
   echo "- **TotalTime** — Android's wall clock from \`am start\` to the first frame of the launched activity (system-side)."
