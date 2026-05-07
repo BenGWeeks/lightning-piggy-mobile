@@ -39,6 +39,63 @@ adb shell ime set com.google.android.inputmethod.latin/com.android.inputmethod.l
 | `npx expo start` fails but `npm start` works
 | The `start` script includes `--dev-client` which is required for custom native modules. Always use `npm start`.
 
+| EAS local production build crashes mid-Gradle with `UncheckedIOException: Could not add entry ... to cache fileHashes.bin`
+| `/tmp` is on tmpfs (default Ubuntu/Debian) capped at ~12 GB. The EAS local builder generates ~9 GB of native-lib intermediates during the multi-arch APK assembly (arm64 + armv7 + x86 + x86_64). When tmpfs hits 100 %, Gradle's incremental-cache writer throws on the next `fileHashes.bin` flush and the entire build aborts. +
+*Symptom:* `tail -3 /tmp/eas-build.log` shows the IOException; `df -h /tmp` shows tmpfs at 100 %; the build PID is gone with no APK at `android/app/build/outputs/apk/release/app-release.apk`. +
+*Fix:* point Gradle at disk-backed storage via `TMPDIR`: +
+[source,bash]
+----
+mkdir -p "$HOME/eas-tmp"
+TMPDIR="$HOME/eas-tmp" EXPO_NO_DOCTOR=1 \
+  eas build --local --platform android --profile production --non-interactive
+----
+*Cleanup:* `rm -rf "$HOME/eas-tmp"` between builds when you want to reclaim disk; the next run's `mkdir -p` and Gradle will re-create everything, including hidden entries such as `.gradle` or `.expo`. The EAS-CLI checkout under `$TMPDIR/eas-build-local-nodejs/` is also safe to delete between runs. Full recipe + rationale in `docs/DEPLOYMENT.adoc` → "Local production builds".
+
+| `eas build --local --profile production` produces an APK with a versionCode that won't install on the target device, and `eas build:version:set` doesn't fix it
+| `eas.json` has `cli.appVersionSource: "remote"` + production profile `autoIncrement: true`. **This row is specifically about `eas build --local`** — `expo run:android --variant release` is a different path that reads `versionCode` straight from `app.config.ts` (see `app.config.ts:135-148` and `docs/DEPLOYMENT.adoc` → "Local production builds" — that mechanism is not what's broken here). +
+The `--local` path is supposed to share the EAS server counter that `eas build:version:set/get` operates on. In practice (verified 2026-05-05 against eas-cli@18.11.0) it has its own per-machine counter that walks +1 per build regardless of any `:set`: `:get` reported the production counter at 50, but four successive local builds produced versionCodes 28, 29, 30, 31. Two further sharp edges: +
+*1. The local-build counter walks +1 per build with no way to push it forward via `:set`.* The only way to clear an underwater `eas build --local` versionCode is to keep building until it climbs past the device floor (~20 min per build) or use a cloud build instead. `eas build --profile production --platform android` (no `--local`) does honour the same counter `:get` reports. +
+*2. The device floor is sticky.* Once you install versionCode N on a device, you cannot downgrade to versionCode < N without uninstalling (which loses all app data: wallets, Nostr login, message history). `adb install -r -d` (allow-downgrade) is a no-op for non-debuggable production APKs on Android 14+. So if a local production build ever ends up far below the device floor, you have to either (a) burn enough local builds to climb past the floor, (b) switch to a cloud build, or (c) wipe the app. *Don't* try to bypass via `appVersionSource: "local"` for `eas build --local` — that breaks the EAS-managed keystore path and the next build signs with a local debug keystore, producing `INSTALL_FAILED_UPDATE_INCOMPATIBLE` on top of everything else. +
+*Mitigation:* `scripts/eas-deploy-pixel.sh` reads the device's current versionCode, kicks off `eas build --local`, watches the build log for the `[CONFIGURE_ANDROID_VERSION] Version code: NN` line (which appears ~60 sec into a 20-min build), and aborts the whole build tree (eas-cli + npm-exec + Gradle daemon + Kotlin daemon) if `NN <= device`. Saves ~19 min per doomed build. Use it instead of running raw `eas build --local` for ad-hoc Pixel deploys. +
+*Symptom + diagnosis sequence:* +
+[source,bash]
+----
+adb -s <serial> install -r build-*.apk
+# → Failure [INSTALL_FAILED_VERSION_DOWNGRADE: Update version code 28 is older than current 34]
+adb -s <serial> shell dumpsys package com.lightningpiggy.app | grep -E versionCode      # device floor
+APP_VARIANT=production eas build:version:get --platform android --profile production    # `:get` counter
+grep -oP 'Version code: \K\d+' /tmp/eas-prod-build.log | head -1                         # what the local build actually used
+----
+The third number is the one to compare against the device floor — *not* the second, even though Expo docs imply they're the same. The APK in hand cannot be re-stamped — `versionCode` is signed into the manifest, repackaging breaks the EAS keystore signature.
+
+| "How long is the EAS iOS build queue right now?" — no public API
+| EAS doesn't expose live queue depth via API; status.expo.dev only reports operational/degraded. Best signals: +
+1. **Last completed-build duration** — proxy for current load: +
+[source,bash]
+----
+NODE_NO_WARNINGS=1 eas build:list --platform ios --status finished --limit 1 --non-interactive \
+  | grep -E "Started at|Finished at"
+----
+Subtract the two timestamps. Free-tier iOS production has historically been ~2-3 hours wall-time. +
+2. **Are any builds currently queued?** +
+[source,bash]
+----
+NODE_NO_WARNINGS=1 eas build:list --status in-queue --status in-progress --limit 10 --non-interactive
+----
+Empty output = nothing in flight; positive output shows projects ahead of you in the shared queue. +
+3. **EAS dashboard** — https://expo.dev/accounts/bengweeks/projects/lightning-piggy-app/builds renders queue position client-side once a build is in flight; the initial HTML doesn't include it. +
+*Why this matters:* GH-Release-driven iOS builds go to TestFlight after EAS finishes + Apple processes (~10 min). For a same-day TestFlight push, kick off in the morning. For a v1.X.Y-rc1 cycle, plan ~3-4 hours from tag-push to "installable in TestFlight". +
+*The only definitive number* is the queue position EAS prints once your build is submitted. Until then, all numbers are estimates from prior runs.
+
+| Maestro can't tap a third-party signer's FAB / button (Aegis, Clave, etc) — `Element not found` or silent no-op
+| Some signer apps (notably Aegis ≥0.5.0, possibly Clave) ship without accessibility labels on key UI elements like the "+" FAB to add a connection. Maestro's `tapOn: { id: ... }` and `tapOn: { text: ... }` both miss because there's nothing to match. The `index:` selector also ranks unpredictably for un-labelled `ImageView` clickables. +
+*Why coordinates aren't a workaround:* `point: '90%, 91%'` and `adb shell input tap` are forbidden by the project's CLAUDE.md (fragile across screen sizes / OS versions / device profiles). +
+*Workarounds:* +
+1. Drive the signer setup manually before kicking off the Maestro flow — pre-pair the signer with the test nsec via its own UI, then have Maestro start from a state where the signer is ready. +
+2. File the missing a11y label upstream and pin the older signer version where the bug doesn't apply. +
+3. Use a signer that exposes a11y selectors (per the 2026-05 review, Nowser surfaces tappable elements with `accessibilityLabel` / resource-id, so Maestro can drive its connection-add flow without coordinate fallbacks). +
+*Validated this session:* PR #284 (NIP-46 / Clave) reaches the QR pairing screen + verifies the spec-compliant `nostrconnect://` URI fully via Maestro; the bunker-side approval cannot be Maestro-driven on Aegis until Aegis ships a `testTag` / `accessibilityLabel` on the FAB. Manual handoff is the supported path today.
+
 | Metro not connecting to device over USB
 | Run `adb reverse tcp:8081 tcp:8081` for USB port forwarding before launching the app.
 
@@ -400,4 +457,99 @@ QT_QPA_PLATFORM=xcb $ANDROID_HOME/emulator/emulator \
 *What you gain:* the `userdata-qemu.img.qcow2` file goes from a multi-GB accumulated overlay (often 7 GB+ after months of use) back to a thin overlay regenerated from the system image's userdata. +
 *Don't waste time on these false leads first:* (a) `adb reboot` won't help — the corrupt overlay is what re-mounts on every boot. (b) Switching GPU mode won't help — the GPU init phase succeeds; the failure is in Android userspace boot. (c) Increasing AVD RAM won't help — `system_server` isn't OOM, it's hanging on the corrupt overlay. (d) Re-running `expo prebuild` won't help — this is an emulator state issue, not an app build issue. +
 *Verify clean boot:* `adb -s emulator-5554 shell getprop sys.boot_completed` returns `1` (with a stable trailing newline) and `adb devices` shows `device` (not `offline`) consistently for >30 s. UI rendering should be smooth — if you see frame stutters and a `Process system isn't responding` dialog, you're probably on `swiftshader_indirect` (software GL) and need to re-launch with `-gpu host` now that the overlay is clean.
+
+| Maestro triple-tap (e.g. version label to enable dev mode) silently fails on API 36 emulator
+| Maestro's official supported ceiling is API 34 — three sequential `tapOn` calls on an API 36 image take >1 s end-to-end, exceeding the 1-second window in `handleVersionTap` (and similar in-app tap-counter handlers like add-wallet hot wallet unlock). Symptom: 3 `tapOn`s complete cleanly per Maestro logs but the dev-mode alert never appears. The same flow can also be defeated by an API 36 PackageManager bug that breaks RN dev builds (`Activity class does not exist` on `am start`) — independent of installer attribution, install path, or `adb reboot`. +
+*Fix:* Run E2E + dev work on **API 34**, **`google_apis`** image (NOT `google_play` — saves ~300 MB RAM + the GMS daemons that thrash `system_server`), **`Medium Phone`** device profile (Pixel 9a / Pixel 10 device profiles have a known input-swallowing bug on Linux/macOS/Windows). Bump RAM + heap before first boot so `system_server` doesn't crash under a 150 MB+ RN dev APK install: +
+[source,bash]
+----
+# Install the image once
+$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+  "system-images;android-34;google_apis;x86_64"
+
+# Create the AVD
+echo no | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd \
+  -n LP_API34 -k "system-images;android-34;google_apis;x86_64" \
+  -d "medium_phone" --force
+
+# Bump RAM + heap (default 1.5 GB / 228 MB OOMs on RN dev installs;
+# 4 GB / 1024 MB matches satmo-react-native's validated config)
+sed -i 's/^hw.ramSize=.*/hw.ramSize=4096/' \
+  ~/.android/avd/LP_API34.avd/config.ini
+sed -i 's/^vm.heapSize=.*/vm.heapSize=1024/' \
+  ~/.android/avd/LP_API34.avd/config.ini
+
+# Cold-boot
+$ANDROID_HOME/emulator/emulator -avd LP_API34 \
+  -no-snapshot-load -no-snapshot-save -no-audio -gpu host
+----
+*Disk-space follow-up:* if `adb install` later fails with `INSTALL_FAILED_INSUFFICIENT_STORAGE` (the dev APK + Hermes intermediates need 3-4 GB free), edit `config.ini` to set `disk.dataPartition.size=12G` (default 800M-6G), then cold-boot with `-wipe-data -no-snapshot` (destructive — wipes installed apps + accounts). +
+*Performance bonus:* API 34 lacks the stylus-handwriting service that API 35+ ship, removing one of the two soft-keyboard suppression gates documented above. Re-running `adb shell settings put secure stylus_handwriting_enabled 0` on every cold boot becomes unnecessary. +
+*Reference:* `../satmo-react-native/docs/TROUBLESHOOTING.adoc` — "Emulator with API 36 (Android 16) image refuses to launch the dev build" and "Android emulator System UI isn't responding".
+
+| Pixel device profiles in Android Studio AVD swallow taps (Pixel 9a / Pixel 10)
+| Hardware-profile bug in the Pixel 9a / Pixel 10 device skins — emulator boots and renders fine, app launches and is visible, but mouse clicks (and `adb shell input tap`) are silently dropped. Confirmed cross-platform (Linux / macOS / Windows). The OS image is fine; only the device profile is broken. +
+*Fix:* Delete the Pixel AVD and recreate using the generic **"Medium Phone"** device profile with the same API level. Same OS, working input. +
+*Workaround if you must stay on the Pixel profile:* AVD settings → Graphics → **Software** (not Hardware) → Cold Boot. Works for some configurations, not all. +
+*Reference:* `../satmo-react-native/docs/TROUBLESHOOTING.adoc` — "Mouse clicks / taps don't register in Android emulator (Pixel device profiles)".
+
+| AVD `system_server` crashes / "System UI isn't responding" *after* installing a fresh dev APK
+| Default AVD allocation (RAM 1.5 GB, Dalvik heap 228 MB) is undersized for installing a 150 MB+ React Native dev APK. `kswapd0` burns 40% kernel CPU, `system_server` dies, Binder IPC fails with `No space left on device` (RAM-pressure symptom, NOT disk), every subsequent `adb install` / `pm list packages` / app launch fails until guest reboot. Distinct from the corrupt-overlay entry above — that's after months of use, this is on first install. +
+*Fix:* Bump RAM to 4 GB + Dalvik heap to 1024 MB *before* first boot (Android Studio → Device Manager → edit AVD → Advanced Settings, or edit `~/.android/avd/<AVD>.avd/config.ini` → `hw.ramSize=4096`, `vm.heapSize=1024`, then cold-boot with `-no-snapshot`). Validated against `system_server` crash on 1.5 GB / 228 MB; clean install on 4 GB / 1024 MB. +
+*Prevent recurrence:* use a `google_apis` system image (NOT `google_play`) — drops the Play Store + GMS daemons that consume ~300 MB RAM / 60% CPU. The Play *Services* subset (Google Sign-In, Firebase Auth, FCM) still works; only the storefront and its background daemons are excluded. +
+*Reference:* `../satmo-react-native/docs/TROUBLESHOOTING.adoc` — "Android emulator System UI isn't responding / app stuck on splash" and "AVD `system_server` crashes during `adb install`".
+
+| Claude Code Bash tool fails silently (exit 1 or 134, empty stdout/stderr) when `/tmp` is full
+| Claude Code creates a shell snapshot in `/tmp` at session start; when the volume is full, every Bash tool invocation silently fails. `bash --noprofile --norc -c '…'` and the file-redirect workaround `{ cmd; } > /tmp/out 2>&1; exit 0` also produce no output (the spawned bash never reaches the redirect). `/doctor` does not flag it; only the Write tool surfaces the underlying `ENOSPC` honestly. On a typical Linux dev machine `/tmp` is a tmpfs sized at 50 % of RAM; common culprits are accumulated git worktrees in `/tmp/wt-*` (1-2 GB of `node_modules` each, up to 7+ GB with EAS local-build artifacts), `/tmp/metro-cache`, `/tmp/node-compile-cache`, and signed-but-not-cleaned `*.apk` outputs. +
+*Diagnose:* `df -h /tmp` to confirm full; `du -shx /tmp/* 2>/dev/null \| sort -h \| tail -20` to identify culprits. +
+*Fix:* `rm -rf /tmp/wt-* /tmp/metro-* /tmp/node-compile-cache /tmp/*.apk` (review the list first; these are caches and ephemeral build outputs). Then `git worktree prune` from any repo whose worktrees lived in `/tmp` so the admin entries match reality. Restart Claude Code so it can write a fresh shell snapshot. +
+*Prevent recurrence:* don't create git worktrees in `/tmp` on tmpfs machines. Use `git worktree add ~/.local/share/wt-<name> <branch>` (or `~/wt-*`) — survives reboot and doesn't compete with the tmpfs cap. +
+*False leads to skip:* reinstalling Claude Code, killing leftover `chrome-native-host` processes, removing dangling plugin entries from `~/.claude/settings.json`, switching out of Remote Control mode — none of these fix the underlying full-tmpfs.
+
+| Sending a NIP-17 group DM via Amber opens Amber's *Applications* screen instead of the per-event Sign sheet — kind-13 seal never gets signed
+| Amber 4.x's `MainActivity` parses `intent.data` from the `nostrsigner:` URI as already-decoded JSON. Lightning Piggy's old `AmberSignerModule.kt` URL-encoded the event JSON before parsing — `Uri.parse("nostrsigner:${Uri.encode(eventJson)}")` — which made `AmberEvent.fromJson` fail silently inside Amber, the intent queue stayed empty, and `MainScreen` fell back to `Route.Applications.route`. NIP-55 spec, Damus, Citrine all pass raw JSON. +
+*Why it bit only kind 13:* the native module has two paths — a silent `ContentResolver` fast-path for previously-Always-approved operations, and an Intent fallback for first-time approvals. Kinds 0/1/10000/10002 had all been Always-approved at some point so they hit path 1 (no Intent ever fired); kind 13 (NIP-17 seal) had never been approved so it always exercised the Intent path and always tripped the URI-encoding bug. +
+*Diagnose from logcat:* +
+[source,bash]
+----
+adb -s <serial> logcat -d 2>/dev/null | grep -iE "AmberSigner|nostrsigner|sign_event"
+----
+The Intent fallback shows up as `ActivityTaskManager: START act=android.intent.action.VIEW dat=nostrsigner: ... cmp=...nostrsigner/.MainActivity (has extras)`. ContentResolver fast-path shows up as `Amber: Querying content://...SIGN_EVENT has context true`. If both lines appear and Amber still shows Applications instead of Sign, the URL-encoded payload is being silently dropped. +
+*Fix:* drop `Uri.encode()` from both Intent fallbacks in `modules/amber-signer/.../AmberSignerModule.kt` (`signEvent` + `handleCryptoOp`). Resolved in PR #407 (issue #406). After the fix lands, the *first* kind-13 send pops Amber's Sign sheet; once approved with Always, subsequent sends return silently via ContentResolver. A "Sign event with kind 13" row appears in Amber's per-app permissions list only after the first approval — its absence pre-fix is the smoking gun.
+
+| Android 16 KB page-size compatibility warning on Pixel 8 / Android 16
+| Local debug builds via `npm run android:dev` show an Android-system "this app isn't 16 KB-compatible" dialog before any LP UI renders. The dialog enumerates several `.so` files (libreactnative, libreanimated, libgesturehandler, libavif_android, libworklets, libnative-filters, libdispatch) but most of those are actually 16 KB-aligned in the APK — the dialog's list is misleading and includes libs from other installed packages, plus at least one (`libdispatch.so`) that isn't in our APK at all. +
+*Diagnose:* run `bash scripts/check-elf-alignment.sh android/app/build/outputs/apk/debug/app-debug.apk` — exits non-zero if any arm64-v8a `.so` has a PT_LOAD segment aligned below 16 KB (0x4000). +
+*Real culprit (as of issue #377):* `libbdkffi.so` from `bdk-rn`, the Bitcoin Dev Kit FFI lib. Prebuilt with an older Rust + NDK toolchain that emits 4 KB-aligned ELFs. Used only in `src/services/onchainService.ts` for on-chain wallet support. +
+*Fix paths (issue #377 has the full menu):* a) rebuild the prebuilt in the `bdk-rn` fork with NDK r27+ + `cargo-ndk` ≥0.17, b) replace `bdk-rn` with an actively-maintained alternative, c) post-install patch via `lld --max-page-size=16384` (brittle), d) defer until Google's Play Store enforcement deadline. +
+*Workaround in the meantime:* test on the Android 14 emulator (no enforcement); EAS production builds aren't blocked because the warning appears only on debuggable installs.
+
+| Lightning payment shows "failed" in the UI but recipient says it was paid
+| Symptom: `pay_invoice` via NWC shows the "Sending payment" overlay, then flips
+to "failed" after ~30-60 s, but the recipient (e.g. Geyser, an LNURL store)
+confirms the invoice was paid. Pull-to-refresh on Home shows the payment in
+transaction history. +
+*Root cause:* mismatch between LN settlement time and the in-app reply-timer.
+The Alby SDK's NWC `pay_invoice` reply timeout is 60 s by default; if the route
+picks up a hold-invoice node (typically Boltz when paying anything that bridges
+to Rootstock — Geyser's "All-or-Nothing" Rootstock crowdfunding is the most
+common case), the HTLC stays locked while the off-chain leg confirms. RSK target
+block time is ~24 s, but block intervals follow an exponential distribution so
+5 % of blocks land beyond 72 s and 1 % beyond 110 s. A normal Lightning payment
+that happens to traverse Boltz Mini for an LN-to-RBTC swap can therefore take
+60-90 s to settle even when nothing is "broken". +
+*Diagnose on your LND:* `lncli listpayments --include_incomplete --max_payments
+5` — find the hash; `htlcs[0].route.hops[].pub_key` and check whether the
+second-to-last hop is Boltz Mini
+(`03e9c5157126b8049ad235bdade8db97a473b5760b34781b8c870bd2ba34dbfcf8`). If it
+is, the wait is the RSK confirmation, not your node. +
+*Fix (partial):* PR #427 raises the in-app reply timeout to 90 s, which catches
+typical RSK exponential tails but still mis-reports the rare 100 s+ outliers.
+The deeper fix is to drop the local timer entirely and react only to the
+eventual NIP-47 reply event landing on Nostr — tracked under #410. +
+*UX gotcha (#428):* the "Cancel" action in the progress overlay does not
+actually cancel the LN HTLC — once the payment is on a route the sender cannot
+stop it. Tapping "Cancel" only stops the UI from waiting; the HTLC continues,
+and the recipient may be paid minutes later. The button is being relabelled to
+"Continue in background".
 |===

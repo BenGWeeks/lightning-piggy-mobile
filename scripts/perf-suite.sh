@@ -20,6 +20,9 @@
 #   - scroll-friends     12 swipes on Friends list (steady-state)
 #   - scroll-messages    12 swipes on Messages list (steady-state)
 #   - fab-open           FAB → FriendPickerSheet open
+#   - back-from-group    Open first group → tap Back (catches #286-style
+#                        JS-thread blocks on group screen mount that
+#                        freeze the navigation back-transition).
 #
 # Captured per sample:
 #   - Total frames
@@ -138,6 +141,38 @@ write_flow /tmp/perf-flow-fab.yaml "name: tap FAB
     id: 'start-conversation-button'
 - waitForAnimationToEnd:
     timeout: 3000"
+
+# Warmup: launch app, switch to Messages tab, open the first group row,
+# wait for the conversation screen to settle. Leaves the app on the
+# group conversation screen so the action flow below can measure just
+# the back-transition. Maestro's id: matcher accepts regex — group rows
+# use the testID pattern \`group-row-<id>\`, so id: 'group-row-.*' picks
+# whatever group is at the top. Requires at least one group on the AVD.
+write_flow /tmp/perf-flow-warmup-group-open.yaml "name: warmup open group
+---
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 30000
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+- tapOn:
+    id: 'group-row-.*'
+- waitForAnimationToEnd:
+    timeout: 8000"
+
+# Action: tap Back from the group conversation. This is the surface that
+# regressed in #286 — pre-fix, refreshDmInbox(force) blocked the JS
+# thread for ~40s after mount, so the back-transition's first frame
+# couldn't render until the refresh finished.
+write_flow /tmp/perf-flow-back-from-group.yaml "name: back from group
+---
+- tapOn:
+    id: 'group-back'
+- waitForAnimationToEnd:
+    timeout: 8000"
 
 # ---- Sample primitives ------------------------------------------------------
 
@@ -273,6 +308,7 @@ run_surface "tab-friends"     "Friends tab cold tap"    "cold-tap" /tmp/perf-flo
 run_surface "scroll-friends"  "Friends list scroll"     "steady"   /tmp/perf-flow-warmup-friends.yaml /tmp/perf-flow-swipes.yaml
 run_surface "scroll-messages" "Messages list scroll"    "steady"   /tmp/perf-flow-warmup-messages.yaml /tmp/perf-flow-swipes.yaml
 run_surface "fab-open"        "FAB → FriendPicker open" "steady"   /tmp/perf-flow-warmup-messages.yaml /tmp/perf-flow-fab.yaml
+run_surface "back-from-group" "Group → Back transition" "steady"   /tmp/perf-flow-warmup-group-open.yaml /tmp/perf-flow-back-from-group.yaml
 
 cat "$OUT/summary.md.tmp" >> "$OUT/summary.md"
 rm -f "$OUT/summary.md.tmp"
