@@ -112,9 +112,9 @@ export const createAmountEntryStyles = (colors: Palette) =>
     amountValueSecondary: {
       color: colors.textSupplementary,
     },
-    // Pill-shaped, brand-pink swap affordance. Holds both the icon and
-    // an inline target-unit label so sighted users can read what they'd
-    // swap to (the accessibilityLabel already conveys this to readers).
+    // Round, bright-pink swap affordance with a white icon for contrast.
+    // The accessibilityLabel conveys the target unit to screen readers,
+    // so no inline text label is needed.
     swapButton: {
       position: 'absolute',
       top: '50%',
@@ -123,10 +123,7 @@ export const createAmountEntryStyles = (colors: Palette) =>
       minWidth: SWAP_DIAMETER,
       paddingHorizontal: 12,
       borderRadius: SWAP_DIAMETER / 2,
-      backgroundColor: colors.brandPinkLight,
-      borderWidth: 1.5,
-      borderColor: colors.brandPink,
-      flexDirection: 'row',
+      backgroundColor: colors.brandPink,
       alignItems: 'center',
       justifyContent: 'center',
       gap: 6,
@@ -136,12 +133,6 @@ export const createAmountEntryStyles = (colors: Palette) =>
       shadowOpacity: 0.12,
       shadowRadius: 6,
       elevation: 3,
-    },
-    swapButtonLabel: {
-      fontSize: 13,
-      fontWeight: '700',
-      color: colors.brandPink,
-      letterSpacing: 0.5,
     },
     rangeText: {
       fontSize: 12,

@@ -288,8 +288,7 @@ const AmountEntryScreen: React.FC<Props> = ({
             accessibilityRole="button"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
-            <ArrowUpDown size={22} color={colors.brandPink} />
-            <Text style={styles.swapButtonLabel}>{secondaryUnitLabel}</Text>
+            <ArrowUpDown size={22} color={colors.white} />
           </TouchableOpacity>
         </View>
 
