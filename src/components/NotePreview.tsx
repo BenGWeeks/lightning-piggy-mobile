@@ -5,7 +5,7 @@ import type { Palette } from '../styles/palettes';
 
 // Minimal text-only preview card for a friend's kind-1 note. Embedded
 // images, mention rendering, replies, reactions, and zaps are deferred
-// to follow-up issues (see PR #439 description).
+// to follow-up issues (see issue #435 description).
 interface Props {
   content: string;
   createdAt: number;

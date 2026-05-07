@@ -301,7 +301,13 @@ const ContactProfileScreen: React.FC = () => {
         {/* Banner + avatar identity card. */}
         {contact.banner ? (
           <View style={styles.bannerContainer}>
-            <Image source={{ uri: contact.banner }} style={styles.bannerImage} cachePolicy="disk" />
+            <Image
+              source={{ uri: contact.banner }}
+              style={styles.bannerImage}
+              cachePolicy="memory-disk"
+              recyclingKey={contact.banner ?? undefined}
+              autoplay={false}
+            />
           </View>
         ) : (
           <View style={styles.bannerSpacer} />
@@ -312,8 +318,10 @@ const ContactProfileScreen: React.FC = () => {
             <Image
               source={{ uri: contact.picture }}
               style={styles.avatar}
-              cachePolicy="disk"
+              cachePolicy="memory-disk"
               transition={200}
+              recyclingKey={contact.picture ?? undefined}
+              autoplay={false}
               onError={() => setAvatarError(true)}
               onLoad={() => setAvatarLoaded(true)}
             />

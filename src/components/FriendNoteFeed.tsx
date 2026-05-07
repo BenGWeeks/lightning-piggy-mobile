@@ -11,8 +11,9 @@ import type { Palette } from '../styles/palettes';
 // on ContactProfileScreen. Subscribes once on mount, captures up to
 // `limit` events (default 30, render-cap 20), sorts desc by created_at,
 // and renders them via NotePreview cards in a FlashList. Shows a small
-// inline spinner while events are streaming and "No posts yet" if the
-// subscription closes with zero events.
+// inline spinner while events are streaming and "No posts yet" after a
+// FIRST_EVENT_GRACE_MS timer expires with no events received (the
+// subscription stays open in the background even after the grace fires).
 interface Props {
   authorPubkey: string;
   limit?: number;
