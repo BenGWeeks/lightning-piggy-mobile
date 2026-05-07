@@ -154,6 +154,7 @@ const SendSheet: React.FC<Props> = ({
   const [progressState, setProgressState] = useState<PaymentProgressState>('hidden');
   const [progressError, setProgressError] = useState<string | undefined>(undefined);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
+  const scrollRef = useRef<any>(null);
   // Per-send AbortController so the Cancel button on PaymentProgressOverlay
   // can abort the NWC call's publish → reply-timeout → poll-for-preimage
   // chain without waiting ~5 minutes for it to give up on its own (#175).
@@ -240,6 +241,7 @@ const SendSheet: React.FC<Props> = ({
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
     const showSub = Keyboard.addListener(showEvent, (e) => {
       setKeyboardHeight(e.endCoordinates.height);
+      setTimeout(() => scrollRef.current?.scrollToEnd?.({ animated: true }), 100);
     });
     const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
     return () => {
@@ -834,6 +836,7 @@ const SendSheet: React.FC<Props> = ({
           </BottomSheetView>
         ) : (
           <BottomSheetScrollView
+            ref={scrollRef}
             contentContainerStyle={[
               styles.content,
               { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
@@ -1110,6 +1113,9 @@ const SendSheet: React.FC<Props> = ({
                       placeholderTextColor={colors.textSupplementary}
                       value={memo}
                       onChangeText={setMemo}
+                      onFocus={() => {
+                        setTimeout(() => scrollRef.current?.scrollToEnd?.({ animated: true }), 250);
+                      }}
                       maxLength={lnurlParams?.commentAllowed || 150}
                       autoCorrect
                       testID="sendsheet-memo-input"
