@@ -282,10 +282,10 @@ const ContactProfileScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      <View style={{ height: insets.top, backgroundColor: colors.surface }} />
-
-      {/* Top-left back chevron — pinned above all content per Primal/Damus convention. */}
-      <View style={styles.topBar}>
+      {/* Back chevron pinned over the banner. The banner extends up behind
+          the status bar (battery / clock / wifi) — `topBar` is absolute so
+          the chevron stays at a consistent inset.top + 8 offset. */}
+      <View style={[styles.topBar, { top: insets.top + 8 }]}>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
           style={styles.backButton}
@@ -293,7 +293,7 @@ const ContactProfileScreen: React.FC = () => {
           testID="contact-profile-back"
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <ChevronLeft size={26} color={colors.textHeader} strokeWidth={2.4} />
+          <ChevronLeft size={26} color={colors.white} strokeWidth={2.4} />
         </TouchableOpacity>
       </View>
 
@@ -348,7 +348,7 @@ const ContactProfileScreen: React.FC = () => {
                   accessibilityLabel="Show QR code"
                   testID="contact-profile-qr-button"
                 >
-                  <QrCode size={20} color={colors.brandPink} />
+                  <QrCode size={20} color={colors.white} />
                 </TouchableOpacity>
               )}
               {contact.lightningAddress && (
@@ -358,7 +358,7 @@ const ContactProfileScreen: React.FC = () => {
                   accessibilityLabel="Zap"
                   testID="contact-profile-zap-button"
                 >
-                  <Zap size={20} color={colors.brandPink} />
+                  <Zap size={20} color={colors.white} />
                 </TouchableOpacity>
               )}
               {contact.pubkey && (
@@ -368,7 +368,7 @@ const ContactProfileScreen: React.FC = () => {
                   accessibilityLabel="Message"
                   testID="contact-profile-message-button"
                 >
-                  <MessageCircle size={20} color={colors.brandPink} />
+                  <MessageCircle size={20} color={colors.white} />
                 </TouchableOpacity>
               )}
             </View>
@@ -593,21 +593,25 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.background,
     },
     topBar: {
+      position: 'absolute',
+      left: 8,
+      zIndex: 10,
       flexDirection: 'row',
       alignItems: 'center',
-      paddingHorizontal: 8,
-      paddingVertical: 6,
-      backgroundColor: colors.surface,
+      paddingHorizontal: 4,
+      paddingVertical: 2,
     },
     backButton: {
       padding: 6,
+      backgroundColor: 'rgba(0,0,0,0.25)',
+      borderRadius: 18,
     },
     scrollContent: {
       paddingBottom: 48,
     },
     bannerContainer: {
       width: '100%',
-      height: 160,
+      height: 200,
       overflow: 'hidden',
       backgroundColor: colors.brandPinkLight,
     },
@@ -724,8 +728,7 @@ const createStyles = (colors: Palette) =>
       width: 40,
       height: 40,
       borderRadius: 20,
-      borderWidth: 1.5,
-      borderColor: colors.brandPink,
+      backgroundColor: colors.brandPink,
       alignItems: 'center',
       justifyContent: 'center',
     },
