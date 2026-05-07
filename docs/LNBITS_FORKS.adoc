@@ -86,7 +86,7 @@ Each fork follows the same convention:
 | https://raw.githubusercontent.com/BenGWeeks/nwcprovider/weeks-family/extensions.json
 |===
 
-`main` on every fork is kept as a clean upstream mirror — never touched. All patches live on `weeks-family`. Tags on `weeks-family` follow the convention `v<upstream-version>-wf<n>` (e.g. `v1.3.0-wf2`); the matching `extensions.json` entry uses the corresponding `+wf<n>` build-metadata suffix in `version` (`1.3.0+wf2`) so semver sorts the patched build above the bare upstream release.
+`main` on every fork is kept as a clean upstream mirror — never touched. All patches live on `weeks-family`. Tags on `weeks-family` follow the convention `v<upstream-version>-wf<n>` (e.g. `v1.3.0-wf2`); the matching `extensions.json` entry uses the corresponding `+wf<n>` build-metadata suffix in `version` (`1.3.0+wf2`). Note that strict SemVer precedence ignores build metadata (`1.3.0+wf2` and `1.3.0` compare equal under SemVer 2.0), so the `+wf<n>` suffix is not a sort key. Its purpose is to make the patched build visually distinct in the LNbits version dropdown and to avoid LNbits' source-merge logic collapsing the entry as a duplicate of the upstream `1.3.0` release.
 
 The display name in each fork's `config.json` is suffixed with ` (Weeks)` (e.g. `Pay Links (Weeks)`) so the running tile in the LNbits Extensions page is visually distinct from a vanilla install.
 
@@ -143,4 +143,14 @@ Drop a patch from `weeks-family` once the equivalent upstream PR merges into a r
 
 === Patch scripts (deprecated)
 
-The `scripts/fix_*.py` patch scripts that used to apply these fixes inside the running container are now superseded by the fork-and-install flow described above. They remain in the repo as an emergency rollback path but should not be run on a server already using the Weeks-family manifests — running them on top of `+wf` builds would produce an inconsistent installation.
+The runtime patch scripts that used to apply these fixes inside the running container are now superseded by the fork-and-install flow described above. They remain in the repo as an emergency rollback path but should not be run on a server already using the Weeks-family manifests — running them on top of `+wf` builds would produce an inconsistent installation.
+
+Each script's actual scope:
+
+[cols="1,2,2",options="header"]
+|===
+| Script | Target | Status
+| `scripts/apply_nip20_fix.py` | Patches the `nostrclient` extension's relay-handshake code inside a running container. | Superseded by `BenGWeeks/nostrclient@weeks-family`.
+| `scripts/fix_nwcprovider_pay_loop.py` | Patches `nwcprovider/tasks.py` (the pay-loop) inside a running container. | Superseded by `BenGWeeks/nwcprovider@weeks-family`.
+| `scripts/fix_lnbits_inflight.py` | Patches LNbits *core* (`/app/lnbits/wallets/lndrest.py`), not an extension fork. | Still active — LNbits core is not in the Weeks-family fork set; this script remains the remediation path until the change lands upstream.
+|===
