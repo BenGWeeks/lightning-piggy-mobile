@@ -1,0 +1,122 @@
+= NIP-46 Signer (Nostr Connect / Clave / Aegis / nsec.app)
+:toc:
+:toclevels: 2
+
+== Overview
+
+Lightning Piggy supports three Nostr signers:
+
+[cols="1,1,2"]
+|===
+| Signer | Platform | Transport
+
+| `nsec`
+| All
+| Local — the user's nsec is decrypted in app memory.
+
+| `amber` (NIP-55)
+| Android only
+| Android Intent IPC. Requires the Amber app installed locally.
+
+| `nip46` (NIP-46 / Nostr Connect)
+| All (iOS, Android, web)
+| NIP-04 encrypted DMs over a Nostr relay. Bunker can run anywhere reachable on a relay.
+|===
+
+NIP-46 closes the iOS gap — Doc's https://testflight.apple.com/join/5Mx5AZx7[Clave] is the canonical iOS bunker. It also lets Android users pair with desktop / web bunkers (https://nsec.app[nsec.app]) for hardware-isolated key storage without installing Amber.
+
+See issue #283 for the design comparison and parity table.
+
+== Pairing flow
+
+The pairing handshake is one-shot per device. Once paired, the connection is persisted to `expo-secure-store` and auto-restored on cold start — the user only ever scans a QR once per app install.
+
+. From the **Account → Connect Nostr** sheet, tap **Use NIP-46 Signer (Clave / nsec.app)**.
+. Lightning Piggy generates a per-app keypair (never the user's real nsec) and renders a `nostrconnect://` URI as a QR code.
+. The user opens their bunker app (Clave / Aegis / nsec.app) and scans the QR.
+. The bunker prompts the user to approve the pairing (showing the requested perms: `sign_event`, `nip04_encrypt`, `nip04_decrypt`, `nip44_encrypt`, `nip44_decrypt`).
+. On approval, the bunker publishes a NIP-04 encrypted `connect` ack to the relay specified in the URI.
+. Lightning Piggy receives the ack, persists the connection, and the user is logged in.
+
+If the bunker doesn't ack within 120s, the pairing screen shows "Pairing took too long — try again". The user can retap the button to start over.
+
+== Per-call behaviour
+
+Every signing operation (sign event, NIP-04 encrypt/decrypt, NIP-44 encrypt/decrypt) becomes a relay round-trip:
+
+. Lightning Piggy publishes an encrypted `kind:24133` request to the bunker via the paired relay.
+. The bunker (optionally) prompts the user to approve the call.
+. The bunker publishes an encrypted response back via the same relay.
+. Lightning Piggy decrypts the response.
+
+Per-call latency is **~200-1500 ms** depending on the relay. Compare with Amber's ~10-50 ms IPC fast-path.
+
+Where this matters in practice:
+
+* **DM send** (1 NIP-04 encrypt + 1 sign) — 0.4-3 s extra vs nsec.
+* **Group send to N members** (sequential N × NIP-44 encrypt + N × sign) — 5-15 s for a 5-member group.
+* **Inbox refresh of K NIP-17 wraps** — K × per-call latency.
+
+Lightning Piggy renders a spinner / progress UI during these flows so the user knows the app is working.
+
+== The silent-decrypt batch fast-path trade-off
+
+Amber has a `nip44_decrypt_batch` ContentResolver fast-path — one IPC for N decrypts, no per-call user prompts. NIP-46 has no equivalent in the spec today. Two options were considered:
+
+. Spec-extend with a batched bunker request and ship it across Clave / nsec.app / Aegis.
+. Take the slow-but-correct path: per-request round-trip, render a spinner.
+
+This PR takes option 2. Inbox refresh on cold cache will show a "decrypting…" spinner while the wraps catch up. The wrap-id cache (`nip46_nip17_cache_v1` in AsyncStorage) means subsequent refreshes only pay the round-trip cost for newly-arrived wraps — the steady-state UX is the same as nsec.
+
+Bunker-side batching is filed as a follow-up. See `src/services/nostrConnectService.ts` `requestNip44DecryptSilent` for the deliberate "throw to surface the trade-off" sentinel.
+
+== Bunker compatibility
+
+The `nostrconnect://` URI we generate matches the format defined in the NIP-46 spec, section "Nostr Connect URIs":
+
+----
+nostrconnect://<client-pub>?relay=wss://relay.nsec.app&secret=<32hex>&perms=sign_event,nip04_encrypt,nip04_decrypt,nip44_encrypt,nip44_decrypt&name=Lightning%20Piggy
+----
+
+Bunkers known to consume this format (no app-side testing, just spec compliance):
+
+* **Clave** (iOS, https://testflight.apple.com/join/5Mx5AZx7[TestFlight]) — Doc's signer, the primary target for this PR.
+* **Aegis** (iOS / Android, https://github.com/ZharlieW/Aegis[GitHub])
+* **nsec.app** (web, https://nsec.app[]) — paste the URI as text.
+* **Nowser** (Android, https://github.com/haorendashu/nowser[GitHub])
+* **Nostrum**
+
+The relay default is `wss://relay.nsec.app`. Bunkers that subscribe to other relays will need URI customisation — that's a follow-up. Most bunkers either default to the same relay or watch a wide set including this one.
+
+== Storage
+
+[cols="1,2"]
+|===
+| Key | Contents
+
+| `nostr_signer_type` (SecureStore)
+| `'nip46'`
+
+| `nostr_pubkey` (SecureStore)
+| The user's hex pubkey (as reported by the bunker's `get_public_key`).
+
+| `nostr_nip46_connection` (SecureStore)
+| JSON `Nip46Connection` — `remoteSignerPubkey`, `userPubkey`, `relays`, `clientSecretKeyHex`, `perms`. **Sensitive** — anyone with this can impersonate the app session against the bunker.
+
+| `nip46_nip17_cache_v1` (AsyncStorage)
+| Wrap-id → decrypted rumor. Cleared on logout. Same shape as the `nsec_` and `amber_` caches.
+|===
+
+== Files
+
+* `src/services/nostrConnectService.ts` — service wrapper around `nostr-tools/nip46.BunkerSigner`. Mirrors the `amberService.ts` API.
+* `src/components/NostrLoginSheet.tsx` — adds the **Use NIP-46 Signer** button + the QR pairing screen (`mode === 'nip46-pair'`).
+* `src/contexts/NostrContext.tsx` — adds `loginWithNip46` + the `signerType === 'nip46'` branch in every signing path (`signEvent`, `signZapRequest`, `publishContactList`, `publishProfile`, `sendDirectMessage`, `sendGroupMessage`, `publishGroupState`, `decryptNip04ViaSigner`, `fetchConversation`, `refreshDmInbox`, `signEvent`).
+* `src/types/nostr.ts` — extends `SignerType` with `'nip46'`, adds `Nip46Connection`.
+* `tests/e2e/test-login-nip46.yaml` — Maestro scaffold reaching the pairing screen.
+
+== See also
+
+* https://github.com/nostr-protocol/nips/blob/master/46.md[NIP-46 spec]
+* Issue #283 — design + parity table
+* PR #267 — Amber group send (the precedent for the multi-recipient sequential-signer loop pattern)
