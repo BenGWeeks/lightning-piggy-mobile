@@ -1300,7 +1300,7 @@ export function subscribeInboxDmsForViewer(input: {
   viewerPubkey: string;
   relays: string[];
   onEvent: (ev: RawInboxDmEvent) => void;
-  // Optional kind-4 `since` cursor (unix seconds). When provided, the kind-4 filter pins to `max(now-7d, providedSince - 120s safety buffer)` so a heavy or stale DM history doesn't restream weeks of events every cold start. If absent, falls back to the 7-day floor.
+  // Optional kind-4 `since` cursor (unix seconds). When provided, the kind-4 filter resolves to `clamp(providedSince - 120s, now-7d, now)` — the 120 s safety buffer in case relay clock skew tagged a wrap slightly older than our cursor, the 7-day floor caps cold-start restream when the cursor is very stale, and the `now` cap defends against a future-dated cursor (corrupted persisted value or a wrap with a bad clock) that would otherwise silently miss new DMs until wall-clock catches up. If absent, falls back to the 7-day floor.
   sinceK4?: number;
 }): () => void {
   trackRelays(input.relays);
@@ -1309,9 +1309,9 @@ export function subscribeInboxDmsForViewer(input: {
   };
   const nowSec = Math.floor(Date.now() / 1000);
   const lookbackFloor = nowSec - DM_LIVE_SUB_MAX_LOOKBACK_SECONDS;
-  const requested =
-    input.sinceK4 !== undefined ? Math.max(0, input.sinceK4 - 120) : lookbackFloor;
-  const sinceK4 = Math.max(lookbackFloor, requested);
+  const requested = input.sinceK4 !== undefined ? Math.max(0, input.sinceK4 - 120) : lookbackFloor;
+  // Upper-bound at `nowSec` so a future-dated persisted cursor (or one bumped by a wrap with a bad created_at) doesn't drop us into a `since` in the future where the relay returns nothing.
+  const sinceK4 = Math.min(nowSec, Math.max(lookbackFloor, requested));
   const subK4 = pool.subscribeMany(
     input.relays,
     {
