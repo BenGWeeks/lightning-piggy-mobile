@@ -26,6 +26,10 @@ import {
   walletLabel,
 } from '../types/wallet';
 
+// Captured at module-evaluation time, which is the closest proxy we have to "JS bundle started executing after app launch". Used by the [Perf] wallet-connect marker so perf scripts can report time-from-launch-to-first-NWC-connect without needing a separate launch timestamp source.
+const WALLET_MODULE_LOAD_T0 = Date.now();
+let firstWalletConnectLogged = false;
+
 export interface IncomingPayment {
   walletId: string;
   amountSats: number;
@@ -353,6 +357,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
               const result = await nwcService.connect(wallet.id, nwcUrl);
               if (result.success) {
+                if (!firstWalletConnectLogged) {
+                  firstWalletConnectLogged = true;
+                  console.log(
+                    `[Perf] wallet connected: ${wallet.id.slice(0, 8)} in ${Date.now() - WALLET_MODULE_LOAD_T0}ms from JS bundle load`,
+                  );
+                }
                 const info = await nwcService.getInfo(wallet.id);
                 const lud16 = parseNwcLud16(nwcUrl);
 

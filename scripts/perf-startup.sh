@@ -134,6 +134,10 @@ run_sample() {
   total_time=$(echo "$launch_out" | awk '/^TotalTime:/ {print $2}')
   wait_time=$(echo  "$launch_out" | awk '/^WaitTime:/ {print $2}')
 
+  # Time-to-wallet-connected: first NWC handshake success log. The marker is logged from WalletContext on the first wallet to flip to isConnected: true, with the elapsed reported as ms-since-JS-bundle-load (close enough to "from app launch" for a wall-clock signal). Tracks issue #410.
+  local wallet_ms
+  wallet_ms=$(wait_for_log 'ReactNativeJS.*\[Perf\] wallet connected' "$since_ts" "$launch_start")
+
   # Time-to-responsive: first refreshDmInbox completion log.
   local responsive_ms
   responsive_ms=$(wait_for_log 'ReactNativeJS.*\[Perf\] refreshDmInbox' "$since_ts" "$launch_start")
@@ -158,14 +162,14 @@ run_sample() {
     friends_ms=$(tap_and_time friends 'ReactNativeJS.*\[Perf\] FriendsList first render' "$since_ts")
   fi
 
-  echo "  cold_total=${total_time}ms  wait=${wait_time}ms  responsive=${responsive_ms:-TIMEOUT}ms"
+  echo "  cold_total=${total_time}ms  wait=${wait_time}ms  wallet=${wallet_ms:-TIMEOUT}ms  responsive=${responsive_ms:-TIMEOUT}ms"
   echo "  home=${home_ms:-—}ms  messages=${msgs_ms:-—}ms  learn=${learn_ms:-—}ms  friends=${friends_ms:-—}ms"
 
   $ADB logcat -d -t "$since_ts" 2>/dev/null \
-    | grep -E "ReactNativeJS.*\[Perf\] (refreshDmInbox|nip17-cache|FriendsList first render|fetchProfiles|fetchInboxDmEvents)" \
+    | grep -E "ReactNativeJS.*\[Perf\] (wallet connected|refreshDmInbox|nip17-cache|FriendsList first render|fetchProfiles|fetchInboxDmEvents)" \
     > "$OUT/sample-$n.log" 2>/dev/null || true
 
-  ROWS+=("$n|${total_time:-—}|${wait_time:-—}|${responsive_ms:-—}|${home_ms:-—}|${msgs_ms:-—}|${learn_ms:-—}|${friends_ms:-—}")
+  ROWS+=("$n|${total_time:-—}|${wait_time:-—}|${wallet_ms:-—}|${responsive_ms:-—}|${home_ms:-—}|${msgs_ms:-—}|${learn_ms:-—}|${friends_ms:-—}")
 }
 
 # ---- median across N integer samples ---------------------------------------
@@ -189,10 +193,10 @@ done
 
 # ---- summary table ---------------------------------------------------------
 
-declare -a colA colB colC colD colE colF colG
+declare -a colA colB colW colC colD colE colF colG
 for row in "${ROWS[@]}"; do
-  IFS='|' read -r _ a b c d e f g <<<"$row"
-  colA+=("$a"); colB+=("$b"); colC+=("$c"); colD+=("$d"); colE+=("$e"); colF+=("$f"); colG+=("$g")
+  IFS='|' read -r _ a b w c d e f g <<<"$row"
+  colA+=("$a"); colB+=("$b"); colW+=("$w"); colC+=("$c"); colD+=("$d"); colE+=("$e"); colF+=("$f"); colG+=("$g")
 done
 
 {
@@ -200,17 +204,18 @@ done
   echo
   echo "device: \`$DEVICE\` · package: \`$PKG\` · samples: $SAMPLES"
   echo
-  echo "| sample | TotalTime | WaitTime | time-to-responsive | tab-home | tab-messages | tab-learn | tab-friends |"
-  echo "|--------|-----------|----------|--------------------|----------|--------------|-----------|-------------|"
+  echo "| sample | TotalTime | WaitTime | time-to-wallet | time-to-responsive | tab-home | tab-messages | tab-learn | tab-friends |"
+  echo "|--------|-----------|----------|----------------|--------------------|----------|--------------|-----------|-------------|"
   for row in "${ROWS[@]}"; do
-    IFS='|' read -r n a b c d e f g <<<"$row"
-    echo "| $n | ${a}ms | ${b}ms | ${c}ms | ${d}ms | ${e}ms | ${f}ms | ${g}ms |"
+    IFS='|' read -r n a b w c d e f g <<<"$row"
+    echo "| $n | ${a}ms | ${b}ms | ${w}ms | ${c}ms | ${d}ms | ${e}ms | ${f}ms | ${g}ms |"
   done
-  echo "| **median** | $(median_of "${colA[@]}")ms | $(median_of "${colB[@]}")ms | $(median_of "${colC[@]}")ms | $(median_of "${colD[@]}")ms | $(median_of "${colE[@]}")ms | $(median_of "${colF[@]}")ms | $(median_of "${colG[@]}")ms |"
+  echo "| **median** | $(median_of "${colA[@]}")ms | $(median_of "${colB[@]}")ms | $(median_of "${colW[@]}")ms | $(median_of "${colC[@]}")ms | $(median_of "${colD[@]}")ms | $(median_of "${colE[@]}")ms | $(median_of "${colF[@]}")ms | $(median_of "${colG[@]}")ms |"
   echo
   echo "Definitions:"
   echo "- **TotalTime** — Android's wall clock from \`am start\` to the first frame of the launched activity (system-side)."
   echo "- **WaitTime** — TotalTime + any pre-launch system overhead."
+  echo "- **time-to-wallet** — wall clock from launch to the first \`[Perf] wallet connected\` line — i.e. how long until the active NWC wallet flips from Disconnected to Connected. Tracks issue #410."
   echo "- **time-to-responsive** — wall clock from launch to the first \`[Perf] refreshDmInbox\` completion line. This is what the user *feels* — the screen is on, but new messages are still draining."
   echo "- **tab-messages** — wall clock from Maestro's tap dispatch to the next \`refreshDmInbox\` log line."
   echo "- **tab-friends** — wall clock from tap dispatch to the next \`FriendsList first render\` log line."
