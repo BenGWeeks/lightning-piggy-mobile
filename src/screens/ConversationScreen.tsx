@@ -64,6 +64,7 @@ import {
   extractSharedContact,
   formatTime,
 } from '../utils/messageContent';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 
 type ConversationRoute = RouteProp<RootStackParamList, 'Conversation'>;
 type ConversationNavigation = NativeStackNavigationProp<RootStackParamList, 'Conversation'>;
@@ -948,7 +949,7 @@ const ConversationScreen: React.FC = () => {
   );
 
   const avatarNode =
-    picture && !avatarError ? (
+    picture && !avatarError && isSupportedImageUrl(picture) ? (
       <Image
         source={{ uri: picture }}
         style={styles.headerAvatar}
@@ -1034,6 +1035,7 @@ const ConversationScreen: React.FC = () => {
         ) : (
           <FlatList
             ref={listRef}
+            style={styles.flex}
             data={items}
             keyExtractor={(it) => it.id}
             renderItem={renderItem}
