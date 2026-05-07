@@ -14,10 +14,6 @@ import * as nostrService from '../services/nostrService';
 import * as lnurlService from '../services/lnurlService';
 import * as zapCounterpartyStorage from '../services/zapCounterpartyStorage';
 import * as swapRecoveryService from '../services/swapRecoveryService';
-import {
-  applyManualCounterpartyPatchV1,
-  type AppliedPatch,
-} from '../services/manualCounterpartyPatchV1';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
 import { CURRENCIES, FiatCurrency, getBtcPrice } from '../services/fiatService';
@@ -408,51 +404,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         swapRecoveryService.recoverPendingSwaps().catch((e) => {
           console.warn('[SwapRecovery] Background recovery failed:', e);
         });
-
-        // One-shot migration — attribute three specific outgoing zap rows on Ben's device that lost their counterparty record before the #418 fix landed (gated by an AsyncStorage flag so it's a no-op on every other device and on Ben's after the first run). After the storage write, also patch the in-memory wallet state directly so the rows update without waiting for the next fetchTransactionsForWallet pass to re-run the resolver.
-        applyManualCounterpartyPatchV1()
-          .then((patches) => {
-            if (patches.length === 0) return;
-            const byWallet = new Map<string, Map<string, AppliedPatch>>();
-            for (const p of patches) {
-              let m = byWallet.get(p.walletId);
-              if (!m) {
-                m = new Map();
-                byWallet.set(p.walletId, m);
-              }
-              m.set(p.paymentHash, p);
-            }
-            setWallets((prev) =>
-              prev.map((w) => {
-                const m = byWallet.get(w.id);
-                if (!m) return w;
-                const updated = w.transactions.map((tx) => {
-                  if (!tx.paymentHash || tx.zapCounterparty) return tx;
-                  const p = m.get(tx.paymentHash);
-                  if (!p) return tx;
-                  return {
-                    ...tx,
-                    zapCounterparty: {
-                      pubkey: p.pubkey,
-                      profile: {
-                        npub: p.npub,
-                        name: p.name,
-                        displayName: p.name,
-                        picture: null,
-                        nip05: null,
-                      },
-                      comment: '',
-                      anonymous: false,
-                    },
-                  };
-                });
-                return { ...w, transactions: updated };
-              }),
-            );
-          })
-          .catch(() => {
-            // best-effort, don't disturb startup
-          });
       } catch (error) {
         console.warn('Wallet startup failed:', error);
         // Order matches the success path: flip `walletsHydrated` first so consumers observing the loading-state change can already trust hydration is complete; only then unblock the UI via `setIsLoading(false)`. Idempotent; React bails on no-op state sets.
