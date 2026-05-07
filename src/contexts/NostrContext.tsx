@@ -2704,6 +2704,32 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     let cancelled = false;
     let writeChain: Promise<void> = Promise.resolve();
 
+    // Coalesce per-event inbox merges into one setDmInbox call per ~150 ms or per 25 events. Without this, a relay-restream burst (e.g. cold start with 200+ kind-4 events queued) causes one React re-render per event = 30+ rerenders/sec on the JS thread, which is what locks the UI for 30 seconds. Batching collapses that into ~6 rerenders/sec at most. Notifications still fire per-event so unread counts/sounds aren't dropped.
+    let pendingInboxEntries: DmInboxEntry[] = [];
+    let pendingFlushTimer: ReturnType<typeof setTimeout> | null = null;
+    const PENDING_FLUSH_MS = 150;
+    const PENDING_FLUSH_THRESHOLD = 25;
+    const flushPendingInbox = (): void => {
+      if (pendingFlushTimer) {
+        clearTimeout(pendingFlushTimer);
+        pendingFlushTimer = null;
+      }
+      if (pendingInboxEntries.length === 0) return;
+      const batch = pendingInboxEntries;
+      pendingInboxEntries = [];
+      setDmInbox((prev) => mergeInboxEntries(prev, batch, DM_INBOX_CAP));
+    };
+    const queueInboxEntry = (entry: DmInboxEntry): void => {
+      pendingInboxEntries.push(entry);
+      if (pendingInboxEntries.length >= PENDING_FLUSH_THRESHOLD) {
+        flushPendingInbox();
+        return;
+      }
+      if (pendingFlushTimer === null) {
+        pendingFlushTimer = setTimeout(flushPendingInbox, PENDING_FLUSH_MS);
+      }
+    };
+
     const handleInboxEvent = async (ev: nostrService.RawInboxDmEvent): Promise<void> => {
       if (__DEV__) console.log(`[Nostr] live evt kind=${ev.kind} recv ${ev.id.slice(0, 8)}`);
       if (cancelled) return;
@@ -2817,7 +2843,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         await writeChain;
         if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
 
-        setDmInbox((prev) => mergeInboxEntries(prev, [k4InboxEntry], DM_INBOX_CAP));
+        queueInboxEntry(k4InboxEntry);
         notifyDmMessage(partnerPubkey);
         if (__DEV__)
           console.log(
@@ -2976,7 +3002,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       await writeChain;
       if (cancelled || viewerPubkey !== pubkey || activeSigner !== signerType) return;
 
-      setDmInbox((prev) => mergeInboxEntries(prev, [inboxEntry], DM_INBOX_CAP));
+      queueInboxEntry(inboxEntry);
       notifyDmMessage(partnership.partnerPubkey);
       if (__DEV__)
         console.log(
@@ -3016,6 +3042,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     return () => {
       cancelled = true;
+      flushPendingInbox();
       if (unsubscribe) unsubscribe();
     };
   }, [isLoggedIn, pubkey, signerType, getReadRelays]);
