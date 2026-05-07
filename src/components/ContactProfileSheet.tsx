@@ -363,8 +363,13 @@ const ContactProfileSheet: React.FC<Props> = ({
               style={[styles.followButton, following && styles.followingButton]}
               onPress={handleFollowToggle}
               disabled={loadingFollow}
+              accessibilityLabel={following ? 'Unfollow' : 'Follow'}
+              testID="profile-sheet-follow-button"
             >
-              <Text style={[styles.followButtonText, following && styles.followingButtonText]}>
+              <Text
+                style={[styles.followButtonText, following && styles.followingButtonText]}
+                numberOfLines={1}
+              >
                 {loadingFollow ? '...' : following ? 'Unfollow' : 'Follow'}
               </Text>
             </TouchableOpacity>
@@ -385,13 +390,22 @@ const ContactProfileSheet: React.FC<Props> = ({
                   strokeLinejoin="round"
                 />
               </Svg>
-              <Text style={styles.messageButtonText}>Message</Text>
+              <Text style={styles.messageButtonText} numberOfLines={1}>
+                Message
+              </Text>
             </TouchableOpacity>
           )}
           {contact.lightningAddress && onZap && (
-            <TouchableOpacity style={styles.zapButton} onPress={onZap}>
+            <TouchableOpacity
+              style={styles.zapButton}
+              onPress={onZap}
+              accessibilityLabel="Zap"
+              testID="profile-sheet-zap-button"
+            >
               <Zap size={20} color={colors.white} fill={colors.white} />
-              <Text style={styles.zapButtonText}>Zap</Text>
+              <Text style={styles.zapButtonText} numberOfLines={1}>
+                Zap
+              </Text>
             </TouchableOpacity>
           )}
           {contact.pubkey && (
@@ -593,12 +607,19 @@ const createStyles = (colors: Palette) =>
     },
     actionRow: {
       flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'center',
       gap: 8,
       marginTop: 20,
       paddingHorizontal: 16,
+      // alignSelf:'stretch' so the row claims the full sheet width even
+      // though parent has alignItems:'center' — otherwise the row sizes
+      // itself to its children and flexWrap never triggers.
+      alignSelf: 'stretch',
     },
     followButton: {
-      paddingHorizontal: 14,
+      flexShrink: 1,
+      paddingHorizontal: 12,
       paddingVertical: 12,
       borderRadius: 10,
       borderWidth: 1.5,
@@ -620,10 +641,11 @@ const createStyles = (colors: Palette) =>
     },
     zapButton: {
       flexDirection: 'row',
+      flexShrink: 1,
       alignItems: 'center',
       justifyContent: 'center',
       gap: 4,
-      paddingHorizontal: 14,
+      paddingHorizontal: 12,
       paddingVertical: 12,
       borderRadius: 10,
       backgroundColor: colors.brandPink,
@@ -635,10 +657,11 @@ const createStyles = (colors: Palette) =>
     },
     messageButton: {
       flexDirection: 'row',
+      flexShrink: 1,
       alignItems: 'center',
       justifyContent: 'center',
       gap: 4,
-      paddingHorizontal: 14,
+      paddingHorizontal: 12,
       paddingVertical: 12,
       borderRadius: 10,
       backgroundColor: colors.brandPink,
