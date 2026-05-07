@@ -63,6 +63,10 @@ const ContactProfileSheet: React.FC<Props> = ({
   // Bumped from 55% to 80% to accommodate the 160px npub QR rendered
   // between NIP-05 and the npub copy row.
   const snapPoints = useMemo(() => ['80%'], []);
+  const npub = useMemo(
+    () => (contact?.pubkey ? npubEncode(contact.pubkey) : null),
+    [contact?.pubkey],
+  );
   const { contacts, followContact, unfollowContact, sendDirectMessage, relays } = useNostr();
   const [following, setFollowing] = useState(false);
   const [loadingFollow, setLoadingFollow] = useState(false);
@@ -169,8 +173,8 @@ const ContactProfileSheet: React.FC<Props> = ({
   };
 
   const handleCopyNpub = async () => {
-    if (!contact?.pubkey) return;
-    await Clipboard.setStringAsync(npubEncode(contact.pubkey));
+    if (!npub) return;
+    await Clipboard.setStringAsync(npub);
     Toast.show({
       type: 'success',
       text1: 'Public key copied',
@@ -238,9 +242,7 @@ const ContactProfileSheet: React.FC<Props> = ({
   );
 
   const handleViewProfile = useCallback(async () => {
-    if (!contact?.pubkey) return;
-    const npub = npubEncode(contact.pubkey);
-    // Try nostr: URI first (NIP-21), fall back to Primal web URL
+    if (!npub) return;
     const nostrUri = `nostr:${npub}`;
     const canOpen = await Linking.canOpenURL(nostrUri);
     if (canOpen) {
@@ -248,16 +250,11 @@ const ContactProfileSheet: React.FC<Props> = ({
     } else {
       Linking.openURL(`https://primal.net/p/${npub}`);
     }
-  }, [contact?.pubkey]);
+  }, [npub]);
 
   if (!contact) return null;
 
-  const npubDisplay = contact.pubkey
-    ? (() => {
-        const full = npubEncode(contact.pubkey);
-        return `${full.slice(0, 16)}...${full.slice(-8)}`;
-      })()
-    : null;
+  const npubDisplay = npub ? `${npub.slice(0, 16)}...${npub.slice(-8)}` : null;
 
   return (
     <BottomSheetModal
@@ -315,14 +312,14 @@ const ContactProfileSheet: React.FC<Props> = ({
             scanner (Damus, Amethyst, Primal, 0xchat) opens the profile
             directly. Forced black-on-white for scan reliability across
             light/dark themes — matches QrSheet's convention. */}
-        {contact.pubkey && (
-          <View style={styles.qrContainer} accessibilityLabel="Friend npub QR code">
-            <QRCode
-              value={`nostr:${npubEncode(contact.pubkey)}`}
-              size={160}
-              backgroundColor="#FFFFFF"
-              color="#000000"
-            />
+        {npub && (
+          <View
+            style={styles.qrContainer}
+            accessible
+            accessibilityRole="image"
+            accessibilityLabel="Friend npub QR code"
+          >
+            <QRCode value={`nostr:${npub}`} size={160} backgroundColor="#FFFFFF" color="#000000" />
           </View>
         )}
 
@@ -500,11 +497,11 @@ const ContactProfileSheet: React.FC<Props> = ({
             tag. The friend can then tap the tag against another device
             to be added on Nostr — same payload as the existing share
             flow but routed through hardware. */}
-        {contact.pubkey && (
+        {npub && (
           <NfcWriteSheet
             visible={nfcWriteVisible}
             onClose={() => setNfcWriteVisible(false)}
-            npub={npubEncode(contact.pubkey)}
+            npub={npub}
             displayName={contact.name}
           />
         )}
