@@ -175,12 +175,25 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
         contentContainerStyle={styles.scrollContent}
         scrollIndicatorInsets={{ right: 1 }}
       >
-        {/* Header — Primal-style: switcher avatars stack from the left,
-            active avatar sits flush-right next to the ⋯ button. Small
-            avatars are sized so 4-5 fit before the row hits the menu;
-            ⋯ opens AccountSwitcherSheet for the full list. (#288) */}
+        {/* Header — large active avatar on the left, small switcher
+            avatars stacked flush-right adjacent to the ⋯ button. Small
+            avatars are sized so 4-5 fit comfortably; ⋯ opens
+            AccountSwitcherSheet for the full list. (#288) */}
         <View style={styles.header}>
           <View style={styles.headerAvatarRow}>
+            <View style={styles.avatarLarge}>
+              {profile?.picture && isSupportedImageUrl(profile.picture) ? (
+                <Image
+                  source={{ uri: profile.picture }}
+                  style={styles.avatarImage}
+                  cachePolicy="disk"
+                />
+              ) : (
+                <View style={[styles.avatarImage, styles.avatarPlaceholder]}>
+                  <UserRound size={28} color={colors.textBody} strokeWidth={1.75} />
+                </View>
+              )}
+            </View>
             {isLoggedIn && otherIdentities.length > 0 && (
               <View style={styles.switcherAvatars}>
                 {otherIdentities.map((id) => {
@@ -211,21 +224,6 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
                 })}
               </View>
             )}
-            {/* Active identity flush-right next to ⋯ — most-prominent slot
-                adjacent to the menu trigger. */}
-            <View style={[styles.avatarLarge, styles.avatarLargeRight]}>
-              {profile?.picture && isSupportedImageUrl(profile.picture) ? (
-                <Image
-                  source={{ uri: profile.picture }}
-                  style={styles.avatarImage}
-                  cachePolicy="disk"
-                />
-              ) : (
-                <View style={[styles.avatarImage, styles.avatarPlaceholder]}>
-                  <UserRound size={28} color={colors.textBody} strokeWidth={1.75} />
-                </View>
-              )}
-            </View>
             {isLoggedIn && (
               <TouchableOpacity
                 style={styles.moreButton}
@@ -375,10 +373,6 @@ const createStyles = (colors: Palette) =>
       overflow: 'hidden',
       backgroundColor: 'rgba(0,0,0,0.05)',
     },
-    avatarLargeRight: {
-      // Active avatar sits flush-right adjacent to the ⋯ button.
-      marginRight: 8,
-    },
     avatarImage: {
       width: 48,
       height: 48,
@@ -388,10 +382,12 @@ const createStyles = (colors: Palette) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 4,
-      // Switcher avatars flow from the left and push the active+menu pair
-      // flush-right via marginRight: 'auto'. Hugs the screen edge so 4-5
-      // small avatars fit on a typical device width.
-      marginRight: 'auto',
+      // Switcher avatars stack flush-right adjacent to the ⋯ button —
+      // active avatar stays on the left and gets visual breathing room.
+      // marginLeft: 'auto' pushes this group to fill the space between
+      // the large avatar and the menu trigger.
+      marginLeft: 'auto',
+      marginRight: 8,
     },
     avatarSmall: {
       width: 28,
