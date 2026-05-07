@@ -14,6 +14,7 @@ import * as nostrService from '../services/nostrService';
 import * as lnurlService from '../services/lnurlService';
 import * as zapCounterpartyStorage from '../services/zapCounterpartyStorage';
 import * as swapRecoveryService from '../services/swapRecoveryService';
+import { applyManualCounterpartyPatchV1 } from '../services/manualCounterpartyPatchV1';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
 import { CURRENCIES, FiatCurrency, getBtcPrice } from '../services/fiatService';
@@ -403,6 +404,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // Runs in background so it doesn't block UI.
         swapRecoveryService.recoverPendingSwaps().catch((e) => {
           console.warn('[SwapRecovery] Background recovery failed:', e);
+        });
+
+        // One-shot migration — attribute three specific outgoing zap rows on Ben's device that lost their counterparty record before the #418 fix landed (gated by an AsyncStorage flag so it's a no-op on every other device and on Ben's after the first run).
+        applyManualCounterpartyPatchV1().catch(() => {
+          // best-effort, don't disturb startup
         });
       } catch (error) {
         console.warn('Wallet startup failed:', error);
