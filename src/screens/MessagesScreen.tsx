@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect, useDeferredValue } from 'react';
 import {
   View,
   Text,
@@ -243,6 +243,9 @@ const MessagesScreen: React.FC = () => {
     return map;
   }, [contacts]);
 
+  // useDeferredValue lets React deprioritise the (O(n)) summary rebuild when an urgent update — e.g. a tab-bar tap, scroll gesture — comes in during a relay-burst flush. The user's tap renders against the previous dmInbox; the new summary lands on the next idle frame. Keeps the bottom nav snappy when 25 wraps batch-flush via the live-sub queue (queueInboxEntry / flushPendingInbox).
+  const deferredDmInbox = useDeferredValue(dmInbox);
+  const deferredContacts = useDeferredValue(contacts);
   // Build the DM summaries first — this is always part of the inbox
   // regardless of the zap-counterparties toggle. Pass followPubkeys as a
   // defence-in-depth filter. NostrContext's refreshDmInbox already drops
@@ -251,8 +254,12 @@ const MessagesScreen: React.FC = () => {
   // "Following only" rule is load-bearing — keep it enforced everywhere
   // a summary is built. Skip the gate only when devMode AND followingOnly=off (production hard-lock).
   const dmSummaries = useMemo(() => {
-    return buildDmSummaries(dmInbox, contacts, enforceFollowingOnly ? followPubkeys : undefined);
-  }, [dmInbox, contacts, enforceFollowingOnly, followPubkeys]);
+    return buildDmSummaries(
+      deferredDmInbox,
+      deferredContacts,
+      enforceFollowingOnly ? followPubkeys : undefined,
+    );
+  }, [deferredDmInbox, deferredContacts, enforceFollowingOnly, followPubkeys]);
   // Build the zap-counterparties memo separately so that toggling
   // `showZapCounterparties` off doesn't make every wallet update churn
   // the merged summary list — when the toggle is off this memo is built
@@ -260,8 +267,8 @@ const MessagesScreen: React.FC = () => {
   // of unioning on every render).
   const zapSummaries = useMemo(() => {
     if (!showZapCounterparties) return null;
-    return buildConversationSummaries(wallets, contacts);
-  }, [wallets, contacts, showZapCounterparties]);
+    return buildConversationSummaries(wallets, deferredContacts);
+  }, [wallets, deferredContacts, showZapCounterparties]);
   const conversationSummaries = useMemo(() => {
     // #147: by default the inbox shows DMs only — zap-only counterparties (rows derived purely from wallet zap history with no decoded NIP-04/NIP-17 message) are hidden. The "Show zap counterparties" chip re-unions them when the user opts in.
     if (!zapSummaries) return dmSummaries;
