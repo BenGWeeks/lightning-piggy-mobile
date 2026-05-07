@@ -260,6 +260,11 @@ const TransactionDetailSheet: React.FC<Props> = ({
 
   const statusBadge = useMemo(() => {
     if (!tx) return null;
+    // Failed-payment optimistic rows (e.g. NWC error → SendSheet inserts a synthetic
+    // tx with status:'failed' so the conversation bubble can render red). Without
+    // this branch the badge still falls through to "Confirmed" because
+    // SendSheet sets settled_at on the failed row.
+    if (tx.status === 'failed') return { style: styles.badgeFailed, text: 'Failed' };
     const pending = !tx.settled_at && !tx.blockHeight;
     if (swap?.terminalFailure) return { style: styles.badgeFailed, text: `Swap: ${swap.status}` };
     if (swap?.terminalSuccess) return { style: styles.badgeConfirmed, text: 'Swap complete' };
@@ -267,7 +272,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
     if (swap) return { style: styles.badgeInfo, text: `Swap: ${swap.status}` };
     if (pending) return { style: styles.badgePending, text: 'Pending' };
     return { style: styles.badgeConfirmed, text: 'Confirmed' };
-  }, [tx, swap]);
+  }, [tx, swap, styles.badgeConfirmed, styles.badgeFailed, styles.badgeInfo, styles.badgePending]);
 
   const effectiveSwapId = tx?.swapId || resolvedSwapId || null;
 

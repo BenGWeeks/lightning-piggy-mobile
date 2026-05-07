@@ -208,6 +208,10 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
         const amountSats = Math.abs(item.amount);
         const ts = item.settled_at || item.created_at;
         const isPending = !ts && !item.blockHeight;
+        // Optimistic failed-payment rows (SendSheet inserts these so the conversation
+        // bubble can render red). Without an explicit branch they'd otherwise show
+        // as a normal confirmed outgoing — settled_at is set on these rows.
+        const isFailed = item.status === 'failed';
         const zapCpRaw = item.zapCounterparty ?? undefined;
         // Prefer the live profile from contacts (which refreshes when the
         // profile cache updates) over the snapshot embedded in the tx.
@@ -232,7 +236,9 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
         // "Received" / "Sent".
         let primary: string;
         let subtitle: string | null = null;
-        if (isPending) {
+        if (isFailed) {
+          primary = zapCp ? `Failed · ${zapCounterpartyLabel(zapCp)}` : 'Failed';
+        } else if (isPending) {
           primary = 'Pending';
         } else if (zapCp) {
           primary = zapCounterpartyLabel(zapCp);
@@ -278,7 +284,14 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
 
             <View style={styles.centerCol}>
               <View style={styles.centerLine}>
-                <Text style={[styles.primary, isPending && styles.pendingText]} numberOfLines={1}>
+                <Text
+                  style={[
+                    styles.primary,
+                    isFailed && styles.failedText,
+                    isPending && styles.pendingText,
+                  ]}
+                  numberOfLines={1}
+                >
                   {primary}
                 </Text>
                 {timeStr ? <Text style={styles.time}> | {timeStr}</Text> : null}
@@ -295,7 +308,13 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
                 <Text
                   style={[
                     styles.amount,
-                    isPending ? styles.pendingText : isIncoming ? styles.incoming : styles.outgoing,
+                    isFailed
+                      ? styles.failedText
+                      : isPending
+                        ? styles.pendingText
+                        : isIncoming
+                          ? styles.incoming
+                          : styles.outgoing,
                   ]}
                 >
                   {amountSats.toLocaleString()} sats
@@ -307,7 +326,13 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
               <Text
                 style={[
                   styles.arrow,
-                  isPending ? styles.pendingText : isIncoming ? styles.incoming : styles.outgoing,
+                  isFailed
+                    ? styles.failedText
+                    : isPending
+                      ? styles.pendingText
+                      : isIncoming
+                        ? styles.incoming
+                        : styles.outgoing,
                 ]}
               >
                 {isIncoming ? '↓' : '↑'}
@@ -502,6 +527,9 @@ const createStyles = (colors: Palette) =>
     },
     pendingText: {
       color: colors.textSupplementary,
+    },
+    failedText: {
+      color: colors.red,
     },
   });
 
