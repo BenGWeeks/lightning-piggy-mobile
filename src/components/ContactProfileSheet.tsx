@@ -17,6 +17,7 @@ import {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import Svg, { Circle, Path } from 'react-native-svg';
+import QRCode from 'react-native-qrcode-svg';
 import { Zap, Copy, Share2, UserRound } from 'lucide-react-native';
 import NfcIcon from './icons/NfcIcon';
 import NfcWriteSheet from './NfcWriteSheet';
@@ -59,7 +60,9 @@ const ContactProfileSheet: React.FC<Props> = ({
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
-  const snapPoints = useMemo(() => ['55%'], []);
+  // Bumped from 55% to 80% to accommodate the 160px npub QR rendered
+  // between NIP-05 and the npub copy row.
+  const snapPoints = useMemo(() => ['80%'], []);
   const { contacts, followContact, unfollowContact, sendDirectMessage, relays } = useNostr();
   const [following, setFollowing] = useState(false);
   const [loadingFollow, setLoadingFollow] = useState(false);
@@ -168,6 +171,23 @@ const ContactProfileSheet: React.FC<Props> = ({
   const handleCopyNpub = async () => {
     if (!contact?.pubkey) return;
     await Clipboard.setStringAsync(npubEncode(contact.pubkey));
+    Toast.show({
+      type: 'success',
+      text1: 'Public key copied',
+      position: 'top',
+      visibilityTime: 1800,
+    });
+  };
+
+  const handleCopyLnAddress = async () => {
+    if (!contact?.lightningAddress) return;
+    await Clipboard.setStringAsync(contact.lightningAddress);
+    Toast.show({
+      type: 'success',
+      text1: 'Lightning address copied',
+      position: 'top',
+      visibilityTime: 1800,
+    });
   };
 
   const handleShare = useCallback(() => {
@@ -291,9 +311,29 @@ const ContactProfileSheet: React.FC<Props> = ({
           </Text>
         )}
 
+        {/* QR code of the friend's npub. nostr:-prefixed so any NIP-21
+            scanner (Damus, Amethyst, Primal, 0xchat) opens the profile
+            directly. Forced black-on-white for scan reliability across
+            light/dark themes — matches QrSheet's convention. */}
+        {contact.pubkey && (
+          <View style={styles.qrContainer} accessibilityLabel="Friend npub QR code">
+            <QRCode
+              value={`nostr:${npubEncode(contact.pubkey)}`}
+              size={160}
+              backgroundColor="#FFFFFF"
+              color="#000000"
+            />
+          </View>
+        )}
+
         {/* npub */}
         {npubDisplay && (
-          <TouchableOpacity style={styles.npubRow} onPress={handleCopyNpub}>
+          <TouchableOpacity
+            style={styles.npubRow}
+            onPress={handleCopyNpub}
+            accessibilityLabel="Copy npub"
+            testID="contact-copy-npub-button"
+          >
             <Text style={styles.npubText}>{npubDisplay}</Text>
             <Copy size={20} color={colors.brandPink} />
           </TouchableOpacity>
@@ -351,9 +391,17 @@ const ContactProfileSheet: React.FC<Props> = ({
             </TouchableOpacity>
           )
         ) : contact.lightningAddress ? (
-          <Text style={styles.lightningAddress} numberOfLines={1}>
-            {contact.lightningAddress}
-          </Text>
+          <TouchableOpacity
+            style={styles.lnAddressRow}
+            onPress={handleCopyLnAddress}
+            accessibilityLabel="Copy Lightning address"
+            testID="contact-copy-lud16-button"
+          >
+            <Text style={styles.lightningAddress} numberOfLines={1}>
+              {contact.lightningAddress}
+            </Text>
+            <Copy size={14} color={colors.brandPink} />
+          </TouchableOpacity>
         ) : null}
 
         {/* Action buttons */}
@@ -533,6 +581,12 @@ const createStyles = (colors: Palette) =>
       fontSize: 13,
       color: colors.brandPink,
       marginTop: 2,
+    },
+    qrContainer: {
+      marginTop: 12,
+      padding: 12,
+      backgroundColor: colors.white,
+      borderRadius: 12,
     },
     npubRow: {
       flexDirection: 'row',
