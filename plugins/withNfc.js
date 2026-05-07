@@ -98,15 +98,15 @@ function withNfcIos(config) {
   });
 
   // Add NFC entitlement (correct location for readersession.formats).
-  // Must be ['TAG'] on iOS SDK >=26: Apple's at-upload validator rejects
-  // ['NDEF'] with "NDEF is disallowed" and demands TAG. NFCTagReaderSession
-  // (the TAG API) can still read/write NDEF via Tag.queryNDEFStatus(), so
-  // react-native-nfc-manager's writeNdefMessage() keeps working — the lib
-  // routes NfcTech.Ndef through the TAG session under the hood.
+  // Apple's App Store Connect validator (Xcode 16+ / SDK 26.x with min iOS 15.1)
+  // rejects 'NDEF' here as "disallowed" and requires 'TAG' instead.
+  // 'TAG' covers reading raw tag UIDs and writing NDEF — the NFCNDEFReaderSession
+  // at runtime works without 'NDEF' being in this entitlement.
+  // Always overwrite (no `if (!...)` guard) — a stale `['NDEF']` from a prior
+  // plugin run or upstream config would silently survive otherwise and the
+  // App Store validator would re-reject the IPA with the same error.
   config = withEntitlementsPlist(config, (config) => {
-    if (!config.modResults['com.apple.developer.nfc.readersession.formats']) {
-      config.modResults['com.apple.developer.nfc.readersession.formats'] = ['TAG'];
-    }
+    config.modResults['com.apple.developer.nfc.readersession.formats'] = ['TAG'];
     return config;
   });
 
