@@ -2,21 +2,68 @@
 
 Lightning Piggy's production server `bank.weeksfamily.me` runs three LNbits extensions in patched form, served from forks under https://github.com/BenGWeeks[BenGWeeks]. This document explains why each fork exists, what's patched, how the LNbits server is configured to install from them, and how to maintain them as upstream evolves.
 
-=== Why fork
+=== What's patched, per fork
 
-Three bugs in upstream LNbits extensions affected zap reliability and NWC stability badly enough that we couldn't wait for the maintainers to land fixes. Each bug has an upstream issue + open PR; until those merge, our patched builds are the production-shipping version.
+Each `weeks-family` build is a stack of cherry-picked upstream PRs (still open at the time of writing) plus a small `extensions.json` manifest commit. Every patch has a matching upstream issue/PR — once any of them lands in an upstream release, drop it from `weeks-family` on the next rebase.
 
-[cols="2,2,3,1", options="header"]
+==== `BenGWeeks/lnurlp` weeks-family
+
+Currently based on upstream `v1.3.0`, tagged `v1.3.0-wf2`.
+
+[cols="3,2,2,2", options="header"]
 |===
-| Extension | Bug | Upstream PR | Severity
+| Patch | Upstream PR | Upstream issue | Lightning-Piggy ref
 
-| `lnurlp` | `send_to_relay` closes the websocket without waiting for the relay's NIP-20 OK frame, and the per-relay tasks are fire-and-forget — kind-9735 zap receipts are silently dropped on most publish attempts. | https://github.com/lnbits/lnurlp/pull/133[#133] (issue https://github.com/lnbits/lnurlp/issues/132[#132]) | High — most outgoing zaps lost their receipt
-| `nostrclient` | `router.py`'s message-publish path doesn't return a NIP-01 `OK` / `CLOSED` frame to the local client. Anything publishing through the Nostrclient endpoint (notably `nwcprovider`) can't tell whether the publish was accepted. | https://github.com/lnbits/nostrclient/pull/68[#68] (issue https://github.com/lnbits/nostrclient/issues/52[#52]) | Medium — silent failures masquerading as success
-| `nwcprovider` | `_process_invoice`'s post-`pay_invoice` wait loop only breaks on `.success`. Failed payments (e.g. expired BOLT11s during Boltz reverse-swap claims) loop forever at ~20 RPS, hammering the funding source. | https://github.com/lnbits/nwcprovider/pull/40[#40] (issue https://github.com/lnbits/nwcprovider/issues/39[#39]) | High — observed as a 7-hour log flood
-| `nwcprovider` | `bolt11_decode` runs synchronously inside `list_transactions`, blocking the asyncio event loop long enough that other extensions (notably `nostrclient` relay keep-alives) miss their windows. | https://github.com/lnbits/nwcprovider/pull/37[#37] (issue https://github.com/lnbits/nwcprovider/issues/35[#35]) | Medium — contributes to relay-publish flakiness
+| Wait for relay NIP-20 OK before closing socket on zap-receipt publish (fixes silent kind-9735 loss for ~75 % of outgoing zaps).
+| https://github.com/lnbits/lnurlp/pull/133[#133]
+| https://github.com/lnbits/lnurlp/issues/132[#132]
+| https://github.com/BenGWeeks/lightning-piggy-mobile/issues/411[#411] root-cause comments
 |===
 
-`nostrclient` also folds in three small UI improvements from open Ben PRs that aren't load-bearing but make the relay-management page substantially more usable.
+==== `BenGWeeks/nostrclient` weeks-family
+
+Currently based on upstream `v1.2.0`, tagged `v1.2.0-wf2`.
+
+[cols="3,2,2,2", options="header"]
+|===
+| Patch | Upstream PR | Upstream issue | Lightning-Piggy ref
+
+| Add NIP-01 `OK` / `CLOSED` responses to client-published events. Without this, anything publishing through the local Nostrclient endpoint (notably `nwcprovider`) cannot tell whether the publish was accepted.
+| https://github.com/lnbits/nostrclient/pull/68[#68]
+| https://github.com/lnbits/nostrclient/issues/52[#52]
+| —
+
+| Test Endpoint UX with dialog and better guidance. (UI improvement, not load-bearing.)
+| https://github.com/lnbits/nostrclient/pull/56[#56]
+| —
+| —
+
+| Improve relay-section UI on the Nostrclient management page. (UI improvement.)
+| https://github.com/lnbits/nostrclient/pull/64[#64]
+| —
+| —
+|===
+
+PR #63 (relay-input gap polish) was attempted but conflicted with #64 — dropped, since #64's rework subsumes the same area. PR #62 (rename to "Nostr Proxy") was deliberately excluded — it changes the extension `id`, which would break in-place upgrades.
+
+==== `BenGWeeks/nwcprovider` weeks-family
+
+Currently based on upstream `v1.1.1`, tagged `v1.1.1-wf2`.
+
+[cols="3,2,2,2", options="header"]
+|===
+| Patch | Upstream PR | Upstream issue | Lightning-Piggy ref
+
+| Break `_process_invoice`'s wait loop on `payment_status.failed` and add a 300 s deadline. Without this, an expired BOLT11 (e.g. a Boltz reverse-swap claim that misses its HTLC window) loops at ~20 RPS forever, hammering the funding source.
+| https://github.com/lnbits/nwcprovider/pull/40[#40]
+| https://github.com/lnbits/nwcprovider/issues/39[#39]
+| —
+
+| Offload synchronous `bolt11_decode` to a worker thread inside `list_transactions`. Vanilla blocks the asyncio event loop long enough that other extensions (e.g. `nostrclient` relay keep-alives) miss their windows.
+| https://github.com/lnbits/nwcprovider/pull/37[#37]
+| https://github.com/lnbits/nwcprovider/issues/35[#35]
+| —
+|===
 
 === Fork layout
 
