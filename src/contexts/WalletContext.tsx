@@ -381,9 +381,18 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               const nwcUrl = await walletStorage.getNwcUrl(wallet.id);
               if (!nwcUrl) return;
 
-              const result = await nwcService.connect(wallet.id, nwcUrl);
+              const result = await nwcService.connect(wallet.id, nwcUrl, () => {
+                setWallets((prev) =>
+                  prev.map((w) => (w.id === wallet.id ? { ...w, isConnected: true } : w)),
+                );
+                if (!firstWalletConnectLogged) {
+                  firstWalletConnectLogged = true;
+                  console.log(
+                    `[Perf] wallet connected: ${wallet.id.slice(0, 8)} in ${Date.now() - WALLET_MODULE_LOAD_T0}ms from JS bundle load`,
+                  );
+                }
+              });
               if (result.success) {
-                // Try getInfo but don't let a failure prevent the wallet from being marked Connected — the relay handshake is what determines functional connectivity, not whether getInfo round-tripped successfully.
                 let info: Awaited<ReturnType<typeof nwcService.getInfo>> | null = null;
                 try {
                   info = await nwcService.getInfo(wallet.id);
@@ -398,25 +407,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                       ? {
                           ...w,
                           isConnected: true,
-                          balance: result.balance ?? null,
-                          walletAlias: info?.alias || null,
-                          // Prefer any user-set / previously-persisted
-                          // address — a manual override in Wallet
-                          // Settings must survive every startup, even
-                          // when the NWC URL still carries a `lud16=`
-                          // that resolves to the provider's default.
+                          balance: result.balance ?? w.balance ?? null,
+                          walletAlias: info?.alias || w.walletAlias || null,
                           lightningAddress: w.lightningAddress || lud16 || info?.lud16 || null,
                         }
                       : w,
                   ),
                 );
-                // Log AFTER setWallets so the marker matches the moment the UI actually flips to Connected (not just the moment connect() resolved). Gated by firstWalletConnectLogged so a second wallet's connect doesn't double-log this run.
-                if (!firstWalletConnectLogged) {
-                  firstWalletConnectLogged = true;
-                  console.log(
-                    `[Perf] wallet connected: ${wallet.id.slice(0, 8)} in ${Date.now() - WALLET_MODULE_LOAD_T0}ms from JS bundle load`,
-                  );
-                }
               }
             } catch (error) {
               console.warn(`Failed to connect wallet ${wallet.alias} (${wallet.id}):`, error);

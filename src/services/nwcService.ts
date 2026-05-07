@@ -141,6 +141,7 @@ export function validateNwcUrl(url: string): { valid: boolean; error?: string } 
 export async function connect(
   walletId: string,
   nwcUrl: string,
+  onEnabled?: () => void,
 ): Promise<{ success: boolean; balance?: number; error?: string }> {
   const validation = validateNwcUrl(nwcUrl);
   if (!validation.valid) {
@@ -169,8 +170,13 @@ export async function connect(
     providers.set(walletId, provider);
     nwcUrls.set(walletId, nwcUrl.trim());
 
-    // Allow relay connection to stabilize before first request
-    await new Promise((r) => setTimeout(r, 500));
+    // Guard the consumer callback so a UI-side throw can't unwind into our
+    // catch block and falsely tear down a healthy provider.
+    try {
+      onEnabled?.();
+    } catch (cbErr) {
+      if (__DEV__) console.warn('[NWC] onEnabled callback threw — connection unaffected', cbErr);
+    }
 
     // Try to get initial balance, but don't fail the connection if it times out
     let balance: number | undefined;
