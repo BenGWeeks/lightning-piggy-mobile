@@ -30,6 +30,9 @@ export interface ContactProfileBodyData {
   picture: string | null;
   banner?: string | null;
   nip05?: string | null;
+  // Free-form bio from the friend's kind-0 (NIP-01 `about` field).
+  // Optional because legacy callers + phone-only contacts won't have it.
+  about?: string | null;
   lightningAddress: string | null;
   source: 'nostr' | 'contacts';
 }
