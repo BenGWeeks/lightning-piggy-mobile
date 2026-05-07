@@ -26,6 +26,10 @@ import {
   walletLabel,
 } from '../types/wallet';
 
+// Captured at module-evaluation time, which is the closest proxy we have to "JS bundle started executing after app launch". Used by the [Perf] wallet-connect marker so perf scripts can report time-from-launch-to-first-NWC-connect without needing a separate launch timestamp source.
+const WALLET_MODULE_LOAD_T0 = Date.now();
+let firstWalletConnectLogged = false;
+
 export interface IncomingPayment {
   walletId: string;
   amountSats: number;
@@ -353,7 +357,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
               const result = await nwcService.connect(wallet.id, nwcUrl);
               if (result.success) {
-                const info = await nwcService.getInfo(wallet.id);
+                // Try getInfo but don't let a failure prevent the wallet from being marked Connected — the relay handshake is what determines functional connectivity, not whether getInfo round-tripped successfully.
+                let info: Awaited<ReturnType<typeof nwcService.getInfo>> | null = null;
+                try {
+                  info = await nwcService.getInfo(wallet.id);
+                } catch (e) {
+                  if (__DEV__) console.warn(`[NWC] getInfo failed for ${wallet.id.slice(0, 8)}`, e);
+                }
                 const lud16 = parseNwcLud16(nwcUrl);
 
                 setWallets((prev) =>
@@ -374,6 +384,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                       : w,
                   ),
                 );
+                // Log AFTER setWallets so the marker matches the moment the UI actually flips to Connected (not just the moment connect() resolved). Gated by firstWalletConnectLogged so a second wallet's connect doesn't double-log this run.
+                if (!firstWalletConnectLogged) {
+                  firstWalletConnectLogged = true;
+                  console.log(
+                    `[Perf] wallet connected: ${wallet.id.slice(0, 8)} in ${Date.now() - WALLET_MODULE_LOAD_T0}ms from JS bundle load`,
+                  );
+                }
               }
             } catch (error) {
               console.warn(`Failed to connect wallet ${wallet.alias} (${wallet.id}):`, error);
