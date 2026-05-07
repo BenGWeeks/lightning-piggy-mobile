@@ -363,6 +363,31 @@ async function ensureConnected(walletId: string): Promise<NostrWebLNProvider | n
   return provider;
 }
 
+const PAY_INVOICE_REPLY_TIMEOUT_MS = 90_000;
+
+type Nip47Internals = {
+  executeNip47Request: <T>(
+    method: string,
+    params: unknown,
+    validator: (result: T) => boolean,
+    timeoutValues?: { replyTimeout?: number; publishTimeout?: number },
+  ) => Promise<T>;
+};
+
+async function sendPaymentWithTimeout(
+  provider: NostrWebLNProvider,
+  bolt11: string,
+): Promise<{ preimage: string }> {
+  const client = provider.client as unknown as Nip47Internals;
+  const result = await client.executeNip47Request<{ preimage: string }>(
+    'pay_invoice',
+    { invoice: bolt11 },
+    (r) => !!r,
+    { replyTimeout: PAY_INVOICE_REPLY_TIMEOUT_MS },
+  );
+  return { preimage: result.preimage };
+}
+
 export async function payInvoice(
   walletId: string,
   bolt11: string,
@@ -372,7 +397,7 @@ export async function payInvoice(
   let provider = await ensureConnected(walletId);
   if (!provider) throw new Error('Not connected');
   try {
-    const result = await provider.sendPayment(bolt11);
+    const result = await sendPaymentWithTimeout(provider, bolt11);
     throwIfAborted(signal);
     return { preimage: result.preimage };
   } catch (error) {
@@ -408,7 +433,7 @@ export async function payInvoice(
         }
       }
       throwIfAborted(signal);
-      const result = await provider.sendPayment(bolt11);
+      const result = await sendPaymentWithTimeout(provider, bolt11);
       return { preimage: result.preimage };
     }
     if (msg.includes('reply timeout')) {
