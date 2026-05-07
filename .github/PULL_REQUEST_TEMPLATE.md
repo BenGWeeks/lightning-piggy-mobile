@@ -51,3 +51,14 @@ For PRs touching list-rendering / sheet / animation surfaces, run:
   scripts/perf-suite.sh
 on this branch and on `main`, then paste the median table delta. Otherwise N/A.
 -->
+
+## TestFlight "What to Test" bullet (if user-visible)
+
+<!--
+For PRs that change something a beta tester would notice, append a one-line
+bullet to docs/RELEASE_NOTES_NEXT.md. The release workflow auto-publishes the
+file's contents to TestFlight as the build's "What to Test" notes, then resets
+the file. See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
+
+Pure refactors / CI / docs PRs should delete this section.
+-->

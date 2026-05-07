@@ -14,6 +14,7 @@ import { useGroups } from '../contexts/GroupsContext';
 import { useNostr } from '../contexts/NostrContext';
 import { Alert as BrandedAlert } from './BrandedAlert';
 import FriendPickerSheet, { type PickedFriend } from './FriendPickerSheet';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 
 interface Props {
   visible: boolean;
@@ -182,7 +183,7 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMembe
               testID={`group-member-row-${m.pubkey.slice(0, 12)}`}
             >
               <View style={styles.avatar}>
-                {m.picture ? (
+                {m.picture && isSupportedImageUrl(m.picture) ? (
                   <Image
                     source={{ uri: m.picture }}
                     style={styles.avatarImage}
