@@ -65,12 +65,20 @@ const ContactProfileSheet: React.FC<Props> = ({
   // tap-on-contact -> sheet rendered. Mirrors the FriendsScreen pattern.
   const firstRenderLogged = useRef(false);
   const visibleSinceMs = useRef<number | null>(null);
-  if (visible && visibleSinceMs.current === null) {
-    visibleSinceMs.current = Date.now();
-  }
+  // Stamp the visibleSince timestamp + emit the first-render marker in an
+  // effect (not during render) so we don't mutate a ref during render and
+  // stay friendly to concurrent rendering / StrictMode double-invocation.
   useEffect(() => {
+    if (!visible) {
+      // Reset on close so a re-open re-times the next first render.
+      visibleSinceMs.current = null;
+      firstRenderLogged.current = false;
+      return;
+    }
+    if (visibleSinceMs.current === null) {
+      visibleSinceMs.current = Date.now();
+    }
     if (!__DEV__) return;
-    if (!visible) return;
     if (firstRenderLogged.current) return;
     firstRenderLogged.current = true;
     const since = visibleSinceMs.current ?? Date.now();

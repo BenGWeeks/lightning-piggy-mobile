@@ -28,8 +28,8 @@
 # Output: a markdown table of per-run + median measurements, plus the raw
 # [Perf] logcat lines per sample.
 #
-# Helpers (now_ms / wait_for_log / tap_and_time / write_tab_flow) are
-# duplicated from perf-startup.sh until a shared lib refactor.
+# Helpers (now_ms / wait_for_log / run_flow_and_time) are duplicated
+# from perf-startup.sh until a shared lib refactor.
 
 set -u
 
@@ -165,8 +165,6 @@ run_sample() {
 
   local since_ts
   since_ts=$($ADB shell 'date +%m-%d\ %H:%M:%S.000' | tr -d '\r')
-  local launch_start
-  launch_start=$(now_ms)
 
   # `am start -W` blocks until the first frame; reports TotalTime / WaitTime.
   local launch_out total_time wait_time
