@@ -3013,14 +3013,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // Load the persisted kind-4 lastSeen cursor before opening the sub so the relay only re-streams events the user hasn't seen yet — without this, a heavy DM history floods the JS thread with hundreds of `live evt kind=4` deliveries on every cold start (each one a NIP-04 decrypt round-trip + setDmInbox re-render).
     let unsubscribe: (() => void) | null = null;
     (async () => {
-      let sinceK4: number | undefined;
-      try {
-        const raw = await AsyncStorage.getItem(inboxLastSeenKey(viewerPubkey));
-        const parsed = raw ? Number(raw) : NaN;
-        if (Number.isFinite(parsed) && parsed > 0) sinceK4 = parsed;
-      } catch {
-        // best-effort
-      }
+      // Reuse loadLastSeen so parsing/validation matches refreshDmInbox's existing reads of the same key (#409 review). loadLastSeen returns undefined for missing/invalid values, which subscribeInboxDmsForViewer then falls back to its 7-day floor for.
+      const sinceK4 = await loadLastSeen(inboxLastSeenKey(viewerPubkey)).catch(() => undefined);
       if (cancelled) return;
       unsubscribe = nostrService.subscribeInboxDmsForViewer({
         viewerPubkey,
