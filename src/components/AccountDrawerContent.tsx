@@ -10,6 +10,7 @@ import {
   Link as LinkIcon,
   Coins,
   Palette as PaletteIcon,
+  ShieldCheck,
   Info,
   LogOut,
   QrCode,
@@ -69,6 +70,12 @@ const buildSectionRows = (colors: Palette): SectionRow[] => [
     label: 'Appearance',
     icon: <PaletteIcon size={22} color={colors.textBody} />,
     testID: 'drawer-row-appearance',
+  },
+  {
+    name: 'AccountSecurity',
+    label: 'Security',
+    icon: <ShieldCheck size={22} color={colors.textBody} />,
+    testID: 'drawer-row-security',
   },
   {
     name: 'AccountAbout',
