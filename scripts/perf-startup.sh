@@ -74,7 +74,12 @@ done
 
 # ---- helpers ----------------------------------------------------------------
 
-now_ms() { date +%s%3N; }
+# `date +%s%3N` requires GNU date (Linux). macOS BSD `date` doesn't expand `%N`, so contributors running this from macOS would get bad timings. Detect once at script load and fall back to python3 (POSIX-portable) when GNU date is unavailable.
+if date +%N 2>/dev/null | grep -qE '^[0-9]{9}$'; then
+  now_ms() { date +%s%3N; }
+else
+  now_ms() { python3 -c 'import time; print(int(time.time()*1000))'; }
+fi
 
 # Wait until logcat shows a line matching $1 since timestamp $2 (HH:MM:SS.mmm).
 # Returns elapsed ms or empty if it never matched within $LAUNCH_TIMEOUT_S.
