@@ -13,6 +13,7 @@ import * as nwcService from '../services/nwcService';
 import * as nostrService from '../services/nostrService';
 import * as lnurlService from '../services/lnurlService';
 import * as zapCounterpartyStorage from '../services/zapCounterpartyStorage';
+import * as zapSenderProfileStorage from '../services/zapSenderProfileStorage';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
@@ -25,6 +26,10 @@ import {
   ZapCounterpartyInfo,
   walletLabel,
 } from '../types/wallet';
+
+// Captured at module-evaluation time, which is the closest proxy we have to "JS bundle started executing after app launch". Used by the [Perf] wallet-connect marker so perf scripts can report time-from-launch-to-first-NWC-connect without needing a separate launch timestamp source.
+const WALLET_MODULE_LOAD_T0 = Date.now();
+let firstWalletConnectLogged = false;
 
 export interface IncomingPayment {
   walletId: string;
@@ -122,14 +127,17 @@ interface WalletContextType {
 
   // Payment actions (operate on active wallet)
   makeInvoice: (amount: number, memo?: string) => Promise<string>;
-  payInvoice: (bolt11: string, signal?: AbortSignal) => Promise<{ preimage: string }>;
+  payInvoice: (
+    bolt11: string,
+    signalOrOptions?: AbortSignal | nwcService.PayInvoiceOptions,
+  ) => Promise<{ preimage: string }>;
 
   // Payment actions with explicit wallet ID (for sheets)
   makeInvoiceForWallet: (walletId: string, amount: number, memo?: string) => Promise<string>;
   payInvoiceForWallet: (
     walletId: string,
     bolt11: string,
-    signal?: AbortSignal,
+    signalOrOptions?: AbortSignal | nwcService.PayInvoiceOptions,
   ) => Promise<{ preimage: string }>;
   refreshBalanceForWallet: (walletId: string) => Promise<void>;
   fetchTransactionsForWallet: (walletId: string) => Promise<void>;
@@ -351,9 +359,24 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               const nwcUrl = await walletStorage.getNwcUrl(wallet.id);
               if (!nwcUrl) return;
 
-              const result = await nwcService.connect(wallet.id, nwcUrl);
+              const result = await nwcService.connect(wallet.id, nwcUrl, () => {
+                setWallets((prev) =>
+                  prev.map((w) => (w.id === wallet.id ? { ...w, isConnected: true } : w)),
+                );
+                if (!firstWalletConnectLogged) {
+                  firstWalletConnectLogged = true;
+                  console.log(
+                    `[Perf] wallet connected: ${wallet.id.slice(0, 8)} in ${Date.now() - WALLET_MODULE_LOAD_T0}ms from JS bundle load`,
+                  );
+                }
+              });
               if (result.success) {
-                const info = await nwcService.getInfo(wallet.id);
+                let info: Awaited<ReturnType<typeof nwcService.getInfo>> | null = null;
+                try {
+                  info = await nwcService.getInfo(wallet.id);
+                } catch (e) {
+                  if (__DEV__) console.warn(`[NWC] getInfo failed for ${wallet.id.slice(0, 8)}`, e);
+                }
                 const lud16 = parseNwcLud16(nwcUrl);
 
                 setWallets((prev) =>
@@ -362,13 +385,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                       ? {
                           ...w,
                           isConnected: true,
-                          balance: result.balance ?? null,
-                          walletAlias: info?.alias || null,
-                          // Prefer any user-set / previously-persisted
-                          // address — a manual override in Wallet
-                          // Settings must survive every startup, even
-                          // when the NWC URL still carries a `lud16=`
-                          // that resolves to the provider's default.
+                          balance: result.balance ?? w.balance ?? null,
+                          walletAlias: info?.alias || w.walletAlias || null,
                           lightningAddress: w.lightningAddress || lud16 || info?.lud16 || null,
                         }
                       : w,
@@ -971,15 +989,25 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             const commentTag = nostrService.parseZapReceipt(r);
             let profile: ZapCounterpartyInfo['profile'] = null;
             if (recipientPubkey) {
-              const p = await nostrService.fetchProfile(recipientPubkey, queryRelays);
-              if (p) {
-                profile = {
-                  npub: p.npub,
-                  name: p.name,
-                  displayName: p.displayName,
-                  picture: p.picture,
-                  nip05: p.nip05,
-                };
+              // Same persistent-cache shortcut as the incoming branch
+              // — saves the kind-0 round-trip when this recipient was
+              // resolved on a previous cold start (#95).
+              const hit = await zapSenderProfileStorage.get(recipientPubkey);
+              if (hit) {
+                profile = hit;
+              } else {
+                const p = await nostrService.fetchProfile(recipientPubkey, queryRelays);
+                if (p) {
+                  profile = {
+                    npub: p.npub,
+                    name: p.name,
+                    displayName: p.displayName,
+                    picture: p.picture,
+                    nip05: p.nip05,
+                  };
+                  // Write-through for the next cold start.
+                  void zapSenderProfileStorage.setMany(new Map([[recipientPubkey, profile]]));
+                }
               }
             }
             byHash.set(tx.paymentHash!, {
@@ -1134,13 +1162,42 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (parsed.senderPubkey && !parsed.anonymous) pubkeysToFetch.add(parsed.senderPubkey);
       }
 
-      // Batch profile fetch. Returns a Map keyed by pubkey.
-      const profileMap =
+      // Persistent cache hit first — strangers' kind-0 events change
+      // infrequently and the relay round-trip is the slow part of the
+      // first cold-start render of TransactionList (#95). Anything served
+      // from AsyncStorage skips the relay query entirely.
+      const cached =
         pubkeysToFetch.size > 0
-          ? await nostrService.fetchProfiles([...pubkeysToFetch], queryRelays)
+          ? await zapSenderProfileStorage.getMany([...pubkeysToFetch])
+          : new Map<string, zapSenderProfileStorage.CachedZapSenderProfile>();
+      const stillToFetch = [...pubkeysToFetch].filter((pk) => !cached.has(pk));
+
+      // Batch profile fetch (relays). Returns a Map keyed by pubkey.
+      const profileMap =
+        stillToFetch.length > 0
+          ? await nostrService.fetchProfiles(stillToFetch, queryRelays)
           : undefined;
 
+      // Write-through any newly-resolved profiles so the next cold start
+      // serves them from disk.
+      if (profileMap && profileMap.size > 0) {
+        const toPersist = new Map<string, zapSenderProfileStorage.CachedZapSenderProfile>();
+        for (const [pk, p] of profileMap) {
+          toPersist.set(pk, {
+            npub: p.npub,
+            name: p.name,
+            displayName: p.displayName,
+            picture: p.picture,
+            nip05: p.nip05,
+          });
+        }
+        // Fire-and-forget — don't block UI updates on the AsyncStorage write.
+        void zapSenderProfileStorage.setMany(toPersist);
+      }
+
       const toCounterpartyProfile = (pk: string): ZapCounterpartyInfo['profile'] => {
+        const hit = cached.get(pk);
+        if (hit) return hit;
         const p = profileMap?.get(pk);
         if (!p) return null;
         return {
@@ -1214,9 +1271,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   const payInvoice = useCallback(
-    async (bolt11: string, signal?: AbortSignal) => {
+    async (bolt11: string, signalOrOptions?: AbortSignal | nwcService.PayInvoiceOptions) => {
       if (!activeWalletId) throw new Error('No active wallet');
-      return nwcService.payInvoice(activeWalletId, bolt11, signal);
+      return nwcService.payInvoice(activeWalletId, bolt11, signalOrOptions);
     },
     [activeWalletId],
   );
@@ -1229,8 +1286,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   const payInvoiceForWallet = useCallback(
-    async (walletId: string, bolt11: string, signal?: AbortSignal) => {
-      return nwcService.payInvoice(walletId, bolt11, signal);
+    async (
+      walletId: string,
+      bolt11: string,
+      signalOrOptions?: AbortSignal | nwcService.PayInvoiceOptions,
+    ) => {
+      return nwcService.payInvoice(walletId, bolt11, signalOrOptions);
     },
     [],
   );

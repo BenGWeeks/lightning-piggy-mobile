@@ -31,6 +31,13 @@ import type { MainTabParamList } from '../navigation/types';
 
 const HomeScreen: React.FC = () => {
   const colors = useThemeColors();
+  // First-render marker: fires once per mount when the first commit lands. Used by scripts/perf-startup.sh to measure tap-to-render latency for tab-home.
+  const homeRenderLoggedRef = useRef(false);
+  useEffect(() => {
+    if (homeRenderLoggedRef.current) return;
+    homeRenderLoggedRef.current = true;
+    console.log(`[Perf] HomeScreen first render`);
+  }, []);
   const styles = useMemo(() => createHomeScreenStyles(colors), [colors]);
   const {
     wallets,
