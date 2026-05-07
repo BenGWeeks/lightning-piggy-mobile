@@ -35,6 +35,20 @@ export function createAbortError(message = 'Payment cancelled'): Error {
   return err;
 }
 
+export const REPLY_TIMEOUT_ERROR_NAME = 'ReplyTimeoutError';
+
+export function createReplyTimeoutError(
+  message = 'Wallet did not reply in time; payment may still be in flight',
+): Error {
+  const err = new Error(message);
+  err.name = REPLY_TIMEOUT_ERROR_NAME;
+  return err;
+}
+
+export function isReplyTimeoutError(error: unknown): boolean {
+  return (error as Error)?.name === REPLY_TIMEOUT_ERROR_NAME;
+}
+
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) throw createAbortError();
 }
@@ -403,11 +417,21 @@ async function sendPaymentWithTimeout(
   return { preimage: result.preimage };
 }
 
+export interface PayInvoiceOptions {
+  signal?: AbortSignal;
+  onReplyTimeout?: () => void;
+}
+
 export async function payInvoice(
   walletId: string,
   bolt11: string,
-  signal?: AbortSignal,
+  signalOrOptions?: AbortSignal | PayInvoiceOptions,
 ): Promise<{ preimage: string }> {
+  const options: PayInvoiceOptions =
+    signalOrOptions && 'aborted' in signalOrOptions
+      ? { signal: signalOrOptions as AbortSignal }
+      : ((signalOrOptions as PayInvoiceOptions | undefined) ?? {});
+  const { signal, onReplyTimeout } = options;
   throwIfAborted(signal);
   let provider = await ensureConnected(walletId);
   if (!provider) throw new Error('Not connected');
@@ -465,7 +489,8 @@ export async function payInvoice(
       // Poll lookupInvoice to check if it completes within 5 minutes.
       console.log('[NWC] pay_invoice timed out, polling for completion...');
       const paymentHash = extractPaymentHash(bolt11);
-      if (!paymentHash) throw error;
+      if (!paymentHash) throw createReplyTimeoutError();
+      onReplyTimeout?.();
       const deadline = Date.now() + 5 * 60 * 1000;
       while (Date.now() < deadline) {
         // abortableSleep rejects with AbortError when the caller cancels,
@@ -490,6 +515,7 @@ export async function payInvoice(
           // Any other lookupInvoice failure — keep polling.
         }
       }
+      throw createReplyTimeoutError();
     }
     throw error;
   }
