@@ -60,6 +60,22 @@ const ContactProfileSheet: React.FC<Props> = ({
   const styles = useMemo(() => createStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['55%'], []);
+  // Performance instrumentation (dev only). Logged once on the first
+  // render where `visible` is true so perf scripts can time
+  // tap-on-contact -> sheet rendered. Mirrors the FriendsScreen pattern.
+  const firstRenderLogged = useRef(false);
+  const visibleSinceMs = useRef<number | null>(null);
+  if (visible && visibleSinceMs.current === null) {
+    visibleSinceMs.current = Date.now();
+  }
+  useEffect(() => {
+    if (!__DEV__) return;
+    if (!visible) return;
+    if (firstRenderLogged.current) return;
+    firstRenderLogged.current = true;
+    const since = visibleSinceMs.current ?? Date.now();
+    console.log(`[Perf] ContactProfileSheet first render: ${Date.now() - since}ms from visible`);
+  }, [visible]);
   const { contacts, followContact, unfollowContact, sendDirectMessage, relays } = useNostr();
   const [following, setFollowing] = useState(false);
   const [loadingFollow, setLoadingFollow] = useState(false);
