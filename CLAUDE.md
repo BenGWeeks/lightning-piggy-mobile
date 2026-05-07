@@ -7,8 +7,8 @@
 
 ## Deploying a release APK to a physical device
 
-- The user's primary device is a Pixel running an EAS-built production install. **`npx expo run:android --variant release` will not upgrade it** — locally-signed APK fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE` (different keystore than EAS) and `INSTALL_FAILED_VERSION_DOWNGRADE` (local versionCode resets to 1 every prebuild, while EAS's remote counter is in the high 20s).
-- To preserve the user's app data (wallets, Nostr login, message history), use `eas build --local --profile production --platform android --non-interactive` instead. This runs EAS's pipeline on this machine, fetches the EAS upload keystore so the signature matches, and uses the remote-incremented versionCode. Sideload with `adb -s <serial> install -r build-*.apk` (note: `adb` takes the serial, `expo run:android --device` takes the model name like `Pixel_8`).
+- The user's primary device is a Pixel running an EAS-built production install. **`npx expo run:android --variant release` will not upgrade it** — locally-signed APK fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE` (different keystore than EAS) and `INSTALL_FAILED_VERSION_DOWNGRADE` (local pipeline reads `versionCode` from `app.config.ts` directly, and that floor sits behind whatever EAS's cloud counter most recently published).
+- To preserve the user's app data (wallets, Nostr login, message history), use `eas build --local --profile production --platform android --non-interactive` instead. This runs EAS's pipeline on this machine, fetching the EAS upload keystore so the signature matches an existing EAS-installed app. **Important**: `appVersionSource: "remote"` in `eas.json` only affects EAS *cloud* builds — `eas build --local` (and `expo run:android --variant release`) both read `versionCode` from `app.config.ts` directly. **Before each local prod build, bump `versionCode` in `app.config.ts` to ≥ the versionCode currently on the target device** (otherwise install fails with `INSTALL_FAILED_VERSION_DOWNGRADE`). Sideload with `adb -s <serial> install -r build-*.apk` (note: `adb` takes the serial, `expo run:android --device` takes the model name like `Pixel_8`).
 - Full recipe + rationale (case 1 vs case 2) lives in `docs/DEPLOYMENT.adoc` → "Local production builds". When a deploy fails for one of these reasons, update that section if anything's changed.
 
 ## Testing
@@ -69,3 +69,4 @@ Refactors, infra, or pure-UX polish that doesn't correspond to a filed issue can
 
 - See `docs/TROUBLESHOOTING.adoc` for known issues and resolutions
 - When you encounter and resolve a development issue, add it to TROUBLESHOOTING.adoc so future developers (and AI assistants) can reference it
+- If Claude Code's Bash tool starts failing silently (exit 1 or 134 with empty output), run `df -h /tmp` first — a full tmpfs disables Claude Code's shell snapshot; see TROUBLESHOOTING.adoc → "Claude Code Bash tool fails silently … when /tmp is full"
