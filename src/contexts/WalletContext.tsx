@@ -414,6 +414,107 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     })();
   }, [fetchPrice]);
 
+  // Re-hydrate wallets when the active Nostr identity changes (#288).
+  // The startup useEffect above runs once on mount; it doesn't react to
+  // switchIdentity, so without this effect the previous identity's
+  // wallet list stayed visible after a switch (per-account namespacing
+  // is correct on disk, the UI just wasn't reading it again).
+  useEffect(() => {
+    let cancelled = false;
+    let lastSeenPubkey = walletStorage.getActivePubkey();
+    const unsubscribe = walletStorage.subscribeActivePubkey((nextPubkey) => {
+      if (nextPubkey === lastSeenPubkey) return;
+      lastSeenPubkey = nextPubkey;
+      // Disconnect every current NWC connection so we don't leak the
+      // previous identity's WebSockets / pay_invoice handlers.
+      for (const w of walletsRef.current) {
+        if (w.walletType === 'nwc') nwcService.disconnect(w.id);
+      }
+      // Clear in-memory wallet list immediately so the UI reflects the
+      // switch without ghosting the old wallets.
+      setWallets([]);
+      setActiveWalletId(null);
+      // Re-hydrate from per-account-keyed storage.
+      (async () => {
+        if (cancelled) return;
+        try {
+          const walletList = await walletStorage.getWalletList();
+          if (cancelled) return;
+          const walletStates: WalletState[] = await Promise.all(
+            walletList.map(async (w) => {
+              let cachedTxs: WalletTransaction[] = [];
+              try {
+                const txJson = await AsyncStorage.getItem(`txs_${w.id}`);
+                if (txJson) cachedTxs = JSON.parse(txJson);
+              } catch (err) {
+                console.warn(`Corrupted cached txs for ${w.id}, clearing:`, err);
+                await AsyncStorage.removeItem(`txs_${w.id}`);
+              }
+              return {
+                ...w,
+                isConnected: false,
+                balance: null,
+                walletAlias: null,
+                transactions: cachedTxs,
+              };
+            }),
+          );
+          if (cancelled) return;
+          setWallets(walletStates);
+          if (walletStates.length > 0) setActiveWalletId(walletStates[0].id);
+          // Kick off NWC connects in parallel; same fire-and-forget
+          // pattern as the startup hydration so the UI doesn't block.
+          void Promise.all(
+            walletList.map(async (wallet) => {
+              if (cancelled) return;
+              try {
+                if (wallet.walletType === 'onchain') {
+                  const bal = await onchainService.getBalance(wallet.id);
+                  if (cancelled) return;
+                  setWallets((prev) =>
+                    prev.map((w) =>
+                      w.id === wallet.id ? { ...w, isConnected: false, balance: bal } : w,
+                    ),
+                  );
+                  return;
+                }
+                const nwcUrl = await walletStorage.getNwcUrl(wallet.id);
+                if (!nwcUrl || cancelled) return;
+                const result = await nwcService.connect(wallet.id, nwcUrl, () => {
+                  setWallets((prev) =>
+                    prev.map((w) => (w.id === wallet.id ? { ...w, isConnected: true } : w)),
+                  );
+                });
+                if (cancelled) return;
+                if (result.success) {
+                  setWallets((prev) =>
+                    prev.map((w) =>
+                      w.id === wallet.id
+                        ? {
+                            ...w,
+                            isConnected: true,
+                            balance: result.balance ?? w.balance ?? null,
+                          }
+                        : w,
+                    ),
+                  );
+                }
+              } catch (error) {
+                console.warn(`[Wallet] re-hydrate connect failed for ${wallet.id}:`, error);
+              }
+            }),
+          );
+        } catch (e) {
+          console.warn('[Wallet] re-hydrate failed:', e);
+        }
+      })();
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+
   // Refresh BTC price every 5 minutes
   useEffect(() => {
     priceInterval.current = setInterval(() => fetchPrice(currency), 5 * 60 * 1000);

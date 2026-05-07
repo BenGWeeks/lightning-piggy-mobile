@@ -16,8 +16,37 @@ import { perAccountKey } from './perAccountStorage';
 // so legacy single-account installs keep working until the migration
 // completes.
 let _activePubkey: string | null = null;
+
+// Subscribers (typically WalletContext) get notified whenever the
+// active pubkey changes so they can tear down + re-hydrate the wallet
+// list against the new account's namespaced storage. Without this,
+// switching identities leaves the previous identity's wallets visible
+// in-memory until the next cold start (see #288 review).
+type ActivePubkeyListener = (pk: string | null) => void;
+const _activePubkeyListeners = new Set<ActivePubkeyListener>();
+
 export function setActivePubkeyForWalletStorage(pk: string | null): void {
+  if (_activePubkey === pk) return;
   _activePubkey = pk;
+  for (const listener of _activePubkeyListeners) {
+    try {
+      listener(pk);
+    } catch (e) {
+      // Don't let one buggy subscriber break the others.
+      if (__DEV__) console.warn('[walletStorage] listener threw:', e);
+    }
+  }
+}
+
+export function subscribeActivePubkey(listener: ActivePubkeyListener): () => void {
+  _activePubkeyListeners.add(listener);
+  return () => {
+    _activePubkeyListeners.delete(listener);
+  };
+}
+
+export function getActivePubkey(): string | null {
+  return _activePubkey;
 }
 const WALLET_LIST_KEY_BASE = 'wallet_list';
 function walletListKey(): string {
