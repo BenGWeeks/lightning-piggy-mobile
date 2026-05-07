@@ -377,6 +377,46 @@ async function ensureConnected(walletId: string): Promise<NostrWebLNProvider | n
   return provider;
 }
 
+const PAY_INVOICE_REPLY_TIMEOUT_MS = 90_000;
+
+type Nip47Internals = {
+  executeNip47Request: <T>(
+    method: string,
+    params: unknown,
+    validator: (result: T) => boolean,
+    timeoutValues?: { replyTimeout?: number; publishTimeout?: number },
+  ) => Promise<T>;
+};
+
+async function sendPaymentWithTimeout(
+  provider: NostrWebLNProvider,
+  bolt11: string,
+): Promise<{ preimage: string }> {
+  // Runtime guard — `executeNip47Request` is a private @getalby/sdk surface;
+  // if a future SDK update removes it, fall back to the public sendPayment.
+  const client = provider.client as unknown as Nip47Internals | undefined;
+  if (!client || typeof client.executeNip47Request !== 'function') {
+    if (__DEV__)
+      console.warn(
+        '[NWC] executeNip47Request unavailable — falling back to public sendPayment (no per-call timeout)',
+      );
+    const fallback = await provider.sendPayment(bolt11);
+    if (!fallback || typeof fallback.preimage !== 'string' || fallback.preimage.length === 0) {
+      throw new Error('pay_invoice returned no preimage');
+    }
+    return { preimage: fallback.preimage };
+  }
+  const result = await client.executeNip47Request<{ preimage: string }>(
+    'pay_invoice',
+    { invoice: bolt11 },
+    // Validator: require a non-empty string preimage so { preimage: undefined }
+    // can't be silently treated as success.
+    (r) => !!r && typeof r.preimage === 'string' && r.preimage.length > 0,
+    { replyTimeout: PAY_INVOICE_REPLY_TIMEOUT_MS },
+  );
+  return { preimage: result.preimage };
+}
+
 export interface PayInvoiceOptions {
   signal?: AbortSignal;
   onReplyTimeout?: () => void;
@@ -396,7 +436,7 @@ export async function payInvoice(
   let provider = await ensureConnected(walletId);
   if (!provider) throw new Error('Not connected');
   try {
-    const result = await provider.sendPayment(bolt11);
+    const result = await sendPaymentWithTimeout(provider, bolt11);
     throwIfAborted(signal);
     return { preimage: result.preimage };
   } catch (error) {
@@ -432,7 +472,7 @@ export async function payInvoice(
         }
       }
       throwIfAborted(signal);
-      const result = await provider.sendPayment(bolt11);
+      const result = await sendPaymentWithTimeout(provider, bolt11);
       return { preimage: result.preimage };
     }
     if (msg.includes('reply timeout')) {
