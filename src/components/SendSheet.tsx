@@ -487,8 +487,6 @@ const SendSheet: React.FC<Props> = ({
           }
         }
 
-        // SCREENSHOT-HACK-#433: hardcoded failure — REVERT BEFORE COMMIT
-        throw new Error('payment_error: SCREENSHOT_HACK');
         await payInvoiceForWallet(walletId!, bolt11, {
           signal,
           onReplyTimeout: handleReplyTimeout,
