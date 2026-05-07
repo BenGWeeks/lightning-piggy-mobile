@@ -4,6 +4,7 @@ import { Image } from 'expo-image';
 import { UserRound, Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 
 interface Props {
   name: string;
@@ -25,7 +26,11 @@ const ContactListItem: React.FC<Props> = ({ name, picture, lightningAddress, onP
     setAvatarError(false);
   }, [picture]);
 
-  const showImage = !!picture && !avatarError;
+  // Pre-filter unsupported URLs (`.svg`, `.heic`, etc.) so we never
+  // hand them to expo-image — Android's BitmapFactory floods logcat
+  // with `unimplemented` decode errors + GC pressure when ~50 contacts
+  // each fail to decode (#189).
+  const showImage = !!picture && !avatarError && isSupportedImageUrl(picture);
 
   return (
     <TouchableOpacity style={styles.container} onPress={onPress} activeOpacity={onPress ? 0.6 : 1}>
