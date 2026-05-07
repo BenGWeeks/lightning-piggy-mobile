@@ -1309,8 +1309,7 @@ export function subscribeInboxDmsForViewer(input: {
   };
   const nowSec = Math.floor(Date.now() / 1000);
   const lookbackFloor = nowSec - DM_LIVE_SUB_MAX_LOOKBACK_SECONDS;
-  const requested =
-    input.sinceK4 !== undefined ? Math.max(0, input.sinceK4 - 120) : lookbackFloor;
+  const requested = input.sinceK4 !== undefined ? Math.max(0, input.sinceK4 - 120) : lookbackFloor;
   const sinceK4 = Math.max(lookbackFloor, requested);
   const subK4 = pool.subscribeMany(
     input.relays,
