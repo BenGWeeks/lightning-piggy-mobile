@@ -461,8 +461,7 @@ const createStyles = (colors: Palette) =>
       color: 'rgba(255,255,255,0.85)',
     },
     invoiceCard: {
-      maxWidth: '85%',
-      minWidth: 240,
+      width: 240,
       paddingTop: 12,
       paddingBottom: 4,
       paddingHorizontal: 14,
