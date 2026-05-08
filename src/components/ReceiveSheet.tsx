@@ -21,6 +21,7 @@ import Toast from './BrandedToast';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
+import { buildBip21 } from '../utils/bip21';
 import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -289,11 +290,8 @@ const ReceiveSheet: React.FC<Props> = ({
 
   const currentSats = parseInt(satsValue) || 0;
 
-  // BIP-21 URI for on-chain: optionally include amount
   const onchainUri = onchainAddress
-    ? mode === 'amount' && currentSats > 0
-      ? `bitcoin:${onchainAddress}?amount=${(currentSats / 100_000_000).toFixed(8)}`
-      : `bitcoin:${onchainAddress}`
+    ? buildBip21(onchainAddress, mode === 'amount' ? currentSats : null)
     : '';
 
   const copyValue = isOnchainWallet
@@ -712,77 +710,52 @@ const ReceiveSheet: React.FC<Props> = ({
                 </View>
               )}
 
-              {/* Amount / address switcher — matches Figma 57-2276 + 57-2515.
-               *  Replaces the old Address/Amount tab bar (removed: the tab
-               *  was a view-switch whose only purpose was to reach the
-               *  Enter-custom-amount button, itself just a navigation
-               *  affordance to the AmountEntryScreen). Now the primary
-               *  amount affordance sits directly on the current view.
-               *  Hidden for presetFriend / presetGroup (single-shot flows
-               *  with their own CTA — switching to address mode here would
-               *  let the group flow share a static lud16 we don't want).
-               */}
-              {!presetFriend && !presetGroup ? (
-                // With invoice (or on-chain amount set) → show summary +
-                // Change amount + "Show my address" fallback to lud16.
-                currentSats > 0 && (invoice || (isOnchainWallet && onchainAddress)) ? (
-                  <View style={styles.amountSummary}>
-                    <View style={styles.amountSummaryLine}>
-                      <Text style={styles.amountSummaryValue}>{currentSats.toLocaleString()}</Text>
-                      <Text style={styles.amountSummaryUnit}>SATS</Text>
-                    </View>
-                    {btcPrice ? (
-                      <Text style={styles.amountSummaryFiat}>
-                        Aprox {formatFiat(satsToFiat(currentSats, btcPrice), currency)}
-                      </Text>
-                    ) : null}
-                    <TouchableOpacity
-                      style={styles.changeAmountButton}
-                      onPress={() => setStep('amount')}
-                      testID="receive-change-amount"
-                      accessibilityLabel="Change amount"
-                    >
-                      <Text style={styles.changeAmountText}>Change amount</Text>
-                    </TouchableOpacity>
-                    {!isOnchainWallet && lightningAddress ? (
-                      <TouchableOpacity
-                        style={styles.secondaryActionButton}
-                        onPress={() => {
-                          // Clear the generated invoice so the next render
-                          // falls back to the lud16 QR view. setMode keeps
-                          // the derived copy/share values in the right
-                          // branch too.
-                          setInvoice('');
-                          setSatsValue('');
-                          setMode('address');
-                        }}
-                        testID="receive-show-address"
-                        accessibilityLabel="Show lightning address"
-                      >
-                        <Text style={styles.secondaryActionText}>Show my address</Text>
-                      </TouchableOpacity>
-                    ) : null}
+              {currentSats > 0 && (invoice || (isOnchainWallet && onchainAddress)) ? (
+                <View style={styles.amountSummary}>
+                  <View style={styles.amountSummaryLine}>
+                    <Text style={styles.amountSummaryValue}>{currentSats.toLocaleString()}</Text>
+                    <Text style={styles.amountSummaryUnit}>SATS</Text>
                   </View>
-                ) : !loading ? (
-                  // No invoice yet → the primary way to initiate an
-                  // amount-specific receive. Renders on the lud16/on-chain
-                  // view (replacing the old "tap Amount tab, then Enter
-                  // custom amount" two-step).
+                  {btcPrice ? (
+                    <Text style={styles.amountSummaryFiat}>
+                      Aprox {formatFiat(satsToFiat(currentSats, btcPrice), currency)}
+                    </Text>
+                  ) : null}
                   <TouchableOpacity
-                    style={styles.enterAmountButton}
-                    onPress={() => {
-                      // Switch into amount mode up-front so when the user
-                      // returns from AmountEntryScreen the invoice-display
-                      // code paths (mode === 'amount' && invoice) fire.
-                      setMode('amount');
-                      setStep('amount');
-                    }}
-                    testID="receive-enter-custom-amount"
-                    accessibilityLabel="Enter an amount"
+                    style={styles.changeAmountButton}
+                    onPress={() => setStep('amount')}
+                    testID="receive-change-amount"
+                    accessibilityLabel="Change amount"
                   >
-                    <Text style={styles.enterAmountText}>Enter an amount</Text>
+                    <Text style={styles.changeAmountText}>Change amount</Text>
                   </TouchableOpacity>
-                ) : null
+                  {!isOnchainWallet && !presetGroup && lightningAddress ? (
+                    <TouchableOpacity
+                      style={styles.secondaryActionButton}
+                      onPress={() => {
+                        setInvoice('');
+                        setSatsValue('');
+                        setMode('address');
+                      }}
+                      testID="receive-show-address"
+                      accessibilityLabel="Show lightning address"
+                    >
+                      <Text style={styles.secondaryActionText}>Show my address</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+              ) : !presetFriend && !presetGroup && !loading ? (
+                <TouchableOpacity
+                  style={styles.enterAmountButton}
+                  onPress={() => {
+                    setMode('amount');
+                    setStep('amount');
+                  }}
+                  testID="receive-enter-custom-amount"
+                  accessibilityLabel="Enter an amount"
+                >
+                  <Text style={styles.enterAmountText}>Enter an amount</Text>
+                </TouchableOpacity>
               ) : null}
             </View>
           )}

@@ -2,6 +2,7 @@ import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { decodeProfileReference } from '../services/nostrService';
 import { extractGifUrl } from '../services/giphyService';
 import { parseGeoMessage, SharedLocation } from '../services/locationService';
+import { parseBip21, ParsedBip21 } from './bip21';
 
 // Bolt11 invoices are self-identifying by their `lnXX` HRP, so detection
 // here matches them with or without the `lightning:` prefix.
@@ -22,14 +23,6 @@ const LN_ADDRESS_REGEX = /lightning:([a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,})\b/i;
 // naddr etc. fall through to plain text rendering.
 const NOSTR_PROFILE_URI_REGEX = /nostr:(npub1[0-9a-z]+|nprofile1[0-9a-z]+)/i;
 
-// BIP-21 on-chain URIs — `bitcoin:<addr>` with optional query string.
-// We only treat the message as a payable on-chain share when the entire
-// body is the URI (mirrors extractImageUrl's whole-message rule). We
-// don't validate the address shape beyond a coarse "alphanumeric, ≥8
-// chars" sniff — SendSheet's BIP-21 parser is the authoritative
-// validator and surfaces a clean error if the address is bad.
-const BITCOIN_URI_REGEX = /^bitcoin:([a-z0-9]{8,})(\?[^\s]*)?$/i;
-
 export interface DecodedInvoice {
   raw: string;
   amountSats: number | null;
@@ -45,16 +38,7 @@ export interface SharedContactRef {
   relays: string[];
 }
 
-export interface BitcoinUri {
-  /** Full BIP-21 URI as received, e.g. `bitcoin:bc1q…?amount=0.0001`. */
-  raw: string;
-  /** The on-chain address portion (no scheme, no query). */
-  address: string;
-  /** Optional BIP-21 amount in BTC, parsed from `?amount=…`. */
-  amountBtc: number | null;
-  /** Same amount converted to sats (rounded), or null if absent/unparseable. */
-  amountSats: number | null;
-}
+export type BitcoinUri = ParsedBip21;
 
 export function extractImageUrl(text: string): string | null {
   if (!text) return null;
@@ -105,22 +89,7 @@ export function extractLightningAddress(text: string): string | null {
 }
 
 export function extractBitcoinUri(text: string): BitcoinUri | null {
-  if (!text) return null;
-  const trimmed = text.trim();
-  const match = trimmed.match(BITCOIN_URI_REGEX);
-  if (!match) return null;
-  const address = match[1];
-  let amountBtc: number | null = null;
-  if (match[2]) {
-    const params = new URLSearchParams(match[2].slice(1));
-    const raw = (params.get('amount') ?? '').trim();
-    if (raw) {
-      const n = Number(raw);
-      if (Number.isFinite(n) && n > 0 && n < 21_000_000) amountBtc = n;
-    }
-  }
-  const amountSats = amountBtc !== null ? Math.round(amountBtc * 100_000_000) : null;
-  return { raw: trimmed, address, amountBtc, amountSats };
+  return parseBip21(text);
 }
 
 export function extractSharedContact(text: string): SharedContactRef | null {
