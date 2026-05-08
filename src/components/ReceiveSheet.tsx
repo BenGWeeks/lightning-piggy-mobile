@@ -168,6 +168,36 @@ const ReceiveSheet: React.FC<Props> = ({
 
   const isOnchainWallet = selectedWallet?.walletType === 'onchain';
 
+  // Single source of truth for the initial step+mode the sheet should
+  // land on for a given wallet. Used both on first open AND on
+  // wallet-dropdown switch — keeping them in sync prevents the
+  // "switching dropdown lands on Custom amount unexpectedly" bug
+  // (#450) where the two effects could disagree.
+  const pickInitialView = useCallback(
+    (wallet: typeof selectedWallet): { step: Step; mode: Mode } => {
+      if (wallet?.walletType === 'onchain') {
+        return { step: 'main', mode: 'address' };
+      }
+      if (presetFriend || presetGroup) {
+        // "Send invoice to friend" / "Send invoice to group" entry point:
+        // skip straight to amount entry so the user doesn't land on the
+        // main receive/address view they can't use, then need a second
+        // tap on "Enter custom amount". Group flow needs an amount-bound
+        // bolt11 invoice anyway — sharing a static lud16 to a group has
+        // no useful "pay me" semantics.
+        return { step: 'amount', mode: 'amount' };
+      }
+      if (!wallet?.lightningAddress) {
+        // No per-wallet LN address (#168/#169). Nothing useful to show
+        // on the main view — jump directly to amount entry instead of
+        // surfacing "Enter an amount to generate invoice" placeholder.
+        return { step: 'amount', mode: 'amount' };
+      }
+      return { step: 'main', mode: 'address' };
+    },
+    [presetFriend, presetGroup],
+  );
+
   // Open/close the sheet — intentionally depends only on `visible`.
   // `balance` and `lightningAddress` are read for initialisation, not as reactive triggers.
   useEffect(() => {
@@ -182,33 +212,18 @@ const ReceiveSheet: React.FC<Props> = ({
       setSatsValue('');
       setInvoice('');
       setPaymentReceived(false);
-      setStep('main');
+
+      const initialWallet = wallets.find((w) => w.id === activeWalletId) ?? null;
+      const initial = pickInitialView(initialWallet);
+      setStep(initial.step);
+      setMode(initial.mode);
 
       if (activeWallet?.walletType === 'onchain' && activeWalletId) {
-        // On-chain wallet: fetch a receive address, default to address mode
-        setMode('address');
         getReceiveAddress(activeWalletId)
           .then((addr) => setOnchainAddress(addr))
           .catch(() => {
             console.warn('Failed to fetch on-chain address');
           });
-      } else if (presetFriend || presetGroup) {
-        // "Send invoice to friend" / "Send invoice to group" entry point:
-        // skip straight to amount entry so the user doesn't land on the
-        // main receive/address view they can't use, then need a second
-        // tap on "Enter custom amount". Group flow needs an amount-bound
-        // bolt11 invoice anyway — sharing a static lud16 to a group has
-        // no useful "pay me" semantics.
-        setMode('amount');
-        setStep('amount');
-      } else if (!lightningAddress) {
-        // No per-wallet LN address (#168/#169). Nothing useful to show
-        // on the main view — jump directly to amount entry instead of
-        // surfacing "Enter an amount to generate invoice" placeholder.
-        setMode('amount');
-        setStep('amount');
-      } else {
-        setMode('address');
       }
 
       bottomSheetRef.current?.present();
@@ -231,32 +246,28 @@ const ReceiveSheet: React.FC<Props> = ({
     return () => handler.remove();
   }, [visible, onClose]);
 
-  // Reset state when wallet is changed via dropdown. Must mirror the
-  // skip-to-amount rule from the visible-open effect — otherwise this
-  // effect races after the first sets capturedWalletId and forces step
-  // back to 'main', dropping the user on the "Enter an amount to
-  // generate invoice" placeholder for wallets without a lud16.
+  // Reset state when wallet is changed via dropdown. Mirrors the
+  // first-open effect's pickInitialView heuristic — keeping both paths
+  // in sync prevents the "switching dropdown lands on Custom amount
+  // unexpectedly" bug (#450). Keyed on walletType (not just id) so
+  // type-flips (lightning ↔ on-chain) always re-derive the default
+  // step + mode rather than carrying state from the previous wallet.
   useEffect(() => {
     if (!visible || !capturedWalletId) return;
     setOnchainAddress(null);
     setInvoice('');
     setPaymentReceived(false);
     setSatsValue('');
+    const next = pickInitialView(selectedWallet);
+    setStep(next.step);
+    setMode(next.mode);
     if (selectedWallet?.walletType === 'onchain') {
-      setMode('address');
-      setStep('main');
       getReceiveAddress(capturedWalletId)
         .then((addr) => setOnchainAddress(addr))
         .catch(() => {});
-    } else if (!lightningAddress) {
-      setMode('amount');
-      setStep('amount');
-    } else {
-      setMode('address');
-      setStep('main');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [capturedWalletId]);
+  }, [capturedWalletId, selectedWallet?.walletType]);
 
   // The "paymentReceived" checkmark on the QR thumbnail flips to true
   // whenever the app-root overlay fires for the wallet this sheet is
@@ -313,11 +324,17 @@ const ReceiveSheet: React.FC<Props> = ({
   // What we'd DM to a friend in the current state. In Address mode that's
   // the user's static lightning address (friend can pay it any time). In
   // Amount mode it's the just-generated bolt11 invoice (friend can pay it
-  // once, for that exact amount). Empty during Amount-tab amount entry
-  // before the debounced invoice has come back — the Copy / Share /
-  // Friend buttons all disable in that window.
-  const friendShareValue =
-    !isOnchainWallet && mode === 'address' ? lightningAddress || '' : invoice || '';
+  // once, for that exact amount). For on-chain wallets we share the BIP-21
+  // URI directly (with optional ?amount= when the user set one). Empty
+  // during Amount-tab amount entry before the debounced invoice has come
+  // back — the Copy / Share / Friend buttons all disable in that window.
+  const friendShareValue = isOnchainWallet
+    ? onchainAddress
+      ? onchainUri
+      : ''
+    : mode === 'address'
+      ? lightningAddress || ''
+      : invoice || '';
 
   const handleFriendPicked = useCallback(
     async (friend: PickedFriend) => {
@@ -332,8 +349,13 @@ const ReceiveSheet: React.FC<Props> = ({
         // for cross-client interop. Lightning addresses look like plain
         // emails (`alice@example.com`), so we have to prefix them with
         // `lightning:` so the receiver can safely render a Pay button
-        // without mis-classifying a regular email.
-        const payload = mode === 'address' ? `lightning:${friendShareValue}` : friendShareValue;
+        // without mis-classifying a regular email. On-chain BIP-21 URIs
+        // already carry their own `bitcoin:` scheme — send as-is.
+        const payload = isOnchainWallet
+          ? friendShareValue
+          : mode === 'address'
+            ? `lightning:${friendShareValue}`
+            : friendShareValue;
         const result = await sendDirectMessage(friend.pubkey, payload);
         if (result.success) onSent?.(payload);
         if (!result.success) {
@@ -374,6 +396,7 @@ const ReceiveSheet: React.FC<Props> = ({
     },
     [
       friendShareValue,
+      isOnchainWallet,
       mode,
       sendingToFriend,
       sendDirectMessage,
@@ -667,25 +690,25 @@ const ReceiveSheet: React.FC<Props> = ({
                     <Text style={styles.actionButtonText}>Share</Text>
                     <Share2 size={20} color={colors.brandPink} />
                   </TouchableOpacity>
-                  {!isOnchainWallet ? (
-                    <Pressable
-                      style={({ pressed }) => [
-                        styles.actionButton,
-                        !friendShareValue && styles.actionButtonDisabled,
-                        pressed && { opacity: 0.7 },
-                      ]}
-                      onPress={() => {
-                        if (__DEV__) console.log('[ReceiveSheet] Friend Pressable FIRED');
-                        handleSendToFriend();
-                      }}
-                      disabled={!friendShareValue}
-                      accessibilityLabel="Send to a friend"
-                      testID="receive-send-to-friend"
-                    >
-                      <Text style={styles.actionButtonText}>Friend</Text>
-                      <Send size={20} color={colors.brandPink} />
-                    </Pressable>
-                  ) : null}
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.actionButton,
+                      !friendShareValue && styles.actionButtonDisabled,
+                      pressed && { opacity: 0.7 },
+                    ]}
+                    onPress={() => {
+                      if (__DEV__) console.log('[ReceiveSheet] Friend Pressable FIRED');
+                      handleSendToFriend();
+                    }}
+                    disabled={!friendShareValue}
+                    accessibilityLabel="Send to a friend"
+                    testID={
+                      isOnchainWallet ? 'receive-friend-share-onchain' : 'receive-send-to-friend'
+                    }
+                  >
+                    <Text style={styles.actionButtonText}>Friend</Text>
+                    <Send size={20} color={colors.brandPink} />
+                  </Pressable>
                 </View>
               )}
 
