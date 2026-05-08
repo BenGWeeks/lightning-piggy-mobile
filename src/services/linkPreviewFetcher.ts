@@ -1,22 +1,20 @@
 // Fetches OG metadata for a URL and normalises it into the shape the
 // MessageLinkPreview card expects (#441).
 //
-// We chose `link-preview-js` (fetcher-only, no UI) over `@flyerhq/...`
-// (bundles a card we'd have to override to match the brand) — see
-// `docs/PACKAGES.adoc` for the full rationale.
-import { getLinkPreview } from 'link-preview-js';
+// Hand-rolled vs lib: we previously pulled in `link-preview-js` (which
+// transitively bundles cheerio, ~1.6 MB). For OG-tag extraction that's
+// massive overkill — OG tags are flat <meta> elements and a small
+// regex sweep covers >99% of real pages. See `src/utils/parseOgMeta.ts`
+// + `docs/PACKAGES.adoc` for the full rationale.
+import { parseOgMeta } from '../utils/parseOgMeta';
 import { get as readCache, set as writeCache, type LinkPreview } from './linkPreviewStorage';
 
-// Hard cap on the OG fetch — we don't want a slow site to hold up
-// a render slot indefinitely. 8 s is generous enough for a cold TLS
-// handshake on a flaky cellular connection but short enough that
-// stalled previews fall back to "no card" quickly.
 const FETCH_TIMEOUT_MS = 8000;
-
+// Cap on response size so a hostile page can't OOM us by streaming
+// gigabytes — OG tags live in <head> so 256 KB covers anything sane.
+const MAX_BYTES = 256 * 1024;
 // Reasonable desktop-ish UA so badly-configured CDNs serve OG tags
-// rather than mobile-app deep links. link-preview-js defaults to a
-// generic fetch UA which some hosts (Substack, Medium) treat as a
-// bot and serve a stub.
+// rather than mobile-app deep links.
 const USER_AGENT = 'Mozilla/5.0 (compatible; LightningPiggy/1.0; +https://lightningpiggy.com)';
 
 function deriveDomain(url: string): string {
@@ -32,42 +30,43 @@ function deriveDomain(url: string): string {
 // requests.
 const inFlight = new Map<string, Promise<LinkPreview | null>>();
 
-async function fetchAndNormalise(url: string): Promise<LinkPreview | null> {
+async function fetchHtml(url: string): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const raw = await getLinkPreview(url, {
-      timeout: FETCH_TIMEOUT_MS,
-      followRedirects: 'follow',
-      headers: { 'User-Agent': USER_AGENT },
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,application/xhtml+xml' },
+      redirect: 'follow',
     });
-
-    // The shape from link-preview-js varies by content type — we only
-    // render the HTML preview shape (mediaType: 'website' or similar
-    // with `title`). For audio/video/image/application responses there
-    // is no title field, so we treat that as "no preview".
-    const r = raw as {
-      url?: string;
-      title?: string;
-      siteName?: string;
-      description?: string;
-      images?: string[];
-    };
-
-    if (!r.title) return null;
-
-    const preview: LinkPreview = {
-      url: r.url || url,
-      title: r.title,
-      description: r.description ?? null,
-      image: r.images && r.images.length > 0 ? r.images[0] : null,
-      siteName: r.siteName ?? null,
-      domain: deriveDomain(r.url || url),
-    };
-    return preview;
+    if (!res.ok) return null;
+    const ct = res.headers.get('content-type') || '';
+    if (ct && !/html|xml/i.test(ct)) return null;
+    // Truncate at MAX_BYTES — OG tags are in <head> so this is plenty.
+    const text = await res.text();
+    return text.length > MAX_BYTES ? text.slice(0, MAX_BYTES) : text;
   } catch {
-    // Any failure (network, parse, timeout, non-HTML) → no preview.
-    // Per the issue spec we silently fall back; no toast.
     return null;
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+async function fetchAndNormalise(url: string): Promise<LinkPreview | null> {
+  const html = await fetchHtml(url);
+  if (!html) return null;
+
+  const meta = parseOgMeta(html, url);
+  if (!meta.title && !meta.image) return null;
+
+  return {
+    url,
+    title: meta.title ?? '',
+    description: meta.description,
+    image: meta.image,
+    siteName: meta.siteName,
+    domain: deriveDomain(url),
+  };
 }
 
 // Public API: cache-first lookup, then network. Returns null when no

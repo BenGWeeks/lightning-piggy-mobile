@@ -119,14 +119,9 @@ const MessageLinkPreview: React.FC<Props> = ({ url, eventId, fromMe = false }) =
             </View>
           ) : preview ? (
             <>
-              <Text style={styles.title} numberOfLines={1}>
+              <Text style={styles.title} numberOfLines={2}>
                 {preview.title}
               </Text>
-              {preview.description ? (
-                <Text style={styles.description} numberOfLines={2}>
-                  {preview.description}
-                </Text>
-              ) : null}
               <Text style={styles.domain} numberOfLines={1}>
                 {preview.siteName || domain}
               </Text>
@@ -174,11 +169,6 @@ const createStyles = (colors: Palette, fromMe: boolean) =>
       fontSize: 14,
       fontWeight: '700',
       color: fromMe ? colors.white : colors.textHeader,
-    },
-    description: {
-      fontSize: 13,
-      color: fromMe ? 'rgba(255,255,255,0.85)' : colors.textBody,
-      lineHeight: 18,
     },
     domain: {
       fontSize: 11,
