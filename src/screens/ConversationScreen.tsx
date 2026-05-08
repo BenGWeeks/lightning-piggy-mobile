@@ -64,6 +64,7 @@ import {
   formatTime,
 } from '../utils/messageContent';
 import { isSupportedImageUrl } from '../utils/imageUrl';
+import * as bolt11SettlementCache from '../services/bolt11SettlementCache';
 
 type ConversationRoute = RouteProp<RootStackParamList, 'Conversation'>;
 type ConversationNavigation = NativeStackNavigationProp<RootStackParamList, 'Conversation'>;
@@ -492,6 +493,12 @@ const ConversationScreen: React.FC = () => {
             next.add(hash);
             return next;
           });
+          // Persist the terminal state so a later cold start renders
+          // the "Paid" badge immediately without needing to re-poll.
+          bolt11SettlementCache.record(hash, true).catch(() => {});
+        } else if (result) {
+          // Refresh the negative TTL — we just confirmed unsettled.
+          bolt11SettlementCache.record(hash, false).catch(() => {});
         }
       }
     };
@@ -516,6 +523,44 @@ const ConversationScreen: React.FC = () => {
       sub.remove();
     };
   }, [activeWalletId, activeWallet?.walletType, outgoingOpenHashes]);
+
+  // Hydrate paidHashes from the persistent settlement cache for any
+  // bolt11 invoice hash visible in the thread. Lets the "Paid" badge
+  // render immediately on cold start before the NWC poll has run its
+  // first round. Settled is terminal so we only ever add — never
+  // remove — from the set here.
+  useEffect(() => {
+    let cancelled = false;
+    const hashes: string[] = [];
+    for (const m of messages) {
+      const inv = extractInvoice(m.text);
+      if (inv?.paymentHash) hashes.push(inv.paymentHash);
+    }
+    if (hashes.length === 0) return;
+    bolt11SettlementCache
+      .getMany(hashes)
+      .then((entries) => {
+        if (cancelled) return;
+        const settled: string[] = [];
+        for (const [h, e] of entries) if (e.settled) settled.push(h);
+        if (settled.length === 0) return;
+        setPaidHashes((prev) => {
+          let mutated = false;
+          const next = new Set(prev);
+          for (const h of settled) {
+            if (!next.has(h)) {
+              next.add(h);
+              mutated = true;
+            }
+          }
+          return mutated ? next : prev;
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [messages]);
 
   // Batch-fetch profiles for every `nostr:` profile reference that appears
   // in the conversation. Relay hints from the nprofile (when present) are
