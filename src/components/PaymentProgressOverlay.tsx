@@ -159,8 +159,12 @@ function Bubble({ spec, colorProgress, screenWidth, screenHeight }: BubbleProps)
   const progress = useSharedValue(0);
   // Reanimated worklets capture primitives by value, so freeze the
   // endpoint colours at render time so the interpolation below sees
-  // stable string literals. 3-stop range mirrors the success path (#426):
-  // colorProgress 0 = pink (in-flight), 1 = green (success), 2 = red (failure).
+  // stable string literals. Symmetric 3-stop range so success and
+  // failure animate AWAY from 0/pink in opposite directions, never
+  // crossing the other outcome's stop (#426):
+  //   colorProgress -1 = red (failure)
+  //   colorProgress  0 = pink (in-flight, default)
+  //   colorProgress  1 = green (success)
   const bubblePink = colors.brandPink;
   const bubbleGreen = colors.green;
   const bubbleRed = colors.red;
@@ -183,8 +187,8 @@ function Bubble({ spec, colorProgress, screenWidth, screenHeight }: BubbleProps)
     );
     const bg = interpolateColor(
       colorProgress.value,
-      [0, 1, 2],
-      [bubblePink, bubbleGreen, bubbleRed],
+      [-1, 0, 1],
+      [bubbleRed, bubblePink, bubbleGreen],
     );
     return {
       transform: [{ translateX: xOffset }, { translateY: y }],
@@ -308,8 +312,12 @@ export default function PaymentProgressOverlay({
   const bubbleSpecs = useMemo(() => makeSpecs(BUBBLE_COUNT, height), [height]);
   const confettiSpecs = useMemo(() => makeConfettiSpecs(CONFETTI_COUNT), []);
 
-  // 0 = pink (sending / error), 1 = green (success). The error case
-  // keeps pink so the green-flood doesn't imply success on a failure.
+  // Symmetric 3-stop range so success and failure paths animate from
+  // 0/pink in opposite directions and never cross each other's stop:
+  //   -1 = red (failure)
+  //    0 = pink (in-flight, default)
+  //    1 = green (success)
+  // See the `Bubble` component's interpolateColor for the colour map.
   const colorProgress = useSharedValue(0);
   // 0 while holding fire, 1 once success fires — gates the confetti launch.
   const confettiArmed = useSharedValue(0);
@@ -351,10 +359,11 @@ export default function PaymentProgressOverlay({
       );
     } else if (state === 'error') {
       // Bubbles morph from pink to red on a definitive failure (#426 —
-      // mirrors the pink → green success path). Same 650 ms duration so
-      // the animation feels symmetric across success / failure outcomes.
+      // mirrors the pink → green success path, just in the opposite
+      // direction so the animation never transits through green). Same
+      // 650 ms duration so the animation feels symmetric across outcomes.
       if (direction === 'send') {
-        colorProgress.value = withTiming(2, { duration: 650 });
+        colorProgress.value = withTiming(-1, { duration: 650 });
       }
       iconScale.value = withSequence(
         withTiming(0, { duration: 0 }),
