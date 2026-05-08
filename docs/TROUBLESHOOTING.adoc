@@ -568,4 +568,43 @@ actually cancel the LN HTLC — once the payment is on a route the sender cannot
 stop it. Tapping "Cancel" only stops the UI from waiting; the HTLC continues,
 and the recipient may be paid minutes later. The button is being relabelled to
 "Continue in background".
+
+| Wireless ADB IP shown on the phone is unreachable (`adb connect` hangs / 100% packet loss)
+| The IP shown in Settings → Developer options → Wireless debugging is whatever
+the phone reports for its currently-active default network, which is the **VPN
+tunnel address** when a VPN is connected (e.g. `10.2.0.2` from a corporate /
+self-hosted VPN). That address only routes inside the VPN; from a peer machine
+on the home Wi-Fi (`192.168.1.x`) there's no path to it. +
+*Symptoms:* `adb connect 10.x.y.z:NNNNN` hangs ~30 s then fails silently, or
+`ping` returns 100% packet loss. The Pixel's developer options page keeps
+showing the VPN address even after toggling Wi-Fi off and on. +
+*Fix:* Toggle the VPN OFF on the phone, **then** re-open Wireless debugging —
+the page will refresh with the home-Wi-Fi address (`192.168.1.x`). The port
+also changes on every wireless-debugging restart, so always re-read both
+fields. Re-pair if the host hasn't paired before. +
+*Verify reachability before `adb connect`:* `ping -c 2 -W 2 <ip>` from the
+host. If that returns `100% packet loss`, the address isn't routable —
+fastest fallback is USB cable (`adb devices` shows the USB serial like
+`37111FDJH0067B`).
+
+| Pixel screen locks mid-deploy / mid-perf-suite, breaking install or Maestro
+| `adb install` after the build prompts in dev settings (the user has to
+re-tap "Allow" if the screen has slept), and `dumpsys gfxinfo` returns zeros
+when the surface isn't being painted. Maestro flows tap real UI so the screen
+must be unlocked + interactive. Default Android lockscreen kicks in at 30 s –
+2 min idle. +
+*Fix (per-session, not persisted across reboot):*
+[source,bash]
+----
+# Keep the screen on regardless of charging state for as long as adb is connected.
+# Reverts on next reboot, or call again with `false` when done.
+adb shell svc power stayon true
+----
+Or: Settings → System → Developer options → "Stay awake" — keeps the screen
+on while charging, persists across reboot. Pair with USB / charger so you can
+walk away. +
+*Combo for hands-off deploy + perf:* USB cable + `adb shell svc power stayon
+true` + Settings → "Don't lock when on this network" disabled (default), and
+the phone won't auto-lock for the duration of the build (~20 min) and the
+follow-on perf-suite (~3 min).
 |===
