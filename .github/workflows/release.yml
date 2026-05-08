@@ -292,14 +292,16 @@ jobs:
           OUT=$(mktemp)
           ERR=$(mktemp)
           if ! fetch "$OUT" "$ERR"; then
-            echo "::warning title=eas build:list transient failure — retrying in 8 s::"
+            echo "::warning title=eas build:list failed once — retrying in 8 s::Transient EAS API hiccup; see grouped logs below if the retry also fails."
             sleep 8
             if ! fetch "$OUT" "$ERR"; then
-              echo "::error title=eas build:list failed twice::"
-              echo "--- stderr ---"
+              echo "::error title=eas build:list failed twice::See grouped logs below for stderr and stdout."
+              echo "::group::eas build:list stderr"
               cat "$ERR"
-              echo "--- stdout ---"
+              echo "::endgroup::"
+              echo "::group::eas build:list stdout"
               cat "$OUT"
+              echo "::endgroup::"
               exit 1
             fi
           fi
@@ -313,18 +315,21 @@ jobs:
           if ! url=$(jq -r --arg sha "${{ github.sha }}" \
                        '[.[] | select(.gitCommitHash == $sha)][0].artifacts.buildUrl // empty' \
                        "$CLEAN" 2>/dev/null); then
-            echo "::error title=jq parse failed on eas build:list output::"
-            echo "--- raw stdout ---"
+            echo "::error title=jq parse failed on eas build:list output::See grouped logs below for raw stdout and the stripped JSON we tried to parse."
+            echo "::group::raw stdout"
             cat "$OUT"
-            echo "--- stripped JSON ---"
+            echo "::endgroup::"
+            echo "::group::stripped JSON (post sed)"
             cat "$CLEAN"
+            echo "::endgroup::"
             exit 1
           fi
 
           if [ -z "$url" ] || [ "$url" = "null" ]; then
-            echo "::error title=No Android build artifact::Could not find a finished Android build for commit ${{ github.sha }}. The EAS build may still be running, or failed."
-            echo "--- recent builds (cleaned) ---"
+            echo "::error title=No Android build artifact for commit ${{ github.sha }}::EAS build may still be running, or failed. Recent builds dumped in the grouped log below."
+            echo "::group::recent builds (cleaned)"
             cat "$CLEAN"
+            echo "::endgroup::"
             exit 1
           fi
           echo "url=$url" >> "$GITHUB_OUTPUT"
