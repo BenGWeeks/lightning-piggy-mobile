@@ -462,26 +462,17 @@ const createStyles = (colors: Palette) =>
     },
     invoiceCard: {
       maxWidth: '85%',
-      minWidth: 240,
       paddingTop: 12,
       paddingBottom: 4,
       paddingHorizontal: 14,
       borderRadius: 14,
-      borderWidth: 1,
       gap: 6,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-      elevation: 1,
     },
     invoiceCardMe: {
       backgroundColor: colors.brandPink,
-      borderColor: colors.brandPink,
     },
     invoiceCardThem: {
       backgroundColor: colors.surface,
-      borderColor: colors.zapYellow,
     },
     invoiceLabel: {
       fontSize: 12,
