@@ -8,7 +8,6 @@ import {
   FlatList,
   ActivityIndicator,
   RefreshControl,
-  AppState,
   BackHandler,
   Image,
   Linking,
@@ -25,7 +24,6 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr, subscribeDmMessages } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
-import * as nwcService from '../services/nwcService';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
@@ -64,7 +62,7 @@ import {
   formatTime,
 } from '../utils/messageContent';
 import { isSupportedImageUrl } from '../utils/imageUrl';
-import * as bolt11SettlementCache from '../services/bolt11SettlementCache';
+import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
 
 type ConversationRoute = RouteProp<RootStackParamList, 'Conversation'>;
 type ConversationNavigation = NativeStackNavigationProp<RootStackParamList, 'Conversation'>;
@@ -211,8 +209,6 @@ const ConversationScreen: React.FC = () => {
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
   const [fullscreenGifUrl, setFullscreenGifUrl] = useState<string | null>(null);
   const [sharingLocation, setSharingLocation] = useState(false);
-  // Payment hashes of outgoing invoices the active NWC wallet reports paid.
-  const [paidHashes, setPaidHashes] = useState<Set<string>>(() => new Set());
   const listRef = useRef<FlatList<Item>>(null);
 
   const zapItems = useMemo<TimedItem[]>(() => {
@@ -412,155 +408,7 @@ const ConversationScreen: React.FC = () => {
     return () => clearTimeout(t);
   }, [items.length]);
 
-  // Payment hashes of outgoing invoices that are plausibly still payable —
-  // not expired, not already known paid, and (as a belt-and-braces cap)
-  // Payment hashes known paid from our wallet's own transaction history,
-  // split by direction so we don't mis-flag an invoice paid just because
-  // its payment_hash happens to appear on the wrong side of the ledger
-  // (e.g. a self-payment or a routed tx reusing the same hash).
-  //   - Outgoing invoice we sent, counterparty paid → match an *incoming*
-  //     wallet tx carrying the same payment_hash.
-  //   - Incoming invoice we received, we paid → match an *outgoing* wallet
-  //     tx carrying the same payment_hash.
-  // Wallet-tx sync keeps these fresh for free; no per-invoice NWC poll
-  // needed for either direction.
-  const { paidOutgoingHashes, paidIncomingHashes } = useMemo(() => {
-    const out = new Set<string>();
-    const inc = new Set<string>();
-    for (const w of wallets) {
-      for (const tx of w.transactions) {
-        if (!tx.paymentHash) continue;
-        if (tx.type === 'incoming') out.add(tx.paymentHash);
-        else if (tx.type === 'outgoing') inc.add(tx.paymentHash);
-      }
-    }
-    return { paidOutgoingHashes: out, paidIncomingHashes: inc };
-  }, [wallets]);
-
-  // Helper used in the render path — picks the appropriate set based on the
-  // invoice's direction, layered with the NWC-polled outgoing results.
-  const isInvoicePaid = useCallback(
-    (paymentHash: string, fromMe: boolean): boolean => {
-      if (fromMe) return paidOutgoingHashes.has(paymentHash) || paidHashes.has(paymentHash);
-      return paidIncomingHashes.has(paymentHash);
-    },
-    [paidOutgoingHashes, paidIncomingHashes, paidHashes],
-  );
-
-  // Payment hashes of outgoing invoices that are plausibly still payable —
-  // not expired, not already known paid, and (as a belt-and-braces cap)
-  // not older than 24 h even if they claimed no expiry. That cap keeps the
-  // polling loop from growing without bound across long-running sessions
-  // where old unpaid invoices accumulate in the DM history.
-  const POLL_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-  const outgoingOpenHashes = useMemo(() => {
-    const now = Date.now();
-    const cutoff = now - POLL_MAX_AGE_MS;
-    const hashes: string[] = [];
-    for (const m of messages) {
-      if (!m.fromMe) continue;
-      if (m.createdAt * 1000 < cutoff) continue;
-      const inv = extractInvoice(m.text);
-      if (!inv || !inv.paymentHash) continue;
-      if (paidOutgoingHashes.has(inv.paymentHash)) continue;
-      if (paidHashes.has(inv.paymentHash)) continue;
-      if (inv.expiresAt !== null && inv.expiresAt * 1000 < now) continue;
-      hashes.push(inv.paymentHash);
-    }
-    return hashes;
-  }, [messages, paidOutgoingHashes, paidHashes]);
-
-  // Poll NWC for the paid status of outgoing invoices. Lightning-only.
-  // Gated on `AppState === 'active'` so we don't burn battery or hammer
-  // the relay while the app is backgrounded. We assume the active wallet
-  // is the one that issued the invoice — not strictly true if the user
-  // switched wallets mid-session, but a miss just means the UI stays
-  // "unpaid" until the next wallet tx sync resolves it.
-  useEffect(() => {
-    if (!activeWalletId || activeWallet?.walletType === 'onchain') return;
-    if (outgoingOpenHashes.length === 0) return;
-    let cancelled = false;
-    let intervalId: ReturnType<typeof setInterval> | null = null;
-    const poll = async () => {
-      for (const hash of outgoingOpenHashes) {
-        if (cancelled) return;
-        const result = await nwcService.lookupInvoice(activeWalletId, hash);
-        if (cancelled) return;
-        if (result?.paid) {
-          setPaidHashes((prev) => {
-            if (prev.has(hash)) return prev;
-            const next = new Set(prev);
-            next.add(hash);
-            return next;
-          });
-          // Persist the terminal state so a later cold start renders
-          // the "Paid" badge immediately without needing to re-poll.
-          bolt11SettlementCache.record(hash, true).catch(() => {});
-        } else if (result) {
-          // Refresh the negative TTL — we just confirmed unsettled.
-          bolt11SettlementCache.record(hash, false).catch(() => {});
-        }
-      }
-    };
-    const start = () => {
-      if (intervalId !== null) return;
-      poll();
-      intervalId = setInterval(poll, 15_000);
-    };
-    const stop = () => {
-      if (intervalId === null) return;
-      clearInterval(intervalId);
-      intervalId = null;
-    };
-    if (AppState.currentState === 'active') start();
-    const sub = AppState.addEventListener('change', (next) => {
-      if (next === 'active') start();
-      else stop();
-    });
-    return () => {
-      cancelled = true;
-      stop();
-      sub.remove();
-    };
-  }, [activeWalletId, activeWallet?.walletType, outgoingOpenHashes]);
-
-  // Hydrate paidHashes from the persistent settlement cache for any
-  // bolt11 invoice hash visible in the thread. Lets the "Paid" badge
-  // render immediately on cold start before the NWC poll has run its
-  // first round. Settled is terminal so we only ever add — never
-  // remove — from the set here.
-  useEffect(() => {
-    let cancelled = false;
-    const hashes: string[] = [];
-    for (const m of messages) {
-      const inv = extractInvoice(m.text);
-      if (inv?.paymentHash) hashes.push(inv.paymentHash);
-    }
-    if (hashes.length === 0) return;
-    bolt11SettlementCache
-      .getMany(hashes)
-      .then((entries) => {
-        if (cancelled) return;
-        const settled: string[] = [];
-        for (const [h, e] of entries) if (e.settled) settled.push(h);
-        if (settled.length === 0) return;
-        setPaidHashes((prev) => {
-          let mutated = false;
-          const next = new Set(prev);
-          for (const h of settled) {
-            if (!next.has(h)) {
-              next.add(h);
-              mutated = true;
-            }
-          }
-          return mutated ? next : prev;
-        });
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [messages]);
+  const { isInvoicePaid } = usePaidInvoiceTracker(messages);
 
   // Batch-fetch profiles for every `nostr:` profile reference that appears
   // in the conversation. Relay hints from the nprofile (when present) are
