@@ -159,9 +159,11 @@ function Bubble({ spec, colorProgress, screenWidth, screenHeight }: BubbleProps)
   const progress = useSharedValue(0);
   // Reanimated worklets capture primitives by value, so freeze the
   // endpoint colours at render time so the interpolation below sees
-  // stable string literals.
-  const bubbleStart = colors.brandPink;
-  const bubbleEnd = colors.green;
+  // stable string literals. 3-stop range mirrors the success path (#426):
+  // colorProgress 0 = pink (in-flight), 1 = green (success), 2 = red (failure).
+  const bubblePink = colors.brandPink;
+  const bubbleGreen = colors.green;
+  const bubbleRed = colors.red;
 
   useEffect(() => {
     progress.value = withDelay(
@@ -179,7 +181,11 @@ function Bubble({ spec, colorProgress, screenWidth, screenHeight }: BubbleProps)
       [0, 0.12, 0.85, 1],
       [0, spec.opacityPeak, spec.opacityPeak, 0],
     );
-    const bg = interpolateColor(colorProgress.value, [0, 1], [bubbleStart, bubbleEnd]);
+    const bg = interpolateColor(
+      colorProgress.value,
+      [0, 1, 2],
+      [bubblePink, bubbleGreen, bubbleRed],
+    );
     return {
       transform: [{ translateX: xOffset }, { translateY: y }],
       opacity,
@@ -344,6 +350,12 @@ export default function PaymentProgressOverlay({
         withSpring(1, { damping: 10, stiffness: 220 }),
       );
     } else if (state === 'error') {
+      // Bubbles morph from pink to red on a definitive failure (#426 —
+      // mirrors the pink → green success path). Same 650 ms duration so
+      // the animation feels symmetric across success / failure outcomes.
+      if (direction === 'send') {
+        colorProgress.value = withTiming(2, { duration: 650 });
+      }
       iconScale.value = withSequence(
         withTiming(0, { duration: 0 }),
         withSpring(1, { damping: 10, stiffness: 220 }),
