@@ -13,6 +13,7 @@ import {
 } from '../services/locationService';
 import {
   type BubbleContent,
+  extractBitcoinUri,
   extractImageUrl,
   extractInvoice,
   extractLightningAddress,
@@ -195,6 +196,52 @@ const MessageBubble: React.FC<Props> = ({
     );
   }
 
+  const bitcoinUri = extractBitcoinUri(text);
+  if (bitcoinUri) {
+    // On-chain BIP-21 share. Tap → parent's onPayInvoice (which opens
+    // SendSheet pre-filled — SendSheet already parses `bitcoin:` URIs
+    // and pre-fills both address and BIP-21 amount, so we hand the raw
+    // URI straight through). Receiver-only Pay button — outgoing
+    // bubbles are informational.
+    const shortAddr =
+      bitcoinUri.address.length > 16
+        ? `${bitcoinUri.address.slice(0, 8)}…${bitcoinUri.address.slice(-6)}`
+        : bitcoinUri.address;
+    return (
+      <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
+        <View style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}>
+          {SenderLabel}
+          <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
+            {fromMe ? 'On-chain address sent' : 'On-chain address'}
+          </Text>
+          {bitcoinUri.amountSats !== null ? (
+            <Text style={[styles.invoiceAmount, fromMe && styles.invoiceAmountMe]}>
+              {bitcoinUri.amountSats.toLocaleString()} sats
+            </Text>
+          ) : null}
+          <Text style={[styles.invoiceMemo, fromMe && styles.invoiceMemoMe]} numberOfLines={1}>
+            {shortAddr}
+          </Text>
+          {fromMe ? null : (
+            <TouchableOpacity
+              style={styles.invoicePayButton}
+              onPress={() => onPayInvoice(bitcoinUri.raw)}
+              accessibilityRole="link"
+              accessibilityLabel="Pay this on-chain address"
+              testID={`${testIdPrefix}-bitcoin-pay-${id}`}
+            >
+              <Zap size={16} color={colors.white} fill={colors.white} />
+              <Text style={styles.invoicePayText}>Pay</Text>
+            </TouchableOpacity>
+          )}
+          <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
+            {formatTime(createdAt)}
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
   const invoice = extractInvoice(text);
   if (invoice) {
     const expired = invoice.expiresAt !== null && invoice.expiresAt * 1000 < Date.now();
@@ -221,7 +268,11 @@ const MessageBubble: React.FC<Props> = ({
           ) : null}
           <View style={styles.invoiceTagRow}>
             {paid ? (
-              <View style={[styles.invoiceTag, styles.invoiceTagPaid]}>
+              <View
+                style={[styles.invoiceTag, styles.invoiceTagPaid]}
+                accessibilityLabel="Invoice paid"
+                testID={`${testIdPrefix}-paid-badge-${id}`}
+              >
                 <Text style={styles.invoiceTagPaidText}>Paid</Text>
               </View>
             ) : expired ? (
@@ -243,6 +294,7 @@ const MessageBubble: React.FC<Props> = ({
             <TouchableOpacity
               style={styles.invoicePayButton}
               onPress={() => onPayInvoice(invoice.raw)}
+              accessibilityRole="link"
               accessibilityLabel="Pay this invoice"
               testID={`${testIdPrefix}-pay-${id}`}
             >
