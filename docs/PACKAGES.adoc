@@ -73,6 +73,10 @@ Third-party packages used by the app. Updated when a dependency is added or its 
 | https://github.com/paulmillr/noble-ciphers[`@noble/ciphers`]
 | paulmillr
 | Audited pure-JS symmetric ciphers — `aes.js` (CBC) powers `nostr-tools`' NIP-04 `nip04.decrypt` / `nip04.encrypt`. Dep of `nostr-tools`, listed here because the DM perf work in `src/contexts/NostrContext.tsx` leans on its throughput (~1 ms / decrypt on mid-range mobile) to keep batched parallel decrypt responsive.
+
+| https://github.com/OP-Engineering/link-preview-js[`link-preview-js`]
+| OP-Engineering (formerly ospfranco)
+| OG/Twitter-card metadata fetcher for the in-DM link-preview cards (#441). Pure-JS (cheerio under the hood, no native module), Hermes-compatible, fetcher-only — we render our own card in `src/components/MessageLinkPreview.tsx` so it matches the brand pink/blue palette. Bundle: ~666 KB (link-preview-js) + ~1 MB (cheerio dep), JS-only, no native module rebuild required. Ruled out: `react-native-link-preview` (deps on `cheerio-without-node-native@0.20.2` from 2017, abandoned); `@flyerhq/react-native-link-preview` (bundles a card component we'd have to override to match the brand, plus an extra `html-entities` dep — wins on size but loses on UI-control).
 |===
 
 == Internal utilities (not packages)
