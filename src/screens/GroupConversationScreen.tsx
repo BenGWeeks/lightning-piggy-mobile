@@ -12,7 +12,11 @@ import {
   Pressable,
 } from 'react-native';
 import { Alert } from '../components/BrandedAlert';
-import { KeyboardController } from 'react-native-keyboard-controller';
+import {
+  KeyboardController,
+  useReanimatedKeyboardAnimation,
+} from 'react-native-keyboard-controller';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { Image as ExpoImage } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import Svg, { Path } from 'react-native-svg';
@@ -80,9 +84,16 @@ interface MemberRow {
 
 const GroupConversationScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
-  // Composer + keyboard handling now live inside ConversationComposer
-  // (#251) — no per-screen useReanimatedKeyboardAnimation /
-  // useAnimatedStyle plumbing needed.
+  // The composer's own keyboard wiring lives in ConversationComposer
+  // (#251). The screen ALSO listens to the keyboard so the FlatList
+  // shrinks by the keyboard height when the IME opens — without this
+  // the bottom bubbles render under the keyboard because
+  // KeyboardStickyView only translates the composer visually, it
+  // doesn't reduce the FlatList's layout footprint (#470).
+  const keyboard = useReanimatedKeyboardAnimation();
+  const animatedListLiftStyle = useAnimatedStyle(() => ({
+    marginBottom: -keyboard.height.value,
+  }));
   const navigation = useNavigation<GroupConversationNavigation>();
   const route = useRoute<GroupConversationRoute>();
   const colors = useThemeColors();
@@ -643,23 +654,30 @@ const GroupConversationScreen: React.FC = () => {
       </View>
 
       <View style={styles.content}>
-        {loadingMessages ? (
-          <ActivityIndicator color={colors.brandPink} style={{ marginTop: 32 }} />
-        ) : (
-          <FlatList
-            ref={listRef}
-            data={classifiedMessages}
-            keyExtractor={(item) => item.id}
-            renderItem={renderMessage}
-            contentContainerStyle={styles.messagesList}
-            testID="group-messages-list"
-            ListEmptyComponent={
-              <View style={styles.emptyState}>
-                <Text style={styles.emptySubtitle}>No messages yet. Say hi!</Text>
-              </View>
-            }
-          />
-        )}
+        {/* See #470 — wrap the FlatList (NOT the composer) in an
+            Animated.View whose marginBottom tracks the keyboard
+            height so the IME doesn't hide the bottom messages. The
+            composer below this wrapper handles its own keyboard
+            avoidance via KeyboardStickyView. */}
+        <Animated.View style={[{ flex: 1 }, animatedListLiftStyle]}>
+          {loadingMessages ? (
+            <ActivityIndicator color={colors.brandPink} style={{ marginTop: 32 }} />
+          ) : (
+            <FlatList
+              ref={listRef}
+              data={classifiedMessages}
+              keyExtractor={(item) => item.id}
+              renderItem={renderMessage}
+              contentContainerStyle={styles.messagesList}
+              testID="group-messages-list"
+              ListEmptyComponent={
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptySubtitle}>No messages yet. Say hi!</Text>
+                </View>
+              }
+            />
+          )}
+        </Animated.View>
 
         {/* Composer + attach panel + IME-aware safe area now live in the
             shared ConversationComposer (#251). Style overrides preserve

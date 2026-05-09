@@ -14,7 +14,11 @@ import {
   StyleSheet,
 } from 'react-native';
 import { Alert } from '../components/BrandedAlert';
-import { KeyboardController } from 'react-native-keyboard-controller';
+import {
+  KeyboardController,
+  useReanimatedKeyboardAnimation,
+} from 'react-native-keyboard-controller';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Zap, ArrowDown } from 'lucide-react-native';
 import { Image as ExpoImage } from 'expo-image';
@@ -133,6 +137,19 @@ const ConversationScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   // The composer owns its own keyboard wiring (KeyboardStickyView +
   // useReanimatedKeyboardAnimation) — see ConversationComposer.tsx.
+  // ConversationScreen ALSO listens to the keyboard so the FlatList
+  // shrinks by the keyboard height when the IME opens — without this
+  // the bottom-most bubbles render under the keyboard because
+  // KeyboardStickyView only translates the composer visually, it
+  // doesn't reduce the FlatList's layout footprint (#470).
+  const keyboard = useReanimatedKeyboardAnimation();
+  const animatedListLiftStyle = useAnimatedStyle(() => ({
+    // RNKC convention: keyboard.height.value is negative when the IME
+    // is up, 0 when down. Negating it gives a positive marginBottom
+    // equal to the keyboard height — pulls the FlatList's bottom edge
+    // up flush with the (now-floating) composer's top.
+    marginBottom: -keyboard.height.value,
+  }));
   const { pubkey, name, picture, lightningAddress } = route.params;
 
   const {
@@ -881,89 +898,98 @@ const ConversationScreen: React.FC = () => {
           pulls the composer flush against the keyboard's top edge
           (RNKC's canonical chat pattern). */}
       <View style={styles.flex}>
-        {loading ? (
-          <View style={styles.loading}>
-            <ActivityIndicator color={colors.brandPink} />
-            <Text style={styles.loadingText}>Loading messages…</Text>
-          </View>
-        ) : (
-          <FlatList
-            ref={listRef}
-            style={styles.flex}
-            data={items}
-            keyExtractor={(it) => it.id}
-            renderItem={renderItem}
-            contentContainerStyle={listContentStyle}
-            inverted
-            // Window the list so a thread with hundreds of messages
-            // doesn't mount every row up front — first-frame work goes
-            // from "render all N bubbles + avatars" to "render the
-            // 20 newest then lazy-mount as the user scrolls". These
-            // defaults are chosen for chat-style threads: one screen
-            // fits ~8-10 bubbles, so 20 covers the visible viewport
-            // plus one screen of pre-roll for smooth momentum scrolls.
-            //
-            // NOTE: `removeClippedSubviews` is deliberately OFF. It's
-            // broken with `inverted` on Android — breaks the contentOffset
-            // reporting so onScroll's `y < 200` check flips when the user
-            // is visually at the bottom, making the scroll-to-bottom FAB
-            // show spuriously. See facebook/react-native#30521 / #26061.
-            initialNumToRender={20}
-            maxToRenderPerBatch={10}
-            windowSize={10}
-            ListEmptyComponent={
-              <View style={styles.empty}>
-                <Text style={styles.emptyTitle}>No messages yet</Text>
-                <Text style={styles.emptySubtitle}>
-                  Say hi{lightningAddress ? ' — or send a zap.' : '.'}
-                </Text>
-              </View>
-            }
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
-            onScroll={(e) => {
-              const y = e.nativeEvent.contentOffset.y;
-              // "Near bottom" in an inverted list = scroll offset ~0.
-              // 200 px of slack covers the contentContainer padding +
-              // one message bubble, so sitting at the newest message
-              // reliably registers as "at bottom" for both the
-              // auto-scroll-on-new-message behaviour and the FAB.
-              const isNear = y < 200;
-              nearBottomRef.current = isNear;
-              // Mirror to state only when the boolean actually flips —
-              // this keeps onScroll cheap while still triggering a
-              // re-render for the FAB's appearance.
-              setAtBottom((prev) => (prev !== isNear ? isNear : prev));
-            }}
-            scrollEventThrottle={100}
-          />
-        )}
+        {/* Wrapping the list (and scroll-to-bottom FAB) in an
+            Animated.View whose marginBottom tracks the keyboard
+            height — shrinks the list's layout footprint so the
+            bottom-most bubbles aren't hidden under the IME. The
+            composer below this wrapper sits OUTSIDE the lifted
+            block; KeyboardStickyView handles the composer's own
+            keyboard avoidance independently. */}
+        <Animated.View style={[styles.flex, animatedListLiftStyle]}>
+          {loading ? (
+            <View style={styles.loading}>
+              <ActivityIndicator color={colors.brandPink} />
+              <Text style={styles.loadingText}>Loading messages…</Text>
+            </View>
+          ) : (
+            <FlatList
+              ref={listRef}
+              style={styles.flex}
+              data={items}
+              keyExtractor={(it) => it.id}
+              renderItem={renderItem}
+              contentContainerStyle={listContentStyle}
+              inverted
+              // Window the list so a thread with hundreds of messages
+              // doesn't mount every row up front — first-frame work goes
+              // from "render all N bubbles + avatars" to "render the
+              // 20 newest then lazy-mount as the user scrolls". These
+              // defaults are chosen for chat-style threads: one screen
+              // fits ~8-10 bubbles, so 20 covers the visible viewport
+              // plus one screen of pre-roll for smooth momentum scrolls.
+              //
+              // NOTE: `removeClippedSubviews` is deliberately OFF. It's
+              // broken with `inverted` on Android — breaks the contentOffset
+              // reporting so onScroll's `y < 200` check flips when the user
+              // is visually at the bottom, making the scroll-to-bottom FAB
+              // show spuriously. See facebook/react-native#30521 / #26061.
+              initialNumToRender={20}
+              maxToRenderPerBatch={10}
+              windowSize={10}
+              ListEmptyComponent={
+                <View style={styles.empty}>
+                  <Text style={styles.emptyTitle}>No messages yet</Text>
+                  <Text style={styles.emptySubtitle}>
+                    Say hi{lightningAddress ? ' — or send a zap.' : '.'}
+                  </Text>
+                </View>
+              }
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+              onScroll={(e) => {
+                const y = e.nativeEvent.contentOffset.y;
+                // "Near bottom" in an inverted list = scroll offset ~0.
+                // 200 px of slack covers the contentContainer padding +
+                // one message bubble, so sitting at the newest message
+                // reliably registers as "at bottom" for both the
+                // auto-scroll-on-new-message behaviour and the FAB.
+                const isNear = y < 200;
+                nearBottomRef.current = isNear;
+                // Mirror to state only when the boolean actually flips —
+                // this keeps onScroll cheap while still triggering a
+                // re-render for the FAB's appearance.
+                setAtBottom((prev) => (prev !== isNear ? isNear : prev));
+              }}
+              scrollEventThrottle={100}
+            />
+          )}
 
-        {/* Backdrop tap-to-close: when the attach panel is open, an
+          {/* Backdrop tap-to-close: when the attach panel is open, an
             absolute transparent Pressable sits above the FlatList area.
             Tapping anywhere on the messages closes the panel (matches
             WhatsApp behaviour). Trade-off: you can't tap a message bubble
             while the panel is open — close the panel first. */}
-        {attachPanelOpen ? (
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            onPress={closeAttachPanel}
-            accessibilityLabel="Close attachment panel"
-            testID="conversation-attach-backdrop"
-          />
-        ) : null}
+          {attachPanelOpen ? (
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={closeAttachPanel}
+              accessibilityLabel="Close attachment panel"
+              testID="conversation-attach-backdrop"
+            />
+          ) : null}
 
-        {!atBottom && !loading ? (
-          <View style={styles.scrollToBottomWrap} pointerEvents="box-none">
-            <TouchableOpacity
-              style={styles.scrollToBottomFab}
-              onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
-              accessibilityLabel="Scroll to most recent message"
-              testID="conversation-scroll-to-bottom"
-            >
-              <ArrowDown size={20} color={colors.white} />
-            </TouchableOpacity>
-          </View>
-        ) : null}
+          {!atBottom && !loading ? (
+            <View style={styles.scrollToBottomWrap} pointerEvents="box-none">
+              <TouchableOpacity
+                style={styles.scrollToBottomFab}
+                onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
+                accessibilityLabel="Scroll to most recent message"
+                testID="conversation-scroll-to-bottom"
+              >
+                <ArrowDown size={20} color={colors.white} />
+              </TouchableOpacity>
+            </View>
+          ) : null}
+        </Animated.View>
 
         {/* Composer + attach panel + IME-aware safe area now live in the
             shared ConversationComposer (#251). Both the 1:1 and group
