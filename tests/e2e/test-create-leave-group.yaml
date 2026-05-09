@@ -8,13 +8,13 @@ name: Create a group, then leave it (assert it's gone)
 # viewer will re-add it. The 3-way suite covers that re-add path.
 #
 # Pre-reqs:
-#  - .env contains MAESTRO_NSEC (defaults to Big Piggy)
+#  - .env contains MAESTRO_NSEC_BIG (defaults to Big Piggy)
 #  - The signed-in account has at least one followed friend (the create
 #    sheet requires picking ≥1 member)
 #
 # Run:
 #   source .env && maestro test \
-#     -e MAESTRO_NSEC=$MAESTRO_NSEC \
+#     -e MAESTRO_NSEC_BIG=$MAESTRO_NSEC_BIG \
 #     -e GROUP_NAME='LeaveTest-1' \
 #     -e MEMBER_PUBKEY_PREFIX='d9b33280ba73' \
 #     tests/e2e/test-create-leave-group.yaml

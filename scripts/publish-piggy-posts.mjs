@@ -7,9 +7,9 @@
 //
 // Usage:
 //   node scripts/publish-piggy-posts.mjs              # all four
-//   node scripts/publish-piggy-posts.mjs MAESTRO_NSEC # one Piggy
+//   node scripts/publish-piggy-posts.mjs MAESTRO_NSEC_BIG # one Piggy
 //
-// Reads each MAESTRO_NSEC* from .env. Never logs the nsec.
+// Reads each MAESTRO_NSEC_BIG* from .env. Never logs the nsec.
 
 import { readFileSync, existsSync } from 'node:fs';
 import { argv, exit } from 'node:process';
@@ -26,7 +26,7 @@ const RELAYS = [
 
 const PIGGIES = [
   {
-    envVar: 'MAESTRO_NSEC',
+    envVar: 'MAESTRO_NSEC_BIG',
     label: 'Big Piggy',
     notes: [
       "Saving sats one swipe at a time. 🐷",
@@ -35,7 +35,7 @@ const PIGGIES = [
     ],
   },
   {
-    envVar: 'MAESTRO_NSEC2',
+    envVar: 'MAESTRO_NSEC_LITTLE',
     label: 'Little Piggy',
     notes: [
       "Tiniest sats matter. ✨",
@@ -43,7 +43,7 @@ const PIGGIES = [
     ],
   },
   {
-    envVar: 'MAESTRO_NSEC3',
+    envVar: 'MAESTRO_NSEC_MIDDLE',
     label: 'Middle Piggy',
     notes: [
       "Caught between Big Piggy's lectures and Little Piggy's pranks. Living the dream.",
@@ -52,7 +52,7 @@ const PIGGIES = [
     ],
   },
   {
-    envVar: 'MAESTRO_NSEC4',
+    envVar: 'MAESTRO_NSEC_EVIL',
     label: 'Evil Piggy',
     notes: [
       "Plotting. Always plotting.",

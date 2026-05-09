@@ -3,7 +3,7 @@
 // pubkey (hex + npub). Never prints the secret. Used by the NIP-17 test
 // pipeline so we don't need to paste the nsec on the command line.
 //
-// Usage: node scripts/derive-pubkey-from-env.mjs MAESTRO_NSEC
+// Usage: node scripts/derive-pubkey-from-env.mjs MAESTRO_NSEC_BIG
 
 import { readFileSync, existsSync } from 'node:fs';
 import { argv, exit } from 'node:process';

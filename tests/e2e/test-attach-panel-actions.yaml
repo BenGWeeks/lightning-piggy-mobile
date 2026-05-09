@@ -8,7 +8,7 @@ name: Attach Panel — each tile opens its downstream sheet
 #   - Conversation peer is always Little Piggy (controlled test
 #     fixture). The current user is assumed to be Big Piggy (set up
 #     by the suite's fixture step or by signing in manually with
-#     MAESTRO_NSEC2 before this test). NO messages are sent to real
+#     MAESTRO_NSEC_LITTLE before this test). NO messages are sent to real
 #     Nostr accounts.
 #   - Skips Camera / Gallery / Location (system permission prompts
 #     are non-deterministic).
