@@ -1,0 +1,148 @@
+appId: com.lightningpiggy.app.dev
+name: Receive → Amount → Friend regression guard for #457
+---
+# Regression guard for issue #457 — when sending a generated bolt11
+# invoice from Home > Receive > Custom amount > Friend, the success
+# Toast doesn't fire AND the bolt11 bubble doesn't land in the
+# recipient thread, even though the user gets navigated into the
+# conversation.
+#
+# This test is **expected to FAIL on main today** until #457 is
+# resolved. Its purpose is to:
+#   1. Provide a deterministic repro the fix can be validated against.
+#   2. Guard against regression once the fix lands.
+#
+# Flow (from a fresh tab-home, AVD signed in as the sender — Big Piggy
+# in the fixture set):
+#
+#   1. Tap btn-receive → ReceiveSheet opens
+#   2. Tap receive-enter-custom-amount → AmountEntryScreen
+#   3. 2 + 1 → 21 sats, tap "Generate invoice" (amount-entry-confirm)
+#   4. Wait for the bolt11 to render, tap receive-send-to-friend
+#   5. FriendPicker opens — tap "Send to Little Piggy"
+#   6. Assert: success Toast "Invoice sent to Little Piggy" appears
+#      (this is the bit that currently doesn't fire — see the
+#      reporter's confirmation in the issue)
+#   7. Assert: app navigates into Little Piggy 1:1 conversation
+#   8. Assert: a "21 sats" bolt11 bubble is visible in the thread
+#      (current bug: the bubble is missing; the wrap doesn't
+#      round-trip back through the live subscription)
+#
+# Preconditions:
+#   - AVD signed in as the sender. By default this test uses whatever
+#     account is currently active — pair with _subflow-login-as.yaml
+#     in a wrapper if you want deterministic Big Piggy login.
+#   - Sender has Little Piggy as a Nostr friend (kind-3 contact list).
+#     If they're not, the FriendPicker won't surface them and the
+#     "Send to Little Piggy" tap below fails with element-not-found.
+#   - Active wallet is Lightning (NWC) and has invoice-issuance
+#     methods. On-chain wallets would route through receive-friend-
+#     share-onchain instead — covered by a separate test.
+
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 30000
+
+- tapOn:
+    id: 'tab-home'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn:
+    id: 'btn-receive'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Drill into custom-amount step. Two render paths:
+#   - Wallets with a lud16 → ReceiveSheet lands on the main step
+#     (lud16 QR + buttons), need to tap receive-enter-custom-amount
+#     to reach the keypad.
+#   - Wallets without a lud16 → ReceiveSheet skips main and goes
+#     straight to AmountEntryScreen (the keypad is already visible).
+# Tap the main-step "Custom amount" button when present. Use
+# `when: visible:` (not `notVisible:`) so we don't hit a timing race
+# where the receive sheet hasn't fully rendered yet — `notVisible`
+# returns true during the brief window before either screen has
+# painted, causing a false-positive into the inner block.
+- runFlow:
+    when:
+      visible:
+        id: 'receive-enter-custom-amount'
+    commands:
+      - tapOn:
+          id: 'receive-enter-custom-amount'
+- extendedWaitUntil:
+    visible:
+      id: 'amount-entry-screen'
+    timeout: 8000
+
+# 21 sats — matches the existing _subflow-send-21sat-bolt11 convention
+# so a wrapper that chains the two ends up with a consistent amount
+# in both the send-from-thread and send-from-home flows.
+- tapOn: { id: 'amount-entry-key-2' }
+- tapOn: { id: 'amount-entry-key-1' }
+- assertVisible: '21'
+
+# "Generate invoice" — confirm goes back to the receive sheet's main
+# step and kicks off invoice generation in parallel.
+- tapOn:
+    id: 'amount-entry-confirm'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Wait for the bolt11 to materialise — receive-send-to-friend stays
+# disabled (and likely hidden) until friendShareValue is non-empty.
+# 15s ceiling matches what _subflow-send-21sat-bolt11.yaml already uses.
+- extendedWaitUntil:
+    visible:
+      id: 'receive-send-to-friend'
+    timeout: 15000
+
+- tapOn:
+    id: 'receive-send-to-friend'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# FriendPicker should be open. Use the accessibilityLabel `Send to
+# {name}` (FriendPickerSheet.tsx:247) — the testID form requires
+# the recipient's pubkey-prefix which is environment-specific; the
+# accessibilityLabel is stable. Recipient name is parametrised via
+# RECIPIENT_NAME so this test runs whether the AVD is signed in as
+# Big Piggy (default → Little Piggy as recipient) or Little Piggy
+# (override → RECIPIENT_NAME='Big Piggy').
+- tapOn:
+    text: 'Send to ${RECIPIENT_NAME}'
+
+# === Regression assertions for #457 ===
+
+# (a) The success Toast must fire. Reporter confirmed this is the
+# observable that's currently missing. Toast text comes from
+# ReceiveSheet.tsx:369-376: "Invoice sent to {friend.name}".
+# IMPORTANT: assert this immediately — react-native-toast-message
+# default visibilityTime is 2500ms. If we waitForAnimationToEnd
+# before checking, the Toast can fade out before the assertion runs.
+- extendedWaitUntil:
+    visible: 'Invoice sent to ${RECIPIENT_NAME}'
+    timeout: 5000
+
+# Now wait for the navigate animation to settle.
+- waitForAnimationToEnd:
+    timeout: 4000
+
+# (b) The user lands inside the recipient's 1:1 thread. The chat
+# header avatar/name is rendered as part of ConversationScreen.
+- assertVisible:
+    id: 'chat-header-open-profile'
+- assertVisible:
+    text: ${RECIPIENT_NAME}
+
+# (c) The just-sent bolt11 bubble must appear in the thread. Bolt11
+# bubbles render with their decoded amount — substring match on
+# "21 sats" because the bubble layout adds prefix copy.
+- extendedWaitUntil:
+    visible:
+      text: '.*21 sats.*'
+    timeout: 8000
