@@ -21,6 +21,7 @@ import {
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
+import { parseBip21 } from '../utils/bip21';
 import { useWallet } from '../contexts/WalletContext';
 import { walletLabel } from '../types/wallet';
 import { useNostr } from '../contexts/NostrContext';
@@ -151,7 +152,18 @@ const SendSheet: React.FC<Props> = ({
   // internal scrolling.
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
-  const needsAmount = scanned && (isLightningAddress(invoiceData || '') || isOnchainAddress);
+  // Amount-less bolt11 (`lnbc1…` with no amount prefix) — recipient lets
+  // the sender pick the amount. NIP-47 `pay_invoice` accepts an optional
+  // `amount` (msats) for these; route through AmountEntryScreen so the
+  // user enters a value before we send.
+  const isAmountlessBolt11 =
+    scanned &&
+    !isLightningAddress(invoiceData || '') &&
+    !isOnchainAddress &&
+    !!invoiceData &&
+    decoded?.amountSats === null;
+  const needsAmount =
+    scanned && (isLightningAddress(invoiceData || '') || isOnchainAddress || isAmountlessBolt11);
   const currentSats = parseInt(satsValue) || 0;
 
   const selectedWalletId = capturedWalletId ?? activeWalletId;
@@ -261,35 +273,11 @@ const SendSheet: React.FC<Props> = ({
     if (input.toLowerCase().startsWith('lightning:')) {
       input = input.substring(10);
     }
-    // Parse BIP-21 bitcoin: URI — extract address and optional amount.
-    // Avoid floating-point: convert the decimal string directly to sats via
-    // integer math. `parseFloat("0.00012345") * 1e8` rounds unpredictably on
-    // some values; parsing as digits preserves exact sat precision.
     if (input.toLowerCase().startsWith('bitcoin:')) {
-      const withoutScheme = input.substring(8);
-      const qIndex = withoutScheme.indexOf('?');
-      if (qIndex >= 0) {
-        const params = new URLSearchParams(withoutScheme.substring(qIndex + 1));
-        const raw = (params.get('amount') ?? '').trim();
-        if (/^\d+(\.\d{0,8})?$/.test(raw)) {
-          const [wholePart, fracPart = ''] = raw.split('.');
-          const fracPadded = (fracPart + '00000000').slice(0, 8);
-          try {
-            const sats = BigInt(wholePart) * 100_000_000n + BigInt(fracPadded);
-            if (sats > 0n && sats <= 2_100_000_000_000_000n) {
-              bip21Amount = Number(sats); // safe: well within Number.MAX_SAFE_INTEGER
-            } else if (sats > 2_100_000_000_000_000n) {
-              console.warn('BIP-21 amount exceeds Bitcoin max supply, ignoring');
-            }
-          } catch {
-            console.warn('BIP-21 amount parse failed, ignoring:', raw);
-          }
-        } else if (raw) {
-          console.warn('BIP-21 amount malformed, ignoring:', raw);
-        }
-        input = withoutScheme.substring(0, qIndex);
-      } else {
-        input = withoutScheme;
+      const parsed = parseBip21(input);
+      if (parsed) {
+        input = parsed.address;
+        bip21Amount = parsed.amountSats;
       }
     }
 
@@ -553,9 +541,28 @@ const SendSheet: React.FC<Props> = ({
           }
         }
       } else {
+        // Amount-bearing bolt11s pay as-is; amount-less bolt11s require
+        // the user-entered sats threaded through as msats per NIP-47.
+        if (isAmountlessBolt11 && currentSats <= 0) {
+          Alert.alert('Error', 'Please enter an amount.');
+          setSending(false);
+          return;
+        }
+        // Guard against `currentSats * 1000` exceeding Number.MAX_SAFE_INTEGER
+        // (~9e15) and silently losing precision when computing msats.
+        // 9e12 sats is far above any practical Lightning payment
+        // (~0.5 BTC HTLC ceiling = 5e7 sats) so this is purely a
+        // defensive bound, not a UX limitation.
+        const MAX_SAFE_SATS = Math.floor(Number.MAX_SAFE_INTEGER / 1000);
+        if (isAmountlessBolt11 && currentSats > MAX_SAFE_SATS) {
+          Alert.alert('Error', 'Amount too large.');
+          setSending(false);
+          return;
+        }
         await payInvoiceForWallet(walletId!, invoiceData, {
           signal,
           onReplyTimeout: handleReplyTimeout,
+          amountMsats: isAmountlessBolt11 ? currentSats * 1000 : undefined,
         });
       }
       if (walletId) {
@@ -706,9 +713,11 @@ const SendSheet: React.FC<Props> = ({
 
   const canSend = isOnchainAddress
     ? currentSats > 0 && !loadingBoltzFees
-    : needsAmount
-      ? lnurlParams && currentSats > 0 && !resolving
-      : !!invoiceData;
+    : isAmountlessBolt11
+      ? currentSats > 0
+      : needsAmount
+        ? lnurlParams && currentSats > 0 && !resolving
+        : !!invoiceData;
 
   return (
     <>
@@ -902,11 +911,11 @@ const SendSheet: React.FC<Props> = ({
                   ) : null}
 
                   {needsAmount ? (
-                    /* Lightning address or on-chain: amount is entered on a dedicated step */
+                    /* Lightning address, on-chain, or amount-less bolt11: amount entered on a dedicated step */
                     <View style={styles.amountSection}>
                       {resolving ? (
                         <ActivityIndicator size="small" color={colors.brandPink} />
-                      ) : lnurlParams || isOnchainAddress ? (
+                      ) : lnurlParams || isOnchainAddress || isAmountlessBolt11 ? (
                         <TouchableOpacity
                           style={styles.amountPickerRow}
                           onPress={() => setStep('amount')}

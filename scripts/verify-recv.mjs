@@ -1,8 +1,8 @@
-// Verifies a NIP-17 wrap addressed to Little Piggy (MAESTRO_NSEC2)
+// Verifies a NIP-17 wrap addressed to Little Piggy (MAESTRO_NSEC_LITTLE)
 // containing the marker text reaches the relays. Used as the
 // "actually received?" check after the Maestro DM-send flow.
 //
-// Usage: MAESTRO_NSEC2=$nsec node /tmp/verify-recv.mjs "PR334 NIP-17 000622"
+// Usage: MAESTRO_NSEC_LITTLE=$nsec node /tmp/verify-recv.mjs "PR334 NIP-17 000622"
 
 import { SimplePool } from 'nostr-tools/pool';
 import * as nip17 from 'nostr-tools/nip17';
@@ -22,9 +22,9 @@ if (!marker) {
   process.exit(1);
 }
 
-const nsec = process.env.MAESTRO_NSEC2;
+const nsec = process.env.MAESTRO_NSEC_LITTLE;
 if (!nsec) {
-  console.error('MAESTRO_NSEC2 not in env');
+  console.error('MAESTRO_NSEC_LITTLE not in env');
   process.exit(1);
 }
 const decoded = nip19.decode(nsec);

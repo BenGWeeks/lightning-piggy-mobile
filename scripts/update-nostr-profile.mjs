@@ -8,7 +8,7 @@
 //   node scripts/update-nostr-profile.mjs <ENV_VAR_OF_NSEC> <name> [picture-url] [banner-url] [about]
 //
 // Example:
-//   node scripts/update-nostr-profile.mjs MAESTRO_NSEC \
+//   node scripts/update-nostr-profile.mjs MAESTRO_NSEC_BIG \
 //     "Big Piggy" \
 //     "https://raw.githubusercontent.com/BenGWeeks/lightning-piggy-mobile/claude/pr-issue-112-b1og0/assets/images/lightning-piggy-intro.png" \
 //     "https://raw.githubusercontent.com/BenGWeeks/lightning-piggy-mobile/claude/pr-issue-112-b1og0/assets/images/lightning-piggy-intro.png" \

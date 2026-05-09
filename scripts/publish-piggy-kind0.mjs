@@ -1,20 +1,22 @@
 #!/usr/bin/env node
 // Publishes (or refreshes) the kind-0 profile metadata for each Piggy
 // test-fixture identity. Sets `picture` to the tinted piggy avatar
-// hosted in this repo and `lud16` to FIXTURE_LUD16 so test flows can
-// trigger zap / SendSheet paths against the Piggies. Other existing
-// kind-0 fields (name, display_name, about, banner, nip05, etc.) are
-// fetched from DEFAULT_RELAYS and merged so we don't clobber them.
+// hosted in this repo and `lud16` to the per-Piggy lud16 so test flows
+// can pay each Piggy independently and observe their wallet balance in
+// isolation. Other existing kind-0 fields (name, display_name, about,
+// banner, nip05, etc.) are fetched from DEFAULT_RELAYS and merged so
+// we don't clobber them.
 //
 // Usage:
-//   node scripts/publish-piggy-kind0.mjs              # publish all four
-//   node scripts/publish-piggy-kind0.mjs MAESTRO_NSEC # publish one
-//   BRANCH=main node scripts/publish-piggy-kind0.mjs  # override raw URL branch
+//   node scripts/publish-piggy-kind0.mjs                       # publish all four
+//   node scripts/publish-piggy-kind0.mjs MAESTRO_NSEC_LITTLE   # publish one
+//   BRANCH=main node scripts/publish-piggy-kind0.mjs           # override raw URL branch
 //
-// Re-run this script whenever a Piggy's kind-0 picture needs refreshing
-// (e.g. after the tinted PNGs change, or a relay drops the event).
+// Re-run this script whenever a Piggy's kind-0 picture or lud16 needs
+// refreshing (e.g. after the tinted PNGs change, the dedicated LNbits
+// wallets change, or a relay drops the event).
 //
-// Never logs the nsec. Reads each MAESTRO_NSEC* from .env.
+// Never logs the nsec. Reads each MAESTRO_NSEC_* from .env.
 
 import { readFileSync, existsSync } from 'node:fs';
 import { argv, exit, env } from 'node:process';
@@ -34,20 +36,40 @@ const RELAYS = [
 const BRANCH = env.BRANCH || 'main';
 const RAW_BASE = `https://raw.githubusercontent.com/BenGWeeks/lightning-piggy-mobile/${BRANCH}/tests/e2e/fixtures`;
 
-// All Piggies share a single fixture LUD16 so tests can trigger zap /
-// SendSheet flows; resolves to Ben's own LNbits wallet so test sats
-// route somewhere benign rather than to a stranger.
-const FIXTURE_LUD16 = 'ben.weeks@bank.weeksfamily.me';
-
-// Each Piggy maps to (env var, fixture filename, friendly label). Label is
-// only used for log lines — we never overwrite an existing `name` /
-// `display_name` on the kind-0 if it's already published.
+// Each Piggy maps to (env var, fixture filename, friendly label, lud16).
+// `lud16` resolves to a dedicated LNbits wallet on bank.weeksfamily.me
+// so each Piggy is independently payable in test flows and the per-
+// wallet balance is observable in isolation. Evil Piggy keeps the
+// shared fallback because it doesn't need its own wallet for the
+// scenarios it covers (unfollowed-sender / Following-only toggle).
+// Label is only used for log lines — we never overwrite an existing
+// `name` / `display_name` on the kind-0 if it's already published.
 const PIGGIES = [
   // Mapping matches tests/e2e/README.adoc — note NSEC2=Little, NSEC3=Middle.
-  { envVar: 'MAESTRO_NSEC', file: 'big-piggy-profile.png', label: 'Big Piggy' },
-  { envVar: 'MAESTRO_NSEC2', file: 'little-piggy-profile.png', label: 'Little Piggy' },
-  { envVar: 'MAESTRO_NSEC3', file: 'middle-piggy-profile.png', label: 'Middle Piggy' },
-  { envVar: 'MAESTRO_NSEC4', file: 'evil-piggy-profile.png', label: 'Evil Piggy' },
+  {
+    envVar: 'MAESTRO_NSEC_BIG',
+    file: 'big-piggy-profile.png',
+    label: 'Big Piggy',
+    lud16: 'big.piggy@bank.weeksfamily.me',
+  },
+  {
+    envVar: 'MAESTRO_NSEC_LITTLE',
+    file: 'little-piggy-profile.png',
+    label: 'Little Piggy',
+    lud16: 'little.piggy@bank.weeksfamily.me',
+  },
+  {
+    envVar: 'MAESTRO_NSEC_MIDDLE',
+    file: 'middle-piggy-profile.png',
+    label: 'Middle Piggy',
+    lud16: 'middle.piggy@bank.weeksfamily.me',
+  },
+  {
+    envVar: 'MAESTRO_NSEC_EVIL',
+    file: 'evil-piggy-profile.png',
+    label: 'Evil Piggy',
+    lud16: 'ben.weeks@bank.weeksfamily.me',
+  },
 ];
 
 if (!existsSync('.env')) {
@@ -110,7 +132,7 @@ function parseContent(content) {
 let exitCode = 0;
 
 for (const piggy of targets) {
-  const { envVar, file, label } = piggy;
+  const { envVar, file, label, lud16 } = piggy;
   console.log(`\n=== ${label} (${envVar}) ===`);
   const nsec = nsecFor(envVar);
   if (!nsec) {
@@ -155,12 +177,13 @@ for (const piggy of targets) {
     );
   }
 
-  // Merge: keep everything, override picture + lud16 (test fixture),
-  // fill in name/display_name only when the existing event has nothing there.
+  // Merge: keep everything, override picture + lud16 (per-piggy
+  // fixture), fill in name/display_name only when the existing event
+  // has nothing there.
   const merged = {
     ...existingContent,
     picture: pictureUrl,
-    lud16: FIXTURE_LUD16,
+    lud16,
   };
   if (!merged.name) merged.name = label;
   if (!merged.display_name) merged.display_name = label;

@@ -7,7 +7,7 @@ name: NIP-17 1:1 DM send (PR #334)
 # Also covers the Copilot review fix to surface partial-publish failures
 # (only the self-wrap published) instead of treating them as success.
 #
-# Fixture: Big Piggy logged in, sends to Little Piggy. Uses MAESTRO_NSEC
+# Fixture: Big Piggy logged in, sends to Little Piggy. Uses MAESTRO_NSEC_BIG
 # (Big Piggy) so a partial-failure path would surface as the Send Alert.
 #
 # Run from the existing app state (do not relaunch — that races the

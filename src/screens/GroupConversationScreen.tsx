@@ -58,6 +58,7 @@ import {
   extractSharedContact,
   type BubbleContent,
 } from '../utils/messageContent';
+import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
 import type { NostrProfile } from '../types/nostr';
 import type { GroupConversationRoute, RootStackParamList } from '../navigation/types';
 import type { CounterpartyContact } from '../components/TransactionDetailSheet';
@@ -465,6 +466,17 @@ const GroupConversationScreen: React.FC = () => {
     [messages],
   );
 
+  const trackedMessages = useMemo(
+    () =>
+      messages.map((m) => ({
+        text: m.text,
+        fromMe: m.senderPubkey === myPubkey,
+        createdAt: m.createdAt,
+      })),
+    [messages, myPubkey],
+  );
+  const { isInvoicePaid } = usePaidInvoiceTracker(trackedMessages);
+
   const renderMessage = useCallback(
     ({ item }: { item: ClassifiedMessage }) => {
       const fromMe = item.senderPubkey === myPubkey;
@@ -489,6 +501,7 @@ const GroupConversationScreen: React.FC = () => {
           onOpenContact={openSharedContact}
           onOpenLocation={openLocation}
           onOpenGifFullscreen={setFullscreenGifUrl}
+          isInvoicePaid={isInvoicePaid}
           testIdPrefix="group-conversation"
         />
       );
@@ -500,6 +513,7 @@ const GroupConversationScreen: React.FC = () => {
       handlePayInvoice,
       openSharedContact,
       openLocation,
+      isInvoicePaid,
     ],
   );
 

@@ -16,7 +16,7 @@ name: Group manage-members sheet — open + add picker + remove flow
 # member-prefix table.
 #
 # Preconditions:
-#   - User is logged in as Big Piggy (MAESTRO_NSEC).
+#   - User is logged in as Big Piggy (MAESTRO_NSEC_BIG).
 #   - The "Triad" fixture group exists with Big + Middle + Little Piggy
 #     as members. Run `scripts/test-3way-group-chat.sh` first if it
 #     doesn't.
