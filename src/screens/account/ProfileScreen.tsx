@@ -64,6 +64,8 @@ const ProfileScreen: React.FC = () => {
             </View>
           </View>
 
+          {profile.about ? <Text style={styles.profileAbout}>{profile.about}</Text> : null}
+
           {/* Inline QR + npub/Lightning toggle (issue #463). Replaces both
               the QR-icon-opens-bottom-sheet path AND the inline npub /
               lud16 rows that used to live here — the QR's own value-row
@@ -163,6 +165,13 @@ const createStyles = (colors: Palette) =>
       color: colors.textSupplementary,
       fontSize: 13,
       marginTop: 2,
+    },
+    profileAbout: {
+      color: colors.textBody,
+      fontSize: 14,
+      paddingHorizontal: 16,
+      paddingBottom: 12,
+      lineHeight: 20,
     },
     editProfileButton: {
       margin: 16,

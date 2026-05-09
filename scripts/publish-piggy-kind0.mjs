@@ -132,7 +132,7 @@ function parseContent(content) {
 let exitCode = 0;
 
 for (const piggy of targets) {
-  const { envVar, file, label, lud16 } = piggy;
+  const { envVar, file, label, lud16, about } = piggy;
   console.log(`\n=== ${label} (${envVar}) ===`);
   const nsec = nsecFor(envVar);
   if (!nsec) {
@@ -156,7 +156,12 @@ for (const piggy of targets) {
   console.log(`  npub:   ${nip19.npubEncode(pubkey)}`);
 
   const pictureUrl = `${RAW_BASE}/${file}`;
+  // Banner reuses the same per-piggy png; square aspect-ratios get
+  // center-cropped by the ProfileScreen banner slot (height: 100,
+  // resizeMode: cover). Swap to dedicated 3:1 banner art when ready.
+  const bannerUrl = pictureUrl;
   console.log(`  picture: ${pictureUrl}`);
+  console.log(`  banner:  ${bannerUrl}`);
 
   const existing = await fetchExistingKind0(pubkey);
   if (existing === FETCH_TIMEOUT) {
@@ -177,13 +182,16 @@ for (const piggy of targets) {
     );
   }
 
-  // Merge: keep everything, override picture + lud16 (per-piggy
-  // fixture), fill in name/display_name only when the existing event
+  // Merge: keep everything, override picture + banner + lud16 + about
+  // (per-piggy fixtures so the new Profile screen renders meaningful
+  // content), fill in name/display_name only when the existing event
   // has nothing there.
   const merged = {
     ...existingContent,
     picture: pictureUrl,
+    banner: bannerUrl,
     lud16,
+    about,
   };
   if (!merged.name) merged.name = label;
   if (!merged.display_name) merged.display_name = label;

@@ -102,14 +102,17 @@ const QrWithIdentityToggle: React.FC<Props> = ({
           <Copy size={22} color={colors.brandPink} />
         </TouchableOpacity>
 
-        {nfcSupported && onNfcWrite && (
+        {onNfcWrite && (
           <TouchableOpacity
-            style={styles.iconButton}
-            onPress={onNfcWrite}
-            accessibilityLabel={`Write ${valueLabel} to NFC tag`}
+            style={[styles.iconButton, !nfcSupported && styles.iconButtonDisabled]}
+            onPress={nfcSupported ? onNfcWrite : undefined}
+            disabled={!nfcSupported}
+            accessibilityLabel={
+              nfcSupported ? `Write ${valueLabel} to NFC tag` : 'NFC not supported on this device'
+            }
             testID="profile-qr-nfc-button"
           >
-            <NfcIcon size={22} color={colors.brandPink} />
+            <NfcIcon size={22} color={nfcSupported ? colors.brandPink : colors.textSupplementary} />
           </TouchableOpacity>
         )}
 
@@ -130,15 +133,29 @@ const createStyles = (colors: Palette) =>
   StyleSheet.create({
     container: {
       alignItems: 'center',
+      marginHorizontal: 16,
+      marginTop: 18,
+      marginBottom: 12,
       paddingHorizontal: 16,
-      paddingVertical: 16,
+      paddingTop: 28,
+      paddingBottom: 16,
       gap: 12,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.brandPink,
     },
+    // Toggle styling matches the original bottom-sheet QrSheet for
+    // theme-consistent contrast: track uses `colors.background` (the
+    // page bg, darker than `colors.surface` which is what the box
+    // uses), active tab is white with brandPink text. Works in both
+    // light and dark themes — the page bg and surface bg are the two
+    // standard contrasting tones in the palette.
     toggleRow: {
       flexDirection: 'row',
       backgroundColor: colors.background,
       borderRadius: 10,
       padding: 3,
+      marginTop: -46,
     },
     toggleTab: {
       paddingHorizontal: 20,
@@ -189,6 +206,9 @@ const createStyles = (colors: Palette) =>
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: colors.background,
+    },
+    iconButtonDisabled: {
+      opacity: 0.4,
     },
   });
 
