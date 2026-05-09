@@ -1691,11 +1691,13 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (success) {
         startTransition(() => setContacts(updatedContacts));
         // Update cache so restarts reflect the follow immediately.
-        // Per-account namespaced (#288). Preserves the pre-existing
-        // behaviour of writing the *profiles* timestamp here — see
-        // CACHE_TIMESTAMP_KEY_BASE below.
+        // Per-account namespaced (#288). Bumps the *contacts* timestamp
+        // (the right freshness clock for kind-3 list reads) — pre-#442
+        // code mistakenly wrote to CACHE_TIMESTAMP_KEY_BASE which is
+        // the *profiles* cache freshness, leaving the contacts list's
+        // own freshness clock stale after every follow.
         const cKey = perAccountKey(CONTACTS_CACHE_KEY_BASE, pubkey);
-        const tKey = perAccountKey(CACHE_TIMESTAMP_KEY_BASE, pubkey);
+        const tKey = perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pubkey);
         AsyncStorage.setItem(cKey, JSON.stringify(updatedContacts)).catch(() => {});
         AsyncStorage.setItem(tKey, Date.now().toString()).catch(() => {});
         // Fetch profile for the new contact
@@ -1731,8 +1733,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           perAccountKey(CONTACTS_CACHE_KEY_BASE, pubkey),
           JSON.stringify(updatedContacts),
         ).catch(() => {});
+        // Same fix as followContact above — bump the *contacts*
+        // timestamp, not the *profiles* one.
         AsyncStorage.setItem(
-          perAccountKey(CACHE_TIMESTAMP_KEY_BASE, pubkey),
+          perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pubkey),
           Date.now().toString(),
         ).catch(() => {});
       }

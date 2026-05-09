@@ -25,9 +25,34 @@ let _activePubkey: string | null = null;
 type ActivePubkeyListener = (pk: string | null) => void;
 const _activePubkeyListeners = new Set<ActivePubkeyListener>();
 
+// Resolves on the first `setActivePubkeyForWalletStorage` call —
+// regardless of whether the value is a hex pubkey or null. Used by
+// WalletContext's startup to gate the initial `getWalletList()` until
+// NostrContext has hydrated identity from SecureStore. Without this
+// gate WalletContext could read `wallet_list` (no suffix) on cold
+// start, missing the per-account `wallet_list_${pubkey}` and showing
+// the wrong identity's wallets — that's the root cause of the
+// wallet-leak symptom (#461 / Copilot review on #442).
+let _firstSetResolve: (() => void) | null = null;
+const _firstSetPromise = new Promise<void>((resolve) => {
+  _firstSetResolve = resolve;
+});
+
 export function setActivePubkeyForWalletStorage(pk: string | null): void {
-  if (_activePubkey === pk) return;
+  if (_activePubkey === pk) {
+    // Idempotent same-value call still counts as "Nostr has spoken" —
+    // resolve the gate even if the value matches the bootstrap null.
+    if (_firstSetResolve) {
+      _firstSetResolve();
+      _firstSetResolve = null;
+    }
+    return;
+  }
   _activePubkey = pk;
+  if (_firstSetResolve) {
+    _firstSetResolve();
+    _firstSetResolve = null;
+  }
   for (const listener of _activePubkeyListeners) {
     try {
       listener(pk);
@@ -36,6 +61,27 @@ export function setActivePubkeyForWalletStorage(pk: string | null): void {
       if (__DEV__) console.warn('[walletStorage] listener threw:', e);
     }
   }
+}
+
+/**
+ * Resolves once NostrContext has called `setActivePubkeyForWalletStorage`
+ * at least once — i.e. the activePubkey has been hydrated (whether to a
+ * hex pubkey for a signed-in identity or to null for a logged-out
+ * install). Race-fixes the cold-start window where WalletProvider
+ * mounts before NostrProvider and would otherwise read the wrong
+ * AsyncStorage key.
+ *
+ * Safe-fallback timeout (default 2 s) means a wedged NostrContext
+ * doesn't permanently block wallet UI — callers fall through to
+ * whatever `_activePubkey` happens to be (still null) and hit the
+ * legacy unsuffixed key, matching pre-#288 behaviour.
+ */
+export async function awaitActivePubkeyHydrated(timeoutMs = 2000): Promise<void> {
+  if (_firstSetResolve === null) return;
+  await Promise.race([
+    _firstSetPromise,
+    new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+  ]);
 }
 
 export function subscribeActivePubkey(listener: ActivePubkeyListener): () => void {

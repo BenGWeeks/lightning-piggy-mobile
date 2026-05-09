@@ -295,6 +295,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           setIsOnboarded(onboardedAfterMigration);
         }
 
+        // Wait for NostrContext to hydrate its identity before we read
+        // the wallet list — otherwise `_activePubkey` is still null
+        // here and `getWalletList()` reads the wrong AsyncStorage key
+        // (#442 Copilot review / #461 wallet-leak root cause). 2 s
+        // timeout means a wedged NostrContext doesn't permanently
+        // block wallet UI — caller falls through to whatever
+        // `_activePubkey` happens to be at that moment.
+        await walletStorage.awaitActivePubkeyHydrated();
         // Load and reconnect all wallets
         const walletList = await walletStorage.getWalletList();
         const walletStates: WalletState[] = await Promise.all(
