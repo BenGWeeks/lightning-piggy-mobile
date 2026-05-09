@@ -152,7 +152,18 @@ const SendSheet: React.FC<Props> = ({
   // internal scrolling.
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
-  const needsAmount = scanned && (isLightningAddress(invoiceData || '') || isOnchainAddress);
+  // Amount-less bolt11 (`lnbc1…` with no amount prefix) — recipient lets
+  // the sender pick the amount. NIP-47 `pay_invoice` accepts an optional
+  // `amount` (msats) for these; route through AmountEntryScreen so the
+  // user enters a value before we send.
+  const isAmountlessBolt11 =
+    scanned &&
+    !isLightningAddress(invoiceData || '') &&
+    !isOnchainAddress &&
+    !!invoiceData &&
+    decoded?.amountSats === null;
+  const needsAmount =
+    scanned && (isLightningAddress(invoiceData || '') || isOnchainAddress || isAmountlessBolt11);
   const currentSats = parseInt(satsValue) || 0;
 
   const selectedWalletId = capturedWalletId ?? activeWalletId;
@@ -530,9 +541,17 @@ const SendSheet: React.FC<Props> = ({
           }
         }
       } else {
+        // Amount-bearing bolt11s pay as-is; amount-less bolt11s require
+        // the user-entered sats threaded through as msats per NIP-47.
+        if (isAmountlessBolt11 && currentSats <= 0) {
+          Alert.alert('Error', 'Please enter an amount.');
+          setSending(false);
+          return;
+        }
         await payInvoiceForWallet(walletId!, invoiceData, {
           signal,
           onReplyTimeout: handleReplyTimeout,
+          amountMsats: isAmountlessBolt11 ? currentSats * 1000 : undefined,
         });
       }
       if (walletId) {
