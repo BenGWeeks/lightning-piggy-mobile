@@ -1,0 +1,89 @@
+appId: com.lightningpiggy.app.dev
+name: Internal — login as the nsec passed via PIGGY_NSEC env var
+---
+# Parametrised version of _subflow-login-as.yaml. The original is
+# hard-coded to MAESTRO_NSEC_BIG (used by the 3-way group-chat suite
+# which always logs in the same fixture). This variant takes the
+# nsec as a parameter so multi-account roundtrip tests can chain
+# Big → Little → Big logins from a single wrapper.
+#
+# Caller passes:
+#   PIGGY_NSEC — the nsec to log in as (e.g. ${MAESTRO_NSEC_BIG})
+
+- launchApp:
+    appId: com.lightningpiggy.app.dev
+    stopApp: true
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'tab-home'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'profile-icon'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+- tapOn:
+    id: 'drawer-sign-out'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn:
+    id: 'branded-alert-button-1'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- tapOn:
+    id: 'profile-icon'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'drawer-row-profile'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- tapOn:
+    id: 'connect-nostr'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+- tapOn:
+    id: 'nsec-input'
+- inputText: ${PIGGY_NSEC}
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- tapOn:
+    id: 'login-button'
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    text: 'UPDATE'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- extendedWaitUntil:
+    visible:
+      text: 'Edit Profile'
+    timeout: 15000
+
+- tapOn:
+    text: 'Allow'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 2000
+
+- tapOn: 'Back'
+- waitForAnimationToEnd:
+    timeout: 1500
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 8000
