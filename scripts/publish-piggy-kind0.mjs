@@ -44,6 +44,17 @@ const RAW_BASE = `https://raw.githubusercontent.com/BenGWeeks/lightning-piggy-mo
 // scenarios it covers (unfollowed-sender / Following-only toggle).
 // Label is only used for log lines — we never overwrite an existing
 // `name` / `display_name` on the kind-0 if it's already published.
+// Scenic farm-themed Unsplash photo IDs picked for banner aesthetic
+// (rolling fields, barns, farm animals). All licensed under the
+// Unsplash Free License — free to use commercially, attribution
+// optional but appreciated. URLs below resolve to a wide-aspect crop
+// at 1500x500 which fits the ProfileScreen banner slot well after
+// `resizeMode: 'cover'`.
+//
+// Swap to dedicated artwork hosted in this repo (e.g.
+// `tests/e2e/fixtures/<name>-banner.png`) when proper banner art
+// exists.
+const UNSPLASH_BANNER_BASE = 'https://images.unsplash.com';
 const PIGGIES = [
   // Mapping matches tests/e2e/README.adoc — note NSEC2=Little, NSEC3=Middle.
   {
@@ -51,24 +62,32 @@ const PIGGIES = [
     file: 'big-piggy-profile.png',
     label: 'Big Piggy',
     lud16: 'big.piggy@bank.weeksfamily.me',
+    about: 'The biggest of the Piggies. Saves more than she spends.',
+    bannerUrl: `${UNSPLASH_BANNER_BASE}/photo-1500595046743-cd271d694d30?w=1500&h=500&fit=crop&auto=format`,
   },
   {
     envVar: 'MAESTRO_NSEC_LITTLE',
     file: 'little-piggy-profile.png',
     label: 'Little Piggy',
     lud16: 'little.piggy@bank.weeksfamily.me',
+    about: 'The littlest Piggy. Just learning about sats and zaps.',
+    bannerUrl: `${UNSPLASH_BANNER_BASE}/photo-1605185189676-cda1e2bdc1a8?w=1500&h=500&fit=crop&auto=format`,
   },
   {
     envVar: 'MAESTRO_NSEC_MIDDLE',
     file: 'middle-piggy-profile.png',
     label: 'Middle Piggy',
     lud16: 'middle.piggy@bank.weeksfamily.me',
+    about: 'The middle Piggy. Splits the difference between Big and Little.',
+    bannerUrl: `${UNSPLASH_BANNER_BASE}/photo-1500382017468-9049fed747ef?w=1500&h=500&fit=crop&auto=format`,
   },
   {
     envVar: 'MAESTRO_NSEC_EVIL',
     file: 'evil-piggy-profile.png',
     label: 'Evil Piggy',
     lud16: 'ben.weeks@bank.weeksfamily.me',
+    about: 'A mysterious unfriended Piggy. Used in test flows for the unfollowed-sender path.',
+    bannerUrl: `${UNSPLASH_BANNER_BASE}/photo-1518866509036-a1c41fc40f1e?w=1500&h=500&fit=crop&auto=format`,
   },
 ];
 
@@ -132,7 +151,7 @@ function parseContent(content) {
 let exitCode = 0;
 
 for (const piggy of targets) {
-  const { envVar, file, label, lud16, about } = piggy;
+  const { envVar, file, label, lud16, about, bannerUrl } = piggy;
   console.log(`\n=== ${label} (${envVar}) ===`);
   const nsec = nsecFor(envVar);
   if (!nsec) {
@@ -156,10 +175,6 @@ for (const piggy of targets) {
   console.log(`  npub:   ${nip19.npubEncode(pubkey)}`);
 
   const pictureUrl = `${RAW_BASE}/${file}`;
-  // Banner reuses the same per-piggy png; square aspect-ratios get
-  // center-cropped by the ProfileScreen banner slot (height: 100,
-  // resizeMode: cover). Swap to dedicated 3:1 banner art when ready.
-  const bannerUrl = pictureUrl;
   console.log(`  picture: ${pictureUrl}`);
   console.log(`  banner:  ${bannerUrl}`);
 
