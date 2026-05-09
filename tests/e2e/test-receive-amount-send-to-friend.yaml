@@ -56,16 +56,28 @@ name: Receive → Amount → Friend regression guard for #457
 - waitForAnimationToEnd:
     timeout: 3000
 
-# Drill into custom-amount step. Wallets that have a lud16 land on
-# the address QR view by default; the "Custom amount" entry surface
-# (receive-enter-custom-amount) is always visible regardless of
-# whether the wallet has a lud16, so we tap it directly.
-- tapOn:
-    id: 'receive-enter-custom-amount'
+# Drill into custom-amount step. Two render paths:
+#   - Wallets with a lud16 → ReceiveSheet lands on the main step
+#     (lud16 QR + buttons), need to tap receive-enter-custom-amount
+#     to reach the keypad.
+#   - Wallets without a lud16 → ReceiveSheet skips main and goes
+#     straight to AmountEntryScreen (the keypad is already visible).
+# Tap the main-step "Custom amount" button when present. Use
+# `when: visible:` (not `notVisible:`) so we don't hit a timing race
+# where the receive sheet hasn't fully rendered yet — `notVisible`
+# returns true during the brief window before either screen has
+# painted, causing a false-positive into the inner block.
+- runFlow:
+    when:
+      visible:
+        id: 'receive-enter-custom-amount'
+    commands:
+      - tapOn:
+          id: 'receive-enter-custom-amount'
 - extendedWaitUntil:
     visible:
       id: 'amount-entry-screen'
-    timeout: 5000
+    timeout: 8000
 
 # 21 sats — matches the existing _subflow-send-21sat-bolt11 convention
 # so a wrapper that chains the two ends up with a consistent amount
@@ -95,29 +107,37 @@ name: Receive → Amount → Friend regression guard for #457
     timeout: 3000
 
 # FriendPicker should be open. Use the accessibilityLabel `Send to
-# Little Piggy` (FriendPickerSheet.tsx:247) — the testID form
-# requires the recipient's pubkey-prefix which is environment-
-# specific; the accessibilityLabel is stable.
+# {name}` (FriendPickerSheet.tsx:247) — the testID form requires
+# the recipient's pubkey-prefix which is environment-specific; the
+# accessibilityLabel is stable. Recipient name is parametrised via
+# RECIPIENT_NAME so this test runs whether the AVD is signed in as
+# Big Piggy (default → Little Piggy as recipient) or Little Piggy
+# (override → RECIPIENT_NAME='Big Piggy').
 - tapOn:
-    text: 'Send to Little Piggy'
-- waitForAnimationToEnd:
-    timeout: 4000
+    text: 'Send to ${RECIPIENT_NAME}'
 
 # === Regression assertions for #457 ===
 
 # (a) The success Toast must fire. Reporter confirmed this is the
 # observable that's currently missing. Toast text comes from
 # ReceiveSheet.tsx:369-376: "Invoice sent to {friend.name}".
+# IMPORTANT: assert this immediately — react-native-toast-message
+# default visibilityTime is 2500ms. If we waitForAnimationToEnd
+# before checking, the Toast can fade out before the assertion runs.
 - extendedWaitUntil:
-    visible: 'Invoice sent to Little Piggy'
+    visible: 'Invoice sent to ${RECIPIENT_NAME}'
     timeout: 5000
 
-# (b) The user lands inside the Little Piggy 1:1 thread. The chat
+# Now wait for the navigate animation to settle.
+- waitForAnimationToEnd:
+    timeout: 4000
+
+# (b) The user lands inside the recipient's 1:1 thread. The chat
 # header avatar/name is rendered as part of ConversationScreen.
 - assertVisible:
     id: 'chat-header-open-profile'
 - assertVisible:
-    text: 'Little Piggy'
+    text: ${RECIPIENT_NAME}
 
 # (c) The just-sent bolt11 bubble must appear in the thread. Bolt11
 # bubbles render with their decoded amount — substring match on
