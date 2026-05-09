@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from './BrandedAlert';
 import { Image } from 'expo-image';
 import {
@@ -22,7 +23,8 @@ import AccountSwitcherSheet from './AccountSwitcherSheet';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { DrawerContentComponentProps } from '@react-navigation/drawer';
 import { DrawerContentScrollView } from '@react-navigation/drawer';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostr, OWN_PROFILE_CACHE_KEY_BASE } from '../contexts/NostrContext';
+import { perAccountKey } from '../services/perAccountStorage';
 import { useThemeColors } from '../contexts/ThemeContext';
 import * as nostrService from '../services/nostrService';
 import type { NostrProfile } from '../types/nostr';
@@ -118,16 +120,45 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
 
   // Lazy-fetch kind-0 for the small switcher avatars. The active
   // identity already has its profile in `profile`; only the others
-  // need fan-out.
+  // need fan-out. Two phases mirror AccountSwitcherSheet: (1) seed
+  // from each identity's per-account own-profile cache in
+  // AsyncStorage so the avatars render instantly, then (2) fan out
+  // for any still missing.
   useEffect(() => {
     if (otherIdentities.length === 0) return;
     let cancelled = false;
-    const targetRelays = relays.filter((r) => r.read).map((r) => r.url);
-    const fanOut = targetRelays.length > 0 ? targetRelays : nostrService.DEFAULT_RELAYS;
     (async () => {
+      // Phase 1 — synchronous-feel cache seed from AsyncStorage.
+      const cacheReads = await Promise.all(
+        otherIdentities.map(async (id) => {
+          if (profileById[id.pubkey]) return null;
+          try {
+            const raw = await AsyncStorage.getItem(
+              perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, id.pubkey),
+            );
+            if (!raw) return null;
+            const parsed = JSON.parse(raw) as NostrProfile;
+            return { pubkey: id.pubkey, profile: parsed };
+          } catch {
+            return null;
+          }
+        }),
+      );
+      if (cancelled) return;
+      const seeded: Record<string, NostrProfile> = {};
+      for (const r of cacheReads) {
+        if (r) seeded[r.pubkey] = r.profile;
+      }
+      if (Object.keys(seeded).length > 0) {
+        setProfileById((prev) => ({ ...seeded, ...prev }));
+      }
+
+      // Phase 2 — relay fan-out for identities still missing.
+      const targetRelays = relays.filter((r) => r.read).map((r) => r.url);
+      const fanOut = targetRelays.length > 0 ? targetRelays : nostrService.DEFAULT_RELAYS;
       for (const id of otherIdentities) {
         if (cancelled) return;
-        if (profileById[id.pubkey]) continue;
+        if (seeded[id.pubkey] || profileById[id.pubkey]) continue;
         try {
           const fetched = await nostrService.fetchProfile(id.pubkey, fanOut);
           if (cancelled) return;

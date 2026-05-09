@@ -462,7 +462,12 @@ const CONTACTS_CACHE_KEY_BASE = 'nostr_contacts_cache';
 const PROFILES_CACHE_KEY_BASE = 'nostr_profiles_cache';
 const CACHE_TIMESTAMP_KEY_BASE = 'nostr_cache_timestamp';
 const CONTACTS_TIMESTAMP_KEY_BASE = 'nostr_contacts_timestamp';
-const OWN_PROFILE_CACHE_KEY_BASE = 'nostr_own_profile_cache';
+// Exported so AccountDrawerContent + AccountSwitcherSheet can seed
+// their per-identity profile caches synchronously from AsyncStorage
+// before fanning out to relays — otherwise they always wait on a
+// network round-trip per non-active identity, making the switcher
+// slow to populate names + avatars.
+export const OWN_PROFILE_CACHE_KEY_BASE = 'nostr_own_profile_cache';
 const OWN_PROFILE_TIMESTAMP_KEY_BASE = 'nostr_own_profile_timestamp';
 const RELAY_LIST_CACHE_KEY_BASE = 'nostr_relay_list_cache';
 const RELAY_LIST_TIMESTAMP_KEY_BASE = 'nostr_relay_list_timestamp';

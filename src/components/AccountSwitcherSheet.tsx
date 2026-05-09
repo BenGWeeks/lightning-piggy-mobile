@@ -9,9 +9,11 @@ import {
 import { Image } from 'expo-image';
 import { Plus, UserPlus, UserRound, X, Check } from 'lucide-react-native';
 import * as nip19 from 'nostr-tools/nip19';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from './BrandedAlert';
 import NostrLoginSheet from './NostrLoginSheet';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostr, OWN_PROFILE_CACHE_KEY_BASE } from '../contexts/NostrContext';
+import { perAccountKey } from '../services/perAccountStorage';
 import { useThemeColors } from '../contexts/ThemeContext';
 import * as nostrService from '../services/nostrService';
 import { isSupportedImageUrl } from '../utils/imageUrl';
@@ -50,19 +52,48 @@ const AccountSwitcherSheet: React.FC<Props> = ({ visible, onClose }) => {
     else sheetRef.current?.dismiss();
   }, [visible]);
 
-  // Lazy-load profile metadata for every signed-in identity. Pulls
-  // from relays the active identity is configured against — that's
-  // the same set used everywhere else, and the typical case is that
-  // those relays already have the kind-0s cached.
+  // Lazy-load profile metadata for every signed-in identity. Two
+  // phases: (1) seed from each identity's per-account own-profile
+  // cache in AsyncStorage so names + avatars render INSTANTLY for
+  // any identity that's been active before, then (2) fan out to
+  // relays only for identities still missing. Without phase (1),
+  // every sheet open paid a per-identity relay round-trip even
+  // though the kind-0 was already on disk.
   useEffect(() => {
     if (!visible || identities.length === 0) return;
     let cancelled = false;
-    const targetRelays = relays.filter((r) => r.read).map((r) => r.url);
-    const fanOut = targetRelays.length > 0 ? targetRelays : nostrService.DEFAULT_RELAYS;
     (async () => {
+      // Phase 1 — synchronous-feel cache seed from AsyncStorage.
+      const cacheReads = await Promise.all(
+        identities.map(async (id) => {
+          if (profileById[id.pubkey]) return null;
+          try {
+            const raw = await AsyncStorage.getItem(
+              perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, id.pubkey),
+            );
+            if (!raw) return null;
+            const parsed = JSON.parse(raw) as NostrProfile;
+            return { pubkey: id.pubkey, profile: parsed };
+          } catch {
+            return null;
+          }
+        }),
+      );
+      if (cancelled) return;
+      const seeded: Record<string, NostrProfile> = {};
+      for (const r of cacheReads) {
+        if (r) seeded[r.pubkey] = r.profile;
+      }
+      if (Object.keys(seeded).length > 0) {
+        setProfileById((prev) => ({ ...seeded, ...prev }));
+      }
+
+      // Phase 2 — relay fan-out for identities NOT in cache.
+      const targetRelays = relays.filter((r) => r.read).map((r) => r.url);
+      const fanOut = targetRelays.length > 0 ? targetRelays : nostrService.DEFAULT_RELAYS;
       for (const id of identities) {
         if (cancelled) return;
-        if (profileById[id.pubkey]) continue;
+        if (seeded[id.pubkey] || profileById[id.pubkey]) continue;
         try {
           const fetched = await nostrService.fetchProfile(id.pubkey, fanOut);
           if (cancelled) return;
