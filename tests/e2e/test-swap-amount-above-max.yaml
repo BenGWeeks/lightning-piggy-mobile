@@ -49,6 +49,16 @@ name: Boltz reverse swap — amount above maximum surfaces "Maximum is" warning
       id: 'amount-entry-screen'
     timeout: 5000
 
+# Wait for the Boltz min/max range copy to render before typing —
+# AmountEntryScreen only emits the "Maximum is …" warning once
+# `maxSats` is populated from the Boltz fees fetch. Without this gate,
+# a slow network leaves max undefined → warning never fires → false-
+# pass. Range text renders as "<min> – <max> sats", em-dash is U+2013.
+- extendedWaitUntil:
+    visible:
+      text: '.*–.*sats'
+    timeout: 12000
+
 # 999,999,999 sats = ~10 BTC — comfortably above Boltz's per-swap
 # ceiling (currently in the low millions of sats / fractions of a
 # BTC range, varies by liquidity).
