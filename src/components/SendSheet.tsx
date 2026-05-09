@@ -702,9 +702,11 @@ const SendSheet: React.FC<Props> = ({
 
   const canSend = isOnchainAddress
     ? currentSats > 0 && !loadingBoltzFees
-    : needsAmount
-      ? lnurlParams && currentSats > 0 && !resolving
-      : !!invoiceData;
+    : isAmountlessBolt11
+      ? currentSats > 0
+      : needsAmount
+        ? lnurlParams && currentSats > 0 && !resolving
+        : !!invoiceData;
 
   return (
     <>
@@ -898,11 +900,11 @@ const SendSheet: React.FC<Props> = ({
                   ) : null}
 
                   {needsAmount ? (
-                    /* Lightning address or on-chain: amount is entered on a dedicated step */
+                    /* Lightning address, on-chain, or amount-less bolt11: amount entered on a dedicated step */
                     <View style={styles.amountSection}>
                       {resolving ? (
                         <ActivityIndicator size="small" color={colors.brandPink} />
-                      ) : lnurlParams || isOnchainAddress ? (
+                      ) : lnurlParams || isOnchainAddress || isAmountlessBolt11 ? (
                         <TouchableOpacity
                           style={styles.amountPickerRow}
                           onPress={() => setStep('amount')}
