@@ -1092,52 +1092,33 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const storedSignerType = await SecureStore.getItemAsync(SIGNER_TYPE_KEY);
         let pk: string | null = null;
 
+        let pendingNsec: string | null = null;
         if (storedSignerType === 'nsec') {
           const storedNsec = await SecureStore.getItemAsync(NSEC_KEY);
           if (storedNsec) {
             pk = nostrService.decodeNsec(storedNsec).pubkey;
-            setPubkey(pk);
-            setSignerType('nsec');
-            setIsLoggedIn(true);
-            // Backfill the registry from the legacy single-account state
-            // for users upgrading from before the multi-account refactor.
-            // `upsertIdentity` is a no-op when this pubkey is already
-            // present.
-            if (!blob.identities.some((i) => i.pubkey === pk)) {
-              const next = await upsertIdentity({
-                pubkey: pk,
-                signerType: 'nsec',
-                nsec: storedNsec,
-                lastUsedAt: Date.now(),
-              });
-              setIdentities(next.identities);
-            }
+            pendingNsec = storedNsec;
           }
         } else if (storedSignerType === 'amber') {
           const storedPubkey = await SecureStore.getItemAsync(PUBKEY_KEY);
           if (storedPubkey) {
             pk = storedPubkey;
-            setPubkey(pk);
-            setSignerType('amber');
-            setIsLoggedIn(true);
-            if (!blob.identities.some((i) => i.pubkey === pk)) {
-              const next = await upsertIdentity({
-                pubkey: pk,
-                signerType: 'amber',
-                lastUsedAt: Date.now(),
-              });
-              setIdentities(next.identities);
-            }
           }
         }
 
         if (!pk) return;
 
-        // One-time per-account storage migration (#288). Self-contained in
-        // `migrateToPerAccountStorage` — runs once, copies legacy global
-        // values to `${base}_${pk}`, sets a flag, and short-circuits on
-        // every subsequent call. Safe to await before the first cache
-        // read because it adds <50 ms to cold start.
+        // One-time per-account storage migration (#288). MUST run before
+        // `setPubkey(pk)` below because `setPubkey` triggers the effect
+        // that calls `setActivePubkeyForWalletStorage(pubkey)` — which
+        // unblocks `awaitActivePubkeyHydrated()` in WalletContext. If
+        // the migration runs AFTER setPubkey, WalletContext can race
+        // ahead and read `wallet_list_${pk}` before the migration has
+        // copied legacy `wallet_list` → `wallet_list_${pk}` (#442
+        // Copilot review). Self-contained in
+        // `migrateToPerAccountStorage`: runs once, copies legacy global
+        // values to `${base}_${pk}`, sets a flag, short-circuits
+        // afterwards. Adds <50 ms to cold start.
         try {
           const result = await migrateToPerAccountStorage(pk);
           if (__DEV__ && !result.alreadyDone) {
@@ -1148,6 +1129,36 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
         } catch (e) {
           console.warn('[Nostr] per-account storage migration failed:', e);
+        }
+
+        // Now safe to publish the pubkey + signer type — WalletContext's
+        // gate will unblock and the per-account `wallet_list_${pk}` is
+        // already populated (whether by migration just above or by an
+        // earlier run that short-circuited).
+        setPubkey(pk);
+        if (storedSignerType === 'nsec') {
+          setSignerType('nsec');
+          setIsLoggedIn(true);
+          if (!blob.identities.some((i) => i.pubkey === pk) && pendingNsec) {
+            const next = await upsertIdentity({
+              pubkey: pk,
+              signerType: 'nsec',
+              nsec: pendingNsec,
+              lastUsedAt: Date.now(),
+            });
+            setIdentities(next.identities);
+          }
+        } else if (storedSignerType === 'amber') {
+          setSignerType('amber');
+          setIsLoggedIn(true);
+          if (!blob.identities.some((i) => i.pubkey === pk)) {
+            const next = await upsertIdentity({
+              pubkey: pk,
+              signerType: 'amber',
+              lastUsedAt: Date.now(),
+            });
+            setIdentities(next.identities);
+          }
         }
 
         // Load cached contacts immediately (no network, <100ms)

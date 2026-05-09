@@ -283,11 +283,25 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setCurrencyState(cur);
         fetchPrice(cur);
 
-        // Check onboarding status
+        // Check onboarding status (independent of wallet-list key —
+        // ONBOARDING_KEY isn't per-account namespaced).
         const onboarded = await walletStorage.isOnboarded();
         setIsOnboarded(onboarded);
 
-        // Migrate legacy single-wallet data
+        // Wait for NostrContext to hydrate its identity BEFORE any
+        // wallet-list read or write. `migrateLegacy`, `getWalletList`,
+        // `saveWalletList` and `initialiseSendThresholdForNewInstall`
+        // all key off `walletStorageService._activePubkey` — running
+        // them while `_activePubkey` is still null would migrate /
+        // read / write against the legacy unsuffixed `wallet_list`
+        // key and then the per-account `wallet_list_${pubkey}` read
+        // below would see different data (#442 Copilot review).
+        // 2 s timeout means a wedged NostrContext still falls
+        // through to legacy-key behaviour matching pre-#288 installs.
+        await walletStorage.awaitActivePubkeyHydrated();
+
+        // Migrate legacy single-wallet data — now safely runs against
+        // the correct per-account key.
         await walletStorage.migrateLegacy();
 
         // Re-check onboarding after migration (migration sets it)
@@ -301,15 +315,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // state signals (wallet_list, onboarding_complete) are stable.
         // Idempotent; short-circuits once initialised (#82 acceptance).
         await initialiseSendThresholdForNewInstall();
-
-        // Wait for NostrContext to hydrate its identity before we read
-        // the wallet list — otherwise `_activePubkey` is still null
-        // here and `getWalletList()` reads the wrong AsyncStorage key
-        // (#442 Copilot review / #461 wallet-leak root cause). 2 s
-        // timeout means a wedged NostrContext doesn't permanently
-        // block wallet UI — caller falls through to whatever
-        // `_activePubkey` happens to be at that moment.
-        await walletStorage.awaitActivePubkeyHydrated();
 
         // Load and reconnect all wallets
         const walletList = await walletStorage.getWalletList();
