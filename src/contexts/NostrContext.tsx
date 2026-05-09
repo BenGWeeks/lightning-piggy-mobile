@@ -41,7 +41,12 @@ import {
   type StoredIdentity,
 } from '../services/identitiesStore';
 import { migrateToPerAccountStorage } from '../services/migrateToPerAccountStorage';
-import { setActivePubkeyForWalletStorage } from '../services/walletStorageService';
+import {
+  setActivePubkeyForWalletStorage,
+  deleteNwcUrl,
+  deleteXpub,
+  deleteMnemonic,
+} from '../services/walletStorageService';
 
 /**
  * Module-level LRU cache for NIP-04 plaintext keyed by event id. Keeps
@@ -1318,6 +1323,32 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // coupling to the active-identity teardown logic (#288).
   const wipeAccountCaches = useCallback(async (loggedOutPubkey: string | null) => {
     if (!loggedOutPubkey) return;
+    // Read the per-account wallet list FIRST so we can delete the
+    // per-wallet secrets that live in SecureStore (NWC URLs, xpubs,
+    // mnemonics) and the per-wallet AsyncStorage tx caches. Without
+    // this, signing out of an identity leaves orphaned credentials
+    // and tx caches under their walletIds — a real privacy concern
+    // on shared devices and what Copilot flagged on #442.
+    const walletListKey = `wallet_list_${loggedOutPubkey}`;
+    let walletIds: string[] = [];
+    try {
+      const json = await AsyncStorage.getItem(walletListKey);
+      if (json) {
+        const list = JSON.parse(json) as Array<{ id: string }>;
+        if (Array.isArray(list)) walletIds = list.map((w) => w.id).filter(Boolean);
+      }
+    } catch {
+      // Corrupted wallet list — nothing we can clean per-wallet,
+      // but the AsyncStorage.multiRemove below still kills the list
+      // entry itself so a future load won't surface it.
+    }
+    // Per-wallet secret cleanup. Each delete is best-effort; an
+    // already-absent key is a no-op in expo-secure-store, so we
+    // can fan out concurrently without sequencing.
+    await Promise.allSettled(
+      walletIds.flatMap((id) => [deleteNwcUrl(id), deleteXpub(id), deleteMnemonic(id)]),
+    );
+
     const toRemove: string[] = [
       // Per-account namespaced caches (#288 storage refactor)
       perAccountKey(CONTACTS_CACHE_KEY_BASE, loggedOutPubkey),
@@ -1336,7 +1367,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       `nostr_group_activity_${loggedOutPubkey}`,
       `nostr_groups_${loggedOutPubkey}`,
       `groups_following_only_${loggedOutPubkey}`,
-      `wallet_list_${loggedOutPubkey}`,
+      walletListKey,
+      // Per-wallet tx caches (AsyncStorage). One key per wallet that
+      // was bound to this identity.
+      ...walletIds.map((id) => `txs_${id}`),
     ];
     const allKeys = await AsyncStorage.getAllKeys();
     const convPrefix = DM_CONV_CACHE_PREFIX + loggedOutPubkey + '_';
