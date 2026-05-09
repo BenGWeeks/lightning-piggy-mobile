@@ -12,8 +12,11 @@
 // in-app DM-link-preview use case those are acceptable — failure mode
 // is "no card", not a crash.
 //
-// Falls back to <title> + first reasonable <img src> when og:title /
-// og:image are absent.
+// Falls back to <title> (whole-doc match) + first reasonable <img src>
+// when og:title / og:image are absent. The <img> fallback only scans
+// the same <head> haystack that the OG sweep did — pages that inline
+// images only in <body> won't get a card image without proper og:image.
+// That matches our test fixture and keeps the parser cheap.
 
 export interface OgMeta {
   title: string | null;
@@ -46,11 +49,26 @@ const ENTITY_MAP: Record<string, string> = {
   '&nbsp;': ' ',
 };
 
+// Unicode codepoints are bounded at U+10FFFF — anything beyond throws
+// a RangeError from String.fromCodePoint. Hostile / malformed HTML can
+// trivially produce numeric entities outside that range (`&#99999999;`
+// etc.), and the OG parser shouldn't crash the message renderer on
+// those. Guard the parsed codepoint and pass the original match
+// through unchanged when out of range.
+function safeFromCodePoint(n: number, original: string): string {
+  if (!Number.isFinite(n) || n < 0 || n > 0x10ffff) return original;
+  try {
+    return String.fromCodePoint(n);
+  } catch {
+    return original;
+  }
+}
+
 function decodeEntities(s: string): string {
   return s
     .replace(/&(?:amp|lt|gt|quot|#39|apos|#x27|nbsp);/gi, (m) => ENTITY_MAP[m.toLowerCase()] ?? m)
-    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(parseInt(n, 10)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)));
+    .replace(/&#(\d+);/g, (m, n) => safeFromCodePoint(parseInt(n, 10), m))
+    .replace(/&#x([0-9a-f]+);/gi, (m, n) => safeFromCodePoint(parseInt(n, 16), m));
 }
 
 // Resolve relative image URLs against the page URL so the rendered

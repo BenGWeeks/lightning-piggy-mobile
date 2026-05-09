@@ -129,8 +129,9 @@ const SecurityScreen: React.FC = () => {
       </View>
       <Text style={sharedAccountStyles.fieldHint}>
         When ON, your phone fetches a preview card (title, image, summary) for any URL shared in a
-        message. This reveals to the URL's host that the link was opened — turn OFF if you'd rather
-        keep that traffic private. Default: ON.
+        message — automatically, as the message renders, even if you never tap it. The fetch tells
+        the URL's host that someone is previewing the page. Turn OFF if you'd rather keep that
+        traffic private. Default: ON.
       </Text>
       <View style={styles.toggleRow}>
         <Text style={styles.optionLabel}>Show link previews</Text>

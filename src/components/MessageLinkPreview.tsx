@@ -53,11 +53,13 @@ const MessageLinkPreview: React.FC<Props> = ({ url, eventId, fromMe = false }) =
   }, []);
 
   // Kick the OG fetch once we know the preference is on. Re-runs if
-  // the URL changes (e.g. message edits — we don't currently support
-  // those, but the dep is correct).
+  // the URL changes — clearing the previous preview synchronously so
+  // the card doesn't briefly render the previous URL's title/image
+  // while the new fetch is in-flight.
   useEffect(() => {
     if (!enabled) return;
     if (isBlocklisted(url)) return;
+    setPreview(null);
     let cancelled = false;
     setLoading(true);
     fetchLinkPreview(url)

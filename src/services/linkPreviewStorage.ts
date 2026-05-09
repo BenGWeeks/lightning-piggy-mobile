@@ -16,9 +16,9 @@ const STORAGE_KEY = 'link_previews_v1';
 
 const TTL_MS = 24 * 60 * 60 * 1000;
 
-// Each entry is bigger than a profile blob (description text + image URL
-// + favicon URL), so cap lower than zapSenderProfile's 500 — 200 keeps
-// the persisted JSON under ~150 KB in the worst case.
+// Each entry is bigger than a profile blob (description text + image
+// URL + site name + domain), so cap lower than zapSenderProfile's 500
+// — 200 keeps the persisted JSON under ~150 KB in the worst case.
 const MAX_ENTRIES = 200;
 
 export interface LinkPreview {
