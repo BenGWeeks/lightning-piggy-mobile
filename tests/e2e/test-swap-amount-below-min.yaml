@@ -59,14 +59,26 @@ name: Boltz reverse swap — amount below minimum surfaces "Minimum is" warning
     timeout: 6000
 
 # Drill into the amount picker. Boltz min/max only populate after
-# getSwapFees resolves, which the previous waitForAnimationToEnd
-# should have covered for a fast network.
+# getSwapFees resolves.
 - tapOn:
     id: 'send-amount-picker'
 - extendedWaitUntil:
     visible:
       id: 'amount-entry-screen'
     timeout: 5000
+
+# Wait for the Boltz min/max range copy to render before typing —
+# AmountEntryScreen only emits the "Minimum is …" warning once
+# `minSats` / `maxSats` are populated from the Boltz fees fetch.
+# Without this gate, a slow network leaves min/max undefined → the
+# warning never fires → false-pass. The range text in
+# AmountEntryScreen renders as "<min> – <max> sats", em-dash from
+# U+2013, so substring-match `.*–.*sats` works regardless of the
+# live numbers.
+- extendedWaitUntil:
+    visible:
+      text: '.*–.*sats'
+    timeout: 12000
 
 # Enter 1,000 sats — well below BOLTZ_MIN_SATS (25,000).
 - tapOn: { id: 'amount-entry-key-1' }

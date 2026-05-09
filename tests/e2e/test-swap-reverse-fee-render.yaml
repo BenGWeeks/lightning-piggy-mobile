@@ -73,14 +73,14 @@ name: Boltz reverse swap — fee summary renders for Lightning → on-chain
     timeout: 1500
 
 # Submit pasted text → SendSheet parses the BIP-21 and triggers the
-# Boltz fee fetch.
+# Boltz fee fetch. Wait for the "Swap fee:" copy itself rather than
+# a fixed-duration sleep so the test rides Boltz's real RTT instead
+# of guessing — slow networks no longer flake here. Copy comes from
+# SendSheet.tsx ~line 987; substring-match because the actual sat
+# number depends on Boltz's server-quoted percentage + lockup.
 - tapOn:
     id: 'send-paste-go'
-- waitForAnimationToEnd:
-    timeout: 6000
-
-# The "Swap fee:" copy comes from SendSheet.tsx ~line 987.
-# Substring-match because the actual sat number depends on Boltz's
-# server-quoted percentage + lockup at fetch time.
-- assertVisible:
-    text: '.*Swap fee:.*sats.*'
+- extendedWaitUntil:
+    visible:
+      text: '.*Swap fee:.*sats.*'
+    timeout: 12000
