@@ -16,8 +16,11 @@ import {
 
 const FETCH_TIMEOUT_MS = 8000;
 // Cap on response size so a hostile page can't OOM us by streaming
-// gigabytes — OG tags live in <head> so 256 KB covers anything sane.
-const MAX_BYTES = 256 * 1024;
+// gigabytes. Empirical floor is 1 MB — YouTube's bloated `<head>`
+// places og:title at byte ~628K, past 256 KB / 512 KB. 1 MB covers
+// YouTube + any other reasonable mainstream site, while still well
+// within the OOM-defence range a phone can absorb on a single fetch.
+const MAX_BYTES = 1024 * 1024;
 // Reasonable desktop-ish UA so badly-configured CDNs serve OG tags
 // rather than mobile-app deep links.
 const USER_AGENT = 'Mozilla/5.0 (compatible; LightningPiggy/1.0; +https://lightningpiggy.com)';
