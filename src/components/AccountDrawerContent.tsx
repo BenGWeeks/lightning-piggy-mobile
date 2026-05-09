@@ -416,7 +416,11 @@ const createStyles = (colors: Palette) =>
       borderColor: colors.divider,
       alignItems: 'center',
       justifyContent: 'center',
-      marginLeft: 'auto',
+      // No marginLeft: 'auto' here — switcherAvatars already absorbs
+      // the available row space via its own auto-margin, pushing both
+      // it and this button to the right as one tight group. A second
+      // auto-margin would split the space evenly, leaving the
+      // switcher avatars marooned mid-row (#442 layout review).
     },
     avatarPlaceholder: {
       backgroundColor: colors.background,
