@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Subflow — add an on-chain hot wallet via mnemonic (clipboard-paste)
 ---
 # Adds an on-chain BIP-84 hot wallet to the AVD by walking the
@@ -24,15 +24,16 @@ name: Subflow — add an on-chain hot wallet via mnemonic (clipboard-paste)
 
 - waitForAnimationToEnd: { timeout: 4000 }
 
-# Swipe the wallet carousel right so the Add-Wallet slot becomes
-# visible. When no wallets exist, the carousel already shows it
-# directly and the swipe is a no-op. Use y: 30%+ to avoid the
-# notification shade at the top (per TROUBLESHOOTING.adoc).
-- swipe:
-    start: 85%, 30%
-    end: 15%, 30%
-    duration: 400
-- waitForAnimationToEnd: { timeout: 1500 }
+# Reach the Add-Wallet card. When 0 wallets exist it's already visible;
+# when N wallets exist it sits N positions to the right in the
+# carousel. `scrollUntilVisible` handles both gracefully and survives
+# any future change to the carousel cell width.
+- scrollUntilVisible:
+    element:
+      id: 'add-wallet-card'
+    direction: RIGHT
+    timeout: 20000
+    speed: 40
 - tapOn: { id: 'add-wallet-card' }
 - waitForAnimationToEnd: { timeout: 2000 }
 

@@ -1,4 +1,4 @@
-appId: com.lightningpiggy.app.dev
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
 name: Add Little Piggy on-chain wallet via clipboard paste
 ---
 # Adds the Little Piggy on-chain wallet (BIP-84 hot, MAESTRO_MNEMONIC_LITTLE
