@@ -494,7 +494,11 @@ Loading 500+ contacts with profiles requires careful optimization:
 - Batches of 50 pubkeys, 3 concurrent batches, 12s timeout per batch
 - 50ms yield between batch rounds for UI responsiveness
 - `onBatch` callback updates UI incrementally as profiles arrive
-- `expo-image` with `cachePolicy="disk"` for profile pictures
+- `expo-image` with `cachePolicy="memory-disk"` for profile pictures (see "Avatar caching convention" below)
+
+=== Avatar caching convention
+
+Every avatar render site (any `<Image>` / `<ExpoImage>` rendering a contact / account / team profile picture) must use `expo-image` with `cachePolicy="memory-disk"`, `recyclingKey={uri}`, and `autoplay={false}`. `memory-disk` keeps the decoded bitmap in memory across renders (no re-fetch on scroll); `recyclingKey` lets FlashList / FlatList reuse the decoded bitmap when a row recycles (no flash of the previous row's avatar); `autoplay={false}` shows the first frame only for animated WebP / GIF avatars (no per-row FrameDecoderExe thread). Audited and standardised across the codebase in issue #477. Banners, splash artwork, course / mission thumbnails, wallet card art, and link-preview thumbnails are deliberately out of scope — they have their own caching needs (or none).
 
 == Image Upload
 

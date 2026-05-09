@@ -5,10 +5,10 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   BackHandler,
-  Image,
   Keyboard,
   Platform,
 } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { Alert } from './BrandedAlert';
 import {
   BottomSheetModal,
@@ -904,7 +904,13 @@ const SendSheet: React.FC<Props> = ({
                 /* Invoice/address detected - show details */
                 <View style={styles.detailsCard}>
                   {activePicture && (
-                    <Image source={{ uri: activePicture }} style={styles.recipientPicture} />
+                    <ExpoImage
+                      source={{ uri: activePicture }}
+                      style={styles.recipientPicture}
+                      cachePolicy="memory-disk"
+                      recyclingKey={activePicture}
+                      autoplay={false}
+                    />
                   )}
                   {decoded?.description ? (
                     <Text style={styles.detailDescription}>{decoded.description}</Text>

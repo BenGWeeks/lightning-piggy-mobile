@@ -269,7 +269,9 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
                 <Image
                   source={{ uri: counterpartyAvatar }}
                   style={styles.avatar}
-                  cachePolicy="disk"
+                  cachePolicy="memory-disk"
+                  recyclingKey={counterpartyAvatar}
+                  autoplay={false}
                   contentFit="cover"
                 />
               ) : (
