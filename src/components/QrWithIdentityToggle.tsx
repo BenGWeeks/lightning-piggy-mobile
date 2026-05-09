@@ -29,15 +29,28 @@ const QrWithIdentityToggle: React.FC<Props> = ({
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const [mode, setMode] = useState<QrMode>(defaultMode);
+  // Clamp the initial mode to 'npub' when no lightning address exists —
+  // otherwise a defaultMode='lightning' caller produces an empty
+  // qrValue and a misleading "Lightning address copied" Toast.
+  const initialMode: QrMode = !lightningAddress ? 'npub' : defaultMode;
+  const [mode, setMode] = useState<QrMode>(initialMode);
 
-  const qrValue = mode === 'npub' ? npub : lightningAddress || '';
+  // The plain identity string (used for the truncated display row)
+  // and the URI-prefixed value used by the QR + Share + Copy paths.
+  // Per NIP-21 the QR / Share encodes `nostr:<npub…>` for the Nostr
+  // identity and `lightning:<lud16>` for the Lightning address so
+  // scans / shared text deep-link correctly into other Nostr / LN
+  // wallets (Damus, Amethyst, Phoenix, etc.). The plain string is
+  // still what we copy to the clipboard since most users expect to
+  // paste a clean npub or address into a profile field.
+  const plainValue = mode === 'npub' ? npub : lightningAddress || '';
+  const qrValue = mode === 'npub' ? `nostr:${npub}` : `lightning:${lightningAddress || ''}`;
   const displayValue =
     mode === 'npub' ? `${npub.slice(0, 16)}...${npub.slice(-8)}` : lightningAddress || '';
   const valueLabel = mode === 'npub' ? 'npub' : 'Lightning address';
 
   const handleCopy = async () => {
-    await Clipboard.setStringAsync(qrValue);
+    await Clipboard.setStringAsync(plainValue);
     Toast.show({
       type: 'success',
       text1: `${valueLabel} copied`,
@@ -48,6 +61,7 @@ const QrWithIdentityToggle: React.FC<Props> = ({
 
   const handleShare = async () => {
     try {
+      // Share the URI-prefixed form so the receiving app can deep-link.
       await Share.share({ message: qrValue });
     } catch {
       // User dismissed the share sheet — no-op.
@@ -81,11 +95,23 @@ const QrWithIdentityToggle: React.FC<Props> = ({
         </View>
       )}
 
-      <View style={styles.qrContainer} testID="profile-qr-image">
+      <View
+        style={styles.qrContainer}
+        testID="profile-qr-image"
+        accessible
+        accessibilityRole="image"
+        accessibilityLabel={`QR code for your ${valueLabel}`}
+      >
         <QRCode value={qrValue} size={200} backgroundColor="#FFFFFF" color="#000000" />
       </View>
 
-      <TouchableOpacity style={styles.valueRow} onPress={handleCopy}>
+      <TouchableOpacity
+        style={styles.valueRow}
+        onPress={handleCopy}
+        accessibilityRole="button"
+        accessibilityLabel={`Copy ${valueLabel}`}
+        testID="profile-qr-value-row"
+      >
         <Text style={styles.valueText} numberOfLines={1}>
           {displayValue}
         </Text>
