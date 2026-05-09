@@ -154,9 +154,9 @@ describe('extractUrls', () => {
     });
 
     it('URL inside parens with surrounding text — paren stripped, URL clean', () => {
-      expect(
-        extractUrls('the source (https://en.wikipedia.org/wiki/Bitcoin) confirms it'),
-      ).toEqual(['https://en.wikipedia.org/wiki/Bitcoin']);
+      expect(extractUrls('the source (https://en.wikipedia.org/wiki/Bitcoin) confirms it')).toEqual(
+        ['https://en.wikipedia.org/wiki/Bitcoin'],
+      );
     });
 
     it('URL with fragment + comma after — comma stripped', () => {
