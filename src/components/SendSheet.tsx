@@ -548,6 +548,17 @@ const SendSheet: React.FC<Props> = ({
           setSending(false);
           return;
         }
+        // Guard against `currentSats * 1000` exceeding Number.MAX_SAFE_INTEGER
+        // (~9e15) and silently losing precision when computing msats.
+        // 9e12 sats is far above any practical Lightning payment
+        // (~0.5 BTC HTLC ceiling = 5e7 sats) so this is purely a
+        // defensive bound, not a UX limitation.
+        const MAX_SAFE_SATS = Math.floor(Number.MAX_SAFE_INTEGER / 1000);
+        if (isAmountlessBolt11 && currentSats > MAX_SAFE_SATS) {
+          Alert.alert('Error', 'Amount too large.');
+          setSending(false);
+          return;
+        }
         await payInvoiceForWallet(walletId!, invoiceData, {
           signal,
           onReplyTimeout: handleReplyTimeout,

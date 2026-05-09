@@ -34,9 +34,8 @@ name: WhatsApp-style Attach Panel Swap Test
 # Run:
 #   source .env
 #   maestro --device emulator-5554 test \
-#     -e BIG_PIGGY_NSEC="$MAESTRO_NSEC_LITTLE" \
+#     -e BIG_PIGGY_NSEC="$MAESTRO_NSEC_BIG" \
 #     -e LITTLE_PIGGY_NAME='Little Piggy' \
-#     -e MAESTRO_NSEC_BIG="$MAESTRO_NSEC_BIG" \
 #     tests/e2e/test-attach-panel-swap.yaml
 
 - launchApp:

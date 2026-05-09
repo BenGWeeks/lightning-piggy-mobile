@@ -4,11 +4,15 @@
 // Why persist this rather than re-polling lookupInvoice on every mount?
 // Settled is a terminal state — once an invoice is paid it can't flip
 // back, so caching the positive result lets cold starts render the
-// "Paid" badge immediately without an NWC round-trip. Negative
-// (`settled: false`) entries are kept too, with a TTL, so a quick
-// bubble re-mount inside the TTL window doesn't cause redundant
-// lookupInvoice calls. Past the TTL the cache is treated as absent and
-// the caller should re-fetch.
+// "Paid" badge immediately without an NWC round-trip.
+//
+// Negative (`settled: false`) entries are still recorded with a TTL,
+// for two reasons: (1) future poll-suppression (read paths could
+// short-circuit re-polling within the TTL window — `get()` already
+// returns them) and (2) bookkeeping for debug. Today's only consumer,
+// `usePaidInvoiceTracker.ts`, hydrates *settled-only* via `getMany`;
+// the negatives sit unused in storage. Wire them into the polling
+// decision when the perf cost of re-polling matters; not yet.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STORAGE_KEY = 'bolt11_settlement_v1';
@@ -30,16 +34,31 @@ export interface SettlementEntry {
 type CacheShape = Record<string, SettlementEntry>;
 
 let memoryCache: CacheShape | null = null;
+// Concurrent callers (e.g. several `record()` fired in quick succession
+// while memoryCache is still null) would each await AsyncStorage and
+// race to assign `memoryCache` — a later resolver could overwrite an
+// already-mutated cache and effectively drop earlier writes until the
+// next persist. Memoise the in-flight load so all racers wait on the
+// same promise.
+let loadPromise: Promise<CacheShape> | null = null;
 
 async function load(): Promise<CacheShape> {
   if (memoryCache) return memoryCache;
+  if (loadPromise) return loadPromise;
+  loadPromise = (async () => {
+    try {
+      const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      memoryCache = raw ? (JSON.parse(raw) as CacheShape) : {};
+    } catch {
+      memoryCache = {};
+    }
+    return memoryCache;
+  })();
   try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
-    memoryCache = raw ? (JSON.parse(raw) as CacheShape) : {};
-  } catch {
-    memoryCache = {};
+    return await loadPromise;
+  } finally {
+    loadPromise = null;
   }
-  return memoryCache;
 }
 
 async function persist(cache: CacheShape): Promise<void> {

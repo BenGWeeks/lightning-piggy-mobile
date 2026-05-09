@@ -403,6 +403,15 @@ async function sendPaymentWithTimeout(
   // if a future SDK update removes it, fall back to the public sendPayment.
   const client = provider.client as unknown as Nip47Internals | undefined;
   if (!client || typeof client.executeNip47Request !== 'function') {
+    // The public `provider.sendPayment(bolt11)` doesn't accept the
+    // optional msats param NIP-47 defines for zero-amount invoices,
+    // so we'd silently send a bolt11-amount-of-0 if we let this path
+    // through. Fail loudly instead — caller can surface the error.
+    if (amountMsats && amountMsats > 0) {
+      throw new Error(
+        'Amount-less bolt11 requires NIP-47 `amount` param — SDK fallback path does not support it',
+      );
+    }
     if (__DEV__)
       console.warn(
         '[NWC] executeNip47Request unavailable — falling back to public sendPayment (no per-call timeout)',
