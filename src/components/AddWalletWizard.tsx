@@ -464,9 +464,32 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                   testID="xpub-input"
                   accessibilityLabel="Extended public key or address input"
                 />
-                <TouchableOpacity style={styles.secondaryButton} onPress={handleScan}>
-                  <Text style={styles.secondaryButtonText}>Scan QR Code</Text>
-                </TouchableOpacity>
+                <View style={styles.secondaryButtonRow}>
+                  <TouchableOpacity
+                    style={[styles.secondaryButton, styles.secondaryButtonHalf]}
+                    onPress={handleScan}
+                    accessibilityLabel="Scan QR Code"
+                    testID="wizard-xpub-scan"
+                  >
+                    <QrCode size={18} color={colors.textBody} strokeWidth={2} />
+                    <Text style={styles.secondaryButtonText}>Scan QR</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.secondaryButton, styles.secondaryButtonHalf]}
+                    onPress={async () => {
+                      const text = await Clipboard.getStringAsync();
+                      if (text) {
+                        setXpub(text.trim());
+                        setError(null);
+                      }
+                    }}
+                    accessibilityLabel="Paste xpub from clipboard"
+                    testID="wizard-xpub-paste"
+                  >
+                    <ClipboardPaste size={18} color={colors.textBody} strokeWidth={2} />
+                    <Text style={styles.secondaryButtonText}>Paste</Text>
+                  </TouchableOpacity>
+                </View>
                 {error && <Text style={styles.errorText}>{error}</Text>}
                 <View style={styles.buttonRow}>
                   <TouchableOpacity
@@ -512,6 +535,21 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
               testID="mnemonic-input"
               accessibilityLabel="Seed phrase input"
             />
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={async () => {
+                const text = await Clipboard.getStringAsync();
+                if (text) {
+                  setMnemonicInput(text.trim());
+                  setError(null);
+                }
+              }}
+              accessibilityLabel="Paste seed phrase from clipboard"
+              testID="wizard-mnemonic-paste"
+            >
+              <ClipboardPaste size={18} color={colors.textBody} strokeWidth={2} />
+              <Text style={styles.secondaryButtonText}>Paste</Text>
+            </TouchableOpacity>
             {error && <Text style={styles.errorText}>{error}</Text>}
             <View style={styles.buttonRow}>
               <TouchableOpacity
