@@ -11,6 +11,7 @@ import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nwcService from '../services/nwcService';
 import * as nostrService from '../services/nostrService';
+import { initialiseSendThresholdForNewInstall } from '../services/sendThresholdService';
 import * as lnurlService from '../services/lnurlService';
 import * as zapCounterpartyStorage from '../services/zapCounterpartyStorage';
 import * as zapSenderProfileStorage from '../services/zapSenderProfileStorage';
@@ -295,6 +296,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           setIsOnboarded(onboardedAfterMigration);
         }
 
+        // Distinguish new-install vs upgrade for the high-value-send
+        // confirmation default — runs after migrateLegacy so the install-
+        // state signals (wallet_list, onboarding_complete) are stable.
+        // Idempotent; short-circuits once initialised (#82 acceptance).
+        await initialiseSendThresholdForNewInstall();
+
         // Wait for NostrContext to hydrate its identity before we read
         // the wallet list — otherwise `_activePubkey` is still null
         // here and `getWalletList()` reads the wrong AsyncStorage key
@@ -303,6 +310,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // block wallet UI — caller falls through to whatever
         // `_activePubkey` happens to be at that moment.
         await walletStorage.awaitActivePubkeyHydrated();
+
         // Load and reconnect all wallets
         const walletList = await walletStorage.getWalletList();
         const walletStates: WalletState[] = await Promise.all(

@@ -25,6 +25,7 @@ import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createTransferSheetStyles } from '../styles/TransferSheet.styles';
 import { satsToFiatString } from '../services/fiatService';
+import { getSendThreshold, shouldConfirmSend } from '../services/sendThresholdService';
 import { WalletState } from '../types/wallet';
 import * as onchainService from '../services/onchainService';
 import * as boltzService from '../services/boltzService';
@@ -353,6 +354,28 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         );
         return;
       }
+    }
+
+    // High-value confirmation gate (issue #82). Mirrors SendSheet's check
+    // so a fat-fingered transfer above the user's threshold gets one
+    // explicit "are you sure?" before we fire the swap / payment chain.
+    // Run after fee/min/max validation so the prompt never appears for
+    // an amount that would have been rejected anyway.
+    const threshold = await getSendThreshold();
+    if (shouldConfirmSend(currentSats, threshold)) {
+      const fiat =
+        btcPrice !== null ? ` (${satsToFiatString(currentSats, btcPrice, currency)})` : '';
+      const confirmed = await new Promise<boolean>((resolve) => {
+        Alert.alert(
+          'Confirm large transfer',
+          `You're about to transfer ${currentSats.toLocaleString()} sats${fiat} from ${source.alias} to ${dest.alias}. Tap Confirm to proceed.`,
+          [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Confirm', onPress: () => resolve(true) },
+          ],
+        );
+      });
+      if (!confirmed) return;
     }
 
     setSending(true);

@@ -2,7 +2,7 @@ appId: com.lightningpiggy.app.dev
 name: 3-way group chat — Big Piggy creates "Triad"
 ---
 # Phase 1 of the 3-way group-chat test (PR #227). Logs in as Big Piggy
-# (MAESTRO_NSEC), navigates to the Friends tab → Groups → New Group,
+# (MAESTRO_NSEC_BIG), navigates to the Friends tab → Groups → New Group,
 # selects Little Piggy + Middle Piggy, names the group "Triad", sends
 # "hi from big" into the thread, then signs out so the next phase can
 # log in as Middle Piggy.

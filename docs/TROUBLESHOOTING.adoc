@@ -87,6 +87,19 @@ Empty output = nothing in flight; positive output shows projects ahead of you in
 *Why this matters:* GH-Release-driven iOS builds go to TestFlight after EAS finishes + Apple processes (~10 min). For a same-day TestFlight push, kick off in the morning. For a v1.X.Y-rc1 cycle, plan ~3-4 hours from tag-push to "installable in TestFlight". +
 *The only definitive number* is the queue position EAS prints once your build is submitted. Until then, all numbers are estimates from prior runs.
 
+| Release workflow fails on iOS with "Provisioning profile … doesn't include the NFC Tag Reading capability" / "doesn't include the com.apple.developer.nfc.readersession.formats entitlement"
+| Symptom from the failing GH Actions log: `🍏 iOS build failed: The "Run fastlane" step failed because of an error in the Xcode build process` followed by the entitlement-missing lines. Hit by `v1.0.0-rc2` and `v1.0.1-rc1` releases. +
+*Why:* The iOS provisioning profile currently in EAS's credentials store predates the NFC scan/write feature added in PRs #48 / #49. Xcode cross-checks the entitlements written into the build (e.g. `com.apple.developer.nfc.readersession.formats`) against what the profile permits at signing time. The profile doesn't list NFC Tag Reading → build refuses to sign. Only *entitlement-bearing* config-plugins trigger this — in this repo `plugins/withNfc.js` is the only one. Permission-only plugins (`expo-image-picker`, `expo-contacts`, `expo-location`) just add Info.plist usage strings and don't require a profile refresh. +
+*Fix (interactive, ~5 min):* +
+1. Sign in to https://developer.apple.com/account/resources/identifiers (Apple Developer Portal). +
+2. Find Identifier `com.lightningpiggy.app` → tap **Edit** → scroll to capabilities → enable **NFC Tag Reading** (and any other capabilities later added in `app.config.ts` plugins). Save. +
+3. Go to **Profiles** → find the production profile (the one EAS auto-created, named like `*[expo] com.lightningpiggy.app AppStore <date>`) → tap **Edit** → it'll auto-pull the new capability → save → **Download** the regenerated profile (you don't need to install it locally). +
+4. From the local repo: `eas credentials --platform ios` → select the production profile slot → choose to **delete the existing profile and re-fetch from Apple** so EAS picks up the new one. +
+5. Re-run the failed release: GH Actions → Release workflow → **Run workflow** → select platform `ios` → tag `v1.0.1-rc1` (or whatever's blocked). +
+*Prevention:* Whenever you add an *entitlement-bearing* config-plugin to `app.config.ts` (NFC, push notifications, App Groups, Background Modes, etc. — the ones whose plugin actually writes to the iOS entitlements file), regenerate the iOS profile **before** cutting the next release. Permission-string-only plugins (location, contacts, camera/photos) don't require this. The Deployment Checklist in `docs/DEPLOYMENT.adoc` calls this out as a pre-release step.
+
+*Re-running the release after fixing:* Note that GH Actions → Release workflow → **Run workflow** (`workflow_dispatch`) skips the tag-driven version-rewrite step in `release.yml`. Re-running this way against a stale `app.config.ts` (current default `version: '1.0.0'`) can produce a build whose user-visible version doesn't match the intended release tag. Safer paths: re-trigger the original `release` event (re-create or move the tag), or manually update `app.config.ts` `version` before the manual run.
+
 | Maestro can't tap a third-party signer's FAB / button (Aegis, Clave, etc) — `Element not found` or silent no-op
 | Some signer apps (notably Aegis ≥0.5.0, possibly Clave) ship without accessibility labels on key UI elements like the "+" FAB to add a connection. Maestro's `tapOn: { id: ... }` and `tapOn: { text: ... }` both miss because there's nothing to match. The `index:` selector also ranks unpredictably for un-labelled `ImageView` clickables. +
 *Why coordinates aren't a workaround:* `point: '90%, 91%'` and `adb shell input tap` are forbidden by the project's CLAUDE.md (fragile across screen sizes / OS versions / device profiles). +
@@ -458,6 +471,9 @@ QT_QPA_PLATFORM=xcb $ANDROID_HOME/emulator/emulator \
 *Don't waste time on these false leads first:* (a) `adb reboot` won't help — the corrupt overlay is what re-mounts on every boot. (b) Switching GPU mode won't help — the GPU init phase succeeds; the failure is in Android userspace boot. (c) Increasing AVD RAM won't help — `system_server` isn't OOM, it's hanging on the corrupt overlay. (d) Re-running `expo prebuild` won't help — this is an emulator state issue, not an app build issue. +
 *Verify clean boot:* `adb -s emulator-5554 shell getprop sys.boot_completed` returns `1` (with a stable trailing newline) and `adb devices` shows `device` (not `offline`) consistently for >30 s. UI rendering should be smooth — if you see frame stutters and a `Process system isn't responding` dialog, you're probably on `swiftshader_indirect` (software GL) and need to re-launch with `-gpu host` now that the overlay is clean.
 
+| iOS TestFlight upload fails with "Invalid entitlement for core nfc framework... 'NDEF is disallowed'" / "'TAG is missing in the entitlement'"
+| `plugins/withNfc.js` was injecting `com.apple.developer.nfc.readersession.formats = ['NDEF']`, which Apple's at-upload validator started rejecting on iOS SDK >=26 (deployment target 15.1+). The fix is `['TAG']`. NFCTagReaderSession can read/write NDEF via `Tag.queryNDEFStatus()`, and react-native-nfc-manager routes `NfcTech.Ndef` calls through the TAG session under the hood, so `writeNdefMessage()` keeps working unchanged. Symptoms appear ONLY at upload time (build itself succeeds, fastlane pilot fails with `STATE_ERROR.VALIDATION_ERROR (409)`). Distinguish from the *separate* "Provisioning profile doesn't include the NFC Tag Reading capability" error — that one needs the App ID capability toggled in Apple Developer Portal + provisioning profile regenerated; this one is the entitlement *value* in the .ipa.
+
 | Maestro triple-tap (e.g. version label to enable dev mode) silently fails on API 36 emulator
 | Maestro's official supported ceiling is API 34 — three sequential `tapOn` calls on an API 36 image take >1 s end-to-end, exceeding the 1-second window in `handleVersionTap` (and similar in-app tap-counter handlers like add-wallet hot wallet unlock). Symptom: 3 `tapOn`s complete cleanly per Maestro logs but the dev-mode alert never appears. The same flow can also be defeated by an API 36 PackageManager bug that breaks RN dev builds (`Activity class does not exist` on `am start`) — independent of installer attribution, install path, or `adb reboot`. +
 *Fix:* Run E2E + dev work on **API 34**, **`google_apis`** image (NOT `google_play` — saves ~300 MB RAM + the GMS daemons that thrash `system_server`), **`Medium Phone`** device profile (Pixel 9a / Pixel 10 device profiles have a known input-swallowing bug on Linux/macOS/Windows). Bump RAM + heap before first boot so `system_server` doesn't crash under a 150 MB+ RN dev APK install: +
@@ -552,4 +568,43 @@ actually cancel the LN HTLC — once the payment is on a route the sender cannot
 stop it. Tapping "Cancel" only stops the UI from waiting; the HTLC continues,
 and the recipient may be paid minutes later. The button is being relabelled to
 "Continue in background".
+
+| Wireless ADB IP shown on the phone is unreachable (`adb connect` hangs / 100% packet loss)
+| The IP shown in Settings → Developer options → Wireless debugging is whatever
+the phone reports for its currently-active default network, which is the **VPN
+tunnel address** when a VPN is connected (e.g. `10.2.0.2` from a corporate /
+self-hosted VPN). That address only routes inside the VPN; from a peer machine
+on the home Wi-Fi (`192.168.1.x`) there's no path to it. +
+*Symptoms:* `adb connect 10.x.y.z:NNNNN` hangs ~30 s then fails silently, or
+`ping` returns 100% packet loss. The Pixel's developer options page keeps
+showing the VPN address even after toggling Wi-Fi off and on. +
+*Fix:* Toggle the VPN OFF on the phone, **then** re-open Wireless debugging —
+the page will refresh with the home-Wi-Fi address (`192.168.1.x`). The port
+also changes on every wireless-debugging restart, so always re-read both
+fields. Re-pair if the host hasn't paired before. +
+*Verify reachability before `adb connect`:* `ping -c 2 -W 2 <ip>` from the
+host. If that returns `100% packet loss`, the address isn't routable —
+fastest fallback is USB cable (`adb devices` shows the USB serial like
+`37111FDJH0067B`).
+
+| Pixel screen locks mid-deploy / mid-perf-suite, breaking install or Maestro
+| `adb install` after the build prompts in dev settings (the user has to
+re-tap "Allow" if the screen has slept), and `dumpsys gfxinfo` returns zeros
+when the surface isn't being painted. Maestro flows tap real UI so the screen
+must be unlocked + interactive. Default Android lockscreen kicks in at 30 s –
+2 min idle. +
+*Fix (per-session, not persisted across reboot):*
+[source,bash]
+----
+# Keep the screen on regardless of charging state for as long as adb is connected.
+# Reverts on next reboot, or call again with `false` when done.
+adb shell svc power stayon true
+----
+Or: Settings → System → Developer options → "Stay awake" — keeps the screen
+on while charging, persists across reboot. Pair with USB / charger so you can
+walk away. +
+*Combo for hands-off deploy + perf:* USB cable + `adb shell svc power stayon
+true` + Settings → "Don't lock when on this network" disabled (default), and
+the phone won't auto-lock for the duration of the build (~20 min) and the
+follow-on perf-suite (~3 min).
 |===

@@ -197,20 +197,14 @@ const HomeScreen: React.FC = () => {
   const isOnchainWallet = activeWallet?.walletType === 'onchain';
   const isWatchOnly = isOnchainWallet && activeWallet?.onchainImportMethod !== 'mnemonic';
   // Don't gate Send/Receive on the transient `isConnected` flag: post-PR-D
-  // NWC wallets land in state with `isConnected: false` and flip true in
-  // background, so gating here would dead-lock the buttons for the 2-14 s
-  // enable() window, or indefinitely if the WebSocket blips. `pay` /
-  // `makeInvoice` auto-await the in-flight connect, so "in state" is
-  // enough.
-  const hasActiveConnection = !!activeWallet;
-  const canSend = hasActiveConnection && !isWatchOnly;
-  // Transfer requires at least 1 wallet that can send + 1 other wallet.
-  // `isSendableWallet` mirrors the per-wallet rule used by `canSend`
-  // above — in particular it does NOT gate NWC wallets on the
-  // transient `isConnected` flag, which was the root cause of #199 /
-  // #302 where Transfer stayed greyed out while Send worked fine.
-  const hasSendableWallet = wallets.some(isSendableWallet);
-  const canTransfer = hasSendableWallet && wallets.length >= 2;
+  // The previous `hasActiveConnection`, `canSend`, `canTransfer`
+  // gates were inlined into the `is*Disabled` constants below — see
+  // #474. They required an in-state activeWallet (i.e. a populated
+  // wallet list, not necessarily a completed NWC handshake) and a
+  // sendable wallet for transfer. We now gate on wallet count alone
+  // since the bottom sheets handle their own connection-loading
+  // states; blocking the BUTTON tap during the NWC handshake left
+  // the app feeling locked.
 
   // Cold-start gating: until the WalletContext finishes its initial
   // AsyncStorage read, `wallets` is `[]` and `activeWallet` is `null` —
@@ -225,9 +219,15 @@ const HomeScreen: React.FC = () => {
   // matches interactivity. During hydration both come out `false` so
   // the buttons render neutral AND remain tappable; the receive sheet
   // / transfer flow handles "wallets not loaded yet" gracefully.
-  const isReceiveDisabled = walletsHydrated && !hasActiveConnection;
-  const isTransferDisabled = walletsHydrated && !canTransfer;
-  const isSendDisabled = walletsHydrated && !canSend;
+  // Disable each button only when the user has no wallet to act on —
+  // not while NWC connections are still handshaking. The bottom
+  // sheets handle their own loading states; gating the BUTTON on
+  // `hasActiveConnection` left taps un-feedback-able for the 1-3 s
+  // cold-start window while NWC handshakes complete (#474).
+  const isReceiveDisabled = walletsHydrated && wallets.length === 0;
+  const isSendDisabled = walletsHydrated && wallets.length === 0;
+  // Transfer needs at least two wallets (a source + destination).
+  const isTransferDisabled = walletsHydrated && wallets.length < 2;
 
   return (
     <View style={styles.container}>

@@ -23,7 +23,7 @@ name: NFC write sheet opens from Profile + ContactProfile
 # breakage on devices where NFC IS available.
 #
 # Pre-reqs:
-#  - .env contains MAESTRO_NSEC
+#  - .env contains MAESTRO_NSEC_BIG
 #  - Signed-in account has at least one followed friend whose pubkey
 #    starts with the prefix passed via MEMBER_PUBKEY_PREFIX (defaults
 #    to Little Piggy's prefix from the existing 3-way fixture)
@@ -33,7 +33,7 @@ name: NFC write sheet opens from Profile + ContactProfile
 #
 # Run:
 #   source .env && maestro --device emulator-5554 test \
-#     -e MAESTRO_NSEC=$MAESTRO_NSEC \
+#     -e MAESTRO_NSEC_BIG=$MAESTRO_NSEC_BIG \
 #     -e MEMBER_PUBKEY_PREFIX=d9b33280ba73 \
 #     tests/e2e/test-nfc-write-sheet.yaml
 

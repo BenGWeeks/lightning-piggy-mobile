@@ -1,5 +1,5 @@
 appId: com.lightningpiggy.app.dev
-name: Internal — login as the nsec passed via MAESTRO_NSEC
+name: Internal — login as the nsec passed via MAESTRO_NSEC_BIG
 ---
 # Like test-login-dev.yaml but with no hardcoded "Ben" post-login
 # assertion (Big/Middle/Little Piggy share the same login flow but
@@ -69,7 +69,7 @@ name: Internal — login as the nsec passed via MAESTRO_NSEC
 # capture. The login-button tap dismisses the IME on its own.
 - tapOn:
     id: 'nsec-input'
-- inputText: ${MAESTRO_NSEC}
+- inputText: ${MAESTRO_NSEC_BIG}
 - waitForAnimationToEnd:
     timeout: 1500
 
