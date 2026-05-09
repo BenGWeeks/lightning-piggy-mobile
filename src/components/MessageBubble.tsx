@@ -22,6 +22,9 @@ import {
   formatRelativeFuture,
 } from '../utils/messageContent';
 import { isSupportedImageUrl } from '../utils/imageUrl';
+import { extractUrls } from '../utils/extractUrls';
+import { isBlocklisted } from '../services/linkPreviewBlocklist';
+import MessageLinkPreview from './MessageLinkPreview';
 
 interface Props {
   // Identifying fields used for testID stability and parent diffing.
@@ -398,12 +401,23 @@ const MessageBubble: React.FC<Props> = ({
     );
   }
 
-  // Plain text fallback — no rich content detected.
+  // Plain text fallback — no rich content detected. Cap link previews
+  // at 1 per message: first non-blocklisted URL wins. Any other URLs in
+  // the body remain clickable as plain text via OS link recognition.
+  const previewUrl = (() => {
+    const urls = extractUrls(text);
+    for (const u of urls) {
+      if (!isBlocklisted(u)) return u;
+    }
+    return null;
+  })();
+
   return (
     <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
       <View style={[styles.bubble, fromMe ? styles.bubbleMe : styles.bubbleThem]}>
         {SenderLabel}
         <Text style={[styles.bubbleText, fromMe && styles.bubbleTextMe]}>{text}</Text>
+        {previewUrl ? <MessageLinkPreview url={previewUrl} eventId={id} fromMe={fromMe} /> : null}
         <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
           {formatTime(createdAt)}
         </Text>

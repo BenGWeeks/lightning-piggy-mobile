@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
-import { Check, ShieldCheck } from 'lucide-react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Switch } from 'react-native';
+import { Check, ShieldCheck, Link2 } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
 import { createSharedAccountStyles } from './sharedStyles';
 import { useThemeColors } from '../../contexts/ThemeContext';
@@ -10,6 +10,7 @@ import {
   getSendThreshold,
   setSendThreshold,
 } from '../../services/sendThresholdService';
+import { getLinkPreviewEnabled, setLinkPreviewEnabled } from '../../services/linkPreviewPreference';
 
 // Preset thresholds for the radio rows (sats). `null` = "Off".
 const PRESETS: { value: number | null; label: string; sublabel: string }[] = [
@@ -31,6 +32,7 @@ const SecurityScreen: React.FC = () => {
     DEFAULT_HIGH_VALUE_SEND_THRESHOLD_SATS,
   );
   const [customDraft, setCustomDraft] = useState<string>('');
+  const [linkPreviewOn, setLinkPreviewOn] = useState<boolean>(true);
 
   useEffect(() => {
     getSendThreshold().then((t) => {
@@ -39,7 +41,13 @@ const SecurityScreen: React.FC = () => {
       const isPreset = PRESETS.some((p) => p.value === t);
       if (!isPreset && t !== null) setCustomDraft(String(t));
     });
+    getLinkPreviewEnabled().then(setLinkPreviewOn);
   }, []);
+
+  const handleToggleLinkPreview = async (next: boolean) => {
+    setLinkPreviewOn(next);
+    await setLinkPreviewEnabled(next);
+  };
 
   const handlePickPreset = async (value: number | null) => {
     setThresholdState(value);
@@ -112,6 +120,29 @@ const SecurityScreen: React.FC = () => {
           {customActive && <Check size={18} color={colors.brandPink} />}
         </View>
       </View>
+
+      <View style={[styles.headerRow, styles.sectionGap]}>
+        <Link2 size={22} color={colors.brandPink} />
+        <Text style={[sharedAccountStyles.sectionLabel, styles.headerLabel]}>
+          Link previews in messages
+        </Text>
+      </View>
+      <Text style={sharedAccountStyles.fieldHint}>
+        When ON, your phone fetches a preview card (title, image, summary) for any URL shared in a
+        message — automatically, as the message renders, even if you never tap it. The fetch tells
+        the URL's host that someone is previewing the page. Turn OFF if you'd rather keep that
+        traffic private. Default: ON.
+      </Text>
+      <View style={styles.toggleRow}>
+        <Text style={styles.optionLabel}>Show link previews</Text>
+        <Switch
+          value={linkPreviewOn}
+          onValueChange={handleToggleLinkPreview}
+          accessibilityLabel="Show link previews in messages"
+          testID="security-link-preview-toggle"
+          trackColor={{ false: colors.divider, true: colors.brandPink }}
+        />
+      </View>
     </AccountScreenLayout>
   );
 };
@@ -126,6 +157,9 @@ const createStyles = (colors: Palette) =>
     },
     headerLabel: {
       marginBottom: 0,
+    },
+    sectionGap: {
+      marginTop: 24,
     },
     optionList: {
       marginTop: 16,
@@ -181,6 +215,18 @@ const createStyles = (colors: Palette) =>
       fontSize: 13,
       color: colors.textSupplementary,
       fontWeight: '500',
+    },
+    toggleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.divider,
+      backgroundColor: colors.surface,
+      marginTop: 8,
     },
   });
 
