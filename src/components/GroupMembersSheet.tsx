@@ -72,18 +72,24 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMembe
   const members: MemberRow[] = useMemo(() => {
     if (!group) return [];
     const byPubkey = new Map(contacts.map((c) => [c.pubkey, c]));
-    const others: MemberRow[] = group.memberPubkeys.map((pk) => {
-      const c = byPubkey.get(pk);
-      return {
-        pubkey: pk,
-        name:
-          c?.profile?.displayName ||
-          c?.profile?.name ||
-          c?.petname ||
-          `${pk.slice(0, 8)}…${pk.slice(-4)}`,
-        picture: c?.profile?.picture ?? null,
-      };
-    });
+    // Dedupe against self (case-insensitive) before mapping so a
+    // legacy memberPubkeys list that already includes the viewer
+    // doesn't produce a double "· you" row + miscount.
+    const selfLower = selfPubkey?.toLowerCase();
+    const others: MemberRow[] = group.memberPubkeys
+      .filter((pk) => !selfLower || pk.toLowerCase() !== selfLower)
+      .map((pk) => {
+        const c = byPubkey.get(pk);
+        return {
+          pubkey: pk,
+          name:
+            c?.profile?.displayName ||
+            c?.profile?.name ||
+            c?.petname ||
+            `${pk.slice(0, 8)}…${pk.slice(-4)}`,
+          picture: c?.profile?.picture ?? null,
+        };
+      });
     if (!selfPubkey) return others;
     const selfRow: MemberRow = {
       pubkey: selfPubkey,

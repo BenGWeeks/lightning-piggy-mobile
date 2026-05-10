@@ -194,18 +194,25 @@ const GroupConversationScreen: React.FC = () => {
   const members: MemberRow[] = useMemo(() => {
     if (!group) return [];
     const byPubkey = new Map(contacts.map((c) => [c.pubkey, c]));
-    const others: MemberRow[] = group.memberPubkeys.map((pk) => {
-      const c = byPubkey.get(pk);
-      return {
-        pubkey: pk,
-        name:
-          c?.profile?.displayName ||
-          c?.profile?.name ||
-          c?.petname ||
-          `${pk.slice(0, 8)}...${pk.slice(-4)}`,
-        picture: c?.profile?.picture ?? null,
-      };
-    });
+    // Dedupe against self (case-insensitive) before mapping. Defends
+    // against legacy / accidentally-self-included memberPubkeys lists
+    // that would otherwise produce a double "You" row + an off-by-one
+    // header count.
+    const myLower = myPubkey?.toLowerCase();
+    const others: MemberRow[] = group.memberPubkeys
+      .filter((pk) => !myLower || pk.toLowerCase() !== myLower)
+      .map((pk) => {
+        const c = byPubkey.get(pk);
+        return {
+          pubkey: pk,
+          name:
+            c?.profile?.displayName ||
+            c?.profile?.name ||
+            c?.petname ||
+            `${pk.slice(0, 8)}...${pk.slice(-4)}`,
+          picture: c?.profile?.picture ?? null,
+        };
+      });
     if (!myPubkey) return others;
     const selfRow: MemberRow = {
       pubkey: myPubkey,
