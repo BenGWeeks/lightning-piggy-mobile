@@ -11,6 +11,7 @@ import {
   Link as LinkIcon,
   Coins,
   Palette as PaletteIcon,
+  Bell,
   ShieldCheck,
   Info,
   LogOut,
@@ -76,6 +77,12 @@ const buildSectionRows = (colors: Palette): SectionRow[] => [
     label: 'Appearance',
     icon: <PaletteIcon size={22} color={colors.textBody} />,
     testID: 'drawer-row-appearance',
+  },
+  {
+    name: 'AccountNearby',
+    label: 'Nearby merchants',
+    icon: <Bell size={22} color={colors.textBody} />,
+    testID: 'drawer-row-nearby',
   },
   {
     name: 'AccountSecurity',

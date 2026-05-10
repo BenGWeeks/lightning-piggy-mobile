@@ -33,6 +33,7 @@ import NostrScreen from '../screens/account/NostrScreen';
 import OnChainScreen from '../screens/account/OnChainScreen';
 import DisplayScreen from '../screens/account/DisplayScreen';
 import AppearanceScreen from '../screens/account/AppearanceScreen';
+import NearbyScreen from '../screens/account/NearbyScreen';
 import SecurityScreen from '../screens/account/SecurityScreen';
 import AboutScreen from '../screens/account/AboutScreen';
 import AccountDrawerContent from '../components/AccountDrawerContent';
@@ -158,6 +159,7 @@ function MainDrawer() {
       <AccountDrawer.Screen name="AccountOnChain" component={OnChainScreen} />
       <AccountDrawer.Screen name="AccountDisplay" component={DisplayScreen} />
       <AccountDrawer.Screen name="AccountAppearance" component={AppearanceScreen} />
+      <AccountDrawer.Screen name="AccountNearby" component={NearbyScreen} />
       <AccountDrawer.Screen name="AccountSecurity" component={SecurityScreen} />
       <AccountDrawer.Screen name="AccountAbout" component={AboutScreen} />
     </AccountDrawer.Navigator>
