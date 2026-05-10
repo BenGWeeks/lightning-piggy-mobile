@@ -1,5 +1,6 @@
 import { bech32 } from 'bech32';
 import {
+  claimLnurlWithdraw,
   decodeLnurlWithdraw,
   LnurlWithdrawError,
   msatToSats,
@@ -107,5 +108,75 @@ describe('msatToSats', () => {
     expect(msatToSats(1_000)).toBe(1);
     expect(msatToSats(21_500)).toBe(21);
     expect(msatToSats(1_000_000)).toBe(1_000);
+  });
+});
+
+describe('claimLnurlWithdraw', () => {
+  const params = {
+    callback: 'https://example.com/cb',
+    k1: 'deadbeef',
+    defaultDescription: 'Geo-Cache 1',
+    minWithdrawable: 21_000,
+    maxWithdrawable: 21_000,
+  };
+
+  beforeEach(() => {
+    (global as unknown as { fetch: jest.Mock }).fetch = jest.fn();
+  });
+  afterEach(() => {
+    delete (global as unknown as { fetch?: unknown }).fetch;
+  });
+
+  it('happy path — POSTs k1+pr to callback, returns sats + bolt11', async () => {
+    const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ status: 'OK' }) });
+    const getInvoice = jest.fn(async () => 'lnbcfakeinvoice');
+
+    const result = await claimLnurlWithdraw(params, getInvoice);
+    expect(result).toEqual({ sats: 21, bolt11: 'lnbcfakeinvoice' });
+    expect(getInvoice).toHaveBeenCalledWith(21, 'Geo-Cache 1');
+    // URL should carry both query params.
+    const calledUrl = fetchMock.mock.calls[0][0] as string;
+    expect(calledUrl).toContain('k1=deadbeef');
+    expect(calledUrl).toContain('pr=lnbcfakeinvoice');
+  });
+
+  it('refuses to claim when maxWithdrawable is zero (cooldown / budget)', async () => {
+    const getInvoice = jest.fn();
+    await expect(claimLnurlWithdraw({ ...params, maxWithdrawable: 0 }, getInvoice)).rejects.toThrow(
+      /sleeping/i,
+    );
+    expect(getInvoice).not.toHaveBeenCalled();
+  });
+
+  it('surfaces issuer ERROR.reason verbatim', async () => {
+    const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ status: 'ERROR', reason: 'wait_time not yet expired' }),
+    });
+    const getInvoice = jest.fn(async () => 'lnbcfake');
+    await expect(claimLnurlWithdraw(params, getInvoice)).rejects.toThrow(
+      'wait_time not yet expired',
+    );
+  });
+
+  it('throws on non-OK HTTP', async () => {
+    const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Service Unavailable' });
+    const getInvoice = jest.fn(async () => 'lnbcfake');
+    await expect(claimLnurlWithdraw(params, getInvoice)).rejects.toThrow(/503/);
+  });
+
+  it('throws if the response is not JSON', async () => {
+    const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => {
+        throw new Error('bad json');
+      },
+    });
+    const getInvoice = jest.fn(async () => 'lnbcfake');
+    await expect(claimLnurlWithdraw(params, getInvoice)).rejects.toThrow(/did not return JSON/i);
   });
 });

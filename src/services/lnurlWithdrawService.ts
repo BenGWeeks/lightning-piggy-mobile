@@ -155,3 +155,70 @@ const isWithdrawRequest = (v: unknown): v is WithdrawRequest => {
 
 /** Convenience for UI surfaces — turn millisats into a clean sats display. */
 export const msatToSats = (msat: number): number => Math.floor(msat / 1_000);
+
+/**
+ * Claim against a resolved LNURL-w. Caller supplies a `getInvoice`
+ * callback that produces a bolt11 invoice for `sats` sats — keeps this
+ * service wallet-agnostic (we don't import nwcService here, the Hunt
+ * screen does the wiring).
+ *
+ * Returns when the issuer has accepted our invoice (LUD-03 OK status).
+ * The actual incoming bolt11 settlement is observed via
+ * `WalletContext.lastIncomingPayment` — the celebration overlay is
+ * already wired to that, so the finder sees the standard success
+ * confetti when the sats land.
+ *
+ * Throws `LnurlWithdrawError` for protocol-level failures (issuer
+ * said no), and a regular Error for transport-level failures.
+ */
+export const claimLnurlWithdraw = async (
+  params: LnurlWithdrawParams,
+  getInvoice: (sats: number, memo: string) => Promise<string>,
+): Promise<{ sats: number; bolt11: string }> => {
+  // Always claim the maximum the issuer offers. Min/max being equal is
+  // the common case (single-amount Piggy); when they differ we still
+  // pick max — finders want the biggest claim available, not the
+  // smallest. The bolt11 we generate has the exact amount baked in.
+  const sats = msatToSats(params.maxWithdrawable);
+  if (sats <= 0) {
+    throw new LnurlWithdrawError(
+      'Issuer reports zero withdrawable — Piggy is sleeping (cooldown not yet expired, or budget exhausted).',
+    );
+  }
+  const bolt11 = await getInvoice(sats, params.defaultDescription || 'Hunt Piggy claim');
+
+  const url = new URL(params.callback);
+  url.searchParams.set('k1', params.k1);
+  url.searchParams.set('pr', bolt11);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(url.toString(), { signal: controller.signal });
+  } catch (e) {
+    throw new LnurlWithdrawError(`Could not reach LNURL callback: ${(e as Error).message}`);
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!res.ok) {
+    throw new LnurlWithdrawError(`LNURL callback returned ${res.status} ${res.statusText}`);
+  }
+  let json: unknown;
+  try {
+    json = await res.json();
+  } catch {
+    throw new LnurlWithdrawError('LNURL callback did not return JSON');
+  }
+  if (!isOkStatus(json)) {
+    const reason = (json as { reason?: string })?.reason;
+    throw new LnurlWithdrawError(reason || 'Issuer rejected the invoice');
+  }
+  return { sats, bolt11 };
+};
+
+const isOkStatus = (v: unknown): boolean => {
+  if (!v || typeof v !== 'object') return false;
+  const r = v as Record<string, unknown>;
+  return r.status === 'OK';
+};
