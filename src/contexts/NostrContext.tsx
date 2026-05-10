@@ -3062,9 +3062,17 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const readRelays = getReadRelays();
     const seen = new Set<string>();
     const SEEN_CAP = 4096;
-    // Lazy-populated in-memory mirror of the persisted NIP-17 wrap-id cache. Loaded
-    // on first wrap so we don't JSON.parse the full cache (up to 5000 entries) on every event.
-    let knownWrapIds: Set<string> | null = null;
+    // In-memory mirror of the persisted NIP-17 wrap-id cache. Populated
+    // synchronously at sub-open time below (one JSON.parse) so the live
+    // sub's onevent path can early-return on cache hits as the VERY
+    // FIRST check, without paying the per-event console.log + seen-set
+    // + dispatch + cacheKey-build cost that was eating 12 s of the
+    // cold-start JS thread on Big Piggy's fixture. Per issue #505 —
+    // the relay re-streams the backlog since the last `since` cursor,
+    // and on a busy account that's 100+ wraps in ~12 s, almost all of
+    // which are already known. Pre-#505 the dedup-cache hit check was
+    // lazy-populated and downstream of several per-event operations.
+    let knownWrapIds: Set<string> = new Set();
     let cancelled = false;
     let writeChain: Promise<void> = Promise.resolve();
 
@@ -3095,6 +3103,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
 
     const handleInboxEvent = async (ev: nostrService.RawInboxDmEvent): Promise<void> => {
+      // Earliest-possible short-circuit for NIP-17 wraps we already
+      // decrypted on a previous launch. Cost saved per backlog wrap:
+      // console.log + seen.has + seen.add + kind dispatch + cacheKey
+      // build + the async AsyncStorage.getItem race. On a busy
+      // fixture with 100+ wraps in the backlog this compressed the
+      // cold-start JS-thread occupation window from ~12 s to <1 s.
+      // Per issue #505.
+      if (ev.kind === 1059 && knownWrapIds.has(ev.id)) return;
       if (__DEV__) console.log(`[Nostr] live evt kind=${ev.kind} recv ${ev.id.slice(0, 8)}`);
       if (cancelled) return;
       if (seen.has(ev.id)) {
@@ -3230,16 +3246,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             ? perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, viewerPubkey)
             : null;
       if (!cacheKey) return;
-      if (knownWrapIds === null) {
-        // First wrap — pay the JSON.parse once to seed the in-memory mirror.
-        const seedRaw = await AsyncStorage.getItem(cacheKey);
-        const seedCache = safeParseRecord<Nip17CacheEntry>(seedRaw);
-        knownWrapIds = new Set(Object.keys(seedCache));
-      }
-      if (knownWrapIds.has(wrap.id)) {
-        if (__DEV__) console.log(`[Nostr] live wrap ${wrap.id.slice(0, 8)} dedup-cache`);
-        return;
-      }
+      // knownWrapIds is populated synchronously at sub-open time
+      // below — the in-flow lazy-load was removed in #505 because it
+      // (a) raced when many wraps arrived together and each tried to
+      // seed the Set concurrently, and (b) made dedup hits pay through
+      // a long per-event prologue before the check fired. The check
+      // for cached IDs now lives at the very top of this function for
+      // kind-1059 events. This line is only reached for genuinely new
+      // (not-yet-cached) wraps.
 
       const onSkip = (reason: string, wrapId: string) => {
         if (__DEV__) console.warn(`[Nostr] live NIP-17 unwrap skip (${wrapId}): ${reason}`);
@@ -3389,6 +3403,37 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     (async () => {
       // Reuse loadLastSeen so parsing/validation matches refreshDmInbox's existing reads of the same key (#409 review). loadLastSeen returns undefined for missing/invalid values, which subscribeInboxDmsForViewer then falls back to its 7-day floor for.
       const sinceK4 = await loadLastSeen(inboxLastSeenKey(viewerPubkey)).catch(() => undefined);
+      if (cancelled) return;
+      // Pre-seed `knownWrapIds` from the persisted NIP-17 wrap-id
+      // cache. One JSON.parse here saves N inline AsyncStorage reads
+      // + parses inside `handleInboxEvent` when the relay re-streams
+      // the backlog. The early-return in `handleInboxEvent` (top)
+      // checks this Set as the very first thing and skips all
+      // downstream per-event work for cache hits. Per issue #505.
+      const wrapCacheKey =
+        activeSigner === 'nsec'
+          ? perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, viewerPubkey)
+          : activeSigner === 'amber'
+            ? perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, viewerPubkey)
+            : null;
+      if (wrapCacheKey) {
+        try {
+          const seedRaw = await AsyncStorage.getItem(wrapCacheKey);
+          const seedCache = safeParseRecord<Nip17CacheEntry>(seedRaw);
+          knownWrapIds = new Set(Object.keys(seedCache));
+          if (__DEV__) {
+            console.log(
+              `[Nostr] live DM sub: seeded knownWrapIds with ${knownWrapIds.size} cached wraps`,
+            );
+          }
+        } catch {
+          // Seed-from-disk failed — leave knownWrapIds as the empty
+          // Set we initialised at outer-scope. Worst case: cache hits
+          // fall through the early-return and pay the existing
+          // per-event prologue. Functionally equivalent to behaviour
+          // before this change.
+        }
+      }
       if (cancelled) return;
       unsubscribe = nostrService.subscribeInboxDmsForViewer({
         viewerPubkey,
