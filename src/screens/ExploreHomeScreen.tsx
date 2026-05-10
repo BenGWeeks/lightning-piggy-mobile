@@ -60,26 +60,23 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     {
       key: 'map',
       title: 'Map',
-      meta: 'Bitcoin merchants near you',
+      meta: 'Bitcoin merchants nearby',
       Icon: MapPin,
       route: 'Map',
-      comingSoon: true,
     },
     {
       key: 'hunt',
       title: 'Hunt',
-      meta: 'Hidden Piggies game',
+      meta: 'Hide & find LNURL Piggies',
       Icon: PiggyBank,
       route: 'Hunt',
-      comingSoon: true,
     },
     {
       key: 'events',
       title: 'Events',
-      meta: 'Bitcoin meetups nearby',
+      meta: 'Bitcoin meetups (NIP-52)',
       Icon: CalendarDays,
       route: 'Events',
-      comingSoon: true,
     },
   ];
 
