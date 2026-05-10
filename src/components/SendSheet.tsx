@@ -7,6 +7,7 @@ import {
   BackHandler,
   Image,
   Keyboard,
+  Linking,
   Platform,
 } from 'react-native';
 import { Alert } from './BrandedAlert';
@@ -33,6 +34,8 @@ import { ChevronUp, ChevronDown } from 'lucide-react-native';
 import { resolveLightningAddress, fetchInvoice, LnurlPayParams } from '../services/lnurlService';
 import * as boltzService from '../services/boltzService';
 import * as onchainService from '../services/onchainService';
+import * as swapRecoveryService from '../services/swapRecoveryService';
+import * as SecureStore from 'expo-secure-store';
 import { npubEncode } from '../services/nostrService';
 import { recordOutgoing as recordOutgoingCounterparty } from '../services/zapCounterpartyStorage';
 import { isReplyTimeoutError } from '../services/nwcService';
@@ -415,14 +418,53 @@ const SendSheet: React.FC<Props> = ({
           // Direct on-chain send from hot wallet
           await onchainService.sendTransaction(walletId!, invoiceData, currentSats);
         } else {
-          // Boltz reverse swap: Lightning → on-chain
+          // Boltz reverse swap: Lightning → on-chain.
+          //
+          // Persist the swap secrets to SecureStore *before* paying the LN
+          // invoice — `swapRecoveryService` reads these on the next launch
+          // and retries the claim if anything below throws or the app is
+          // killed mid-flow. Without persistence the random preimage and
+          // claim privkey live in JS memory only, and a failed/aborted
+          // claim leaves the on-chain HTLC permanently unspendable. See
+          // issue #481 — the same pattern TransferSheet has had since
+          // its initial Boltz integration.
           const swap = await boltzService.createReverseSwap(invoiceData, currentSats);
-          await payInvoiceForWallet(walletId!, swap.invoice, {
-            signal,
-            onReplyTimeout: handleReplyTimeout,
-          });
-          const lockup = await boltzService.waitForLockup(swap.id, 120000);
-          await boltzService.claimSwap(swap, lockup, invoiceData);
+          await SecureStore.setItemAsync(
+            `boltz_swap_${swap.id}`,
+            JSON.stringify({
+              id: swap.id,
+              preimage: swap.preimage,
+              claimPrivateKey: swap.claimPrivateKey,
+              lockupAddress: swap.lockupAddress,
+              destinationAddress: invoiceData,
+              refundPublicKey: swap.refundPublicKey,
+              swapTree: swap.swapTree,
+            }),
+          );
+          await swapRecoveryService.registerPendingSwap(swap.id);
+          try {
+            await payInvoiceForWallet(walletId!, swap.invoice, {
+              signal,
+              onReplyTimeout: handleReplyTimeout,
+            });
+            const lockup = await boltzService.waitForLockup(swap.id, 120000);
+            await boltzService.claimSwap(swap, lockup, invoiceData);
+            // Success → drop the recovery record.
+            await SecureStore.deleteItemAsync(`boltz_swap_${swap.id}`);
+            await swapRecoveryService.unregisterPendingSwap(swap.id);
+          } catch (e) {
+            // Leave the persisted record in place so swapRecoveryService can
+            // retry on the next launch. Re-throw with a contextualized
+            // message — the bare error from claimSwap / waitForLockup is
+            // often opaque ("unknown Error", numeric Electrum codes), and
+            // PaymentProgressOverlay surfaces this as the failure subtitle.
+            const detail = e instanceof Error ? e.message || e.toString() : String(e);
+            console.warn(
+              `[Boltz] Swap ${swap.id} failed mid-flight, persisted for recovery:`,
+              detail,
+            );
+            throw new Error(`Boltz swap failed: ${detail}`);
+          }
         }
       } else if (isLightningAddress(invoiceData)) {
         if (!lnurlParams) {
@@ -975,18 +1017,38 @@ const SendSheet: React.FC<Props> = ({
                     </Text>
                   )}
 
-                  {/* Fee estimate for on-chain addresses */}
+                  {/* Fee estimate for on-chain addresses. When the
+                      payment goes through Boltz (LN wallet \u2192 on-chain
+                      address) show the Boltz logo so users know who is
+                      brokering the swap \u2014 same affordance as
+                      TransferSheet. Hot-wallet \u2192 on-chain sends bypass
+                      Boltz, so the logo is suppressed there. */}
                   {isOnchainAddress && currentSats > 0 && (
-                    <Text style={styles.feeText}>
-                      {selectedWallet?.walletType === 'onchain' &&
-                      selectedWallet?.onchainImportMethod === 'mnemonic'
-                        ? (onchainFeeEstimate ?? 'Estimating fee...')
-                        : loadingBoltzFees
-                          ? 'Loading fees...'
-                          : boltzFees
-                            ? `Swap fee: ~${boltzService.calculateSwapFee(currentSats, boltzFees).toLocaleString()} sats \u00B7 ~10-60 min`
-                            : 'Fee estimate unavailable'}
-                    </Text>
+                    <View style={styles.feeRow}>
+                      {selectedWallet?.walletType !== 'onchain' && (
+                        <TouchableOpacity
+                          onPress={() => Linking.openURL('https://boltz.exchange')}
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                          accessibilityLabel="Powered by Boltz"
+                        >
+                          <Image
+                            source={require('../../assets/images/boltz-logo.png')}
+                            style={styles.boltzLogo}
+                            resizeMode="contain"
+                          />
+                        </TouchableOpacity>
+                      )}
+                      <Text style={styles.feeText}>
+                        {selectedWallet?.walletType === 'onchain' &&
+                        selectedWallet?.onchainImportMethod === 'mnemonic'
+                          ? (onchainFeeEstimate ?? 'Estimating fee...')
+                          : loadingBoltzFees
+                            ? 'Loading fees...'
+                            : boltzFees
+                              ? `Swap fee: ~${boltzService.calculateSwapFee(currentSats, boltzFees).toLocaleString()} sats \u00B7 ~10-60 min`
+                              : 'Fee estimate unavailable'}
+                      </Text>
+                    </View>
                   )}
 
                   {/* Memo / comment field for Lightning address payments */}
