@@ -3062,16 +3062,18 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const readRelays = getReadRelays();
     const seen = new Set<string>();
     const SEEN_CAP = 4096;
-    // In-memory mirror of the persisted NIP-17 wrap-id cache. Populated
-    // synchronously at sub-open time below (one JSON.parse) so the live
-    // sub's onevent path can early-return on cache hits as the VERY
-    // FIRST check, without paying the per-event console.log + seen-set
-    // + dispatch + cacheKey-build cost that was eating 12 s of the
-    // cold-start JS thread on Big Piggy's fixture. Per issue #505 —
-    // the relay re-streams the backlog since the last `since` cursor,
-    // and on a busy account that's 100+ wraps in ~12 s, almost all of
-    // which are already known. Pre-#505 the dedup-cache hit check was
-    // lazy-populated and downstream of several per-event operations.
+    // In-memory mirror of the persisted NIP-17 wrap-id cache. Seeded
+    // eagerly up-front below (one async AsyncStorage.getItem + one
+    // JSON.parse, before `subscribeInboxDmsForViewer` opens the sub)
+    // so the live sub's onevent path can early-return on cache hits
+    // as the VERY FIRST check, without paying the per-event
+    // console.log + seen-set + dispatch + cacheKey-build cost that
+    // was eating 12 s of the cold-start JS thread on Big Piggy's
+    // fixture. Per issue #505 — the relay re-streams the backlog
+    // since the last `since` cursor, and on a busy account that's
+    // 100+ wraps in ~12 s, almost all of which are already known.
+    // Pre-#505 the dedup-cache hit check was lazy-populated and
+    // downstream of several per-event operations.
     let knownWrapIds: Set<string> = new Set();
     let cancelled = false;
     let writeChain: Promise<void> = Promise.resolve();
@@ -3246,14 +3248,22 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             ? perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, viewerPubkey)
             : null;
       if (!cacheKey) return;
-      // knownWrapIds is populated synchronously at sub-open time
-      // below — the in-flow lazy-load was removed in #505 because it
-      // (a) raced when many wraps arrived together and each tried to
-      // seed the Set concurrently, and (b) made dedup hits pay through
-      // a long per-event prologue before the check fired. The check
-      // for cached IDs now lives at the very top of this function for
-      // kind-1059 events. This line is only reached for genuinely new
-      // (not-yet-cached) wraps.
+      // knownWrapIds is seeded eagerly up-front below (before the
+      // subscription opens) — the in-flow lazy-load was removed in
+      // #505 because it (a) raced when many wraps arrived together
+      // and each tried to seed the Set concurrently, and (b) made
+      // dedup hits pay through a long per-event prologue before the
+      // check fired. The check for cached IDs now lives at the very
+      // top of this function for kind-1059 events. This line is only
+      // reached for genuinely new (not-yet-cached) wraps, OR — in
+      // the rare case the seed failed (see the catch in the sub-open
+      // block) — for wraps that should have been pre-known. In that
+      // case the wrap re-decrypts; the persistent `wrapCache` write
+      // below still guards against the on-disk cache filling
+      // unboundedly, but the `dmMessageListeners` may fire a second
+      // time for messages already shown in a previous session.
+      // Acceptable trade-off because the seed only fails on
+      // AsyncStorage I/O error which is extremely rare on Android.
 
       const onSkip = (reason: string, wrapId: string) => {
         if (__DEV__) console.warn(`[Nostr] live NIP-17 unwrap skip (${wrapId}): ${reason}`);
@@ -3426,12 +3436,26 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               `[Nostr] live DM sub: seeded knownWrapIds with ${knownWrapIds.size} cached wraps`,
             );
           }
-        } catch {
+        } catch (e) {
           // Seed-from-disk failed — leave knownWrapIds as the empty
-          // Set we initialised at outer-scope. Worst case: cache hits
-          // fall through the early-return and pay the existing
-          // per-event prologue. Functionally equivalent to behaviour
-          // before this change.
+          // Set we initialised at outer-scope. Cached wraps re-stream
+          // through the full handler (decrypt, route, write-cache,
+          // queueInboxEntry, notifyDmMessage). Two observable side
+          // effects vs the pre-#505 in-flow dedup check:
+          //   1. `dmMessageListeners` registered for an open
+          //      conversation will re-fire for messages already
+          //      surfaced in a prior session.
+          //   2. The `unwrapWrapNsec` / `unwrapWrapViaNip44` call
+          //      runs unnecessarily for each cached wrap (1–3 ms each).
+          // The persistent on-disk wrapCache write is idempotent —
+          // it doesn't grow unboundedly. We accept this regression on
+          // the failure path because (a) AsyncStorage.getItem I/O
+          // errors are extremely rare on Android, and (b) the
+          // alternative (resurrecting the lazy-load inside the
+          // handler) would re-introduce the race + per-event prologue
+          // cost that motivated #505 in the first place.
+          if (__DEV__)
+            console.warn('[Nostr] live DM sub: knownWrapIds seed failed, dedup degraded:', e);
         }
       }
       if (cancelled) return;
