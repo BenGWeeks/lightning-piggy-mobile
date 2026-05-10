@@ -15,6 +15,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
 import { encodeGeohash, geohashPrefixes } from '../utils/geohash';
+import { getDevPinnedLocation } from '../utils/devLocation';
 import { type ParsedEvent } from '../services/nostrPlacesService';
 import { subscribeNearbyEvents } from '../services/nostrPlacesPublisher';
 
@@ -47,16 +48,28 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
     setEvents(new Map());
     closerRef.current?.();
     try {
-      const perm = await Location.requestForegroundPermissionsAsync();
-      if (perm.status !== 'granted') {
-        setError(
-          'Location permission required to discover nearby events. We use a coarse 5 km area, not your exact location.',
-        );
-        setLoading(false);
-        return;
+      const pinned = getDevPinnedLocation();
+      let lat: number;
+      let lon: number;
+      if (pinned) {
+        lat = pinned.lat;
+        lon = pinned.lon;
+      } else {
+        const perm = await Location.requestForegroundPermissionsAsync();
+        if (perm.status !== 'granted') {
+          setError(
+            'Location permission required to discover nearby events. We use a coarse 5 km area, not your exact location.',
+          );
+          setLoading(false);
+          return;
+        }
+        const pos = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        lat = pos.coords.latitude;
+        lon = pos.coords.longitude;
       }
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const myGh = encodeGeohash(pos.coords.latitude, pos.coords.longitude, 7);
+      const myGh = encodeGeohash(lat, lon, 7);
       const prefixes = geohashPrefixes(myGh, 5).filter((p) => p.length === 5);
       const closer = subscribeNearbyEvents(prefixes, (e) => {
         // De-dupe by coord — replaceable events; only keep the

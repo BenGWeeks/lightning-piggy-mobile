@@ -30,6 +30,7 @@ import {
 import { type ParsedCache, type ParsedEvent } from '../services/nostrPlacesService';
 import { subscribeNearbyCaches, subscribeNearbyEvents } from '../services/nostrPlacesPublisher';
 import { encodeGeohash, geohashPrefixes } from '../utils/geohash';
+import { getDevPinnedLocation } from '../utils/devLocation';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createExploreHomeScreenStyles } from '../styles/ExploreHomeScreen.styles';
 import type { Palette } from '../styles/palettes';
@@ -73,24 +74,51 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      // Dev-only emulator fallback — see `getDevPinnedLocation`.
+      const pinned = getDevPinnedLocation();
+      if (pinned) {
+        if (!cancelled) setPos(pinned);
+        return;
+      }
       const perm = await Location.requestForegroundPermissionsAsync();
       if (cancelled) return;
       if (perm.status !== 'granted') {
         setLocationDenied(true);
         return;
       }
+      // Fast path: surface last-known position immediately so the
+      // rails + mini-map render content while we ask for a fresh fix
+      // in parallel. On Android emulators `getCurrentPositionAsync` can
+      // hang waiting on the simulated GPS HAL even with `geo fix`
+      // ticking; on real devices it usually returns in under a second.
       try {
-        const p = await Location.getCurrentPositionAsync({
+        const last = await Location.getLastKnownPositionAsync({
+          maxAge: 10 * 60 * 1000, // ≤ 10 min old is fine for our 5 km tiles
+        });
+        if (!cancelled && last) {
+          setPos({ lat: last.coords.latitude, lon: last.coords.longitude });
+        }
+      } catch {
+        // Non-fatal — fall through to getCurrentPositionAsync.
+      }
+      try {
+        const current = await Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
         });
-        if (!cancelled) setPos({ lat: p.coords.latitude, lon: p.coords.longitude });
-      } catch {
-        if (!cancelled) setLocationDenied(true);
+        if (!cancelled) {
+          setPos({ lat: current.coords.latitude, lon: current.coords.longitude });
+        }
+      } catch (e) {
+        // If getCurrentPositionAsync rejects AND we never got a
+        // last-known, mark the rails as denied so they show the
+        // friendlier "grant location" copy.
+        if (!cancelled && !pos) setLocationDenied(true);
       }
     })();
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ----- BTC Map merchants ------------------------------------------------

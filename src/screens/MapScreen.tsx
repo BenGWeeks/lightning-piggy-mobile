@@ -19,6 +19,7 @@ import {
 import type { ParsedCache } from '../services/nostrPlacesService';
 import { subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
 import { encodeGeohash, geohashPrefixes } from '../utils/geohash';
+import { getDevPinnedLocation } from '../utils/devLocation';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -63,29 +64,47 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (cancelled) return;
-      if (status !== 'granted') {
-        setPermission('denied');
-        return;
-      }
-      setPermission('granted');
-      try {
-        const pos = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
+      // Dev-only emulator fallback (see `getDevPinnedLocation`).
+      const pinned = getDevPinnedLocation();
+      let lat: number;
+      let lon: number;
+      if (pinned) {
+        lat = pinned.lat;
+        lon = pinned.lon;
+        setPermission('granted');
+      } else {
+        const { status } = await Location.requestForegroundPermissionsAsync();
         if (cancelled) return;
-        const initBbox = bboxAround(pos.coords.latitude, pos.coords.longitude, 0.02);
+        if (status !== 'granted') {
+          setPermission('denied');
+          return;
+        }
+        setPermission('granted');
+        try {
+          const pos = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+          if (cancelled) return;
+          lat = pos.coords.latitude;
+          lon = pos.coords.longitude;
+        } catch (e) {
+          if (!cancelled) setError((e as Error).message);
+          return;
+        }
+      }
+      try {
+        if (cancelled) return;
+        const initBbox = bboxAround(lat, lon, 0.02);
         lastBbox.current = initBbox;
         await refreshPlaces(initBbox);
-        setViewportInWebView(pos.coords.latitude, pos.coords.longitude, 14);
+        setViewportInWebView(lat, lon, 14);
 
         // Subscribe to NIP-GC kind 37516 caches in the user's coarse
         // geohash neighbourhood. Renders Lightning Piggies (com.lightningpiggy.app
         // label) AND standard NIP-GC caches (treasures.to /
         // TapTheSatsMap / etc.) as a different pin glyph alongside
         // BTC Map merchants. See project memory `treasures.to interop`.
-        const myGeohash = encodeGeohash(pos.coords.latitude, pos.coords.longitude, 7);
+        const myGeohash = encodeGeohash(lat, lon, 7);
         const prefixes = geohashPrefixes(myGeohash, 5).filter((p) => p.length === 5);
         cachesCloserRef.current?.();
         cachesCloserRef.current = subscribeNearbyCaches(prefixes, (cache) => {
