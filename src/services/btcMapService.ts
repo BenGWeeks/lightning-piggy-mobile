@@ -11,6 +11,8 @@
  * Closes part of #467.
  */
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 // Overpass interpreter — queries OpenStreetMap directly. BTC Map's
 // own data is harvested from this same OSM commons (see project
 // memory `BTC Map runs the commons (Nathan)`), so going to OSM
@@ -23,6 +25,11 @@ const OVERPASS_HOSTS = [
 ];
 const FETCH_TIMEOUT_MS = 45_000;
 const TILE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1_000; // 7 days
+// AsyncStorage key — namespaced so it's grepable + obviously
+// invalidatable from devtools. Persists the in-memory tile cache
+// so a successful Overpass fetch survives mirror outages later in
+// the week (the public mirrors return 406/504/403 unpredictably).
+const TILE_CACHE_STORAGE_KEY = '@lp:btcmap-tile-cache';
 
 export interface BtcMapPlace {
   id: number;
@@ -87,12 +94,46 @@ const tileCache = new Map<string, CachedTile>();
 
 const isFresh = (entry: CachedTile): boolean => Date.now() - entry.fetchedAt < TILE_CACHE_TTL_MS;
 
+// One-shot AsyncStorage hydration. Runs on first `fetchPlacesInBbox`
+// call, not at module load, because RN evaluates this file early in
+// the bundle and AsyncStorage's native module may not be ready yet.
+// The promise is cached so we never double-hydrate.
+let hydratePromise: Promise<void> | null = null;
+const hydrateFromStorage = async (): Promise<void> => {
+  if (hydratePromise) return hydratePromise;
+  hydratePromise = (async () => {
+    try {
+      const raw = await AsyncStorage.getItem(TILE_CACHE_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Record<string, CachedTile>;
+      for (const [k, entry] of Object.entries(parsed)) {
+        if (entry && isFresh(entry)) tileCache.set(k, entry);
+      }
+    } catch {
+      // Corrupt or unreadable storage shouldn't break merchant fetch —
+      // we'll just hit Overpass and re-persist on success.
+    }
+  })();
+  return hydratePromise;
+};
+
+// Serialise the live cache out to AsyncStorage. Best-effort; failures
+// are silent because the in-memory cache still serves the session.
+const persistToStorage = (): void => {
+  const obj: Record<string, CachedTile> = {};
+  tileCache.forEach((v, k) => {
+    obj[k] = v;
+  });
+  AsyncStorage.setItem(TILE_CACHE_STORAGE_KEY, JSON.stringify(obj)).catch(() => {});
+};
+
 /**
  * Fetch merchants in a bounding box. Returns cached results if a recent
  * fetch covered the same key. Caller should debounce on map-pan/zoom so
  * we're not hammering the API on every gesture frame.
  */
 export const fetchPlacesInBbox = async (bbox: Bbox): Promise<BtcMapPlace[]> => {
+  await hydrateFromStorage();
   const key = tileKey(bbox);
   const cached = tileCache.get(key);
   if (cached && isFresh(cached)) {
@@ -167,6 +208,7 @@ out center;`;
         })
         .filter((p): p is BtcMapPlace => p !== null);
       tileCache.set(key, { fetchedAt: Date.now(), places });
+      persistToStorage();
       return places;
     } catch (e) {
       lastError = e as Error;
@@ -223,4 +265,5 @@ export const daysSinceVerified = (place: BtcMapPlace): number | null => {
  */
 export const __resetCacheForTest = (): void => {
   tileCache.clear();
+  hydratePromise = null;
 };
