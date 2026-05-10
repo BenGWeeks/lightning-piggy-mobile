@@ -607,4 +607,26 @@ walk away. +
 true` + Settings → "Don't lock when on this network" disabled (default), and
 the phone won't auto-lock for the duration of the build (~20 min) and the
 follow-on perf-suite (~3 min).
+
+| Expo SDK 55 dev build crashes on launch with `TurboModuleRegistry.getEnforcing(...): 'PlatformConstants' could not be found`
+| `npx expo prebuild` defaults `newArchEnabled=true` in `android/gradle.properties`. One of our native deps (added in the Explore PR — most likely `expo-task-manager`) doesn't ship new-architecture codegen yet, so the runtime fails when the JS bundle requests `PlatformConstants`. +
+*Fix for local dev:* `sed -i 's/^newArchEnabled=true$/newArchEnabled=false/' android/gradle.properties && rm -rf android/app/.cxx android/app/build android/build && cd android && ./gradlew clean && cd .. && npx expo run:android`. The CMake codegen artifacts from the new-arch build cause `./gradlew clean` to fail on its own; the manual `rm -rf` is mandatory. +
+*Note:* `android/` is gitignored, so the flag flip is local-only. EAS production profiles likely need the same treatment via `eas.json` env vars or an `app.config.ts` override; track as a follow-up when the EAS prod build hits the same error. +
+*Validate:* after the rebuild, kill any running Metro (`pkill -f 'expo start'`), `npm start -- --clear`, then `adb -s <serial> reverse tcp:8081 tcp:8081 && adb -s <serial> shell am force-stop com.lightningpiggy.app.dev && adb -s <serial> shell am start -n com.lightningpiggy.app.dev/.MainActivity`. Watch `adb logcat \| grep ReactNativeJS` for `[Perf] HomeScreen first render` instead of the runtime-not-ready error.
+
+| Android emulator GPS / `geo fix` doesn't propagate to apps using `Location.getCurrentPositionAsync()`
+| `adb -s <serial> emu geo fix <lon> <lat>` writes to the emulator's GPS buffer but doesn't always trigger the `LocationManager.requestLocation` callback — on Pixel-series AVDs running API 34+ the location service can sit idle waiting for a "fix" event that never fires. Apps see an indefinite hang on `getCurrentPositionAsync` even though `geo fix` returned `OK`. +
+*Workarounds:* +
+1. **Send `geo fix` repeatedly** (every ~2 s) for the first 30 s after launch — simulates a moving track and forces the location service to push updates: +
+[source,bash]
+----
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  adb -s emulator-5554 emu geo fix 0.04039 52.28897
+  sleep 3
+done &
+----
+2. **Use a real device** for any work that needs reliable foreground location (Map sub-screen, geofence settings, hub mini-map preview). The emulator-1080p (Medium_Phone API 36.1) profile is fine for everything *except* live-position UI. +
+3. **Mock-location app** like _Lockito_ on the emulator. Heavier but works for journey simulation as well as static fixes. +
+*Symptom in our app:* `ExploreHomeScreen` mini-map shows "Locating you…" indefinitely, the "Places near you" rail shows "Grant location to discover Bitcoin-accepting shops near you" even after the OS-level permission was granted, and `MapScreen` opens but stays at the world view (no recentre). +
+*History note:* during the Explore-tab PR's screenshot pass we hit this on a Medium_Phone API 36.1 AVD with `emu geo fix` returning OK but no fix ever reaching the app. The Maestro screenshot tour (`tests/e2e/screenshots-explore-tour.yaml`) reproduces it. The seed coords `0.04039, 52.28897` (Ladywalk, Longstanton, Cambridge CB24 3ED) were chosen to match the live test event published earlier in the PR (kind 37516, geohash u1212vz).
 |===

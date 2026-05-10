@@ -28,11 +28,15 @@ name: Explore tour — captures screenshots for the PR description
 # (Home / Messages / Explore / Friends with the Compass icon).
 - takeScreenshot: 01-tab-bar-home
 
-# 02 — Explore hub with the 4 cards (Lessons / Map / Hunt / Events).
+# 02 — Explore hub. The hub subscribes to live data (BTC Map merchants,
+# NIP-GC kind 37516 caches, NIP-52 events, lessons progress) and shows
+# a mini-map preview at the top. Wait long enough for the location
+# resolve + first-relay-event to land before capturing, otherwise the
+# screenshot shows the "Locating you…" placeholder.
 - tapOn:
     id: 'tab-explore'
 - waitForAnimationToEnd:
-    timeout: 1500
+    timeout: 8000
 - takeScreenshot: 02-explore-hub
 
 # 03 — Lessons sub-screen (regression baseline — courses identical
