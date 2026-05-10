@@ -24,3 +24,11 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 - Perf: Lightning-zap sender avatars render instantly on cold start instead of waiting for a relay round-trip.
 - Perf: home wallet card clears the "Disconnected" indicator noticeably faster on cold app launch.
 - Perf: avatar grids no longer hit a decode-error storm when a contact has an unsupported image URL (`.svg` / `.heic`).
+- New: Transfer can now send to a wallet in a different signed-in profile — pick the destination profile from a new "Profile" dropdown under "To". Display names show up when cached. Default behaviour unchanged for single-profile users.
+- New: Send to a Bitcoin address from a Lightning wallet now persists the swap — a force-stop or network hiccup mid-flight can be recovered via "Retry now" or on next app launch. Previously a failed claim could leave funds stuck.
+- New: group conversation header now reads "3 members" not "2 members" — you're now counted, with a "· you" tag on your own row in the members sheet. Mirrors Signal / WhatsApp.
+- Polish: Revolut and Xapo wallet card wordmarks no longer overlap the balance text — the brand sits flush in the lower-right of the card.
+- Polish: Send button on Home is now greyed out when the active wallet is receive-only (Xapo deposit address, watch-only xpub) — taps no longer open a Send sheet that can't sign.
+- Polish: the `⋯` (open Account Switcher / add another nsec) button in the side drawer is right-aligned again — was collapsing left next to the avatar for single-profile users.
+- Perf: several improvements to reduce cold-start JS-thread contention — more frequent yielding while draining the inbox, deduped NIP-04 deprecation log spam, a brief grace window before the bulk relay/profile refresh fires, an event-loop yield between each live-sub wrap decrypt, and cached gift-wraps no longer re-fire listeners. `console.log` calls are stripped from production bundles too. Heavy phones may still see a brief unresponsive window on first launch — more work to come in 1.0.3.
+
