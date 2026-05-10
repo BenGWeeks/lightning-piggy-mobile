@@ -32,9 +32,11 @@ export interface ClaimHistoryEntry {
   /** Sats actually received. Surfaces as "you got 21 sats from this
    * Piggy 47m ago" on the detail screen. */
   sats: number;
-  /** Optional `d` tag of the kind-30408 event we matched the LNURL to.
-   * Lets the UI link directly to the Piggy detail page. Absent for tags
-   * that were never published as a Piggy event. */
+  /** Optional `d` tag of the NIP-GC kind 37516 cache listing we matched
+   * the LNURL to. Lets the UI link directly to the Piggy detail page.
+   * Absent for tag taps that were never published as a kind 37516 event
+   * (e.g. a friend handed you a one-shot QR that lives nowhere on
+   * Nostr). */
   piggyId?: string;
 }
 

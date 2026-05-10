@@ -16,7 +16,7 @@ import AppNavigator, { navigateToHuntFound } from './src/navigation/AppNavigator
 import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
 import BootSplash from './src/components/BootSplash';
 import { BrandedAlertHost } from './src/components/BrandedAlert';
-import Toast, { BrandedToast } from './src/components/BrandedToast';
+import { BrandedToast } from './src/components/BrandedToast';
 
 // Renders the global incoming-payment celebration on top of the nav
 // stack. Lives inside the WalletProvider so it can subscribe to the

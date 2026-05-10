@@ -92,11 +92,22 @@ the project memory `No LNbits-specific APIs`. Lightning Piggy is the
 **publisher**, **discoverer**, and **find-log thread** layer.
 
 We adopt **NIP-GC** (Nostr Geocaching, draft by https://treasures.to[treasures.to])
-verbatim and add an `lnurl` + `wait` + `uses` extension for the
-Lightning-payout flavour. A Hunt Piggy is just a NIP-GC `traditional`
-cache that happens to also pay the finder. Generic geocaching clients
-(treasures.to et al.) render it as a normal cache; LP renders the
-"🐷 Lightning bonus" UI on top via the extension tags. **Read the
+verbatim and mark Lightning-payout caches with a **NIP-32 label**
+(`L=com.lightningpiggy.app` / `l=payout-lnurl-w`). The LNURL bearer
+token is deliberately **never** put on the public event — it lives
+only on the physical NFC tag / QR and the hider's local SecureStore;
+publishing it on a kind 37516 would let any relay subscriber drain
+the cache without ever physically visiting it (see
+`feedback_lnurl_never_on_relays.md` and the
+`buildCacheListing` security test in `nostrPlacesService.test.ts`).
+A Hunt Piggy is therefore just a NIP-GC `traditional` cache flagged
+by our label; generic geocaching clients (treasures.to et al.)
+ignore the label and render it as a normal cache, while LP routes
+the finder through HuntFoundScreen for claim. The `wait` / `uses`
+fields exist on the local `HiddenPiggy` record for the cooldown UX
+but are NOT published as event tags — that was an early design
+draft that got dropped to avoid side-channel discoverability of
+the cache's economics. **Read the
 upstream draft** in the kind-30817 event with `d="geocaching-events"`
 authored by `npub1pse...zz68` (or
 https://nostrhub.io/naddr1qvzqqqrcvypzppscgyy746fhmrt0nq955z6xmf80pkvrat0yq0hpknqtd00z8z68qqgkwet0vdskx6rfdenj6etkv4h8guc6gs5y5[the

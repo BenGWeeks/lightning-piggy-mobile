@@ -1,11 +1,15 @@
 /**
- * Tiny geohash encoder/decoder. Used for the `g` tag on kind-30408
- * Piggy events and kind-31923 calendar events (NIP-52). 7-char default
- * precision ≈ 153 m × 153 m — fine for "near this bench" hints.
+ * Tiny geohash encoder. Used for the `g` tag on the NIP-GC kind 37516
+ * cache listings (Hunt Piggies + treasures.to / TapTheSatsMap caches)
+ * and on NIP-52 kind 31923 calendar events. 7-char default precision
+ * ≈ 153 m × 153 m — fine for "near this bench" hints; the hub /
+ * Discover queries widen via prefix using `geohashPrefixes`.
  *
  * Algorithm + base-32 alphabet from Niemeyer's original spec
- * (en.wikipedia.org/wiki/Geohash). No deps; we don't need decoder
- * symmetry beyond what tests need.
+ * (en.wikipedia.org/wiki/Geohash). No deps. The MapScreen / mini-map
+ * decoder is duplicated inline rather than exported here because both
+ * call sites want zero-overhead use; if a third reader appears we'll
+ * extract a shared `decodeGeohash`.
  */
 
 const BASE32 = '0123456789bcdefghjkmnpqrstuvwxyz';

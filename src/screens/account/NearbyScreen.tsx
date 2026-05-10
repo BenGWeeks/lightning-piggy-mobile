@@ -93,11 +93,20 @@ const NearbyScreen: React.FC = () => {
 
       const count = await enableGeofencing();
       if (count === null) {
+        // No merchants around right now — don't claim the feature is "on" when
+        // no geofence task is actually running (Copilot review #488). The user
+        // can re-toggle once they move into an area with merchants; we don't
+        // run a background recompute loop yet (that's M3-followup work). Keep
+        // the persisted preference at OFF so isGeofencingActive() / the toggle
+        // visual stay honest.
         Alert.alert(
           'No nearby merchants',
-          "We couldn't find any Bitcoin-accepting merchants near your current location. The feature stays on — we'll start watching as soon as you're near one.",
+          "We couldn't find any Bitcoin-accepting merchants near your current location. Move closer to a city centre and toggle this on again.",
           [{ text: 'OK' }],
         );
+        await persist({ ...settings, enabled: false });
+        setActive(false);
+        return;
       }
       await persist({ ...settings, enabled: true });
       setActive(true);

@@ -140,9 +140,10 @@ const HuntDiscoverScreen: React.FC<Props> = ({ navigation }) => {
           data={sortedCaches}
           keyExtractor={(c) => c.coord}
           contentContainerStyle={styles.listContent}
-          renderItem={({ item }) => (
+          renderItem={({ item, index }) => (
             <CacheRow
               cache={item}
+              index={index}
               colors={colors}
               styles={styles}
               onPress={() => navigation.navigate('HuntPiggyDetail', { coord: item.coord })}
@@ -156,16 +157,24 @@ const HuntDiscoverScreen: React.FC<Props> = ({ navigation }) => {
 
 const CacheRow: React.FC<{
   cache: ParsedCache;
+  /** FlatList index — drives a deterministic `hunt-discover-row-N`
+   * testID alongside the data-stable `hunt-discover-row-${cache.d}`
+   * so Maestro flows can target the first row by `id: 'hunt-discover-row-0'`
+   * without coordinate taps (Copilot review #488). */
+  index: number;
   colors: Palette;
   styles: ReturnType<typeof createStyles>;
   onPress: () => void;
-}> = ({ cache, colors, styles, onPress }) => (
+}> = ({ cache, index, colors, styles, onPress }) => (
   <TouchableOpacity
     style={styles.row}
     onPress={onPress}
     testID={`hunt-discover-row-${cache.d}`}
     accessibilityLabel={cache.name}
   >
+    {/* Sibling testID that's deterministic by position. Maestro can match
+        either id; the data-stable one is preferred when the d-tag is known. */}
+    <View testID={`hunt-discover-row-${index}`} pointerEvents="none" />
     <View style={[styles.iconWrap, cache.isLpPiggy ? styles.iconLp : styles.iconStandard]}>
       {cache.isLpPiggy ? (
         <PiggyBank size={22} color={colors.white} strokeWidth={2} />

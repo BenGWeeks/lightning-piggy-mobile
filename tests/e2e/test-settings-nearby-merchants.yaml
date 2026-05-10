@@ -21,8 +21,12 @@ name: Nearby merchants — toggle, radius preset, quiet hours
 - waitForAnimationToEnd:
     timeout: 1500
 
-# The avatar in the TabHeader opens the drawer (#100).
-- tapOn: 'profile-icon-button'
+# The avatar in the TabHeader opens the drawer (#100). The ProfileIcon
+# component uses testID `profile-icon` (Copilot review #488 caught the
+# wrong id we had earlier). Falling back to a swipe is still here as a
+# defensive measure for builds where the icon hasn't rendered yet.
+- tapOn:
+    id: 'profile-icon'
     optional: true
 - swipe:
     start: 95%, 30%

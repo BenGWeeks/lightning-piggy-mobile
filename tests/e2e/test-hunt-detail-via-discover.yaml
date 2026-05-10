@@ -42,13 +42,14 @@ name: Hunt Discover → Detail navigation works
         id: 'hunt-discover-empty-state'
     commands:
       - tapOn:
-          point: '50%,40%' # Maestro doesn't have a "first row" matcher
-                          # without a known row id; fall back to a
-                          # rough center tap on the list area. Per
-                          # CLAUDE.md normally we'd avoid coordinates,
-                          # but row ids are dynamic (cache.d). The
-                          # alternative — relay-fixture seeded test —
-                          # is the M8 deterministic flow.
+          id: 'hunt-discover-row-0' # First row by FlatList index — added
+                                    # in HuntDiscoverScreen so Maestro can
+                                    # tap deterministically without
+                                    # coordinates (CLAUDE.md rule, Copilot
+                                    # review #488). Data-stable
+                                    # `hunt-discover-row-${cache.d}` is
+                                    # also present for tests that already
+                                    # know the d-tag.
       - waitForAnimationToEnd:
           timeout: 3000
       - assertVisible:

@@ -107,7 +107,12 @@ export const enableGeofencing = async (): Promise<number | null> => {
   if (places.length === 0) return null;
 
   const settings = await loadNearbySettings();
+  // pickNearest prefers Lightning-accepting merchants; if the area has only
+  // on-chain ones we fall back to those rather than registering an empty
+  // regions array (Copilot review #488). startGeofencingAsync throws on []
+  // on iOS and silently no-ops on Android, neither of which we want.
   const top = pickNearest(places, pos.coords.latitude, pos.coords.longitude, NEARBY_LIMIT);
+  if (top.length === 0) return null;
 
   // Cache id → label pairs for the background task. Map is module-level so
   // it survives JS-context restarts within the same process.
@@ -154,12 +159,21 @@ const pickNearest = (
   lng: number,
   limit: number,
 ): BtcMapPlace[] => {
-  const annotated = places
-    .filter(acceptsLightning) // bias to Lightning-friendly merchants for v1
+  // Prefer Lightning-friendly merchants (Hunt's #467 spec spec leans toward
+  // ⚡-capable shops), but fall back to all-Bitcoin if the user's area has
+  // none — better to alert on an on-chain shop than nothing (Copilot
+  // review #488). Distance-sort either way.
+  const lightning = places
+    .filter(acceptsLightning)
     .map((p) => ({ p, d: haversine(lat, lng, p.lat, p.lon) }))
     .sort((a, b) => a.d - b.d)
     .slice(0, limit);
-  return annotated.map(({ p }) => p);
+  if (lightning.length > 0) return lightning.map(({ p }) => p);
+  return places
+    .map((p) => ({ p, d: haversine(lat, lng, p.lat, p.lon) }))
+    .sort((a, b) => a.d - b.d)
+    .slice(0, limit)
+    .map(({ p }) => p);
 };
 
 const haversine = (lat1: number, lon1: number, lat2: number, lon2: number): number => {

@@ -11,13 +11,21 @@ import * as SecureStore from 'expo-secure-store';
  * their wallet of choice (LNbits, Alby, Mutiny, …) and pastes it here
  * — see project memory `No LNbits-specific APIs`.
  *
- * Published as a **NIP-GC kind 37516** geocache listing with an
- * `["lnurl", …]` extension tag (treasures.to's draft NIP, see project
- * memory `treasures.to interop`). LP isn't reinventing the wheel —
- * we're a Lightning-flavoured cache type within the same Nostr
- * geocaching commons. Smart defaults below apply when the field
- * isn't explicitly set: D=1, T=1, S=micro, t=traditional — matching
- * an NFC-tag Piggy that anyone can find without a hike.
+ * Published as a **NIP-GC kind 37516** geocache listing marked with a
+ * NIP-32 label (`["L","com.lightningpiggy.app"]` +
+ * `["l","payout-lnurl-w","com.lightningpiggy.app"]`) — generic NIP-GC
+ * clients (treasures.to, etc.) ignore the label and render the cache
+ * as a standard listing, while LP recognises it and routes the finder
+ * through HuntFoundScreen. **The LNURL bearer token is deliberately
+ * NEVER on the wire** — it lives only on the physical NFC tag / QR
+ * and in this SecureStore. See `feedback_lnurl_never_on_relays.md` and
+ * `buildCacheListing` in `nostrPlacesService.ts` (which has a
+ * security unit test asserting the absence). The `wait` / `uses`
+ * fields below are local-only at present (used by the M5/M6 UI for
+ * cooldown estimation) — the matching extension tags were considered
+ * during design but dropped to avoid side-channel discoverability of
+ * the cache's economics. Smart defaults: D=1, T=1, S=micro,
+ * t=traditional — matching an NFC-tag Piggy anyone can find.
  */
 
 const STORAGE_KEY = 'hunt-piggies:v1';
