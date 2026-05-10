@@ -99,7 +99,14 @@ const GroupConversationScreen: React.FC = () => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { getGroup, deleteGroup } = useGroups();
-  const { contacts, sendGroupMessage, pubkey: myPubkey, signEvent, relays } = useNostr();
+  const {
+    contacts,
+    sendGroupMessage,
+    pubkey: myPubkey,
+    profile: myProfile,
+    signEvent,
+    relays,
+  } = useNostr();
   const [renameVisible, setRenameVisible] = useState(false);
   const [membersSheetVisible, setMembersSheetVisible] = useState(false);
   const [draft, setDraft] = useState('');
@@ -178,22 +185,45 @@ const GroupConversationScreen: React.FC = () => {
   // land while the screen is open; missed wraps from before mount get
   // drained on the next MessagesScreen focus or app-foreground refresh.
 
+  // Stored `memberPubkeys` excludes the viewer by LP convention (see
+  // GroupsContext). For display we re-include self pinned at the top so
+  // the header count and the members sheet reflect the true group size,
+  // matching Signal / WhatsApp / Telegram (#473). The "You" suffix on
+  // the self row is wired via `memberNameByPubkey` below + the sheet's
+  // own self-row marker.
   const members: MemberRow[] = useMemo(() => {
     if (!group) return [];
     const byPubkey = new Map(contacts.map((c) => [c.pubkey, c]));
-    return group.memberPubkeys.map((pk) => {
-      const c = byPubkey.get(pk);
-      return {
-        pubkey: pk,
-        name:
-          c?.profile?.displayName ||
-          c?.profile?.name ||
-          c?.petname ||
-          `${pk.slice(0, 8)}...${pk.slice(-4)}`,
-        picture: c?.profile?.picture ?? null,
-      };
-    });
-  }, [group, contacts]);
+    // Dedupe against self (case-insensitive) before mapping. Defends
+    // against legacy / accidentally-self-included memberPubkeys lists
+    // that would otherwise produce a double "You" row + an off-by-one
+    // header count.
+    const myLower = myPubkey?.toLowerCase();
+    const others: MemberRow[] = group.memberPubkeys
+      .filter((pk) => !myLower || pk.toLowerCase() !== myLower)
+      .map((pk) => {
+        const c = byPubkey.get(pk);
+        return {
+          pubkey: pk,
+          name:
+            c?.profile?.displayName ||
+            c?.profile?.name ||
+            c?.petname ||
+            `${pk.slice(0, 8)}...${pk.slice(-4)}`,
+          picture: c?.profile?.picture ?? null,
+        };
+      });
+    if (!myPubkey) return others;
+    const selfRow: MemberRow = {
+      pubkey: myPubkey,
+      name:
+        myProfile?.displayName ||
+        myProfile?.name ||
+        `${myPubkey.slice(0, 8)}...${myPubkey.slice(-4)}`,
+      picture: myProfile?.picture ?? null,
+    };
+    return [selfRow, ...others];
+  }, [group, contacts, myPubkey, myProfile]);
 
   const memberNameByPubkey = useMemo(() => {
     const map = new Map<string, string>();
