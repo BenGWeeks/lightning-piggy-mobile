@@ -9,7 +9,6 @@ import {
   ActivityIndicator,
   RefreshControl,
   BackHandler,
-  Image,
   Linking,
   StyleSheet,
 } from 'react-native';
@@ -821,9 +820,12 @@ const ConversationScreen: React.FC = () => {
 
   const avatarNode =
     picture && !avatarError && isSupportedImageUrl(picture) ? (
-      <Image
+      <ExpoImage
         source={{ uri: picture }}
         style={styles.headerAvatar}
+        cachePolicy="memory-disk"
+        recyclingKey={picture}
+        autoplay={false}
         onError={() => setAvatarError(true)}
       />
     ) : (

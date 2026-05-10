@@ -379,7 +379,9 @@ const TransactionDetailSheet: React.FC<Props> = ({
                   <Image
                     source={{ uri: zapCounterparty.profile.picture }}
                     style={styles.senderAvatar}
-                    cachePolicy="disk"
+                    cachePolicy="memory-disk"
+                    recyclingKey={zapCounterparty.profile.picture}
+                    autoplay={false}
                     contentFit="cover"
                   />
                 ) : (

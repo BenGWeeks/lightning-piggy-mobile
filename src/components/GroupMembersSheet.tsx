@@ -55,7 +55,7 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMembe
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { getGroup, addMembersToGroup, removeMemberFromGroup } = useGroups();
-  const { contacts, pubkey: selfPubkey } = useNostr();
+  const { contacts, pubkey: selfPubkey, profile: selfProfile } = useNostr();
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['85%'], []);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -65,22 +65,42 @@ const GroupMembersSheet: React.FC<Props> = ({ visible, groupId, onClose, onMembe
   // Resolve memberPubkeys → friendly rows. We fall back to a short-pubkey
   // placeholder when no kind-0 profile is in `contacts` (matches the
   // membership chip pattern we replaced).
+  // Stored `memberPubkeys` excludes the viewer (LP convention in
+  // GroupsContext); we prepend a self row so the count + list match
+  // every other modern messenger (#473). The self row has no Remove
+  // button and is non-tappable — handled inline in the row render below.
   const members: MemberRow[] = useMemo(() => {
     if (!group) return [];
     const byPubkey = new Map(contacts.map((c) => [c.pubkey, c]));
-    return group.memberPubkeys.map((pk) => {
-      const c = byPubkey.get(pk);
-      return {
-        pubkey: pk,
-        name:
-          c?.profile?.displayName ||
-          c?.profile?.name ||
-          c?.petname ||
-          `${pk.slice(0, 8)}…${pk.slice(-4)}`,
-        picture: c?.profile?.picture ?? null,
-      };
-    });
-  }, [group, contacts]);
+    // Dedupe against self (case-insensitive) before mapping so a
+    // legacy memberPubkeys list that already includes the viewer
+    // doesn't produce a double "· you" row + miscount.
+    const selfLower = selfPubkey?.toLowerCase();
+    const others: MemberRow[] = group.memberPubkeys
+      .filter((pk) => !selfLower || pk.toLowerCase() !== selfLower)
+      .map((pk) => {
+        const c = byPubkey.get(pk);
+        return {
+          pubkey: pk,
+          name:
+            c?.profile?.displayName ||
+            c?.profile?.name ||
+            c?.petname ||
+            `${pk.slice(0, 8)}…${pk.slice(-4)}`,
+          picture: c?.profile?.picture ?? null,
+        };
+      });
+    if (!selfPubkey) return others;
+    const selfRow: MemberRow = {
+      pubkey: selfPubkey,
+      name:
+        selfProfile?.displayName ||
+        selfProfile?.name ||
+        `${selfPubkey.slice(0, 8)}…${selfPubkey.slice(-4)}`,
+      picture: selfProfile?.picture ?? null,
+    };
+    return [selfRow, ...others];
+  }, [group, contacts, selfPubkey, selfProfile]);
 
   useEffect(() => {
     if (visible) {

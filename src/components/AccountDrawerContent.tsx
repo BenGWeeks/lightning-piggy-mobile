@@ -224,7 +224,9 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
                 <Image
                   source={{ uri: profile.picture }}
                   style={styles.avatarImage}
-                  cachePolicy="disk"
+                  cachePolicy="memory-disk"
+                  recyclingKey={profile.picture}
+                  autoplay={false}
                 />
               ) : (
                 <View style={[styles.avatarImage, styles.avatarPlaceholder]}>
@@ -250,7 +252,9 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
                         <Image
                           source={{ uri: prof.picture }}
                           style={styles.avatarSmallImage}
-                          cachePolicy="disk"
+                          cachePolicy="memory-disk"
+                          recyclingKey={prof.picture}
+                          autoplay={false}
                         />
                       ) : (
                         <View style={[styles.avatarSmallImage, styles.avatarPlaceholder]}>
