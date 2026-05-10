@@ -454,15 +454,21 @@ const SendSheet: React.FC<Props> = ({
             await swapRecoveryService.unregisterPendingSwap(swap.id);
           } catch (e) {
             // Leave the persisted record in place so swapRecoveryService can
-            // retry on the next launch. Re-throw with a contextualized
-            // message — the bare error from claimSwap / waitForLockup is
-            // often opaque ("unknown Error", numeric Electrum codes), and
-            // PaymentProgressOverlay surfaces this as the failure subtitle.
+            // retry on the next launch. The bare error from claimSwap /
+            // waitForLockup can be opaque ("unknown Error", numeric Electrum
+            // codes); PaymentProgressOverlay surfaces this as the failure
+            // subtitle. Wrap with a "Boltz swap failed:" prefix EXCEPT for
+            // ReplyTimeoutError — that one needs to keep its `name` so the
+            // outer isReplyTimeoutError() branch can route it to the
+            // "Still in flight" overlay state instead of "Payment failed".
             const detail = e instanceof Error ? e.message || e.toString() : String(e);
             console.warn(
               `[Boltz] Swap ${swap.id} failed mid-flight, persisted for recovery:`,
               detail,
             );
+            if (isReplyTimeoutError(e)) {
+              throw e;
+            }
             throw new Error(`Boltz swap failed: ${detail}`);
           }
         }
@@ -1018,14 +1024,22 @@ const SendSheet: React.FC<Props> = ({
                   )}
 
                   {/* Fee estimate for on-chain addresses. When the
-                      payment goes through Boltz (LN wallet \u2192 on-chain
-                      address) show the Boltz logo so users know who is
-                      brokering the swap \u2014 same affordance as
-                      TransferSheet. Hot-wallet \u2192 on-chain sends bypass
-                      Boltz, so the logo is suppressed there. */}
+                      payment goes through Boltz (anything that isn't
+                      a *mnemonic* on-chain wallet) show the Boltz
+                      logo so users know who is brokering the swap \u2014
+                      same affordance as TransferSheet. The mnemonic
+                      hot-wallet path bypasses Boltz and broadcasts
+                      directly via BDK, so its logo is suppressed.
+                      Watch-only / xpub on-chain wallets *do* still
+                      hop through Boltz (they can't sign), so they
+                      get the logo too. Mirrors the routing predicate
+                      at SendSheet.tsx:411-415. */}
                   {isOnchainAddress && currentSats > 0 && (
                     <View style={styles.feeRow}>
-                      {selectedWallet?.walletType !== 'onchain' && (
+                      {!(
+                        selectedWallet?.walletType === 'onchain' &&
+                        selectedWallet?.onchainImportMethod === 'mnemonic'
+                      ) && (
                         <TouchableOpacity
                           onPress={() => Linking.openURL('https://boltz.exchange')}
                           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
