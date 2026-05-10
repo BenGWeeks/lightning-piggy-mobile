@@ -19,10 +19,13 @@ import {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast from './BrandedToast';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import { useWallet } from '../contexts/WalletContext';
-import { useNostr } from '../contexts/NostrContext';
+import { useNostr, OWN_PROFILE_CACHE_KEY_BASE } from '../contexts/NostrContext';
+import { perAccountKey } from '../services/perAccountStorage';
+import type { NostrProfile } from '../types/nostr';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createTransferSheetStyles } from '../styles/TransferSheet.styles';
 import { satsToFiatString } from '../services/fiatService';
@@ -76,6 +79,13 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   // identity NWC client which only runs for the active profile. The
   // dropdown renders without a balance suffix in that case.
   const [otherProfileWallets, setOtherProfileWallets] = useState<WalletMetadata[]>([]);
+  // Display-name cache for the Profile dropdown — same per-account
+  // own-profile lookup AccountSwitcherSheet does. Without this the
+  // dropdown would render raw npub prefixes for every other profile,
+  // which is unhelpful when you've named those accounts (e.g. "Middle
+  // Piggy"). Phase-1-only (no relay fan-out) — the data we need is
+  // always on disk if the user has ever switched to that profile.
+  const [profileNameById, setProfileNameById] = useState<Record<string, string>>({});
   const [satsValue, setSatsValue] = useState('');
   const [step, setStep] = useState<Step>('main');
   const [sending, setSending] = useState(false);
@@ -366,6 +376,49 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       hideSub.remove();
     };
   }, []);
+
+  // Phase-1 (cache-only) profile-name hydration for the Profile
+  // dropdown — read each non-active identity's own-profile blob from
+  // per-account AsyncStorage so the row reads "Middle Piggy" rather
+  // than "npub1…tqp265". Same source AccountSwitcherSheet uses, no
+  // relay fan-out (the kind-0 is always on disk after the user has
+  // ever switched to that profile, and the relay fallback would slow
+  // the sheet open and add UI flicker).
+  useEffect(() => {
+    if (!visible || identities.length <= 1) return;
+    let cancelled = false;
+    (async () => {
+      const reads = await Promise.all(
+        identities.map(async (id) => {
+          if (id.pubkey === activePubkey) return null;
+          if (profileNameById[id.pubkey]) return null;
+          try {
+            const raw = await AsyncStorage.getItem(
+              perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, id.pubkey),
+            );
+            if (!raw) return null;
+            const parsed = JSON.parse(raw) as NostrProfile;
+            const name = parsed?.displayName || parsed?.name || null;
+            if (!name) return null;
+            return { pubkey: id.pubkey, name };
+          } catch {
+            return null;
+          }
+        }),
+      );
+      if (cancelled) return;
+      const next: Record<string, string> = {};
+      for (const r of reads) if (r) next[r.pubkey] = r.name;
+      if (Object.keys(next).length > 0) {
+        setProfileNameById((prev) => ({ ...next, ...prev }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // profileNameById omitted — re-running on every resolve creates a loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, identities, activePubkey]);
 
   const handleTransfer = async () => {
     if (!sourceId || !destId || !source || !dest || currentSats <= 0) return;
@@ -889,6 +942,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
 
   const renderProfileLabel = (pk: string): string => {
     if (pk === activePubkey) return 'This profile (default)';
+    const cachedName = profileNameById[pk];
+    if (cachedName) return cachedName;
     try {
       const npub = nip19.npubEncode(pk);
       return `${npub.slice(0, 14)}…${npub.slice(-6)}`;
