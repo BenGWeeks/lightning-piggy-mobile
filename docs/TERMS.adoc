@@ -111,6 +111,15 @@ A glossary of key terms used throughout this document.
 | **NIP-20**
 | Nostr Implementation Possibility for OK responses (https://github.com/nostr-protocol/nips/blob/master/01.md[NIP-01]). Relays must send `["OK", event_id, success, message]` after receiving an EVENT.
 
+| **NIP-22**
+| Nostr Implementation Possibility for comments (https://github.com/nostr-protocol/nips/blob/master/22.md[NIP-22]). Defines a generic comment-threading model with uppercase `["A"/"K"/"P"]` tags pointing at the root and lowercase `["a"/"k"/"p"]` pointing at the parent. Used by NIP-GC for cache status comments (kind 1111 — DNF / note / maintenance / archived) tagged to the kind 37516 listing.
+
+| **NIP-32**
+| Nostr Implementation Possibility for labels (https://github.com/nostr-protocol/nips/blob/master/32.md[NIP-32]). A standardised pattern for annotating events / pubkeys / URLs with structured tags under namespaced vocabularies. Format: `["L", "namespace"]` declares the namespace, `["l", "value", "namespace"]` carries the value within it. Lets multiple labelling systems (moderation services, country tags, MIME types, etc.) coexist without colliding. Lightning Piggy uses namespace `lp.piggy` with value `payout-lnurl-w` on its kind-37516 Hunt cache listings — a marker that says "this cache pays via LNURL-w on the physical artifact" without leaking the bearer LNURL onto public relays. NIP-32 also defines kind 1985 standalone label events (used when a third party wants to annotate content without the original author's involvement); we use the inline-on-the-event form, not 1985.
+
+| **NIP-GC**
+| The Nostr Geocaching draft NIP (`d="geocaching-events"` published as a kind-30817 storage event by https://nostrhub.io/naddr1qvzqq…gkwet0vdskx6rfdenj6etkv4h8guc6gs5y5[chad@chadwick.site / hodlbod@coracle.social]). Defines kind 37516 (geocache listing — replaceable, with `D/T/S/t/g/hint/image` tags), kind 7516 (found-log — append-only with `a` tag pointing at the listing), kind 1111 (comments per NIP-22 for DNF / note / maintenance / archived), and kind 7517 (cryptographic verification of a physical find via per-cache verification key). Lightning Piggy adopts NIP-GC verbatim and adds a NIP-32 `lp.piggy / payout-lnurl-w` label marker on listings to flag Lightning-payout caches without leaking the LNURL bearer token to public relays. See `docs/PROTOCOLS.adoc` → "Hunt: Lightning extension to NIP-GC".
+
 | **Nostr**
 | An open protocol for decentralised social networking (https://github.com/nostr-protocol/nostr[nostr-protocol/nostr]). Lightning Piggy uses Nostr for identity, social features (friends, profiles), and zaps.
 

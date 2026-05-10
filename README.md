@@ -72,6 +72,9 @@ Lightning Piggy Mobile implements the following open standards. See [docs/STANDA
 | [NIP-19](https://github.com/nostr-protocol/nips/blob/master/19.md) | Bech32-encoded Entities (`npub`, `nsec`)                      |
 | [NIP-20](https://github.com/nostr-protocol/nips/blob/master/20.md) | Command Results (OK messages)                                 |
 | [NIP-21](https://github.com/nostr-protocol/nips/blob/master/21.md) | `nostr:` URI Scheme                                           |
+| [NIP-22](https://github.com/nostr-protocol/nips/blob/master/22.md) | Comments (kind 1111 — used by NIP-GC for DNF / maintenance / archived cache statuses) |
+| [NIP-32](https://github.com/nostr-protocol/nips/blob/master/32.md) | Labels (`L` namespace + `l` value tags — used to mark Hunt caches as Lightning-payout via the `lp.piggy / payout-lnurl-w` label) |
+| [NIP-40](https://github.com/nostr-protocol/nips/blob/master/40.md) | Expiration Timestamp (auto-retire Hunt cache listings)        |
 | [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) | Encrypted Payloads v2 (used by NIP-17 sealing)                |
 | [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md) | Nostr Wallet Connect (NWC)                                    |
 | [NIP-55](https://github.com/nostr-protocol/nips/blob/master/55.md) | Android Signer (Amber)                                        |
@@ -79,10 +82,19 @@ Lightning Piggy Mobile implements the following open standards. See [docs/STANDA
 | [NIP-59](https://github.com/nostr-protocol/nips/blob/master/59.md) | Gift Wrap (used by NIP-17 to mask sender + metadata)          |
 | [NIP-65](https://github.com/nostr-protocol/nips/blob/master/65.md) | Relay List Metadata                                           |
 | [NIP-94](https://github.com/nostr-protocol/nips/blob/master/94.md) | File Metadata                                                 |
+| NIP-GC ([draft, on Nostr](https://nostrhub.io/naddr1qvzqqqrcvypzppscgyy746fhmrt0nq955z6xmf80pkvrat0yq0hpknqtd00z8z68qqgkwet0vdskx6rfdenj6etkv4h8guc6gs5y5)) | Geocaching Events (kinds 37516 / 7516 / 1111 / 7517 — used by the Hunt feature, with an `lp.piggy` NIP-32 label marker for Lightning-payout caches) |
 
 Group state for client-side group chat is propagated via a parameterised-replaceable
 `kind:30200` event (custom to this client; receivers reconcile by `groupId` + `created_at`).
 Not a NIP — see `src/services/nostrService.ts` (`GROUP_STATE_KIND`) for the schema.
+
+### LUDs (LNURL specifications)
+
+| Standard                                                       | Name                                                                |
+| -------------------------------------------------------------- | ------------------------------------------------------------------- |
+| [LUD-03](https://github.com/lnurl/luds/blob/luds/03.md)        | LNURL-withdraw — used by the Hunt feature to claim Piggies          |
+| [LUD-16](https://github.com/lnurl/luds/blob/luds/16.md)        | Lightning Address (`user@domain` → LNURL-pay endpoint)              |
+| [LUD-17](https://github.com/lnurl/luds/blob/luds/17.md)        | URI scheme prefixes (`lnurlw://`, `lnurlp://`, …) — accepted as input alongside bech32 `LNURL1…` |
 
 ### Lightning Standards
 
