@@ -1168,78 +1168,76 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                   )}
                 </View>
 
-                {/* Profile selector — only when there are multiple
-                    locally-configured profiles (#485). Default is the
-                    active profile, which behaves identically to the
-                    pre-multi-account flow. */}
+                {/* Destination block. With multiple profiles signed in
+                    we render `To` as a header followed by both the
+                    profile and the wallet dropdown — semantically
+                    "pick *who*, then pick *which of their wallets*"
+                    (#485). With a single profile, the profile dropdown
+                    collapses out and the layout matches the pre-#485
+                    flow exactly. */}
+                <Text style={styles.sectionLabel}>To</Text>
                 {showProfileDropdown && (
-                  <>
-                    <Text style={styles.sectionLabel}>Profile</Text>
-                    <View style={[styles.dropdownWrapper, profileDropdownOpen && { zIndex: 15 }]}>
-                      <TouchableOpacity
-                        style={styles.dropdown}
-                        onPress={() => {
-                          setProfileDropdownOpen(!profileDropdownOpen);
-                          setSourceDropdownOpen(false);
-                          setDestDropdownOpen(false);
-                        }}
-                        testID="transfer-profile-dropdown"
-                        accessibilityLabel="Destination profile"
-                      >
-                        <Text style={styles.dropdownText}>
-                          {renderProfileLabel(selectedProfilePubkey ?? activePubkey ?? '')}
-                        </Text>
-                        <Text style={styles.dropdownArrow}>
-                          {profileDropdownOpen ? '\u25B2' : '\u25BC'}
-                        </Text>
-                      </TouchableOpacity>
-                      {profileDropdownOpen && (
-                        <View style={styles.dropdownMenu}>
-                          {profileOptions.map((id) => {
-                            const isSelected =
-                              (selectedProfilePubkey ?? activePubkey) === id.pubkey;
-                            return (
-                              <TouchableOpacity
-                                key={id.pubkey}
-                                testID={`transfer-profile-${id.pubkey}`}
+                  <View style={[styles.dropdownWrapper, profileDropdownOpen && { zIndex: 15 }]}>
+                    <TouchableOpacity
+                      style={styles.dropdown}
+                      onPress={() => {
+                        setProfileDropdownOpen(!profileDropdownOpen);
+                        setSourceDropdownOpen(false);
+                        setDestDropdownOpen(false);
+                      }}
+                      testID="transfer-profile-dropdown"
+                      accessibilityLabel="Destination profile"
+                    >
+                      <Text style={styles.dropdownText}>
+                        {renderProfileLabel(selectedProfilePubkey ?? activePubkey ?? '')}
+                      </Text>
+                      <Text style={styles.dropdownArrow}>
+                        {profileDropdownOpen ? '\u25B2' : '\u25BC'}
+                      </Text>
+                    </TouchableOpacity>
+                    {profileDropdownOpen && (
+                      <View style={styles.dropdownMenu}>
+                        {profileOptions.map((id) => {
+                          const isSelected = (selectedProfilePubkey ?? activePubkey) === id.pubkey;
+                          return (
+                            <TouchableOpacity
+                              key={id.pubkey}
+                              testID={`transfer-profile-${id.pubkey}`}
+                              style={[styles.dropdownItem, isSelected && styles.dropdownItemActive]}
+                              onPress={() => {
+                                // null = "current profile" so the
+                                // legacy code path (no cross-profile
+                                // load) fires when the user picks
+                                // the active identity explicitly.
+                                const next = id.pubkey === activePubkey ? null : id.pubkey;
+                                setSelectedProfilePubkey(next);
+                                setProfileDropdownOpen(false);
+                                // Clearing destId on profile change
+                                // — the previously-picked walletId
+                                // is from a different list and
+                                // would be visually stale.
+                                setDestId(null);
+                              }}
+                            >
+                              <Text
                                 style={[
-                                  styles.dropdownItem,
-                                  isSelected && styles.dropdownItemActive,
+                                  styles.dropdownItemText,
+                                  isSelected && styles.dropdownItemTextActive,
                                 ]}
-                                onPress={() => {
-                                  // null = "current profile" so the
-                                  // legacy code path (no cross-profile
-                                  // load) fires when the user picks
-                                  // the active identity explicitly.
-                                  const next = id.pubkey === activePubkey ? null : id.pubkey;
-                                  setSelectedProfilePubkey(next);
-                                  setProfileDropdownOpen(false);
-                                  // Clearing destId on profile change
-                                  // — the previously-picked walletId
-                                  // is from a different list and
-                                  // would be visually stale.
-                                  setDestId(null);
-                                }}
                               >
-                                <Text
-                                  style={[
-                                    styles.dropdownItemText,
-                                    isSelected && styles.dropdownItemTextActive,
-                                  ]}
-                                >
-                                  {renderProfileLabel(id.pubkey)}
-                                </Text>
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </View>
-                      )}
-                    </View>
-                  </>
+                                {renderProfileLabel(id.pubkey)}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    )}
+                  </View>
                 )}
 
-                {/* Destination wallet selector */}
-                <Text style={styles.sectionLabel}>To</Text>
+                {/* Destination wallet selector — sits under the same
+                    `To` header above (and beneath the profile dropdown
+                    when one is shown). */}
                 <View style={styles.dropdownWrapper}>
                   <TouchableOpacity
                     style={styles.dropdown}
