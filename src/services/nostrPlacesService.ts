@@ -22,6 +22,12 @@ export const GC_FOUND_LOG_KIND = 7516;
 export const GC_COMMENT_KIND = 1111;
 export const GC_VERIFICATION_KIND = 7517;
 
+// NIP-52 calendar event kinds — used by the Events sub-screen (M7) to
+// surface nearby Bitcoin meetups. We only consume kind 31923
+// (time-based) for v1; kind 31922 (date-based all-day) and kind 31925
+// (RSVPs) are out of scope.
+export const NIP52_TIME_BASED_KIND = 31923;
+
 export const LP_LABEL_NAMESPACE = 'com.lightningpiggy.app';
 export const LP_LABEL_VALUE = 'payout-lnurl-w';
 
@@ -196,4 +202,51 @@ export const parseCacheCoord = (
   const kind = parseInt(parts[0], 10);
   if (!Number.isFinite(kind)) return null;
   return { kind, pubkey: parts[1], d: parts[2] };
+};
+
+// -----------------------------------------------------------------------------
+// NIP-52 events (kind 31923) — used by the Events sub-screen
+// -----------------------------------------------------------------------------
+
+export interface ParsedEvent {
+  coord: string;
+  organiserPubkey: string;
+  d: string;
+  title: string;
+  description: string;
+  /** Unix-seconds start timestamp parsed from the `start` tag. */
+  startsAt: number | null;
+  /** Optional unix-seconds end timestamp. */
+  endsAt: number | null;
+  /** Free-form location string from the `location` tag. May be a venue
+   * name, address, or "video call link" — NIP-52 leaves it open. */
+  location: string | null;
+  geohash: string | null;
+  imageUrl: string | null;
+  hashtags: string[];
+}
+
+export const parseNip52Event = (event: VerifiedEvent): ParsedEvent | null => {
+  if (event.kind !== NIP52_TIME_BASED_KIND) return null;
+  const tag = (k: string): string | undefined => event.tags.find((t) => t[0] === k)?.[1];
+  const d = tag('d');
+  if (!d) return null;
+  const start = parseInt(tag('start') ?? '', 10);
+  const end = parseInt(tag('end') ?? '', 10);
+  const gtags = event.tags.filter((t) => t[0] === 'g').map((t) => t[1]);
+  const longestGh = gtags.sort((a, b) => b.length - a.length)[0] ?? null;
+  const hashtags = event.tags.filter((t) => t[0] === 't').map((t) => t[1]);
+  return {
+    coord: `${NIP52_TIME_BASED_KIND}:${event.pubkey}:${d}`,
+    organiserPubkey: event.pubkey,
+    d,
+    title: tag('title') ?? tag('name') ?? 'Untitled event',
+    description: event.content,
+    startsAt: Number.isFinite(start) ? start : null,
+    endsAt: Number.isFinite(end) ? end : null,
+    location: tag('location') ?? null,
+    geohash: longestGh,
+    imageUrl: tag('image') ?? null,
+    hashtags,
+  };
 };

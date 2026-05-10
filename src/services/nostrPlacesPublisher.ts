@@ -4,8 +4,11 @@ import {
   GC_COMMENT_KIND,
   GC_FOUND_LOG_KIND,
   GC_LISTING_KIND,
+  NIP52_TIME_BASED_KIND,
   parseCache,
+  parseNip52Event,
   type ParsedCache,
+  type ParsedEvent,
 } from './nostrPlacesService';
 
 /** Structural shape of an event as returned by NostrContext.signEvent —
@@ -85,6 +88,30 @@ export const subscribeComments = (
   const filter: Filter = { kinds: [GC_COMMENT_KIND], '#A': [cacheCoord] };
   const sub = pool.subscribeMany(relays, filter, {
     onevent: (e: NostrEvent) => onEvent(e as VerifiedEvent),
+  });
+  return () => sub.close();
+};
+
+/**
+ * Subscribe to nearby NIP-52 calendar events (kind 31923) by geohash
+ * prefix. Mirrors `subscribeNearbyCaches` for the Events sub-screen.
+ * Returns a closer.
+ */
+export const subscribeNearbyEvents = (
+  prefixes: string[],
+  onEvent: (parsed: ParsedEvent) => void,
+  relays: string[] = DEFAULT_RELAYS,
+): (() => void) => {
+  if (prefixes.length === 0) return () => {};
+  const filter: Filter = {
+    kinds: [NIP52_TIME_BASED_KIND],
+    '#g': prefixes,
+  };
+  const sub = pool.subscribeMany(relays, filter, {
+    onevent: (e: NostrEvent) => {
+      const parsed = parseNip52Event(e as VerifiedEvent);
+      if (parsed) onEvent(parsed);
+    },
   });
   return () => sub.close();
 };
