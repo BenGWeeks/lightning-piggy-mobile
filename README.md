@@ -29,6 +29,16 @@ A mobile Bitcoin Lightning wallet built with Expo/React Native, connecting via N
 - Contact profile cards with deep linking to Nostr apps
 - QR code sharing for npub and Lightning address
 - Secure credential storage (expo-secure-store)
+- **Explore tab**: discover Bitcoin merchants nearby (BTC Map / OpenStreetMap),
+  opt-in geofence alerts when you walk past one (#467), hunt for hidden
+  LNURL-withdraw "Piggies" stashed on NFC tags or QR codes (#468), and find
+  Bitcoin meetups (NIP-52 calendar events). Hunt Piggies are published as
+  Nostr **kind-30408** (parameterised replaceable event — the hider can
+  update location, LNURL, hint photo, cooldown, or expiry by re-publishing
+  with the same `d` tag). Finder log entries (photo + comment) are
+  append-only kind-1 replies tagged to the Piggy's `a` coordinate. See
+  [docs/PROTOCOLS.adoc](docs/PROTOCOLS.adoc) → "Hunt: Hidden Piggies" for the
+  tag schema.
 
 ## Standards
 

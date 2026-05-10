@@ -80,3 +80,76 @@ There is no scheduled removal date. Removal will be announced one release ahead 
 | `src/contexts/NostrContext.tsx` :: `fetchConversation` / `refreshDmInbox` | Application-level receive paths. Decrypt both protocols, merge into the per-peer thread.
 | `src/services/nostrService.ts` :: `decryptNip04WithSecret` + `nip04` import | Read-only NIP-04 decrypt. Retained for backward-compatibility per the deprecation timeline above.
 |===
+
+=== Hunt: Hidden Piggies (#468) — kind-30408 + kind-1 thread
+
+==== Summary
+
+Lightning Piggy's "Hunt" feature lets users hide LNURL-withdraw "Piggies" in
+the wild and lets others find + claim them. The wallet-level LNURL-w is
+created by the hider in their own wallet (LNbits / Alby / Mutiny / …) — see
+the project memory `No LNbits-specific APIs`. Lightning Piggy is the
+**publisher**, **discoverer**, and **comment thread** layer.
+
+The data model is split between **two Nostr kinds with different lifecycles**.
+This is intentional and the app supports both:
+
+[cols="1,1,1,3", options="header"]
+|===
+| What | Kind | Lifecycle | Why this kind?
+
+| Piggy listing | `30408` | **Replaceable** (PRE) | Keyed by `(pubkey, kind, d)` per NIP-01 30000–39999 range. Hider can re-publish to update the LNURL, location, hint photo, cooldown, expiry, etc. — relays drop the prior version automatically. Same `d` tag = same Piggy.
+| Finder log entry (photo + comment) | `1` | **Append-only** | Each find is a separate kind-1 reply tagged to the Piggy's `a` coordinate. New comments don't replace previous ones — the thread grows over time, geocaching.com-style.
+|===
+
+==== kind-30408 tag schema
+
+[cols="1,3", options="header"]
+|===
+| Tag | Meaning
+
+| `["d", piggy_id]` | Stable identifier scoped to the hider's pubkey. Required for replaceability. Format: `piggy_<base36-millis>_<random6>` (see `newPiggyId` in `src/services/piggyStorageService.ts`).
+| `["g", geohash]` (×N) | Location, NIP-52 convention. We emit precision-7 (≈ 153 m) plus successively coarser prefixes (6, 5, 4) so subscribers can run prefix-filter queries with any of those granularities. See `src/utils/geohash.ts` :: `geohashPrefixes`.
+| `["lnurl", "lightning:LNURL1…"]` | The bearer-token withdraw URL (any of the LUD-17 / bech32 forms `decodeLnurlWithdraw` accepts). This is what the finder claims against.
+| `["image", url]` | Optional EXIF-stripped Blossom / nostr.build URL of the hider's hint photo.
+| `["wait", seconds]` | Optional self-reported cooldown hint (mirrors the hider's wallet `wait_time`). LUD-03 metadata is stateless, so this is a UX hint not protocol enforcement. See the `Cooldown / wait_time UX` notes in the `project_hunt_photos_comments` memory.
+| `["uses", count]` | Optional self-reported lifetime-uses cap. Same "soft hint" treatment as `wait`.
+| `["expiration", unix_ts]` | NIP-40. Clients hide the listing past this time without needing a separate delete event.
+| `["t", "piggy"]`, `["t", "lightningpiggy"]` | Discovery hashtags so non-LP clients (or future LP siblings) can find Piggies via topic queries.
+|===
+
+`content` carries the human-readable memo ("🐷 Geo-Cache 1 — 21 sats per claim, 3h cooldown").
+
+==== kind-1 reply thread (finder log entries)
+
+Each find produces a kind-1 with:
+
+* `["a", "30408:<hider_pubkey>:<piggy_id>"]` — NIP-01 / NIP-10 reply pointer to the Piggy's a-coordinate. This is what makes `kinds:[1], "#a":[…]` subscriptions return the thread.
+* `["e", <piggy_event_id>]` — convenience pointer to a specific revision of the Piggy event for older clients that don't filter by `#a`.
+* `["claim", "found"]` — present iff the comment was posted via the post-claim celebration flow. Renders the `⚡ claimed` badge on the comment row. Honour-system, easily forgeable, but useful as a social signal. **We do NOT gate posting on it.**
+* `["imeta", url, "alt …", "x …", …]` — NIP-92 file metadata for any photo embedded in the comment. The URL itself is also inline in `content` so clients without imeta support still render the image.
+
+==== Subscribe filter shape
+
+* **Discovery feed** — `{ kinds: [30408], "#g": [<geohash prefixes for current viewport>] }`. Prefix list comes from `geohashPrefixes(currentGh, 5)` so a single subscribe covers a ~5 km city neighbourhood without enumerating cells.
+* **Single Piggy detail (replaceable + thread)** — two filters:
+  ** `{ kinds: [30408], authors: [hider], "#d": [piggy_id] }` — latest revision of the listing (replaceable, so 1 event back).
+  ** `{ kinds: [1], "#a": ["30408:<hider>:<piggy_id>"] }` — the append-only comment thread.
+* **My Piggies (cross-device)** — `{ kinds: [30408], authors: [me] }` (NB: a private mirror via kind-30407 encrypted to self is the future plan for cross-device sync of un-published Piggies; not implemented in M4).
+
+==== Why kind 30408 specifically
+
+`30000-39999` is the parameterised replaceable range per NIP-01 — required if we want hider-edit semantics. The specific number 30408 is greenfield and chosen pragmatically; if a community NIP later standardises geocaching events (e.g. NIP-G0 has been proposed for geospatial tagging) we will migrate by republishing under the new kind and tombstoning 30408 with an `expiration`.
+
+==== Code references
+
+|===
+| Path | What it does
+
+| `scripts/publish-test-piggy.mjs` | One-shot dev script that publishes a real kind-30408 event from a disposable key to the default relay set. Used for end-to-end testing before the in-app composer (M6) lands.
+| `src/services/lnurlWithdrawService.ts` | Decode + LUD-03 resolve for any of the LNURL forms (`lnurl1…`, `LNURL1…`, `lightning:LNURL1…`, `lnurlw://…`, raw `https://`).
+| `src/services/piggyStorageService.ts` | Local SecureStore registry of the hider's Piggies. Carries the optional fields (`hintPhotoUrl`, `waitSecondsHint`, `usesHint`, `lat`, `lon`, `geohash`) that get tagged on publish in M6.
+| `src/utils/geohash.ts` | Tiny geohash encoder + `geohashPrefixes` helper.
+| `src/services/nfcService.ts` :: `writeLnurlToTag` | Writes `lightning:LNURL…` to an NDEF URI record so any LNURL-aware wallet on tap opens.
+| `src/screens/HuntCreateScreen.tsx` | Hider create flow — paste / validate LNURL, attach hint photo (EXIF-stripped via `imageUploadService`), drop GPS pin → 7-char geohash, optional cooldown / uses hints, optional Public toggle.
+|===

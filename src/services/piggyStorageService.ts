@@ -31,6 +31,36 @@ export interface HiddenPiggy {
    * each finder claim. Optional because old / unreachable LNURLs may
    * have been resolved before but failed at re-validation. */
   maxWithdrawableMsat?: number;
+  /** Optional EXIF-stripped Blossom / nostr.build URL of a hint photo
+   * uploaded at create time ("look near this bench"). Surfaces on the
+   * finder celebration screen and on the public Piggy detail page when
+   * isPublic. Stored as a URL only — the bytes themselves live with
+   * the user's chosen Blossom server, not in SecureStore. */
+  hintPhotoUrl?: string;
+  /** Optional hider-published cooldown hint in seconds — mirrors the
+   * `wait_time` setting in the hider's wallet (LNbits etc). Self-
+   * reported; the LUD-03 metadata response itself is stateless and
+   * doesn't expose this. Used by HuntPiggyDetailScreen to render
+   * "next-available-in" estimates alongside the latest claim
+   * timestamp from the kind-1 thread. */
+  waitSecondsHint?: number;
+  /** Optional hider-published lifetime-uses hint — mirrors the
+   * `uses` (a.k.a. "amount of uses") cap in the hider's wallet. Same
+   * stateless-LUD-03 caveat: not in metadata, not protocol-enforced
+   * here. We surface it on the detail screen alongside the count of
+   * claim-tagged kind-1 replies so finders see "12/100 claims used"
+   * as a soft availability hint. */
+  usesHint?: number;
+  /** Optional GPS pin captured at hide-time. Stored locally so the
+   * hider can recall "where did I stash this?" later. ONLY published
+   * to Nostr (as a `g` geohash tag on kind-30408) when the Piggy is
+   * marked public — private Piggies keep their pin on-device. */
+  lat?: number;
+  lon?: number;
+  /** Pre-computed 7-char geohash of (lat, lon). Convenience cache so
+   * we don't re-encode on every render. Always derivable from
+   * lat/lon via `encodeGeohash`. */
+  geohash?: string;
 }
 
 export const loadPiggies = async (): Promise<HiddenPiggy[]> => {
@@ -77,11 +107,23 @@ export const newPiggyId = (): string =>
 const isValidPiggy = (v: unknown): v is HiddenPiggy => {
   if (!v || typeof v !== 'object') return false;
   const p = v as Record<string, unknown>;
-  return (
-    typeof p.id === 'string' &&
-    typeof p.lnurlw === 'string' &&
-    typeof p.memo === 'string' &&
-    typeof p.createdAt === 'number' &&
-    typeof p.isPublic === 'boolean'
-  );
+  if (
+    typeof p.id !== 'string' ||
+    typeof p.lnurlw !== 'string' ||
+    typeof p.memo !== 'string' ||
+    typeof p.createdAt !== 'number' ||
+    typeof p.isPublic !== 'boolean'
+  ) {
+    return false;
+  }
+  // Optional fields — accept absent or correctly-typed; reject wrong-typed.
+  if (p.hintPhotoUrl !== undefined && typeof p.hintPhotoUrl !== 'string') return false;
+  if (p.waitSecondsHint !== undefined && typeof p.waitSecondsHint !== 'number') return false;
+  if (p.usesHint !== undefined && typeof p.usesHint !== 'number') return false;
+  if (p.maxWithdrawableMsat !== undefined && typeof p.maxWithdrawableMsat !== 'number')
+    return false;
+  if (p.lat !== undefined && typeof p.lat !== 'number') return false;
+  if (p.lon !== undefined && typeof p.lon !== 'number') return false;
+  if (p.geohash !== undefined && typeof p.geohash !== 'string') return false;
+  return true;
 };

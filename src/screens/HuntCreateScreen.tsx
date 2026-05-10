@@ -7,17 +7,25 @@ import {
   StyleSheet,
   ScrollView,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
+import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
 import {
+  Camera,
   CheckCircle2,
   ChevronLeft,
   Clipboard as ClipboardIcon,
   Globe,
+  ImagePlus,
+  MapPin,
   Nfc,
   PiggyBank,
+  X,
 } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useNostr } from '../contexts/NostrContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
 import { Alert } from '../components/BrandedAlert';
@@ -30,6 +38,8 @@ import {
 } from '../services/lnurlWithdrawService';
 import { newPiggyId, savePiggy } from '../services/piggyStorageService';
 import { writeLnurlToTag } from '../services/nfcService';
+import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
+import { encodeGeohash } from '../utils/geohash';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -46,11 +56,18 @@ type Stage =
 const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const { signEvent } = useNostr();
 
   const [lnurl, setLnurl] = useState('');
   const [memo, setMemo] = useState('');
   const [isPublic, setIsPublic] = useState(false);
   const [stage, setStage] = useState<Stage>({ kind: 'idle' });
+  const [hintPhotoUrl, setHintPhotoUrl] = useState<string | null>(null);
+  const [uploadingHint, setUploadingHint] = useState(false);
+  const [waitMinutesText, setWaitMinutesText] = useState('');
+  const [usesText, setUsesText] = useState('');
+  const [pin, setPin] = useState<{ lat: number; lon: number; geohash: string } | null>(null);
+  const [pinning, setPinning] = useState(false);
 
   const handlePaste = useCallback(async () => {
     try {
@@ -84,6 +101,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
 
   const handleSave = useCallback(async () => {
     if (stage.kind !== 'validated') return;
+    const waitMinutes = parseInt(waitMinutesText.trim(), 10);
+    const waitSecondsHint =
+      Number.isFinite(waitMinutes) && waitMinutes > 0 ? waitMinutes * 60 : undefined;
+    const usesParsed = parseInt(usesText.trim(), 10);
+    const usesHint = Number.isFinite(usesParsed) && usesParsed > 0 ? usesParsed : undefined;
     const piggy = {
       id: newPiggyId(),
       lnurlw: lnurl.trim(),
@@ -91,11 +113,96 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
       createdAt: Date.now(),
       isPublic,
       maxWithdrawableMsat: stage.params.maxWithdrawable,
+      hintPhotoUrl: hintPhotoUrl ?? undefined,
+      waitSecondsHint,
+      usesHint,
+      lat: pin?.lat,
+      lon: pin?.lon,
+      geohash: pin?.geohash,
     };
     await savePiggy(piggy);
     setStage({ kind: 'saved', lnurlw: piggy.lnurlw });
     Toast.show({ type: 'success', text1: 'Piggy hidden 🐷' });
-  }, [stage, lnurl, memo, isPublic]);
+  }, [stage, lnurl, memo, isPublic, hintPhotoUrl, waitMinutesText, usesText, pin]);
+
+  const handlePinHere = useCallback(async () => {
+    if (pinning) return;
+    setPinning(true);
+    try {
+      const perm = await Location.requestForegroundPermissionsAsync();
+      if (perm.status !== 'granted') {
+        Alert.alert('Permission needed', 'Location is needed to drop a pin at the cache.', [
+          { text: 'OK' },
+        ]);
+        return;
+      }
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+      setPin({ lat, lon, geohash: encodeGeohash(lat, lon, 7) });
+    } catch (e) {
+      Alert.alert('Could not get location', (e as Error).message, [{ text: 'OK' }]);
+    } finally {
+      setPinning(false);
+    }
+  }, [pinning]);
+
+  const handleClearPin = useCallback(() => setPin(null), []);
+
+  // ----- hint photo capture / library --------------------------------------
+
+  const uploadHintPhoto = useCallback(
+    async (uri: string, base64?: string | null) => {
+      setUploadingHint(true);
+      try {
+        const scrubbed = await stripImageMetadata(uri, base64);
+        const url = await uploadImage(scrubbed.uri, signEvent ?? null, scrubbed.base64);
+        setHintPhotoUrl(url);
+        Toast.show({ type: 'success', text1: 'Hint photo uploaded' });
+      } catch (e) {
+        Alert.alert('Upload failed', (e as Error).message, [{ text: 'OK' }]);
+      } finally {
+        setUploadingHint(false);
+      }
+    },
+    [signEvent],
+  );
+
+  const handlePickHintFromLibrary = useCallback(async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission needed', 'Allow photo library access to attach a hint photo.', [
+        { text: 'OK' },
+      ]);
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 1,
+      base64: true,
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+    await uploadHintPhoto(result.assets[0].uri, result.assets[0].base64);
+  }, [uploadHintPhoto]);
+
+  const handleTakeHintPhoto = useCallback(async () => {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission needed', 'Allow camera access to take a hint photo.', [
+        { text: 'OK' },
+      ]);
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images'],
+      quality: 1,
+      base64: true,
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+    await uploadHintPhoto(result.assets[0].uri, result.assets[0].base64);
+  }, [uploadHintPhoto]);
+
+  const handleRemoveHintPhoto = useCallback(() => setHintPhotoUrl(null), []);
 
   const handleWriteNfc = useCallback(async () => {
     if (stage.kind !== 'saved' && stage.kind !== 'wrote-nfc') return;
@@ -214,6 +321,132 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
               testID="hunt-piggy-memo-input"
             />
             <Text style={styles.helper}>Shown to the finder on the celebration screen.</Text>
+
+            <Text style={[styles.sectionLabel, styles.sectionGap]}>Hint photo (optional)</Text>
+            {hintPhotoUrl ? (
+              <View style={styles.hintPreviewWrapper}>
+                <Image
+                  source={{ uri: hintPhotoUrl }}
+                  style={styles.hintPreview}
+                  resizeMode="cover"
+                />
+                <TouchableOpacity
+                  style={styles.hintRemoveButton}
+                  onPress={handleRemoveHintPhoto}
+                  accessibilityLabel="Remove hint photo"
+                  testID="hunt-piggy-remove-hint-button"
+                >
+                  <X size={16} color={colors.white} strokeWidth={2.5} />
+                </TouchableOpacity>
+              </View>
+            ) : uploadingHint ? (
+              <View style={styles.hintUploadingWrapper}>
+                <ActivityIndicator color={colors.brandPink} />
+                <Text style={styles.helper}>Stripping EXIF + uploading…</Text>
+              </View>
+            ) : (
+              <View style={styles.hintButtonsRow}>
+                <TouchableOpacity
+                  style={styles.hintButton}
+                  onPress={handleTakeHintPhoto}
+                  disabled={stage.kind !== 'validated'}
+                  testID="hunt-piggy-take-hint-button"
+                >
+                  <Camera size={18} color={colors.brandPink} strokeWidth={2} />
+                  <Text style={styles.hintButtonText}>Take photo</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.hintButton}
+                  onPress={handlePickHintFromLibrary}
+                  disabled={stage.kind !== 'validated'}
+                  testID="hunt-piggy-pick-hint-button"
+                >
+                  <ImagePlus size={18} color={colors.brandPink} strokeWidth={2} />
+                  <Text style={styles.hintButtonText}>From library</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            <Text style={styles.helper}>
+              EXIF data (incl. GPS) is stripped before upload. Pick a clue photo, not a photo taken
+              at the cache itself.
+            </Text>
+
+            <Text style={[styles.sectionLabel, styles.sectionGap]}>
+              Cooldown &amp; uses (optional)
+            </Text>
+            <View style={styles.hintsRow}>
+              <View style={styles.hintField}>
+                <Text style={styles.hintFieldLabel}>Cooldown (mins)</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="180"
+                  placeholderTextColor={colors.textSupplementary}
+                  keyboardType="number-pad"
+                  value={waitMinutesText}
+                  onChangeText={setWaitMinutesText}
+                  editable={stage.kind === 'validated'}
+                  testID="hunt-piggy-wait-input"
+                />
+              </View>
+              <View style={styles.hintField}>
+                <Text style={styles.hintFieldLabel}>Total uses</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="100"
+                  placeholderTextColor={colors.textSupplementary}
+                  keyboardType="number-pad"
+                  value={usesText}
+                  onChangeText={setUsesText}
+                  editable={stage.kind === 'validated'}
+                  testID="hunt-piggy-uses-input"
+                />
+              </View>
+            </View>
+            <Text style={styles.helper}>
+              These mirror your wallet&apos;s wait_time + uses settings — finders see them as soft
+              hints. The wallet still does the actual enforcement.
+            </Text>
+
+            <Text style={[styles.sectionLabel, styles.sectionGap]}>Location pin (optional)</Text>
+            {pin ? (
+              <View style={styles.pinRow}>
+                <MapPin size={20} color={colors.brandPink} strokeWidth={2} />
+                <View style={styles.pinTextWrapper}>
+                  <Text style={styles.pinTitle}>
+                    {pin.lat.toFixed(5)}, {pin.lon.toFixed(5)}
+                  </Text>
+                  <Text style={styles.pinSub}>geohash {pin.geohash}</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.pinClearButton}
+                  onPress={handleClearPin}
+                  testID="hunt-piggy-clear-pin-button"
+                  accessibilityLabel="Clear pin"
+                >
+                  <X size={16} color={colors.white} strokeWidth={2.5} />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.pinButton}
+                onPress={handlePinHere}
+                disabled={stage.kind !== 'validated' || pinning}
+                testID="hunt-piggy-pin-here-button"
+              >
+                {pinning ? (
+                  <ActivityIndicator color={colors.brandPink} />
+                ) : (
+                  <>
+                    <MapPin size={18} color={colors.brandPink} strokeWidth={2} />
+                    <Text style={styles.pinButtonText}>Drop pin at my location</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
+            <Text style={styles.helper}>
+              Stored locally so you can find your own Piggy later. Only published to Nostr (as the
+              kind-30408 `g` tag) if you toggle Public below.
+            </Text>
 
             <Text style={[styles.sectionLabel, styles.sectionGap]}>Discoverability</Text>
             <TouchableOpacity
@@ -439,6 +672,115 @@ const createStyles = (colors: Palette) =>
       lineHeight: 17,
     },
     savedActions: { gap: 4 },
+    hintPreviewWrapper: {
+      position: 'relative',
+      marginTop: 4,
+    },
+    hintPreview: {
+      width: '100%',
+      aspectRatio: 16 / 9,
+      borderRadius: 12,
+      backgroundColor: colors.divider,
+    },
+    hintRemoveButton: {
+      position: 'absolute',
+      top: 8,
+      right: 8,
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      backgroundColor: 'rgba(0,0,0,0.55)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    hintUploadingWrapper: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingVertical: 14,
+      paddingHorizontal: 14,
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+    },
+    hintButtonsRow: {
+      flexDirection: 'row',
+      gap: 10,
+      marginTop: 4,
+    },
+    hintButton: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      paddingVertical: 12,
+      borderRadius: 12,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.brandPinkLight,
+    },
+    hintButtonText: {
+      color: colors.brandPink,
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    hintsRow: {
+      flexDirection: 'row',
+      gap: 10,
+    },
+    hintField: {
+      flex: 1,
+    },
+    hintFieldLabel: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      fontWeight: '600',
+      marginBottom: 4,
+    },
+    pinRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 14,
+    },
+    pinTextWrapper: { flex: 1 },
+    pinTitle: {
+      color: colors.textHeader,
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    pinSub: {
+      color: colors.textSupplementary,
+      fontSize: 12,
+      marginTop: 2,
+      fontFamily: 'monospace',
+    },
+    pinClearButton: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      backgroundColor: 'rgba(0,0,0,0.55)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    pinButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      paddingVertical: 12,
+      borderRadius: 12,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.brandPinkLight,
+    },
+    pinButtonText: {
+      color: colors.brandPink,
+      fontSize: 13,
+      fontWeight: '700',
+    },
   });
 
 export default HuntCreateScreen;
