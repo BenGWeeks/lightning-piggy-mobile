@@ -1179,6 +1179,37 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         // kind-0/kind-3 entirely. Only falls back to DEFAULT_RELAYS on
         // the very first login (before any relay cache exists).
         InteractionManager.runAfterInteractions(async () => {
+          // Outer cache-staleness check — if every cache (relay list,
+          // own profile, contacts) is fresh under the 24 h TTL, skip the
+          // parallel refresh block entirely. Each loadX function checks
+          // its own TTL inside, but they still spin up + AsyncStorage
+          // round-trip + decide-to-skip + resolve, costing ~50-200 ms of
+          // incidental JS work × three in parallel on every cold start
+          // even when nothing's stale. On the common returning-user
+          // path (recently opened the app) this avoids the work
+          // outright. See issue #494.
+          const tsKeys = {
+            relay: perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, pk!),
+            profile: perAccountKey(OWN_PROFILE_TIMESTAMP_KEY_BASE, pk!),
+            contacts: perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pk!),
+          };
+          const [relayTs, profileTs, contactsTs] = await Promise.all([
+            AsyncStorage.getItem(tsKeys.relay),
+            AsyncStorage.getItem(tsKeys.profile),
+            AsyncStorage.getItem(tsKeys.contacts),
+          ]);
+          const now = Date.now();
+          const isFresh = (raw: string | null) =>
+            raw != null && now - parseInt(raw, 10) < CACHE_MAX_AGE_MS;
+          if (isFresh(relayTs) && isFresh(profileTs) && isFresh(contactsTs)) {
+            if (__DEV__) {
+              console.log(
+                `[Nostr] cold-start parallel refresh: skipped (all 3 caches fresh under ${CACHE_MAX_AGE_MS / 3600_000}h TTL)`,
+              );
+            }
+            return;
+          }
+
           let workingRelays: string[] = nostrService.DEFAULT_RELAYS;
           // Ignore the timestamp here — even a stale cached relay list is
           // better than DEFAULT_RELAYS for reaching user-only relays.
