@@ -162,15 +162,18 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   );
 
   // Destination dropdown contents.
-  //  - Same profile: live WalletState list (existing behaviour).
+  //  - Same profile: live WalletState list (existing behaviour) —
+  //    excludes the source wallet, and requires NWC wallets to be
+  //    `isConnected` since we need the live client to make an
+  //    invoice locally.
   //  - Cross profile: read-only WalletMetadata from disk. We surface
-  //    every wallet on the other profile EXCEPT watch-only on-chain
-  //    + xpub-only (the destination has to be receivable). Practically
-  //    that means: any NWC wallet (assumed receivable via the wallet's
-  //    lightning address even when its NWC client isn't loaded here),
-  //    plus any on-chain wallet (single-address xpub or mnemonic both
-  //    can derive a receive address — SecureStore xpub key is keyed by
-  //    walletId, not pubkey, so onchainService can read it directly).
+  //    every NWC wallet (their lud16 alone is enough to receive via
+  //    LNURL-pay, no need for the destination's NWC client to be
+  //    loaded here) and every on-chain wallet (xpub watch-only AND
+  //    mnemonic both derive a receive address fine — the SecureStore
+  //    xpub blob is keyed by walletId, not pubkey, so onchainService
+  //    can read it for any local profile). The two SendSheet-style
+  //    routes (BIP-21 paste, lud16 string) work identically here.
   const destWallets = useMemo<(WalletState | WalletMetadata)[]>(() => {
     if (isCrossProfile) {
       return otherProfileWallets.filter(
@@ -390,7 +393,10 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     (async () => {
       const reads = await Promise.all(
         identities.map(async (id) => {
-          if (id.pubkey === activePubkey) return null;
+          // Hydrate every identity, including the active one — the
+          // active row's display name is rendered as "<Name> · default"
+          // by renderProfileLabel so the user can see *which* profile
+          // they're currently transferring from. Per Copilot review.
           if (profileNameById[id.pubkey]) return null;
           try {
             const raw = await AsyncStorage.getItem(
@@ -583,9 +589,16 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             `Destination accepts ${params.minSats.toLocaleString()}-${params.maxSats.toLocaleString()} sats.`,
           );
         }
-        return lnurlService.fetchInvoice(params.callback, currentSats, {
-          comment: 'Transfer',
-        });
+        // Respect the destination LNURL's commentAllowed budget — some
+        // servers reject the request when a comment is sent but
+        // commentAllowed === 0. Truncate to the advertised limit when
+        // they accept comments shorter than our default. Mirrors the
+        // SendSheet LNURL-pay path.
+        const opts: { comment?: string } = {};
+        if (params.commentAllowed > 0) {
+          opts.comment = 'Transfer'.slice(0, params.commentAllowed);
+        }
+        return lnurlService.fetchInvoice(params.callback, currentSats, opts);
       }
       return makeInvoiceForWallet(destWallet.id, currentSats, 'Transfer');
     };
@@ -941,8 +954,15 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const showProfileDropdown = profileOptions.length > 1;
 
   const renderProfileLabel = (pk: string): string => {
-    if (pk === activePubkey) return 'This profile (default)';
     const cachedName = profileNameById[pk];
+    if (pk === activePubkey) {
+      // Mark the active profile so the user knows which row signs
+      // the transfer; surface its actual name when we have it
+      // cached so the dropdown reads e.g. "Big Piggy · default"
+      // instead of an opaque "This profile (default)" that hides
+      // who that is.
+      return cachedName ? `${cachedName} · default` : 'This profile (default)';
+    }
     if (cachedName) return cachedName;
     try {
       const npub = nip19.npubEncode(pk);
