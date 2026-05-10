@@ -340,9 +340,15 @@ const DECRYPT_YIELD_EVERY = 15;
  * yields the JS thread regularly. The cache-hit path itself is cheap
  * (~ms), but on a >1000-wrap inbox the bulk processing piles up to
  * tens of seconds of unbroken JS work without a periodic yield, which
- * starves UI events (back-tap appears frozen — #286). 8 keeps each
- * yield-bounded burst well under a 60 fps frame budget. */
-const NIP17_LOOP_YIELD_EVERY = 8;
+ * starves UI events (back-tap appears frozen — #286). Lowered from 8
+ * to 4 in 2026-05 — perf testing on a real Pixel showed the
+ * post-cold-start "Send sheet feels frozen" window was dominated by
+ * back-to-back NIP-17 inbox processing without enough JS-thread
+ * breathing room for gorhom-bottom-sheet's open animation to schedule
+ * frames. Halving this doubles yield frequency, drops the per-burst
+ * blocking from ~8 ms to ~4 ms, and lets bottom-sheet opens stay
+ * smooth during inbox drain. */
+const NIP17_LOOP_YIELD_EVERY = 4;
 
 /**
  * Minimum gap between `refreshDmInbox` calls fired by
@@ -1172,13 +1178,26 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         // the merged disk+relay result.
         await hydrateDmInboxFromCache(pk);
 
-        // Defer relay fetches until after animations/rendering complete.
+        // Defer relay fetches until after animations/rendering complete,
+        // PLUS a 1500 ms grace window so the user can tap Send / Receive
+        // / Transfer in the first ~1.5 s of cold-start without the JS
+        // thread being yanked away by parallel kind-3 + kind-0 +
+        // kind-10002 fetches. `runAfterInteractions` alone fires on the
+        // next tick when nothing is registered, so it doesn't actually
+        // give us breathing room here. The setTimeout pulls the bulk
+        // refresh out of the cold-start critical path entirely — the
+        // "Send sheet feels frozen for the first few seconds" symptom
+        // tracked in perf logcats lined up exactly with this batch
+        // running back-to-back with the inbox drain on the JS thread.
+        //
         // Seed the working relay set from the cached NIP-65 relay list so
         // `loadProfile` / `loadContacts` hit the relays the user actually
         // publishes to — not `DEFAULT_RELAYS`, which might miss their
         // kind-0/kind-3 entirely. Only falls back to DEFAULT_RELAYS on
         // the very first login (before any relay cache exists).
-        InteractionManager.runAfterInteractions(async () => {
+        const COLD_START_GRACE_MS = 1500;
+        setTimeout(() => {
+          InteractionManager.runAfterInteractions(async () => {
           let workingRelays: string[] = nostrService.DEFAULT_RELAYS;
           // Ignore the timestamp here — even a stale cached relay list is
           // better than DEFAULT_RELAYS for reaching user-only relays.
@@ -1203,7 +1222,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           ]).then(() => {
             if (__DEV__) console.log(`[Nostr] parallel refresh complete in ${Date.now() - t0}ms`);
           });
-        });
+          });
+        }, COLD_START_GRACE_MS);
       } catch (error) {
         console.warn('Nostr auto-login failed:', error);
       }
