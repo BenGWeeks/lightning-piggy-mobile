@@ -341,9 +341,12 @@ const MessageBubble: React.FC<Props> = ({
             <View style={[styles.contactAvatar, styles.contactAvatarFallback]}>
               <UserRound size={26} color={colors.textBody} strokeWidth={1.75} />
               {prof?.picture && isSupportedImageUrl(prof.picture) ? (
-                <Image
+                <ExpoImage
                   source={{ uri: prof.picture }}
                   style={[StyleSheet.absoluteFillObject, { borderRadius: 22 }]}
+                  cachePolicy="memory-disk"
+                  recyclingKey={prof.picture}
+                  autoplay={false}
                 />
               ) : null}
             </View>
