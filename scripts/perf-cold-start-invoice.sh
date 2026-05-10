@@ -19,6 +19,17 @@ DEVICE="${DEVICE:-emulator-5554}"
 PKG="${PKG:-com.lightningpiggy.app.dev}"
 SAMPLES="${SAMPLES:-3}"
 
+# Portable millisecond timestamps. GNU `date +%s%3N` works on Linux but
+# BSD `date` (macOS) silently emits the unexpanded `%3N` literal, which
+# breaks the arithmetic that subtracts start from end. Mirror the
+# helper used in scripts/perf-startup.sh: prefer GNU date if available,
+# otherwise fall back to python3 (POSIX-portable on every dev box).
+if date +%s%3N 2>/dev/null | grep -q '^[0-9]\+$'; then
+  now_ms() { date +%s%3N; }
+else
+  now_ms() { python3 -c 'import time; print(int(time.time()*1000))'; }
+fi
+
 OUT="/tmp/perf-cold-invoice-$(date +%s)"
 mkdir -p "$OUT"
 echo "→ writing to $OUT (samples: $SAMPLES, device: $DEVICE)"
@@ -71,10 +82,10 @@ for i in $(seq 1 "$SAMPLES"); do
   echo "--- sample $i / $SAMPLES ---"
   adb -s "$DEVICE" shell am force-stop "$PKG"
   sleep 2
-  start=$(date +%s%3N)
+  start=$(now_ms)
   maestro test --device "$DEVICE" "$OUT/flow.yaml" > "$OUT/sample-$i.log" 2>&1
   rc=$?
-  end=$(date +%s%3N)
+  end=$(now_ms)
   ms=$((end - start))
   if [ $rc -eq 0 ]; then
     echo "  ✔ ${ms}ms"
@@ -87,8 +98,8 @@ done
 
 if [ ${#results[@]} -gt 0 ]; then
   printf '%s\n' "${results[@]}" | sort -n > "$OUT/sorted.txt"
-  median=$(awk 'NR==int((NR+1)/2)' "$OUT/sorted.txt" 2>/dev/null || cat "$OUT/sorted.txt" | awk -v n="${#results[@]}" 'NR==int((n+1)/2)')
-  median=$(sort -n "$OUT/sorted.txt" | awk -v n="${#results[@]}" 'NR==int((n+1)/2)')
+  n=${#results[@]}
+  median=$(awk -v n="$n" 'NR==int((n+1)/2)' "$OUT/sorted.txt")
   min=$(head -1 "$OUT/sorted.txt")
   max=$(tail -1 "$OUT/sorted.txt")
   cat <<S | tee "$OUT/summary.md"
