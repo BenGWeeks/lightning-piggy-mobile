@@ -64,8 +64,23 @@ function gh(lat, lon, p = 7) {
 }
 const g7 = gh(LAT, LON, 7);
 
-// Disposable test key (would normally be the hider's own npub)
-const sk = generateSecretKey();
+// Signing key — pass `BIG_PIGGY_NSEC=nsec1...` (or NSEC=nsec1...) to publish
+// from a real identity (events become replaceable by that pubkey later).
+// Falls back to a fresh disposable key, useful for one-shot test events
+// that nobody can edit afterwards.
+const nsecInput = process.env.BIG_PIGGY_NSEC ?? process.env.NSEC;
+let sk;
+if (nsecInput) {
+  const decoded = nip19.decode(nsecInput.trim());
+  if (decoded.type !== 'nsec') {
+    throw new Error(`Expected nsec1… in BIG_PIGGY_NSEC, got "${decoded.type}"`);
+  }
+  sk = decoded.data;
+  console.log('Signing with provided nsec — event will be replaceable by this npub.');
+} else {
+  sk = generateSecretKey();
+  console.log('No NSEC env var → using disposable key (event will be unreplaceable).');
+}
 const pk = getPublicKey(sk);
 const npub = nip19.npubEncode(pk);
 

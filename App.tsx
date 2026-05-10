@@ -2,7 +2,7 @@
 import './src/polyfills';
 
 import React, { useEffect, useState } from 'react';
-import { StyleSheet } from 'react-native';
+import { Linking, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
@@ -16,7 +16,7 @@ import AppNavigator from './src/navigation/AppNavigator';
 import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
 import BootSplash from './src/components/BootSplash';
 import { BrandedAlertHost } from './src/components/BrandedAlert';
-import { BrandedToast } from './src/components/BrandedToast';
+import Toast, { BrandedToast } from './src/components/BrandedToast';
 
 // Renders the global incoming-payment celebration on top of the nav
 // stack. Lives inside the WalletProvider so it can subscribe to the
@@ -57,6 +57,29 @@ export default function App() {
   useEffect(() => {
     const t = setTimeout(() => setBootDone(true), 600);
     return () => clearTimeout(t);
+  }, []);
+
+  // `lightning:` deep-link listener (Hunt finder flow, #468). LP registers
+  // the scheme in app.config.ts so an NFC tag tap or a Linking call wakes
+  // the app. M5 will route Hunt-Piggy URIs into HuntFoundScreen via a
+  // navigationRef; in this milestone we just acknowledge the URL with a
+  // toast so the user knows LP saw the tap. Generic non-Hunt LNURL URIs
+  // also land here for now and get the same toast — the routing split
+  // (Hunt vs generic LNURL-pay) lands with HuntFoundScreen.
+  useEffect(() => {
+    const handle = (raw: string | null | undefined) => {
+      if (!raw) return;
+      const trimmed = raw.trim();
+      if (!/^lightning:/i.test(trimmed)) return;
+      Toast.show({
+        type: 'info',
+        text1: 'Lightning URL received',
+        text2: 'Open Explore → Hunt to claim. Auto-routing lands in M5.',
+      });
+    };
+    Linking.getInitialURL().then(handle);
+    const sub = Linking.addEventListener('url', (e) => handle(e.url));
+    return () => sub.remove();
   }, []);
 
   return (
