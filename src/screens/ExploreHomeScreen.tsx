@@ -131,11 +131,15 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     (async () => {
       setMerchantsLoading(true);
       try {
+        // ~50 km half-side around the user. Rural users (Longstanton,
+        // Highlands, mid-Wales) sit in 0-merchant 5 km tiles; widening
+        // to ~50 km surfaces the closest drive-away merchants on the
+        // rail without paying for a country-wide query.
         const places = await fetchPlacesInBbox({
-          minLon: pos.lon - 0.04,
-          minLat: pos.lat - 0.04,
-          maxLon: pos.lon + 0.04,
-          maxLat: pos.lat + 0.04,
+          minLon: pos.lon - 0.5,
+          minLat: pos.lat - 0.5,
+          maxLon: pos.lon + 0.5,
+          maxLat: pos.lat + 0.5,
         });
         if (!cancelled) setMerchants(places);
       } catch {
@@ -157,10 +161,15 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   useEffect(() => {
     if (!pos) return;
     const myGh = encodeGeohash(pos.lat, pos.lon, 7);
-    const prefixes = geohashPrefixes(myGh, 5).filter((p) => p.length === 5);
+    // Caches sit at precision 5 (~5 km) — geocaching is inherently
+    // hyper-local. Events broaden to precision 3 (~150 km) so a rural
+    // user catches the nearest city's Bitcoin meetup; most NIP-52
+    // publishers emit g tags at every precision 3..9.
+    const cachePrefixes = geohashPrefixes(myGh, 5).filter((p) => p.length === 5);
+    const eventPrefixes = geohashPrefixes(myGh, 3).filter((p) => p.length === 3);
 
     subsCloserRef.current.push(
-      subscribeNearbyCaches(prefixes, (c) => {
+      subscribeNearbyCaches(cachePrefixes, (c) => {
         setCaches((prev) => {
           const existing = prev.get(c.coord);
           if (existing && existing.createdAt >= c.createdAt) return prev;
@@ -171,7 +180,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
       }),
     );
     subsCloserRef.current.push(
-      subscribeNearbyEvents(prefixes, (e) => {
+      subscribeNearbyEvents(eventPrefixes, (e) => {
         // Skip events that already started > 1h ago.
         if (e.startsAt && e.startsAt < Math.floor(Date.now() / 1000) - 60 * 60) return;
         setEvents((prev) => {
@@ -300,7 +309,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         />
 
         <ContentRail<ParsedCache>
-          title="Caches near you"
+          title="Geo-caches near you"
           caption="LP Piggies + standard NIP-GC caches"
           items={sortedCaches}
           loading={!!pos && caches.size === 0}
@@ -324,7 +333,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
         <ContentRail<ParsedEvent>
           title="Events near you"
-          caption="Bitcoin meetups via NIP-52"
+          caption="Bitcoin meetups within ~150 km · NIP-52"
           items={sortedEvents}
           loading={!!pos && events.size === 0 && false}
           onSeeAll={() => navigation.navigate('Events')}
@@ -410,18 +419,22 @@ const CacheCard: React.FC<{
   styles: ReturnType<typeof createLocalStyles>;
 }> = ({ cache, onPress, colors, styles }) => (
   <TouchableOpacity style={styles.card} onPress={onPress} testID={`cache-card-${cache.d}`}>
-    <View
-      style={[
-        styles.cardIcon,
-        cache.isLpPiggy ? styles.cardIconLightning : styles.cardIconStandard,
-      ]}
-    >
-      {cache.isLpPiggy ? (
-        <PiggyBank size={20} color={colors.white} strokeWidth={2.5} />
-      ) : (
-        <MapPin size={20} color={colors.white} strokeWidth={2.5} />
-      )}
-    </View>
+    {cache.imageUrl ? (
+      <Image source={{ uri: cache.imageUrl }} style={styles.cardThumb} resizeMode="cover" />
+    ) : (
+      <View
+        style={[
+          styles.cardIcon,
+          cache.isLpPiggy ? styles.cardIconLightning : styles.cardIconStandard,
+        ]}
+      >
+        {cache.isLpPiggy ? (
+          <PiggyBank size={20} color={colors.white} strokeWidth={2.5} />
+        ) : (
+          <MapPin size={20} color={colors.white} strokeWidth={2.5} />
+        )}
+      </View>
+    )}
     <Text style={styles.cardTitle} numberOfLines={2}>
       {cache.name}
     </Text>
@@ -449,9 +462,13 @@ const EventCard: React.FC<{
     : 'Soon';
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} testID={`event-card-${event.d}`}>
-      <View style={[styles.cardIcon, styles.cardIconEvent]}>
-        <CalendarDays size={20} color={colors.white} strokeWidth={2.5} />
-      </View>
+      {event.imageUrl ? (
+        <Image source={{ uri: event.imageUrl }} style={styles.cardThumb} resizeMode="cover" />
+      ) : (
+        <View style={[styles.cardIcon, styles.cardIconEvent]}>
+          <CalendarDays size={20} color={colors.white} strokeWidth={2.5} />
+        </View>
+      )}
       <Text style={styles.cardTitle} numberOfLines={2}>
         {event.title}
       </Text>
@@ -527,6 +544,13 @@ const createLocalStyles = (colors: Palette) =>
       alignItems: 'center',
       justifyContent: 'center',
       marginBottom: 6,
+    },
+    cardThumb: {
+      width: '100%',
+      height: 80,
+      borderRadius: 8,
+      marginBottom: 6,
+      backgroundColor: colors.divider,
     },
     cardIconLightning: { backgroundColor: colors.brandPink },
     cardIconOnchain: { backgroundColor: '#F5A623' },

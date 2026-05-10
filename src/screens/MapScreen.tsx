@@ -94,10 +94,15 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
       }
       try {
         if (cancelled) return;
-        const initBbox = bboxAround(lat, lon, 0.02);
+        // Wider initial bbox + lower default zoom so rural users (no
+        // Bitcoin merchants within walking distance) see at least a
+        // few drive-away pins on first paint. They can zoom in from
+        // here; Leaflet refetches on `moveend`/`zoomend` via the
+        // bounds bridge.
+        const initBbox = bboxAround(lat, lon, 0.3);
         lastBbox.current = initBbox;
         await refreshPlaces(initBbox);
-        setViewportInWebView(lat, lon, 14);
+        setViewportInWebView(lat, lon, 10);
 
         // Subscribe to NIP-GC kind 37516 caches in the user's coarse
         // geohash neighbourhood. Renders Lightning Piggies (com.lightningpiggy.app
@@ -452,6 +457,20 @@ const LEAFLET_HTML = `<!DOCTYPE html>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     html, body, #map { margin: 0; padding: 0; height: 100%; width: 100%; }
+    /* Leaflet's default zoom buttons are small + tucked top-left.
+       Bump size + contrast so they land at thumb-tappable size and
+       are obvious to users who don't realise they can pinch. */
+    .leaflet-control-zoom a {
+      width: 36px !important;
+      height: 36px !important;
+      line-height: 36px !important;
+      font-size: 22px !important;
+      font-weight: 700;
+      color: #1a1a1a !important;
+      background: #ffffff !important;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+    }
+    .leaflet-control-zoom a:hover { background: #f4f4f4 !important; }
     .lp-pin {
       width: 22px; height: 22px; border-radius: 11px;
       background: #EC008C; border: 2px solid #fff;

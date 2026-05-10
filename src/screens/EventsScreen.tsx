@@ -70,7 +70,11 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
         lon = pos.coords.longitude;
       }
       const myGh = encodeGeohash(lat, lon, 7);
-      const prefixes = geohashPrefixes(myGh, 5).filter((p) => p.length === 5);
+      // Precision 3 (~150 km neighbourhood) — Bitcoin meetups cluster
+      // in cities; rural users would otherwise see an empty feed.
+      // NIP-52 publishers conventionally emit g tags at every
+      // precision 3..9, so 3-char prefix is enough to catch them.
+      const prefixes = geohashPrefixes(myGh, 3).filter((p) => p.length === 3);
       const closer = subscribeNearbyEvents(prefixes, (e) => {
         // De-dupe by coord — replaceable events; only keep the
         // newest revision and skip past events.
