@@ -4,19 +4,23 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createDrawerNavigator } from '@react-navigation/drawer';
-import { Home, MessageCircle, GraduationCap, Users } from 'lucide-react-native';
+import { Home, MessageCircle, Compass, Users } from 'lucide-react-native';
 import { useWallet } from '../contexts/WalletContext';
 import { useTheme } from '../contexts/ThemeContext';
 import {
   RootStackParamList,
-  LearnStackParamList,
+  ExploreStackParamList,
   MainTabParamList,
   AccountDrawerParamList,
 } from './types';
 
 import HomeScreen from '../screens/HomeScreen';
 import MessagesScreen from '../screens/MessagesScreen';
-import LearnScreen from '../screens/LearnScreen';
+import ExploreHomeScreen from '../screens/ExploreHomeScreen';
+import LessonsScreen from '../screens/LessonsScreen';
+import MapScreen from '../screens/MapScreen';
+import HuntScreen from '../screens/HuntScreen';
+import EventsScreen from '../screens/EventsScreen';
 import CourseDetailScreen from '../screens/CourseDetailScreen';
 import MissionDetailScreen from '../screens/MissionDetailScreen';
 import FriendsScreen from '../screens/FriendsScreen';
@@ -35,16 +39,20 @@ import AccountDrawerContent from '../components/AccountDrawerContent';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
-const LearnStack = createNativeStackNavigator<LearnStackParamList>();
+const ExploreStack = createNativeStackNavigator<ExploreStackParamList>();
 const AccountDrawer = createDrawerNavigator<AccountDrawerParamList>();
 
-function LearnStackNavigator() {
+function ExploreStackNavigator() {
   return (
-    <LearnStack.Navigator screenOptions={{ headerShown: false }}>
-      <LearnStack.Screen name="LearnHome" component={LearnScreen} />
-      <LearnStack.Screen name="CourseDetail" component={CourseDetailScreen} />
-      <LearnStack.Screen name="MissionDetail" component={MissionDetailScreen} />
-    </LearnStack.Navigator>
+    <ExploreStack.Navigator screenOptions={{ headerShown: false }}>
+      <ExploreStack.Screen name="ExploreHome" component={ExploreHomeScreen} />
+      <ExploreStack.Screen name="Lessons" component={LessonsScreen} />
+      <ExploreStack.Screen name="CourseDetail" component={CourseDetailScreen} />
+      <ExploreStack.Screen name="MissionDetail" component={MissionDetailScreen} />
+      <ExploreStack.Screen name="Map" component={MapScreen} />
+      <ExploreStack.Screen name="Hunt" component={HuntScreen} />
+      <ExploreStack.Screen name="Events" component={EventsScreen} />
+    </ExploreStack.Navigator>
   );
 }
 
@@ -93,13 +101,13 @@ function HomeTabs() {
         }}
       />
       <Tab.Screen
-        name="Learn"
-        component={LearnStackNavigator}
+        name="Explore"
+        component={ExploreStackNavigator}
         options={{
-          tabBarButtonTestID: 'tab-learn',
-          tabBarAccessibilityLabel: 'Learn tab',
+          tabBarButtonTestID: 'tab-explore',
+          tabBarAccessibilityLabel: 'Explore tab',
           tabBarIcon: ({ focused, color, size }) => (
-            <GraduationCap size={size} color={color} strokeWidth={focused ? 2.5 : 2} />
+            <Compass size={size} color={color} strokeWidth={focused ? 2.5 : 2} />
           ),
         }}
       />

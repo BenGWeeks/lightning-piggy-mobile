@@ -1,0 +1,89 @@
+appId: com.lightningpiggy.app.dev
+name: Explore tab renders the hub with Lessons / Map / Hunt / Events cards
+---
+# Verifies the rename of the Learn tab to Explore: the bottom-tab button
+# answers to `tab-explore`, taps land on the new ExploreHome hub, and all
+# four cards (Lessons, Map, Hunt, Events) are reachable. Lessons opens the
+# existing course catalog (regression check); Map / Hunt / Events open the
+# stub "Coming soon" screens that subsequent milestones will fill in.
+#
+# Run: maestro test tests/e2e/test-explore-tab-rename.yaml
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Tap the renamed tab. The old `tab-learn` testID is gone.
+- tapOn:
+    id: 'tab-explore'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Hub header copy and the four discovery cards.
+- assertVisible: 'Explore'
+- assertVisible:
+    id: 'explore-card-lessons'
+- assertVisible:
+    id: 'explore-card-map'
+- assertVisible:
+    id: 'explore-card-hunt'
+- assertVisible:
+    id: 'explore-card-events'
+
+# Drill into Lessons — existing courses must still render.
+- tapOn:
+    id: 'explore-card-lessons'
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible: 'Lessons'
+- assertVisible: 'Satoshi Nakamoto'
+
+# Back to hub.
+- back
+- waitForAnimationToEnd:
+    timeout: 1000
+- assertVisible:
+    id: 'explore-card-map'
+
+# Map stub.
+- tapOn:
+    id: 'explore-card-map'
+- waitForAnimationToEnd:
+    timeout: 1500
+- assertVisible:
+    id: 'map-screen'
+- assertVisible: 'Bitcoin merchants near you'
+- tapOn:
+    id: 'map-back-button'
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Hunt stub.
+- tapOn:
+    id: 'explore-card-hunt'
+- waitForAnimationToEnd:
+    timeout: 1500
+- assertVisible:
+    id: 'hunt-screen'
+- assertVisible: 'Hidden Piggies'
+- tapOn:
+    id: 'hunt-back-button'
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Events stub.
+- tapOn:
+    id: 'explore-card-events'
+- waitForAnimationToEnd:
+    timeout: 1500
+- assertVisible:
+    id: 'events-screen'
+- assertVisible: 'Bitcoin meetups nearby'
+- tapOn:
+    id: 'events-back-button'
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Back on hub — final sanity that round-trip didn't lose state.
+- assertVisible: 'Explore'
+- assertVisible:
+    id: 'explore-card-lessons'

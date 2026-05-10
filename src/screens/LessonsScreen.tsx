@@ -13,10 +13,10 @@ import { Check, GraduationCap, Search, X } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createLearnScreenStyles } from '../styles/LearnScreen.styles';
 
-import { LearnNavigation } from '../navigation/types';
+import { ExploreNavigation } from '../navigation/types';
 
 interface Props {
-  navigation: LearnNavigation;
+  navigation: ExploreNavigation;
 }
 
 /**
@@ -36,14 +36,14 @@ const courseMatches = (course: Course, lowerQuery: string): boolean => {
   );
 };
 
-const LearnScreen: React.FC<Props> = ({ navigation }) => {
+const LessonsScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
-  // First-render marker: fires once per mount when the first commit lands. Used by scripts/perf-startup.sh to measure tap-to-render latency for tab-learn.
-  const learnRenderLoggedRef = useRef(false);
+  // First-render marker: fires once per mount when the first commit lands. Used by scripts/perf-startup.sh to measure tap-to-render latency for the Lessons sub-screen reached via tab-explore → ExploreHome → Lessons.
+  const lessonsRenderLoggedRef = useRef(false);
   useEffect(() => {
-    if (learnRenderLoggedRef.current) return;
-    learnRenderLoggedRef.current = true;
-    console.log(`[Perf] LearnScreen first render`);
+    if (lessonsRenderLoggedRef.current) return;
+    lessonsRenderLoggedRef.current = true;
+    console.log(`[Perf] LessonsScreen first render`);
   }, []);
   const styles = useMemo(() => createLearnScreenStyles(colors), [colors]);
   const [progress, setProgress] = useState<LearnProgress>({ completedMissions: [] });
@@ -92,7 +92,7 @@ const LearnScreen: React.FC<Props> = ({ navigation }) => {
           resizeMode="cover"
         />
         <View style={styles.headerOverlay} />
-        <TabHeader title="Learn" icon={<GraduationCap size={20} color={colors.brandPink} />} />
+        <TabHeader title="Lessons" icon={<GraduationCap size={20} color={colors.brandPink} />} />
         <View style={styles.headerExtras}>
           {searchExpanded ? (
             <View style={styles.searchRow}>
@@ -204,4 +204,4 @@ const LearnScreen: React.FC<Props> = ({ navigation }) => {
   );
 };
 
-export default LearnScreen;
+export default LessonsScreen;

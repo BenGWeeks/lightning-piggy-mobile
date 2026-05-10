@@ -12,9 +12,9 @@ interface Props {
   /**
    * The page-identifying glyph rendered inside the round badge on the
    * left. Passed as a ReactNode so the screen can choose between tinted
-   * `Image` (Home, Learn) and `Svg` components (Messages, Friends) — both
-   * match their tab-bar counterparts. Decorative only: the badge never
-   * navigates anywhere on tap (per #139's AC).
+   * `Image` (Home) and `Svg`/Lucide components (Messages, Explore,
+   * Friends) — both match their tab-bar counterparts. Decorative only:
+   * the badge never navigates anywhere on tap (per #139's AC).
    */
   icon: React.ReactNode;
   /** Page title text. For Home this carries the "Hello, <name>!" greeting. */
@@ -31,12 +31,12 @@ interface Props {
   accessibilityLabel?: string;
   /** Optional style override for the title Text. Home uses this to pull the
    * greeting back to the lighter weight/size it had pre-#139 (section
-   * titles like "Messages"/"Friends"/"Learn" keep the default bold). */
+   * titles like "Messages"/"Friends"/"Explore" keep the default bold). */
   titleStyle?: TextStyle;
 }
 
 /**
- * Shared header row for the four top-level tabs (Home, Messages, Learn,
+ * Shared header row for the four top-level tabs (Home, Messages, Explore,
  * Friends). Fixes the prior inconsistency where each screen rolled its
  * own page-icon badge, title position, and profile-icon placement.
  *
@@ -115,7 +115,7 @@ const createStyles = (colors: Palette) =>
       color: colors.white,
       // Slightly lighter than the previous per-screen 28/700 because Home's
       // "Hello, <name>!" greeting reads better at a softer weight and the
-      // section titles (Messages / Friends / Learn) still look substantial.
+      // section titles (Messages / Friends / Explore) still look substantial.
       fontSize: 24,
       fontWeight: '600',
       flexShrink: 1,

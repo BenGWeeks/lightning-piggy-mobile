@@ -9,7 +9,7 @@ export type MainTabParamList = {
     | { sendToAddress?: string; sendToName?: string; sendToPicture?: string; sendToPubkey?: string }
     | undefined;
   Messages: undefined;
-  Learn: undefined;
+  Explore: undefined;
   Friends: undefined;
 };
 
@@ -41,20 +41,28 @@ export type RootStackParamList = {
   GroupConversation: { groupId: string };
 };
 
-// Learn sub-stack
-export type LearnStackParamList = {
-  LearnHome: undefined;
+// Explore sub-stack — the renamed Learn tab now hosts a hub plus Lessons
+// (existing course content), Map (BTC Map merchants), Hunt (geocaching
+// game), and Events (NIP-52 meetups). See plan
+// .claude/plans/look-through-the-issues-squishy-wigderson.md for the
+// motivation; closes parts of #467 and #468.
+export type ExploreStackParamList = {
+  ExploreHome: undefined;
+  Lessons: undefined;
   CourseDetail: { courseId: string };
   MissionDetail: { courseId: string; missionId: string };
+  Map: undefined;
+  Hunt: undefined;
+  Events: undefined;
 };
 
 // Navigation prop shortcuts
 export type RootNavigation = NativeStackNavigationProp<RootStackParamList>;
-export type LearnNavigation = NativeStackNavigationProp<LearnStackParamList>;
+export type ExploreNavigation = NativeStackNavigationProp<ExploreStackParamList>;
 export type AccountDrawerNavigation = DrawerNavigationProp<AccountDrawerParamList>;
 
 // Route prop shortcuts
-export type CourseDetailRoute = RouteProp<LearnStackParamList, 'CourseDetail'>;
-export type MissionDetailRoute = RouteProp<LearnStackParamList, 'MissionDetail'>;
+export type CourseDetailRoute = RouteProp<ExploreStackParamList, 'CourseDetail'>;
+export type MissionDetailRoute = RouteProp<ExploreStackParamList, 'MissionDetail'>;
 export type HomeRoute = RouteProp<MainTabParamList, 'Home'>;
 export type GroupConversationRoute = RouteProp<RootStackParamList, 'GroupConversation'>;

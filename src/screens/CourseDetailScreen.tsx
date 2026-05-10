@@ -14,11 +14,11 @@ import { ChevronLeft, Check } from 'lucide-react-native';
 import { createCourseDetailScreenStyles } from '../styles/CourseDetailScreen.styles';
 import { getYouTubeThumbnail } from '../utils/youtube';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { LearnNavigation, CourseDetailRoute } from '../navigation/types';
+import { ExploreNavigation, CourseDetailRoute } from '../navigation/types';
 
 interface Props {
   route: CourseDetailRoute;
-  navigation: LearnNavigation;
+  navigation: ExploreNavigation;
 }
 
 const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
