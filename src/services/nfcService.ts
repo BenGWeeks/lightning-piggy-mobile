@@ -284,8 +284,20 @@ export async function writeLnurlToTag(lnurl: string, onTagDetected?: () => void)
 
   // The `lightning:` prefix makes Android's NDEF intent system route
   // the tap to whichever LNURL-aware wallet the user has installed,
-  // not just Lightning Piggy.
-  const uri = /^lightning:/i.test(trimmed) ? trimmed : `lightning:${trimmed.toUpperCase()}`;
+  // not just Lightning Piggy. Case handling matters per input form:
+  // - Already prefixed → use as-is.
+  // - bech32 (`lnurl1…` / `LNURL1…`) → uppercase is conventional on
+  //   tags + QR codes for OCR / scanner robustness; bech32 itself is
+  //   case-insensitive so this is information-preserving.
+  // - LUD-17 (`lnurlw://…`, `lnurl://…`) and raw https URLs → preserve
+  //   case. The path component is generally case-sensitive (LNbits
+  //   for example uses base58-style segment ids that case-uppercasing
+  //   would break, see scripts/publish-test-piggy.mjs default LNURL).
+  const uri = /^lightning:/i.test(trimmed)
+    ? trimmed
+    : /^lnurl1/i.test(trimmed)
+      ? `lightning:${trimmed.toUpperCase()}`
+      : `lightning:${trimmed}`;
 
   try {
     if (!(await ensureNfcStarted())) {

@@ -79,7 +79,10 @@ A glossary of key terms used throughout this document.
 | A Layer 2 payment protocol built on top of Bitcoin, enabling instant, low-cost transactions. All payments in Lightning Piggy use the Lightning Network.
 
 | **LNURL**
-| A set of protocols (https://github.com/lnurl/luds[LUD specs]) for interacting with Lightning Network services via HTTP. Lightning Piggy uses LNURL-pay (LUD-16) for resolving lightning addresses to bolt11 invoices.
+| A set of protocols (https://github.com/lnurl/luds[LUD specs]) for interacting with Lightning Network services via HTTP. Lightning Piggy uses LNURL-pay (LUD-16) for resolving lightning addresses to bolt11 invoices, and LNURL-withdraw (LUD-03) for the Hunt feature's Piggy claims.
+
+| **LNURL-withdraw / LNURL-w**
+| The LNURL flavour for *withdrawing* sats from an issuer (https://github.com/lnurl/luds/blob/luds/03.md[LUD-03]). The wallet GETs the LNURL endpoint to fetch a `withdrawRequest` payload (`callback`, `k1`, `min/maxWithdrawable`, `defaultDescription`), generates a bolt11 invoice for the desired amount, and POSTs it to `callback`. The issuer pays the invoice. Used by Hunt Piggies (#468): hider creates the LNURL-w in their own wallet (LNbits / Alby / Mutiny / …) — Lightning Piggy is the *client* and *publisher*, never the issuer. The metadata is stateless — `wait_time` and `uses` caps are enforced server-side and only surface as a LUD-03 error envelope when a finder POSTs during the cooldown.
 
 | **Lockup Address**
 | The Taproot (`bc1p...`) address generated for a swap. Its script encodes both a claim path (hash-lock via preimage) and a refund path (time-lock via `nLockTime`).
@@ -98,6 +101,9 @@ A glossary of key terms used throughout this document.
 
 | **MuSig2**
 | A multi-signature scheme (https://bips.dev/327/[BIP-327]) that aggregates multiple Schnorr signatures into a single signature. Used by Boltz for cooperative Taproot key-path spending.
+
+| **NDEF**
+| NFC Data Exchange Format — the data layout the NFC Forum standardised for storing structured payloads on NFC tags and exchanging them between devices. An NDEF *Message* is a sequence of NDEF *Records*; each record has a Type Name Format (TNF), a Type identifier, an optional ID, and a Payload. Common record types: `URI` (TNF 0x01, RTD `U` — what Lightning Piggy writes for `lightning:LNURL...` and `nostr:nevent...`), `Text` (RTD `T`), `MIME` (TNF 0x02). When an Android device taps a tag whose first record is a URI, the OS dispatches the URI to the registered handler app — that's how a `lightning:` URI on a tag wakes a Lightning wallet without any app being open. Lightning Piggy reads/writes NDEF via `react-native-nfc-manager`'s `Ndef.uriRecord` / `NfcManager.ndefHandler.writeNdefMessage`. Tag capacity matters: NTAG213 (~120 chars after overhead) is too small for a typical LNURL-w; NTAG215 (504 B) or NTAG216 (888 B) are the right choices for Hunt Piggies, especially when writing the dual `lightning:` + `nostr:` records.
 
 | **NIP**
 | Nostr Implementation Possibility — a numbered specification in the Nostr protocol. Key NIPs used: NIP-01 (events), NIP-19 (bech32 encoding), NIP-55 (Android signer), NIP-57 (zaps), NIP-65 (relay lists).
