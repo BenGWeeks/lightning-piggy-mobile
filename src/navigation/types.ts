@@ -54,6 +54,7 @@ export type ExploreStackParamList = {
   MissionDetail: { courseId: string; missionId: string };
   Map: undefined;
   Hunt: undefined;
+  HuntCreate: undefined;
   Events: undefined;
 };
 

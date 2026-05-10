@@ -262,6 +262,56 @@ export async function writeNpubToTag(npub: string, onTagDetected?: () => void): 
 }
 
 /**
+ * Write an LNURL string to an NFC tag as an NDEF URI record. Used by
+ * the Hunt-hider flow (#468) so the hider can stash a Piggy on a
+ * physical token. The URI is `lightning:LNURL1...` so any LNURL-aware
+ * wallet (Lightning Piggy, Wallet of Satoshi, Phoenix, Zeus, …) opens
+ * on tap.
+ *
+ * @param lnurl - bech32-encoded `lnurl1...` (case-insensitive) or any
+ *   other form the user pasted; we only enforce that the LNURL itself
+ *   is non-empty. Use `decodeLnurlWithdraw` from
+ *   `lnurlWithdrawService.ts` upstream if you want to validate the
+ *   shape before writing.
+ * @param onTagDetected - Optional callback fired the moment a tag is
+ *   detected (just before write). Mirrors `writeNpubToTag`.
+ */
+export async function writeLnurlToTag(lnurl: string, onTagDetected?: () => void): Promise<void> {
+  const trimmed = lnurl.trim();
+  if (!trimmed) {
+    throw new Error('Empty LNURL — paste or scan one first');
+  }
+
+  // The `lightning:` prefix makes Android's NDEF intent system route
+  // the tap to whichever LNURL-aware wallet the user has installed,
+  // not just Lightning Piggy.
+  const uri = /^lightning:/i.test(trimmed) ? trimmed : `lightning:${trimmed.toUpperCase()}`;
+
+  try {
+    if (!(await ensureNfcStarted())) {
+      throw new Error('NFC unavailable on this device');
+    }
+    await NfcManager.requestTechnology(NfcTech.Ndef);
+
+    const tag = await NfcManager.getTag();
+    if (!tag) {
+      throw new Error('No tag detected');
+    }
+
+    onTagDetected?.();
+
+    const bytes = Ndef.encodeMessage([Ndef.uriRecord(uri)]);
+    if (!bytes) {
+      throw new Error('Failed to encode NDEF message');
+    }
+
+    await NfcManager.ndefHandler.writeNdefMessage(bytes);
+  } finally {
+    NfcManager.cancelTechnologyRequest().catch(() => {});
+  }
+}
+
+/**
  * Cancel any ongoing NFC operation.
  */
 export function cancelNfcOperation(): void {

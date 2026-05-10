@@ -20,6 +20,7 @@ import ExploreHomeScreen from '../screens/ExploreHomeScreen';
 import LessonsScreen from '../screens/LessonsScreen';
 import MapScreen from '../screens/MapScreen';
 import HuntScreen from '../screens/HuntScreen';
+import HuntCreateScreen from '../screens/HuntCreateScreen';
 import EventsScreen from '../screens/EventsScreen';
 import CourseDetailScreen from '../screens/CourseDetailScreen';
 import MissionDetailScreen from '../screens/MissionDetailScreen';
@@ -52,6 +53,7 @@ function ExploreStackNavigator() {
       <ExploreStack.Screen name="MissionDetail" component={MissionDetailScreen} />
       <ExploreStack.Screen name="Map" component={MapScreen} />
       <ExploreStack.Screen name="Hunt" component={HuntScreen} />
+      <ExploreStack.Screen name="HuntCreate" component={HuntCreateScreen} />
       <ExploreStack.Screen name="Events" component={EventsScreen} />
     </ExploreStack.Navigator>
   );

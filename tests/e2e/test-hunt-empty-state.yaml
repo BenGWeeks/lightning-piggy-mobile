@@ -1,0 +1,63 @@
+appId: com.lightningpiggy.app.dev
+name: Hunt sub-screen — empty hub renders Create CTA
+---
+# Smoke flow for the Hunt hub: with no Piggies stored, we expect the
+# empty state to render and the "Hide a Piggy" CTA to be tappable. The
+# CTA opens HuntCreateScreen with the LNURL paste field. Saving an
+# actual Piggy + writing to NFC is exercised in milestone 8 with a
+# fixture LNURL-w endpoint and mocked NFC.
+#
+# Run: maestro test tests/e2e/test-hunt-empty-state.yaml
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'tab-explore'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- tapOn:
+    id: 'explore-card-hunt'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- assertVisible:
+    id: 'hunt-screen'
+- assertVisible:
+    id: 'hunt-create-piggy-button'
+- assertVisible:
+    id: 'hunt-empty-state'
+
+# Drill into the Create flow.
+- tapOn:
+    id: 'hunt-create-piggy-button'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- assertVisible:
+    id: 'hunt-create-screen'
+- assertVisible:
+    id: 'hunt-piggy-lnurl-input'
+- assertVisible:
+    id: 'hunt-piggy-paste-button'
+
+# Validate button is present but disabled until something is in the input.
+- assertVisible:
+    id: 'hunt-piggy-validate-button'
+
+# Bail back to the Hunt hub.
+- tapOn:
+    id: 'hunt-create-back-button'
+- waitForAnimationToEnd:
+    timeout: 1000
+- assertVisible:
+    id: 'hunt-screen'
+
+# And back to Explore home.
+- tapOn:
+    id: 'hunt-back-button'
+- waitForAnimationToEnd:
+    timeout: 1000
+- assertVisible:
+    id: 'explore-card-hunt'
