@@ -1198,30 +1198,30 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const COLD_START_GRACE_MS = 1500;
         setTimeout(() => {
           InteractionManager.runAfterInteractions(async () => {
-          let workingRelays: string[] = nostrService.DEFAULT_RELAYS;
-          // Ignore the timestamp here — even a stale cached relay list is
-          // better than DEFAULT_RELAYS for reaching user-only relays.
-          const { value: cachedRelays } = await readCachedWithTtl<RelayConfig[]>(
-            perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk!),
-            perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, pk!),
-          );
-          if (cachedRelays) {
-            const readRelays = cachedRelays.filter((r) => r.read).map((r) => r.url);
-            if (readRelays.length > 0) workingRelays = readRelays;
-          }
+            let workingRelays: string[] = nostrService.DEFAULT_RELAYS;
+            // Ignore the timestamp here — even a stale cached relay list is
+            // better than DEFAULT_RELAYS for reaching user-only relays.
+            const { value: cachedRelays } = await readCachedWithTtl<RelayConfig[]>(
+              perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk!),
+              perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, pk!),
+            );
+            if (cachedRelays) {
+              const readRelays = cachedRelays.filter((r) => r.read).map((r) => r.url);
+              if (readRelays.length > 0) workingRelays = readRelays;
+            }
 
-          const t0 = Date.now();
-          Promise.all([
-            loadRelays(pk!).catch((e) => console.warn('[Nostr] relay refresh failed:', e)),
-            loadProfile(pk!, workingRelays).catch((e) =>
-              console.warn('[Nostr] profile refresh failed:', e),
-            ),
-            loadContacts(pk!, workingRelays).catch((e) =>
-              console.warn('[Nostr] contact refresh failed:', e),
-            ),
-          ]).then(() => {
-            if (__DEV__) console.log(`[Nostr] parallel refresh complete in ${Date.now() - t0}ms`);
-          });
+            const t0 = Date.now();
+            Promise.all([
+              loadRelays(pk!).catch((e) => console.warn('[Nostr] relay refresh failed:', e)),
+              loadProfile(pk!, workingRelays).catch((e) =>
+                console.warn('[Nostr] profile refresh failed:', e),
+              ),
+              loadContacts(pk!, workingRelays).catch((e) =>
+                console.warn('[Nostr] contact refresh failed:', e),
+              ),
+            ]).then(() => {
+              if (__DEV__) console.log(`[Nostr] parallel refresh complete in ${Date.now() - t0}ms`);
+            });
           });
         }, COLD_START_GRACE_MS);
       } catch (error) {

@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 #
-# Wall-clock latency from tapping btn-send on Home to the SendSheet
-# being interactive (the Scan / Input tab row visible). Captures
-# adb logcat for the same window so the slow phase is attributable.
+# Wall-clock latency from `am force-stop` to the SendSheet being
+# interactive (the Scan / Input tab row visible). The timer brackets
+# the entire Maestro flow including launch + cold-start + the eventual
+# btn-send tap, NOT just the tap-to-render slice — so don't read the
+# raw number as "Send sheet animation duration". The useful comparison
+# is the same script, same device, same fixture, before vs after a
+# perf change.
+#
+# Captures adb logcat for the same window so the slow phase is
+# attributable in the per-sample log file.
 #
 # Defaults to the Pixel; override via DEVICE / PKG.
 #
@@ -47,15 +54,20 @@ for i in $(seq 1 "$SAMPLES"); do
   echo "--- sample $i / $SAMPLES ---"
   adb -s "$DEVICE" shell am force-stop "$PKG"
   sleep 2
-  # Background logcat for the duration of this sample.
+  # Background logcat for the duration of this sample. Trap ensures
+  # the background tail is killed if the script is interrupted (Ctrl-C,
+  # SIGTERM, exit). Without the trap an aborted run leaves stray
+  # `adb logcat` processes that conflict with later runs.
   adb -s "$DEVICE" logcat -c
   adb -s "$DEVICE" logcat -v time *:I > "$OUT/sample-$i.logcat" 2>&1 &
   LOGCAT_PID=$!
+  trap 'kill $LOGCAT_PID 2>/dev/null' EXIT INT TERM
   start=$(now_ms)
   maestro test --device "$DEVICE" "$OUT/flow.yaml" > "$OUT/sample-$i.maestro.log" 2>&1
   rc=$?
   end=$(now_ms)
   kill $LOGCAT_PID 2>/dev/null
+  trap - EXIT INT TERM
   ms=$((end - start))
   if [ $rc -eq 0 ]; then
     echo "  ✔ ${ms}ms"
