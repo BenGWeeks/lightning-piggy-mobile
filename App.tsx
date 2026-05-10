@@ -12,7 +12,7 @@ import { WalletProvider, useWallet } from './src/contexts/WalletContext';
 import { NostrProvider } from './src/contexts/NostrContext';
 import { GroupsProvider } from './src/contexts/GroupsContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
-import AppNavigator from './src/navigation/AppNavigator';
+import AppNavigator, { navigateToHuntFound } from './src/navigation/AppNavigator';
 import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
 import BootSplash from './src/components/BootSplash';
 import { BrandedAlertHost } from './src/components/BrandedAlert';
@@ -61,25 +61,35 @@ export default function App() {
 
   // `lightning:` deep-link listener (Hunt finder flow, #468). LP registers
   // the scheme in app.config.ts so an NFC tag tap or a Linking call wakes
-  // the app. M5 will route Hunt-Piggy URIs into HuntFoundScreen via a
-  // navigationRef; in this milestone we just acknowledge the URL with a
-  // toast so the user knows LP saw the tap. Generic non-Hunt LNURL URIs
-  // also land here for now and get the same toast — the routing split
-  // (Hunt vs generic LNURL-pay) lands with HuntFoundScreen.
+  // the app. We strip the `lightning:` prefix and hand the bare LNURL
+  // (or LUD-17 / https URL) to HuntFoundScreen via the navigation ref;
+  // resolveLnurlWithdraw normalises the rest. The screen falls back to
+  // a friendly "couldn't claim" state for non-withdrawRequest payloads
+  // (e.g. a LUD-06 LNURL-pay tag landed here by accident), which is the
+  // simplest UX while a proper Hunt-vs-generic-LNURL split waits on
+  // pay-flow integration. Cold-start case races the navigation tree's
+  // mount, so we retry briefly until `navigationRef.isReady()`.
   useEffect(() => {
-    const handle = (raw: string | null | undefined) => {
-      if (!raw) return;
+    let cancelled = false;
+    const route = (raw: string | null | undefined) => {
+      if (cancelled || !raw) return;
       const trimmed = raw.trim();
       if (!/^lightning:/i.test(trimmed)) return;
-      Toast.show({
-        type: 'info',
-        text1: 'Lightning URL received',
-        text2: 'Open Explore → Hunt to claim. Auto-routing lands in M5.',
-      });
+      const lnurl = trimmed.slice('lightning:'.length).trim();
+      if (!lnurl) return;
+      const tryNav = (attempt: number) => {
+        if (navigateToHuntFound(lnurl)) return;
+        if (attempt >= 20 || cancelled) return;
+        setTimeout(() => tryNav(attempt + 1), 100);
+      };
+      tryNav(0);
     };
-    Linking.getInitialURL().then(handle);
-    const sub = Linking.addEventListener('url', (e) => handle(e.url));
-    return () => sub.remove();
+    Linking.getInitialURL().then(route);
+    const sub = Linking.addEventListener('url', (e) => route(e.url));
+    return () => {
+      cancelled = true;
+      sub.remove();
+    };
   }, []);
 
   return (

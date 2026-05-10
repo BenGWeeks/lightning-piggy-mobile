@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { StyleSheet, ActivityIndicator, View, Platform, useWindowDimensions } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createDrawerNavigator } from '@react-navigation/drawer';
@@ -21,6 +21,7 @@ import LessonsScreen from '../screens/LessonsScreen';
 import MapScreen from '../screens/MapScreen';
 import HuntScreen from '../screens/HuntScreen';
 import HuntCreateScreen from '../screens/HuntCreateScreen';
+import HuntFoundScreen from '../screens/HuntFoundScreen';
 import EventsScreen from '../screens/EventsScreen';
 import CourseDetailScreen from '../screens/CourseDetailScreen';
 import MissionDetailScreen from '../screens/MissionDetailScreen';
@@ -39,6 +40,27 @@ import SecurityScreen from '../screens/account/SecurityScreen';
 import AboutScreen from '../screens/account/AboutScreen';
 import AccountDrawerContent from '../components/AccountDrawerContent';
 
+/**
+ * Imperative navigation ref consumed by `App.tsx`'s Linking listener so
+ * incoming `lightning:LNURL…` URIs (NFC tag tap, deep link from another
+ * app) can route to HuntFoundScreen without React-Navigation's static
+ * `linking` config — which doesn't fit a non-path-segmented URI scheme
+ * cleanly. Use `navigateToHuntFound(lnurl)` from outside the React tree.
+ */
+export const navigationRef = createNavigationContainerRef<RootStackParamList>();
+
+export const navigateToHuntFound = (lnurl: string): boolean => {
+  if (!navigationRef.isReady()) return false;
+  navigationRef.navigate('Main', {
+    screen: 'MainTabs',
+    params: {
+      screen: 'Explore',
+      params: { screen: 'HuntFound', params: { lnurl } },
+    },
+  });
+  return true;
+};
+
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 const ExploreStack = createNativeStackNavigator<ExploreStackParamList>();
@@ -54,6 +76,7 @@ function ExploreStackNavigator() {
       <ExploreStack.Screen name="Map" component={MapScreen} />
       <ExploreStack.Screen name="Hunt" component={HuntScreen} />
       <ExploreStack.Screen name="HuntCreate" component={HuntCreateScreen} />
+      <ExploreStack.Screen name="HuntFound" component={HuntFoundScreen} />
       <ExploreStack.Screen name="Events" component={EventsScreen} />
     </ExploreStack.Navigator>
   );
@@ -202,7 +225,7 @@ export default function AppNavigator() {
   }
 
   return (
-    <NavigationContainer theme={navTheme}>
+    <NavigationContainer ref={navigationRef} theme={navTheme}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Main" component={MainDrawer} />
         <Stack.Screen name="Conversation" component={ConversationScreen} />

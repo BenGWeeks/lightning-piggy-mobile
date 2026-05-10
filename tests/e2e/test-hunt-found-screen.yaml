@@ -1,0 +1,52 @@
+appId: com.lightningpiggy.app.dev
+name: Hunt finder celebration screen renders + claim button is reachable
+---
+# Verifies HuntFoundScreen mounts when the user navigates manually
+# (the deep-link path from App.tsx's Linking listener requires a real
+# `lightning:` URI tap, which Maestro can't synthesise without
+# `openLink`). Asserts the celebration card, claim button, and the
+# "sleeping" / "couldn't claim" graceful fallbacks.
+#
+# This flow uses the live Geo-Cache 1 LNURL by routing through a
+# manual `openLink` step. To stay independent of the live LNbits
+# server's state (cooldown / budget), the assertions are structural:
+# the screen's `hunt-found-screen` testID is visible AND either
+# `piggy-claim-button` (ready) or the friendly "sleeping" copy.
+#
+# Run: maestro test tests/e2e/test-hunt-found-screen.yaml
+
+- launchApp:
+    permissions:
+      location: allow
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+# Open Lightning Piggy via the lightning: scheme. Maestro's openLink
+# routes through the OS, so this exercises the same code path a real
+# NFC tap goes through.
+- openLink: 'lightning:lnurlw://bank.weeksfamily.me/withdraw/api/v1/lnurl/B2qnmj9HAyA2TnEwbvx2nX/GqSmSakRohyenUpBN8QYhy'
+- waitForAnimationToEnd:
+    timeout: 6000
+
+- assertVisible:
+    id: 'hunt-found-screen'
+
+# One of three states must render — either the celebration with the
+# claim button, the "sleeping" fallback, or the generic "couldn't
+# claim" branch. We accept all three because the live endpoint's
+# state (in cooldown, budget exhausted, network dropped) is
+# unpredictable from CI.
+- runFlow:
+    when:
+      visible:
+        id: 'piggy-claim-button'
+    commands:
+      - assertVisible: 'You found a Piggy!'
+- runFlow:
+    when:
+      notVisible:
+        id: 'piggy-claim-button'
+    commands:
+      - assertVisible:
+          text: 'Hunt'

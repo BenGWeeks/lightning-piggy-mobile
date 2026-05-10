@@ -9,7 +9,11 @@ export type MainTabParamList = {
     | { sendToAddress?: string; sendToName?: string; sendToPicture?: string; sendToPubkey?: string }
     | undefined;
   Messages: undefined;
-  Explore: undefined;
+  // Explore hosts a sub-stack so the type carries NavigatorScreenParams
+  // — that's what lets the Linking listener (App.tsx → navigateToHuntFound
+  // in AppNavigator.tsx) target a specific Explore-stack screen like
+  // HuntFound from outside the React tree.
+  Explore: NavigatorScreenParams<ExploreStackParamList> | undefined;
   Friends: undefined;
 };
 
@@ -44,9 +48,11 @@ export type RootStackParamList = {
 
 // Explore sub-stack — the renamed Learn tab now hosts a hub plus Lessons
 // (existing course content), Map (BTC Map merchants), Hunt (geocaching
-// game), and Events (NIP-52 meetups). See plan
-// .claude/plans/look-through-the-issues-squishy-wigderson.md for the
-// motivation; closes parts of #467 and #468.
+// game), and Events (NIP-52 meetups). Defined BEFORE MainTabParamList
+// uses NavigatorScreenParams<ExploreStackParamList> above; the forward-
+// reference works at type-level but is brittle so we keep the order.
+// See plan .claude/plans/look-through-the-issues-squishy-wigderson.md
+// for motivation; closes parts of #467 and #468.
 export type ExploreStackParamList = {
   ExploreHome: undefined;
   Lessons: undefined;
@@ -55,6 +61,7 @@ export type ExploreStackParamList = {
   Map: undefined;
   Hunt: undefined;
   HuntCreate: undefined;
+  HuntFound: { lnurl: string };
   Events: undefined;
 };
 
