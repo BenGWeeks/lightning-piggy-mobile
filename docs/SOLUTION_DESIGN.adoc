@@ -163,7 +163,7 @@ await swapRecoveryService.unregisterPendingSwap(swap.id);
 **Caller surface.** Both code paths now follow this contract:
 
 * `src/components/TransferSheet.tsx` — Home → Transfer (LN→on-chain *and* on-chain→LN). Has done so since the original Boltz integration.
-* `src/components/SendSheet.tsx` — Home → Send → paste BIP-21. Brought up to contract in #482 (was previously memory-only and lost secrets on every claim failure — issue #481).
+* `src/components/SendSheet.tsx` — Home → Send → paste BIP-21. Brought up to contract by the #481 fix (was previously memory-only and lost secrets on every claim failure).
 
 **Recovery service.** `src/services/swapRecoveryService.ts` runs on every `WalletContext` mount (`src/contexts/WalletContext.tsx:426`). For each swap ID in the index it:
 
@@ -176,9 +176,9 @@ await swapRecoveryService.unregisterPendingSwap(swap.id);
 **User-facing affordances.**
 
 * `TransferSheet` shows a "Recovery retried" overlay after a background failure, with a **Retry now** button that re-runs the same recovery routine immediately rather than waiting for the next launch.
-* `SendSheet` (post-#482) re-throws errors with a `"Boltz swap failed: <detail>"` prefix so the failure overlay shows the underlying claim error instead of "unknown Error". The persisted record means a force-stop + relaunch will quietly settle the on-chain side.
+* `SendSheet` (after the #481 fix) re-throws errors with a `"Boltz swap failed: <detail>"` prefix so the failure overlay shows the underlying claim error instead of "unknown Error". The persisted record means a force-stop + relaunch will quietly settle the on-chain side.
 
-**Observed today (2026-05-10):** the first claim attempt on a freshly created reverse swap fails *deterministically* with an opaque `"unknown Error"` from `boltzService.claimSwap` (suspected timing race between Boltz lockup propagation and our Electrum query — under investigation). The recovery retry on next launch (or via "Retry now") succeeds reliably. Two real-money 30k swaps via SendSheet and TransferSheet on Big Piggy validated this end-to-end on PR #482.
+**Observed during the #481 fix work (2026-05-10):** the first claim attempt on a freshly created reverse swap was failing *deterministically* with an opaque `"unknown Error"`. Root cause: the Alby SDK wraps NIP-47 responses with empty error bodies as `Nip47WalletError("unknown Error", "INTERNAL")` *even when the wallet processed the payment* — `nwcService.payInvoice` now looks up the invoice in that case (mirroring the existing "failed to publish" handler) and returns the preimage if found, so fresh swaps no longer trip the recovery path at all. The persistence + retry layer remains as defence in depth for genuine claim failures. Two real-money 30k swaps via SendSheet and TransferSheet on Big Piggy validated the end-to-end recovery path before the root-cause fix landed.
 
 ==== Taproot Internal Key Derivation (MuSig2)
 
