@@ -121,8 +121,8 @@ const npub = nip19.npubEncode(pk);
 // the event carries metadata + a marker label so clients can render
 // the LP claim UX while pointing the finder at the physical tag.
 //
-// We mark Lightning-payout caches via a NIP-32 label: ["L", "lp.piggy"]
-// (namespace) + ["l", "payout-lnurl-w", "lp.piggy"] (label value within
+// We mark Lightning-payout caches via a NIP-32 label: ["L", "com.lightningpiggy.app"]
+// (namespace) + ["l", "payout-lnurl-w", "com.lightningpiggy.app"] (label value within
 // the namespace). Generic geocaching clients (treasures.to) render the
 // cache as a standard NIP-GC listing; LP recognises the label and
 // shows the 🐷 pin / "tap the physical tag to claim" UX without
@@ -139,8 +139,8 @@ const tags = [
   ['t', CACHE_TYPE],
   ['hint', rot13(HINT)],
   // --- Lightning Piggy marker (NIP-32 label, not a bearer token!) ---
-  ['L', 'lp.piggy'], // label namespace
-  ['l', 'payout-lnurl-w', 'lp.piggy'], // payout type within the namespace
+  ['L', 'com.lightningpiggy.app'], // label namespace
+  ['l', 'payout-lnurl-w', 'com.lightningpiggy.app'], // payout type within the namespace
   ['expiration', String(Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60)], // 30d
 ];
 

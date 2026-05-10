@@ -40,6 +40,8 @@ import { newPiggyId, savePiggy } from '../services/piggyStorageService';
 import { writeLnurlToTag } from '../services/nfcService';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 import { encodeGeohash } from '../utils/geohash';
+import { buildCacheListing } from '../services/nostrPlacesService';
+import { publishCacheEvent } from '../services/nostrPlacesPublisher';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -56,7 +58,7 @@ type Stage =
 const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { signEvent } = useNostr();
+  const { signEvent, relays } = useNostr();
 
   const [lnurl, setLnurl] = useState('');
   const [memo, setMemo] = useState('');
@@ -123,7 +125,56 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
     await savePiggy(piggy);
     setStage({ kind: 'saved', lnurlw: piggy.lnurlw });
     Toast.show({ type: 'success', text1: 'Piggy hidden 🐷' });
-  }, [stage, lnurl, memo, isPublic, hintPhotoUrl, waitMinutesText, usesText, pin]);
+
+    // If the hider opted into Public, build + sign + publish the kind
+    // 37516 NIP-GC listing with the com.lightningpiggy.app label. The LNURL itself
+    // does NOT go on the event (see buildCacheListing comments + the
+    // unit test that asserts this invariant). Failures are non-fatal:
+    // the local Piggy is saved either way, the user can retry publish
+    // later from MyPiggies.
+    if (piggy.isPublic) {
+      try {
+        if (typeof piggy.lat !== 'number' || typeof piggy.lon !== 'number') {
+          Toast.show({
+            type: 'info',
+            text1: 'Saved locally — drop a pin to publish',
+            text2: 'Public Piggies need a location pin so finders can discover them.',
+          });
+          return;
+        }
+        const unsigned = buildCacheListing(piggy);
+        const signed = await signEvent(unsigned);
+        if (!signed) {
+          Toast.show({
+            type: 'error',
+            text1: 'Could not sign Piggy listing',
+            text2: 'Sign-in / Amber declined. Saved locally; retry publish later.',
+          });
+          return;
+        }
+        const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+        await publishCacheEvent(signed, writeRelays.length > 0 ? writeRelays : undefined);
+        Toast.show({ type: 'success', text1: 'Piggy published 🐷', text2: 'Visible on Discover.' });
+      } catch (e) {
+        Toast.show({
+          type: 'error',
+          text1: 'Could not publish to relays',
+          text2: (e as Error).message,
+        });
+      }
+    }
+  }, [
+    stage,
+    lnurl,
+    memo,
+    isPublic,
+    hintPhotoUrl,
+    waitMinutesText,
+    usesText,
+    pin,
+    signEvent,
+    relays,
+  ]);
 
   const handlePinHere = useCallback(async () => {
     if (pinning) return;

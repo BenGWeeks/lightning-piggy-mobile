@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { ChevronLeft, ChevronRight, PiggyBank, Plus } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, Compass, PiggyBank, Plus } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
@@ -65,6 +65,24 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
               Stash an LNURL-withdraw link on an NFC tag or QR for someone to find.
             </Text>
           </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.discoverCard}
+          onPress={() => navigation.navigate('HuntDiscover')}
+          testID="hunt-discover-button"
+          accessibilityLabel="Discover nearby Piggies"
+        >
+          <View style={styles.discoverIconWrapper}>
+            <Compass size={26} color={colors.brandPink} strokeWidth={2} />
+          </View>
+          <View style={styles.createTextWrapper}>
+            <Text style={styles.discoverTitle}>Discover nearby</Text>
+            <Text style={styles.discoverSubtitle}>
+              Find Piggies + traditional caches around you (NIP-GC).
+            </Text>
+          </View>
+          <ChevronRight size={18} color={colors.textSupplementary} />
         </TouchableOpacity>
 
         <Text style={styles.sectionLabel}>My Piggies</Text>
@@ -218,6 +236,26 @@ const createStyles = (colors: Palette) =>
       color: colors.textSupplementary,
       marginTop: 2,
     },
+    discoverCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: colors.brandPinkLight,
+    },
+    discoverIconWrapper: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: colors.brandPinkLight,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    discoverTitle: { color: colors.textHeader, fontSize: 15, fontWeight: '700' },
+    discoverSubtitle: { color: colors.textSupplementary, fontSize: 12, marginTop: 2 },
   });
 
 export default HuntScreen;

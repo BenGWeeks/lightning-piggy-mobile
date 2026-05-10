@@ -147,8 +147,8 @@ LP marker tags (NIP-32 label, **not** a bearer token — the LNURL deliberately 
 |===
 | Tag | Meaning
 
-| `["L", "lp.piggy"]` | NIP-32 label namespace declaring "this cache is in the Lightning Piggy taxonomy".
-| `["l", "payout-lnurl-w", "lp.piggy"]` | NIP-32 label value within the namespace — declares the cache pays out via LNURL-withdraw on the physical artifact (the NFC tag / printed QR carries the actual LNURL string). Generic NIP-GC clients (treasures.to) ignore the label entirely and render the cache as a standard listing; LP recognises it and renders the 🐷 pin + "tap the physical tag to claim" UX.
+| `["L", "com.lightningpiggy.app"]` | NIP-32 label namespace declaring "this cache is in the Lightning Piggy taxonomy".
+| `["l", "payout-lnurl-w", "com.lightningpiggy.app"]` | NIP-32 label value within the namespace — declares the cache pays out via LNURL-withdraw on the physical artifact (the NFC tag / printed QR carries the actual LNURL string). Generic NIP-GC clients (treasures.to) ignore the label entirely and render the cache as a standard listing; LP recognises it and renders the 🐷 pin + "tap the physical tag to claim" UX.
 |===
 
 **The LNURL never goes in the public event** — that would broadcast a bearer token to every relay subscriber, letting anyone in the world drain the cache without ever physically visiting it (defeating the entire physical-cache premise). The LNURL lives on:
@@ -171,7 +171,7 @@ Each successful claim produces:
 
 ==== Subscribe filter shape
 
-* **Discovery feed** — `{ kinds: [37516], "#g": [<geohash prefixes for current viewport>] }`. Single round-trip catches both LP Piggies AND treasures.to caches in the same area (we filter for the `["l", "payout-lnurl-w", "lp.piggy"]` label client-side to render the 🐷 vs 📍 pin distinction). Prefix list comes from `geohashPrefixes(currentGh, 5)` so one subscribe covers a ~5 km city neighbourhood.
+* **Discovery feed** — `{ kinds: [37516], "#g": [<geohash prefixes for current viewport>] }`. Single round-trip catches both LP Piggies AND treasures.to caches in the same area (we filter for the `["l", "payout-lnurl-w", "com.lightningpiggy.app"]` label client-side to render the 🐷 vs 📍 pin distinction). Prefix list comes from `geohashPrefixes(currentGh, 5)` so one subscribe covers a ~5 km city neighbourhood.
 * **Single cache detail (replaceable + thread)** — three filters:
   ** `{ kinds: [37516], authors: [hider], "#d": [piggy_id] }` — latest revision of the listing.
   ** `{ kinds: [7516], "#a": ["37516:<hider>:<piggy_id>"] }` — append-only found-log thread.
@@ -196,7 +196,7 @@ Reasons it's the right call:
 |===
 | Path | What it does
 
-| `scripts/publish-test-piggy.mjs` | One-shot dev script that publishes a real NIP-GC kind 37516 event with the LP `lp.piggy` label marker (no LNURL — by design, see schema notes above). Default values target Big Piggy's Geo-Cache 1 in Longstanton, Cambridge; override via env vars (LAT / LON / NAME / MEMO / HINT / DIFFICULTY / TERRAIN / SIZE / CACHE_TYPE / BIG_PIGGY_NSEC). The LNURL stays on the physical artifact only.
+| `scripts/publish-test-piggy.mjs` | One-shot dev script that publishes a real NIP-GC kind 37516 event with the LP `com.lightningpiggy.app` label marker (no LNURL — by design, see schema notes above). Default values target Big Piggy's Geo-Cache 1 in Longstanton, Cambridge; override via env vars (LAT / LON / NAME / MEMO / HINT / DIFFICULTY / TERRAIN / SIZE / CACHE_TYPE / BIG_PIGGY_NSEC). The LNURL stays on the physical artifact only.
 | `src/services/lnurlWithdrawService.ts` | Decode + LUD-03 resolve + LUD-03 claim (`claimLnurlWithdraw`). Wallet-agnostic: takes a `getInvoice(sats, memo)` callback so no NWC import dependency.
 | `src/services/claimHistoryService.ts` | AsyncStorage-backed log of "I claimed this Piggy" history. Drives the `⚡ claimed N min ago` badge.
 | `src/services/piggyStorageService.ts` | Local SecureStore registry of the hider's own Piggies. Carries every NIP-GC field (`name, difficulty, terrain, size, cacheType, hint`) plus LP extension fields (`hintPhotoUrl, waitSecondsHint, usesHint, lat, lon, geohash`).

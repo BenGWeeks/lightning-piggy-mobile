@@ -16,6 +16,9 @@ import {
   formatAddress,
   lightningAddressOf,
 } from '../services/btcMapService';
+import type { ParsedCache } from '../services/nostrPlacesService';
+import { subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
+import { encodeGeohash, geohashPrefixes } from '../utils/geohash';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -24,9 +27,11 @@ interface Props {
 type PermissionState = 'unknown' | 'granted' | 'denied';
 
 interface BridgeMessage {
-  type: 'ready' | 'bounds' | 'markerTap';
+  type: 'ready' | 'bounds' | 'markerTap' | 'cacheTap';
   bbox?: Bbox;
   id?: number;
+  /** Cache coord (`<kind>:<pubkey>:<d>`) for cacheTap messages. */
+  coord?: string;
 }
 
 /**
@@ -47,7 +52,9 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
 
   const [permission, setPermission] = useState<PermissionState>('unknown');
   const [places, setPlaces] = useState<BtcMapPlace[]>([]);
+  const [caches, setCaches] = useState<Map<string, ParsedCache>>(new Map());
   const [selected, setSelected] = useState<BtcMapPlace | null>(null);
+  const cachesCloserRef = useRef<(() => void) | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [webviewReady, setWebviewReady] = useState(false);
 
@@ -72,12 +79,31 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         lastBbox.current = initBbox;
         await refreshPlaces(initBbox);
         setViewportInWebView(pos.coords.latitude, pos.coords.longitude, 14);
+
+        // Subscribe to NIP-GC kind 37516 caches in the user's coarse
+        // geohash neighbourhood. Renders Lightning Piggies (com.lightningpiggy.app
+        // label) AND standard NIP-GC caches (treasures.to /
+        // TapTheSatsMap / etc.) as a different pin glyph alongside
+        // BTC Map merchants. See project memory `treasures.to interop`.
+        const myGeohash = encodeGeohash(pos.coords.latitude, pos.coords.longitude, 7);
+        const prefixes = geohashPrefixes(myGeohash, 5).filter((p) => p.length === 5);
+        cachesCloserRef.current?.();
+        cachesCloserRef.current = subscribeNearbyCaches(prefixes, (cache) => {
+          setCaches((prev) => {
+            const existing = prev.get(cache.coord);
+            if (existing && existing.createdAt >= cache.createdAt) return prev;
+            const next = new Map(prev);
+            next.set(cache.coord, cache);
+            return next;
+          });
+        });
       } catch (e) {
         if (!cancelled) setError((e as Error).message);
       }
     })();
     return () => {
       cancelled = true;
+      cachesCloserRef.current?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -102,10 +128,34 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
     webviewRef.current.injectJavaScript(js);
   }, []);
 
+  const sendCaches = useCallback((list: ParsedCache[]) => {
+    if (!webviewRef.current) return;
+    const payload = list
+      .filter((c) => c.geohash) // skip caches with no location
+      .map((c) => ({
+        coord: c.coord,
+        // Decode the longest geohash back to lat/lon — quick and
+        // dirty by inverse-bisection inline; for now we'll request
+        // each cache's lat/lon to come pre-decoded from a separate
+        // helper. The simplest path: caches with multi-precision g
+        // tags from precision 9 give us ~5 m resolution which is
+        // plenty for a pin. We use the longest tag's geohash decoded
+        // via a tiny inverse-encode (TODO: extract).
+        ...decodeGeohash(c.geohash as string),
+        kind: c.isLpPiggy ? 'piggy' : 'cache',
+      }));
+    const js = `window.LP_setCaches && window.LP_setCaches(${JSON.stringify(payload)}); true;`;
+    webviewRef.current.injectJavaScript(js);
+  }, []);
+
   // Re-emit markers any time `places` changes after the bridge is ready.
   useEffect(() => {
     if (webviewReady) sendMarkers(places);
   }, [places, webviewReady, sendMarkers]);
+
+  useEffect(() => {
+    if (webviewReady) sendCaches([...caches.values()]);
+  }, [caches, webviewReady, sendCaches]);
 
   const refreshPlaces = useCallback(async (bbox: Bbox) => {
     try {
@@ -137,9 +187,11 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
       } else if (msg.type === 'markerTap' && typeof msg.id === 'number') {
         const hit = places.find((p) => p.id === msg.id);
         if (hit) setSelected(hit);
+      } else if (msg.type === 'cacheTap' && typeof msg.coord === 'string') {
+        navigation.navigate('HuntPiggyDetail', { coord: msg.coord });
       }
     },
-    [places, refreshPlaces],
+    [places, refreshPlaces, navigation],
   );
 
   const recenterOnUser = useCallback(async () => {
@@ -209,7 +261,14 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         {error ? (
           <Text style={styles.footerError}>{error}</Text>
         ) : (
-          <Text style={styles.footerText}>{places.length} places nearby</Text>
+          <Text style={styles.footerText}>
+            {places.length} merchants
+            {caches.size > 0
+              ? ` · ${[...caches.values()].filter((c) => c.isLpPiggy).length} 🐷 Piggies · ${
+                  [...caches.values()].filter((c) => !c.isLpPiggy).length
+                } caches`
+              : ''}
+          </Text>
         )}
       </View>
 
@@ -328,6 +387,36 @@ const bboxAround = (lat: number, lng: number, halfDegrees: number): Bbox => ({
   maxLat: lat + halfDegrees,
 });
 
+// Geohash → centroid (lat, lng) — inverse of utils/geohash.ts encoder.
+// Used here because cache events publish only the geohash string, not
+// raw lat/lon (NIP-GC convention).
+const GEOHASH_BASE32 = '0123456789bcdefghjkmnpqrstuvwxyz';
+const decodeGeohash = (gh: string): { lat: number; lng: number } => {
+  let latLo = -90;
+  let latHi = 90;
+  let lonLo = -180;
+  let lonHi = 180;
+  let evenBit = true;
+  for (let i = 0; i < gh.length; i += 1) {
+    const idx = GEOHASH_BASE32.indexOf(gh[i].toLowerCase());
+    if (idx < 0) continue;
+    for (let bit = 4; bit >= 0; bit -= 1) {
+      const set = (idx >> bit) & 1;
+      if (evenBit) {
+        const mid = (lonLo + lonHi) / 2;
+        if (set) lonLo = mid;
+        else lonHi = mid;
+      } else {
+        const mid = (latLo + latHi) / 2;
+        if (set) latLo = mid;
+        else latHi = mid;
+      }
+      evenBit = !evenBit;
+    }
+  }
+  return { lat: (latLo + latHi) / 2, lng: (lonLo + lonHi) / 2 };
+};
+
 // -----------------------------------------------------------------------------
 // Leaflet HTML — kept inline so the bundle has no runtime CDN dependency
 // for the loader, while tile imagery itself still streams from OSM at use
@@ -350,6 +439,25 @@ const LEAFLET_HTML = `<!DOCTYPE html>
       box-shadow: 0 1px 4px rgba(0,0,0,0.4);
     }
     .lp-pin.onchain { background: #F5A623; }
+    /* NIP-GC cache pins — diamond shape so they're visually
+       distinguishable from circular merchant pins. */
+    .lp-cache {
+      width: 22px; height: 22px;
+      background: #6c7b8a; border: 2px solid #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+      transform: rotate(45deg);
+    }
+    .lp-cache.piggy { background: #EC008C; }
+    .lp-cache.piggy::after {
+      content: '🐷';
+      transform: rotate(-45deg);
+      display: inline-block;
+      font-size: 12px;
+      line-height: 18px;
+      width: 18px;
+      height: 18px;
+      text-align: center;
+    }
     .lp-me {
       width: 14px; height: 14px; border-radius: 7px;
       background: #2D88FF; border: 2px solid #fff;
@@ -370,6 +478,7 @@ const LEAFLET_HTML = `<!DOCTYPE html>
 
     let meMarker = null;
     let markerLayer = L.layerGroup().addTo(map);
+    let cacheLayer = L.layerGroup().addTo(map);
 
     const debounce = (fn, ms) => {
       let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
@@ -401,6 +510,17 @@ const LEAFLET_HTML = `<!DOCTYPE html>
         const marker = L.marker([m.lat, m.lng], { icon });
         marker.on('click', () => post({ type: 'markerTap', id: m.id }));
         marker.addTo(markerLayer);
+      });
+    };
+
+    window.LP_setCaches = function(list) {
+      cacheLayer.clearLayers();
+      list.forEach((c) => {
+        const cls = 'lp-cache' + (c.kind === 'piggy' ? ' piggy' : '');
+        const icon = L.divIcon({ className: '', html: '<div class="' + cls + '"></div>', iconSize: [22, 22] });
+        const marker = L.marker([c.lat, c.lng], { icon });
+        marker.on('click', () => post({ type: 'cacheTap', coord: c.coord }));
+        marker.addTo(cacheLayer);
       });
     };
 

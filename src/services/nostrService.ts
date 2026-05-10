@@ -13,7 +13,12 @@ import * as nip44 from 'nostr-tools/nip44';
 import * as nip59 from 'nostr-tools/nip59';
 import type { NostrProfile, NostrContact, RelayConfig } from '../types/nostr';
 
-const pool = new SimplePool();
+// Exported so feature-specific modules (e.g. nostrPlacesPublisher.ts for
+// the Hunt feature's NIP-GC subs) can share the single connection pool
+// rather than spinning up parallel SimplePool instances per feature —
+// each pool maintains its own WebSockets per relay, so duplication adds
+// real connection cost.
+export const pool = new SimplePool();
 
 // Shared pubkey + read relays of the currently logged-in Nostr user.
 // Kept as module state because `WalletProvider` wraps `NostrProvider` in
