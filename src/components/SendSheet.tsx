@@ -1095,6 +1095,8 @@ const SendSheet: React.FC<Props> = ({
                   style={[styles.sendButton, (!canSend || sending) && styles.sendButtonDisabled]}
                   onPress={handleSend}
                   disabled={!canSend || sending}
+                  accessibilityLabel="Send"
+                  testID="sendsheet-send-button"
                 >
                   {sending ? (
                     <ActivityIndicator color={colors.brandPink} />
