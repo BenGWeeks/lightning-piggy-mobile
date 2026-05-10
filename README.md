@@ -34,10 +34,12 @@ A mobile Bitcoin Lightning wallet built with Expo/React Native, connecting via N
   LNURL-withdraw "Piggies" stashed on NFC tags or QR codes (#468), and find
   Bitcoin meetups (NIP-52 calendar events). Hunt Piggies adopt
   [treasures.to](https://treasures.to)'s **NIP-GC** (`kind 37516` listings,
-  `kind 7516` found-logs, `kind 1111` NIP-22 comments) and add a `lnurl`
-  extension tag for the Lightning-payout flavour — so generic geocaching
-  clients render Piggies as standard caches, while Lightning Piggy renders
-  the 🐷 claim flow on top. Hider can update location / LNURL / hint photo /
+  `kind 7516` found-logs, `kind 1111` NIP-22 comments) and tag the listing
+  with a NIP-32 `lp.piggy / payout-lnurl-w` label so LP renders the 🐷
+  claim UX on top while generic geocaching clients render the cache normally.
+  **The LNURL bearer token never goes on the public relay event** — it
+  lives only on the physical NFC tag / QR (the access control) and in
+  the hider's local SecureStore. Hider can update location / hint photo /
   cooldown / expiry by re-publishing with the same `d` tag (PRE
   semantics). See [docs/PROTOCOLS.adoc](docs/PROTOCOLS.adoc) →
   "Hunt: Lightning extension to NIP-GC" for the full tag schema.

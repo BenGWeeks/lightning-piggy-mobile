@@ -141,16 +141,22 @@ NIP-GC optional tags (we emit when present):
 | `["expiration", unix_ts]` | NIP-40. Clients hide the listing past this time without needing a separate delete event.
 |===
 
-LP Lightning extension tags (treasures.to et al. ignore these gracefully; LP renders the 🐷 Lightning UI on top):
+LP marker tags (NIP-32 label, **not** a bearer token — the LNURL deliberately does NOT go on the public event):
 
 [cols="1,3", options="header"]
 |===
 | Tag | Meaning
 
-| `["lnurl", "lightning:LNURL1…"]` | The bearer-token withdraw URL (any of the LUD-17 / bech32 forms `decodeLnurlWithdraw` accepts). Presence of this tag is what makes a NIP-GC cache an LP Piggy.
-| `["wait", seconds]` | Self-reported cooldown hint mirroring the hider's wallet `wait_time`. LUD-03 metadata is stateless; this is a UX hint not protocol enforcement. See the `Cooldown / wait_time UX` notes in `project_hunt_photos_comments` memory.
-| `["uses", count]` | Self-reported lifetime-uses cap mirroring the hider's wallet `uses` setting. Same soft-hint treatment as `wait`.
+| `["L", "lp.piggy"]` | NIP-32 label namespace declaring "this cache is in the Lightning Piggy taxonomy".
+| `["l", "payout-lnurl-w", "lp.piggy"]` | NIP-32 label value within the namespace — declares the cache pays out via LNURL-withdraw on the physical artifact (the NFC tag / printed QR carries the actual LNURL string). Generic NIP-GC clients (treasures.to) ignore the label entirely and render the cache as a standard listing; LP recognises it and renders the 🐷 pin + "tap the physical tag to claim" UX.
 |===
+
+**The LNURL never goes in the public event** — that would broadcast a bearer token to every relay subscriber, letting anyone in the world drain the cache without ever physically visiting it (defeating the entire physical-cache premise). The LNURL lives on:
+
+* The **physical artifact** (NFC tag / printed QR) — this is the real access control. Possession = consent to claim.
+* The **hider's local `SecureStore`** (`piggyStorageService.HiddenPiggy.lnurlw`) — for tag-write, re-print, and any future "show me the QR for this Piggy" affordance. Never leaves the device.
+
+This is how TapTheSatsMap (the most prolific NIP-GC publisher, 31 sticker caches) operates — see project memory `treasures.to interop` for the analysis. Wait_time / uses / per-claim caps remain the hider's responsibility to set in their own wallet's LNURL-w configuration; LP doesn't try to mirror them on the event because doing so contributes to side-channel discoverability of the cache's economics without adding any safety.
 
 `content` carries the longer cache description ("🐷 Geo-Cache 1 — 21 sats per claim, 3h cooldown, 100 uses.").
 
@@ -165,7 +171,7 @@ Each successful claim produces:
 
 ==== Subscribe filter shape
 
-* **Discovery feed** — `{ kinds: [37516], "#g": [<geohash prefixes for current viewport>] }`. Single round-trip catches both LP Piggies AND treasures.to caches in the same area (we filter for the `lnurl` tag client-side to render the 🐷 vs 📍 pin distinction). Prefix list comes from `geohashPrefixes(currentGh, 5)` so one subscribe covers a ~5 km city neighbourhood.
+* **Discovery feed** — `{ kinds: [37516], "#g": [<geohash prefixes for current viewport>] }`. Single round-trip catches both LP Piggies AND treasures.to caches in the same area (we filter for the `["l", "payout-lnurl-w", "lp.piggy"]` label client-side to render the 🐷 vs 📍 pin distinction). Prefix list comes from `geohashPrefixes(currentGh, 5)` so one subscribe covers a ~5 km city neighbourhood.
 * **Single cache detail (replaceable + thread)** — three filters:
   ** `{ kinds: [37516], authors: [hider], "#d": [piggy_id] }` — latest revision of the listing.
   ** `{ kinds: [7516], "#a": ["37516:<hider>:<piggy_id>"] }` — append-only found-log thread.
@@ -190,7 +196,7 @@ Reasons it's the right call:
 |===
 | Path | What it does
 
-| `scripts/publish-test-piggy.mjs` | One-shot dev script that publishes a real NIP-GC kind 37516 event with the LP `lnurl` extension to the default relay set. Default values target Big Piggy's Geo-Cache 1 in Longstanton, Cambridge; override via env vars (LAT / LON / NAME / MEMO / HINT / LNURL / DIFFICULTY / TERRAIN / SIZE / CACHE_TYPE / BIG_PIGGY_NSEC).
+| `scripts/publish-test-piggy.mjs` | One-shot dev script that publishes a real NIP-GC kind 37516 event with the LP `lp.piggy` label marker (no LNURL — by design, see schema notes above). Default values target Big Piggy's Geo-Cache 1 in Longstanton, Cambridge; override via env vars (LAT / LON / NAME / MEMO / HINT / DIFFICULTY / TERRAIN / SIZE / CACHE_TYPE / BIG_PIGGY_NSEC). The LNURL stays on the physical artifact only.
 | `src/services/lnurlWithdrawService.ts` | Decode + LUD-03 resolve + LUD-03 claim (`claimLnurlWithdraw`). Wallet-agnostic: takes a `getInvoice(sats, memo)` callback so no NWC import dependency.
 | `src/services/claimHistoryService.ts` | AsyncStorage-backed log of "I claimed this Piggy" history. Drives the `⚡ claimed N min ago` badge.
 | `src/services/piggyStorageService.ts` | Local SecureStore registry of the hider's own Piggies. Carries every NIP-GC field (`name, difficulty, terrain, size, cacheType, hint`) plus LP extension fields (`hintPhotoUrl, waitSecondsHint, usesHint, lat, lon, geohash`).

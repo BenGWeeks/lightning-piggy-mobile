@@ -13,7 +13,12 @@
 //   node scripts/publish-test-piggy.mjs
 //
 // Override values via env vars: LAT, LON, NAME, MEMO, HINT, PIGGY_ID,
-// LNURL, DIFFICULTY, TERRAIN, SIZE, CACHE_TYPE.
+// DIFFICULTY, TERRAIN, SIZE, CACHE_TYPE.
+//
+// Note: there is NO `LNURL` env var. The LNURL is intentionally NOT
+// part of this script's output — see the schema comment below for
+// why. The LNURL belongs on the physical NFC tag / QR sticker the
+// hider stashes, not on a relay-broadcast event.
 import { generateSecretKey, getPublicKey, finalizeEvent, nip19 } from 'nostr-tools';
 import { SimplePool } from 'nostr-tools/pool';
 import { useWebSocketImplementation } from 'nostr-tools/relay';
@@ -27,9 +32,6 @@ useWebSocketImplementation(WebSocket);
 // --- Defaults: Big Piggy's Geo-Cache 1 (Longstanton, Cambridge) -------------
 const LAT = parseFloat(process.env.LAT ?? '52.283602');
 const LON = parseFloat(process.env.LON ?? '0.043889');
-const LNURL =
-  process.env.LNURL ??
-  'lightning:LNURL1DP68GURN8GHJ7CNPDE4JUAM9V44HXENPD45KC7FWD4JJ7AMFW35XGUNPWUHKZURF9AMRZTMVDE6HYMP0GGE8ZMNDDGU5SSTEGYE9GMJ9WA38V7PJDEVZ73M32DK4XCTT2FHKS7T9DE2HQSJW8PG4J6RE7CXWSZ';
 const NAME = process.env.NAME ?? 'Geo-Cache 1';
 const MEMO =
   process.env.MEMO ??
@@ -109,10 +111,22 @@ const pk = getPublicKey(sk);
 const npub = nip19.npubEncode(pk);
 
 // NIP-GC kind 37516 listing — required (d, name, g, D, T, S) + optional
-// (t, hint, image, r, verification) + LP's `lnurl` / `wait` / `uses`
-// extension. Other geocaching clients (treasures.to) ignore the
-// extension tags gracefully; LP renders the "🐷 Lightning bonus" UI on
-// top of the standard listing.
+// (t, hint, image, r, verification) + LP's marker label.
+//
+// CRITICAL: We deliberately do NOT include the LNURL string in the
+// event. Public Nostr events are broadcast to every relay subscriber;
+// embedding the bearer-token LNURL would let anyone in the world
+// drain the cache without ever physically visiting it. The LNURL
+// belongs on the physical artifact only (NFC tag + printed QR);
+// the event carries metadata + a marker label so clients can render
+// the LP claim UX while pointing the finder at the physical tag.
+//
+// We mark Lightning-payout caches via a NIP-32 label: ["L", "lp.piggy"]
+// (namespace) + ["l", "payout-lnurl-w", "lp.piggy"] (label value within
+// the namespace). Generic geocaching clients (treasures.to) render the
+// cache as a standard NIP-GC listing; LP recognises the label and
+// shows the 🐷 pin / "tap the physical tag to claim" UX without
+// leaking the bearer token to relays.
 const tags = [
   ['d', PIGGY_ID],
   ['name', NAME],
@@ -124,10 +138,9 @@ const tags = [
   ['S', SIZE],
   ['t', CACHE_TYPE],
   ['hint', rot13(HINT)],
-  // --- Lightning Piggy extension tags ---
-  ['lnurl', LNURL],
-  ['wait', '10800'], // 3 h, mirrors hider's wallet wait_time
-  ['uses', '100'],
+  // --- Lightning Piggy marker (NIP-32 label, not a bearer token!) ---
+  ['L', 'lp.piggy'], // label namespace
+  ['l', 'payout-lnurl-w', 'lp.piggy'], // payout type within the namespace
   ['expiration', String(Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60)], // 30d
 ];
 
