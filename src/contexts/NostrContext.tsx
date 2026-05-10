@@ -3245,6 +3245,16 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (__DEV__) console.warn(`[Nostr] live NIP-17 unwrap skip (${wrapId}): ${reason}`);
       };
 
+      // Yield to the event loop before each per-wrap decryption. The
+      // live sub fans out wraps from the relay one at a time, but
+      // when the sub catches up a backlog after cold start, multiple
+      // wraps land in the same JS task — each sync `unwrapWrapNsec`
+      // is ~1-3 ms and they pile up to tens-of-ms of unbroken
+      // blocking, dropping bottom-sheet animation frames. A single
+      // setTimeout(0) per wrap costs ~0 ms but lets RN re-flush
+      // pending UI events between decryptions. See issue #496.
+      await yieldToEventLoop();
+
       let rumor: DecodedRumor | null = null;
       if (activeSigner === 'nsec') {
         const secretKey = await getMemoisedSecretKey(viewerPubkey);
