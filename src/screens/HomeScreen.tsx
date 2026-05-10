@@ -225,7 +225,14 @@ const HomeScreen: React.FC = () => {
   // `hasActiveConnection` left taps un-feedback-able for the 1-3 s
   // cold-start window while NWC handshakes complete (#474).
   const isReceiveDisabled = walletsHydrated && wallets.length === 0;
-  const isSendDisabled = walletsHydrated && wallets.length === 0;
+  // Send is also disabled when the active wallet itself can't sign —
+  // watch-only on-chain (xpub) and bare-receive-address imports
+  // (Xapo deposit addresses, etc.) have no signing material so the
+  // Send sheet can't complete from them. Per #493. The "no wallets
+  // at all" case still kicks in first.
+  const isSendDisabled =
+    (walletsHydrated && wallets.length === 0) ||
+    (activeWallet !== null && !isSendableWallet(activeWallet));
   // Transfer needs at least two wallets (a source + destination).
   const isTransferDisabled = walletsHydrated && wallets.length < 2;
 
