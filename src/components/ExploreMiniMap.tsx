@@ -141,7 +141,7 @@ const makeHtml = (lat: number, lon: number): string => `<!DOCTYPE html>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const post=(m)=>window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify(m));
-const map=L.map('map',{zoomControl:false,dragging:false,scrollWheelZoom:false,doubleClickZoom:false,touchZoom:false,boxZoom:false,keyboard:false}).setView([${lat},${lon}],14);
+const map=L.map('map',{zoomControl:false,dragging:false,scrollWheelZoom:false,doubleClickZoom:false,touchZoom:false,boxZoom:false,keyboard:false}).setView([${lat},${lon}],11);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
 let merchantLayer=L.layerGroup().addTo(map),cacheLayer=L.layerGroup().addTo(map),eventLayer=L.layerGroup().addTo(map),meMarker=null;
 const dot=(cls,size)=>L.divIcon({className:'',html:'<div class="'+cls+'"></div>',iconSize:[size,size]});
@@ -152,6 +152,19 @@ window.LP_setHub=function(d){
   d.merchants.forEach(m=>L.marker([m.lat,m.lng],{icon:dot('lp-pin'+(m.lightning?'':' onchain'),14)}).addTo(merchantLayer));
   d.caches.forEach(c=>L.marker([c.lat,c.lng],{icon:dot('lp-cache'+(c.kind==='piggy'?' piggy':''),14)}).addTo(cacheLayer));
   d.events.forEach(e=>L.marker([e.lat,e.lng],{icon:dot('lp-event',14)}).addTo(eventLayer));
+  // Fit the viewport to include the user + every nearby pin so a
+  // rural user with caches 1-5 km away actually sees them on the
+  // preview, instead of staring at the user dot at zoom 14. Cap
+  // zoom so a single pin doesn't fly the viewport to street level.
+  var pts=[[d.me.lat,d.me.lng]];
+  d.merchants.forEach(m=>pts.push([m.lat,m.lng]));
+  d.caches.forEach(c=>pts.push([c.lat,c.lng]));
+  d.events.forEach(e=>pts.push([e.lat,e.lng]));
+  if(pts.length>1){
+    map.fitBounds(pts,{padding:[24,24],maxZoom:13});
+  } else {
+    map.setView([d.me.lat,d.me.lng],12);
+  }
 };
 post({type:'ready'});
 </script>

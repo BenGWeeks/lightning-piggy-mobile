@@ -104,32 +104,51 @@ describe('fetchPlacesInBbox cache', () => {
 
   it('returns cached results for identical bboxes within TTL', async () => {
     const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
-    const place: BtcMapPlace = {
+    // Overpass returns `{elements:[{type, id, lat, lon, tags}]}`; the
+    // service maps that to BtcMapPlace and derives verified_at from
+    // the `check_date` tag.
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        elements: [
+          {
+            type: 'node',
+            id: 42,
+            lat: 51.5,
+            lon: -0.1,
+            tags: { name: 'Cached café' },
+          },
+        ],
+      }),
+    });
+
+    const expected: BtcMapPlace = {
       id: 42,
       lat: 51.5,
       lon: -0.1,
       tags: { name: 'Cached café' },
       verified_at: null,
     };
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => [place],
-    });
-
     const bbox = { minLon: -0.2, minLat: 51.4, maxLon: 0.0, maxLat: 51.6 };
     const first = await fetchPlacesInBbox(bbox);
     const second = await fetchPlacesInBbox(bbox);
 
-    expect(first).toEqual([place]);
-    expect(second).toEqual([place]);
+    expect(first).toEqual([expected]);
+    expect(second).toEqual([expected]);
     expect(fetchMock).toHaveBeenCalledTimes(1); // second call hit the cache
   });
 
-  it('throws a useful error when the API returns non-OK', async () => {
+  it('throws a useful error when every mirror returns non-OK', async () => {
     const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
-    fetchMock.mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Service Unavailable' });
+    // Three Overpass mirrors are tried in order; reject them all so
+    // the race exhausts and surfaces the last error.
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 503,
+      statusText: 'Service Unavailable',
+    });
 
     const bbox = { minLon: 0, minLat: 0, maxLon: 1, maxLat: 1 };
-    await expect(fetchPlacesInBbox(bbox)).rejects.toThrow(/503/);
+    await expect(fetchPlacesInBbox(bbox)).rejects.toThrow(/Overpass 503/);
   });
 });

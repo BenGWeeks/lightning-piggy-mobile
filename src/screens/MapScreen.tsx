@@ -101,8 +101,12 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         // bounds bridge.
         const initBbox = bboxAround(lat, lon, 0.3);
         lastBbox.current = initBbox;
-        await refreshPlaces(initBbox);
+        // Queue the viewport BEFORE awaiting Overpass — the WebView
+        // bridge fires `ready` in parallel with the (potentially slow)
+        // merchant fetch, and we want the map centred on the user
+        // regardless of whether the BTC-merchant query has come back.
         setViewportInWebView(lat, lon, 10);
+        await refreshPlaces(initBbox);
 
         // Subscribe to NIP-GC kind 37516 caches in the user's coarse
         // geohash neighbourhood. Renders Lightning Piggies (com.lightningpiggy.app
@@ -134,11 +138,31 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
 
   // ------- WebView communication ----------------------------------------
 
-  const setViewportInWebView = useCallback((lat: number, lng: number, zoom: number) => {
-    if (!webviewRef.current) return;
-    const js = `window.LP_setViewport && window.LP_setViewport(${lat}, ${lng}, ${zoom}); true;`;
+  // Queues the most-recent intended viewport so we can re-issue it
+  // once the WebView bridge fires its `ready` message. Without this
+  // the initial location-resolve happens before `LP_setViewport`
+  // exists inside the WebView and the call no-ops, leaving the map
+  // stranded on Leaflet's hardcoded London fallback.
+  const pendingViewport = useRef<{ lat: number; lng: number; zoom: number } | null>(null);
+
+  const setViewportInWebView = useCallback(
+    (lat: number, lng: number, zoom: number) => {
+      pendingViewport.current = { lat, lng, zoom };
+      if (!webviewRef.current || !webviewReady) return;
+      const js = `window.LP_setViewport && window.LP_setViewport(${lat}, ${lng}, ${zoom}); true;`;
+      webviewRef.current.injectJavaScript(js);
+    },
+    [webviewReady],
+  );
+
+  // Replay the pending viewport once the bridge comes up.
+  useEffect(() => {
+    if (!webviewReady) return;
+    const v = pendingViewport.current;
+    if (!v || !webviewRef.current) return;
+    const js = `window.LP_setViewport && window.LP_setViewport(${v.lat}, ${v.lng}, ${v.zoom}); true;`;
     webviewRef.current.injectJavaScript(js);
-  }, []);
+  }, [webviewReady]);
 
   const sendMarkers = useCallback((list: BtcMapPlace[]) => {
     if (!webviewRef.current) return;

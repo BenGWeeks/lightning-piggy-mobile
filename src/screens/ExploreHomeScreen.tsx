@@ -6,7 +6,6 @@ import {
   CalendarDays,
   ChevronRight,
   Compass,
-  GraduationCap,
   MapPin,
   PiggyBank,
   Zap,
@@ -211,8 +210,11 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
   const sortedMerchants = useMemo(
     () =>
+      // Every node Overpass returns matched at least one of our
+      // Bitcoin-accepting selectors (payment:bitcoin / currency:XBT /
+      // payment:lightning), so the rail trusts the upstream filter
+      // rather than re-checking tag combinations and dropping rows.
       [...merchants]
-        .filter((m) => acceptsLightning(m) || m.tags['payment:bitcoin'] === 'yes')
         .sort((a, b) => {
           if (acceptsLightning(a) === acceptsLightning(b)) return 0;
           return acceptsLightning(a) ? -1 : 1;
@@ -422,16 +424,21 @@ const CacheCard: React.FC<{
     {cache.imageUrl ? (
       <Image source={{ uri: cache.imageUrl }} style={styles.cardThumb} resizeMode="cover" />
     ) : (
+      // Same-shape placeholder so cards align visually whether or
+      // not the hider attached a hint photo. LP Piggies get a pink
+      // panel + piggy glyph; vanilla NIP-GC caches get a slate
+      // panel + map-pin glyph.
       <View
         style={[
-          styles.cardIcon,
+          styles.cardThumb,
+          styles.cardThumbPlaceholder,
           cache.isLpPiggy ? styles.cardIconLightning : styles.cardIconStandard,
         ]}
       >
         {cache.isLpPiggy ? (
-          <PiggyBank size={20} color={colors.white} strokeWidth={2.5} />
+          <PiggyBank size={32} color={colors.white} strokeWidth={2} />
         ) : (
-          <MapPin size={20} color={colors.white} strokeWidth={2.5} />
+          <MapPin size={32} color={colors.white} strokeWidth={2} />
         )}
       </View>
     )}
@@ -465,8 +472,8 @@ const EventCard: React.FC<{
       {event.imageUrl ? (
         <Image source={{ uri: event.imageUrl }} style={styles.cardThumb} resizeMode="cover" />
       ) : (
-        <View style={[styles.cardIcon, styles.cardIconEvent]}>
-          <CalendarDays size={20} color={colors.white} strokeWidth={2.5} />
+        <View style={[styles.cardThumb, styles.cardThumbPlaceholder, styles.cardIconEvent]}>
+          <CalendarDays size={32} color={colors.white} strokeWidth={2} />
         </View>
       )}
       <Text style={styles.cardTitle} numberOfLines={2}>
@@ -498,9 +505,7 @@ const LessonCard: React.FC<{
   const total = course.missions.length;
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} testID={`lesson-card-${course.id}`}>
-      <View style={[styles.cardIcon, styles.cardIconLesson]}>
-        <GraduationCap size={20} color={colors.white} strokeWidth={2.5} />
-      </View>
+      <Image source={course.image} style={styles.cardThumb} resizeMode="cover" />
       <Text style={styles.cardTitle} numberOfLines={2}>
         {course.title}
       </Text>
@@ -552,11 +557,14 @@ const createLocalStyles = (colors: Palette) =>
       marginBottom: 6,
       backgroundColor: colors.divider,
     },
+    cardThumbPlaceholder: {
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     cardIconLightning: { backgroundColor: colors.brandPink },
     cardIconOnchain: { backgroundColor: '#F5A623' },
     cardIconStandard: { backgroundColor: '#6c7b8a' },
     cardIconEvent: { backgroundColor: '#5b3aff' },
-    cardIconLesson: { backgroundColor: colors.brandPink },
     cardTitle: {
       fontSize: 13,
       fontWeight: '700',

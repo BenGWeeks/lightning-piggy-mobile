@@ -1,14 +1,27 @@
 /**
- * BTC Map HTTP client. Read-only consumer of api.btcmap.org/v3 — the
- * community-maintained directory of Bitcoin-accepting merchants, backed by
- * OpenStreetMap. We never write back; merchant data lives in the OSM
- * commons (see project memory `BTC Map runs the commons (Nathan)`).
+ * Read-only consumer of Bitcoin-accepting merchant data. Originally
+ * hit `api.btcmap.org/v3/places` but that endpoint returned 404 by
+ * mid-2025; v4 strips OSM tags + ignores bbox, v2 is bulky. So we
+ * query **Overpass** directly against OpenStreetMap — the underlying
+ * commons BTC Map curates. Same data, more reliable transport. We
+ * never write back: merchant data lives in OSM (see project memory
+ * `BTC Map runs the commons (Nathan)`). The exported type stays
+ * `BtcMapPlace` so all callers / tests keep working.
  *
  * Closes part of #467.
  */
 
-const BTCMAP_BASE = 'https://api.btcmap.org/v3';
-const FETCH_TIMEOUT_MS = 10_000;
+// Overpass interpreter — queries OpenStreetMap directly. BTC Map's
+// own data is harvested from this same OSM commons (see project
+// memory `BTC Map runs the commons (Nathan)`), so going to OSM
+// upstream gives equivalent merchant coverage with a stable public
+// HTTP surface. Main host first, mirrors as fallbacks.
+const OVERPASS_HOSTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.openstreetmap.fr/api/interpreter',
+];
+const FETCH_TIMEOUT_MS = 45_000;
 const TILE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1_000; // 7 days
 
 export interface BtcMapPlace {
@@ -86,23 +99,82 @@ export const fetchPlacesInBbox = async (bbox: Bbox): Promise<BtcMapPlace[]> => {
     return cached.places;
   }
 
-  const url =
-    `${BTCMAP_BASE}/places?bbox=` + [bbox.minLon, bbox.minLat, bbox.maxLon, bbox.maxLat].join(',');
+  // Overpass QL — fetch every OSM node OR way whose tags indicate
+  // Bitcoin acceptance, in the requested bbox. We union three
+  // selectors because OSM contributors haven't settled on one tag:
+  //   payment:bitcoin=yes   — most common modern convention
+  //   currency:XBT=yes      — older "XBT is the ISO ticker for BTC" school
+  //   payment:lightning=yes — Lightning-specific
+  // `out center;` collapses ways to a representative point so we get
+  // lat/lon regardless of geometry type. `[timeout:35]` matches our
+  // client-side timeout so the server doesn't hold connections
+  // open past when the client gave up.
+  const bb = `${bbox.minLat},${bbox.minLon},${bbox.maxLat},${bbox.maxLon}`;
+  const ql = `[out:json][timeout:35];
+(
+  node["payment:bitcoin"="yes"](${bb});
+  node["currency:XBT"="yes"](${bb});
+  node["payment:lightning"="yes"](${bb});
+  way["payment:bitcoin"="yes"](${bb});
+  way["currency:XBT"="yes"](${bb});
+  way["payment:lightning"="yes"](${bb});
+);
+out center;`;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-
-  try {
-    const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) {
-      throw new Error(`BTC Map ${res.status}: ${res.statusText}`);
+  // Race through Overpass mirrors. Some 406 React Native fetches on
+  // certain Accept-Encoding combinations, others 504 under load; the
+  // public-mirror landscape changes month-to-month. First success wins.
+  let lastError: Error | null = null;
+  for (const host of OVERPASS_HOSTS) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    try {
+      // POST with `text/plain` body = raw QL — the format every Overpass
+      // mirror documents and that sidesteps Accept-Encoding negotiation
+      // headaches the `data=` form runs into from React Native's fetch.
+      const res = await fetch(host, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain', Accept: 'application/json' },
+        body: ql,
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        lastError = new Error(`Overpass ${res.status} from ${host}`);
+        continue;
+      }
+      const json = (await res.json()) as {
+        elements?: Array<{
+          type: 'node' | 'way' | 'relation';
+          id: number;
+          lat?: number;
+          lon?: number;
+          center?: { lat: number; lon: number };
+          tags?: Record<string, string>;
+        }>;
+      };
+      const places: BtcMapPlace[] = (json.elements ?? [])
+        .map((el) => {
+          const lat = el.lat ?? el.center?.lat;
+          const lon = el.lon ?? el.center?.lon;
+          if (lat === undefined || lon === undefined) return null;
+          const tags = el.tags ?? {};
+          const verified_at: string | null =
+            tags['check_date'] ??
+            tags['check_date:payment:bitcoin'] ??
+            tags['check_date:currency:XBT'] ??
+            null;
+          return { id: el.id, lat, lon, tags, verified_at } as BtcMapPlace;
+        })
+        .filter((p): p is BtcMapPlace => p !== null);
+      tileCache.set(key, { fetchedAt: Date.now(), places });
+      return places;
+    } catch (e) {
+      lastError = e as Error;
+    } finally {
+      clearTimeout(timer);
     }
-    const places = (await res.json()) as BtcMapPlace[];
-    tileCache.set(key, { fetchedAt: Date.now(), places });
-    return places;
-  } finally {
-    clearTimeout(timer);
   }
+  throw lastError ?? new Error('Overpass: no mirrors reachable');
 };
 
 /**
