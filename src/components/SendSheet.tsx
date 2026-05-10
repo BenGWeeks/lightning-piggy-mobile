@@ -1051,10 +1051,10 @@ const SendSheet: React.FC<Props> = ({
                           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                           accessibilityLabel="Powered by Boltz"
                         >
-                          <Image
+                          <ExpoImage
                             source={require('../../assets/images/boltz-logo.png')}
                             style={styles.boltzLogo}
-                            resizeMode="contain"
+                            contentFit="contain"
                           />
                         </TouchableOpacity>
                       )}
