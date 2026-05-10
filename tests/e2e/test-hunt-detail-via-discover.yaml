@@ -1,0 +1,61 @@
+appId: com.lightningpiggy.app.dev
+name: Hunt Discover → Detail navigation works
+---
+# Walks Explore → Hunt → Discover → tap first cache row → assert the
+# detail screen mounts, regardless of whether the cache is an LP Piggy
+# or a standard NIP-GC cache. The compose CTA's visibility depends on
+# whether the user has a recent claim recorded locally; we don't gate
+# the assertion on it.
+#
+# Skipped if Discover has no caches at run time (live relay state).
+#
+# Run: maestro test tests/e2e/test-hunt-detail-via-discover.yaml
+
+- launchApp:
+    permissions:
+      location: allow
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'tab-explore'
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn:
+    id: 'explore-card-hunt'
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn:
+    id: 'hunt-discover-button'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+- assertVisible:
+    id: 'hunt-discover-screen'
+
+# Empty state? Bail — no cache to navigate into. Otherwise tap the
+# first row and confirm detail mounts.
+- runFlow:
+    when:
+      notVisible:
+        id: 'hunt-discover-empty-state'
+    commands:
+      - tapOn:
+          point: '50%,40%' # Maestro doesn't have a "first row" matcher
+                          # without a known row id; fall back to a
+                          # rough center tap on the list area. Per
+                          # CLAUDE.md normally we'd avoid coordinates,
+                          # but row ids are dynamic (cache.d). The
+                          # alternative — relay-fixture seeded test —
+                          # is the M8 deterministic flow.
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - assertVisible:
+          id: 'hunt-piggy-detail-screen'
+      - tapOn:
+          id: 'hunt-piggy-detail-back-button'
+      - waitForAnimationToEnd:
+          timeout: 1000
+      - assertVisible:
+          id: 'hunt-discover-screen'

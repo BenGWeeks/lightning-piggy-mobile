@@ -1,0 +1,66 @@
+appId: com.lightningpiggy.app.dev
+name: Hunt Discover renders nearby caches list (or empty state)
+---
+# Smoke flow for HuntDiscoverScreen. With foreground location granted,
+# the screen subscribes to NIP-GC kind 37516 events whose `g` tag falls
+# in the user's coarse 5-char geohash neighbourhood. The live relay
+# state is unpredictable from CI (caches drift, relays flake), so the
+# assertions are structural: either the list renders rows OR the
+# empty-state with the "No caches nearby yet" copy. Both branches are
+# legitimate exits.
+#
+# Run: maestro test tests/e2e/test-hunt-discover.yaml
+
+- launchApp:
+    permissions:
+      location: allow
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'tab-explore'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- tapOn:
+    id: 'explore-card-hunt'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- tapOn:
+    id: 'hunt-discover-button'
+- waitForAnimationToEnd:
+    timeout: 4000
+
+- assertVisible:
+    id: 'hunt-discover-screen'
+
+# Either populated list (refresh button visible + at least loading
+# indicator dropped) OR the empty state — both are acceptable.
+- runFlow:
+    when:
+      visible:
+        id: 'hunt-discover-empty-state'
+    commands:
+      - assertVisible: 'No caches nearby yet'
+- runFlow:
+    when:
+      notVisible:
+        id: 'hunt-discover-empty-state'
+    commands:
+      - assertVisible:
+          id: 'hunt-discover-refresh-button'
+
+# Refresh round-trip works regardless.
+- tapOn:
+    id: 'hunt-discover-refresh-button'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- tapOn:
+    id: 'hunt-discover-back-button'
+- waitForAnimationToEnd:
+    timeout: 1000
+- assertVisible:
+    id: 'hunt-screen'
