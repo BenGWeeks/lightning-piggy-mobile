@@ -1,0 +1,45 @@
+appId: com.lightningpiggy.app.dev
+name: Map sub-screen renders with WebView and recenter control
+---
+# Smoke flow for the Map sub-screen: grant foreground location, open
+# Explore → Map, confirm the WebView mounts and the recenter control is
+# present. The actual marker count varies with the user's real position
+# (this flow doesn't mock BTC Map), so we only assert structural elements
+# rather than specific merchant pins. Marker-tap verification lives in
+# test-map-tap-merchant.yaml once the fixture relay is in place
+# (milestone 8).
+#
+# Run: maestro test tests/e2e/test-map-foreground-render.yaml
+
+- launchApp:
+    permissions:
+      location: allow
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'tab-explore'
+- waitForAnimationToEnd:
+    timeout: 1500
+
+- tapOn:
+    id: 'explore-card-map'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+- assertVisible:
+    id: 'map-screen'
+- assertVisible:
+    id: 'map-webview'
+- assertVisible:
+    id: 'map-recenter-button'
+- assertVisible:
+    id: 'map-back-button'
+
+- tapOn:
+    id: 'map-back-button'
+- waitForAnimationToEnd:
+    timeout: 1000
+- assertVisible:
+    id: 'explore-card-map'
