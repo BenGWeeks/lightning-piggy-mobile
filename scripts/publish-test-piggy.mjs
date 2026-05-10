@@ -1,10 +1,19 @@
-// Publishes a kind-30408 "Hidden Piggy" event to LP's default relays, signed
-// by a fresh disposable key. Used for end-to-end testing of the M6 publish/
-// subscribe shape before the in-app composer lands.
+// Publishes a NIP-GC kind 37516 "geocache listing" event with the
+// Lightning Piggy `lnurl` extension, signed by a fresh disposable key
+// (or `BIG_PIGGY_NSEC` env var). Used for end-to-end testing of the
+// M6 publish / subscribe shape before the in-app composer lands.
+//
+// We adopt treasures.to's NIP-GC draft (kind 37516 listings, kind 7516
+// found-logs, kind 1111 comments per NIP-22) and add `lnurl`/`wait`/
+// `uses` extension tags for our Lightning-payout flavour. Their
+// existing schema's `D/T/S/t` defaults are smart for an NFC-tag Piggy:
+// difficulty 1, terrain 1, size micro, type traditional. See project
+// memory `treasures.to interop`.
 //
 //   node scripts/publish-test-piggy.mjs
 //
-// Override values via env vars: LAT, LON, MEMO, PIGGY_ID, LNURL.
+// Override values via env vars: LAT, LON, NAME, MEMO, HINT, PIGGY_ID,
+// LNURL, DIFFICULTY, TERRAIN, SIZE, CACHE_TYPE.
 import { generateSecretKey, getPublicKey, finalizeEvent, nip19 } from 'nostr-tools';
 import { SimplePool } from 'nostr-tools/pool';
 import { useWebSocketImplementation } from 'nostr-tools/relay';
@@ -21,10 +30,16 @@ const LON = parseFloat(process.env.LON ?? '0.043889');
 const LNURL =
   process.env.LNURL ??
   'lightning:LNURL1DP68GURN8GHJ7CNPDE4JUAM9V44HXENPD45KC7FWD4JJ7AMFW35XGUNPWUHKZURF9AMRZTMVDE6HYMP0GGE8ZMNDDGU5SSTEGYE9GMJ9WA38V7PJDEVZ73M32DK4XCTT2FHKS7T9DE2HQSJW8PG4J6RE7CXWSZ';
+const NAME = process.env.NAME ?? 'Geo-Cache 1';
 const MEMO =
   process.env.MEMO ??
   '🐷 Geo-Cache 1 — Longstanton, Cambridge. 21 sats per claim, 3h cooldown, 100 uses.';
+const HINT = process.env.HINT ?? 'Look near the bench by the village sign.';
 const PIGGY_ID = process.env.PIGGY_ID ?? 'big-piggy-geo-cache-1';
+const DIFFICULTY = process.env.DIFFICULTY ?? '1';
+const TERRAIN = process.env.TERRAIN ?? '1';
+const SIZE = process.env.SIZE ?? 'micro';
+const CACHE_TYPE = process.env.CACHE_TYPE ?? 'traditional';
 
 // geohash encoder (same as utils/geohash.ts in the repo)
 const ALPHA = '0123456789bcdefghjkmnpqrstuvwxyz';
@@ -62,7 +77,16 @@ function gh(lat, lon, p = 7) {
   }
   return out;
 }
-const g7 = gh(LAT, LON, 7);
+// ROT13 for the hint per NIP-GC client guidance — prevents inline
+// spoilers when generic Nostr clients render the listing.
+const rot13 = (s) =>
+  s.replace(/[A-Za-z]/g, (c) => {
+    const b = c <= 'Z' ? 65 : 97;
+    return String.fromCharCode(((c.charCodeAt(0) - b + 13) % 26) + b);
+  });
+
+// Multi-precision g tags per the NIP-GC suggestion (3-9 chars).
+const g9 = gh(LAT, LON, 9);
 
 // Signing key — pass `BIG_PIGGY_NSEC=nsec1...` (or NSEC=nsec1...) to publish
 // from a real identity (events become replaceable by that pubkey later).
@@ -84,23 +108,32 @@ if (nsecInput) {
 const pk = getPublicKey(sk);
 const npub = nip19.npubEncode(pk);
 
+// NIP-GC kind 37516 listing — required (d, name, g, D, T, S) + optional
+// (t, hint, image, r, verification) + LP's `lnurl` / `wait` / `uses`
+// extension. Other geocaching clients (treasures.to) ignore the
+// extension tags gracefully; LP renders the "🐷 Lightning bonus" UI on
+// top of the standard listing.
 const tags = [
   ['d', PIGGY_ID],
-  ['g', g7],
-  ['g', g7.slice(0, 6)],
-  ['g', g7.slice(0, 5)],
-  ['g', g7.slice(0, 4)],
+  ['name', NAME],
+  // g tags at every precision from 3 to 9 — cheap on event size,
+  // dramatically widens the prefix-filter surface for proximity queries.
+  ...Array.from({ length: 7 }, (_, i) => ['g', g9.slice(0, i + 3)]),
+  ['D', DIFFICULTY],
+  ['T', TERRAIN],
+  ['S', SIZE],
+  ['t', CACHE_TYPE],
+  ['hint', rot13(HINT)],
+  // --- Lightning Piggy extension tags ---
   ['lnurl', LNURL],
-  ['wait', '10800'], // 3 hours, mirrors LNbits wait_time
+  ['wait', '10800'], // 3 h, mirrors hider's wallet wait_time
   ['uses', '100'],
   ['expiration', String(Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60)], // 30d
-  ['t', 'piggy'],
-  ['t', 'lightningpiggy'],
 ];
 
 const evt = finalizeEvent(
   {
-    kind: 30408,
+    kind: 37516,
     created_at: Math.floor(Date.now() / 1000),
     tags,
     content: MEMO,
@@ -136,8 +169,14 @@ RELAYS.forEach((r, i) => {
 // Wait then re-fetch to confirm it lands
 await new Promise((r) => setTimeout(r, 1500));
 console.log('\n--- re-fetch (subscribe with #g) ---');
-const fetched = await pool.querySync(RELAYS, { kinds: [30408], '#g': [g7], authors: [pk] });
-console.log(`got back ${fetched.length} event(s) matching #g=${g7} authors=[ours]`);
+const fetched = await pool.querySync(RELAYS, {
+  kinds: [37516],
+  '#g': [g9.slice(0, 7)],
+  authors: [pk],
+});
+console.log(
+  `got back ${fetched.length} event(s) matching kind=37516 #g=${g9.slice(0, 7)} authors=[ours]`,
+);
 fetched.forEach((e) => console.log('  id:', e.id, 'kind:', e.kind, 'tags:', e.tags.length));
 
 await pool.close(RELAYS);

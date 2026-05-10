@@ -81,7 +81,7 @@ There is no scheduled removal date. Removal will be announced one release ahead 
 | `src/services/nostrService.ts` :: `decryptNip04WithSecret` + `nip04` import | Read-only NIP-04 decrypt. Retained for backward-compatibility per the deprecation timeline above.
 |===
 
-=== Hunt: Hidden Piggies (#468) — kind-30408 + kind-1 thread
+=== Hunt: Lightning extension to NIP-GC (#468)
 
 ==== Summary
 
@@ -89,67 +89,114 @@ Lightning Piggy's "Hunt" feature lets users hide LNURL-withdraw "Piggies" in
 the wild and lets others find + claim them. The wallet-level LNURL-w is
 created by the hider in their own wallet (LNbits / Alby / Mutiny / …) — see
 the project memory `No LNbits-specific APIs`. Lightning Piggy is the
-**publisher**, **discoverer**, and **comment thread** layer.
+**publisher**, **discoverer**, and **find-log thread** layer.
 
-The data model is split between **two Nostr kinds with different lifecycles**.
-This is intentional and the app supports both:
+We adopt **NIP-GC** (Nostr Geocaching, draft by https://treasures.to[treasures.to])
+verbatim and add an `lnurl` + `wait` + `uses` extension for the
+Lightning-payout flavour. A Hunt Piggy is just a NIP-GC `traditional`
+cache that happens to also pay the finder. Generic geocaching clients
+(treasures.to et al.) render it as a normal cache; LP renders the
+"🐷 Lightning bonus" UI on top via the extension tags. **Read the
+upstream draft** in the kind-30817 event with `d="geocaching-events"`
+authored by `npub1pse...zz68` (or
+https://nostrhub.io/naddr1qvzqqqrcvypzppscgyy746fhmrt0nq955z6xmf80pkvrat0yq0hpknqtd00z8z68qqgkwet0vdskx6rfdenj6etkv4h8guc6gs5y5[the
+nostrhub.io rendering]).
+
+The data model uses **three Nostr kinds with three different lifecycles**:
 
 [cols="1,1,1,3", options="header"]
 |===
-| What | Kind | Lifecycle | Why this kind?
+| What | Kind | Lifecycle | NIP source
 
-| Piggy listing | `30408` | **Replaceable** (PRE) | Keyed by `(pubkey, kind, d)` per NIP-01 30000–39999 range. Hider can re-publish to update the LNURL, location, hint photo, cooldown, expiry, etc. — relays drop the prior version automatically. Same `d` tag = same Piggy.
-| Finder log entry (photo + comment) | `1` | **Append-only** | Each find is a separate kind-1 reply tagged to the Piggy's `a` coordinate. New comments don't replace previous ones — the thread grows over time, geocaching.com-style.
+| Cache listing | `37516` | **Replaceable** (PRE — `30000-39999` range, keyed by `(pubkey, kind, d)`). Hider can re-publish to update LNURL, location, hint, cooldown, expiry, etc.; relays drop the prior version. | NIP-GC §"Geocache Listing Event"
+| Found-log entry | `7516` | **Append-only**, `7000-7999` regular range. Each find produces one event tagged to the cache's `a` coordinate. Optional embedded `kind 7517` verification event for cryptographic find-proof. | NIP-GC §"Found Log Event"
+| Comment / status (DNF, note, maintenance, archived) | `1111` | **Append-only**, NIP-22 comment threading model with the cache as both root + parent. | NIP-GC §"Comment Log Events" + NIP-22
 |===
 
-==== kind-30408 tag schema
+==== kind 37516 listing — full tag schema
+
+NIP-GC required tags (we always emit):
 
 [cols="1,3", options="header"]
 |===
 | Tag | Meaning
 
-| `["d", piggy_id]` | Stable identifier scoped to the hider's pubkey. Required for replaceability. Format: `piggy_<base36-millis>_<random6>` (see `newPiggyId` in `src/services/piggyStorageService.ts`).
-| `["g", geohash]` (×N) | Location, NIP-52 convention. We emit precision-7 (≈ 153 m) plus successively coarser prefixes (6, 5, 4) so subscribers can run prefix-filter queries with any of those granularities. See `src/utils/geohash.ts` :: `geohashPrefixes`.
-| `["lnurl", "lightning:LNURL1…"]` | The bearer-token withdraw URL (any of the LUD-17 / bech32 forms `decodeLnurlWithdraw` accepts). This is what the finder claims against.
-| `["image", url]` | Optional EXIF-stripped Blossom / nostr.build URL of the hider's hint photo.
-| `["wait", seconds]` | Optional self-reported cooldown hint (mirrors the hider's wallet `wait_time`). LUD-03 metadata is stateless, so this is a UX hint not protocol enforcement. See the `Cooldown / wait_time UX` notes in the `project_hunt_photos_comments` memory.
-| `["uses", count]` | Optional self-reported lifetime-uses cap. Same "soft hint" treatment as `wait`.
-| `["expiration", unix_ts]` | NIP-40. Clients hide the listing past this time without needing a separate delete event.
-| `["t", "piggy"]`, `["t", "lightningpiggy"]` | Discovery hashtags so non-LP clients (or future LP siblings) can find Piggies via topic queries.
+| `["d", piggy_id]` | Stable identifier scoped to the hider's pubkey. Format: `piggy_<base36-millis>_<random6>` (see `newPiggyId` in `src/services/piggyStorageService.ts`).
+| `["name", str]` | Short human-readable cache name. Required by NIP-GC.
+| `["g", geohash]` (×7) | Location at every precision from 3 to 9 chars — cheap on event size, dramatically widens prefix-filter surface for proximity queries. See `src/utils/geohash.ts`.
+| `["D", "1-5"]` | Finding difficulty. We default `1` (just-find-the-tag) for NFC-stash Piggies; user can override for tricky hides.
+| `["T", "1-5"]` | Physical terrain. Default `1` (urban/accessible); bump for hilltop / hike-required caches.
+| `["S", "micro\|small\|regular\|large\|other"]` | Cache size. Default `micro` since an NFC sticker is small.
 |===
 
-`content` carries the human-readable memo ("🐷 Geo-Cache 1 — 21 sats per claim, 3h cooldown").
+NIP-GC optional tags (we emit when present):
 
-==== kind-1 reply thread (finder log entries)
+[cols="1,3", options="header"]
+|===
+| Tag | Meaning
 
-Each find produces a kind-1 with:
+| `["t", "traditional\|multi\|mystery"]` | Cache type. Default `traditional` per NIP-GC. **All Lightning Piggies are traditional caches with a Lightning bonus.**
+| `["hint", rot13(str)]` | Plaintext clue, ROT13-encoded per NIP-GC client guidance (prevents inline spoilers in scrolling clients). LP decodes for display; users with non-NIP-GC-aware clients see the rotated text and need to ROT13 themselves.
+| `["image", url]` | EXIF-stripped Blossom / nostr.build URL of the hider's hint photo. Routed through `src/services/imageUploadService.ts`.
+| `["expiration", unix_ts]` | NIP-40. Clients hide the listing past this time without needing a separate delete event.
+|===
 
-* `["a", "30408:<hider_pubkey>:<piggy_id>"]` — NIP-01 / NIP-10 reply pointer to the Piggy's a-coordinate. This is what makes `kinds:[1], "#a":[…]` subscriptions return the thread.
-* `["e", <piggy_event_id>]` — convenience pointer to a specific revision of the Piggy event for older clients that don't filter by `#a`.
-* `["claim", "found"]` — present iff the comment was posted via the post-claim celebration flow. Renders the `⚡ claimed` badge on the comment row. Honour-system, easily forgeable, but useful as a social signal. **We do NOT gate posting on it.**
-* `["imeta", url, "alt …", "x …", …]` — NIP-92 file metadata for any photo embedded in the comment. The URL itself is also inline in `content` so clients without imeta support still render the image.
+LP Lightning extension tags (treasures.to et al. ignore these gracefully; LP renders the 🐷 Lightning UI on top):
+
+[cols="1,3", options="header"]
+|===
+| Tag | Meaning
+
+| `["lnurl", "lightning:LNURL1…"]` | The bearer-token withdraw URL (any of the LUD-17 / bech32 forms `decodeLnurlWithdraw` accepts). Presence of this tag is what makes a NIP-GC cache an LP Piggy.
+| `["wait", seconds]` | Self-reported cooldown hint mirroring the hider's wallet `wait_time`. LUD-03 metadata is stateless; this is a UX hint not protocol enforcement. See the `Cooldown / wait_time UX` notes in `project_hunt_photos_comments` memory.
+| `["uses", count]` | Self-reported lifetime-uses cap mirroring the hider's wallet `uses` setting. Same soft-hint treatment as `wait`.
+|===
+
+`content` carries the longer cache description ("🐷 Geo-Cache 1 — 21 sats per claim, 3h cooldown, 100 uses.").
+
+==== kind 7516 found-log — what we emit
+
+Each successful claim produces:
+
+* `["a", "37516:<hider_pubkey>:<piggy_id>"]` — required NIP-GC reference to the cache.
+* `["image", url]` (optional) — finder's photo of the find spot. Same EXIF-strip pipeline as the listing's hint photo.
+* `["amount", "21"]` (LP extension) — sats claimed via the LNURL-w. Drives the `⚡ claimed` badge and "you got 21 sats here 47m ago" copy on the detail screen. Treasures.to et al. ignore this; for them it's a regular found-log.
+* `["verification", <kind-7517-json>]` (optional) — embedded NIP-GC verification event signed by the cache's verification key, if the listing carries one. **For LP Piggies we don't need this** — successful claim of the LNURL-w is its own physical-presence proof (you had the bearer token, the issuer paid you).
 
 ==== Subscribe filter shape
 
-* **Discovery feed** — `{ kinds: [30408], "#g": [<geohash prefixes for current viewport>] }`. Prefix list comes from `geohashPrefixes(currentGh, 5)` so a single subscribe covers a ~5 km city neighbourhood without enumerating cells.
-* **Single Piggy detail (replaceable + thread)** — two filters:
-  ** `{ kinds: [30408], authors: [hider], "#d": [piggy_id] }` — latest revision of the listing (replaceable, so 1 event back).
-  ** `{ kinds: [1], "#a": ["30408:<hider>:<piggy_id>"] }` — the append-only comment thread.
-* **My Piggies (cross-device)** — `{ kinds: [30408], authors: [me] }` (NB: a private mirror via kind-30407 encrypted to self is the future plan for cross-device sync of un-published Piggies; not implemented in M4).
+* **Discovery feed** — `{ kinds: [37516], "#g": [<geohash prefixes for current viewport>] }`. Single round-trip catches both LP Piggies AND treasures.to caches in the same area (we filter for the `lnurl` tag client-side to render the 🐷 vs 📍 pin distinction). Prefix list comes from `geohashPrefixes(currentGh, 5)` so one subscribe covers a ~5 km city neighbourhood.
+* **Single cache detail (replaceable + thread)** — three filters:
+  ** `{ kinds: [37516], authors: [hider], "#d": [piggy_id] }` — latest revision of the listing.
+  ** `{ kinds: [7516], "#a": ["37516:<hider>:<piggy_id>"] }` — append-only found-log thread.
+  ** `{ kinds: [1111], "#A": ["37516:<hider>:<piggy_id>"] }` — append-only comment thread (DNF / notes / maintenance / archived).
+* **My Piggies (cross-device)** — `{ kinds: [37516], authors: [me] }` and filter the result for the `lnurl` tag.
 
-==== Why kind 30408 specifically
+==== Why NIP-GC rather than a custom kind
 
-`30000-39999` is the parameterised replaceable range per NIP-01 — required if we want hider-edit semantics. The specific number 30408 is greenfield and chosen pragmatically; if a community NIP later standardises geocaching events (e.g. NIP-G0 has been proposed for geospatial tagging) we will migrate by republishing under the new kind and tombstoning 30408 with an `expiration`.
+We initially picked a custom `kind 30408` (still in the PRE range, semantically equivalent). Switched to NIP-GC `kind 37516` after a one-line user direction:
+
+> _"i think we should use their NIPs and use traditional but with an LNUrlw additional field."_
+
+Reasons it's the right call:
+
+* **Network effects.** treasures.to users see our Piggies on their map, vice versa. One geocaching ecosystem on Nostr instead of two competing ones.
+* **No semantic conflict.** A Lightning Piggy *is* a traditional NFC-tag cache — it just also pays. The `lnurl` extension is purely additive; their schema doesn't need to change.
+* **Their schema is more thought-through.** D/T/S/t classification, ROT13 hint convention, NIP-22 comment-thread model, optional cryptographic verification (kind 7517) all generalise beyond what we'd built. We inherit it for free.
+* **Migration cost: trivial.** `30408` → `37516` is a single-kind change; the tag schema is a strict superset of what we had; one orphan test event from the old kind hits its 30-day NIP-40 expiration and ages out.
 
 ==== Code references
 
 |===
 | Path | What it does
 
-| `scripts/publish-test-piggy.mjs` | One-shot dev script that publishes a real kind-30408 event from a disposable key to the default relay set. Used for end-to-end testing before the in-app composer (M6) lands.
-| `src/services/lnurlWithdrawService.ts` | Decode + LUD-03 resolve for any of the LNURL forms (`lnurl1…`, `LNURL1…`, `lightning:LNURL1…`, `lnurlw://…`, raw `https://`).
-| `src/services/piggyStorageService.ts` | Local SecureStore registry of the hider's Piggies. Carries the optional fields (`hintPhotoUrl`, `waitSecondsHint`, `usesHint`, `lat`, `lon`, `geohash`) that get tagged on publish in M6.
+| `scripts/publish-test-piggy.mjs` | One-shot dev script that publishes a real NIP-GC kind 37516 event with the LP `lnurl` extension to the default relay set. Default values target Big Piggy's Geo-Cache 1 in Longstanton, Cambridge; override via env vars (LAT / LON / NAME / MEMO / HINT / LNURL / DIFFICULTY / TERRAIN / SIZE / CACHE_TYPE / BIG_PIGGY_NSEC).
+| `src/services/lnurlWithdrawService.ts` | Decode + LUD-03 resolve + LUD-03 claim (`claimLnurlWithdraw`). Wallet-agnostic: takes a `getInvoice(sats, memo)` callback so no NWC import dependency.
+| `src/services/claimHistoryService.ts` | AsyncStorage-backed log of "I claimed this Piggy" history. Drives the `⚡ claimed N min ago` badge.
+| `src/services/piggyStorageService.ts` | Local SecureStore registry of the hider's own Piggies. Carries every NIP-GC field (`name, difficulty, terrain, size, cacheType, hint`) plus LP extension fields (`hintPhotoUrl, waitSecondsHint, usesHint, lat, lon, geohash`).
 | `src/utils/geohash.ts` | Tiny geohash encoder + `geohashPrefixes` helper.
-| `src/services/nfcService.ts` :: `writeLnurlToTag` | Writes `lightning:LNURL…` to an NDEF URI record so any LNURL-aware wallet on tap opens.
+| `src/utils/rot13.ts` | Tiny ROT13 helper for NIP-GC hint encoding.
+| `src/services/nfcService.ts` :: `writeLnurlToTag` | Writes `lightning:LNURL…` to an NDEF URI record (case-preserving for LUD-17 paths) so any LNURL-aware wallet on tap opens.
 | `src/screens/HuntCreateScreen.tsx` | Hider create flow — paste / validate LNURL, attach hint photo (EXIF-stripped via `imageUploadService`), drop GPS pin → 7-char geohash, optional cooldown / uses hints, optional Public toggle.
+| `src/screens/HuntFoundScreen.tsx` | Finder celebration / claim flow — opens via `lightning:` deep-link, resolves LUD-03, generates bolt11 via `useWallet().makeInvoice`, POSTs to LNURL callback, records to claim history.
 |===

@@ -10,6 +10,14 @@ import * as SecureStore from 'expo-secure-store';
  * Used by the Hunt feature (#468). The user creates the LNURL-w in
  * their wallet of choice (LNbits, Alby, Mutiny, …) and pastes it here
  * — see project memory `No LNbits-specific APIs`.
+ *
+ * Published as a **NIP-GC kind 37516** geocache listing with an
+ * `["lnurl", …]` extension tag (treasures.to's draft NIP, see project
+ * memory `treasures.to interop`). LP isn't reinventing the wheel —
+ * we're a Lightning-flavoured cache type within the same Nostr
+ * geocaching commons. Smart defaults below apply when the field
+ * isn't explicitly set: D=1, T=1, S=micro, t=traditional — matching
+ * an NFC-tag Piggy that anyone can find without a hike.
  */
 
 const STORAGE_KEY = 'hunt-piggies:v1';
@@ -22,9 +30,11 @@ export interface HiddenPiggy {
   memo: string;
   createdAt: number;
   /** When true, the hider has opted into publishing this Piggy as a
-   * kind-30408 Nostr event so strangers can find it via the Discover
-   * tab. The publish itself happens in milestone 6; the flag is stored
-   * here from the create flow. */
+   * NIP-GC kind 37516 Nostr event (with the LP `lnurl` extension tag)
+   * so strangers can find it via the Discover tab — and so generic
+   * geocaching clients like treasures.to render it as a standard
+   * cache. The publish itself happens in milestone 6; the flag is
+   * stored here from the create flow. */
   isPublic: boolean;
   /** Snapshot of the LNURL-w endpoint's max-withdrawable (millisats) at
    * create time — purely informational; the live value is queried on
@@ -40,27 +50,52 @@ export interface HiddenPiggy {
   /** Optional hider-published cooldown hint in seconds — mirrors the
    * `wait_time` setting in the hider's wallet (LNbits etc). Self-
    * reported; the LUD-03 metadata response itself is stateless and
-   * doesn't expose this. Used by HuntPiggyDetailScreen to render
-   * "next-available-in" estimates alongside the latest claim
-   * timestamp from the kind-1 thread. */
+   * doesn't expose this. Published as an LP `["wait", seconds]`
+   * extension tag on the kind 37516 listing. Used by
+   * HuntPiggyDetailScreen to render "next-available-in" estimates
+   * alongside the latest claim timestamp from the kind 7516 found-log
+   * thread. */
   waitSecondsHint?: number;
   /** Optional hider-published lifetime-uses hint — mirrors the
    * `uses` (a.k.a. "amount of uses") cap in the hider's wallet. Same
    * stateless-LUD-03 caveat: not in metadata, not protocol-enforced
-   * here. We surface it on the detail screen alongside the count of
-   * claim-tagged kind-1 replies so finders see "12/100 claims used"
-   * as a soft availability hint. */
+   * here. Published as an LP `["uses", count]` extension tag. We
+   * surface it on the detail screen alongside the count of kind 7516
+   * found-logs so finders see "12/100 claims used" as a soft
+   * availability hint. */
   usesHint?: number;
   /** Optional GPS pin captured at hide-time. Stored locally so the
    * hider can recall "where did I stash this?" later. ONLY published
-   * to Nostr (as a `g` geohash tag on kind-30408) when the Piggy is
-   * marked public — private Piggies keep their pin on-device. */
+   * to Nostr (as multi-precision `g` geohash tags on the kind 37516
+   * listing) when the Piggy is marked public — private Piggies keep
+   * their pin on-device. */
   lat?: number;
   lon?: number;
   /** Pre-computed 7-char geohash of (lat, lon). Convenience cache so
    * we don't re-encode on every render. Always derivable from
    * lat/lon via `encodeGeohash`. */
   geohash?: string;
+  /** NIP-GC required field — short human-readable cache name. If
+   * unset at publish time we fall back to the first ~50 chars of
+   * memo. */
+  name?: string;
+  /** NIP-GC required `D` field — finding difficulty 1-5. Defaults to
+   * 1 (just-find-the-tag). User can override for caches that hide
+   * the tag in a tricky place. */
+  difficulty?: 1 | 2 | 3 | 4 | 5;
+  /** NIP-GC required `T` field — physical terrain 1-5. Defaults to 1
+   * (urban / accessible). Bump for hilltop / hike-required caches. */
+  terrain?: 1 | 2 | 3 | 4 | 5;
+  /** NIP-GC required `S` field. Defaults to `micro` since an NFC
+   * sticker is small. */
+  size?: 'micro' | 'small' | 'regular' | 'large' | 'other';
+  /** NIP-GC optional `t` field (cache type). Defaults to
+   * `traditional`. */
+  cacheType?: 'traditional' | 'multi' | 'mystery';
+  /** NIP-GC optional `hint` field — short prose clue. Stored
+   * plaintext locally; ROT13-encoded on publish per the NIP-GC
+   * client guidance to prevent inline spoilers. */
+  hint?: string;
 }
 
 export const loadPiggies = async (): Promise<HiddenPiggy[]> => {
@@ -125,5 +160,24 @@ const isValidPiggy = (v: unknown): v is HiddenPiggy => {
   if (p.lat !== undefined && typeof p.lat !== 'number') return false;
   if (p.lon !== undefined && typeof p.lon !== 'number') return false;
   if (p.geohash !== undefined && typeof p.geohash !== 'string') return false;
+  if (p.name !== undefined && typeof p.name !== 'string') return false;
+  if (
+    p.difficulty !== undefined &&
+    (typeof p.difficulty !== 'number' || p.difficulty < 1 || p.difficulty > 5)
+  )
+    return false;
+  if (p.terrain !== undefined && (typeof p.terrain !== 'number' || p.terrain < 1 || p.terrain > 5))
+    return false;
+  if (
+    p.size !== undefined &&
+    !['micro', 'small', 'regular', 'large', 'other'].includes(p.size as string)
+  )
+    return false;
+  if (
+    p.cacheType !== undefined &&
+    !['traditional', 'multi', 'mystery'].includes(p.cacheType as string)
+  )
+    return false;
+  if (p.hint !== undefined && typeof p.hint !== 'string') return false;
   return true;
 };
