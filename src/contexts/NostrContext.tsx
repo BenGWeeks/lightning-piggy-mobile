@@ -1487,6 +1487,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     clearMemoisedSecretKey();
     setAmberNip44Permission('unknown');
     nip04PlaintextCache.clear();
+    // Drop the in-memory NIP-17 wrap-id dedup Set — without this, a
+    // sign-out then sign-back-in to the SAME pubkey would keep wrap
+    // ids from the prior session alive in memory, and any wrap whose
+    // on-disk cache entry got wiped by `wipeAccountCaches` below
+    // would be permanently skipped by the live-sub early-return
+    // (since the in-memory Set would still claim "seen"). Per Copilot
+    // review on #508.
+    knownWrapIdsRef.current = { pubkey: null, set: new Set() };
     const loggedOutPubkey = pubkey;
     await SecureStore.deleteItemAsync(NSEC_KEY);
     await SecureStore.deleteItemAsync(PUBKEY_KEY);
