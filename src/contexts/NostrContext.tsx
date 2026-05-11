@@ -31,7 +31,11 @@ import {
   reconcileSyntheticGroup,
 } from '../services/groupRoutingRegistry';
 import { isSyntheticGroupId, syntheticGroupIdForParticipants } from '../utils/syntheticGroupId';
-import { appendGroupMessage, type GroupMessage } from '../services/groupMessagesStorageService';
+import {
+  appendGroupMessage,
+  listPersistedGroupWrapIds,
+  type GroupMessage,
+} from '../services/groupMessagesStorageService';
 import { perAccountKey } from '../services/perAccountStorage';
 import {
   loadIdentities,
@@ -3513,9 +3517,17 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           const seedRaw = await AsyncStorage.getItem(wrapCacheKey);
           const seedCache = safeParseRecord<Nip17CacheEntry>(seedRaw);
           for (const id of Object.keys(seedCache)) knownWrapIds.add(id);
+          // Also seed from persisted group messages — group-routed wraps
+          // never land in the 1:1 wrapCache (the tryRouteGroupRumor
+          // branch returns before the cache write). Without this union
+          // every cold start re-decrypts + re-routes the same group
+          // wraps the relay re-streams since the last `since` cursor.
+          const dmCount = knownWrapIds.size;
+          const groupWrapIds = await listPersistedGroupWrapIds();
+          for (const id of groupWrapIds) knownWrapIds.add(id);
           if (__DEV__) {
             console.log(
-              `[Nostr] live DM sub: seeded knownWrapIds with ${knownWrapIds.size} cached wraps`,
+              `[Nostr] live DM sub: seeded knownWrapIds with ${dmCount} dm + ${knownWrapIds.size - dmCount} group wraps`,
             );
           }
         } catch (e) {
