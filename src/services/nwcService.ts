@@ -558,16 +558,37 @@ export async function payInvoice(
         try {
           const lookup = await provider.lookupInvoice({ paymentHash });
           if (lookup?.preimage) {
-            console.log(
-              `[NWC] pay_invoice surfaced "${msg}" but invoice is already paid — returning preimage`,
+            // `warn` (not `log`) so this survives the production
+            // `transform-remove-console` strip — without it field logs
+            // can't tell a benign Alby-SDK-wrapping case (wallet did
+            // process the payment) from a real failure.
+            console.warn(
+              `[NWC] pay_invoice surfaced "${msg}" but invoice IS paid — returning preimage (paymentHash=${paymentHash.slice(0, 8)})`,
             );
             return { preimage: lookup.preimage };
           }
-        } catch {
-          // lookup failed — fall through, throw original error so the
-          // caller can decide. Do NOT retry the payment here, that would
-          // risk a double-pay on the wallets that *did* process it.
+          // lookup succeeded but reported invoice unpaid — payment really failed.
+          console.warn(
+            `[NWC] pay_invoice "${msg}" + lookup says invoice unpaid — treating as real failure (paymentHash=${paymentHash.slice(0, 8)})`,
+          );
+        } catch (lookupErr) {
+          // lookup itself threw — most ambiguous case. We don't know if
+          // the payment succeeded or not. Log so field diagnostics can
+          // correlate, then fall through + re-throw the ORIGINAL error
+          // so the caller decides. Do NOT retry the payment here —
+          // would risk a double-pay on wallets that *did* process it.
+          const lookupMsg =
+            lookupErr instanceof Error
+              ? lookupErr.message || lookupErr.toString()
+              : String(lookupErr);
+          console.warn(
+            `[NWC] pay_invoice "${msg}" + lookupInvoice ALSO failed (${lookupMsg || 'no message'}) — payment status unknown (paymentHash=${paymentHash.slice(0, 8)})`,
+          );
         }
+      } else {
+        console.warn(
+          `[NWC] pay_invoice "${msg}" + could not extract paymentHash from bolt11 — payment status unknown`,
+        );
       }
     }
     throw error;
