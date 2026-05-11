@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   FlatList,
@@ -10,7 +11,8 @@ import {
   Linking,
 } from 'react-native';
 import * as Location from 'expo-location';
-import { CalendarDays, ChevronLeft, MapPinned, RefreshCw } from 'lucide-react-native';
+import { CalendarDays, ChevronLeft, MapPinned, Plus, RefreshCw, Search } from 'lucide-react-native';
+import Toast from '../components/BrandedToast';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
@@ -52,6 +54,10 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
   // haversine + the list sort prefers proximity (with start-time as
   // tiebreaker for events at the same geohash).
   const [pos, setPos] = useState<{ lat: number; lon: number } | null>(null);
+  // Free-text search over title / description / location / hashtags.
+  // Pure client-side filter against the already-trust-filtered list;
+  // no extra relay queries.
+  const [searchQuery, setSearchQuery] = useState('');
   const closerRef = useRef<(() => void) | null>(null);
 
   const { isTrusted, filterEnabled } = useTrustGraph();
@@ -152,6 +158,34 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
     return items;
   }, [events, pos]);
 
+  // Filtered slice — case-insensitive substring match across the
+  // fields a user would search by. Empty query → pass-through. Always
+  // applied after sort so "next 3" highlighting (UpNext chip on the
+  // first three entries) stays in distance-order.
+  const filteredEvents = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return sortedEvents;
+    return sortedEvents.filter(({ event }) => {
+      const hay = [event.title, event.description, event.location ?? '', event.hashtags.join(' ')]
+        .join(' ')
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [sortedEvents, searchQuery]);
+
+  const onCreateEvent = useCallback(() => {
+    // Full create flow lives behind a Nostr signer + venue picker we
+    // haven't built yet. Surface a friendly placeholder so the
+    // affordance is discoverable and the door is propped open.
+    Toast.show({
+      type: 'info',
+      text1: 'Creating events lands soon',
+      text2:
+        'For now publish your meetup via Flockstr or Coracle — it shows up here automatically.',
+      visibilityTime: 5000,
+    });
+  }, []);
+
   const openInMaps = useCallback((event: ParsedEvent) => {
     const q = event.location ?? (event.geohash ? event.geohash : event.title);
     const encoded = encodeURIComponent(q);
@@ -174,6 +208,14 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Events</Text>
         <TouchableOpacity
+          onPress={onCreateEvent}
+          accessibilityLabel="Create event"
+          testID="events-create-button"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Plus size={20} color={colors.white} strokeWidth={2.5} />
+        </TouchableOpacity>
+        <TouchableOpacity
           onPress={reload}
           accessibilityLabel="Refresh"
           testID="events-refresh-button"
@@ -181,6 +223,22 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
         >
           <RefreshCw size={20} color={colors.white} strokeWidth={2.5} />
         </TouchableOpacity>
+      </View>
+
+      {/* Search bar — filters the loaded events client-side. Cheap, no
+          extra relay queries. */}
+      <View style={styles.searchRow}>
+        <Search size={16} color={colors.textSupplementary} strokeWidth={2.5} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search events…"
+          placeholderTextColor={colors.textSupplementary}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          autoCapitalize="none"
+          autoCorrect={false}
+          testID="events-search-input"
+        />
       </View>
 
       {loading && events.size === 0 ? (
@@ -213,13 +271,17 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
             </Text>
           ) : null}
           <FlatList
-            data={sortedEvents}
+            data={filteredEvents}
             keyExtractor={({ event }) => event.coord}
             contentContainerStyle={styles.listContent}
-            renderItem={({ item }) => (
+            renderItem={({ item, index }) => (
               <EventRow
                 event={item.event}
                 distance={item.distance}
+                // Highlight the first three unsearched results as
+                // "Up next" — when the user is filtering by query the
+                // highlight makes no sense, so skip it.
+                upNext={searchQuery.trim() === '' && index < 3}
                 expanded={expandedCoord === item.event.coord}
                 onToggle={() =>
                   setExpandedCoord((prev) => (prev === item.event.coord ? null : item.event.coord))
@@ -229,6 +291,13 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
                 styles={styles}
               />
             )}
+            ListEmptyComponent={
+              searchQuery.trim() !== '' ? (
+                <Text style={styles.emptySearchText}>
+                  Nothing matches “{searchQuery.trim()}”. Try a city, hashtag, or organiser name.
+                </Text>
+              ) : null
+            }
           />
         </>
       )}
@@ -260,24 +329,33 @@ const dayLabel = (ts: number | null): { day: string; month: string } => {
 const EventRow: React.FC<{
   event: ParsedEvent;
   distance: number;
+  upNext: boolean;
   expanded: boolean;
   onToggle: () => void;
   onOpenInMaps: () => void;
   colors: Palette;
   styles: ReturnType<typeof createStyles>;
-}> = ({ event, distance, expanded, onToggle, onOpenInMaps, colors, styles }) => {
+}> = ({ event, distance, upNext, expanded, onToggle, onOpenInMaps, colors, styles }) => {
   const { day, month } = dayLabel(event.startsAt);
   return (
     <TouchableOpacity
-      style={styles.row}
+      style={[styles.row, upNext ? styles.rowUpNext : null]}
       onPress={onToggle}
       testID={`event-row-${event.d}`}
       accessibilityLabel={event.title}
     >
+      {upNext ? <Text style={styles.upNextChip}>UP NEXT</Text> : null}
       <View style={styles.dateBlock}>
         <Text style={styles.dateMonth}>{month}</Text>
         <Text style={styles.dateDay}>{day}</Text>
       </View>
+      {/* Thumbnail in the collapsed row so the user can recognise the
+          event at a glance. Falls back to nothing (date block + meta
+          carry the row on their own) when the publisher didn't supply
+          an image. The expanded view renders a wider hero image too. */}
+      {event.imageUrl ? (
+        <Image source={{ uri: event.imageUrl }} style={styles.thumb} resizeMode="cover" />
+      ) : null}
       <View style={styles.rowMain}>
         <Text style={styles.rowTitle} numberOfLines={expanded ? 0 : 1}>
           {event.title}
@@ -375,6 +453,48 @@ const createStyles = (colors: Palette) =>
     },
     dateMonth: { color: colors.brandPink, fontSize: 11, fontWeight: '800', letterSpacing: 1 },
     dateDay: { color: colors.brandPink, fontSize: 22, fontWeight: '800', marginTop: 2 },
+    thumb: {
+      width: 56,
+      height: 56,
+      borderRadius: 10,
+      backgroundColor: colors.divider,
+    },
+    rowUpNext: {
+      borderLeftWidth: 3,
+      borderLeftColor: colors.brandPink,
+      paddingLeft: 9, // 12 - 3 to keep contents aligned with non-UpNext rows
+    },
+    upNextChip: {
+      position: 'absolute',
+      top: 8,
+      right: 10,
+      fontSize: 9,
+      fontWeight: '800',
+      letterSpacing: 1,
+      color: colors.brandPink,
+    },
+    searchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: colors.surface,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.divider,
+    },
+    searchInput: {
+      flex: 1,
+      fontSize: 14,
+      color: colors.textHeader,
+      paddingVertical: 4,
+    },
+    emptySearchText: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+      textAlign: 'center',
+      padding: 24,
+    },
     rowMain: { flex: 1 },
     rowTitle: { fontSize: 15, fontWeight: '700', color: colors.textHeader },
     rowMeta: { fontSize: 12, color: colors.textSupplementary, marginTop: 2 },
