@@ -3074,6 +3074,21 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     followPubkeysRef.current = followPubkeys;
   }, [followPubkeys]);
 
+  // In-memory dedup Set that survives live-DM-sub re-opens. The sub
+  // useEffect below re-runs when getReadRelays changes — e.g. when the
+  // relay-list refresh adds a new relay 9 s into cold start. Without
+  // this ref, the new effect instance creates a fresh Set and re-seeds
+  // it from AsyncStorage's wrap cache. That snapshot is stale by the
+  // deferred-write window, so all wraps the prior sub already
+  // decrypted re-stream from the relays (same `since` cursor) and get
+  // re-routed/re-decrypted. Carrying the Set forward keeps the
+  // early-return in handleInboxEvent honest across the re-open.
+  // Reset only when the viewer changes (sign out / account switch).
+  const knownWrapIdsRef = useRef<{ pubkey: string | null; set: Set<string> }>({
+    pubkey: null,
+    set: new Set(),
+  });
+
   // Long-lived kind-1059 (NIP-17 gift wrap) subscription for the
   // current viewer (#349). Without this, new incoming wraps only
   // surface via pull-to-refresh or the 30 s-TTL useFocusEffect on
@@ -3119,19 +3134,20 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const readRelays = getReadRelays();
     const seen = new Set<string>();
     const SEEN_CAP = 4096;
-    // In-memory mirror of the persisted NIP-17 wrap-id cache. Seeded
-    // eagerly up-front below (one async AsyncStorage.getItem + one
-    // JSON.parse, before `subscribeInboxDmsForViewer` opens the sub)
-    // so the live sub's onevent path can early-return on cache hits
-    // as the VERY FIRST check, without paying the per-event
-    // console.log + seen-set + dispatch + cacheKey-build cost that
-    // was eating 12 s of the cold-start JS thread on Big Piggy's
-    // fixture. Per issue #505 — the relay re-streams the backlog
-    // since the last `since` cursor, and on a busy account that's
-    // 100+ wraps in ~12 s, almost all of which are already known.
-    // Pre-#505 the dedup-cache hit check was lazy-populated and
-    // downstream of several per-event operations.
-    let knownWrapIds: Set<string> = new Set();
+    // In-memory mirror of the persisted NIP-17 wrap-id cache. Backed
+    // by `knownWrapIdsRef` so the Set survives this effect's re-runs
+    // (relay-list change → fresh effect instance). Seeded by union
+    // below from AsyncStorage's wrap cache, but does NOT replace any
+    // entries the prior sub instance added in-memory but the deferred
+    // writeChain hasn't persisted yet. Per issue #505 — the relay
+    // re-streams the backlog since the last `since` cursor, and on a
+    // busy account that's 100+ wraps in ~12 s, almost all of which are
+    // already known; pre-#505 the dedup-cache hit check was
+    // lazy-populated and downstream of several per-event operations.
+    if (knownWrapIdsRef.current.pubkey !== viewerPubkey) {
+      knownWrapIdsRef.current = { pubkey: viewerPubkey, set: new Set() };
+    }
+    const knownWrapIds: Set<string> = knownWrapIdsRef.current.set;
     let cancelled = false;
     let writeChain: Promise<void> = Promise.resolve();
 
@@ -3170,6 +3186,15 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // cold-start JS-thread occupation window from ~12 s to <1 s.
       // Per issue #505.
       if (ev.kind === 1059 && knownWrapIds.has(ev.id)) return;
+      // Eagerly claim this wrap.id in the in-memory dedup Set before
+      // doing any async work. The deferred writeChain at the bottom of
+      // this handler also does this, but only after AsyncStorage I/O
+      // completes — leaving a window where a re-opened sub (relay-list
+      // change mid cold start) re-streams the same wrap and gets past
+      // the early-return because the Set hasn't been updated yet.
+      // Set.add is idempotent so the trailing writeChain add becomes
+      // a no-op. kind 4 has its own `seen` Set below.
+      if (ev.kind === 1059) knownWrapIds.add(ev.id);
       if (__DEV__) console.log(`[Nostr] live evt kind=${ev.kind} recv ${ev.id.slice(0, 8)}`);
       if (cancelled) return;
       if (seen.has(ev.id)) {
@@ -3487,7 +3512,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         try {
           const seedRaw = await AsyncStorage.getItem(wrapCacheKey);
           const seedCache = safeParseRecord<Nip17CacheEntry>(seedRaw);
-          knownWrapIds = new Set(Object.keys(seedCache));
+          for (const id of Object.keys(seedCache)) knownWrapIds.add(id);
           if (__DEV__) {
             console.log(
               `[Nostr] live DM sub: seeded knownWrapIds with ${knownWrapIds.size} cached wraps`,
