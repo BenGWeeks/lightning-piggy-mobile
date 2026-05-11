@@ -31,9 +31,12 @@ const RELAYS = [
 function readEnv() {
   if (!existsSync('.env')) return new Map();
   const out = new Map();
-  for (const line of readFileSync('.env', 'utf8').split('\n')) {
+  // Split on CRLF + LF so Windows-edited .env files parse cleanly,
+  // and trim trailing \r on the value (the `(.*)$` capture doesn't
+  // exclude it). Per Copilot review on PR #507.
+  for (const line of readFileSync('.env', 'utf8').split(/\r?\n/)) {
     const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
-    if (m) out.set(m[1], m[2]);
+    if (m) out.set(m[1], m[2].replace(/\r$/, '').trim());
   }
   return out;
 }
@@ -78,7 +81,9 @@ function pick(arr) {
 
 async function main() {
   const count = Number(argv[2] ?? 30);
-  if (!Number.isFinite(count) || count < 1) {
+  // `Number.isInteger` rejects `2.5` and friends — `Number.isFinite`
+  // alone passed them. Per Copilot review on PR #507.
+  if (!Number.isInteger(count) || count < 1) {
     console.error('count must be a positive integer');
     exit(1);
   }
