@@ -1,11 +1,12 @@
 appId: com.lightningpiggy.app.dev
-name: Hunt sub-screen — empty hub renders Create CTA
+name: Geo-caches empty list renders Create CTA
 ---
-# Smoke flow for the Hunt hub: with no Piggies stored, we expect the
-# empty state to render and the "Hide a Piggy" CTA to be tappable. The
-# CTA opens HuntCreateScreen with the LNURL paste field. Saving an
-# actual Piggy + writing to NFC is exercised in milestone 8 with a
-# fixture LNURL-w endpoint and mocked NFC.
+# Smoke flow for the Geo-caches screen (was the Hunt hub before the
+# Hunt+Discover merge in PR #488): with no caches nearby, we expect
+# the empty state to render and the `+` button in the header to be
+# tappable. Tap → HuntCreateScreen with the LNURL paste field.
+# Saving an actual Piggy + writing to NFC is exercised in milestone
+# 8 with a fixture LNURL-w endpoint and mocked NFC.
 #
 # Run: maestro test tests/e2e/test-hunt-empty-state.yaml
 
@@ -20,16 +21,22 @@ name: Hunt sub-screen — empty hub renders Create CTA
 - tapOn:
     id: 'explore-card-hunt'
 - waitForAnimationToEnd:
-    timeout: 1500
+    timeout: 4000
 
 - assertVisible:
     id: 'hunt-screen'
 - assertVisible:
     id: 'hunt-create-piggy-button'
-- assertVisible:
-    id: 'hunt-empty-state'
 
-# Drill into the Create flow.
+# Either populated list or empty state — both are acceptable.
+- runFlow:
+    when:
+      visible:
+        id: 'hunt-discover-empty-state'
+    commands:
+      - assertVisible: 'No geo-caches nearby yet'
+
+# Drill into the Create flow via the header `+` button.
 - tapOn:
     id: 'hunt-create-piggy-button'
 - waitForAnimationToEnd:
@@ -46,7 +53,7 @@ name: Hunt sub-screen — empty hub renders Create CTA
 - assertVisible:
     id: 'hunt-piggy-validate-button'
 
-# Bail back to the Hunt hub.
+# Bail back to the Geo-caches screen.
 - tapOn:
     id: 'hunt-create-back-button'
 - waitForAnimationToEnd:

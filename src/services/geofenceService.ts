@@ -3,6 +3,7 @@ import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
 import { acceptsLightning, fetchPlacesInBbox, type Bbox, type BtcMapPlace } from './btcMapService';
 import { isWithinQuietHours, loadNearbySettings } from './nearbySettingsService';
+import { haversineMetres } from '../utils/geohash';
 
 /**
  * Background geofence service for the "Nearby Bitcoin merchants" feature
@@ -34,8 +35,15 @@ interface GeofenceTaskEvent {
 }
 
 // Module-level cache so the background task can resolve a region.identifier
-// (BTC Map place id) back to a human label without an extra network call.
-const placeLabels = new Map<string, string>();
+// (BTC Map place id) back to a human label + payment-method flag without
+// an extra network call. The Lightning flag drives notification copy so
+// we never claim a place "accepts Lightning" when `pickNearest` fell
+// back to on-chain-only merchants (Copilot review #488).
+interface PlaceMeta {
+  name: string;
+  lightning: boolean;
+}
+const placeMeta = new Map<string, PlaceMeta>();
 
 /**
  * Register the background task. Idempotent — calling more than once
@@ -56,11 +64,13 @@ const ensureTaskDefined = (): void => {
     if (settings.quietHoursEnabled && isWithinQuietHours()) return;
 
     const id = event.region?.identifier ?? '';
-    const label = placeLabels.get(id) ?? 'a Bitcoin shop';
+    const meta = placeMeta.get(id) ?? { name: 'a Bitcoin shop', lightning: true };
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: '⚡ Lightning accepted nearby',
-        body: `${label} accepts Lightning. Open Lightning Piggy to pay.`,
+        title: meta.lightning ? '⚡ Lightning accepted nearby' : '₿ Bitcoin accepted nearby',
+        body: meta.lightning
+          ? `${meta.name} accepts Lightning. Open Lightning Piggy to pay.`
+          : `${meta.name} accepts Bitcoin (on-chain). Open Lightning Piggy for details.`,
         data: { kind: 'merchant-geofence', placeId: id },
       },
       trigger: null,
@@ -114,11 +124,17 @@ export const enableGeofencing = async (): Promise<number | null> => {
   const top = pickNearest(places, pos.coords.latitude, pos.coords.longitude, NEARBY_LIMIT);
   if (top.length === 0) return null;
 
-  // Cache id → label pairs for the background task. Map is module-level so
-  // it survives JS-context restarts within the same process.
-  placeLabels.clear();
+  // Cache id → {name, lightning} for the background task. Map is module-
+  // level so it survives JS-context restarts within the same process.
+  // The lightning flag lets the notification copy match the actual
+  // payment type — necessary because `pickNearest` falls back to
+  // on-chain-only merchants when no Lightning ones are nearby.
+  placeMeta.clear();
   for (const place of top) {
-    placeLabels.set(String(place.id), labelOf(place));
+    placeMeta.set(String(place.id), {
+      name: labelOf(place),
+      lightning: acceptsLightning(place),
+    });
   }
 
   const regions: Location.LocationRegion[] = top.map((place) => ({
@@ -146,7 +162,7 @@ export const disableGeofencing = async (): Promise<void> => {
   if (await Location.hasStartedGeofencingAsync(GEOFENCE_TASK)) {
     await Location.stopGeofencingAsync(GEOFENCE_TASK);
   }
-  placeLabels.clear();
+  placeMeta.clear();
 };
 
 // -----------------------------------------------------------------------------
@@ -159,32 +175,24 @@ const pickNearest = (
   lng: number,
   limit: number,
 ): BtcMapPlace[] => {
-  // Prefer Lightning-friendly merchants (Hunt's #467 spec spec leans toward
-  // ⚡-capable shops), but fall back to all-Bitcoin if the user's area has
-  // none — better to alert on an on-chain shop than nothing (Copilot
-  // review #488). Distance-sort either way.
+  // Prefer Lightning-friendly merchants (Hunt's #467 spec leans toward
+  // ⚡-capable shops), but fall back to all-Bitcoin if the user's area
+  // has none — better to alert on an on-chain shop than nothing
+  // (Copilot review #488). Distance-sort either way. Reuses
+  // `haversineMetres` from `utils/geohash` rather than re-implementing
+  // the formula (Copilot review #488 round 2).
+  const here = { lat, lon: lng };
   const lightning = places
     .filter(acceptsLightning)
-    .map((p) => ({ p, d: haversine(lat, lng, p.lat, p.lon) }))
+    .map((p) => ({ p, d: haversineMetres(here, { lat: p.lat, lon: p.lon }) }))
     .sort((a, b) => a.d - b.d)
     .slice(0, limit);
   if (lightning.length > 0) return lightning.map(({ p }) => p);
   return places
-    .map((p) => ({ p, d: haversine(lat, lng, p.lat, p.lon) }))
+    .map((p) => ({ p, d: haversineMetres(here, { lat: p.lat, lon: p.lon }) }))
     .sort((a, b) => a.d - b.d)
     .slice(0, limit)
     .map(({ p }) => p);
-};
-
-const haversine = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-  const R = 6_371_000; // metres
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.asin(Math.sqrt(a));
 };
 
 const labelOf = (p: BtcMapPlace): string => p.tags.name ?? 'A Bitcoin merchant';

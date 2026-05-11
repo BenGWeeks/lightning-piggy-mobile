@@ -57,14 +57,14 @@ name: Explore tab renders the hub with Lessons / Map / Hunt / Events cards
 - waitForAnimationToEnd:
     timeout: 1000
 
-# Hunt stub.
+# Geo-caches (merged Hunt + Discover screen, PR #488).
 - tapOn:
     id: 'explore-card-hunt'
 - waitForAnimationToEnd:
-    timeout: 1500
+    timeout: 4000
 - assertVisible:
     id: 'hunt-screen'
-- assertVisible: 'Hidden Piggies'
+- assertVisible: 'Geo-caches'
 - tapOn:
     id: 'hunt-back-button'
 - waitForAnimationToEnd:

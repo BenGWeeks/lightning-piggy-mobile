@@ -1,13 +1,15 @@
 appId: com.lightningpiggy.app.dev
-name: Hunt Discover → Detail navigation works
+name: Geo-caches list → Detail navigation works
 ---
-# Walks Explore → Hunt → Discover → tap first cache row → assert the
-# detail screen mounts, regardless of whether the cache is an LP Piggy
+# Walks Explore → Geo-caches → tap first cache row → assert the
+# detail screen mounts, regardless of whether the cache is a Piglet
 # or a standard NIP-GC cache. The compose CTA's visibility depends on
 # whether the user has a recent claim recorded locally; we don't gate
-# the assertion on it.
+# the assertion on it. Updated after the Hunt+Discover merge in
+# PR #488 — the dedicated Discover screen no longer exists; the list
+# is part of the merged Geo-caches screen.
 #
-# Skipped if Discover has no caches at run time (live relay state).
+# Skipped if the list has no caches at run time (live relay state).
 #
 # Run: maestro test tests/e2e/test-hunt-detail-via-discover.yaml
 
@@ -25,14 +27,10 @@ name: Hunt Discover → Detail navigation works
 - tapOn:
     id: 'explore-card-hunt'
 - waitForAnimationToEnd:
-    timeout: 1500
-- tapOn:
-    id: 'hunt-discover-button'
-- waitForAnimationToEnd:
     timeout: 5000
 
 - assertVisible:
-    id: 'hunt-discover-screen'
+    id: 'hunt-screen'
 
 # Empty state? Bail — no cache to navigate into. Otherwise tap the
 # first row and confirm detail mounts.
@@ -42,14 +40,12 @@ name: Hunt Discover → Detail navigation works
         id: 'hunt-discover-empty-state'
     commands:
       - tapOn:
-          id: 'hunt-discover-row-0' # First row by FlatList index — added
-                                    # in HuntDiscoverScreen so Maestro can
-                                    # tap deterministically without
-                                    # coordinates (CLAUDE.md rule, Copilot
-                                    # review #488). Data-stable
-                                    # `hunt-discover-row-${cache.d}` is
-                                    # also present for tests that already
-                                    # know the d-tag.
+          id:
+            'hunt-discover-row-0' # First row by FlatList index —
+            # kept on the merged Geo-caches
+            # screen so Maestro flows can tap
+            # deterministically without
+            # coordinates (CLAUDE.md rule).
       - waitForAnimationToEnd:
           timeout: 3000
       - assertVisible:
@@ -59,4 +55,4 @@ name: Hunt Discover → Detail navigation works
       - waitForAnimationToEnd:
           timeout: 1000
       - assertVisible:
-          id: 'hunt-discover-screen'
+          id: 'hunt-screen'

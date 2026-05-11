@@ -7,13 +7,18 @@ name: Hunt finder celebration screen renders + claim button is reachable
 # `openLink`). Asserts the celebration card, claim button, and the
 # "sleeping" / "couldn't claim" graceful fallbacks.
 #
-# This flow uses the live Geo-Cache 1 LNURL by routing through a
-# manual `openLink` step. To stay independent of the live LNbits
-# server's state (cooldown / budget), the assertions are structural:
-# the screen's `hunt-found-screen` testID is visible AND either
-# `piggy-claim-button` (ready) or the friendly "sleeping" copy.
+# This flow needs an LNURL-withdraw URL to drive the deep-link
+# handler — it MUST come from `$MAESTRO_TEST_LNURL_W` in the
+# environment, NOT hardcoded in this file. Committing real bearer
+# tokens to the repo is equivalent to publishing a secret (anyone
+# could drain the cache until server-side caps trip). Run locally:
 #
-# Run: maestro test tests/e2e/test-hunt-found-screen.yaml
+#   export MAESTRO_TEST_LNURL_W='lnurlw://your-dev-lnbits/.../...'
+#   maestro test tests/e2e/test-hunt-found-screen.yaml \
+#     -e LNURL_W=$MAESTRO_TEST_LNURL_W
+#
+# Assertions are structural so the test passes regardless of the
+# live endpoint's cooldown / budget state.
 
 - launchApp:
     permissions:
@@ -24,8 +29,9 @@ name: Hunt finder celebration screen renders + claim button is reachable
 
 # Open Lightning Piggy via the lightning: scheme. Maestro's openLink
 # routes through the OS, so this exercises the same code path a real
-# NFC tap goes through.
-- openLink: 'lightning:lnurlw://bank.weeksfamily.me/withdraw/api/v1/lnurl/B2qnmj9HAyA2TnEwbvx2nX/GqSmSakRohyenUpBN8QYhy'
+# NFC tap goes through. ${LNURL_W} is provided via Maestro's `-e`
+# flag from a local env var so no bearer token lands in git.
+- openLink: 'lightning:${LNURL_W}'
 - waitForAnimationToEnd:
     timeout: 6000
 

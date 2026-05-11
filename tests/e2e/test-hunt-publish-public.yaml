@@ -32,11 +32,16 @@ name: Hunt Create — toggle Public publishes to relays after save
 - waitForAnimationToEnd:
     timeout: 1500
 
-# Paste the live Geo-Cache 1 LNURL — small / fixed claim cap so
-# accidental claims during testing are bounded.
+# Paste an LNURL-withdraw via Maestro's `-e LNURL_W=…` env arg —
+# NEVER hardcoded in this file. Bearer tokens in source = leaked
+# secrets. Run locally:
+#
+#   export MAESTRO_TEST_LNURL_W='lnurlw://your-dev-lnbits/.../...'
+#   maestro test tests/e2e/test-hunt-publish-public.yaml \
+#     -e LNURL_W=$MAESTRO_TEST_LNURL_W
 - tapOn:
     id: 'hunt-piggy-lnurl-input'
-- inputText: 'lnurlw://bank.weeksfamily.me/withdraw/api/v1/lnurl/B2qnmj9HAyA2TnEwbvx2nX/GqSmSakRohyenUpBN8QYhy'
+- inputText: '${LNURL_W}'
 - tapOn:
     id: 'hunt-piggy-validate-button'
 - extendedWaitUntil:

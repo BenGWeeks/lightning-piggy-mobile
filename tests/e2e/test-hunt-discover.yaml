@@ -1,13 +1,14 @@
 appId: com.lightningpiggy.app.dev
-name: Hunt Discover renders nearby caches list (or empty state)
+name: Geo-caches screen renders nearby caches list (or empty state)
 ---
-# Smoke flow for HuntDiscoverScreen. With foreground location granted,
-# the screen subscribes to NIP-GC kind 37516 events whose `g` tag falls
-# in the user's coarse 5-char geohash neighbourhood. The live relay
-# state is unpredictable from CI (caches drift, relays flake), so the
-# assertions are structural: either the list renders rows OR the
-# empty-state with the "No caches nearby yet" copy. Both branches are
-# legitimate exits.
+# Smoke flow for the merged Geo-caches screen (was HuntDiscoverScreen
+# before the May 2026 Hunt+Discover merge — see PR #488). With
+# foreground location granted, the screen subscribes to NIP-GC kind
+# 37516 events whose `g` tag falls in the user's coarse 5-char
+# geohash neighbourhood. The live relay state is unpredictable from
+# CI (caches drift, relays flake), so the assertions are structural:
+# either the list renders rows OR the empty-state with the
+# "No geo-caches nearby yet" copy. Both branches are legitimate exits.
 #
 # Run: maestro test tests/e2e/test-hunt-discover.yaml
 
@@ -23,44 +24,34 @@ name: Hunt Discover renders nearby caches list (or empty state)
 - waitForAnimationToEnd:
     timeout: 1500
 
+# "Geo-caches near you" rail See-all routes straight to the list now.
 - tapOn:
     id: 'explore-card-hunt'
-- waitForAnimationToEnd:
-    timeout: 1500
-
-- tapOn:
-    id: 'hunt-discover-button'
 - waitForAnimationToEnd:
     timeout: 4000
 
 - assertVisible:
-    id: 'hunt-discover-screen'
+    id: 'hunt-screen'
 
-# Either populated list (refresh button visible + at least loading
-# indicator dropped) OR the empty state — both are acceptable.
+# Either populated list OR the empty state — both are acceptable.
 - runFlow:
     when:
       visible:
         id: 'hunt-discover-empty-state'
     commands:
-      - assertVisible: 'No caches nearby yet'
+      - assertVisible: 'No geo-caches nearby yet'
 - runFlow:
     when:
       notVisible:
         id: 'hunt-discover-empty-state'
     commands:
       - assertVisible:
-          id: 'hunt-discover-refresh-button'
+          id: 'hunt-discover-row-0'
 
-# Refresh round-trip works regardless.
+# Back returns to the hub.
 - tapOn:
-    id: 'hunt-discover-refresh-button'
-- waitForAnimationToEnd:
-    timeout: 1500
-
-- tapOn:
-    id: 'hunt-discover-back-button'
+    id: 'hunt-back-button'
 - waitForAnimationToEnd:
     timeout: 1000
 - assertVisible:
-    id: 'hunt-screen'
+    id: 'tab-explore'
