@@ -156,6 +156,7 @@ const ConversationScreen: React.FC = () => {
     fetchConversation,
     getCachedConversation,
     sendDirectMessage,
+    appendLocalDmMessage,
     signEvent,
     contacts,
     relays,
@@ -488,6 +489,25 @@ const ConversationScreen: React.FC = () => {
     }
   }, [load]);
 
+  // Append an optimistic local- message to BOTH React state (instant
+  // paint) AND the per-conversation cache on disk (survives back-then-
+  // reopen before the NIP-17 self-wrap echo arrives). The merge-side
+  // dedup in mergeConversationMessages drops this local- row when the
+  // real wrap echoes back from the relay.
+  const appendOptimisticLocal = useCallback(
+    (text: string) => {
+      const optimistic = {
+        id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        fromMe: true,
+        text,
+        createdAt: Math.floor(Date.now() / 1000),
+      };
+      setMessages((prev) => [...prev, optimistic]);
+      void appendLocalDmMessage(pubkey, optimistic);
+    },
+    [appendLocalDmMessage, pubkey],
+  );
+
   const handleSend = useCallback(async () => {
     const text = draft.trim();
     if (!text || sending) return;
@@ -499,17 +519,11 @@ const ConversationScreen: React.FC = () => {
         return;
       }
       setDraft('');
-      const optimistic = {
-        id: `local-${Date.now()}`,
-        fromMe: true,
-        text,
-        createdAt: Math.floor(Date.now() / 1000),
-      };
-      setMessages((prev) => [...prev, optimistic]);
+      appendOptimisticLocal(text);
     } finally {
       setSending(false);
     }
-  }, [draft, sending, sendDirectMessage, pubkey]);
+  }, [draft, sending, sendDirectMessage, pubkey, appendOptimisticLocal]);
 
   const handleShareLocation = useCallback(async () => {
     if (sharingLocation) return;
@@ -551,15 +565,7 @@ const ConversationScreen: React.FC = () => {
                 if (!sendResult.success) {
                   Alert.alert('Send failed', sendResult.error ?? 'Could not send location.');
                 } else {
-                  setMessages((prev) => [
-                    ...prev,
-                    {
-                      id: `local-${Date.now()}`,
-                      fromMe: true,
-                      text,
-                      createdAt: Math.floor(Date.now() / 1000),
-                    },
-                  ]);
+                  appendOptimisticLocal(text);
                 }
                 resolve();
               },
@@ -576,7 +582,7 @@ const ConversationScreen: React.FC = () => {
     } finally {
       setSharingLocation(false);
     }
-  }, [sharingLocation, name, pubkey, sendDirectMessage]);
+  }, [sharingLocation, name, pubkey, sendDirectMessage, appendOptimisticLocal]);
 
   // Shared send-image path for both gallery and camera entry points.
   // Strips EXIF from the picked image, uploads to the user's configured
@@ -593,22 +599,14 @@ const ConversationScreen: React.FC = () => {
           Alert.alert('Send failed', sendResult.error ?? 'Could not send image.');
           return;
         }
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `local-${Date.now()}`,
-            fromMe: true,
-            text: url,
-            createdAt: Math.floor(Date.now() / 1000),
-          },
-        ]);
+        appendOptimisticLocal(url);
       } catch (error) {
         Alert.alert('Upload failed', error instanceof Error ? error.message : 'Please try again.');
       } finally {
         setUploadingImage(false);
       }
     },
-    [signEvent, sendDirectMessage, pubkey],
+    [signEvent, sendDirectMessage, pubkey, appendOptimisticLocal],
   );
 
   const handlePickAndSendImage = useCallback(async () => {
@@ -670,17 +668,9 @@ const ConversationScreen: React.FC = () => {
         Alert.alert('Share failed', result.error ?? 'Could not share contact.');
         return;
       }
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `local-${Date.now()}`,
-          fromMe: true,
-          text: payload,
-          createdAt: Math.floor(Date.now() / 1000),
-        },
-      ]);
+      appendOptimisticLocal(payload);
     },
-    [pubkey, sendDirectMessage, contacts, relays],
+    [pubkey, sendDirectMessage, contacts, relays, appendOptimisticLocal],
   );
 
   const handleSendGif = useCallback(
@@ -693,21 +683,9 @@ const ConversationScreen: React.FC = () => {
         Alert.alert('Send failed', result.error ?? 'Could not send GIF.');
         return;
       }
-      // `local-<ms>` on its own collides if two sends land in the same
-      // millisecond (e.g. a double-tap on a slow network). Append a
-      // short random suffix so the FlatList keyExtractor stays unique.
-      const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: localId,
-          fromMe: true,
-          text: payload,
-          createdAt: Math.floor(Date.now() / 1000),
-        },
-      ]);
+      appendOptimisticLocal(payload);
     },
-    [pubkey, sendDirectMessage],
+    [pubkey, sendDirectMessage, appendOptimisticLocal],
   );
 
   const openLocation = useCallback((loc: SharedLocation) => {
@@ -1107,15 +1085,7 @@ const ConversationScreen: React.FC = () => {
           lightningAddress: lightningAddress ?? null,
         }}
         onSent={(payload) => {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `local-${Date.now()}`,
-              fromMe: true,
-              text: payload,
-              createdAt: Math.floor(Date.now() / 1000),
-            },
-          ]);
+          appendOptimisticLocal(payload);
         }}
       />
       <SendSheet
