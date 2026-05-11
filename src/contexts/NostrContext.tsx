@@ -775,6 +775,45 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [],
   );
 
+  /** Eagerly hydrate own `profile` state from the per-account cache so
+   * the drawer header + tab profile avatar paint on cold start without
+   * waiting for the deferred `loadProfile` relay round-trip. Matches the
+   * pattern of `loadContactsFromCache`. The cache-fresh setProfile-from-
+   * cache was previously only happening inside the deferred `loadProfile`
+   * fast path, which meant a fresh cold-start with grace-window deferral
+   * left `profile` null for ~1.5 s. */
+  const loadProfileFromCache = useCallback(async (pk: string) => {
+    try {
+      const raw = await AsyncStorage.getItem(perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, pk));
+      if (!raw) return false;
+      const cached = JSON.parse(raw) as NostrProfile;
+      setProfile(cached);
+      return true;
+    } catch (error) {
+      console.warn('Failed to load profile cache:', error);
+      return false;
+    }
+  }, []);
+
+  /** Eagerly hydrate `relays` state from the per-account cache so
+   * relay-dependent fan-out (kind-0 publish, NIP-17 send) uses the
+   * user's actual relays from the very first action instead of
+   * defaulting to `DEFAULT_RELAYS`. Same pattern as
+   * `loadProfileFromCache`. */
+  const loadRelaysFromCache = useCallback(async (pk: string) => {
+    try {
+      const raw = await AsyncStorage.getItem(perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk));
+      if (!raw) return false;
+      const cached = JSON.parse(raw) as RelayConfig[];
+      if (!Array.isArray(cached)) return false;
+      setRelays(cached);
+      return true;
+    } catch (error) {
+      console.warn('Failed to load relays cache:', error);
+      return false;
+    }
+  }, []);
+
   const loadContactsFromCache = useCallback(async (pk: string) => {
     try {
       const t0 = Date.now();
@@ -1167,16 +1206,26 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
         }
 
-        // Load cached contacts immediately (no network, <100ms)
-        await loadContactsFromCache(pk);
-
-        // Eagerly hydrate dmInbox from disk cache so the Messages tab
-        // paints conversations on cold start. The relay refresh below
-        // doesn't touch dmInbox; the eventual refreshDmInbox call
-        // (driven by Messages-tab focus) does its own cache read for
-        // the delta-fetch path and replaces this hydrated state with
-        // the merged disk+relay result.
-        await hydrateDmInboxFromCache(pk);
+        // Eagerly hydrate cached state from disk in parallel — these
+        // are all small per-account AsyncStorage reads (<100 ms each)
+        // and they wire UI surfaces that would otherwise stay empty
+        // until the deferred parallel refresh fires:
+        //   - `profile` → drawer header + tab profile avatar
+        //   - `relays`  → relay-dependent fan-out (kind-0 publish,
+        //                 NIP-17 send, group membership republish)
+        //   - `contacts` → friends list + DM partner resolution
+        //   - `dmInbox`  → Messages tab paints on first frame
+        // Previously only contacts + dmInbox were sync-hydrated; the
+        // grace window before the deferred refresh left profile +
+        // relays null for ~1.5 s after Home rendered, which made
+        // drawer-header avatars and relay-aware code paths see empty
+        // state on cold start. (Followup of perf review on PR #495.)
+        await Promise.all([
+          loadProfileFromCache(pk),
+          loadRelaysFromCache(pk),
+          loadContactsFromCache(pk),
+          hydrateDmInboxFromCache(pk),
+        ]);
 
         // Defer relay fetches until after animations/rendering complete,
         // PLUS a 1500 ms grace window so the user can tap Send / Receive
@@ -1228,7 +1277,15 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         console.warn('Nostr auto-login failed:', error);
       }
     })();
-  }, [loadRelays, loadProfile, loadContacts, loadContactsFromCache, hydrateDmInboxFromCache]);
+  }, [
+    loadRelays,
+    loadProfile,
+    loadContacts,
+    loadProfileFromCache,
+    loadRelaysFromCache,
+    loadContactsFromCache,
+    hydrateDmInboxFromCache,
+  ]);
 
   const loginWithNsec = useCallback(
     async (nsec: string): Promise<{ success: boolean; error?: string }> => {
