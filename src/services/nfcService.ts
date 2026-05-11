@@ -262,21 +262,6 @@ export async function writeNpubToTag(npub: string, onTagDetected?: () => void): 
 }
 
 /**
- * Write an LNURL string to an NFC tag as an NDEF URI record. Used by
- * the Hunt-hider flow (#468) so the hider can stash a Piggy on a
- * physical token. The URI is `lightning:LNURL1...` so any LNURL-aware
- * wallet (Lightning Piggy, Wallet of Satoshi, Phoenix, Zeus, …) opens
- * on tap.
- *
- * @param lnurl - bech32-encoded `lnurl1...` (case-insensitive) or any
- *   other form the user pasted; we only enforce that the LNURL itself
- *   is non-empty. Use `decodeLnurlWithdraw` from
- *   `lnurlWithdrawService.ts` upstream if you want to validate the
- *   shape before writing.
- * @param onTagDetected - Optional callback fired the moment a tag is
- *   detected (just before write). Mirrors `writeNpubToTag`.
- */
-/**
  * Tag-type identification used by `writeLnurlToTag` to decide whether
  * we can lock the tag (NDEF make-read-only) after writing the LNURL.
  * Locking matters because a Piglet's NDEF record is a bearer URL — if
@@ -322,6 +307,28 @@ export type WriteLnurlResult = {
   locked: boolean;
 };
 
+/**
+ * Write an LNURL string to an NFC tag as an NDEF URI record. Used by
+ * the Hunt-hider flow (#468) so the hider can stash a Piggy on a
+ * physical token. The URI is `lightning:LNURL1...` so any LNURL-aware
+ * wallet (Lightning Piggy, Wallet of Satoshi, Phoenix, Zeus, …) opens
+ * on tap.
+ *
+ * **iOS vs Android**: tag-family inference and `makeReadOnly()` locking
+ * are Android-only — `tag.techTypes` is an Android-specific shape and
+ * the CoreNFC iOS API doesn't expose an equivalent permanent-lock
+ * primitive. On iOS we write the NDEF record and return
+ * `{ family: 'unknown', locked: false }`; the UI surfaces the
+ * unlocked state so the user can decide whether to deploy that tag.
+ *
+ * @param lnurl - bech32-encoded `lnurl1...` (case-insensitive) or any
+ *   other form the user pasted; we only enforce that the LNURL itself
+ *   is non-empty. Use `decodeLnurlWithdraw` from
+ *   `lnurlWithdrawService.ts` upstream if you want to validate the
+ *   shape before writing.
+ * @param onTagDetected - Optional callback fired the moment a tag is
+ *   detected (just before write). Mirrors `writeNpubToTag`.
+ */
 export async function writeLnurlToTag(
   lnurl: string,
   onTagDetected?: () => void,
@@ -372,13 +379,22 @@ export async function writeLnurlToTag(
       throw new Error('No tag detected');
     }
 
-    const family = inferTagFamily(tag as { techTypes?: string[]; type?: string });
-    if (family === 'mifare-classic') {
+    // Family inference + lock-on-write are Android-only — `techTypes`
+    // is Android-specific and CoreNFC has no equivalent permanent-lock
+    // primitive. On iOS we write the NDEF record without inspecting
+    // the chip family and report `{ family: 'unknown', locked: false }`
+    // so the hider knows the tag is still re-writeable (Copilot
+    // review #488).
+    const isAndroid = Platform.OS === 'android';
+    const family = isAndroid
+      ? inferTagFamily(tag as { techTypes?: string[]; type?: string })
+      : ('unknown' as TagFamily);
+    if (isAndroid && family === 'mifare-classic') {
       throw new Error(
         "Mifare Classic tags can't be permanently locked — use an NTAG213/215/216 or Mifare Ultralight C chip so others can't overwrite this Piglet.",
       );
     }
-    if (family === 'unknown') {
+    if (isAndroid && family === 'unknown') {
       throw new Error(
         'Unrecognised tag type. Lightning Piggy supports NTAG213/215/216 and Mifare Ultralight C.',
       );
@@ -396,23 +412,26 @@ export async function writeLnurlToTag(
     // Permanently lock the NDEF area so a passer-by can't overwrite
     // this Piglet with a phishing / lure URL. `makeReadOnly` writes
     // the dynamic lock bytes on NTAG21x + Mifare Ultralight C; the
-    // operation is irreversible by design.
+    // operation is irreversible by design. iOS has no equivalent
+    // API — we skip the call and report `locked: false`.
     let locked = false;
-    try {
-      // The react-native-nfc-manager API exposes makeReadOnly through
-      // the Android NDEF handler. Use a defensive `any` cast because
-      // the typings on some versions omit the method even though the
-      // native impl is present (issue revolutionsystems/.../#1212).
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const handler = NfcManager.ndefHandler as any;
-      if (typeof handler.makeReadOnly === 'function') {
-        const ok = await handler.makeReadOnly();
-        locked = ok !== false;
+    if (isAndroid) {
+      try {
+        // The react-native-nfc-manager API exposes makeReadOnly through
+        // the Android NDEF handler. Use a defensive `any` cast because
+        // the typings on some versions omit the method even though the
+        // native impl is present (issue revolutionsystems/.../#1212).
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const handler = NfcManager.ndefHandler as any;
+        if (typeof handler.makeReadOnly === 'function') {
+          const ok = await handler.makeReadOnly();
+          locked = ok !== false;
+        }
+      } catch {
+        // Lock failure is non-fatal — the data is written. Surface via
+        // `locked: false` so the UI can warn the user that the tag is
+        // still re-writeable and recommend using an NTAG21x chip.
       }
-    } catch {
-      // Lock failure is non-fatal — the data is written. Surface via
-      // `locked: false` so the UI can warn the user that the tag is
-      // still re-writeable and recommend using an NTAG21x chip.
     }
 
     return { family, locked };

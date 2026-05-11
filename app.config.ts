@@ -51,17 +51,18 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     resizeMode: 'contain',
     backgroundColor: '#e91e63',
   },
-  // `lightningpiggy://` — LP's own deep-link scheme.
-  // `lightning:` — Lightning URI scheme (LNURL-pay, LNURL-w, bolt11
-  // invoices). LP registers as a handler so the Hunt finder flow
-  // (#468) can wake from an NFC tag tap or a Linking deep-link. We
-  // do NOT force LP to be the user's *default* Lightning handler —
-  // Android shows its standard chooser when multiple LN-aware wallets
-  // are installed, and `App.tsx`'s Linking listener gates routing
-  // (Hunt Piggies → HuntFoundScreen, generic LNURL-pay → existing
-  // pay flow) so we don't hijack non-Hunt URIs that happen to land
-  // here.
-  scheme: ['lightningpiggy', 'lightning'],
+  // `lightningpiggy://` — LP's own deep-link scheme. Cross-platform.
+  // `lightning:` registration is **Android-only**, wired via the
+  // `intentFilters` block on the `android` config below. iOS is
+  // deliberately excluded: iOS doesn't show a chooser for custom URL
+  // schemes, so registering `lightning:` globally would silently
+  // hijack every bolt11 / LNURL-pay link into LP — but `App.tsx`'s
+  // Linking listener currently only routes the Hunt-eligible subset
+  // (`lnurl1…`, `lnurlw://`, `lnurl://`) into HuntFoundScreen and
+  // no-ops other payloads. Until full `lightning:` invoice/pay
+  // routing is in, leaving iOS off the scheme avoids dead-ends for
+  // TestFlight users (Copilot review #488).
+  scheme: 'lightningpiggy',
   ios: {
     supportsTablet: true,
     bundleIdentifier: getIosBundleId(),
@@ -146,6 +147,18 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     },
     predictiveBackGestureEnabled: false,
     package: getAndroidPackage(),
+    // Android-only `lightning:` deep-link registration (see comment on
+    // top-level `scheme`). The intent filter wakes the app on an NFC
+    // tag tap or a `Linking.openURL('lightning:lnurl1…')`. Android
+    // shows its standard chooser if multiple LN-aware wallets handle
+    // the scheme, so this doesn't hijack other wallets' flows.
+    intentFilters: [
+      {
+        action: 'VIEW',
+        category: ['BROWSABLE', 'DEFAULT'],
+        data: [{ scheme: 'lightning' }],
+      },
+    ],
     // Floor for the local-build versionCode. EAS *cloud* production
     // builds use a separate remote counter (`eas.json` →
     // `appVersionSource: "remote"`) and ignore this. EAS *local* builds

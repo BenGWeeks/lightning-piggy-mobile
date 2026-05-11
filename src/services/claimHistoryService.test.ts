@@ -28,12 +28,17 @@ describe('claimHistoryService', () => {
     await recordClaim({ lnurl: 'lnurl1xyz', sats: 21 });
     const list = await loadClaimHistory();
     expect(list).toHaveLength(1);
-    expect(list[0].lnurl).toBe('lnurl1xyz');
+    // Stored entry carries a SHA-256 hash of the LNURL, not the bearer
+    // itself (Copilot review #488). Verify the round-trip via the
+    // public lookup API and that the persisted field is not the raw
+    // bearer string.
+    expect(list[0].lnurlHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(list[0].lnurlHash).not.toBe('lnurl1xyz');
     expect(list[0].sats).toBe(21);
     expect(list[0].claimedAt).toBeGreaterThanOrEqual(before);
   });
 
-  it('normalises LNURL to lowercase + trim on read & write', async () => {
+  it('normalises LNURL to lowercase + trim before hashing', async () => {
     await recordClaim({ lnurl: '  LNURL1XYZ  ', sats: 21 });
     const hit = await lastClaimFor('lnurl1xyz');
     expect(hit?.sats).toBe(21);

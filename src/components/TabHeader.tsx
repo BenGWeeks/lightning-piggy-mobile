@@ -13,8 +13,10 @@ interface Props {
    * The page-identifying glyph rendered inside the round badge on the
    * left. Passed as a ReactNode so the screen can choose between tinted
    * `Image` (Home) and `Svg`/Lucide components (Messages, Explore,
-   * Friends) — both match their tab-bar counterparts. Decorative only:
-   * the badge never navigates anywhere on tap (per #139's AC).
+   * Friends) — both match their tab-bar counterparts. Decorative by
+   * default (per #139's AC), but a screen can pass `onIconPress` to
+   * make the badge tappable — used in sub-screens to navigate back
+   * (e.g. Hunt detail → Hunt hub).
    */
   icon: React.ReactNode;
   /** Page title text. For Home this carries the "Hello, <name>!" greeting. */

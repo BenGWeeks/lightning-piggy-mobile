@@ -64,7 +64,12 @@ const ensureTaskDefined = (): void => {
     if (settings.quietHoursEnabled && isWithinQuietHours()) return;
 
     const id = event.region?.identifier ?? '';
-    const meta = placeMeta.get(id) ?? { name: 'a Bitcoin shop', lightning: true };
+    // Fallback to neutral on-chain copy when the placeMeta cache is
+    // empty (JS context restart between fence registration and
+    // trigger, or an unknown region.identifier). Defaulting to
+    // Lightning would risk claiming a non-Lightning merchant accepts
+    // it — neutral is safer than wrong (Copilot review #488).
+    const meta = placeMeta.get(id) ?? { name: 'a Bitcoin shop', lightning: false };
     await Notifications.scheduleNotificationAsync({
       content: {
         title: meta.lightning ? '⚡ Lightning accepted nearby' : '₿ Bitcoin accepted nearby',

@@ -17,7 +17,7 @@ import AppNavigator, { navigateToHuntFound } from './src/navigation/AppNavigator
 import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
 import BootSplash from './src/components/BootSplash';
 import { BrandedAlertHost } from './src/components/BrandedAlert';
-import { BrandedToast } from './src/components/BrandedToast';
+import { BrandedToast, Toast } from './src/components/BrandedToast';
 
 // Renders the global incoming-payment celebration on top of the nav
 // stack. Lives inside the WalletProvider so it can subscribe to the
@@ -88,7 +88,24 @@ export default function App() {
       // HuntFound which would have hijacked invoice / pay-link shares.
       const isHuntEligible =
         /^lnurl1/i.test(lnurl) || /^lnurlw:\/\//i.test(lnurl) || /^lnurl:\/\//i.test(lnurl);
-      if (!isHuntEligible) return;
+      if (!isHuntEligible) {
+        // Otherwise the user lands in LP with no feedback when the
+        // OS routes a non-Hunt `lightning:` URI here (bolt11 invoice,
+        // LNURL-pay, raw https, Lightning Address). Surface a toast so
+        // they know the link type isn't supported yet, instead of a
+        // silent dead end (Copilot review #488). Full pay-flow
+        // integration would absorb these into SendSheet — until then
+        // the toast nudges them to use a wallet that does handle the
+        // URI type.
+        Toast.show({
+          type: 'info',
+          text1: 'Link not supported yet',
+          text2:
+            "Lightning Piggy currently opens `lightning:lnurl…` withdraw tags. Bolt11 invoices and pay links aren't routed yet.",
+          visibilityTime: 4500,
+        });
+        return;
+      }
       const tryNav = (attempt: number) => {
         if (navigateToHuntFound(lnurl)) return;
         if (attempt >= 20 || cancelled) return;
