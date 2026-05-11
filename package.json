@@ -1,6 +1,6 @@
 {
   "name": "lightning-piggy-app",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "main": "index.ts",
   "engines": {
     "node": ">=22.13.0"
