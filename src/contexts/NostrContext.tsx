@@ -45,6 +45,7 @@ import {
   type StoredIdentity,
 } from '../services/identitiesStore';
 import { migrateToPerAccountStorage } from '../services/migrateToPerAccountStorage';
+import { perfLog } from '../utils/perfLog';
 import {
   setActivePubkeyForWalletStorage,
   deleteNwcUrl,
@@ -690,6 +691,13 @@ interface NostrContextType {
    */
   refreshDmInbox: (opts?: RefreshDmInboxOptions) => Promise<void>;
   /**
+   * Arm the live NIP-17 DM subscription. Idempotent. Call from any
+   * DM-receiving screen (Messages tab, ConversationScreen) via
+   * useFocusEffect — first call opens the sub, subsequent are no-ops.
+   * Cold-boot does NOT arm the sub by itself, so Home stays responsive.
+   */
+  armLiveDmSub: () => void;
+  /**
    * Tri-state for the NIP-17 silent-decrypt fast path.
    *  - 'unknown': haven't tried yet in this session
    *  - 'granted': a decrypt succeeded silently → cache the plaintext, no dialogs
@@ -725,7 +733,19 @@ export interface ConversationMessage {
 
 const NostrContext = createContext<NostrContextType | undefined>(undefined);
 
+// Module-evaluation perf marker. Fires the first time this file is parsed,
+// before any provider mounts. Catches "RN bundle finished loading,
+// JS engine started executing our code" — the upstream of every other
+// [Perf] line in this file.
+perfLog('NostrContext module-eval');
+
+let __nostrProviderFirstRenderLogged = false;
+let __nostrProviderLoggedInLogged = false;
 export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  if (!__nostrProviderFirstRenderLogged) {
+    __nostrProviderFirstRenderLogged = true;
+    perfLog('NostrProvider first render');
+  }
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [profile, setProfile] = useState<NostrProfile | null>(null);
@@ -735,6 +755,15 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [pubkey, setPubkey] = useState<string | null>(null);
   const [dmInbox, setDmInbox] = useState<DmInboxEntry[]>([]);
   const [dmInboxLoading, setDmInboxLoading] = useState(false);
+  // Gates the live NIP-17 DM sub useEffect below. False on cold boot
+  // so we don't burn JS-thread cycles unwrapping wraps the user can't
+  // see yet (they're on Home, the Messages tab isn't mounted). Flipped
+  // to true the first time Messages / Conversation / any DM-receiving
+  // surface focuses via `armLiveDmSub()`. Once armed it stays armed for
+  // the rest of the session. Cold-start Home stays responsive because
+  // the per-wrap unwrap/route work moves to after the user has
+  // explicitly chosen to look at messages.
+  const [liveSubArmed, setLiveSubArmed] = useState(false);
   const [amberNip44Permission, setAmberNip44Permission] = useState<
     'unknown' | 'granted' | 'denied'
   >('unknown');
@@ -866,15 +895,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const loadContactsFromCache = useCallback(async (pk: string) => {
     try {
       const t0 = Date.now();
-      // One multiGet round-trip for all three caches. Contacts freshness
-      // is gated by CONTACTS_TIMESTAMP_KEY_BASE (the contact-list's own
-      // write time), not the profiles timestamp — they get separate keys
-      // so a successful contact refresh isn't blocked by an unrelated
-      // profiles cache entry. Per-account namespaced (#288).
+      perfLog('loadContactsFromCache: start');
       const contactsKey = perAccountKey(CONTACTS_CACHE_KEY_BASE, pk);
       const profilesKey = perAccountKey(PROFILES_CACHE_KEY_BASE, pk);
       const contactsTsKey = perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pk);
       const pairs = await AsyncStorage.multiGet([contactsKey, profilesKey, contactsTsKey]);
+      perfLog('loadContactsFromCache: multiGet returned');
       let contactsJson: string | null = null;
       let profilesJson: string | null = null;
       let contactsTsStr: string | null = null;
@@ -883,29 +909,36 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         else if (k === profilesKey) profilesJson = v;
         else if (k === contactsTsKey) contactsTsStr = v;
       }
+      perfLog(
+        `loadContactsFromCache: blob sizes contacts=${contactsJson?.length ?? 0}B profiles=${profilesJson?.length ?? 0}B`,
+      );
       if (contactsTsStr && Date.now() - parseInt(contactsTsStr, 10) > CACHE_MAX_AGE_MS) {
-        if (__DEV__) console.log('[Nostr] contacts cache expired, skipping');
+        perfLog('loadContactsFromCache: contacts cache expired, skipping');
         return false;
       }
       if (contactsJson) {
+        const tParse = Date.now();
         const cached: NostrContact[] = JSON.parse(contactsJson);
+        perfLog(`loadContactsFromCache: JSON.parse(contacts) ${Date.now() - tParse}ms`);
         if (profilesJson) {
+          const tProfilesParse = Date.now();
           const profileMap: Record<string, NostrProfile> = JSON.parse(profilesJson);
+          perfLog(`loadContactsFromCache: JSON.parse(profiles) ${Date.now() - tProfilesParse}ms`);
+          const tMerge = Date.now();
           const withProfiles = cached.map((c) => ({
             ...c,
             profile: profileMap[c.pubkey] ?? c.profile,
           }));
+          perfLog(
+            `loadContactsFromCache: merge ${withProfiles.length} contacts ${Date.now() - tMerge}ms`,
+          );
           startTransition(() => setContacts(withProfiles));
-          if (__DEV__)
-            console.log(
-              `[Nostr] loaded ${withProfiles.length} contacts from cache in ${Date.now() - t0}ms`,
-            );
+          perfLog(`loadContactsFromCache: setContacts dispatched (total ${Date.now() - t0}ms)`);
         } else {
           startTransition(() => setContacts(cached));
-          if (__DEV__)
-            console.log(
-              `[Nostr] loaded ${cached.length} contacts (no profiles) from cache in ${Date.now() - t0}ms`,
-            );
+          perfLog(
+            `loadContactsFromCache: setContacts (no profiles) dispatched (total ${Date.now() - t0}ms)`,
+          );
         }
         return true;
       }
@@ -1172,8 +1205,18 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
   }, []);
 
+  // Single-fire perf log when isLoggedIn becomes true — the
+  // "login restored from cache" moment. Anchor for the boot path.
+  useEffect(() => {
+    if (isLoggedIn && !__nostrProviderLoggedInLogged) {
+      __nostrProviderLoggedInLogged = true;
+      perfLog('NostrProvider isLoggedIn=true');
+    }
+  }, [isLoggedIn]);
+
   // Auto-login on startup: load cache immediately, refresh from relays in background
   useEffect(() => {
+    perfLog('NostrProvider auto-login effect fires');
     (async () => {
       try {
         // Hydrate the multi-account registry first so the switcher has
@@ -3183,6 +3226,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     followPubkeysRef.current = followPubkeys;
   }, [followPubkeys]);
 
+  // Idempotent — any DM-surface (Messages tab, ConversationScreen)
+  // calls this on focus. The first call flips `liveSubArmed`, the
+  // gated useEffect below re-runs and opens the live NIP-17 sub.
+  // Subsequent calls are no-ops (React bails on identical setState).
+  const armLiveDmSub = useCallback(() => {
+    setLiveSubArmed(true);
+  }, []);
+
   // In-memory dedup Set that survives live-DM-sub re-opens. The sub
   // useEffect below re-runs when getReadRelays changes — e.g. when the
   // relay-list refresh adds a new relay 9 s into cold start. Without
@@ -3238,6 +3289,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // single-flight guard in `refreshDmInbox` serialises on its side.
   useEffect(() => {
     if (!isLoggedIn || !pubkey || !signerType) return;
+    // Wait until a DM-surface (Messages tab, ConversationScreen) has
+    // focused at least once before opening the live sub. On cold boot
+    // the user is on Home, so we skip ~5 s of per-wrap unwrap/route/
+    // dedup JS-thread work. First Messages focus flips `liveSubArmed`,
+    // this effect re-runs, sub opens, drain happens then — when the
+    // user is explicitly looking at messages and a brief loading
+    // state is expected.
+    if (!liveSubArmed) return;
     const viewerPubkey = pubkey;
     const activeSigner = signerType;
     const readRelays = getReadRelays();
@@ -3681,7 +3740,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       flushPendingInbox();
       if (unsubscribe) unsubscribe();
     };
-  }, [isLoggedIn, pubkey, signerType, getReadRelays]);
+  }, [isLoggedIn, pubkey, signerType, getReadRelays, liveSubArmed]);
 
   const signEvent = useCallback(
     async (event: {
@@ -3746,6 +3805,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       dmInbox,
       dmInboxLoading,
       refreshDmInbox,
+      armLiveDmSub,
       amberNip44Permission,
       signEvent,
     }),
@@ -3779,6 +3839,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       dmInbox,
       dmInboxLoading,
       refreshDmInbox,
+      armLiveDmSub,
       amberNip44Permission,
       signEvent,
     ],

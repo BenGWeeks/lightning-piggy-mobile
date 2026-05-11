@@ -146,7 +146,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     //   eas build:list --platform android --status finished --limit 1
     //
     // See docs/DEPLOYMENT.adoc → "Local production builds".
-    versionCode: 59,
+    versionCode: 64,
   },
   web: {
     favicon: './assets/favicon.png',

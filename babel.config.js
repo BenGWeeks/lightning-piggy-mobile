@@ -18,10 +18,18 @@ module.exports = function (api) {
   // `transform-remove-console` is inserted BEFORE it so the stripped
   // AST is what Reanimated sees when it processes worklets.
   const isRelease = process.env.NODE_ENV !== 'development';
+  // Escape hatch for a one-off perf-instrumented release build: when
+  // `EXPO_PUBLIC_KEEP_PERF_LOGS=1` is set at build time (e.g. for a
+  // sideloaded APK measuring cold-start latency on a real device),
+  // skip the strip so `[Perf]` logcat lines survive. The runtime
+  // `perfLog` helper reads the same env so it stops short-circuiting.
+  // Default unset → strip as usual; never ship release builds with
+  // this env set.
+  const keepPerfLogs = process.env.EXPO_PUBLIC_KEEP_PERF_LOGS === '1';
   return {
     presets: ['babel-preset-expo'],
     plugins: [
-      ...(isRelease
+      ...(isRelease && !keepPerfLogs
         ? [['transform-remove-console', { exclude: ['warn', 'error', 'assert'] }]]
         : []),
       'react-native-reanimated/plugin',

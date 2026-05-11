@@ -41,6 +41,7 @@ import { recordOutgoing as recordOutgoingCounterparty } from '../services/zapCou
 import { isReplyTimeoutError } from '../services/nwcService';
 import PaymentProgressOverlay, { PaymentProgressState } from './PaymentProgressOverlay';
 import AmountEntryScreen from './AmountEntryScreen';
+import { perfLog } from '../utils/perfLog';
 
 interface Props {
   visible: boolean;
@@ -96,6 +97,7 @@ function isValidInvoice(data: string): boolean {
   );
 }
 
+let __sendSheetFirstVisibleLogged = false;
 const SendSheet: React.FC<Props> = ({
   visible,
   onClose,
@@ -104,6 +106,10 @@ const SendSheet: React.FC<Props> = ({
   recipientPubkey,
   recipientName,
 }) => {
+  if (visible && !__sendSheetFirstVisibleLogged) {
+    __sendSheetFirstVisibleLogged = true;
+    perfLog('SendSheet first render (visible=true)');
+  }
   const colors = useThemeColors();
   const styles = useMemo(() => createSendSheetStyles(colors), [colors]);
   const {

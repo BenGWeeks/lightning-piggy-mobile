@@ -27,6 +27,7 @@ import TabHeader from '../components/TabHeader';
 import { ArrowDownIcon, ArrowUpIcon, ArrowLeftRightIcon } from '../components/icons/ArrowIcons';
 import { createHomeScreenStyles } from '../styles/HomeScreen.styles';
 import { isSendableWallet } from '../utils/walletCapabilities';
+import { perfLog } from '../utils/perfLog';
 import type { MainTabParamList } from '../navigation/types';
 
 const HomeScreen: React.FC = () => {
@@ -293,7 +294,10 @@ const HomeScreen: React.FC = () => {
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.actionButton, isSendDisabled && styles.actionButtonDisabled]}
-            onPress={() => setSendOpen(true)}
+            onPress={() => {
+              perfLog('btn-send onPress');
+              setSendOpen(true);
+            }}
             disabled={isSendDisabled}
             accessibilityLabel="Send"
             testID="btn-send"

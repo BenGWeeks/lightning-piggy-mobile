@@ -160,7 +160,13 @@ const ConversationScreen: React.FC = () => {
     signEvent,
     contacts,
     relays,
+    armLiveDmSub,
   } = useNostr();
+  // Cover the deep-link path (notification → straight to ConversationScreen
+  // without passing the Messages tab). Idempotent — no-op if already armed.
+  useEffect(() => {
+    armLiveDmSub();
+  }, [armLiveDmSub]);
   const { wallets, activeWalletId, activeWallet } = useWallet();
 
   const [messages, setMessages] = useState<
