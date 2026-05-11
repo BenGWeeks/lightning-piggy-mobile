@@ -11,13 +11,19 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import {
+  Boxes,
+  Box,
   Camera,
+  CalendarDays,
   CheckCircle2,
   ChevronLeft,
+  Cloud,
   Eye,
   EyeOff,
+  HelpCircle,
   ImagePlus,
   MapPin,
+  Mountain,
   PiggyBank,
   Send,
   Sparkles,
@@ -307,11 +313,8 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   <Text style={styles.lpBadgeText}>NIP-GC cache</Text>
                 </View>
               )}
-              {cache.cacheType ? <Text style={styles.metaPill}>{cache.cacheType}</Text> : null}
-              {cache.size ? <Text style={styles.metaPill}>{cache.size}</Text> : null}
-              {cache.difficulty ? <Text style={styles.metaPill}>D{cache.difficulty}</Text> : null}
-              {cache.terrain ? <Text style={styles.metaPill}>T{cache.terrain}</Text> : null}
             </View>
+            <CacheSpecPanel cache={cache} colors={colors} styles={styles} />
             <Text style={styles.description}>{cache.description}</Text>
             {/* Attribution — surface the hider so the finder knows
                 whose word they're trusting before walking to a
@@ -479,6 +482,164 @@ const LogRow: React.FC<{
   );
 };
 
+// -----------------------------------------------------------------------------
+// Cache spec panel — replaces the cryptic "D1 / T1 / micro" pills with a
+// labelled, visual breakdown so a first-time geocacher knows what they
+// mean. NIP-GC scales are 1-5 for both difficulty (how tricky to find)
+// and terrain (how rough the walk). Size + cache-type are categorical;
+// we surface a one-line plain-English description for each.
+// -----------------------------------------------------------------------------
+
+const SIZE_LABELS: Record<string, { label: string; description: string }> = {
+  micro: { label: 'Micro', description: 'Matchbox-sized' },
+  small: { label: 'Small', description: 'Sandwich-box-sized' },
+  regular: { label: 'Regular', description: 'Ammo-can-sized' },
+  large: { label: 'Large', description: 'Bucket-sized' },
+  other: { label: 'Other', description: 'Custom container' },
+};
+
+const TYPE_LABELS: Record<string, { label: string; description: string; Icon: typeof Box }> = {
+  traditional: {
+    label: 'Traditional',
+    description: 'The coordinates are the cache',
+    Icon: Box,
+  },
+  multi: {
+    label: 'Multi',
+    description: 'Visit multiple waypoints to find it',
+    Icon: Boxes,
+  },
+  mystery: {
+    label: 'Mystery',
+    description: 'Solve a puzzle to learn the coordinates',
+    Icon: HelpCircle,
+  },
+  virtual: {
+    label: 'Virtual',
+    description: 'No physical container; check in instead',
+    Icon: Cloud,
+  },
+  event: {
+    label: 'Event',
+    description: 'A gathering at a time and place',
+    Icon: CalendarDays,
+  },
+};
+
+const DIFFICULTY_DESCRIPTIONS: Record<string, string> = {
+  '1': 'Quick find',
+  '2': 'Moderate find',
+  '3': 'Challenging find',
+  '4': 'Tricky find',
+  '5': 'Very difficult',
+};
+
+const TERRAIN_DESCRIPTIONS: Record<string, string> = {
+  '1': 'Easy walk',
+  '2': 'Light walk',
+  '3': 'Moderate hike',
+  '4': 'Steep or rough',
+  '5': 'Special gear needed',
+};
+
+const DotScale: React.FC<{
+  value: number;
+  max?: number;
+  colors: Palette;
+}> = ({ value, max = 5, colors }) => {
+  const dots: React.ReactNode[] = [];
+  for (let i = 1; i <= max; i += 1) {
+    dots.push(
+      <View
+        key={i}
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: 4,
+          backgroundColor: i <= value ? colors.brandPink : colors.divider,
+          marginRight: i === max ? 0 : 4,
+        }}
+      />,
+    );
+  }
+  return <View style={{ flexDirection: 'row', alignItems: 'center' }}>{dots}</View>;
+};
+
+const CacheSpecPanel: React.FC<{
+  cache: ParsedCache;
+  colors: Palette;
+  styles: ReturnType<typeof createStyles>;
+}> = ({ cache, colors, styles }) => {
+  const typeKey = (cache.cacheType ?? 'traditional').toLowerCase();
+  const sizeKey = (cache.size ?? '').toLowerCase();
+  const typeInfo = TYPE_LABELS[typeKey];
+  const sizeInfo = SIZE_LABELS[sizeKey];
+  const difficulty = cache.difficulty;
+  const terrain = cache.terrain;
+
+  return (
+    <View style={styles.specPanel} testID="hunt-piggy-detail-spec-panel">
+      {typeInfo ? (
+        <View style={styles.specRow}>
+          <View style={styles.specIconWrap}>
+            <typeInfo.Icon size={16} color={colors.brandPink} strokeWidth={2.5} />
+          </View>
+          <View style={styles.specRowMain}>
+            <Text style={styles.specLabel}>Type · {typeInfo.label}</Text>
+            <Text style={styles.specDescription}>{typeInfo.description}</Text>
+          </View>
+        </View>
+      ) : null}
+
+      {sizeInfo ? (
+        <View style={styles.specRow}>
+          <View style={styles.specIconWrap}>
+            <Box size={16} color={colors.brandPink} strokeWidth={2.5} />
+          </View>
+          <View style={styles.specRowMain}>
+            <Text style={styles.specLabel}>Size · {sizeInfo.label}</Text>
+            <Text style={styles.specDescription}>{sizeInfo.description}</Text>
+          </View>
+        </View>
+      ) : null}
+
+      {difficulty ? (
+        <View style={styles.specRow}>
+          <View style={styles.specIconWrap}>
+            <HelpCircle size={16} color={colors.brandPink} strokeWidth={2.5} />
+          </View>
+          <View style={styles.specRowMain}>
+            <View style={styles.specLabelRow}>
+              <Text style={styles.specLabel}>Difficulty</Text>
+              <DotScale value={difficulty} colors={colors} />
+            </View>
+            <Text style={styles.specDescription}>
+              {DIFFICULTY_DESCRIPTIONS[String(difficulty)] ?? `${difficulty}/5`}
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
+      {terrain ? (
+        <View style={styles.specRow}>
+          <View style={styles.specIconWrap}>
+            <Mountain size={16} color={colors.brandPink} strokeWidth={2.5} />
+          </View>
+          <View style={styles.specRowMain}>
+            <View style={styles.specLabelRow}>
+              <Text style={styles.specLabel}>Terrain</Text>
+              <DotScale value={terrain} colors={colors} />
+            </View>
+            <Text style={styles.specDescription}>
+              {TERRAIN_DESCRIPTIONS[String(terrain)] ?? `${terrain}/5`}
+            </Text>
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
+};
+
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
@@ -535,6 +696,42 @@ const createStyles = (colors: Palette) =>
       borderRadius: 100,
       fontSize: 11,
       fontWeight: '600',
+    },
+    specPanel: {
+      gap: 12,
+      paddingVertical: 4,
+    },
+    specRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 12,
+    },
+    specIconWrap: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      backgroundColor: colors.brandPinkLight,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    specRowMain: {
+      flex: 1,
+      gap: 2,
+    },
+    specLabelRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    specLabel: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.textHeader,
+    },
+    specDescription: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      lineHeight: 16,
     },
     description: { fontSize: 14, color: colors.textHeader, lineHeight: 20 },
     attribution: {
