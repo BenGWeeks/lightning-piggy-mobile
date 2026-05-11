@@ -7,9 +7,18 @@
 //   [Perf] btn-send tap +9120ms
 //   [Perf] SendSheet first render +9381ms
 //
-// __DEV__ gated only — production bundles strip console.log via the
-// Babel transform-remove-console plugin, so this whole file is dead
-// weight in release builds.
+// __DEV__ gated by default — production bundles strip console.log via
+// the Babel transform-remove-console plugin, so this whole file is
+// dead weight in release builds.
+//
+// Escape hatch: when `EXPO_PUBLIC_KEEP_PERF_LOGS=1` is set at build
+// time, `babel.config.js` skips the strip AND this module's guard
+// passes through. Used for one-off perf-instrumented APKs sideloaded
+// to a real device to attribute cold-start latency. Expo inlines
+// `process.env.EXPO_PUBLIC_*` at bundle time, so the literal-string
+// comparison dead-code-eliminates the rest of this file in normal
+// release builds where the flag is unset.
+const PERF_LOGS_ENABLED = __DEV__ || process.env.EXPO_PUBLIC_KEEP_PERF_LOGS === '1';
 let T0: number | null = null;
 
 export function perfT0(): number {
@@ -18,7 +27,7 @@ export function perfT0(): number {
 }
 
 export function perfLog(tag: string): void {
-  if (!__DEV__) return;
+  if (!PERF_LOGS_ENABLED) return;
   const t = perfT0();
   console.log(`[Perf] ${tag} +${Date.now() - t}ms`);
 }

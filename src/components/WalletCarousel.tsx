@@ -4,6 +4,9 @@ import { WalletState } from '../types/wallet';
 import WalletCard, { CARD_WIDTH, CARD_MARGIN } from './WalletCard';
 import AddWalletCard from './AddWalletCard';
 import { FiatCurrency } from '../services/fiatService';
+import { perfLog } from '../utils/perfLog';
+
+let __walletCarouselFirstRenderLogged = false;
 
 const SNAP_INTERVAL = CARD_WIDTH + CARD_MARGIN * 2;
 
@@ -28,6 +31,10 @@ const WalletCarousel: React.FC<WalletCarouselProps> = ({
   onAddWallet,
   onSettingsPress,
 }) => {
+  if (!__walletCarouselFirstRenderLogged) {
+    __walletCarouselFirstRenderLogged = true;
+    perfLog(`WalletCarousel first render (${wallets.length} wallets)`);
+  }
   const flatListRef = useRef<FlatList>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
 

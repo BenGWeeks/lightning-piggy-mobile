@@ -32,6 +32,9 @@ import AppearanceScreen from '../screens/account/AppearanceScreen';
 import SecurityScreen from '../screens/account/SecurityScreen';
 import AboutScreen from '../screens/account/AboutScreen';
 import AccountDrawerContent from '../components/AccountDrawerContent';
+import { perfLog } from '../utils/perfLog';
+
+let __appNavigatorFirstRenderLogged = false;
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -157,6 +160,10 @@ function MainDrawer() {
 }
 
 export default function AppNavigator() {
+  if (!__appNavigatorFirstRenderLogged) {
+    __appNavigatorFirstRenderLogged = true;
+    perfLog('AppNavigator first render');
+  }
   const { isLoading } = useWallet();
   const { scheme, colors } = useTheme();
 
