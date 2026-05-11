@@ -359,10 +359,10 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           }
           items={sortedCaches}
           loading={!!pos && caches.size === 0}
-          // "See all" lands users on the Discover list directly — the
-          // Hunt hub is for hiders. Per UX feedback (most users find,
-          // few hide).
-          onSeeAll={() => navigation.navigate('HuntDiscover')}
+          // "See all" lands on the merged Geo-caches page (map + list
+          // + [+] in header for the hider flow). Was a two-screen
+          // Hunt/Discover split before the May 2026 UX merge.
+          onSeeAll={() => navigation.navigate('Hunt')}
           seeAllTestId="explore-card-hunt"
           keyExtractor={(c) => c.cache.coord}
           emptyState={

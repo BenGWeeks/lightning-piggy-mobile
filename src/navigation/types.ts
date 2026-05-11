@@ -64,7 +64,6 @@ export type ExploreStackParamList = {
   Hunt: undefined;
   HuntCreate: undefined;
   HuntFound: { lnurl: string };
-  HuntDiscover: undefined;
   HuntPiggyDetail: { coord: string };
   Events: undefined;
 };
