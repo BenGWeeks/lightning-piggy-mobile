@@ -19,6 +19,7 @@ import {
   Clipboard as ClipboardIcon,
   Globe,
   ImagePlus,
+  Lock,
   MapPin,
   Nfc,
   PiggyBank,
@@ -260,9 +261,16 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
     const value = stage.kind === 'saved' ? stage.lnurlw : lnurl;
     setStage({ kind: 'writing-nfc' });
     try {
-      await writeLnurlToTag(value);
+      const result = await writeLnurlToTag(value);
       setStage({ kind: 'wrote-nfc' });
-      Toast.show({ type: 'success', text1: 'Tag written' });
+      Toast.show({
+        type: 'success',
+        text1: result.locked ? 'Tag written and locked 🔒' : 'Tag written',
+        text2: result.locked
+          ? 'This Piglet cannot be overwritten by anyone else.'
+          : 'Tag stays re-writeable — use an NTAG213/215/216 chip to lock it next time.',
+        visibilityTime: 5000,
+      });
     } catch (e) {
       setStage({ kind: 'saved', lnurlw: value });
       Alert.alert('Could not write tag', (e as Error).message, [{ text: 'OK' }]);
@@ -542,6 +550,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
 
         {(stage.kind === 'saved' || stage.kind === 'writing-nfc' || stage.kind === 'wrote-nfc') && (
           <View style={styles.savedActions}>
+            <NfcSupportedTagsCard colors={colors} styles={styles} />
             <TouchableOpacity
               style={styles.primaryButton}
               onPress={handleWriteNfc}
@@ -572,6 +581,79 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
     </View>
   );
 };
+
+// -----------------------------------------------------------------------------
+// Supported-tags visual reference — three "chip family" cards (the two
+// safe families + the one we reject) so the hider knows what to buy
+// before they tap "Write to NFC tag". Locking the NDEF area prevents
+// a passer-by from overwriting the Piglet with a phishing / lure URL
+// (see `writeLnurlToTag` in `nfcService.ts` for the threat model).
+// -----------------------------------------------------------------------------
+
+const SUPPORTED_TAGS: Array<{
+  name: string;
+  blurb: string;
+  capacity: string;
+  status: 'recommended' | 'ok' | 'avoid';
+}> = [
+  {
+    name: 'NTAG213 / 215 / 216',
+    blurb: 'Locks permanently after write. Common Amazon sticker / keyfob chip.',
+    capacity: '144 / 504 / 888 bytes',
+    status: 'recommended',
+  },
+  {
+    name: 'Mifare Ultralight C',
+    blurb: 'Also lockable. Slightly older but works the same in practice.',
+    capacity: '144 bytes',
+    status: 'ok',
+  },
+  {
+    name: 'Mifare Classic 1K / 4K',
+    blurb: 'No permanent NDEF lock — anyone with the default sector key can overwrite.',
+    capacity: '768 / 3.4 KB',
+    status: 'avoid',
+  },
+];
+
+const NfcSupportedTagsCard: React.FC<{
+  colors: Palette;
+  styles: ReturnType<typeof createStyles>;
+}> = ({ colors, styles }) => (
+  <View style={styles.tagsCard} testID="hunt-create-supported-tags">
+    <View style={styles.tagsCardHeader}>
+      <Lock size={14} color={colors.brandPink} strokeWidth={2.5} />
+      <Text style={styles.tagsCardHeaderText}>Supported NFC tags</Text>
+    </View>
+    <Text style={styles.tagsCardIntro}>
+      The Piglet is locked after writing so no one else can overwrite it. Two chip families support
+      that — one to avoid.
+    </Text>
+    {SUPPORTED_TAGS.map((tag) => (
+      <View key={tag.name} style={styles.tagsCardRow}>
+        <View
+          style={[
+            styles.tagsCardDot,
+            tag.status === 'recommended'
+              ? { backgroundColor: colors.brandPink }
+              : tag.status === 'ok'
+                ? { backgroundColor: '#F5A623' }
+                : { backgroundColor: colors.textSupplementary },
+          ]}
+        />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.tagsCardName}>
+            {tag.name}
+            {tag.status === 'recommended' ? ' · Recommended' : ''}
+            {tag.status === 'avoid' ? ' · Avoid' : ''}
+          </Text>
+          <Text style={styles.tagsCardBlurb}>{tag.blurb}</Text>
+          <Text style={styles.tagsCardCapacity}>Capacity: {tag.capacity}</Text>
+        </View>
+      </View>
+    ))}
+  </View>
+);
 
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
@@ -722,7 +804,58 @@ const createStyles = (colors: Palette) =>
       fontSize: 12,
       lineHeight: 17,
     },
-    savedActions: { gap: 4 },
+    savedActions: { gap: 12 },
+    tagsCard: {
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 14,
+      gap: 10,
+      borderWidth: 1,
+      borderColor: colors.divider,
+    },
+    tagsCardHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    tagsCardHeaderText: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.textHeader,
+    },
+    tagsCardIntro: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      lineHeight: 17,
+    },
+    tagsCardRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 10,
+    },
+    tagsCardDot: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+      marginTop: 4,
+    },
+    tagsCardName: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.textHeader,
+    },
+    tagsCardBlurb: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      lineHeight: 16,
+      marginTop: 2,
+    },
+    tagsCardCapacity: {
+      fontSize: 11,
+      color: colors.textSupplementary,
+      fontStyle: 'italic',
+      marginTop: 1,
+    },
     hintPreviewWrapper: {
       position: 'relative',
       marginTop: 4,

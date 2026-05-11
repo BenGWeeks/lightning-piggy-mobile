@@ -276,7 +276,56 @@ export async function writeNpubToTag(npub: string, onTagDetected?: () => void): 
  * @param onTagDetected - Optional callback fired the moment a tag is
  *   detected (just before write). Mirrors `writeNpubToTag`.
  */
-export async function writeLnurlToTag(lnurl: string, onTagDetected?: () => void): Promise<void> {
+/**
+ * Tag-type identification used by `writeLnurlToTag` to decide whether
+ * we can lock the tag (NDEF make-read-only) after writing the LNURL.
+ * Locking matters because a Piglet's NDEF record is a bearer URL — if
+ * a passer-by can overwrite the tag, they can repoint a "Piglet" to a
+ * phishing LNURL or, worse, a lure address. Locking the NDEF area
+ * after write means re-flashing is impossible without physical chip
+ * tampering.
+ *
+ * Supported families (Android, via react-native-nfc-manager):
+ *   - **NTAG213 / NTAG215 / NTAG216** — NXP NFC Forum Type 2.
+ *     Lockable via `ndefHandler.makeReadOnly()` which writes the
+ *     dynamic lock bytes. Recommended chip for a Piglet.
+ *   - **Mifare Ultralight C (MF0ICU2)** — also Type 2, lockable.
+ *   - **Mifare Classic 1K / 4K** — NFC Forum Type 1, NDEF is layered
+ *     over Crypto1 sectors with per-sector keys. We can't permanently
+ *     lock an NDEF area on Classic without burning the sector keys,
+ *     which other readers then can't authenticate to read either.
+ *     Rejected with a friendly error so the user picks a different
+ *     chip.
+ *
+ * `tech_types` on Android comes back as a list like
+ * `["android.nfc.tech.Ndef", "android.nfc.tech.NfcA",
+ *   "android.nfc.tech.MifareUltralight"]`; we infer the family from
+ * those plus the `type` heuristic the platform exposes.
+ */
+type TagFamily = 'ntag-21x' | 'mifare-ultralight' | 'mifare-classic' | 'unknown';
+
+const inferTagFamily = (tag: { techTypes?: string[]; type?: string } | null): TagFamily => {
+  if (!tag) return 'unknown';
+  const tech = (tag.techTypes ?? []).map((t) => t.toLowerCase());
+  if (tech.includes('android.nfc.tech.mifareclassic')) return 'mifare-classic';
+  if (tech.includes('android.nfc.tech.mifareultralight')) return 'mifare-ultralight';
+  // NTAG21x exposes NfcA + Ndef but no Mifare tech — distinguish from
+  // generic NfcA by also requiring Ndef support.
+  if (tech.includes('android.nfc.tech.ndef') && tech.includes('android.nfc.tech.nfca')) {
+    return 'ntag-21x';
+  }
+  return 'unknown';
+};
+
+export type WriteLnurlResult = {
+  family: TagFamily;
+  locked: boolean;
+};
+
+export async function writeLnurlToTag(
+  lnurl: string,
+  onTagDetected?: () => void,
+): Promise<WriteLnurlResult> {
   const trimmed = lnurl.trim();
   if (!trimmed) {
     throw new Error('Empty LNURL — paste or scan one first');
@@ -310,6 +359,18 @@ export async function writeLnurlToTag(lnurl: string, onTagDetected?: () => void)
       throw new Error('No tag detected');
     }
 
+    const family = inferTagFamily(tag as { techTypes?: string[]; type?: string });
+    if (family === 'mifare-classic') {
+      throw new Error(
+        "Mifare Classic tags can't be permanently locked — use an NTAG213/215/216 or Mifare Ultralight C chip so others can't overwrite this Piglet.",
+      );
+    }
+    if (family === 'unknown') {
+      throw new Error(
+        'Unrecognised tag type. Lightning Piggy supports NTAG213/215/216 and Mifare Ultralight C.',
+      );
+    }
+
     onTagDetected?.();
 
     const bytes = Ndef.encodeMessage([Ndef.uriRecord(uri)]);
@@ -318,6 +379,30 @@ export async function writeLnurlToTag(lnurl: string, onTagDetected?: () => void)
     }
 
     await NfcManager.ndefHandler.writeNdefMessage(bytes);
+
+    // Permanently lock the NDEF area so a passer-by can't overwrite
+    // this Piglet with a phishing / lure URL. `makeReadOnly` writes
+    // the dynamic lock bytes on NTAG21x + Mifare Ultralight C; the
+    // operation is irreversible by design.
+    let locked = false;
+    try {
+      // The react-native-nfc-manager API exposes makeReadOnly through
+      // the Android NDEF handler. Use a defensive `any` cast because
+      // the typings on some versions omit the method even though the
+      // native impl is present (issue revolutionsystems/.../#1212).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const handler = NfcManager.ndefHandler as any;
+      if (typeof handler.makeReadOnly === 'function') {
+        const ok = await handler.makeReadOnly();
+        locked = ok !== false;
+      }
+    } catch {
+      // Lock failure is non-fatal — the data is written. Surface via
+      // `locked: false` so the UI can warn the user that the tag is
+      // still re-writeable and recommend using an NTAG21x chip.
+    }
+
+    return { family, locked };
   } finally {
     NfcManager.cancelTechnologyRequest().catch(() => {});
   }
