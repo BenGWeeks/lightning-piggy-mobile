@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, StyleSheet, ActivityIndicator, TouchableOpacity, Text } from 'react-native';
 import { WebView } from 'react-native-webview';
-import { Maximize2 } from 'lucide-react-native';
+import { Maximize2, Minus, Plus } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import type { BtcMapPlace } from '../services/btcMapService';
@@ -46,6 +46,19 @@ export const ExploreMiniMap: React.FC<Props> = ({
   const styles = useMemo(() => createStyles(colors), [colors]);
   const webviewRef = useRef<WebView>(null);
   const [ready, setReady] = useState(false);
+
+  // Inject a Leaflet zoom delta into the WebView. The +/− controls are
+  // RN-level siblings of the WebView (which has `pointerEvents="none"`),
+  // so they don't compete with the tap-anywhere-to-open-full-map
+  // affordance and stay independent of Leaflet's own ignored gestures.
+  const zoomBy = useCallback(
+    (delta: number) => () => {
+      if (!ready || !webviewRef.current) return;
+      const js = `window.LP_zoomBy && window.LP_zoomBy(${delta}); true;`;
+      webviewRef.current.injectJavaScript(js);
+    },
+    [ready],
+  );
 
   // Re-emit pins whenever data changes after the bridge is up.
   useEffect(() => {
@@ -103,6 +116,28 @@ export const ExploreMiniMap: React.FC<Props> = ({
           style={styles.webview}
         />
       )}
+      {lat !== null && lon !== null ? (
+        <View style={styles.zoomColumn}>
+          <TouchableOpacity
+            style={styles.zoomButton}
+            onPress={zoomBy(1)}
+            accessibilityLabel="Zoom in"
+            testID="explore-minimap-zoom-in"
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+          >
+            <Plus size={16} color={colors.textHeader} strokeWidth={2.5} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.zoomButton}
+            onPress={zoomBy(-1)}
+            accessibilityLabel="Zoom out"
+            testID="explore-minimap-zoom-out"
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+          >
+            <Minus size={16} color={colors.textHeader} strokeWidth={2.5} />
+          </TouchableOpacity>
+        </View>
+      ) : null}
       <View style={styles.openBadge}>
         <Maximize2 size={12} color={colors.white} strokeWidth={2.5} />
         <Text style={styles.openBadgeText}>Open map</Text>
@@ -145,6 +180,9 @@ const map=L.map('map',{zoomControl:false,dragging:false,scrollWheelZoom:false,do
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
 let merchantLayer=L.layerGroup().addTo(map),cacheLayer=L.layerGroup().addTo(map),eventLayer=L.layerGroup().addTo(map),meMarker=null;
 const dot=(cls,size)=>L.divIcon({className:'',html:'<div class="'+cls+'"></div>',iconSize:[size,size]});
+window.LP_zoomBy=function(delta){
+  map.setZoom(map.getZoom()+delta);
+};
 window.LP_setHub=function(d){
   merchantLayer.clearLayers();cacheLayer.clearLayers();eventLayer.clearLayers();
   if(meMarker)map.removeLayer(meMarker);
@@ -218,6 +256,25 @@ const createStyles = (colors: Palette) =>
       gap: 8,
     },
     fallbackText: { color: colors.textSupplementary, fontSize: 13 },
+    zoomColumn: {
+      position: 'absolute',
+      top: 10,
+      left: 10,
+      gap: 6,
+    },
+    zoomButton: {
+      width: 32,
+      height: 32,
+      borderRadius: 8,
+      backgroundColor: 'rgba(255,255,255,0.95)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOpacity: 0.18,
+      shadowRadius: 3,
+      shadowOffset: { width: 0, height: 1 },
+      elevation: 2,
+    },
     openBadge: {
       position: 'absolute',
       bottom: 10,

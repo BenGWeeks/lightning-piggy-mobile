@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   Eye,
+  EyeOff,
   ImagePlus,
   MapPin,
   PiggyBank,
@@ -94,6 +95,11 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const [composerPhotoUrl, setComposerPhotoUrl] = useState<string | null>(null);
   const [composerUploading, setComposerUploading] = useState(false);
   const [posting, setPosting] = useState(false);
+  // Hints are ROT13-encoded on-relay per NIP-GC convention so generic
+  // clients can't accidentally spoiler the find. We decode at parse
+  // time but only reveal in the UI when the hunter explicitly taps —
+  // that preserves the "stuck? unhide" experience geocachers expect.
+  const [hintRevealed, setHintRevealed] = useState(false);
   const [hasClaimed, setHasClaimed] = useState(false);
   const closerRef = useRef<(() => void) | null>(null);
 
@@ -293,7 +299,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               {cache.isLpPiggy ? (
                 <View style={styles.lpBadge}>
                   <PiggyBank size={14} color={colors.white} strokeWidth={2.5} />
-                  <Text style={styles.lpBadgeText}>Lightning Piggy</Text>
+                  <Text style={styles.lpBadgeText}>Piglet</Text>
                 </View>
               ) : (
                 <View style={styles.standardBadge}>
@@ -308,10 +314,21 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
             </View>
             <Text style={styles.description}>{cache.description}</Text>
             {cache.hint ? (
-              <View style={styles.hintCard}>
-                <Eye size={14} color={colors.brandPink} strokeWidth={2.5} />
-                <Text style={styles.hintText}>Hint: {cache.hint}</Text>
-              </View>
+              <TouchableOpacity
+                style={styles.hintCard}
+                onPress={() => setHintRevealed((r) => !r)}
+                accessibilityLabel={hintRevealed ? 'Hide hint' : 'Reveal hint'}
+                testID="hunt-piggy-detail-hint"
+              >
+                {hintRevealed ? (
+                  <EyeOff size={14} color={colors.brandPink} strokeWidth={2.5} />
+                ) : (
+                  <Eye size={14} color={colors.brandPink} strokeWidth={2.5} />
+                )}
+                <Text style={styles.hintText}>
+                  {hintRevealed ? `Hint: ${cache.hint}` : 'Stuck? Tap to reveal the hint'}
+                </Text>
+              </TouchableOpacity>
             ) : null}
             {cache.isLpPiggy ? (
               <View style={styles.tapHintCard}>

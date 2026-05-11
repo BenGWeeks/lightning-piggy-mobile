@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, type TextStyle } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, type TextStyle } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ProfileIcon from './ProfileIcon';
@@ -33,6 +33,16 @@ interface Props {
    * greeting back to the lighter weight/size it had pre-#139 (section
    * titles like "Messages"/"Friends"/"Explore" keep the default bold). */
   titleStyle?: TextStyle;
+  /**
+   * Optional tap handler for the round badge. Top-level tabs leave this
+   * undefined — the badge stays decorative-only per #139. Sub-screens
+   * that reuse `TabHeader` (e.g. Lessons) can pass a `goBack` callback
+   * here and swap the glyph for a `ChevronLeft`, getting a tappable
+   * back affordance without redesigning the header.
+   */
+  onIconPress?: () => void;
+  /** Accessibility label for the badge when `onIconPress` is set. */
+  iconAccessibilityLabel?: string;
 }
 
 /**
@@ -52,6 +62,8 @@ const TabHeader: React.FC<Props> = ({
   rightAction,
   accessibilityLabel,
   titleStyle,
+  onIconPress,
+  iconAccessibilityLabel,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -73,14 +85,27 @@ const TabHeader: React.FC<Props> = ({
 
   return (
     <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-      <View
-        style={styles.badge}
-        accessible={false}
-        // Decorative only — not tappable. See #139 AC.
-        importantForAccessibility="no-hide-descendants"
-      >
-        {icon}
-      </View>
+      {onIconPress ? (
+        <TouchableOpacity
+          style={styles.badge}
+          onPress={onIconPress}
+          accessibilityLabel={iconAccessibilityLabel ?? 'Back'}
+          accessibilityRole="button"
+          testID="tab-header-icon-button"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          {icon}
+        </TouchableOpacity>
+      ) : (
+        <View
+          style={styles.badge}
+          accessible={false}
+          // Decorative only — not tappable. See #139 AC.
+          importantForAccessibility="no-hide-descendants"
+        >
+          {icon}
+        </View>
+      )}
       <Text
         style={[styles.title, titleStyle]}
         numberOfLines={1}

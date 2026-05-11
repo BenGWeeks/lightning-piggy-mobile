@@ -23,6 +23,11 @@
 - Alphabet sidebar letters use `testID` pattern `alphabet-{letter}` (e.g., `alphabet-M`)
 - Maestro selectors: use `id: 'testID-value'` for testID, `text: 'label'` for text/accessibilityLabel
 
+## Naming
+
+- The brand is **Lightning Piggy** — never shorten to "LP" in user-facing strings. "LP" only belongs in internal type / variable names (`isLpPiggy`) and code comments.
+- Geo-caches published by this app are called **Piglets** in UI copy (the wallet is the "Piggy", a cache stash is its "Piglet"). Vanilla NIP-GC caches stay "NIP-GC cache".
+
 ## Code Style
 
 - Prettier and ESLint must pass before committing

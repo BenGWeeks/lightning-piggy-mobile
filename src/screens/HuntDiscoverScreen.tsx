@@ -189,32 +189,32 @@ const CacheRow: React.FC<{
     {/* Sibling testID that's deterministic by position. Maestro can match
         either id; the data-stable one is preferred when the d-tag is known. */}
     <View testID={`hunt-discover-row-${index}`} pointerEvents="none" />
-    <View style={[styles.iconWrap, cache.isLpPiggy ? styles.iconLp : styles.iconStandard]}>
-      {cache.isLpPiggy ? (
-        <PiggyBank size={22} color={colors.white} strokeWidth={2} />
-      ) : (
-        <MapPin size={22} color={colors.white} strokeWidth={2} />
-      )}
-    </View>
+    {/* One visual per row — the hint photo if the publisher attached
+        one, otherwise a bright-pink Lucide PiggyBank outline for
+        Piglets / MapPin for vanilla NIP-GC caches. Avoids the prior
+        triple-pig (icon + image + emoji) the user flagged. */}
     {cache.imageUrl ? (
       <Image source={{ uri: cache.imageUrl }} style={styles.thumb} resizeMode="cover" />
-    ) : null}
+    ) : (
+      <View style={[styles.iconWrap, cache.isLpPiggy ? styles.iconLp : styles.iconStandard]}>
+        {cache.isLpPiggy ? (
+          <PiggyBank size={22} color={colors.white} strokeWidth={2} />
+        ) : (
+          <MapPin size={22} color={colors.white} strokeWidth={2} />
+        )}
+      </View>
+    )}
     <View style={styles.rowMain}>
       <Text style={styles.rowTitle} numberOfLines={1}>
         {cache.name}
       </Text>
       <Text style={styles.rowMeta} numberOfLines={1}>
-        {cache.isLpPiggy ? '🐷 Lightning Piggy' : 'NIP-GC cache'}
+        {cache.isLpPiggy ? 'Piglet' : 'NIP-GC cache'}
         {cache.cacheType ? ` · ${cache.cacheType}` : ''}
         {cache.size ? ` · ${cache.size}` : ''}
         {cache.difficulty ? ` · D${cache.difficulty}` : ''}
         {cache.terrain ? ` / T${cache.terrain}` : ''}
       </Text>
-      {cache.description ? (
-        <Text style={styles.rowSub} numberOfLines={1}>
-          {cache.description}
-        </Text>
-      ) : null}
     </View>
     <ChevronRight size={20} color={colors.textSupplementary} />
   </TouchableOpacity>

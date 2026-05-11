@@ -9,7 +9,7 @@ import {
   getCourseCompletedCount,
   isCourseComplete,
 } from '../services/learnProgressService';
-import { Check, GraduationCap, Search, X } from 'lucide-react-native';
+import { Check, ChevronLeft, Search, X } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createLearnScreenStyles } from '../styles/LearnScreen.styles';
 
@@ -92,7 +92,12 @@ const LessonsScreen: React.FC<Props> = ({ navigation }) => {
           resizeMode="cover"
         />
         <View style={styles.headerOverlay} />
-        <TabHeader title="Lessons" icon={<GraduationCap size={20} color={colors.brandPink} />} />
+        <TabHeader
+          title="Lessons"
+          icon={<ChevronLeft size={20} color={colors.brandPink} strokeWidth={2.5} />}
+          onIconPress={() => navigation.goBack()}
+          iconAccessibilityLabel="Back to Explore"
+        />
         <View style={styles.headerExtras}>
           {searchExpanded ? (
             <View style={styles.searchRow}>

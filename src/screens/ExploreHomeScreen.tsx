@@ -305,10 +305,13 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
         <ContentRail<ParsedCache>
           title="Geo-caches near you"
-          caption="LP Piggies + standard NIP-GC caches"
+          caption="Piglets + classic NIP-GC caches"
           items={sortedCaches}
           loading={!!pos && caches.size === 0}
-          onSeeAll={() => navigation.navigate('Hunt')}
+          // "See all" lands users on the Discover list directly — the
+          // Hunt hub is for hiders. Per UX feedback (most users find,
+          // few hide).
+          onSeeAll={() => navigation.navigate('HuntDiscover')}
           seeAllTestId="explore-card-hunt"
           keyExtractor={(c) => c.coord}
           emptyState={
@@ -439,7 +442,7 @@ const CacheCard: React.FC<{
       {cache.name}
     </Text>
     <Text style={styles.cardSub} numberOfLines={1}>
-      {cache.isLpPiggy ? '🐷 Lightning Piggy' : 'NIP-GC cache'}
+      {cache.isLpPiggy ? 'Piglet' : 'NIP-GC cache'}
     </Text>
     <Text style={styles.cardSubSmall} numberOfLines={1}>
       {cache.cacheType ?? 'traditional'} · {cache.size ?? 'micro'}
