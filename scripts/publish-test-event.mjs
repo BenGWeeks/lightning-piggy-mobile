@@ -26,7 +26,10 @@ const LOCATION = process.env.LOCATION ?? 'The Bitcoin Embassy, Cambridge, UK';
 // `subscribeNearbyEvents` widening.
 const LAT = parseFloat(process.env.LAT ?? '52.2053');
 const LON = parseFloat(process.env.LON ?? '0.1218');
-const START_OFFSET_SECONDS = parseInt(process.env.START_OFFSET_SECONDS ?? `${7 * 24 * 60 * 60}`, 10);
+const START_OFFSET_SECONDS = parseInt(
+  process.env.START_OFFSET_SECONDS ?? `${7 * 24 * 60 * 60}`,
+  10,
+);
 const DURATION_SECONDS = parseInt(process.env.DURATION_SECONDS ?? `${3 * 60 * 60}`, 10);
 const IMAGE =
   process.env.IMAGE ??

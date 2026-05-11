@@ -2,14 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, Image, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import * as Location from 'expo-location';
 import { useFocusEffect } from '@react-navigation/native';
-import {
-  CalendarDays,
-  ChevronRight,
-  Compass,
-  MapPin,
-  PiggyBank,
-  Zap,
-} from 'lucide-react-native';
+import { CalendarDays, ChevronRight, Compass, MapPin, PiggyBank, Zap } from 'lucide-react-native';
 import TabHeader from '../components/TabHeader';
 import { ContentRail } from '../components/ContentRail';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
