@@ -38,6 +38,8 @@ import { ExploreNavigation, ExploreStackParamList } from '../navigation/types';
 import { Alert } from '../components/BrandedAlert';
 import Toast from '../components/BrandedToast';
 import { buildFoundLog, parseCacheCoord, type ParsedCache } from '../services/nostrPlacesService';
+import { ExploreMiniMap } from '../components/ExploreMiniMap';
+import { decodeGeohash } from '../utils/geohash';
 import {
   fetchCache,
   publishCacheEvent,
@@ -350,6 +352,25 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 <Text style={styles.tapHintText}>
                   Tap the physical NFC tag or scan the QR at the cache to claim sats.
                 </Text>
+              </View>
+            ) : null}
+
+            {/* Location preview — single-pin map centred on the cache's
+                geohash centroid. Tap → opens the full Map for pan/zoom.
+                NIP-GC publishes geohash precision 9 (≈ 5 m) at the
+                tightest tag, so this is "exact spot" not "rough area"
+                — the hider's choice of hashed precision controls the
+                fidelity, not the client. */}
+            {cache.geohash ? (
+              <View style={styles.mapPreviewWrap}>
+                <ExploreMiniMap
+                  lat={decodeGeohash(cache.geohash).lat}
+                  lon={decodeGeohash(cache.geohash).lng}
+                  merchants={[]}
+                  caches={[cache]}
+                  events={[]}
+                  onTapMap={() => navigation.navigate('Map')}
+                />
               </View>
             ) : null}
 
@@ -700,6 +721,13 @@ const createStyles = (colors: Palette) =>
     specPanel: {
       gap: 12,
       paddingVertical: 4,
+    },
+    mapPreviewWrap: {
+      // ExploreMiniMap brings its own horizontal margin in for the hub
+      // layout — neutralise that here so it lines up with the detail
+      // screen's content padding instead.
+      marginHorizontal: -16,
+      marginVertical: 4,
     },
     specRow: {
       flexDirection: 'row',

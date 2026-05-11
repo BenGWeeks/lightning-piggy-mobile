@@ -305,6 +305,32 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         </TouchableOpacity>
       </View>
 
+      {/* Pin legend — three rows aligned with the Leaflet glyphs the
+          map uses (see LEAFLET_HTML CSS). Helps a first-time user
+          decode what each colour/shape means. */}
+      <View style={styles.legend} testID="map-legend">
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: '#EC008C' }]} />
+          <Text style={styles.legendText}>⚡ Lightning</Text>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: '#F5A623' }]} />
+          <Text style={styles.legendText}>On-chain</Text>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDiamond, { backgroundColor: '#EC008C' }]} />
+          <Text style={styles.legendText}>Piglet</Text>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDiamond, { backgroundColor: '#6c7b8a' }]} />
+          <Text style={styles.legendText}>NIP-GC cache</Text>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: '#2D88FF' }]} />
+          <Text style={styles.legendText}>You</Text>
+        </View>
+      </View>
+
       <View style={styles.footer}>
         {error ? (
           <Text style={styles.footerError}>{error}</Text>
@@ -312,7 +338,7 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
           <Text style={styles.footerText}>
             {places.length} merchants
             {caches.size > 0
-              ? ` · ${[...caches.values()].filter((c) => c.isLpPiggy).length} 🐷 Piggies · ${
+              ? ` · ${[...caches.values()].filter((c) => c.isLpPiggy).length} Piglets · ${
                   [...caches.values()].filter((c) => !c.isLpPiggy).length
                 } caches`
               : ''}
@@ -648,6 +674,42 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.surface,
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: colors.divider,
+    },
+    legend: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      gap: 14,
+      rowGap: 6,
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      backgroundColor: colors.surface,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.divider,
+    },
+    legendItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    legendDot: {
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+      borderWidth: 1.5,
+      borderColor: '#fff',
+    },
+    legendDiamond: {
+      width: 11,
+      height: 11,
+      transform: [{ rotate: '45deg' }],
+      borderWidth: 1.5,
+      borderColor: '#fff',
+    },
+    legendText: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.textSupplementary,
     },
     footerText: {
       fontSize: 13,
