@@ -51,6 +51,7 @@ export interface IncomingPayment {
 }
 
 const CURRENCY_KEY = 'user_fiat_currency';
+const BTC_PRICE_CACHE_PREFIX = 'btc_price_';
 
 // The #P-tagged outgoing zap-receipt relay fetch is expensive (500-event
 // filter). With local-storage attribution being the common path, this
@@ -232,11 +233,22 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     await AsyncStorage.setItem(CURRENCY_KEY, cur);
     const price = await getBtcPrice(cur);
     setBtcPrice(price);
+    if (price != null) {
+      AsyncStorage.setItem(`${BTC_PRICE_CACHE_PREFIX}${cur}`, String(price)).catch(() => {});
+    }
   }, []);
 
   const fetchPrice = useCallback(async (cur: FiatCurrency) => {
     const price = await getBtcPrice(cur);
     setBtcPrice(price);
+    // Persist for cold-start hydration — without this, GBP/USD/etc. show
+    // empty for the first 1-3 s of every cold start while we wait on the
+    // CoinGecko fetch. Cached value is "stale-ok": still in the right
+    // ballpark for converting balance/transactions, and the next interval
+    // tick (5 min) or focus refresh replaces it.
+    if (price != null) {
+      AsyncStorage.setItem(`${BTC_PRICE_CACHE_PREFIX}${cur}`, String(price)).catch(() => {});
+    }
   }, []);
 
   const updateWalletInState = useCallback((walletId: string, updates: Partial<WalletState>) => {
@@ -296,6 +308,18 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           ? (savedCurrency as FiatCurrency)
           : 'USD';
         setCurrencyState(cur);
+        // Hydrate cached BTC price from disk so the fiat column renders
+        // on first paint — without this, every cold start shows an
+        // empty/zero fiat value for 1-3 s while the CoinGecko fetch
+        // round-trips. `fetchPrice` below overwrites with the fresh
+        // value once it arrives.
+        AsyncStorage.getItem(`${BTC_PRICE_CACHE_PREFIX}${cur}`)
+          .then((raw) => {
+            if (raw == null) return;
+            const n = Number(raw);
+            if (Number.isFinite(n) && n > 0) setBtcPrice(n);
+          })
+          .catch(() => {});
         fetchPrice(cur);
 
         // Check onboarding status (independent of wallet-list key —
@@ -332,14 +356,26 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         await initialiseSendThresholdForNewInstall();
 
         // Load and reconnect all wallets
+        perfLog('WalletProvider startup: getWalletList begin');
         const walletList = await walletStorage.getWalletList();
+        perfLog(`WalletProvider startup: getWalletList -> ${walletList.length} wallets`);
         const walletStates: WalletState[] = await Promise.all(
           walletList.map(async (w) => {
             // Load cached transactions from AsyncStorage
             let cachedTxs: WalletTransaction[] = [];
             try {
+              const tTxRead = Date.now();
               const txJson = await AsyncStorage.getItem(`txs_${w.id}`);
-              if (txJson) cachedTxs = JSON.parse(txJson);
+              perfLog(
+                `WalletProvider: txs_${w.id.slice(0, 8)} read ${Date.now() - tTxRead}ms (${txJson?.length ?? 0}B)`,
+              );
+              if (txJson) {
+                const tTxParse = Date.now();
+                cachedTxs = JSON.parse(txJson);
+                perfLog(
+                  `WalletProvider: txs_${w.id.slice(0, 8)} parse ${Date.now() - tTxParse}ms (${cachedTxs.length} txs)`,
+                );
+              }
             } catch (err) {
               console.warn(`Corrupted cached txs for ${w.id}, clearing:`, err);
               await AsyncStorage.removeItem(`txs_${w.id}`);
@@ -1050,6 +1086,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const resolveZapSendersForWallet = useCallback(
     async (walletId: string) => {
+      const __zapResolveStart = Date.now();
+      perfLog(`resolveZapSenders[${walletId.slice(0, 8)}]: start`);
       const userPubkey = nostrService.getCurrentUserPubkey();
       // Collect recipient pubkeys for the `#p` filter: the user's own Nostr
       // pubkey plus every lightning-address LNURL server's `nostrPubkey`.
@@ -1400,6 +1438,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         );
       }
       mergeResolverResults(walletId, resultsByIdx);
+      perfLog(
+        `resolveZapSenders[${walletId.slice(0, 8)}]: done ${Date.now() - __zapResolveStart}ms (merged ${resultsByIdx.size})`,
+      );
     },
     [resolveLud16ToNostrPubkey, mergeResolverResults],
   );

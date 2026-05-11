@@ -895,15 +895,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const loadContactsFromCache = useCallback(async (pk: string) => {
     try {
       const t0 = Date.now();
-      // One multiGet round-trip for all three caches. Contacts freshness
-      // is gated by CONTACTS_TIMESTAMP_KEY_BASE (the contact-list's own
-      // write time), not the profiles timestamp — they get separate keys
-      // so a successful contact refresh isn't blocked by an unrelated
-      // profiles cache entry. Per-account namespaced (#288).
+      perfLog('loadContactsFromCache: start');
       const contactsKey = perAccountKey(CONTACTS_CACHE_KEY_BASE, pk);
       const profilesKey = perAccountKey(PROFILES_CACHE_KEY_BASE, pk);
       const contactsTsKey = perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pk);
       const pairs = await AsyncStorage.multiGet([contactsKey, profilesKey, contactsTsKey]);
+      perfLog('loadContactsFromCache: multiGet returned');
       let contactsJson: string | null = null;
       let profilesJson: string | null = null;
       let contactsTsStr: string | null = null;
@@ -912,29 +909,36 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         else if (k === profilesKey) profilesJson = v;
         else if (k === contactsTsKey) contactsTsStr = v;
       }
+      perfLog(
+        `loadContactsFromCache: blob sizes contacts=${contactsJson?.length ?? 0}B profiles=${profilesJson?.length ?? 0}B`,
+      );
       if (contactsTsStr && Date.now() - parseInt(contactsTsStr, 10) > CACHE_MAX_AGE_MS) {
-        if (__DEV__) console.log('[Nostr] contacts cache expired, skipping');
+        perfLog('loadContactsFromCache: contacts cache expired, skipping');
         return false;
       }
       if (contactsJson) {
+        const tParse = Date.now();
         const cached: NostrContact[] = JSON.parse(contactsJson);
+        perfLog(`loadContactsFromCache: JSON.parse(contacts) ${Date.now() - tParse}ms`);
         if (profilesJson) {
+          const tProfilesParse = Date.now();
           const profileMap: Record<string, NostrProfile> = JSON.parse(profilesJson);
+          perfLog(`loadContactsFromCache: JSON.parse(profiles) ${Date.now() - tProfilesParse}ms`);
+          const tMerge = Date.now();
           const withProfiles = cached.map((c) => ({
             ...c,
             profile: profileMap[c.pubkey] ?? c.profile,
           }));
+          perfLog(
+            `loadContactsFromCache: merge ${withProfiles.length} contacts ${Date.now() - tMerge}ms`,
+          );
           startTransition(() => setContacts(withProfiles));
-          if (__DEV__)
-            console.log(
-              `[Nostr] loaded ${withProfiles.length} contacts from cache in ${Date.now() - t0}ms`,
-            );
+          perfLog(`loadContactsFromCache: setContacts dispatched (total ${Date.now() - t0}ms)`);
         } else {
           startTransition(() => setContacts(cached));
-          if (__DEV__)
-            console.log(
-              `[Nostr] loaded ${cached.length} contacts (no profiles) from cache in ${Date.now() - t0}ms`,
-            );
+          perfLog(
+            `loadContactsFromCache: setContacts (no profiles) dispatched (total ${Date.now() - t0}ms)`,
+          );
         }
         return true;
       }

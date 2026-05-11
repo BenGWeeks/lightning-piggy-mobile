@@ -1,6 +1,6 @@
 import { registerRootComponent } from 'expo';
 import { LogBox } from 'react-native';
-import { perfAnchor, perfLog } from './src/utils/perfLog';
+import { perfAnchor, perfLog, perfHeartbeatStart } from './src/utils/perfLog';
 
 // Anchor T0 at the FIRST line of JS execution (this module is the
 // app's entry point per registerRootComponent below). Every later
@@ -8,6 +8,9 @@ import { perfAnchor, perfLog } from './src/utils/perfLog';
 // `adb logcat | grep "[Perf]"` gives the entire cold-start timeline.
 perfAnchor();
 perfLog('index.ts module-eval');
+// Start the JS-thread heartbeat so cold-start freezes show up as
+// large `gap=Xms` values in the perf log, even when no user taps.
+perfHeartbeatStart();
 
 import App from './App';
 perfLog('App.tsx imported');

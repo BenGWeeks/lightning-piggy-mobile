@@ -38,3 +38,37 @@ export function perfLog(tag: string): void {
 export function perfAnchor(): void {
   if (T0 === null) T0 = Date.now();
 }
+
+// JS-thread heartbeat. A self-recurring `setTimeout(cb, 100)` that
+// logs `[Perf] heartbeat #N gap=Xms` every tick. If the JS thread is
+// blocked, the next tick fires LATE — `gap` reports the actual delay
+// between scheduled-fire and actual-fire. Any gap > ~150 ms is a
+// stutter; > 1 s is a freeze. Captures cold-start freezes (e.g.
+// resolveZapSenders) that single-tap perf tests miss because the
+// freeze window depends on when the user/test taps.
+//
+// Idempotent — calling twice is a no-op so multiple entry points
+// (index.ts + dev-only tooling) can both arm it without double-firing.
+let __heartbeatStarted = false;
+let __heartbeatCount = 0;
+let __heartbeatExpectedAt = 0;
+export function perfHeartbeatStart(intervalMs = 100): void {
+  if (!PERF_LOGS_ENABLED) return;
+  if (__heartbeatStarted) return;
+  __heartbeatStarted = true;
+  __heartbeatExpectedAt = Date.now() + intervalMs;
+  const tick = (): void => {
+    const now = Date.now();
+    const gap = now - __heartbeatExpectedAt;
+    __heartbeatCount += 1;
+    // Only log significant gaps + every 50th heartbeat (so the
+    // logcat doesn't drown). 50 × 100 ms = 5 s of "alive" markers
+    // when the thread is healthy.
+    if (gap > 50 || __heartbeatCount % 50 === 0) {
+      perfLog(`heartbeat #${__heartbeatCount} gap=${gap}ms`);
+    }
+    __heartbeatExpectedAt = now + intervalMs;
+    setTimeout(tick, intervalMs);
+  };
+  setTimeout(tick, intervalMs);
+}
