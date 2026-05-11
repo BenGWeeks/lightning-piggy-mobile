@@ -45,6 +45,13 @@ export const DEFAULT_SEED_PUBKEYS: readonly string[] = [
   // for events — "platform-curated baseline that you can mute".
   // nostr:npub1enkml7dx7fsm8zq83dczyh06g9r7l2447p32wu32p5jn7qmqclns65f4st
   'ccedbff9a6f261b388078b70225dfa4147efaab5f062a7722a0d253f0360c7e7',
+  // OrangePillApp — the dominant Bitcoin-meetup publisher on Nostr in
+  // 2026, ~150+ kind-31923 events tagged #OrangePillApp (verified via
+  // global relay scan). Adding them as a seed means a fresh LP install
+  // sees real upcoming Bitcoin meetups worldwide without the user
+  // having to find and follow them first.
+  // nostr:npub1e99uyeswta8ymv4wcfemfhgxd8gy7kzzkrkey07cat0c4vnaexsqdr078k
+  'c94bc2660e5f4e4db2aec273b4dd0669d04f5842b0ed923fd8eadf8ab27dc9a0',
 ];
 
 /**
