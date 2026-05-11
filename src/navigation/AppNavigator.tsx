@@ -19,6 +19,8 @@ import MessagesScreen from '../screens/MessagesScreen';
 import ExploreHomeScreen from '../screens/ExploreHomeScreen';
 import LessonsScreen from '../screens/LessonsScreen';
 import MapScreen from '../screens/MapScreen';
+import PlacesScreen from '../screens/PlacesScreen';
+import PlaceDetailScreen from '../screens/PlaceDetailScreen';
 import HuntScreen from '../screens/HuntScreen';
 import HuntCreateScreen from '../screens/HuntCreateScreen';
 import HuntFoundScreen from '../screens/HuntFoundScreen';
@@ -76,6 +78,8 @@ function ExploreStackNavigator() {
       <ExploreStack.Screen name="CourseDetail" component={CourseDetailScreen} />
       <ExploreStack.Screen name="MissionDetail" component={MissionDetailScreen} />
       <ExploreStack.Screen name="Map" component={MapScreen} />
+      <ExploreStack.Screen name="Places" component={PlacesScreen} />
+      <ExploreStack.Screen name="PlaceDetail" component={PlaceDetailScreen} />
       <ExploreStack.Screen name="Hunt" component={HuntScreen} />
       <ExploreStack.Screen name="HuntCreate" component={HuntCreateScreen} />
       <ExploreStack.Screen name="HuntFound" component={HuntFoundScreen} />

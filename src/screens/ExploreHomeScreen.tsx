@@ -327,7 +327,9 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           caption="Bitcoin-accepting merchants from BTC Map"
           items={sortedMerchants}
           loading={merchantsLoading && sortedMerchants.length === 0 && !!pos}
-          onSeeAll={() => navigation.navigate('Map')}
+          // "See all" lands on the Places list (with map button in
+          // its header); the dedicated Map view is one tap away.
+          onSeeAll={() => navigation.navigate('Places')}
           seeAllTestId="explore-card-map"
           keyExtractor={(p) => String(p.place.id)}
           emptyState={
@@ -341,7 +343,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
             <PlaceCard
               place={place}
               distance={distance}
-              onPress={() => navigation.navigate('Map')}
+              onPress={() => navigation.navigate('PlaceDetail', { placeId: place.id })}
               colors={colors}
               styles={localStyles}
             />

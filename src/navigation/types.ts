@@ -59,6 +59,8 @@ export type ExploreStackParamList = {
   CourseDetail: { courseId: string };
   MissionDetail: { courseId: string; missionId: string };
   Map: undefined;
+  Places: undefined;
+  PlaceDetail: { placeId: number };
   Hunt: undefined;
   HuntCreate: undefined;
   HuntFound: { lnurl: string };
