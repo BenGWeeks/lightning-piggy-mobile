@@ -1,11 +1,18 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import * as Location from 'expo-location';
 import { useFocusEffect } from '@react-navigation/native';
 import { ChevronLeft, ChevronRight, Compass, PiggyBank, Plus } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTrustGraph } from '../contexts/TrustGraphContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
 import { HiddenPiggy, loadPiggies } from '../services/piggyStorageService';
+import { ExploreMiniMap } from '../components/ExploreMiniMap';
+import { type ParsedCache } from '../services/nostrPlacesService';
+import { subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
+import { encodeGeohash, geohashPrefixes } from '../utils/geohash';
+import { getDevPinnedLocation } from '../utils/devLocation';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -27,12 +34,69 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [piggies, setPiggies] = useState<HiddenPiggy[]>([]);
+  // User position drives the mini-map at the top of the page.
+  const [pos, setPos] = useState<{ lat: number; lon: number } | null>(null);
+  // Nearby caches feed the mini-map's pin layer. Subscription is
+  // identical to the hub's so the two views stay coherent.
+  const [caches, setCaches] = useState<Map<string, ParsedCache>>(new Map());
+
+  // Web-of-trust filter applied to mini-map pins so an Evil-Pig lure
+  // doesn't show up on the Hunt page either. See `trustGraphService`.
+  const { isTrusted, filterEnabled } = useTrustGraph();
+  const isTrustedRef = useRef(isTrusted);
+  useEffect(() => {
+    isTrustedRef.current = isTrusted;
+  }, [isTrusted]);
 
   useFocusEffect(
     useCallback(() => {
       loadPiggies().then(setPiggies);
     }, []),
   );
+
+  // Resolve location once on mount (with the same dev-fallback every
+  // other location-aware screen uses).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const pinned = getDevPinnedLocation();
+      if (pinned) {
+        if (!cancelled) setPos(pinned);
+        return;
+      }
+      try {
+        const perm = await Location.requestForegroundPermissionsAsync();
+        if (perm.status !== 'granted') return;
+        const fix = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        if (!cancelled) setPos({ lat: fix.coords.latitude, lon: fix.coords.longitude });
+      } catch {
+        /* mini-map renders its own "Locating you…" fallback */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Cache subscription — only kicks off once we have a fix.
+  useEffect(() => {
+    if (!pos) return;
+    const myGeohash = encodeGeohash(pos.lat, pos.lon, 7);
+    const prefixes = geohashPrefixes(myGeohash, 5).filter((p) => p.length === 5);
+    const closer = subscribeNearbyCaches(prefixes, (c) => {
+      if (filterEnabled && !isTrustedRef.current(c.hiderPubkey)) return;
+      setCaches((prev) => {
+        const existing = prev.get(c.coord);
+        if (existing && existing.createdAt >= c.createdAt) return prev;
+        const next = new Map(prev);
+        next.set(c.coord, c);
+        return next;
+      });
+    });
+    return () => closer();
+  }, [pos, filterEnabled]);
 
   return (
     <View style={styles.container} testID="hunt-screen">
@@ -50,36 +114,54 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
       </View>
 
       <ScrollView contentContainerStyle={styles.body}>
-        <TouchableOpacity
-          style={styles.createCard}
-          onPress={() => navigation.navigate('HuntCreate')}
-          testID="hunt-create-piggy-button"
-          accessibilityLabel="Hide a Piggy"
-        >
-          <View style={styles.createIconWrapper}>
-            <Plus size={28} color={colors.white} strokeWidth={2.5} />
-          </View>
-          <View style={styles.createTextWrapper}>
-            <Text style={styles.createTitle}>Hide a Piggy</Text>
-            <Text style={styles.createSubtitle}>
-              Stash an LNURL-withdraw link on an NFC tag or QR for someone to find.
-            </Text>
-          </View>
-        </TouchableOpacity>
+        {/* Mini-map at the top mirrors the Explore hub so the user can
+            see which Piglets are around without flipping screens. We
+            pass empty merchants/events arrays — Hunt is cache-only. */}
+        <ExploreMiniMap
+          lat={pos?.lat ?? null}
+          lon={pos?.lon ?? null}
+          merchants={[]}
+          caches={[...caches.values()]}
+          events={[]}
+          onTapMap={() => navigation.navigate('Map')}
+        />
 
+        {/* Discover is the primary CTA now — most users will find, not
+            hide. The big pink card was previously "Hide a Piggy". */}
         <TouchableOpacity
-          style={styles.discoverCard}
+          style={styles.discoverPrimary}
           onPress={() => navigation.navigate('HuntDiscover')}
           testID="hunt-discover-button"
           accessibilityLabel="Discover nearby Piggies"
         >
-          <View style={styles.discoverIconWrapper}>
-            <Compass size={26} color={colors.brandPink} strokeWidth={2} />
+          <View style={styles.discoverPrimaryIconWrap}>
+            <Compass size={28} color={colors.white} strokeWidth={2.5} />
           </View>
           <View style={styles.createTextWrapper}>
-            <Text style={styles.discoverTitle}>Discover nearby</Text>
+            <Text style={styles.createTitle}>Discover nearby</Text>
+            <Text style={styles.createSubtitle}>
+              Find Piglets + classic NIP-GC caches around you.
+            </Text>
+          </View>
+          <ChevronRight size={20} color={colors.white} />
+        </TouchableOpacity>
+
+        {/* Hide a Piggy demoted to a secondary outlined card. Most
+            users won't hide — the affordance is still here for those
+            who do, just visually quieter. */}
+        <TouchableOpacity
+          style={styles.createSecondary}
+          onPress={() => navigation.navigate('HuntCreate')}
+          testID="hunt-create-piggy-button"
+          accessibilityLabel="Hide a Piggy"
+        >
+          <View style={styles.createSecondaryIconWrap}>
+            <Plus size={22} color={colors.brandPink} strokeWidth={2.5} />
+          </View>
+          <View style={styles.createTextWrapper}>
+            <Text style={styles.discoverTitle}>Hide a Piglet</Text>
             <Text style={styles.discoverSubtitle}>
-              Find Piggies + traditional caches around you (NIP-GC).
+              Stash an LNURL-withdraw link on an NFC tag or QR for someone else to find.
             </Text>
           </View>
           <ChevronRight size={18} color={colors.textSupplementary} />
@@ -170,6 +252,40 @@ const createStyles = (colors: Palette) =>
       height: 48,
       borderRadius: 24,
       backgroundColor: 'rgba(255,255,255,0.25)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    discoverPrimary: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+      backgroundColor: colors.brandPink,
+      borderRadius: 12,
+      padding: 16,
+    },
+    discoverPrimaryIconWrap: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor: 'rgba(255,255,255,0.25)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    createSecondary: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: colors.brandPinkLight,
+    },
+    createSecondaryIconWrap: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: colors.brandPinkLight,
       alignItems: 'center',
       justifyContent: 'center',
     },
