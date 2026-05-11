@@ -282,7 +282,14 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
                   contentFit="cover"
                 />
               ) : (
-                <TransactionTypeIcon category={getTxCategory(item)} size={AVATAR_SIZE} />
+                <TransactionTypeIcon
+                  category={getTxCategory(item)}
+                  size={AVATAR_SIZE}
+                  // TODO(#519): wire to swapRecoveryService — show the badge
+                  // when this tx's swap is `claimable` (LN paid + lockup
+                  // confirmed but on-chain claim not yet broadcast). The
+                  // visual is in place; the data hookup is the follow-up.
+                />
               )}
             </View>
 
