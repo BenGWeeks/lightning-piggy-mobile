@@ -502,10 +502,24 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 console.warn(`Corrupted cached txs for ${w.id}, clearing:`, err);
                 await AsyncStorage.removeItem(`txs_${w.id}`);
               }
+              // Hydrate cached balance from disk (matches the startup-
+              // hydration path). Identity-switch is treated identically:
+              // never run BDK init eagerly. Fresh balance comes lazily on
+              // refresh / wallet-detail open.
+              let cachedBalance: number | null = null;
+              try {
+                const bRaw = await AsyncStorage.getItem(`balance_${w.id}`);
+                if (bRaw) {
+                  const n = Number(bRaw);
+                  if (Number.isFinite(n)) cachedBalance = n;
+                }
+              } catch {
+                // Ignore corrupted cache.
+              }
               return {
                 ...w,
                 isConnected: false,
-                balance: null,
+                balance: cachedBalance,
                 walletAlias: null,
                 transactions: cachedTxs,
               };
@@ -515,19 +529,15 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           setWallets(walletStates);
           if (walletStates.length > 0) setActiveWalletId(walletStates[0].id);
           // Kick off NWC connects in parallel; same fire-and-forget
-          // pattern as the startup hydration so the UI doesn't block.
+          // pattern as the startup hydration. Onchain wallets are NOT
+          // fetched eagerly (BDK init costs ~9 s of JS-thread time on
+          // a real fixture) — they hydrate from `balance_<id>` cache
+          // above and refresh lazily on user action.
           void Promise.all(
             walletList.map(async (wallet) => {
               if (cancelled) return;
               try {
                 if (wallet.walletType === 'onchain') {
-                  const bal = await onchainService.getBalance(wallet.id);
-                  if (cancelled) return;
-                  setWallets((prev) =>
-                    prev.map((w) =>
-                      w.id === wallet.id ? { ...w, isConnected: false, balance: bal } : w,
-                    ),
-                  );
                   return;
                 }
                 const nwcUrl = await walletStorage.getNwcUrl(wallet.id);

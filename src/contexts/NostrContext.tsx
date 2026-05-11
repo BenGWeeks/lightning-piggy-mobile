@@ -690,6 +690,13 @@ interface NostrContextType {
    */
   refreshDmInbox: (opts?: RefreshDmInboxOptions) => Promise<void>;
   /**
+   * Arm the live NIP-17 DM subscription. Idempotent. Call from any
+   * DM-receiving screen (Messages tab, ConversationScreen) via
+   * useFocusEffect — first call opens the sub, subsequent are no-ops.
+   * Cold-boot does NOT arm the sub by itself, so Home stays responsive.
+   */
+  armLiveDmSub: () => void;
+  /**
    * Tri-state for the NIP-17 silent-decrypt fast path.
    *  - 'unknown': haven't tried yet in this session
    *  - 'granted': a decrypt succeeded silently → cache the plaintext, no dialogs
@@ -735,6 +742,15 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [pubkey, setPubkey] = useState<string | null>(null);
   const [dmInbox, setDmInbox] = useState<DmInboxEntry[]>([]);
   const [dmInboxLoading, setDmInboxLoading] = useState(false);
+  // Gates the live NIP-17 DM sub useEffect below. False on cold boot
+  // so we don't burn JS-thread cycles unwrapping wraps the user can't
+  // see yet (they're on Home, the Messages tab isn't mounted). Flipped
+  // to true the first time Messages / Conversation / any DM-receiving
+  // surface focuses via `armLiveDmSub()`. Once armed it stays armed for
+  // the rest of the session. Cold-start Home stays responsive because
+  // the per-wrap unwrap/route work moves to after the user has
+  // explicitly chosen to look at messages.
+  const [liveSubArmed, setLiveSubArmed] = useState(false);
   const [amberNip44Permission, setAmberNip44Permission] = useState<
     'unknown' | 'granted' | 'denied'
   >('unknown');
@@ -3183,6 +3199,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     followPubkeysRef.current = followPubkeys;
   }, [followPubkeys]);
 
+  // Idempotent — any DM-surface (Messages tab, ConversationScreen)
+  // calls this on focus. The first call flips `liveSubArmed`, the
+  // gated useEffect below re-runs and opens the live NIP-17 sub.
+  // Subsequent calls are no-ops (React bails on identical setState).
+  const armLiveDmSub = useCallback(() => {
+    setLiveSubArmed(true);
+  }, []);
+
   // In-memory dedup Set that survives live-DM-sub re-opens. The sub
   // useEffect below re-runs when getReadRelays changes — e.g. when the
   // relay-list refresh adds a new relay 9 s into cold start. Without
@@ -3238,6 +3262,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // single-flight guard in `refreshDmInbox` serialises on its side.
   useEffect(() => {
     if (!isLoggedIn || !pubkey || !signerType) return;
+    // Wait until a DM-surface (Messages tab, ConversationScreen) has
+    // focused at least once before opening the live sub. On cold boot
+    // the user is on Home, so we skip ~5 s of per-wrap unwrap/route/
+    // dedup JS-thread work. First Messages focus flips `liveSubArmed`,
+    // this effect re-runs, sub opens, drain happens then — when the
+    // user is explicitly looking at messages and a brief loading
+    // state is expected.
+    if (!liveSubArmed) return;
     const viewerPubkey = pubkey;
     const activeSigner = signerType;
     const readRelays = getReadRelays();
@@ -3681,7 +3713,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       flushPendingInbox();
       if (unsubscribe) unsubscribe();
     };
-  }, [isLoggedIn, pubkey, signerType, getReadRelays]);
+  }, [isLoggedIn, pubkey, signerType, getReadRelays, liveSubArmed]);
 
   const signEvent = useCallback(
     async (event: {
@@ -3746,6 +3778,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       dmInbox,
       dmInboxLoading,
       refreshDmInbox,
+      armLiveDmSub,
       amberNip44Permission,
       signEvent,
     }),
@@ -3779,6 +3812,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       dmInbox,
       dmInboxLoading,
       refreshDmInbox,
+      armLiveDmSub,
       amberNip44Permission,
       signEvent,
     ],
