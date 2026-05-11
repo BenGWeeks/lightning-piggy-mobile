@@ -14,7 +14,13 @@ import { CalendarDays, ChevronLeft, MapPinned, RefreshCw } from 'lucide-react-na
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
-import { encodeGeohash, geohashPrefixes } from '../utils/geohash';
+import {
+  decodeGeohash,
+  encodeGeohash,
+  formatDistance,
+  geohashPrefixes,
+  haversineMetres,
+} from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { type ParsedEvent } from '../services/nostrPlacesService';
@@ -42,6 +48,10 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
   const [error, setError] = useState<string | null>(null);
   const [expandedCoord, setExpandedCoord] = useState<string | null>(null);
   const [untrustedHidden, setUntrustedHidden] = useState(0);
+  // User position is captured so each row can compute "X away" via
+  // haversine + the list sort prefers proximity (with start-time as
+  // tiebreaker for events at the same geohash).
+  const [pos, setPos] = useState<{ lat: number; lon: number } | null>(null);
   const closerRef = useRef<(() => void) | null>(null);
 
   const { isTrusted, filterEnabled } = useTrustGraph();
@@ -72,12 +82,13 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
           setLoading(false);
           return;
         }
-        const pos = await Location.getCurrentPositionAsync({
+        const liveFix = await Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
         });
-        lat = pos.coords.latitude;
-        lon = pos.coords.longitude;
+        lat = liveFix.coords.latitude;
+        lon = liveFix.coords.longitude;
       }
+      setPos({ lat, lon });
       const myGh = encodeGeohash(lat, lon, 7);
       // Precision 3 (~150 km neighbourhood) — Bitcoin meetups cluster
       // in cities; rural users would otherwise see an empty feed.
@@ -119,15 +130,27 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const sortedEvents = useMemo(
-    () =>
-      [...events.values()].sort((a, b) => {
-        const sa = a.startsAt ?? Number.MAX_SAFE_INTEGER;
-        const sb = b.startsAt ?? Number.MAX_SAFE_INTEGER;
-        return sa - sb;
-      }),
-    [events],
-  );
+  const sortedEvents = useMemo(() => {
+    // Primary sort key: distance from user (nearest first). Falls
+    // back to start time for events lacking a geohash. Each row
+    // carries its precomputed distance so the badge text doesn't
+    // re-haversine on every paint.
+    const items = [...events.values()].map((event) => {
+      const center = event.geohash ? decodeGeohash(event.geohash) : null;
+      const distance =
+        pos && center
+          ? haversineMetres({ lat: pos.lat, lon: pos.lon }, { lat: center.lat, lon: center.lng })
+          : Number.POSITIVE_INFINITY;
+      return { event, distance };
+    });
+    items.sort((a, b) => {
+      if (a.distance !== b.distance) return a.distance - b.distance;
+      const sa = a.event.startsAt ?? Number.MAX_SAFE_INTEGER;
+      const sb = b.event.startsAt ?? Number.MAX_SAFE_INTEGER;
+      return sa - sb;
+    });
+    return items;
+  }, [events, pos]);
 
   const openInMaps = useCallback((event: ParsedEvent) => {
     const q = event.location ?? (event.geohash ? event.geohash : event.title);
@@ -191,16 +214,17 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
           ) : null}
           <FlatList
             data={sortedEvents}
-            keyExtractor={(e) => e.coord}
+            keyExtractor={({ event }) => event.coord}
             contentContainerStyle={styles.listContent}
             renderItem={({ item }) => (
               <EventRow
-                event={item}
-                expanded={expandedCoord === item.coord}
+                event={item.event}
+                distance={item.distance}
+                expanded={expandedCoord === item.event.coord}
                 onToggle={() =>
-                  setExpandedCoord((prev) => (prev === item.coord ? null : item.coord))
+                  setExpandedCoord((prev) => (prev === item.event.coord ? null : item.event.coord))
                 }
-                onOpenInMaps={() => openInMaps(item)}
+                onOpenInMaps={() => openInMaps(item.event)}
                 colors={colors}
                 styles={styles}
               />
@@ -235,12 +259,13 @@ const dayLabel = (ts: number | null): { day: string; month: string } => {
 
 const EventRow: React.FC<{
   event: ParsedEvent;
+  distance: number;
   expanded: boolean;
   onToggle: () => void;
   onOpenInMaps: () => void;
   colors: Palette;
   styles: ReturnType<typeof createStyles>;
-}> = ({ event, expanded, onToggle, onOpenInMaps, colors, styles }) => {
+}> = ({ event, distance, expanded, onToggle, onOpenInMaps, colors, styles }) => {
   const { day, month } = dayLabel(event.startsAt);
   return (
     <TouchableOpacity
@@ -259,6 +284,7 @@ const EventRow: React.FC<{
         </Text>
         <Text style={styles.rowMeta} numberOfLines={1}>
           {formatDate(event.startsAt)}
+          {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
           {event.location ? ` · ${event.location}` : ''}
         </Text>
         {expanded ? (

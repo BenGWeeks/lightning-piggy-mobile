@@ -6,10 +6,7 @@
  * Discover queries widen via prefix using `geohashPrefixes`.
  *
  * Algorithm + base-32 alphabet from Niemeyer's original spec
- * (en.wikipedia.org/wiki/Geohash). No deps. The MapScreen / mini-map
- * decoder is duplicated inline rather than exported here because both
- * call sites want zero-overhead use; if a third reader appears we'll
- * extract a shared `decodeGeohash`.
+ * (en.wikipedia.org/wiki/Geohash). No deps.
  */
 
 const BASE32 = '0123456789bcdefghjkmnpqrstuvwxyz';
@@ -66,4 +63,73 @@ export const geohashPrefixes = (gh: string, minLen = 3): string[] => {
   const out: string[] = [];
   for (let i = gh.length; i >= minLen; i -= 1) out.push(gh.slice(0, i));
   return out;
+};
+
+/**
+ * Decode a geohash to its centroid `{lat, lng}`. Inverse of
+ * `encodeGeohash`. Returns the geometric centre of the cell, not a
+ * corner — that's what the consumers (map pins, distance sort) want.
+ */
+export const decodeGeohash = (gh: string): { lat: number; lng: number } => {
+  let latLo = -90;
+  let latHi = 90;
+  let lonLo = -180;
+  let lonHi = 180;
+  let evenBit = true;
+  for (let i = 0; i < gh.length; i += 1) {
+    const idx = BASE32.indexOf(gh[i].toLowerCase());
+    if (idx < 0) continue;
+    for (let bit = 4; bit >= 0; bit -= 1) {
+      const set = (idx >> bit) & 1;
+      if (evenBit) {
+        const mid = (lonLo + lonHi) / 2;
+        if (set) lonLo = mid;
+        else lonHi = mid;
+      } else {
+        const mid = (latLo + latHi) / 2;
+        if (set) latLo = mid;
+        else latHi = mid;
+      }
+      evenBit = !evenBit;
+    }
+  }
+  return { lat: (latLo + latHi) / 2, lng: (lonLo + lonHi) / 2 };
+};
+
+/**
+ * Great-circle distance in metres between two (lat, lon) points,
+ * via the haversine formula. We use this to sort the Hub / Discover
+ * / Events rails by proximity to the user. Accuracy is plenty for
+ * "X km away" copy — within 0.5 % on city-scale distances.
+ */
+export const haversineMetres = (
+  a: { lat: number; lon: number },
+  b: { lat: number; lon: number },
+): number => {
+  const R = 6_371_000; // mean Earth radius in metres
+  const toRad = (deg: number): number => (deg * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLon = toRad(b.lon - a.lon);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const sa = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(sa)));
+};
+
+/**
+ * Human-readable distance string. Used as the "X away" badge on
+ * Hub / Discover / Events rows.
+ *   < 950 m  → "210 m" (rounded to nearest 10 m)
+ *   < 10 km  → "3.2 km"
+ *   ≥ 10 km  → "42 km"
+ */
+export const formatDistance = (metres: number): string => {
+  if (!Number.isFinite(metres) || metres < 0) return '';
+  if (metres < 950) {
+    const rounded = Math.round(metres / 10) * 10;
+    return `${rounded} m`;
+  }
+  const km = metres / 1000;
+  if (km < 10) return `${km.toFixed(1)} km`;
+  return `${Math.round(km)} km`;
 };

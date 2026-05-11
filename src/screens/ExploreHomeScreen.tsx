@@ -21,7 +21,13 @@ import {
 } from '../services/btcMapService';
 import { type ParsedCache, type ParsedEvent } from '../services/nostrPlacesService';
 import { subscribeNearbyCaches, subscribeNearbyEvents } from '../services/nostrPlacesPublisher';
-import { encodeGeohash, geohashPrefixes } from '../utils/geohash';
+import {
+  decodeGeohash,
+  encodeGeohash,
+  formatDistance,
+  geohashPrefixes,
+  haversineMetres,
+} from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
@@ -227,40 +233,51 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   );
 
   // ----- derived rail data ------------------------------------------------
+  //
+  // Every rail is sorted by haversine distance from the user so the
+  // nearest row sits leftmost. Items without a usable location land
+  // at the end. We tag each entry with a `distance` number so the
+  // card variants can render an "X km" badge without recomputing.
 
-  const sortedMerchants = useMemo(
-    () =>
-      // Every node Overpass returns matched at least one of our
-      // Bitcoin-accepting selectors (payment:bitcoin / currency:XBT /
-      // payment:lightning), so the rail trusts the upstream filter
-      // rather than re-checking tag combinations and dropping rows.
-      [...merchants]
-        .sort((a, b) => {
-          if (acceptsLightning(a) === acceptsLightning(b)) return 0;
-          return acceptsLightning(a) ? -1 : 1;
-        })
-        .slice(0, 12),
-    [merchants],
-  );
+  const sortedMerchants = useMemo(() => {
+    if (!pos) return [] as { place: BtcMapPlace; distance: number }[];
+    return merchants
+      .map((place) => ({
+        place,
+        distance: haversineMetres(
+          { lat: pos.lat, lon: pos.lon },
+          { lat: place.lat, lon: place.lon },
+        ),
+      }))
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, 12);
+  }, [merchants, pos]);
 
-  const sortedCaches = useMemo(
-    () =>
-      [...caches.values()]
-        .sort((a, b) => {
-          if (a.isLpPiggy !== b.isLpPiggy) return a.isLpPiggy ? -1 : 1;
-          return b.createdAt - a.createdAt;
-        })
-        .slice(0, 12),
-    [caches],
-  );
+  const sortedCaches = useMemo(() => {
+    const items = [...caches.values()].map((cache) => {
+      const center = cache.geohash ? decodeGeohash(cache.geohash) : null;
+      const distance =
+        pos && center
+          ? haversineMetres({ lat: pos.lat, lon: pos.lon }, { lat: center.lat, lon: center.lng })
+          : Number.POSITIVE_INFINITY;
+      return { cache, distance };
+    });
+    items.sort((a, b) => a.distance - b.distance);
+    return items.slice(0, 12);
+  }, [caches, pos]);
 
-  const sortedEvents = useMemo(
-    () =>
-      [...events.values()]
-        .sort((a, b) => (a.startsAt ?? Infinity) - (b.startsAt ?? Infinity))
-        .slice(0, 12),
-    [events],
-  );
+  const sortedEvents = useMemo(() => {
+    const items = [...events.values()].map((event) => {
+      const center = event.geohash ? decodeGeohash(event.geohash) : null;
+      const distance =
+        pos && center
+          ? haversineMetres({ lat: pos.lat, lon: pos.lon }, { lat: center.lat, lon: center.lng })
+          : Number.POSITIVE_INFINITY;
+      return { event, distance };
+    });
+    items.sort((a, b) => a.distance - b.distance);
+    return items.slice(0, 12);
+  }, [events, pos]);
 
   return (
     <View style={styles.container}>
@@ -305,14 +322,14 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           />
         )}
 
-        <ContentRail<BtcMapPlace>
+        <ContentRail<{ place: BtcMapPlace; distance: number }>
           title="Places near you"
           caption="Bitcoin-accepting merchants from BTC Map"
           items={sortedMerchants}
           loading={merchantsLoading && sortedMerchants.length === 0 && !!pos}
           onSeeAll={() => navigation.navigate('Map')}
           seeAllTestId="explore-card-map"
-          keyExtractor={(p) => String(p.id)}
+          keyExtractor={(p) => String(p.place.id)}
           emptyState={
             <Text style={localStyles.emptyText}>
               {pos
@@ -320,9 +337,10 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
                 : 'Grant location to discover Bitcoin-accepting shops near you.'}
             </Text>
           }
-          renderItem={(place) => (
+          renderItem={({ place, distance }) => (
             <PlaceCard
               place={place}
+              distance={distance}
               onPress={() => navigation.navigate('Map')}
               colors={colors}
               styles={localStyles}
@@ -330,7 +348,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           )}
         />
 
-        <ContentRail<ParsedCache>
+        <ContentRail<{ cache: ParsedCache; distance: number }>
           title="Geo-caches near you"
           caption={
             untrustedCacheCount > 0
@@ -344,15 +362,16 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           // few hide).
           onSeeAll={() => navigation.navigate('HuntDiscover')}
           seeAllTestId="explore-card-hunt"
-          keyExtractor={(c) => c.coord}
+          keyExtractor={(c) => c.cache.coord}
           emptyState={
             <Text style={localStyles.emptyText}>
               No caches in your area yet. Tap See all → Hide a Piggy to be the first.
             </Text>
           }
-          renderItem={(cache) => (
+          renderItem={({ cache, distance }) => (
             <CacheCard
               cache={cache}
+              distance={distance}
               onPress={() => navigation.navigate('HuntPiggyDetail', { coord: cache.coord })}
               colors={colors}
               styles={localStyles}
@@ -360,7 +379,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           )}
         />
 
-        <ContentRail<ParsedEvent>
+        <ContentRail<{ event: ParsedEvent; distance: number }>
           title="Events near you"
           caption={
             untrustedEventCount > 0
@@ -371,15 +390,16 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           loading={!!pos && events.size === 0 && false}
           onSeeAll={() => navigation.navigate('Events')}
           seeAllTestId="explore-card-events"
-          keyExtractor={(e) => e.coord}
+          keyExtractor={(e) => e.event.coord}
           emptyState={
             <Text style={localStyles.emptyText}>
               No upcoming meetups in your area on the NIP-52 feed right now.
             </Text>
           }
-          renderItem={(event) => (
+          renderItem={({ event, distance }) => (
             <EventCard
               event={event}
+              distance={distance}
               onPress={() => navigation.navigate('Events')}
               colors={colors}
               styles={localStyles}
@@ -415,10 +435,11 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
 const PlaceCard: React.FC<{
   place: BtcMapPlace;
+  distance: number;
   onPress: () => void;
   colors: Palette;
   styles: ReturnType<typeof createLocalStyles>;
-}> = ({ place, onPress, colors, styles }) => {
+}> = ({ place, distance, onPress, colors, styles }) => {
   const lightning = acceptsLightning(place);
   const lud16 = lightningAddressOf(place);
   return (
@@ -437,6 +458,7 @@ const PlaceCard: React.FC<{
       </Text>
       <Text style={styles.cardSub} numberOfLines={1}>
         {lightning ? '⚡ Lightning' : 'On-chain'}
+        {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
       </Text>
       <Text style={styles.cardSubSmall} numberOfLines={1}>
         {lud16 ?? formatAddress(place)}
@@ -447,10 +469,11 @@ const PlaceCard: React.FC<{
 
 const CacheCard: React.FC<{
   cache: ParsedCache;
+  distance: number;
   onPress: () => void;
   colors: Palette;
   styles: ReturnType<typeof createLocalStyles>;
-}> = ({ cache, onPress, colors, styles }) => (
+}> = ({ cache, distance, onPress, colors, styles }) => (
   <TouchableOpacity style={styles.card} onPress={onPress} testID={`cache-card-${cache.d}`}>
     {cache.imageUrl ? (
       <Image source={{ uri: cache.imageUrl }} style={styles.cardThumb} resizeMode="cover" />
@@ -478,6 +501,7 @@ const CacheCard: React.FC<{
     </Text>
     <Text style={styles.cardSub} numberOfLines={1}>
       {cache.isLpPiggy ? 'Piglet' : 'NIP-GC cache'}
+      {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
     </Text>
     <Text style={styles.cardSubSmall} numberOfLines={1}>
       {cache.cacheType ?? 'traditional'} · {cache.size ?? 'micro'}
@@ -487,10 +511,11 @@ const CacheCard: React.FC<{
 
 const EventCard: React.FC<{
   event: ParsedEvent;
+  distance: number;
   onPress: () => void;
   colors: Palette;
   styles: ReturnType<typeof createLocalStyles>;
-}> = ({ event, onPress, colors, styles }) => {
+}> = ({ event, distance, onPress, colors, styles }) => {
   const day = event.startsAt
     ? new Date(event.startsAt * 1000).toLocaleString(undefined, {
         weekday: 'short',
@@ -512,6 +537,7 @@ const EventCard: React.FC<{
       </Text>
       <Text style={styles.cardSub} numberOfLines={1}>
         {day}
+        {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
       </Text>
       {event.location ? (
         <Text style={styles.cardSubSmall} numberOfLines={1}>

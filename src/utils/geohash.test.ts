@@ -1,4 +1,10 @@
-import { encodeGeohash, geohashPrefixes } from './geohash';
+import {
+  decodeGeohash,
+  encodeGeohash,
+  formatDistance,
+  geohashPrefixes,
+  haversineMetres,
+} from './geohash';
 
 describe('encodeGeohash', () => {
   // Spot-check a few well-known coordinates against published geohash values
@@ -37,5 +43,53 @@ describe('geohashPrefixes', () => {
 
   it('returns just the input when length equals minLen', () => {
     expect(geohashPrefixes('u121', 4)).toEqual(['u121']);
+  });
+});
+
+describe('decodeGeohash', () => {
+  it('round-trips a precision-7 encode within half a cell', () => {
+    const lat = 52.205;
+    const lon = 0.121;
+    const { lat: decLat, lng: decLng } = decodeGeohash(encodeGeohash(lat, lon, 7));
+    expect(Math.abs(decLat - lat)).toBeLessThan(0.001);
+    expect(Math.abs(decLng - lon)).toBeLessThan(0.001);
+  });
+});
+
+describe('haversineMetres', () => {
+  it('is zero for identical points', () => {
+    expect(haversineMetres({ lat: 51.5, lon: -0.1 }, { lat: 51.5, lon: -0.1 })).toBe(0);
+  });
+
+  it('matches a known reference (London → Cambridge ≈ 80 km)', () => {
+    const d = haversineMetres({ lat: 51.5074, lon: -0.1278 }, { lat: 52.2053, lon: 0.1218 });
+    expect(d).toBeGreaterThan(79_000);
+    expect(d).toBeLessThan(81_000);
+  });
+
+  it('is symmetric', () => {
+    const a = { lat: 51.5, lon: -0.1 };
+    const b = { lat: 52.0, lon: 0.5 };
+    expect(haversineMetres(a, b)).toBeCloseTo(haversineMetres(b, a), 6);
+  });
+});
+
+describe('formatDistance', () => {
+  it('rounds sub-1 km values to the nearest 10 m', () => {
+    expect(formatDistance(217)).toBe('220 m');
+    expect(formatDistance(12)).toBe('10 m');
+  });
+
+  it('uses 1 decimal place between 1 km and 10 km', () => {
+    expect(formatDistance(3210)).toBe('3.2 km');
+  });
+
+  it('uses whole km above 10 km', () => {
+    expect(formatDistance(42_500)).toBe('43 km');
+  });
+
+  it('returns empty string for non-finite or negative input', () => {
+    expect(formatDistance(NaN)).toBe('');
+    expect(formatDistance(-1)).toBe('');
   });
 });

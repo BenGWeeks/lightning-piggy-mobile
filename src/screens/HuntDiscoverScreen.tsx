@@ -13,7 +13,13 @@ import { ChevronLeft, ChevronRight, MapPin, PiggyBank, RefreshCw } from 'lucide-
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
-import { encodeGeohash, geohashPrefixes } from '../utils/geohash';
+import {
+  decodeGeohash,
+  encodeGeohash,
+  formatDistance,
+  geohashPrefixes,
+  haversineMetres,
+} from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
 import { type ParsedCache } from '../services/nostrPlacesService';
 import { subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
@@ -38,6 +44,10 @@ const HuntDiscoverScreen: React.FC<Props> = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [untrustedHidden, setUntrustedHidden] = useState(0);
+  // User position is captured so the cache list can sort by haversine
+  // distance and each row can show "X away" — without this we'd have
+  // to refetch location at sort time.
+  const [pos, setPos] = useState<{ lat: number; lon: number } | null>(null);
   const closerRef = useRef<(() => void) | null>(null);
 
   // Trust-graph filter — ref so the subscription callback always reads
@@ -71,12 +81,13 @@ const HuntDiscoverScreen: React.FC<Props> = ({ navigation }) => {
           setLoading(false);
           return;
         }
-        const pos = await Location.getCurrentPositionAsync({
+        const liveFix = await Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
         });
-        lat = pos.coords.latitude;
-        lon = pos.coords.longitude;
+        lat = liveFix.coords.latitude;
+        lon = liveFix.coords.longitude;
       }
+      setPos({ lat, lon });
       const myGeohash = encodeGeohash(lat, lon, 7);
       // Coarse 5-char prefix ≈ 5 km tile — broad enough that one query
       // covers the user's neighbourhood without enumerating cells.
@@ -116,12 +127,21 @@ const HuntDiscoverScreen: React.FC<Props> = ({ navigation }) => {
   }, []);
 
   const sortedCaches = useMemo(() => {
-    return [...caches.values()].sort((a, b) => {
-      // Show LP Piggies first (richer UX), then by recency.
-      if (a.isLpPiggy !== b.isLpPiggy) return a.isLpPiggy ? -1 : 1;
-      return b.createdAt - a.createdAt;
+    // Sort by haversine distance from the user (nearest first); caches
+    // without a geohash sink to the bottom (Infinity). Each row also
+    // carries its distance for the "X away" badge so we don't compute
+    // it twice.
+    const items = [...caches.values()].map((cache) => {
+      const center = cache.geohash ? decodeGeohash(cache.geohash) : null;
+      const distance =
+        pos && center
+          ? haversineMetres({ lat: pos.lat, lon: pos.lon }, { lat: center.lat, lon: center.lng })
+          : Number.POSITIVE_INFINITY;
+      return { cache, distance };
     });
-  }, [caches]);
+    items.sort((a, b) => a.distance - b.distance);
+    return items;
+  }, [caches, pos]);
 
   return (
     <View style={styles.container} testID="hunt-discover-screen">
@@ -177,15 +197,16 @@ const HuntDiscoverScreen: React.FC<Props> = ({ navigation }) => {
           ) : null}
           <FlatList
             data={sortedCaches}
-            keyExtractor={(c) => c.coord}
+            keyExtractor={(c) => c.cache.coord}
             contentContainerStyle={styles.listContent}
             renderItem={({ item, index }) => (
               <CacheRow
-                cache={item}
+                cache={item.cache}
+                distance={item.distance}
                 index={index}
                 colors={colors}
                 styles={styles}
-                onPress={() => navigation.navigate('HuntPiggyDetail', { coord: item.coord })}
+                onPress={() => navigation.navigate('HuntPiggyDetail', { coord: item.cache.coord })}
               />
             )}
           />
@@ -197,6 +218,7 @@ const HuntDiscoverScreen: React.FC<Props> = ({ navigation }) => {
 
 const CacheRow: React.FC<{
   cache: ParsedCache;
+  distance: number;
   /** FlatList index — drives a deterministic `hunt-discover-row-N`
    * testID alongside the data-stable `hunt-discover-row-${cache.d}`
    * so Maestro flows can target the first row by `id: 'hunt-discover-row-0'`
@@ -205,7 +227,7 @@ const CacheRow: React.FC<{
   colors: Palette;
   styles: ReturnType<typeof createStyles>;
   onPress: () => void;
-}> = ({ cache, index, colors, styles, onPress }) => (
+}> = ({ cache, distance, index, colors, styles, onPress }) => (
   <TouchableOpacity
     style={styles.row}
     onPress={onPress}
@@ -236,6 +258,7 @@ const CacheRow: React.FC<{
       </Text>
       <Text style={styles.rowMeta} numberOfLines={1}>
         {cache.isLpPiggy ? 'Piglet' : 'NIP-GC cache'}
+        {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
         {cache.cacheType ? ` · ${cache.cacheType}` : ''}
         {cache.size ? ` · ${cache.size}` : ''}
         {cache.difficulty ? ` · D${cache.difficulty}` : ''}
