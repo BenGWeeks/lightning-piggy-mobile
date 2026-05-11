@@ -60,6 +60,13 @@ import {
  * path free and avoid serialising full-bundle JSON on every decrypt.
  */
 const nip04PlaintextCache = new LRUCache<string, string>({ max: 1000 });
+
+// Per-(viewer,partner) serialization chain for the optimistic local-
+// message disk-cache writes. Without this, two rapid sends (e.g.
+// double-tap retry, or two sequential tap-share-from-attach) could
+// each read-modify-write the conversation blob concurrently — last
+// write wins, losing the prior optimistic row. Per Copilot review #509.
+const appendLocalDmChains = new Map<string, Promise<void>>();
 export function __clearNip04PlaintextCacheForTests() {
   nip04PlaintextCache.clear();
 }
@@ -2221,34 +2228,49 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (!pubkey) return;
       const normalized = otherPubkey.trim().toLowerCase();
       if (!/^[0-9a-f]{64}$/.test(normalized)) return;
-      try {
-        const key = convCacheKey(pubkey, normalized);
-        const raw = await AsyncStorage.getItem(key);
-        const existing: ConversationMessage[] = raw
-          ? (() => {
-              try {
-                const parsed = JSON.parse(raw);
-                return Array.isArray(parsed) ? parsed : [];
-              } catch {
-                return [];
-              }
-            })()
-          : [];
-        // Dedup on id (same key would arise from a double-tap retry).
-        const map = new Map<string, ConversationMessage>();
-        for (const m of existing) map.set(m.id, m);
-        map.set(msg.id, msg);
-        const merged = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
-        const capped =
-          merged.length <= DM_CONV_CAP ? merged : merged.slice(merged.length - DM_CONV_CAP);
-        await AsyncStorage.setItem(key, JSON.stringify(capped));
-      } catch {
-        // Swallow — the in-memory setMessages above already painted the
-        // bubble. The remount-after-back regression is precisely what
-        // this method exists to fix, so a write failure is unfortunate
-        // but not destructive (next relay echo will repopulate the
-        // cache).
-      }
+      // Serialize concurrent appends to the same conversation. Without
+      // this, two rapid sends could both read the same `existing` array,
+      // each merge their msg, both write back — last write wins, the
+      // earlier optimistic row is silently lost. Per Copilot review #509.
+      const chainKey = `${pubkey}:${normalized}`;
+      const prev = appendLocalDmChains.get(chainKey) ?? Promise.resolve();
+      const next = prev.then(async () => {
+        try {
+          const key = convCacheKey(pubkey, normalized);
+          const raw = await AsyncStorage.getItem(key);
+          const existing: ConversationMessage[] = raw
+            ? (() => {
+                try {
+                  const parsed = JSON.parse(raw);
+                  return Array.isArray(parsed) ? parsed : [];
+                } catch {
+                  return [];
+                }
+              })()
+            : [];
+          // Dedup on id (same key would arise from a double-tap retry).
+          const map = new Map<string, ConversationMessage>();
+          for (const m of existing) map.set(m.id, m);
+          map.set(msg.id, msg);
+          const merged = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
+          const capped =
+            merged.length <= DM_CONV_CAP ? merged : merged.slice(merged.length - DM_CONV_CAP);
+          await AsyncStorage.setItem(key, JSON.stringify(capped));
+        } catch {
+          // Swallow — the in-memory setMessages above already painted
+          // the bubble. The remount-after-back regression is precisely
+          // what this method exists to fix, so a write failure is
+          // unfortunate but not destructive (next relay echo will
+          // repopulate the cache).
+        }
+      });
+      // `.catch` on the chain entry so a single failure doesn't poison
+      // every subsequent append on this conversation.
+      appendLocalDmChains.set(
+        chainKey,
+        next.catch(() => {}),
+      );
+      await next;
     },
     [pubkey],
   );
