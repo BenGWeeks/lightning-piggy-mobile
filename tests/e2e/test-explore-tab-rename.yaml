@@ -18,16 +18,29 @@ name: Explore tab renders the hub with Lessons / Map / Hunt / Events cards
 - waitForAnimationToEnd:
     timeout: 2000
 
-# Hub header copy and the four discovery cards.
+# Hub header + four discovery rails. The hub is scrollable
+# (mini-map preview + content rails below); assert each rail in
+# top-to-bottom order so `scrollUntilVisible` only ever needs to
+# scroll DOWN (it won't backtrack upward by default).
 - assertVisible: 'Explore'
-- assertVisible:
-    id: 'explore-card-lessons'
-- assertVisible:
-    id: 'explore-card-map'
-- assertVisible:
-    id: 'explore-card-hunt'
-- assertVisible:
-    id: 'explore-card-events'
+- scrollUntilVisible:
+    element:
+      id: 'explore-card-map'
+- scrollUntilVisible:
+    element:
+      id: 'explore-card-hunt'
+- scrollUntilVisible:
+    element:
+      id: 'explore-card-events'
+- scrollUntilVisible:
+    element:
+      id: 'explore-card-lessons'
+
+# Scroll back up so the rest of the flow starts from the top.
+- scrollUntilVisible:
+    element:
+      id: 'explore-minimap'
+    direction: UP
 
 # Drill into Lessons — existing courses must still render.
 - tapOn:
