@@ -147,9 +147,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     //
     // See docs/DEPLOYMENT.adoc → "Local production builds".
     versionCode: 64,
-
-
-
   },
   web: {
     favicon: './assets/favicon.png',

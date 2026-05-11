@@ -1192,24 +1192,66 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             const b = r.tags.find((t) => t[0] === 'bolt11')?.[1];
             if (b) byBolt11Outgoing.set(b, r);
           }
+          // Two-phase resolution so profile fetches batch into ONE
+          // relay round-trip instead of N sequential ones. The old
+          // per-tx `await fetchProfile` loop was the dominant
+          // cold-start freeze: with ~50 unmatched outgoing zaps and
+          // no cached recipient profiles, each ~500-2000 ms relay
+          // round-trip serialised → 7-15 s of JS-thread
+          // contention exactly when the user is most likely to tap
+          // Send. Now: collect every recipient pubkey, `getMany`
+          // from disk, single batched `fetchProfiles` for misses.
+          // Mirrors the incoming branch below.
+          type OutgoingEntry = {
+            tx: WalletTransaction;
+            receipt: (typeof sentReceipts)[number];
+            recipientPubkey: string | null;
+            comment: { comment: string; anonymous: boolean } | null;
+          };
+          const outgoingEntries: OutgoingEntry[] = [];
+          const outgoingPubkeys = new Set<string>();
           for (const { tx } of unmatched) {
             if (!tx.bolt11) continue;
             const r = byBolt11Outgoing.get(tx.bolt11);
             if (!r) continue;
-            // The receipt's `p` tag carries the recipient pubkey. We
-            // fetch their profile lazily; anon zaps skip the profile.
             const recipientPubkey = r.tags.find((t) => t[0] === 'p')?.[1] ?? null;
             const commentTag = nostrService.parseZapReceipt(r);
+            outgoingEntries.push({ tx, receipt: r, recipientPubkey, comment: commentTag });
+            if (recipientPubkey) outgoingPubkeys.add(recipientPubkey);
+          }
+          // Phase 1: persistent cache hits for all recipients in one read.
+          const outgoingCached =
+            outgoingPubkeys.size > 0
+              ? await zapSenderProfileStorage.getMany([...outgoingPubkeys])
+              : new Map<string, zapSenderProfileStorage.CachedZapSenderProfile>();
+          // Phase 2: single batched relay round-trip for whatever the cache missed.
+          const outgoingStillToFetch = [...outgoingPubkeys].filter((pk) => !outgoingCached.has(pk));
+          const outgoingProfileMap =
+            outgoingStillToFetch.length > 0
+              ? await nostrService.fetchProfiles(outgoingStillToFetch, queryRelays)
+              : undefined;
+          // Write-through any newly-resolved profiles for next cold start.
+          if (outgoingProfileMap && outgoingProfileMap.size > 0) {
+            const toPersist = new Map<string, zapSenderProfileStorage.CachedZapSenderProfile>();
+            for (const [pk, p] of outgoingProfileMap) {
+              toPersist.set(pk, {
+                npub: p.npub,
+                name: p.name,
+                displayName: p.displayName,
+                picture: p.picture,
+                nip05: p.nip05,
+              });
+            }
+            void zapSenderProfileStorage.setMany(toPersist);
+          }
+          for (const e of outgoingEntries) {
             let profile: ZapCounterpartyInfo['profile'] = null;
-            if (recipientPubkey) {
-              // Same persistent-cache shortcut as the incoming branch
-              // — saves the kind-0 round-trip when this recipient was
-              // resolved on a previous cold start (#95).
-              const hit = await zapSenderProfileStorage.get(recipientPubkey);
+            if (e.recipientPubkey) {
+              const hit = outgoingCached.get(e.recipientPubkey);
               if (hit) {
                 profile = hit;
               } else {
-                const p = await nostrService.fetchProfile(recipientPubkey, queryRelays);
+                const p = outgoingProfileMap?.get(e.recipientPubkey);
                 if (p) {
                   profile = {
                     npub: p.npub,
@@ -1218,16 +1260,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                     picture: p.picture,
                     nip05: p.nip05,
                   };
-                  // Write-through for the next cold start.
-                  void zapSenderProfileStorage.setMany(new Map([[recipientPubkey, profile]]));
                 }
               }
             }
-            byHash.set(tx.paymentHash!, {
-              pubkey: recipientPubkey,
+            byHash.set(e.tx.paymentHash!, {
+              pubkey: e.recipientPubkey,
               profile,
-              comment: commentTag?.comment ?? '',
-              anonymous: commentTag?.anonymous ?? false,
+              comment: e.comment?.comment ?? '',
+              anonymous: e.comment?.anonymous ?? false,
             });
           }
           // Persist negative attributions for any tx that survived the relay
