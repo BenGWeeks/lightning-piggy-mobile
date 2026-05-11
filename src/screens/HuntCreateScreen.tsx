@@ -301,7 +301,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
         >
           <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Hide a Piggy</Text>
+        <Text style={styles.headerTitle}>Hide a Piglet</Text>
         <View style={styles.headerRightSpacer} />
       </View>
 

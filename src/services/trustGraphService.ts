@@ -39,6 +39,12 @@ export const DEFAULT_SEED_PUBKEYS: readonly string[] = [
   // bitcoinevents.uk — UK Bitcoin meetup index publishing NIP-52 events.
   // nostr:npub1g8ag22auywa5c5de6w9ujenpyhrrp9qq8sjzram02xldttmmwurqfd0hqk
   '41fa852bbc23bb4c51b9d38bc9666125c63094003c2421f76f51bed5af7b7706',
+  // Big Piggy — LP team's curated example publisher account. Surfaces
+  // demo Piglets + events on a fresh install so the user sees content
+  // before they have any follows of their own. Same role as bitcoinevents.uk
+  // for events — "platform-curated baseline that you can mute".
+  // nostr:npub1enkml7dx7fsm8zq83dczyh06g9r7l2447p32wu32p5jn7qmqclns65f4st
+  'ccedbff9a6f261b388078b70225dfa4147efaab5f062a7722a0d253f0360c7e7',
 ];
 
 /**

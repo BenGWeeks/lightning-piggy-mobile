@@ -9,7 +9,7 @@ import {
   Image,
 } from 'react-native';
 import * as Location from 'expo-location';
-import { ChevronLeft, ChevronRight, MapPin, PiggyBank, RefreshCw } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, MapPin, PiggyBank, Plus, RefreshCw } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
@@ -155,6 +155,14 @@ const HuntDiscoverScreen: React.FC<Props> = ({ navigation }) => {
           <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Discover</Text>
+        <TouchableOpacity
+          onPress={() => navigation.navigate('Hunt')}
+          accessibilityLabel="Hide a Piglet"
+          testID="hunt-discover-hide-button"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Plus size={20} color={colors.white} strokeWidth={2.5} />
+        </TouchableOpacity>
         <TouchableOpacity
           onPress={reload}
           accessibilityLabel="Refresh"

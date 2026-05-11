@@ -153,7 +153,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
           style={styles.createSecondary}
           onPress={() => navigation.navigate('HuntCreate')}
           testID="hunt-create-piggy-button"
-          accessibilityLabel="Hide a Piggy"
+          accessibilityLabel="Hide a Piglet"
         >
           <View style={styles.createSecondaryIconWrap}>
             <Plus size={22} color={colors.brandPink} strokeWidth={2.5} />
@@ -173,7 +173,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
             <PiggyBank size={48} color={colors.textSupplementary} strokeWidth={1.5} />
             <Text style={styles.emptyTitle}>No Piggies hidden yet</Text>
             <Text style={styles.emptySubtitle}>
-              Tap &ldquo;Hide a Piggy&rdquo; above to stash your first one.
+              Tap &ldquo;Hide a Piglet&rdquo; above to stash your first one.
             </Text>
           </View>
         ) : (
