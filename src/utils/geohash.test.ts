@@ -12,7 +12,7 @@ describe('encodeGeohash', () => {
   // /wiki/Geohash + geohash.org).
   it.each([
     // Cambridge value verified end-to-end via the publish-test-piggy script
-    // — the kind-30408 event we sent to relay.damus.io carries the same g7.
+    // — the kind 37516 NIP-GC event we sent to relay.damus.io carries the same g7.
     ['Longstanton, Cambridge', 52.283602, 0.043889, 'u1212vz'],
     ['Eiffel Tower', 48.8584, 2.2945, 'u09tunq'],
     // Statue of Liberty — cross-check against geohash.org / Niemeyer ref impl.

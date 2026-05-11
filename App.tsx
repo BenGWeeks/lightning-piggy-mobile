@@ -78,6 +78,17 @@ export default function App() {
       if (!/^lightning:/i.test(trimmed)) return;
       const lnurl = trimmed.slice('lightning:'.length).trim();
       if (!lnurl) return;
+      // Only route Hunt-eligible payloads (LNURL-withdraw forms) into
+      // HuntFound. Bolt11 invoices (`lnbc…`), LNURL-pay (`lnurl1…` may
+      // be either kind — accept and let HuntFound disambiguate),
+      // Lightning Addresses (`user@host`), and raw https URLs land
+      // elsewhere in the future pay-flow integration, so we ignore
+      // them here rather than hijacking the URI. Per Copilot review
+      // on PR #488: previous logic routed every `lightning:` URI into
+      // HuntFound which would have hijacked invoice / pay-link shares.
+      const isHuntEligible =
+        /^lnurl1/i.test(lnurl) || /^lnurlw:\/\//i.test(lnurl) || /^lnurl:\/\//i.test(lnurl);
+      if (!isHuntEligible) return;
       const tryNav = (attempt: number) => {
         if (navigateToHuntFound(lnurl)) return;
         if (attempt >= 20 || cancelled) return;

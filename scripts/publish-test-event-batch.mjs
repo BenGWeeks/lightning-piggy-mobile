@@ -18,7 +18,7 @@ import WebSocket from 'ws';
 // eslint-disable-next-line react-hooks/rules-of-hooks
 useWebSocketImplementation(WebSocket);
 
-const REPO_RAW = 'https://github.com/BenGWeeks/lightning-piggy-mobile/raw/feat/explore-tab';
+const REPO_RAW = 'https://github.com/BenGWeeks/lightning-piggy-mobile/raw/main';
 const FIXTURES = [
   {
     d: 'cambridge-bitcoin-drinks',
@@ -37,7 +37,7 @@ const FIXTURES = [
     d: 'london-bitcoin-devs',
     title: 'Snouts and Sats 🐽',
     description:
-      "London pleb night for Lightning node operators, Nostr-curious devs, and bitcoin-core hackers. Truffle out the bugs together. Pints, sats, and snouts deep in code.",
+      'London pleb night for Lightning node operators, Nostr-curious devs, and bitcoin-core hackers. Truffle out the bugs together. Pints, sats, and snouts deep in code.',
     location: 'The Cuckoo Club, Shoreditch, London',
     lat: 51.527,
     lon: -0.082,
@@ -50,7 +50,7 @@ const FIXTURES = [
     d: 'edinburgh-bitcoin-beach',
     title: 'The Highland Hog Roast 🐖🔥',
     description:
-      "Edinburgh bitcoin BBQ. Whole-hog roast paid in sats. Bring a Lightning wallet — every pint of ale, every cut of pork, every haggis is a Lightning invoice. Plebs of all sizes welcome.",
+      'Edinburgh bitcoin BBQ. Whole-hog roast paid in sats. Bring a Lightning wallet — every pint of ale, every cut of pork, every haggis is a Lightning invoice. Plebs of all sizes welcome.',
     location: 'The Auld Hoose, Edinburgh',
     lat: 55.9477,
     lon: -3.1843,
@@ -89,7 +89,7 @@ const FIXTURES = [
     d: 'bitcoin-park-nashville-meetup',
     title: 'Bacon and Sats BBQ 🥓⚡',
     description:
-      "Nashville pig-out at Bitcoin Park. Co-working all day, smokehouse plate at sunset, freedom-tech demos in between. Plebs welcome, BYO wallet.",
+      'Nashville pig-out at Bitcoin Park. Co-working all day, smokehouse plate at sunset, freedom-tech demos in between. Plebs welcome, BYO wallet.',
     location: 'Bitcoin Park, Nashville TN',
     lat: 36.166,
     lon: -86.778,

@@ -35,13 +35,21 @@ export const loadNearbySettings = async (): Promise<NearbySettings> => {
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_NEARBY_SETTINGS;
-    const parsed = JSON.parse(raw) as Partial<NearbySettings>;
+    const parsed = JSON.parse(raw);
+    // Strict per-field type validation. A corrupted-but-JSON payload
+    // like `{ "enabled": "yes" }` would otherwise pass the
+    // nullish-coalesce as a truthy non-boolean and flip the geofence
+    // logic. Per Copilot review on PR #488.
     return {
-      enabled: parsed.enabled ?? DEFAULT_NEARBY_SETTINGS.enabled,
-      alertRadiusMeters: isAllowedRadius(parsed.alertRadiusMeters)
+      enabled:
+        typeof parsed?.enabled === 'boolean' ? parsed.enabled : DEFAULT_NEARBY_SETTINGS.enabled,
+      alertRadiusMeters: isAllowedRadius(parsed?.alertRadiusMeters)
         ? parsed.alertRadiusMeters
         : DEFAULT_NEARBY_SETTINGS.alertRadiusMeters,
-      quietHoursEnabled: parsed.quietHoursEnabled ?? DEFAULT_NEARBY_SETTINGS.quietHoursEnabled,
+      quietHoursEnabled:
+        typeof parsed?.quietHoursEnabled === 'boolean'
+          ? parsed.quietHoursEnabled
+          : DEFAULT_NEARBY_SETTINGS.quietHoursEnabled,
     };
   } catch {
     return DEFAULT_NEARBY_SETTINGS;

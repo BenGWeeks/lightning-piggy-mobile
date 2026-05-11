@@ -1,14 +1,18 @@
-// Publishes a NIP-GC kind 37516 "geocache listing" event with the
-// Lightning Piggy `lnurl` extension, signed by a fresh disposable key
-// (or `BIG_PIGGY_NSEC` env var). Used for end-to-end testing of the
-// M6 publish / subscribe shape before the in-app composer lands.
+// Publishes a NIP-GC kind 37516 "geocache listing" event signed by a
+// fresh disposable key (or `BIG_PIGGY_NSEC` env var). Used for
+// end-to-end testing of the M6 publish/subscribe shape.
 //
 // We adopt treasures.to's NIP-GC draft (kind 37516 listings, kind 7516
-// found-logs, kind 1111 comments per NIP-22) and add `lnurl`/`wait`/
-// `uses` extension tags for our Lightning-payout flavour. Their
-// existing schema's `D/T/S/t` defaults are smart for an NFC-tag Piggy:
-// difficulty 1, terrain 1, size micro, type traditional. See project
-// memory `treasures.to interop`.
+// found-logs, kind 1111 comments per NIP-22) and mark Lightning-payout
+// caches with a **NIP-32 label** (`["L","com.lightningpiggy.app"]` +
+// `["l","payout-lnurl-w","com.lightningpiggy.app"]`) — **not** an
+// `lnurl` tag. Embedding the LNURL bearer token on the public event
+// would let any relay subscriber drain the cache without visiting; it
+// stays on the physical NFC tag / QR sticker only. See project memory
+// `feedback_lnurl_never_on_relays` + the security unit test in
+// `nostrPlacesService.test.ts`. NIP-GC's `D/T/S/t` defaults (difficulty
+// 1, terrain 1, size micro, type traditional) are smart for an NFC
+// Piggy.
 //
 //   node scripts/publish-test-piggy.mjs
 //
@@ -43,12 +47,12 @@ const TERRAIN = process.env.TERRAIN ?? '1';
 const SIZE = process.env.SIZE ?? 'micro';
 const CACHE_TYPE = process.env.CACHE_TYPE ?? 'traditional';
 // Hint photo URL. Defaults to the British telephone-box stock photo
-// committed under docs/test-fixtures/ on the feat/explore-tab branch.
+// committed under docs/test-fixtures/ on the main branch.
 // Override with IMAGE=https://... for a different host; pass IMAGE=
 // (empty) to publish a cache without an `image` tag.
 const IMAGE =
   process.env.IMAGE ??
-  'https://github.com/BenGWeeks/lightning-piggy-mobile/raw/feat/explore-tab/docs/test-fixtures/geo-cache-1-telephone.jpg';
+  'https://github.com/BenGWeeks/lightning-piggy-mobile/raw/main/docs/test-fixtures/geo-cache-1-telephone.jpg';
 // Whether to attach the Lightning Piggy NIP-32 label. Set LP_LABEL=0 to
 // publish a vanilla NIP-GC cache (treasures.to / TapTheSatsMap style)
 // so the in-app feed has something to render with the alternate pin.

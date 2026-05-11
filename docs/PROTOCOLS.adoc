@@ -187,7 +187,7 @@ Each successful claim produces:
   ** `{ kinds: [37516], authors: [hider], "#d": [piggy_id] }` — latest revision of the listing.
   ** `{ kinds: [7516], "#a": ["37516:<hider>:<piggy_id>"] }` — append-only found-log thread.
   ** `{ kinds: [1111], "#A": ["37516:<hider>:<piggy_id>"] }` — append-only comment thread (DNF / notes / maintenance / archived).
-* **My Piggies (cross-device)** — `{ kinds: [37516], authors: [me] }` and filter the result for the `lnurl` tag.
+* **My Piggies (cross-device)** — `{ kinds: [37516], authors: [me] }` and filter the result for the NIP-32 `["l", "payout-lnurl-w", "com.lightningpiggy.app"]` label marker. **Not** the `lnurl` tag — that one deliberately never reaches the relay (see the "marker tags" subsection above).
 
 ==== Why NIP-GC rather than a custom kind
 

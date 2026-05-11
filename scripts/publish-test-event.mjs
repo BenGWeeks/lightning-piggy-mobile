@@ -33,7 +33,7 @@ const START_OFFSET_SECONDS = parseInt(
 const DURATION_SECONDS = parseInt(process.env.DURATION_SECONDS ?? `${3 * 60 * 60}`, 10);
 const IMAGE =
   process.env.IMAGE ??
-  'https://github.com/BenGWeeks/lightning-piggy-mobile/raw/feat/explore-tab/docs/test-fixtures/cambridge-bitcoin-meetup.jpg';
+  'https://github.com/BenGWeeks/lightning-piggy-mobile/raw/main/docs/test-fixtures/cambridge-bitcoin-meetup.jpg';
 
 const ALPHA = '0123456789bcdefghjkmnpqrstuvwxyz';
 function gh(lat, lon, p = 9) {

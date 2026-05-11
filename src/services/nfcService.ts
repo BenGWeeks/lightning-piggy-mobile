@@ -333,18 +333,31 @@ export async function writeLnurlToTag(
 
   // The `lightning:` prefix makes Android's NDEF intent system route
   // the tap to whichever LNURL-aware wallet the user has installed,
-  // not just Lightning Piggy. Case handling matters per input form:
+  // not just Lightning Piggy. We accept only LNURL-withdraw forms:
+  // bech32 `lnurl1…`, LUD-17 `lnurlw://…` / `lnurl://…`, and inputs
+  // already wrapped in `lightning:`. Raw https URLs are rejected
+  // explicitly — writing `lightning:https://…` to a tag produces a
+  // payload most LN wallets can't interpret (see Copilot review on
+  // PR #488). The hider can paste the bech32 or `lnurlw://…` form
+  // of their endpoint instead. Case handling:
   // - Already prefixed → use as-is.
   // - bech32 (`lnurl1…` / `LNURL1…`) → uppercase is conventional on
   //   tags + QR codes for OCR / scanner robustness; bech32 itself is
   //   case-insensitive so this is information-preserving.
-  // - LUD-17 (`lnurlw://…`, `lnurl://…`) and raw https URLs → preserve
-  //   case. The path component is generally case-sensitive (LNbits
-  //   for example uses base58-style segment ids that case-uppercasing
-  //   would break, see scripts/publish-test-piggy.mjs default LNURL).
-  const uri = /^lightning:/i.test(trimmed)
+  // - LUD-17 (`lnurlw://…`, `lnurl://…`) → preserve case. The path
+  //   component is generally case-sensitive (LNbits for example uses
+  //   base58-style segment ids that case-uppercasing would break).
+  const isLightningPrefixed = /^lightning:/i.test(trimmed);
+  const isBech32 = /^lnurl1/i.test(trimmed);
+  const isLud17 = /^lnurlw:\/\//i.test(trimmed) || /^lnurl:\/\//i.test(trimmed);
+  if (!isLightningPrefixed && !isBech32 && !isLud17) {
+    throw new Error(
+      "That doesn't look like an LNURL-withdraw. Paste the `lnurl1…` bech32 form or the `lnurlw://…` URL your wallet gives you.",
+    );
+  }
+  const uri = isLightningPrefixed
     ? trimmed
-    : /^lnurl1/i.test(trimmed)
+    : isBech32
       ? `lightning:${trimmed.toUpperCase()}`
       : `lightning:${trimmed}`;
 

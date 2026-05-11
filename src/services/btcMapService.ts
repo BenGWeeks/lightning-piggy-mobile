@@ -82,15 +82,32 @@ export interface Bbox {
  * so adjacent viewports share the same cache entry instead of triggering
  * a fresh network call on every pan-by-a-pixel.
  */
+// Coarse cache key — round bbox bounds to 2 decimal places (~1 km
+// precision) so adjacent viewports during normal map panning share a
+// cache entry. Per Copilot review on PR #488: 4-decimal precision
+// generated a new key on every pixel-pan, bloating AsyncStorage.
 const tileKey = (bbox: Bbox): string =>
   [
-    bbox.minLon.toFixed(4),
-    bbox.minLat.toFixed(4),
-    bbox.maxLon.toFixed(4),
-    bbox.maxLat.toFixed(4),
+    bbox.minLon.toFixed(2),
+    bbox.minLat.toFixed(2),
+    bbox.maxLon.toFixed(2),
+    bbox.maxLat.toFixed(2),
   ].join(',');
 
+// LRU-style bounded cache. JS `Map` preserves insertion order, so
+// dropping the oldest key when we exceed `TILE_CACHE_MAX_ENTRIES`
+// keeps the most-recently-fetched tiles in memory + on disk.
+const TILE_CACHE_MAX_ENTRIES = 32;
 const tileCache = new Map<string, CachedTile>();
+const touchCacheEntry = (key: string, entry: CachedTile): void => {
+  // Re-insert so the LRU order tracks recent use.
+  tileCache.delete(key);
+  tileCache.set(key, entry);
+  if (tileCache.size > TILE_CACHE_MAX_ENTRIES) {
+    const oldest = tileCache.keys().next().value;
+    if (oldest !== undefined) tileCache.delete(oldest);
+  }
+};
 
 const isFresh = (entry: CachedTile): boolean => Date.now() - entry.fetchedAt < TILE_CACHE_TTL_MS;
 
@@ -107,7 +124,7 @@ const hydrateFromStorage = async (): Promise<void> => {
       if (!raw) return;
       const parsed = JSON.parse(raw) as Record<string, CachedTile>;
       for (const [k, entry] of Object.entries(parsed)) {
-        if (entry && isFresh(entry)) tileCache.set(k, entry);
+        if (entry && isFresh(entry)) touchCacheEntry(k, entry);
       }
     } catch {
       // Corrupt or unreadable storage shouldn't break merchant fetch —
@@ -207,7 +224,7 @@ out center;`;
           return { id: el.id, lat, lon, tags, verified_at } as BtcMapPlace;
         })
         .filter((p): p is BtcMapPlace => p !== null);
-      tileCache.set(key, { fetchedAt: Date.now(), places });
+      touchCacheEntry(key, { fetchedAt: Date.now(), places });
       persistToStorage();
       return places;
     } catch (e) {

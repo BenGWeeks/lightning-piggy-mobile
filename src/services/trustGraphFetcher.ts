@@ -28,7 +28,10 @@ const cacheKeyFor = (userPubkey: string): string =>
 /** Cheap, order-insensitive hash of an L1 follow set. */
 const hashL1 = (l1: ReadonlySet<string>): string => {
   const sorted = [...l1].map((s) => s.toLowerCase()).sort();
-  // 53-bit xorshift sum — good enough for invalidation; never written to relays.
+  // 32-bit rolling hash (Java-style `31*h + char`, OR'd to keep within
+  // i32). Plenty of collision resistance for cache-key invalidation
+  // (we're comparing two snapshots of a single user's follow list,
+  // not anti-pre-image work). Per Copilot review on PR #488.
   let h = 0;
   for (const s of sorted) {
     for (let i = 0; i < s.length; i += 1) {

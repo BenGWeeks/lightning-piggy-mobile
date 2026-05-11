@@ -106,9 +106,18 @@ export interface HiddenPiggy {
   hint?: string;
 }
 
+// `AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY` mirrors `identitiesStore` and
+// `walletStorageService`: ensures the LNURL bearer tokens never end
+// up in iCloud / device-migration backups, and are unreadable until
+// the user has unlocked the device at least once since boot. Per
+// Copilot review on PR #488 (was implicit before).
+const SECURE_OPTIONS: SecureStore.SecureStoreOptions = {
+  keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
+};
+
 export const loadPiggies = async (): Promise<HiddenPiggy[]> => {
   try {
-    const raw = await SecureStore.getItemAsync(STORAGE_KEY);
+    const raw = await SecureStore.getItemAsync(STORAGE_KEY, SECURE_OPTIONS);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
@@ -119,7 +128,7 @@ export const loadPiggies = async (): Promise<HiddenPiggy[]> => {
 };
 
 const persist = async (next: HiddenPiggy[]): Promise<void> => {
-  await SecureStore.setItemAsync(STORAGE_KEY, JSON.stringify(next));
+  await SecureStore.setItemAsync(STORAGE_KEY, JSON.stringify(next), SECURE_OPTIONS);
 };
 
 export const savePiggy = async (piggy: HiddenPiggy): Promise<HiddenPiggy[]> => {

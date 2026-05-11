@@ -25,7 +25,14 @@ export const loadWotSettings = async (): Promise<WotSettings> => {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULTS;
     const parsed = JSON.parse(raw);
-    return { ...DEFAULTS, ...parsed };
+    // Per-field type validation — corrupted-but-JSON storage (e.g.
+    // `{ "filterEnabled": "false" }`) would otherwise flow a non-
+    // boolean through TrustGraphContext and silently flip the safety
+    // filter. Treat anything that isn't strictly `boolean` as missing
+    // and fall back to DEFAULTS (Copilot review on PR #488).
+    const filterEnabled =
+      typeof parsed?.filterEnabled === 'boolean' ? parsed.filterEnabled : DEFAULTS.filterEnabled;
+    return { filterEnabled };
   } catch {
     return DEFAULTS;
   }
