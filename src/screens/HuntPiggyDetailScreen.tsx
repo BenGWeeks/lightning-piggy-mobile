@@ -313,6 +313,17 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               {cache.terrain ? <Text style={styles.metaPill}>T{cache.terrain}</Text> : null}
             </View>
             <Text style={styles.description}>{cache.description}</Text>
+            {/* Attribution — surface the hider so the finder knows
+                whose word they're trusting before walking to a
+                coordinate. The npub is shorthand-formatted; full
+                profile UI lands later. The WoT filter would already
+                have hidden this listing from any view if the hider
+                weren't in the user's trust graph (see
+                `trustGraphService` for the threat model). */}
+            <Text style={styles.attribution} testID="hunt-piggy-detail-attribution">
+              Hidden by {cache.hiderPubkey.slice(0, 8)}…{cache.hiderPubkey.slice(-4)} — verify you
+              trust them before going to the location.
+            </Text>
             {cache.hint ? (
               <TouchableOpacity
                 style={styles.hintCard}
@@ -526,6 +537,13 @@ const createStyles = (colors: Palette) =>
       fontWeight: '600',
     },
     description: { fontSize: 14, color: colors.textHeader, lineHeight: 20 },
+    attribution: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      fontStyle: 'italic',
+      marginTop: 2,
+      lineHeight: 17,
+    },
     hintCard: {
       flexDirection: 'row',
       alignItems: 'center',

@@ -10,6 +10,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { WalletProvider, useWallet } from './src/contexts/WalletContext';
 import { NostrProvider } from './src/contexts/NostrContext';
+import { TrustGraphProvider } from './src/contexts/TrustGraphContext';
 import { GroupsProvider } from './src/contexts/GroupsContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
 import AppNavigator, { navigateToHuntFound } from './src/navigation/AppNavigator';
@@ -109,28 +110,34 @@ export default function App() {
           <ThemeProvider>
             <WalletProvider>
               <NostrProvider>
-                {/* GroupsProvider sits inside Nostr so groups can subscribe
+                {/* TrustGraphProvider derives the L1+L2 web-of-trust set
+                    from Nostr contacts. Lives inside NostrProvider so it
+                    can read `contacts` + `pubkey`, but outside Groups
+                    because nothing else depends on it. */}
+                <TrustGraphProvider>
+                  {/* GroupsProvider sits inside Nostr so groups can subscribe
                     to multi-recipient gift wraps using the active signer. */}
-                <GroupsProvider>
-                  <BottomSheetModalProvider>
-                    <ThemedStatusBar />
-                    <AppNavigator />
-                  </BottomSheetModalProvider>
-                  {/* BrandedToast: brand-themed wrapper around
+                  <GroupsProvider>
+                    <BottomSheetModalProvider>
+                      <ThemedStatusBar />
+                      <AppNavigator />
+                    </BottomSheetModalProvider>
+                    {/* BrandedToast: brand-themed wrapper around
                       `react-native-toast-message`. Single mount for the
                       app's toast slot — keeps styling (pink success
                       accent, red error, rounded corners + shadow that
                       mirror BrandedAlert) in one place. ESLint blocks
                       direct imports of the underlying lib elsewhere. */}
-                  <BrandedToast />
-                  <GlobalIncomingPaymentOverlay />
-                  {/* BrandedAlertHost: portal target for the on-brand
+                    <BrandedToast />
+                    <GlobalIncomingPaymentOverlay />
+                    {/* BrandedAlertHost: portal target for the on-brand
                       BrandedAlert dialog. Sits at the root so any sheet /
                       screen that calls `Alert.alert(...)` (the BrandedAlert
                       drop-in re-export, NOT the system Alert) renders
                       above the rest of the UI without z-index gymnastics. */}
-                  <BrandedAlertHost />
-                </GroupsProvider>
+                    <BrandedAlertHost />
+                  </GroupsProvider>
+                </TrustGraphProvider>
               </NostrProvider>
             </WalletProvider>
             <BootSplash done={bootDone} />

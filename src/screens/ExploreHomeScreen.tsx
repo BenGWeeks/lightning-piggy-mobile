@@ -24,6 +24,7 @@ import { subscribeNearbyCaches, subscribeNearbyEvents } from '../services/nostrP
 import { encodeGeohash, geohashPrefixes } from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { createExploreHomeScreenStyles } from '../styles/ExploreHomeScreen.styles';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
@@ -147,8 +148,22 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
   // ----- NIP-GC caches + NIP-52 events (live subs) ------------------------
 
+  // Web-of-trust filter — kept in a ref so the subscription callbacks
+  // always see the current `isTrusted` predicate without resubscribing
+  // every time the trust set churns (L2 backfill, contact-list updates).
+  const { isTrusted, filterEnabled } = useTrustGraph();
+  const isTrustedRef = useRef(isTrusted);
+  useEffect(() => {
+    isTrustedRef.current = isTrusted;
+  }, [isTrusted]);
+
   const [caches, setCaches] = useState<Map<string, ParsedCache>>(new Map());
   const [events, setEvents] = useState<Map<string, ParsedEvent>>(new Map());
+  // Counts of events arriving from pubkeys outside the trust set.
+  // Surfaced as "N hidden — from outside your trust graph" so users
+  // know the filter is doing something.
+  const [untrustedCacheCount, setUntrustedCacheCount] = useState(0);
+  const [untrustedEventCount, setUntrustedEventCount] = useState(0);
   const subsCloserRef = useRef<(() => void)[]>([]);
   useEffect(() => {
     if (!pos) return;
@@ -162,6 +177,14 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
     subsCloserRef.current.push(
       subscribeNearbyCaches(cachePrefixes, (c) => {
+        // WoT filter: silently drop caches from pubkeys outside the
+        // trust graph (an unverified cache could be a phishing LNURL
+        // or, worse, a physical lure). Surfaced as a count instead so
+        // users know they exist without being lured into inspecting them.
+        if (filterEnabled && !isTrustedRef.current(c.hiderPubkey)) {
+          setUntrustedCacheCount((n) => n + 1);
+          return;
+        }
         setCaches((prev) => {
           const existing = prev.get(c.coord);
           if (existing && existing.createdAt >= c.createdAt) return prev;
@@ -175,6 +198,10 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
       subscribeNearbyEvents(eventPrefixes, (e) => {
         // Skip events that already started > 1h ago.
         if (e.startsAt && e.startsAt < Math.floor(Date.now() / 1000) - 60 * 60) return;
+        if (filterEnabled && !isTrustedRef.current(e.organiserPubkey)) {
+          setUntrustedEventCount((n) => n + 1);
+          return;
+        }
         setEvents((prev) => {
           const existing = prev.get(e.coord);
           if (existing && existing.startsAt === e.startsAt) return prev;
@@ -305,7 +332,11 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
         <ContentRail<ParsedCache>
           title="Geo-caches near you"
-          caption="Piglets + classic NIP-GC caches"
+          caption={
+            untrustedCacheCount > 0
+              ? `Piglets + classic NIP-GC caches · ${untrustedCacheCount} hidden from outside your trust graph`
+              : 'Piglets + classic NIP-GC caches'
+          }
           items={sortedCaches}
           loading={!!pos && caches.size === 0}
           // "See all" lands users on the Discover list directly — the
@@ -331,7 +362,11 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
         <ContentRail<ParsedEvent>
           title="Events near you"
-          caption="Bitcoin meetups within ~150 km · NIP-52"
+          caption={
+            untrustedEventCount > 0
+              ? `Bitcoin meetups within ~150 km · ${untrustedEventCount} hidden from outside your trust graph`
+              : 'Bitcoin meetups within ~150 km · NIP-52'
+          }
           items={sortedEvents}
           loading={!!pos && events.size === 0 && false}
           onSeeAll={() => navigation.navigate('Events')}

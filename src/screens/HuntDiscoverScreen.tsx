@@ -17,6 +17,7 @@ import { encodeGeohash, geohashPrefixes } from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
 import { type ParsedCache } from '../services/nostrPlacesService';
 import { subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
+import { useTrustGraph } from '../contexts/TrustGraphContext';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -36,12 +37,22 @@ const HuntDiscoverScreen: React.FC<Props> = ({ navigation }) => {
   const [caches, setCaches] = useState<Map<string, ParsedCache>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [untrustedHidden, setUntrustedHidden] = useState(0);
   const closerRef = useRef<(() => void) | null>(null);
+
+  // Trust-graph filter — ref so the subscription callback always reads
+  // the current predicate without resubscribing.
+  const { isTrusted, filterEnabled } = useTrustGraph();
+  const isTrustedRef = useRef(isTrusted);
+  useEffect(() => {
+    isTrustedRef.current = isTrusted;
+  }, [isTrusted]);
 
   const reload = useCallback(async () => {
     setLoading(true);
     setError(null);
     setCaches(new Map());
+    setUntrustedHidden(0);
     closerRef.current?.();
     try {
       // Dev-only emulator fallback first (see `getDevPinnedLocation`).
@@ -71,6 +82,12 @@ const HuntDiscoverScreen: React.FC<Props> = ({ navigation }) => {
       // covers the user's neighbourhood without enumerating cells.
       const prefixes = geohashPrefixes(myGeohash, 5).filter((p) => p.length === 5);
       const closer = subscribeNearbyCaches(prefixes, (cache) => {
+        // WoT filter — see threat model in `trustGraphService`. Caches
+        // from outside the trust set are counted but not rendered.
+        if (filterEnabled && !isTrustedRef.current(cache.hiderPubkey)) {
+          setUntrustedHidden((n) => n + 1);
+          return;
+        }
         // De-dupe by coord — replaceable events; latest wins.
         setCaches((prev) => {
           const existing = prev.get(cache.coord);
@@ -150,20 +167,29 @@ const HuntDiscoverScreen: React.FC<Props> = ({ navigation }) => {
           </Text>
         </View>
       ) : (
-        <FlatList
-          data={sortedCaches}
-          keyExtractor={(c) => c.coord}
-          contentContainerStyle={styles.listContent}
-          renderItem={({ item, index }) => (
-            <CacheRow
-              cache={item}
-              index={index}
-              colors={colors}
-              styles={styles}
-              onPress={() => navigation.navigate('HuntPiggyDetail', { coord: item.coord })}
-            />
-          )}
-        />
+        <>
+          {untrustedHidden > 0 ? (
+            <Text style={styles.trustNote} testID="hunt-discover-trust-note">
+              {untrustedHidden} {untrustedHidden === 1 ? 'cache' : 'caches'} hidden from outside
+              your trust graph. An unverified geo-cache can be a lure — only listings from people
+              you (or your follows) trust are shown.
+            </Text>
+          ) : null}
+          <FlatList
+            data={sortedCaches}
+            keyExtractor={(c) => c.coord}
+            contentContainerStyle={styles.listContent}
+            renderItem={({ item, index }) => (
+              <CacheRow
+                cache={item}
+                index={index}
+                colors={colors}
+                styles={styles}
+                onPress={() => navigation.navigate('HuntPiggyDetail', { coord: item.coord })}
+              />
+            )}
+          />
+        </>
       )}
     </View>
   );
@@ -292,6 +318,15 @@ const createStyles = (colors: Palette) =>
     rowTitle: { fontSize: 15, fontWeight: '700', color: colors.textHeader },
     rowMeta: { fontSize: 12, color: colors.textSupplementary, marginTop: 2 },
     rowSub: { fontSize: 12, color: colors.textSupplementary, marginTop: 2, fontStyle: 'italic' },
+    trustNote: {
+      paddingHorizontal: 16,
+      paddingTop: 10,
+      paddingBottom: 6,
+      fontSize: 12,
+      color: colors.textSupplementary,
+      lineHeight: 17,
+      backgroundColor: colors.background,
+    },
   });
 
 export default HuntDiscoverScreen;

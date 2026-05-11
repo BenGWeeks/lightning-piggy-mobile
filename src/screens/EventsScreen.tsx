@@ -16,6 +16,7 @@ import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
 import { encodeGeohash, geohashPrefixes } from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
+import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { type ParsedEvent } from '../services/nostrPlacesService';
 import { subscribeNearbyEvents } from '../services/nostrPlacesPublisher';
 
@@ -40,12 +41,20 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedCoord, setExpandedCoord] = useState<string | null>(null);
+  const [untrustedHidden, setUntrustedHidden] = useState(0);
   const closerRef = useRef<(() => void) | null>(null);
+
+  const { isTrusted, filterEnabled } = useTrustGraph();
+  const isTrustedRef = useRef(isTrusted);
+  useEffect(() => {
+    isTrustedRef.current = isTrusted;
+  }, [isTrusted]);
 
   const reload = useCallback(async () => {
     setLoading(true);
     setError(null);
     setEvents(new Map());
+    setUntrustedHidden(0);
     closerRef.current?.();
     try {
       const pinned = getDevPinnedLocation();
@@ -79,6 +88,11 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
         // De-dupe by coord — replaceable events; only keep the
         // newest revision and skip past events.
         if (e.startsAt && e.startsAt < Math.floor(Date.now() / 1000) - 60 * 60) {
+          return;
+        }
+        // WoT filter — see `trustGraphService` for the threat model.
+        if (filterEnabled && !isTrustedRef.current(e.organiserPubkey)) {
+          setUntrustedHidden((n) => n + 1);
           return;
         }
         setEvents((prev) => {
@@ -168,21 +182,31 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
           </Text>
         </View>
       ) : (
-        <FlatList
-          data={sortedEvents}
-          keyExtractor={(e) => e.coord}
-          contentContainerStyle={styles.listContent}
-          renderItem={({ item }) => (
-            <EventRow
-              event={item}
-              expanded={expandedCoord === item.coord}
-              onToggle={() => setExpandedCoord((prev) => (prev === item.coord ? null : item.coord))}
-              onOpenInMaps={() => openInMaps(item)}
-              colors={colors}
-              styles={styles}
-            />
-          )}
-        />
+        <>
+          {untrustedHidden > 0 ? (
+            <Text style={styles.trustNote} testID="events-trust-note">
+              {untrustedHidden} {untrustedHidden === 1 ? 'event' : 'events'} hidden from outside
+              your trust graph.
+            </Text>
+          ) : null}
+          <FlatList
+            data={sortedEvents}
+            keyExtractor={(e) => e.coord}
+            contentContainerStyle={styles.listContent}
+            renderItem={({ item }) => (
+              <EventRow
+                event={item}
+                expanded={expandedCoord === item.coord}
+                onToggle={() =>
+                  setExpandedCoord((prev) => (prev === item.coord ? null : item.coord))
+                }
+                onOpenInMaps={() => openInMaps(item)}
+                colors={colors}
+                styles={styles}
+              />
+            )}
+          />
+        </>
       )}
     </View>
   );
@@ -348,6 +372,14 @@ const createStyles = (colors: Palette) =>
       alignSelf: 'flex-start',
     },
     locationButtonText: { color: colors.brandPink, fontSize: 13, fontWeight: '700' },
+    trustNote: {
+      paddingHorizontal: 16,
+      paddingTop: 10,
+      paddingBottom: 6,
+      fontSize: 12,
+      color: colors.textSupplementary,
+      lineHeight: 17,
+    },
   });
 
 export default EventsScreen;
