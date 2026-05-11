@@ -31,6 +31,10 @@ import {
 // Captured at module-evaluation time, which is the closest proxy we have to "JS bundle started executing after app launch". Used by the [Perf] wallet-connect marker so perf scripts can report time-from-launch-to-first-NWC-connect without needing a separate launch timestamp source.
 const WALLET_MODULE_LOAD_T0 = Date.now();
 let firstWalletConnectLogged = false;
+import { perfLog } from '../utils/perfLog';
+perfLog('WalletContext module-eval');
+let __walletProviderFirstRenderLogged = false;
+let __walletProviderHydratedLogged = false;
 
 export interface IncomingPayment {
   walletId: string;
@@ -193,6 +197,10 @@ interface WalletContextType {
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
 
 export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  if (!__walletProviderFirstRenderLogged) {
+    __walletProviderFirstRenderLogged = true;
+    perfLog('WalletProvider first render');
+  }
   const [wallets, setWallets] = useState<WalletState[]>([]);
   const [activeWalletId, setActiveWalletId] = useState<string | null>(null);
   const [isOnboarded, setIsOnboarded] = useState(false);
@@ -364,6 +372,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           }),
         );
         setWallets(walletStates);
+        if (!__walletProviderHydratedLogged) {
+          __walletProviderHydratedLogged = true;
+          perfLog(`WalletProvider hydrated ${walletStates.length} wallets`);
+        }
         // Mark the initial AsyncStorage read complete BEFORE flipping
         // `isLoading`. Consumers gating cold-start UI (e.g. HomeScreen's
         // Send/Receive button styles) need to know "we tried to load and

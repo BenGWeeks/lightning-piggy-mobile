@@ -45,6 +45,7 @@ import {
   type StoredIdentity,
 } from '../services/identitiesStore';
 import { migrateToPerAccountStorage } from '../services/migrateToPerAccountStorage';
+import { perfLog } from '../utils/perfLog';
 import {
   setActivePubkeyForWalletStorage,
   deleteNwcUrl,
@@ -732,7 +733,19 @@ export interface ConversationMessage {
 
 const NostrContext = createContext<NostrContextType | undefined>(undefined);
 
+// Module-evaluation perf marker. Fires the first time this file is parsed,
+// before any provider mounts. Catches "RN bundle finished loading,
+// JS engine started executing our code" — the upstream of every other
+// [Perf] line in this file.
+perfLog('NostrContext module-eval');
+
+let __nostrProviderFirstRenderLogged = false;
+let __nostrProviderLoggedInLogged = false;
 export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  if (!__nostrProviderFirstRenderLogged) {
+    __nostrProviderFirstRenderLogged = true;
+    perfLog('NostrProvider first render');
+  }
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [profile, setProfile] = useState<NostrProfile | null>(null);
@@ -1188,8 +1201,18 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
   }, []);
 
+  // Single-fire perf log when isLoggedIn becomes true — the
+  // "login restored from cache" moment. Anchor for the boot path.
+  useEffect(() => {
+    if (isLoggedIn && !__nostrProviderLoggedInLogged) {
+      __nostrProviderLoggedInLogged = true;
+      perfLog('NostrProvider isLoggedIn=true');
+    }
+  }, [isLoggedIn]);
+
   // Auto-login on startup: load cache immediately, refresh from relays in background
   useEffect(() => {
+    perfLog('NostrProvider auto-login effect fires');
     (async () => {
       try {
         // Hydrate the multi-account registry first so the switcher has

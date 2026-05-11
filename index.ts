@@ -1,7 +1,16 @@
 import { registerRootComponent } from 'expo';
 import { LogBox } from 'react-native';
+import { perfAnchor, perfLog } from './src/utils/perfLog';
+
+// Anchor T0 at the FIRST line of JS execution (this module is the
+// app's entry point per registerRootComponent below). Every later
+// `perfLog(tag)` call reports `+Nms` relative to here, so a single
+// `adb logcat | grep "[Perf]"` gives the entire cold-start timeline.
+perfAnchor();
+perfLog('index.ts module-eval');
 
 import App from './App';
+perfLog('App.tsx imported');
 
 // Suppress the dev-tools / debugger warning banners. The "Open debugger
 // to view warnings" overlay keeps intercepting taps + stealing focus on
@@ -37,4 +46,5 @@ console.warn = (...args: unknown[]) => {
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);
 // It also ensures that whether you load the app in Expo Go or in a native build,
 // the environment is set up appropriately
+perfLog('registerRootComponent called');
 registerRootComponent(App);
