@@ -64,6 +64,13 @@ import {
  * path free and avoid serialising full-bundle JSON on every decrypt.
  */
 const nip04PlaintextCache = new LRUCache<string, string>({ max: 1000 });
+
+// Per-(viewer,partner) serialization chain for the optimistic local-
+// message disk-cache writes. Without this, two rapid sends (e.g.
+// double-tap retry, or two sequential tap-share-from-attach) could
+// each read-modify-write the conversation blob concurrently — last
+// write wins, losing the prior optimistic row. Per Copilot review #509.
+const appendLocalDmChains = new Map<string, Promise<void>>();
 export function __clearNip04PlaintextCacheForTests() {
   nip04PlaintextCache.clear();
 }
@@ -448,6 +455,12 @@ function mergeInboxEntries(
   return all.slice(0, cap);
 }
 
+// Window in seconds to match a fresh real-id message against a pending
+// optimistic local- echo (same fromMe + same text). Mirrors
+// appendGroupMessage's LOCAL_ECHO_MATCH_WINDOW_SECS so the same UX
+// invariant — one bubble per send, not two — holds across 1:1 + group.
+const LOCAL_DM_ECHO_WINDOW_SECS = 30;
+
 function mergeConversationMessages(
   cached: ConversationMessage[],
   fresh: ConversationMessage[],
@@ -455,7 +468,30 @@ function mergeConversationMessages(
 ): ConversationMessage[] {
   const map = new Map<string, ConversationMessage>();
   for (const m of cached) map.set(m.id, m);
-  for (const m of fresh) map.set(m.id, m);
+  for (const m of fresh) {
+    // When a real (non-local-) entry arrives, drop any pending local-
+    // echo with matching fromMe + text within the echo window. Without
+    // this the user would see two bubbles for the same GIF/text: the
+    // optimistic local- row persisted by ConversationScreen on send,
+    // plus the NIP-17 self-wrap echo from the relay.
+    if (!m.id.startsWith('local-')) {
+      let bestKey: string | null = null;
+      let bestDelta = Infinity;
+      for (const [k, prev] of map) {
+        if (!k.startsWith('local-')) continue;
+        if (prev.fromMe !== m.fromMe) continue;
+        if (prev.text !== m.text) continue;
+        const delta = Math.abs(prev.createdAt - m.createdAt);
+        if (delta > LOCAL_DM_ECHO_WINDOW_SECS) continue;
+        if (delta < bestDelta) {
+          bestDelta = delta;
+          bestKey = k;
+        }
+      }
+      if (bestKey !== null) map.delete(bestKey);
+    }
+    map.set(m.id, m);
+  }
   const all = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
   if (all.length <= cap) return all;
   // Keep the newest DM_CONV_CAP messages; drop oldest.
@@ -591,6 +627,15 @@ interface NostrContextType {
     recipientPubkey: string,
     plaintext: string,
   ) => Promise<{ success: boolean; error?: string }>;
+  /**
+   * Persist an optimistic local- DM message to the per-conversation
+   * cache so it survives navigating away + back before the NIP-17
+   * self-wrap echo arrives. The matching merge dedup against the real
+   * relay echo lives in `mergeConversationMessages`. Without this,
+   * leaving the thread after sending a GIF (or any message) would
+   * drop the optimistic bubble until the relay round-trip completes.
+   */
+  appendLocalDmMessage: (otherPubkey: string, msg: ConversationMessage) => Promise<void>;
   /**
    * Send a NIP-17 group chat message to multiple recipients. Builds one
    * kind-14 rumor with `subject` + `p` tags for every member, then NIP-59
@@ -2247,6 +2292,58 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [pubkey],
   );
 
+  const appendLocalDmMessage = useCallback(
+    async (otherPubkey: string, msg: ConversationMessage): Promise<void> => {
+      if (!pubkey) return;
+      const normalized = otherPubkey.trim().toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(normalized)) return;
+      // Serialize concurrent appends to the same conversation. Without
+      // this, two rapid sends could both read the same `existing` array,
+      // each merge their msg, both write back — last write wins, the
+      // earlier optimistic row is silently lost. Per Copilot review #509.
+      const chainKey = `${pubkey}:${normalized}`;
+      const prev = appendLocalDmChains.get(chainKey) ?? Promise.resolve();
+      const next = prev.then(async () => {
+        try {
+          const key = convCacheKey(pubkey, normalized);
+          const raw = await AsyncStorage.getItem(key);
+          const existing: ConversationMessage[] = raw
+            ? (() => {
+                try {
+                  const parsed = JSON.parse(raw);
+                  return Array.isArray(parsed) ? parsed : [];
+                } catch {
+                  return [];
+                }
+              })()
+            : [];
+          // Dedup on id (same key would arise from a double-tap retry).
+          const map = new Map<string, ConversationMessage>();
+          for (const m of existing) map.set(m.id, m);
+          map.set(msg.id, msg);
+          const merged = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
+          const capped =
+            merged.length <= DM_CONV_CAP ? merged : merged.slice(merged.length - DM_CONV_CAP);
+          await AsyncStorage.setItem(key, JSON.stringify(capped));
+        } catch {
+          // Swallow — the in-memory setMessages above already painted
+          // the bubble. The remount-after-back regression is precisely
+          // what this method exists to fix, so a write failure is
+          // unfortunate but not destructive (next relay echo will
+          // repopulate the cache).
+        }
+      });
+      // `.catch` on the chain entry so a single failure doesn't poison
+      // every subsequent append on this conversation.
+      appendLocalDmChains.set(
+        chainKey,
+        next.catch(() => {}),
+      );
+      await next;
+    },
+    [pubkey],
+  );
+
   const fetchConversation = useCallback(
     async (otherPubkey: string): Promise<ConversationMessage[]> => {
       if (!pubkey || !isLoggedIn) return [];
@@ -3645,6 +3742,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       publishGroupState,
       fetchConversation,
       getCachedConversation,
+      appendLocalDmMessage,
       dmInbox,
       dmInboxLoading,
       refreshDmInbox,
@@ -3677,6 +3775,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       publishGroupState,
       fetchConversation,
       getCachedConversation,
+      appendLocalDmMessage,
       dmInbox,
       dmInboxLoading,
       refreshDmInbox,
