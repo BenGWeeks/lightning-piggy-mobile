@@ -102,24 +102,19 @@ describe('fetchPlacesInBbox cache', () => {
     delete (global as unknown as { fetch?: unknown }).fetch;
   });
 
-  it('returns cached results for identical bboxes within TTL', async () => {
+  it('caches the global dataset across calls within TTL and filters by bbox', async () => {
     const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
-    // Overpass returns `{elements:[{type, id, lat, lon, tags}]}`; the
-    // service maps that to BtcMapPlace and derives verified_at from
-    // the `check_date` tag.
+    // BTC Map v4 returns a flat array; each tag comes back as a
+    // prefixed top-level field (`osm:name`, `osm:payment:lightning`,
+    // …). reshape() pulls the `osm:` prefix off and rebuilds the
+    // BtcMapPlace.tags map.
     fetchMock.mockResolvedValueOnce({
       ok: true,
-      json: async () => ({
-        elements: [
-          {
-            type: 'node',
-            id: 42,
-            lat: 51.5,
-            lon: -0.1,
-            tags: { name: 'Cached café' },
-          },
-        ],
-      }),
+      json: async () => [
+        { id: 42, lat: 51.5, lon: -0.1, 'osm:name': 'Cached café' },
+        // Outside bbox — used to confirm client-side filter.
+        { id: 99, lat: 60.0, lon: 30.0, 'osm:name': 'Faraway place' },
+      ],
     });
 
     const expected: BtcMapPlace = {
@@ -138,10 +133,8 @@ describe('fetchPlacesInBbox cache', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1); // second call hit the cache
   });
 
-  it('throws a useful error when every mirror returns non-OK', async () => {
+  it('throws a useful error when v4 returns non-OK', async () => {
     const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
-    // Three Overpass mirrors are tried in order; reject them all so
-    // the race exhausts and surfaces the last error.
     fetchMock.mockResolvedValue({
       ok: false,
       status: 503,
@@ -149,6 +142,6 @@ describe('fetchPlacesInBbox cache', () => {
     });
 
     const bbox = { minLon: 0, minLat: 0, maxLon: 1, maxLat: 1 };
-    await expect(fetchPlacesInBbox(bbox)).rejects.toThrow(/Overpass 503/);
+    await expect(fetchPlacesInBbox(bbox)).rejects.toThrow(/BTC Map v4 503/);
   });
 });

@@ -1,42 +1,64 @@
 /**
- * Read-only consumer of Bitcoin-accepting merchant data. Originally
- * hit `api.btcmap.org/v3/places` but that endpoint returned 404 by
- * mid-2025; v4 strips OSM tags + ignores bbox, v2 is bulky. So we
- * query **Overpass** directly against OpenStreetMap — the underlying
- * commons BTC Map curates. Same data, more reliable transport. We
- * never write back: merchant data lives in OSM (see project memory
- * `BTC Map runs the commons (Nathan)`). The exported type stays
- * `BtcMapPlace` so all callers / tests keep working.
+ * Read-only consumer of Bitcoin-accepting merchant data sourced from
+ * BTC Map's v4 REST API. BTC Map curates merchants from the OSM
+ * commons (see project memory `BTC Map runs the commons (Nathan)`) —
+ * we never write back.
+ *
+ * History: this file previously hit `/v3/places?bbox=…` (gone), then
+ * pivoted to Overpass when v4 looked broken. Issue #52 in
+ * `teambtcmap/btcmap-api` clarified that v4 returns only `{id}` by
+ * default and tags must be requested individually with a source
+ * prefix (e.g. `osm:payment:lightning`). With the explicit field list
+ * below v4 is the right transport: one global fetch, week-long cache,
+ * no bbox param (filter client-side). Stable, no rate-limit pain, no
+ * Overpass-mirror roulette.
  *
  * Closes part of #467.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Overpass interpreter — queries OpenStreetMap directly. BTC Map's
-// own data is harvested from this same OSM commons (see project
-// memory `BTC Map runs the commons (Nathan)`), so going to OSM
-// upstream gives equivalent merchant coverage with a stable public
-// HTTP surface. Main host first, mirrors as fallbacks.
-const OVERPASS_HOSTS = [
-  'https://overpass-api.de/api/interpreter',
-  'https://overpass.kumi.systems/api/interpreter',
-  'https://overpass.openstreetmap.fr/api/interpreter',
-];
+const BTCMAP_V4_PLACES_URL = 'https://api.btcmap.org/v4/places';
+
+// v4 returns one prefixed field per requested OSM key. The prefix
+// (`osm:`) names the upstream data source — v4 is designed to fuse
+// multiple sources later, so the prefix is required even when only
+// OSM is in play. We pull every tag a caller in this codebase reads,
+// plus `verified_at` for the "Verified N days ago" UI hint.
+const V4_FIELDS = [
+  'id',
+  'lat',
+  'lon',
+  'verified_at',
+  'osm:name',
+  'osm:addr:street',
+  'osm:addr:city',
+  'osm:addr:postcode',
+  'osm:payment:bitcoin',
+  'osm:payment:lightning',
+  'osm:payment:lightning_contactless',
+  'osm:payment:onchain',
+  'osm:contact:phone',
+  'osm:contact:website',
+  'osm:contact:email',
+  'osm:payment:lightning_address',
+  'osm:lud16',
+].join(',');
+
 const FETCH_TIMEOUT_MS = 45_000;
-const TILE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1_000; // 7 days
+const DATASET_TTL_MS = 7 * 24 * 60 * 60 * 1_000; // 7 days
 // AsyncStorage key — namespaced so it's grepable + obviously
-// invalidatable from devtools. Persists the in-memory tile cache
-// so a successful Overpass fetch survives mirror outages later in
-// the week (the public mirrors return 406/504/403 unpredictably).
-const TILE_CACHE_STORAGE_KEY = '@lp:btcmap-tile-cache';
+// invalidatable from devtools. A single global dataset cache; v4 has
+// no bbox parameter so we fetch the whole world and filter in memory.
+const DATASET_STORAGE_KEY = '@lp:btcmap-dataset-v4';
 
 export interface BtcMapPlace {
   id: number;
   lat: number;
   lon: number;
-  /** OSM tags pulled through. We surface the shape we care about and
-   * leave the rest as Record so callers can dig for additional keys. */
+  /** OSM tags pulled through (un-prefixed). We surface the shape we
+   * care about and leave the rest as Record so callers can dig for
+   * additional keys. */
   tags: Record<string, string> & {
     name?: string;
     'addr:street'?: string;
@@ -61,14 +83,15 @@ export interface BtcMapPlace {
   verified_at?: string | null;
 }
 
-interface CachedTile {
+interface CachedDataset {
   fetchedAt: number;
   places: BtcMapPlace[];
 }
 
 /**
  * Bounding box in `[minLon, minLat, maxLon, maxLat]` order. Matches the
- * BTC Map API parameter order, which itself matches the GeoJSON convention.
+ * GeoJSON convention. (BTC Map v4 has no bbox parameter — this is used
+ * for client-side filtering of the cached dataset.)
  */
 export interface Bbox {
   minLon: number;
@@ -77,170 +100,99 @@ export interface Bbox {
   maxLat: number;
 }
 
-/**
- * Cache key keyed by the rounded bbox (4 decimal places ≈ 11 m precision)
- * so adjacent viewports share the same cache entry instead of triggering
- * a fresh network call on every pan-by-a-pixel.
- */
-// Coarse cache key — round bbox bounds to 2 decimal places (~1 km
-// precision) so adjacent viewports during normal map panning share a
-// cache entry. Per Copilot review on PR #488: 4-decimal precision
-// generated a new key on every pixel-pan, bloating AsyncStorage.
-const tileKey = (bbox: Bbox): string =>
-  [
-    bbox.minLon.toFixed(2),
-    bbox.minLat.toFixed(2),
-    bbox.maxLon.toFixed(2),
-    bbox.maxLat.toFixed(2),
-  ].join(',');
+let memoryDataset: CachedDataset | null = null;
 
-// LRU-style bounded cache. JS `Map` preserves insertion order, so
-// dropping the oldest key when we exceed `TILE_CACHE_MAX_ENTRIES`
-// keeps the most-recently-fetched tiles in memory + on disk.
-const TILE_CACHE_MAX_ENTRIES = 32;
-const tileCache = new Map<string, CachedTile>();
-const touchCacheEntry = (key: string, entry: CachedTile): void => {
-  // Re-insert so the LRU order tracks recent use.
-  tileCache.delete(key);
-  tileCache.set(key, entry);
-  if (tileCache.size > TILE_CACHE_MAX_ENTRIES) {
-    const oldest = tileCache.keys().next().value;
-    if (oldest !== undefined) tileCache.delete(oldest);
+const isFresh = (entry: CachedDataset): boolean => Date.now() - entry.fetchedAt < DATASET_TTL_MS;
+
+const inBbox = (p: BtcMapPlace, b: Bbox): boolean =>
+  p.lon >= b.minLon && p.lon <= b.maxLon && p.lat >= b.minLat && p.lat <= b.maxLat;
+
+// v4 returns each tag as `osm:<key>` at the top level. Reshape into the
+// historical `BtcMapPlace.tags` map so downstream code (acceptsLightning,
+// formatAddress, etc.) keeps working without per-call rewrites.
+const reshape = (raw: Record<string, unknown>): BtcMapPlace | null => {
+  const id = raw['id'];
+  const lat = raw['lat'];
+  const lon = raw['lon'];
+  if (typeof id !== 'number' || typeof lat !== 'number' || typeof lon !== 'number') return null;
+  const tags: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (typeof v !== 'string') continue;
+    if (k.startsWith('osm:')) tags[k.slice(4)] = v;
   }
+  const verified_at = typeof raw['verified_at'] === 'string' ? (raw['verified_at'] as string) : null;
+  return { id, lat, lon, tags, verified_at };
 };
-
-const isFresh = (entry: CachedTile): boolean => Date.now() - entry.fetchedAt < TILE_CACHE_TTL_MS;
 
 // One-shot AsyncStorage hydration. Runs on first `fetchPlacesInBbox`
 // call, not at module load, because RN evaluates this file early in
 // the bundle and AsyncStorage's native module may not be ready yet.
-// The promise is cached so we never double-hydrate.
 let hydratePromise: Promise<void> | null = null;
 const hydrateFromStorage = async (): Promise<void> => {
   if (hydratePromise) return hydratePromise;
   hydratePromise = (async () => {
     try {
-      const raw = await AsyncStorage.getItem(TILE_CACHE_STORAGE_KEY);
+      const raw = await AsyncStorage.getItem(DATASET_STORAGE_KEY);
       if (!raw) return;
-      const parsed = JSON.parse(raw) as Record<string, CachedTile>;
-      for (const [k, entry] of Object.entries(parsed)) {
-        if (entry && isFresh(entry)) touchCacheEntry(k, entry);
+      const parsed = JSON.parse(raw) as CachedDataset;
+      if (parsed && Array.isArray(parsed.places) && isFresh(parsed)) {
+        memoryDataset = parsed;
       }
     } catch {
       // Corrupt or unreadable storage shouldn't break merchant fetch —
-      // we'll just hit Overpass and re-persist on success.
+      // we'll just hit v4 and re-persist on success.
     }
   })();
   return hydratePromise;
 };
 
-// Serialise the live cache out to AsyncStorage. Best-effort; failures
-// are silent because the in-memory cache still serves the session.
-const persistToStorage = (): void => {
-  const obj: Record<string, CachedTile> = {};
-  tileCache.forEach((v, k) => {
-    obj[k] = v;
-  });
-  AsyncStorage.setItem(TILE_CACHE_STORAGE_KEY, JSON.stringify(obj)).catch(() => {});
+const persistToStorage = (dataset: CachedDataset): void => {
+  AsyncStorage.setItem(DATASET_STORAGE_KEY, JSON.stringify(dataset)).catch(() => {});
+};
+
+// Fetch the full v4 dataset with our explicit field list, reshape into
+// BtcMapPlace, cache. v4 has no bbox param so this pull is global —
+// roughly 28k places, ~3 MB JSON. Fine for a weekly refresh.
+const fetchDataset = async (): Promise<CachedDataset> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const url = `${BTCMAP_V4_PLACES_URL}?fields=${encodeURIComponent(V4_FIELDS)}`;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`BTC Map v4 ${res.status}`);
+    const json = (await res.json()) as Record<string, unknown>[];
+    const places = (Array.isArray(json) ? json : [])
+      .map(reshape)
+      .filter((p): p is BtcMapPlace => p !== null);
+    const dataset: CachedDataset = { fetchedAt: Date.now(), places };
+    memoryDataset = dataset;
+    persistToStorage(dataset);
+    return dataset;
+  } finally {
+    clearTimeout(timer);
+  }
 };
 
 /**
- * Fetch merchants in a bounding box. Returns cached results if a recent
- * fetch covered the same key. Caller should debounce on map-pan/zoom so
- * we're not hammering the API on every gesture frame.
+ * Fetch merchants in a bounding box. Returns cached results if the
+ * global dataset is still fresh; otherwise refreshes from v4 and then
+ * filters. Caller should debounce on map-pan/zoom so we're not
+ * re-filtering on every gesture frame (the filter itself is O(n)
+ * over ~28k items — millisecond-fast, but still worth debouncing).
  */
 export const fetchPlacesInBbox = async (bbox: Bbox): Promise<BtcMapPlace[]> => {
   await hydrateFromStorage();
-  const key = tileKey(bbox);
-  const cached = tileCache.get(key);
-  if (cached && isFresh(cached)) {
-    return cached.places;
-  }
-
-  // Overpass QL — fetch every OSM node OR way whose tags indicate
-  // Bitcoin acceptance, in the requested bbox. We union three
-  // selectors because OSM contributors haven't settled on one tag:
-  //   payment:bitcoin=yes   — most common modern convention
-  //   currency:XBT=yes      — older "XBT is the ISO ticker for BTC" school
-  //   payment:lightning=yes — Lightning-specific
-  // `out center;` collapses ways to a representative point so we get
-  // lat/lon regardless of geometry type. `[timeout:35]` matches our
-  // client-side timeout so the server doesn't hold connections
-  // open past when the client gave up.
-  const bb = `${bbox.minLat},${bbox.minLon},${bbox.maxLat},${bbox.maxLon}`;
-  const ql = `[out:json][timeout:35];
-(
-  node["payment:bitcoin"="yes"](${bb});
-  node["currency:XBT"="yes"](${bb});
-  node["payment:lightning"="yes"](${bb});
-  way["payment:bitcoin"="yes"](${bb});
-  way["currency:XBT"="yes"](${bb});
-  way["payment:lightning"="yes"](${bb});
-);
-out center;`;
-
-  // Race through Overpass mirrors. Some 406 React Native fetches on
-  // certain Accept-Encoding combinations, others 504 under load; the
-  // public-mirror landscape changes month-to-month. First success wins.
-  let lastError: Error | null = null;
-  for (const host of OVERPASS_HOSTS) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-    try {
-      // POST with `text/plain` body = raw QL — the format every Overpass
-      // mirror documents and that sidesteps Accept-Encoding negotiation
-      // headaches the `data=` form runs into from React Native's fetch.
-      const res = await fetch(host, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain', Accept: 'application/json' },
-        body: ql,
-        signal: controller.signal,
-      });
-      if (!res.ok) {
-        lastError = new Error(`Overpass ${res.status} from ${host}`);
-        continue;
-      }
-      const json = (await res.json()) as {
-        elements?: Array<{
-          type: 'node' | 'way' | 'relation';
-          id: number;
-          lat?: number;
-          lon?: number;
-          center?: { lat: number; lon: number };
-          tags?: Record<string, string>;
-        }>;
-      };
-      const places: BtcMapPlace[] = (json.elements ?? [])
-        .map((el) => {
-          const lat = el.lat ?? el.center?.lat;
-          const lon = el.lon ?? el.center?.lon;
-          if (lat === undefined || lon === undefined) return null;
-          const tags = el.tags ?? {};
-          const verified_at: string | null =
-            tags['check_date'] ??
-            tags['check_date:payment:bitcoin'] ??
-            tags['check_date:currency:XBT'] ??
-            null;
-          return { id: el.id, lat, lon, tags, verified_at } as BtcMapPlace;
-        })
-        .filter((p): p is BtcMapPlace => p !== null);
-      touchCacheEntry(key, { fetchedAt: Date.now(), places });
-      persistToStorage();
-      return places;
-    } catch (e) {
-      lastError = e as Error;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  throw lastError ?? new Error('Overpass: no mirrors reachable');
+  const dataset = memoryDataset && isFresh(memoryDataset) ? memoryDataset : await fetchDataset();
+  return dataset.places.filter((p) => inBbox(p, bbox));
 };
 
 /**
  * Resolve a Lightning Address from a place's OSM tags. Tries common
- * tag variants in order; returns null if none present. Purely a tag
- * lookup — we never invent or normalise the address (callers handle
- * presentation + validation).
+ * tag variants in order; returns null if none present.
  */
 export const lightningAddressOf = (place: BtcMapPlace): string | null =>
   place.tags['payment:lightning_address'] ?? place.tags.lud16 ?? null;
@@ -276,11 +228,13 @@ export const daysSinceVerified = (place: BtcMapPlace): number | null => {
 };
 
 /**
- * Test-only escape hatch — the in-memory tile cache survives across
- * unit-test invocations otherwise, leading to flaky tests when one test
- * primes a key that another expects to be cold.
+ * Test-only escape hatch — the in-memory dataset survives across
+ * unit-test invocations otherwise.
  */
 export const __resetCacheForTest = (): void => {
-  tileCache.clear();
+  memoryDataset = null;
   hydratePromise = null;
+  // Also wipe the persisted copy — otherwise the next test hydrates
+  // from AsyncStorage and never reaches the mocked fetch path.
+  AsyncStorage.removeItem(DATASET_STORAGE_KEY).catch(() => {});
 };

@@ -101,7 +101,7 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         // bounds bridge.
         const initBbox = bboxAround(lat, lon, 0.3);
         lastBbox.current = initBbox;
-        // Queue the viewport BEFORE awaiting Overpass — the WebView
+        // Queue the viewport BEFORE awaiting BTC Map — the WebView
         // bridge fires `ready` in parallel with the (potentially slow)
         // merchant fetch, and we want the map centred on the user
         // regardless of whether the BTC-merchant query has come back.
