@@ -233,6 +233,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const updateWalletInState = useCallback((walletId: string, updates: Partial<WalletState>) => {
     setWallets((prev) => prev.map((w) => (w.id === walletId ? { ...w, ...updates } : w)));
+    // Persist fresh balance to disk so the next cold start can hydrate
+    // it instantly (vs paying ~9 s BDK.Wallet.create + Electrum.sync to
+    // re-derive it). Fire-and-forget; failure mode is "next boot shows
+    // stale-or-null balance, refreshes lazily" — same as before.
+    if (typeof updates.balance === 'number') {
+      AsyncStorage.setItem(`balance_${walletId}`, String(updates.balance)).catch(() => {});
+    }
   }, []);
 
   // Forward-declared so `fetchTransactionsForWallet` can call into it without
@@ -329,10 +336,28 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               console.warn(`Corrupted cached txs for ${w.id}, clearing:`, err);
               await AsyncStorage.removeItem(`txs_${w.id}`);
             }
+            // Hydrate cached balance from disk so the wallet card shows
+            // a number on cold start instead of `---` while we hold off
+            // the BDK `Wallet.create() + Electrum.sync()` work (~9 s of
+            // JS-thread time per onchain wallet) until the user actually
+            // asks for fresh data (pull-to-refresh, open wallet detail,
+            // open Send sheet for that wallet). Closes the cold-start
+            // "Send button feels frozen for 12 s" symptom: BDK is the
+            // dominant blocker, and BDK isn't needed to paint Home.
+            let cachedBalance: number | null = null;
+            try {
+              const bRaw = await AsyncStorage.getItem(`balance_${w.id}`);
+              if (bRaw) {
+                const n = Number(bRaw);
+                if (Number.isFinite(n)) cachedBalance = n;
+              }
+            } catch {
+              // Corrupted balance cache — ignore; live fetch will repopulate.
+            }
             return {
               ...w,
               isConnected: false,
-              balance: null,
+              balance: cachedBalance,
               walletAlias: null,
               transactions: cachedTxs,
             };
@@ -363,16 +388,22 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // call will auto-await the connect because `nwcService.connect`
         // is idempotent and provider-map-keyed.
         setIsLoading(false);
+        // No eager onchain `getBalance` at boot. Each call does
+        // `BDK.Wallet.create() + Electrum.sync()` — ~9 s of JS-thread
+        // time even for ONE wallet (measured on Big Piggy's AVD fixture
+        // with 230 NIP-17 wraps in the inbox). That 9 s landed inside
+        // the cold-start window where the user is most likely to tap
+        // Send, and tap events queued behind it — root cause of the
+        // "Send button feels frozen for 12 s" symptom. Cached balances
+        // from the previous session are hydrated above; fresh balances
+        // arrive on pull-to-refresh / wallet detail open / explicit
+        // `refreshBalanceForWallet` calls, all of which lazily init
+        // BDK on demand (the `bdkWallets` cache in onchainService
+        // already memoises per walletId).
         void Promise.all(
           walletList.map(async (wallet) => {
             try {
               if (wallet.walletType === 'onchain') {
-                const bal = await onchainService.getBalance(wallet.id);
-                setWallets((prev) =>
-                  prev.map((w) =>
-                    w.id === wallet.id ? { ...w, isConnected: false, balance: bal } : w,
-                  ),
-                );
                 return;
               }
 
