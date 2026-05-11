@@ -58,6 +58,10 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
   // Pure client-side filter against the already-trust-filtered list;
   // no extra relay queries.
   const [searchQuery, setSearchQuery] = useState('');
+  // Optional distance ceiling. `null` = no filter (default — show all
+  // events in the user's web of trust regardless of distance).
+  // Numeric value = haversine cap in metres.
+  const [maxDistanceMetres, setMaxDistanceMetres] = useState<number | null>(null);
   const closerRef = useRef<(() => void) | null>(null);
 
   const { isTrusted, filterEnabled } = useTrustGraph();
@@ -158,20 +162,25 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
     return items;
   }, [events, pos]);
 
-  // Filtered slice — case-insensitive substring match across the
-  // fields a user would search by. Empty query → pass-through. Always
-  // applied after sort so "next 3" highlighting (UpNext chip on the
-  // first three entries) stays in distance-order.
+  // Filtered slice — search query (substring match) AND optional
+  // distance ceiling. Both default to "no filter" so a fresh user
+  // sees every WoT-trusted event regardless of how far away it is.
   const filteredEvents = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return sortedEvents;
-    return sortedEvents.filter(({ event }) => {
-      const hay = [event.title, event.description, event.location ?? '', event.hashtags.join(' ')]
-        .join(' ')
-        .toLowerCase();
-      return hay.includes(q);
-    });
-  }, [sortedEvents, searchQuery]);
+    let items = sortedEvents;
+    if (maxDistanceMetres !== null) {
+      items = items.filter(({ distance }) => distance <= maxDistanceMetres);
+    }
+    if (q) {
+      items = items.filter(({ event }) => {
+        const hay = [event.title, event.description, event.location ?? '', event.hashtags.join(' ')]
+          .join(' ')
+          .toLowerCase();
+        return hay.includes(q);
+      });
+    }
+    return items;
+  }, [sortedEvents, searchQuery, maxDistanceMetres]);
 
   const onCreateEvent = useCallback(() => {
     // Full create flow lives behind a Nostr signer + venue picker we
@@ -223,6 +232,37 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
         >
           <RefreshCw size={20} color={colors.white} strokeWidth={2.5} />
         </TouchableOpacity>
+      </View>
+
+      {/* Distance filter chips — choose how tight a radius to draw
+          around the user. Default "All" shows every WoT-trusted event
+          worldwide (per UX feedback: "we don't want to just filter
+          stuff out if we're not getting anything anyway"). */}
+      <View style={styles.filterRow} testID="events-distance-filter">
+        {(
+          [
+            { label: 'All', value: null },
+            { label: '5 km', value: 5_000 },
+            { label: '25 km', value: 25_000 },
+            { label: '150 km', value: 150_000 },
+            { label: '500 km', value: 500_000 },
+          ] as const
+        ).map((opt) => {
+          const active = maxDistanceMetres === opt.value;
+          return (
+            <TouchableOpacity
+              key={opt.label}
+              style={[styles.filterChip, active ? styles.filterChipActive : null]}
+              onPress={() => setMaxDistanceMetres(opt.value)}
+              accessibilityLabel={`Show events within ${opt.label}`}
+              testID={`events-distance-${opt.label.replace(/\s/g, '')}`}
+            >
+              <Text style={[styles.filterChipText, active ? styles.filterChipTextActive : null]}>
+                {opt.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       {/* Search bar — filters the loaded events client-side. Cheap, no
@@ -482,6 +522,33 @@ const createStyles = (colors: Palette) =>
       paddingVertical: 8,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.divider,
+    },
+    filterRow: {
+      flexDirection: 'row',
+      gap: 6,
+      backgroundColor: colors.surface,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+    },
+    filterChip: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 100,
+      backgroundColor: colors.background,
+      borderWidth: 1,
+      borderColor: colors.divider,
+    },
+    filterChipActive: {
+      backgroundColor: colors.brandPink,
+      borderColor: colors.brandPink,
+    },
+    filterChipText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.textSupplementary,
+    },
+    filterChipTextActive: {
+      color: colors.white,
     },
     searchInput: {
       flex: 1,
