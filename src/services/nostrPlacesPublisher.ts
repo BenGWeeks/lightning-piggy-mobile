@@ -93,27 +93,61 @@ export const subscribeComments = (
 };
 
 /**
- * Subscribe to nearby NIP-52 calendar events (kind 31923) by geohash
- * prefix. Mirrors `subscribeNearbyCaches` for the Events sub-screen.
- * Returns a closer.
+ * Subscribe to nearby NIP-52 calendar events. **Runs two parallel
+ * subscriptions and unions the results** because filtering by `g`
+ * tag alone is too restrictive in 2026 — most NIP-52 publishers
+ * (notably OrangePillApp, the dominant Bitcoin-meetup source) don't
+ * add `g` tags consistently. We complement the geohash sub with a
+ * hashtag sub on `#t in [bitcoin, lightning, meetup]` so topical
+ * matches surface even without a geohash. The caller's `onEvent`
+ * fires once per unique event; downstream code already de-dupes
+ * by coord so the union is safe.
+ *
+ * @param prefixes  geohash prefixes for the nearby filter
+ * @param topicTags lowercased hashtag list for the topical filter
+ *                  (default ['bitcoin','lightning','meetup'])
+ * @param onEvent   called per parsed event
  */
 export const subscribeNearbyEvents = (
   prefixes: string[],
   onEvent: (parsed: ParsedEvent) => void,
   relays: string[] = DEFAULT_RELAYS,
+  topicTags: string[] = ['bitcoin', 'lightning', 'meetup'],
 ): (() => void) => {
-  if (prefixes.length === 0) return () => {};
-  const filter: Filter = {
-    kinds: [NIP52_TIME_BASED_KIND],
-    '#g': prefixes,
-  };
-  const sub = pool.subscribeMany(relays, filter, {
-    onevent: (e: NostrEvent) => {
-      const parsed = parseNip52Event(e as VerifiedEvent);
-      if (parsed) onEvent(parsed);
-    },
-  });
-  return () => sub.close();
+  const closers: Array<() => void> = [];
+
+  // (1) Geohash-prefix filter — nearby events (the original behaviour).
+  if (prefixes.length > 0) {
+    const geoFilter: Filter = { kinds: [NIP52_TIME_BASED_KIND], '#g': prefixes };
+    const geoSub = pool.subscribeMany(relays, geoFilter, {
+      onevent: (e: NostrEvent) => {
+        const parsed = parseNip52Event(e as VerifiedEvent);
+        if (parsed) onEvent(parsed);
+      },
+    });
+    closers.push(() => geoSub.close());
+  }
+
+  // (2) Topical-hashtag filter — Bitcoin-tagged events anywhere on
+  // the planet, including ones with no `g` tag. Capacity-bounded via
+  // `limit` so the union doesn't drown the UI on relays that return
+  // years of history.
+  if (topicTags.length > 0) {
+    const tagFilter: Filter = {
+      kinds: [NIP52_TIME_BASED_KIND],
+      '#t': topicTags,
+      limit: 200,
+    };
+    const tagSub = pool.subscribeMany(relays, tagFilter, {
+      onevent: (e: NostrEvent) => {
+        const parsed = parseNip52Event(e as VerifiedEvent);
+        if (parsed) onEvent(parsed);
+      },
+    });
+    closers.push(() => tagSub.close());
+  }
+
+  return () => closers.forEach((c) => c());
 };
 
 /**
