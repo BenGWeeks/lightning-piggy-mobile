@@ -120,7 +120,8 @@ const reshape = (raw: Record<string, unknown>): BtcMapPlace | null => {
     if (typeof v !== 'string') continue;
     if (k.startsWith('osm:')) tags[k.slice(4)] = v;
   }
-  const verified_at = typeof raw['verified_at'] === 'string' ? (raw['verified_at'] as string) : null;
+  const verified_at =
+    typeof raw['verified_at'] === 'string' ? (raw['verified_at'] as string) : null;
   return { id, lat, lon, tags, verified_at };
 };
 
