@@ -633,9 +633,7 @@ const CacheCard: React.FC<{
     </Text>
     <Text style={styles.cardSub} numberOfLines={1}>
       {cache.isLpPiggy ? 'Piglet' : 'NIP-GC cache'}
-      {Number.isFinite(distance)
-        ? ` · ${distance < 50 ? 'Here' : formatDistance(distance)}`
-        : ''}
+      {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
     </Text>
     <Text style={styles.cardSubSmall} numberOfLines={1}>
       {cache.cacheType ?? 'traditional'} · {cache.size ?? 'micro'}

@@ -476,9 +476,7 @@ const CacheRow: React.FC<{
       </Text>
       <Text style={styles.rowMeta} numberOfLines={1}>
         {cache.isLpPiggy ? 'Piglet' : 'NIP-GC cache'}
-        {Number.isFinite(distance)
-          ? ` · ${distance < 50 ? 'Here' : formatDistance(distance)}`
-          : ''}
+        {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
         {cache.cacheType ? ` · ${cache.cacheType}` : ''}
         {cache.size ? ` · ${cache.size}` : ''}
         {cache.difficulty ? ` · D${cache.difficulty}` : ''}
