@@ -214,6 +214,10 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
       lat: p.lat,
       lng: p.lon,
       lightning: acceptsLightning(p),
+      // BTC Map's curated category glyph (Material Symbols name). Falls
+      // back to 'storefront' in the WebView when missing so every pin
+      // still gets an obvious shop-shaped marker.
+      icon: p.icon ?? 'storefront',
     }));
     const js = `window.LP_setMarkers && window.LP_setMarkers(${JSON.stringify(payload)}); true;`;
     webviewRef.current.injectJavaScript(js);
@@ -385,7 +389,7 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
           <Text style={styles.legendText}>⚡ Lightning</Text>
         </View>
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: '#F5A623' }]} />
+          <View style={[styles.legendDot, { backgroundColor: '#F7931A' }]} />
           <Text style={styles.legendText}>On-chain</Text>
         </View>
         <View style={styles.legendItem}>
@@ -739,7 +743,7 @@ const FILTER_OPTIONS: ReadonlyArray<{
   diamond?: boolean;
 }> = [
   { key: 'lightning', label: 'Lightning', hint: 'Pays in sats over Lightning', swatch: '#EC008C' },
-  { key: 'onchain', label: 'On-chain', hint: 'Accepts bitcoin on-chain', swatch: '#F5A623' },
+  { key: 'onchain', label: 'On-chain', hint: 'Accepts bitcoin on-chain', swatch: '#F7931A' },
   { key: 'piglet', label: 'Piglet', hint: 'Lightning Piggy stash', swatch: '#EC008C', diamond: true },
   { key: 'nipgcCache', label: 'NIP-GC cache', hint: 'Geo-cache (treasures.to et al.)', swatch: '#6c7b8a', diamond: true },
 ];
@@ -849,6 +853,11 @@ const LEAFLET_HTML = `<!DOCTYPE html>
   <meta charset="utf-8" />
   <meta name="viewport" content="initial-scale=1.0,maximum-scale=1.0,user-scalable=no" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <!-- Material Symbols Outlined — same icon family BTC Map ships, so
+       every BtcMapPlace.icon name resolves to a recognisable glyph
+       (storefront, chalet, cafe, pub, bicycle, …). Self-hosted from
+       Google Fonts CDN; no JS, just a single CSS+woff2 fetch. -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Symbols+Outlined" />
   <style>
     html, body, #map { margin: 0; padding: 0; height: 100%; width: 100%; }
     /* Leaflet's default zoom buttons are small + tucked top-left.
@@ -865,12 +874,22 @@ const LEAFLET_HTML = `<!DOCTYPE html>
       box-shadow: 0 1px 4px rgba(0,0,0,0.25);
     }
     .leaflet-control-zoom a:hover { background: #f4f4f4 !important; }
+    /* Merchant pin — circular badge sized big enough for a glyph to
+       read clearly. Pink for Lightning, bitcoin orange (#F7931A) for
+       on-chain only. Material-Symbols glyph centred inside. */
     .lp-pin {
-      width: 22px; height: 22px; border-radius: 11px;
+      width: 32px; height: 32px; border-radius: 16px;
       background: #EC008C; border: 2px solid #fff;
       box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+      display: flex; align-items: center; justify-content: center;
+      color: #fff;
     }
-    .lp-pin.onchain { background: #F5A623; }
+    .lp-pin.onchain { background: #F7931A; }
+    .lp-pin .material-symbols-outlined {
+      font-size: 18px;
+      font-variation-settings: 'FILL' 1, 'wght' 500;
+      line-height: 1;
+    }
     /* NIP-GC cache pins — diamond shape so they're visually
        distinguishable from circular merchant pins. */
     .lp-cache {
@@ -934,11 +953,25 @@ const LEAFLET_HTML = `<!DOCTYPE html>
       }).addTo(map);
     };
 
+    // Whitelist of Material Symbols names we accept from JS. Anything
+    // outside this set falls through to 'storefront' — keeps a malformed
+    // BTC Map payload from injecting arbitrary HTML/text into the DOM.
+    const ALLOWED_ICONS = new Set([
+      'storefront','shop','shopping_bag','cafe','coffee','restaurant','fast_food','pizza',
+      'bar','pub','hotel','lodging','chalet','bed','office','building','apartment',
+      'hospital','pharmacy','health','fuel','gas_station','car_repair','bicycle','bike',
+      'hardware','tools','scissors','salon','camera','photo','gym','fitness',
+      'palette','art','pet','veterinary','travel','airport','outdoor','park','delivery','truck',
+    ]);
+    const safeIcon = (name) => ALLOWED_ICONS.has(name) ? name : 'storefront';
+
     window.LP_setMarkers = function(list) {
       markerLayer.clearLayers();
       list.forEach((m) => {
         const cls = 'lp-pin' + (m.lightning ? '' : ' onchain');
-        const icon = L.divIcon({ className: '', html: '<div class="' + cls + '"></div>', iconSize: [22, 22] });
+        const glyph = safeIcon(m.icon);
+        const html = '<div class="' + cls + '"><span class="material-symbols-outlined">' + glyph + '</span></div>';
+        const icon = L.divIcon({ className: '', html: html, iconSize: [32, 32] });
         const marker = L.marker([m.lat, m.lng], { icon });
         marker.on('click', () => post({ type: 'markerTap', id: m.id }));
         marker.addTo(markerLayer);
