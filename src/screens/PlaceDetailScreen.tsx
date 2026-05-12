@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import * as Location from 'expo-location';
 import {
+  Accessibility,
   ChevronLeft,
   Clock,
   ExternalLink,
@@ -19,6 +20,10 @@ import {
   Navigation as NavigationIcon,
   Phone,
   ShieldCheck,
+  ShoppingBag,
+  Sparkles,
+  Trees,
+  Truck,
   Zap,
 } from 'lucide-react-native';
 import type { RouteProp } from '@react-navigation/native';
@@ -34,6 +39,7 @@ import {
   daysSinceVerified,
   fetchPlacesInBbox,
   formatAddress,
+  isBoosted,
   lightningAddressOf,
 } from '../services/btcMapService';
 import { formatDistance, haversineMetres } from '../utils/geohash';
@@ -62,6 +68,29 @@ const formatYMD = (iso: string): string => {
   if (Number.isNaN(d.getTime())) return iso;
   return d.toISOString().slice(0, 10);
 };
+
+/**
+ * One row in the Contact section for a social URL — Lucide dropped the
+ * brand glyphs (Facebook / Twitter etc.) so we use a generic
+ * `ExternalLink` icon and label the row with the network name. URL is
+ * shown stripped of scheme + "www." for readability.
+ */
+const SocialRow: React.FC<{
+  label: string;
+  url: string;
+  // Loose styles type so we don't have to thread the full createStyles
+  // signature through; this component is a one-off helper used only
+  // inside PlaceDetailScreen.
+  styles: Record<string, ReturnType<typeof StyleSheet.create>[string]>;
+  colors: Palette;
+}> = ({ label, url, styles, colors }) => (
+  <TouchableOpacity style={styles.contactRow} onPress={() => Linking.openURL(url).catch(() => {})}>
+    <ExternalLink size={14} color={colors.brandPink} strokeWidth={2.5} />
+    <Text style={styles.contactText} numberOfLines={1}>
+      {label} · {url.replace(/^https?:\/\/(www\.)?/, '')}
+    </Text>
+  </TouchableOpacity>
+);
 
 const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
@@ -175,6 +204,12 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               <Text style={styles.title}>{place.tags.name ?? 'Unnamed merchant'}</Text>
             </View>
             <View style={styles.chipRow}>
+              {isBoosted(place) ? (
+                <View style={styles.chipFeatured} testID="place-detail-featured-chip">
+                  <Sparkles size={12} color={colors.white} strokeWidth={2.5} />
+                  <Text style={styles.chipPinkText}>Featured</Text>
+                </View>
+              ) : null}
               {acceptsLightning(place) ? (
                 <View style={styles.chipPink}>
                   <Zap size={12} color={colors.white} strokeWidth={2.5} />
@@ -200,9 +235,58 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   </Text>
                 </View>
               ) : null}
+              {/* Accessibility — OSM `wheelchair=yes/limited/no`. We only
+                  surface yes/limited (a hard "no" feels stigmatising and
+                  the data is too sparse to act on). */}
+              {place.tags['wheelchair'] === 'yes' ||
+              place.tags['wheelchair'] === 'limited' ? (
+                <View style={styles.chipFeature}>
+                  <Accessibility size={12} color={colors.textHeader} strokeWidth={2.5} />
+                  <Text style={styles.chipFeatureText}>
+                    {place.tags['wheelchair'] === 'limited'
+                      ? 'Wheelchair limited'
+                      : 'Wheelchair accessible'}
+                  </Text>
+                </View>
+              ) : null}
+              {place.tags['takeaway'] === 'yes' ? (
+                <View style={styles.chipFeature}>
+                  <ShoppingBag size={12} color={colors.textHeader} strokeWidth={2.5} />
+                  <Text style={styles.chipFeatureText}>Takeaway</Text>
+                </View>
+              ) : null}
+              {place.tags['delivery'] === 'yes' ? (
+                <View style={styles.chipFeature}>
+                  <Truck size={12} color={colors.textHeader} strokeWidth={2.5} />
+                  <Text style={styles.chipFeatureText}>Delivery</Text>
+                </View>
+              ) : null}
+              {place.tags['outdoor_seating'] === 'yes' ? (
+                <View style={styles.chipFeature}>
+                  <Trees size={12} color={colors.textHeader} strokeWidth={2.5} />
+                  <Text style={styles.chipFeatureText}>Outdoor seating</Text>
+                </View>
+              ) : null}
             </View>
 
             <Text style={styles.address}>{formatAddress(place)}</Text>
+
+            {place.tags['brand'] ? (
+              <Text style={styles.metaLine}>Part of {place.tags['brand']}</Text>
+            ) : null}
+            {place.tags['cuisine'] ? (
+              <Text style={styles.metaLine}>
+                Cuisine · {place.tags['cuisine'].replace(/;/g, ', ')}
+              </Text>
+            ) : null}
+            {place.tags['level'] || place.tags['addr:floor'] ? (
+              <Text style={styles.metaLine}>
+                Floor {place.tags['level'] ?? place.tags['addr:floor']}
+              </Text>
+            ) : null}
+            {place.tags['wheelchair:description'] ? (
+              <Text style={styles.metaLine}>{place.tags['wheelchair:description']}</Text>
+            ) : null}
 
             {place.description ? (
               <Text style={styles.description}>{place.description}</Text>
@@ -259,7 +343,14 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               </View>
             ) : null}
 
-            {place.phone || place.tags['contact:website'] || place.email || place.facebookUrl ? (
+            {place.phone ||
+            place.tags['contact:website'] ||
+            place.email ||
+            place.facebookUrl ||
+            place.twitterUrl ||
+            place.instagramUrl ||
+            place.telegramUrl ||
+            place.whatsappUrl ? (
               <View style={styles.contactSection}>
                 <Text style={styles.sectionLabel}>Contact</Text>
                 {place.phone ? (
@@ -293,21 +384,60 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   </TouchableOpacity>
                 ) : null}
                 {place.facebookUrl ? (
-                  <TouchableOpacity
-                    style={styles.contactRow}
-                    onPress={() => Linking.openURL(place.facebookUrl!).catch(() => {})}
-                  >
-                    <ExternalLink size={14} color={colors.brandPink} strokeWidth={2.5} />
-                    <Text style={styles.contactText} numberOfLines={1}>
-                      {place.facebookUrl.replace(/^https?:\/\/(www\.)?/, '')}
-                    </Text>
-                  </TouchableOpacity>
+                  <SocialRow
+                    label="Facebook"
+                    url={place.facebookUrl}
+                    styles={styles}
+                    colors={colors}
+                  />
+                ) : null}
+                {place.twitterUrl ? (
+                  <SocialRow
+                    label="X / Twitter"
+                    url={place.twitterUrl}
+                    styles={styles}
+                    colors={colors}
+                  />
+                ) : null}
+                {place.instagramUrl ? (
+                  <SocialRow
+                    label="Instagram"
+                    url={place.instagramUrl}
+                    styles={styles}
+                    colors={colors}
+                  />
+                ) : null}
+                {place.telegramUrl ? (
+                  <SocialRow
+                    label="Telegram"
+                    url={place.telegramUrl}
+                    styles={styles}
+                    colors={colors}
+                  />
+                ) : null}
+                {place.whatsappUrl ? (
+                  <SocialRow
+                    label="WhatsApp"
+                    url={place.whatsappUrl}
+                    styles={styles}
+                    colors={colors}
+                  />
                 ) : null}
               </View>
             ) : null}
 
-            {place.verified_at || place.createdAt || place.updatedAt ? (
+            {place.verified_at ||
+            place.createdAt ||
+            place.updatedAt ||
+            place.tags['start_date'] ||
+            place.tags['check_date:currency:XBT'] ||
+            (place.commentsCount ?? 0) > 0 ? (
               <View style={styles.lifecycleBlock}>
+                {place.tags['check_date:currency:XBT'] ? (
+                  <Text style={styles.lifecycleText}>
+                    Bitcoin acceptance confirmed {place.tags['check_date:currency:XBT']}.
+                  </Text>
+                ) : null}
                 {place.verified_at ? (
                   <Text style={styles.lifecycleText}>
                     Last community-verified {daysSinceVerified(place)} days ago via OpenStreetMap.
@@ -318,10 +448,27 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                     Last updated {formatYMD(place.updatedAt)}.
                   </Text>
                 ) : null}
+                {place.tags['start_date'] ? (
+                  <Text style={styles.lifecycleText}>
+                    Open since {place.tags['start_date']}.
+                  </Text>
+                ) : null}
                 {place.createdAt ? (
                   <Text style={styles.lifecycleText}>
-                    Listed since {formatYMD(place.createdAt)}.
+                    Listed on BTC Map {formatYMD(place.createdAt)}.
                   </Text>
+                ) : null}
+                {(place.commentsCount ?? 0) > 0 && btcMapMerchantUrl(place) ? (
+                  <TouchableOpacity
+                    onPress={() => Linking.openURL(btcMapMerchantUrl(place)!)}
+                    testID="place-detail-comments-link"
+                  >
+                    <Text style={[styles.lifecycleText, styles.commentsLink]}>
+                      {place.commentsCount}{' '}
+                      {place.commentsCount === 1 ? 'community note' : 'community notes'} on BTC
+                      Map →
+                    </Text>
+                  </TouchableOpacity>
                 ) : null}
               </View>
             ) : null}
@@ -422,6 +569,41 @@ const createStyles = (colors: Palette) =>
       paddingHorizontal: 10,
       paddingVertical: 4,
       borderRadius: 100,
+    },
+    chipFeatured: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      // Bitcoin yellow so the Featured pill reads instantly even on
+      // a busy chip row (Lightning pink + on-chain orange already
+      // crowd the warm end of the palette).
+      backgroundColor: colors.zapYellow,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 100,
+    },
+    chipFeature: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.divider,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 100,
+    },
+    chipFeatureText: { color: colors.textHeader, fontSize: 11, fontWeight: '700' },
+    metaLine: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+      marginTop: 2,
+    },
+    commentsLink: {
+      color: colors.brandPink,
+      fontStyle: 'normal',
+      fontWeight: '700',
+      marginTop: 4,
     },
     chipOrange: {
       flexDirection: 'row',

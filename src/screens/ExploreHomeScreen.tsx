@@ -2,7 +2,15 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, Image, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import * as Location from 'expo-location';
 import { useFocusEffect } from '@react-navigation/native';
-import { CalendarDays, ChevronRight, Compass, MapPin, PiggyBank, Zap } from 'lucide-react-native';
+import {
+  CalendarDays,
+  ChevronRight,
+  Compass,
+  MapPin,
+  PiggyBank,
+  Sparkles,
+  Zap,
+} from 'lucide-react-native';
 import TabHeader from '../components/TabHeader';
 import { ContentRail } from '../components/ContentRail';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
@@ -17,6 +25,7 @@ import {
   acceptsLightning,
   fetchPlacesInBbox,
   formatAddress,
+  isBoosted,
   lightningAddressOf,
 } from '../services/btcMapService';
 import { type ParsedCache, type ParsedEvent } from '../services/nostrPlacesService';
@@ -249,7 +258,18 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           { lat: place.lat, lon: place.lon },
         ),
       }))
-      .sort((a, b) => a.distance - b.distance)
+      // Boosted merchants surface first on the rail (BTC Map's
+      // paid-feature mechanism); within the same boost-bucket we still
+      // sort by distance so the closest boosted / closest non-boosted
+      // sit at the front of each half. Honest visual: each boosted
+      // card gets a "Featured" badge so the user knows why it's
+      // prominent.
+      .sort((a, b) => {
+        const ab = isBoosted(a.place) ? 1 : 0;
+        const bb = isBoosted(b.place) ? 1 : 0;
+        if (ab !== bb) return bb - ab;
+        return a.distance - b.distance;
+      })
       .slice(0, 12);
   }, [merchants, pos]);
 
@@ -444,8 +464,15 @@ const PlaceCard: React.FC<{
 }> = ({ place, distance, onPress, colors, styles }) => {
   const lightning = acceptsLightning(place);
   const lud16 = lightningAddressOf(place);
+  const boosted = isBoosted(place);
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} testID={`place-card-${place.id}`}>
+      {boosted ? (
+        <View style={styles.cardFeaturedBadge} testID={`place-card-${place.id}-featured`}>
+          <Sparkles size={10} color={colors.textHeader} strokeWidth={2.5} />
+          <Text style={styles.cardFeaturedText}>Featured</Text>
+        </View>
+      ) : null}
       <View
         style={[styles.cardIcon, lightning ? styles.cardIconLightning : styles.cardIconOnchain]}
       >
@@ -600,6 +627,25 @@ const createLocalStyles = (colors: Palette) =>
       borderRadius: 12,
       padding: 12,
       gap: 4,
+      // Position relative so the absolute Featured badge anchors to it.
+      position: 'relative',
+    },
+    cardFeaturedBadge: {
+      position: 'absolute',
+      top: 8,
+      right: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 3,
+      backgroundColor: colors.zapYellow,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 999,
+    },
+    cardFeaturedText: {
+      fontSize: 10,
+      fontWeight: '800',
+      color: colors.textHeader,
     },
     cardIcon: {
       width: 36,

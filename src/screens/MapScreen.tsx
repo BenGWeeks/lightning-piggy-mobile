@@ -23,6 +23,7 @@ import {
   PiggyBank,
   ShieldCheck,
   SlidersHorizontal,
+  Sparkles,
   Zap,
 } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -38,6 +39,7 @@ import {
   daysSinceVerified,
   fetchPlacesInBbox,
   formatAddress,
+  isBoosted,
   lightningAddressOf,
 } from '../services/btcMapService';
 import type { ParsedCache } from '../services/nostrPlacesService';
@@ -661,6 +663,12 @@ const MerchantDetailSheet: React.FC<{
         </View>
         <Text style={styles.sheetSubtitle}>{formatAddress(place)}</Text>
         <View style={styles.sheetChipRow}>
+          {isBoosted(place) && (
+            <View style={styles.sheetChipFeatured} testID="merchant-detail-featured">
+              <Sparkles size={12} color={colors.textHeader} strokeWidth={2.5} />
+              <Text style={styles.sheetChipFeaturedText}>Featured</Text>
+            </View>
+          )}
           {acceptsLightning(place) && (
             <View style={styles.sheetChipPink}>
               <Zap size={12} color={colors.white} strokeWidth={2.5} />
@@ -1433,6 +1441,20 @@ const createStyles = (colors: Palette) =>
     },
     sheetChipPinkText: {
       color: colors.white,
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    sheetChipFeatured: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      backgroundColor: colors.zapYellow,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 100,
+    },
+    sheetChipFeaturedText: {
+      color: colors.textHeader,
       fontSize: 11,
       fontWeight: '700',
     },

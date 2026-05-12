@@ -39,6 +39,30 @@ const V4_FIELDS = [
   'icon',
   'osm_url',
   'categories',
+  // Merchants pay a few sats to BTC Map (a non-profit) to feature
+  // their listing for a window of time; surfaced in-app as a small
+  // "Featured" pill + sort tie-break.
+  'boosted_until',
+  'comments_count',
+  // Richer OSM-tag fields — surfaced on PlaceDetail as chips / lines.
+  // All optional, often null. `osm:` prefix is stripped by `reshape`
+  // so they land in `place.tags['cuisine']`, etc.
+  'osm:cuisine',
+  'osm:wheelchair',
+  'osm:wheelchair:description',
+  'osm:takeaway',
+  'osm:delivery',
+  'osm:outdoor_seating',
+  'osm:brand',
+  'osm:brand:wikidata',
+  'osm:level',
+  'osm:addr:floor',
+  'osm:contact:twitter',
+  'osm:contact:instagram',
+  'osm:contact:telegram',
+  'osm:contact:whatsapp',
+  'osm:start_date',
+  'osm:check_date:currency:XBT',
   // Top-level curated contact fields. BTC Map normalises these from
   // the raw OSM tags + their own hand-fills, so they're often present
   // when the OSM-prefixed `osm:contact:*` tags are not (e.g. Mill Road
@@ -71,10 +95,10 @@ const DATASET_TTL_MS = 7 * 24 * 60 * 60 * 1_000; // 7 days
 // AsyncStorage key — namespaced so it's grepable + obviously
 // invalidatable from devtools. A single global dataset cache; v4 has
 // no bbox parameter so we fetch the whole world and filter in memory.
-// Bumped to `v4f` to invalidate caches written before the curated
-// `phone`/`email`/`opening_hours` + Facebook URL + created/updated
-// timestamps joined the parsed shape.
-const DATASET_STORAGE_KEY = '@lp:btcmap-dataset-v4f';
+// Bumped to `v4h` to invalidate caches written before boostedUntil +
+// the social URLs (twitter/instagram/telegram/whatsapp) + commentsCount
+// joined the parsed shape.
+const DATASET_STORAGE_KEY = '@lp:btcmap-dataset-v4h';
 
 export interface BtcMapPlace {
   id: number;
@@ -141,16 +165,34 @@ export interface BtcMapPlace {
   email?: string | null;
   opening_hours?: string | null;
   /**
-   * Facebook profile URL pulled from the OSM `contact:facebook` tag.
-   * No equivalent top-level field on BTC Map; we read the raw tag.
+   * Social profile URLs pulled from OSM `contact:<network>` tags.
+   * Surfaced as a chip row on the contact section. Each is optional
+   * and often null. `tags['contact:<network>']` carries the same value
+   * if a caller would rather read straight from the bag.
    */
   facebookUrl?: string | null;
+  twitterUrl?: string | null;
+  instagramUrl?: string | null;
+  telegramUrl?: string | null;
+  whatsappUrl?: string | null;
   /**
    * Unix-seconds timestamps for the listing lifecycle. Surfaced as
    * "Listed since" / "Last updated" hints on the detail page.
    */
   createdAt?: string | null;
   updatedAt?: string | null;
+  /**
+   * ISO timestamp until which the listing is "boosted" — BTC Map's
+   * paid-feature mechanism. Surfaced as a "Featured" pill + a sort
+   * tie-break (boosted wins within the same distance band).
+   */
+  boostedUntil?: string | null;
+  /**
+   * Number of community notes attached to the merchant on BTC Map.
+   * Currently surfaced as a copy line ("N community notes"); could
+   * link out to BTC Map's comments page in a follow-up.
+   */
+  commentsCount?: number | null;
 }
 
 interface CachedDataset {
@@ -219,8 +261,15 @@ const reshape = (raw: Record<string, unknown>): BtcMapPlace | null => {
   const email = pickStr('email') ?? tags['contact:email'] ?? null;
   const opening_hours = pickStr('opening_hours') ?? tags['opening_hours'] ?? null;
   const facebookUrl = tags['contact:facebook'] ?? null;
+  const twitterUrl = tags['contact:twitter'] ?? null;
+  const instagramUrl = tags['contact:instagram'] ?? null;
+  const telegramUrl = tags['contact:telegram'] ?? null;
+  const whatsappUrl = tags['contact:whatsapp'] ?? null;
+  const commentsCount =
+    typeof raw['comments_count'] === 'number' ? (raw['comments_count'] as number) : null;
   const createdAt = pickStr('created_at');
   const updatedAt = pickStr('updated_at');
+  const boostedUntil = pickStr('boosted_until');
   return {
     id,
     lat,
@@ -235,8 +284,14 @@ const reshape = (raw: Record<string, unknown>): BtcMapPlace | null => {
     email,
     opening_hours,
     facebookUrl,
+    twitterUrl,
+    instagramUrl,
+    telegramUrl,
+    whatsappUrl,
     createdAt,
     updatedAt,
+    boostedUntil,
+    commentsCount,
   };
 };
 
@@ -352,6 +407,17 @@ export const btcMapMerchantUrl = (place: BtcMapPlace): string | null => {
 export const acceptsLightning = (place: BtcMapPlace): boolean =>
   place.tags['payment:lightning'] === 'yes' ||
   place.tags['payment:lightning_contactless'] === 'yes';
+
+/**
+ * True when the listing has paid BTC Map to feature it for a window
+ * that hasn't expired yet. Drives the "Featured" pill + a tie-break
+ * in distance-sorted lists.
+ */
+export const isBoosted = (place: BtcMapPlace): boolean => {
+  if (!place.boostedUntil) return false;
+  const t = Date.parse(place.boostedUntil);
+  return Number.isFinite(t) && t > Date.now();
+};
 
 export const acceptsOnchain = (place: BtcMapPlace): boolean =>
   place.tags['payment:onchain'] === 'yes' || place.tags['payment:bitcoin'] === 'yes';
