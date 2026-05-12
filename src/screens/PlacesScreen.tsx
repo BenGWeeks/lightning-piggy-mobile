@@ -24,6 +24,7 @@ import {
 import { formatDistance, haversineMetres } from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
 import BtcMapAttribution from '../components/BtcMapAttribution';
+import { ExploreMiniMap } from '../components/ExploreMiniMap';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -160,6 +161,22 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
         </TouchableOpacity>
       </View>
 
+      <View style={styles.miniMapContainer}>
+        <ExploreMiniMap
+          lat={pos?.lat ?? null}
+          lon={pos?.lon ?? null}
+          merchants={sortedPlaces.map((p) => p.place)}
+          caches={[]}
+          events={[]}
+          loading={loading && sortedPlaces.length === 0}
+          onTapMap={() => navigation.navigate('Map')}
+        />
+      </View>
+
+      <View style={styles.attributionRow}>
+        <BtcMapAttribution testID="places-btcmap-attribution" />
+      </View>
+
       <View style={styles.searchRow}>
         <Search size={16} color={colors.textSupplementary} strokeWidth={2.5} />
         <TextInput
@@ -172,10 +189,6 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
           autoCorrect={false}
           testID="places-search-input"
         />
-      </View>
-
-      <View style={styles.attributionRow}>
-        <BtcMapAttribution testID="places-btcmap-attribution" />
       </View>
 
       {loading && places.length === 0 ? (
@@ -300,6 +313,10 @@ const createStyles = (colors: Palette) =>
     attributionRow: {
       paddingHorizontal: 16,
       paddingVertical: 6,
+    },
+    miniMapContainer: {
+      paddingHorizontal: 16,
+      paddingTop: 12,
     },
     searchInput: {
       flex: 1,

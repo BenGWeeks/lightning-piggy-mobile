@@ -1,8 +1,22 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  ActivityIndicator,
+  Linking,
+} from 'react-native';
 import { WebView, WebViewMessageEvent } from 'react-native-webview';
 import * as Location from 'expo-location';
-import { ChevronLeft, MapPin, Navigation as NavigationIcon, Zap } from 'lucide-react-native';
+import {
+  ChevronLeft,
+  Globe,
+  MapPin,
+  Navigation as NavigationIcon,
+  Phone,
+  Zap,
+} from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
@@ -51,6 +65,18 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   const webviewRef = useRef<WebView>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastBbox = useRef<Bbox | null>(null);
+
+  // The full-screen map looks cramped under the bottom tab bar, and the
+  // tabs steal vertical space from the WebView. Hide them while we're
+  // on this screen and restore on unmount. Per react-navigation v6 docs:
+  // walk up to the parent Tab.Navigator and set tabBarStyle dynamically.
+  useLayoutEffect(() => {
+    const parent = navigation.getParent();
+    parent?.setOptions({ tabBarStyle: { display: 'none' } });
+    return () => {
+      parent?.setOptions({ tabBarStyle: undefined });
+    };
+  }, [navigation]);
 
   const [permission, setPermission] = useState<PermissionState>('unknown');
   const [places, setPlaces] = useState<BtcMapPlace[]>([]);
@@ -355,6 +381,11 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         <MerchantDetailSheet
           place={selected}
           onClose={() => setSelected(null)}
+          onViewDetails={() => {
+            const placeId = selected.id;
+            setSelected(null);
+            navigation.navigate('PlaceDetail', { placeId });
+          }}
           colors={colors}
           styles={styles}
         />
@@ -394,9 +425,10 @@ const Header: React.FC<{ onBack: () => void; colors: Palette }> = ({ onBack, col
 const MerchantDetailSheet: React.FC<{
   place: BtcMapPlace;
   onClose: () => void;
+  onViewDetails: () => void;
   colors: Palette;
   styles: ReturnType<typeof createStyles>;
-}> = ({ place, onClose, colors, styles }) => {
+}> = ({ place, onClose, onViewDetails, colors, styles }) => {
   const days = daysSinceVerified(place);
   const lud16 = lightningAddressOf(place);
   const verifyText =
@@ -431,6 +463,38 @@ const MerchantDetailSheet: React.FC<{
           )}
         </View>
         {verifyText && <Text style={styles.sheetVerify}>{verifyText}</Text>}
+        {(place.tags['contact:website'] || place.tags['contact:phone']) && (
+          <View style={styles.sheetContactRow}>
+            {place.tags['contact:website'] ? (
+              <TouchableOpacity
+                style={styles.sheetContactChip}
+                onPress={() => Linking.openURL(place.tags['contact:website']!)}
+                testID="merchant-detail-website"
+                accessibilityLabel="Open website"
+              >
+                <Globe size={13} color={colors.brandPink} strokeWidth={2.5} />
+                <Text style={styles.sheetContactText} numberOfLines={1}>
+                  Website
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+            {place.tags['contact:phone'] ? (
+              <TouchableOpacity
+                style={styles.sheetContactChip}
+                onPress={() =>
+                  Linking.openURL(`tel:${place.tags['contact:phone']!.replace(/\s+/g, '')}`)
+                }
+                testID="merchant-detail-phone"
+                accessibilityLabel={`Call ${place.tags['contact:phone']}`}
+              >
+                <Phone size={13} color={colors.brandPink} strokeWidth={2.5} />
+                <Text style={styles.sheetContactText} numberOfLines={1}>
+                  {place.tags['contact:phone']}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        )}
         <View style={styles.sheetActions}>
           <TouchableOpacity
             style={[styles.sheetButton, !lud16 && styles.sheetButtonDisabled]}
@@ -448,6 +512,14 @@ const MerchantDetailSheet: React.FC<{
           >
             <Zap size={16} color={colors.white} strokeWidth={2.5} />
             <Text style={styles.sheetButtonText}>{lud16 ? 'Pay' : 'No address'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.sheetButtonSecondary}
+            onPress={onViewDetails}
+            testID="merchant-detail-view-button"
+            accessibilityLabel="Open place detail"
+          >
+            <Text style={styles.sheetButtonSecondaryText}>View details</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -862,6 +934,46 @@ const createStyles = (colors: Palette) =>
       color: colors.white,
       fontSize: 14,
       fontWeight: '700',
+    },
+    sheetButtonSecondary: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      backgroundColor: 'transparent',
+      paddingVertical: 12,
+      borderRadius: 100,
+      borderWidth: 1,
+      borderColor: colors.brandPink,
+    },
+    sheetButtonSecondaryText: {
+      color: colors.brandPink,
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    sheetContactRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginBottom: 10,
+    },
+    sheetContactChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 999,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.divider,
+    },
+    sheetContactText: {
+      color: colors.textHeader,
+      fontSize: 12,
+      fontWeight: '600',
+      maxWidth: 160,
     },
   });
 
