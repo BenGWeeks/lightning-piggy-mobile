@@ -17,6 +17,7 @@ import {
   Navigation as NavigationIcon,
   Phone,
   PiggyBank,
+  ShieldCheck,
   SlidersHorizontal,
   Zap,
 } from 'lucide-react-native';
@@ -28,6 +29,8 @@ import {
   BtcMapPlace,
   acceptsLightning,
   acceptsOnchain,
+  btcMapMerchantUrl,
+  btcMapVerifyUrl,
   daysSinceVerified,
   fetchPlacesInBbox,
   formatAddress,
@@ -617,15 +620,30 @@ const MerchantDetailSheet: React.FC<{
             <Text style={styles.sheetButtonSecondaryText}>View details</Text>
           </TouchableOpacity>
         </View>
-        {place.osm_url ? (
-          <TouchableOpacity
-            style={styles.sheetSuggestEditRow}
-            onPress={() => Linking.openURL(place.osm_url!)}
-            testID="merchant-detail-suggest-edit"
-            accessibilityLabel="Suggest an edit on OpenStreetMap"
-          >
-            <Text style={styles.sheetSuggestEditText}>Suggest an edit on OpenStreetMap →</Text>
-          </TouchableOpacity>
+        {btcMapVerifyUrl(place) || btcMapMerchantUrl(place) ? (
+          <View style={styles.sheetBtcMapActionsRow}>
+            {btcMapVerifyUrl(place) ? (
+              <TouchableOpacity
+                style={styles.sheetBtcMapActionButton}
+                onPress={() => Linking.openURL(btcMapVerifyUrl(place)!)}
+                testID="merchant-detail-verify"
+                accessibilityLabel="Verify this listing on BTC Map"
+              >
+                <ShieldCheck size={13} color={colors.brandPink} strokeWidth={2.5} />
+                <Text style={styles.sheetBtcMapActionText}>Verify</Text>
+              </TouchableOpacity>
+            ) : null}
+            {btcMapMerchantUrl(place) ? (
+              <TouchableOpacity
+                style={styles.sheetBtcMapActionButton}
+                onPress={() => Linking.openURL(btcMapMerchantUrl(place)!)}
+                testID="merchant-detail-suggest-edit"
+                accessibilityLabel="Suggest an edit on BTC Map"
+              >
+                <Text style={styles.sheetBtcMapActionText}>Suggest an edit →</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
         ) : null}
       </View>
     </View>
@@ -1238,16 +1256,28 @@ const createStyles = (colors: Palette) =>
       alignItems: 'center',
       justifyContent: 'center',
     },
-    sheetSuggestEditRow: {
+    sheetBtcMapActionsRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
       marginTop: 12,
       paddingTop: 10,
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: colors.divider,
-      alignItems: 'center',
     },
-    sheetSuggestEditText: {
+    sheetBtcMapActionButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.brandPink,
+    },
+    sheetBtcMapActionText: {
       fontSize: 12,
-      fontWeight: '600',
+      fontWeight: '700',
       color: colors.brandPink,
     },
     sheetMetaRow: {

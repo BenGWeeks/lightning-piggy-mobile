@@ -17,6 +17,7 @@ import {
   MapPin,
   Navigation as NavigationIcon,
   Phone,
+  ShieldCheck,
   Zap,
 } from 'lucide-react-native';
 import type { RouteProp } from '@react-navigation/native';
@@ -27,6 +28,8 @@ import {
   type BtcMapPlace,
   acceptsLightning,
   acceptsOnchain,
+  btcMapMerchantUrl,
+  btcMapVerifyUrl,
   daysSinceVerified,
   fetchPlacesInBbox,
   formatAddress,
@@ -280,17 +283,30 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               </Text>
             ) : null}
 
-            {place.osm_url ? (
-              <TouchableOpacity
-                style={styles.suggestEditRow}
-                onPress={() => Linking.openURL(place.osm_url!)}
-                testID="place-detail-suggest-edit"
-                accessibilityLabel="Suggest an edit on OpenStreetMap"
-              >
-                <ExternalLink size={14} color={colors.brandPink} strokeWidth={2.5} />
-                <Text style={styles.suggestEditText}>Suggest an edit on OpenStreetMap</Text>
-              </TouchableOpacity>
-            ) : null}
+            <View style={styles.btcMapActionsRow}>
+              {btcMapVerifyUrl(place) ? (
+                <TouchableOpacity
+                  style={styles.btcMapActionButton}
+                  onPress={() => Linking.openURL(btcMapVerifyUrl(place)!)}
+                  testID="place-detail-verify"
+                  accessibilityLabel="Verify this listing on BTC Map"
+                >
+                  <ShieldCheck size={14} color={colors.brandPink} strokeWidth={2.5} />
+                  <Text style={styles.btcMapActionText}>Verify on BTC Map</Text>
+                </TouchableOpacity>
+              ) : null}
+              {btcMapMerchantUrl(place) ? (
+                <TouchableOpacity
+                  style={styles.btcMapActionButton}
+                  onPress={() => Linking.openURL(btcMapMerchantUrl(place)!)}
+                  testID="place-detail-suggest-edit"
+                  accessibilityLabel="Suggest an edit on BTC Map"
+                >
+                  <ExternalLink size={14} color={colors.brandPink} strokeWidth={2.5} />
+                  <Text style={styles.btcMapActionText}>Suggest an edit</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
           </>
         ) : null}
       </ScrollView>
@@ -333,16 +349,25 @@ const createStyles = (colors: Palette) =>
       alignItems: 'center',
       justifyContent: 'center',
     },
-    suggestEditRow: {
+    btcMapActionsRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginTop: 12,
+    },
+    btcMapActionButton: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
-      paddingVertical: 6,
-      marginTop: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.brandPink,
     },
-    suggestEditText: {
+    btcMapActionText: {
       fontSize: 13,
-      fontWeight: '600',
+      fontWeight: '700',
       color: colors.brandPink,
     },
     chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },

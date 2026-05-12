@@ -242,6 +242,42 @@ export const fetchPlacesInBbox = async (bbox: Bbox): Promise<BtcMapPlace[]> => {
 export const lightningAddressOf = (place: BtcMapPlace): string | null =>
   place.tags['payment:lightning_address'] ?? place.tags.lud16 ?? null;
 
+/**
+ * Extract the OSM `<type>:<id>` token (e.g. `node:12062799158`) from a
+ * place's `osm_url`. BTC Map URL routes use this shape — both the
+ * verify-location form and the merchant landing page expect it. Returns
+ * null when the URL doesn't match (malformed entries, ways/relations
+ * we don't yet support).
+ */
+const osmRef = (place: BtcMapPlace): string | null => {
+  if (!place.osm_url) return null;
+  const m = place.osm_url.match(/openstreetmap\.org\/(node|way|relation)\/(\d+)/i);
+  return m ? `${m[1].toLowerCase()}:${m[2]}` : null;
+};
+
+/**
+ * BTC Map's community-verification form. Submitting it flags the merchant
+ * to a "Shadowy Supertagger" who then pushes the new `survey:date` /
+ * `check_date` tag back to OpenStreetMap; BTC Map re-ingests OSM every
+ * ~10 minutes so the verify date refreshes on its own.
+ *
+ * No auth needed in our app — we just hand off to the existing web form.
+ */
+export const btcMapVerifyUrl = (place: BtcMapPlace): string | null => {
+  const ref = osmRef(place);
+  return ref ? `https://btcmap.org/verify-location?id=${ref}` : null;
+};
+
+/**
+ * Public BTC Map landing page for the merchant — friendlier UX than the
+ * raw OSM node URL for non-OSM users, and surfaces the "Suggest an
+ * edit" / "Verify" affordances BTC Map already builds.
+ */
+export const btcMapMerchantUrl = (place: BtcMapPlace): string | null => {
+  const ref = osmRef(place);
+  return ref ? `https://btcmap.org/merchant/${ref}` : null;
+};
+
 export const acceptsLightning = (place: BtcMapPlace): boolean =>
   place.tags['payment:lightning'] === 'yes' ||
   place.tags['payment:lightning_contactless'] === 'yes';
