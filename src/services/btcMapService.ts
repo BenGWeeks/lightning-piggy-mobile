@@ -38,6 +38,7 @@ const V4_FIELDS = [
   'description',
   'icon',
   'osm_url',
+  'categories',
   'osm:name',
   'osm:description',
   'osm:addr:street',
@@ -60,9 +61,9 @@ const DATASET_TTL_MS = 7 * 24 * 60 * 60 * 1_000; // 7 days
 // AsyncStorage key — namespaced so it's grepable + obviously
 // invalidatable from devtools. A single global dataset cache; v4 has
 // no bbox parameter so we fetch the whole world and filter in memory.
-// Bumped to `v4d` to invalidate caches written before `opening_hours`
+// Bumped to `v4e` to invalidate caches written before `categories`
 // joined the parsed shape — old payloads would otherwise serve forever.
-const DATASET_STORAGE_KEY = '@lp:btcmap-dataset-v4d';
+const DATASET_STORAGE_KEY = '@lp:btcmap-dataset-v4e';
 
 export interface BtcMapPlace {
   id: number;
@@ -113,6 +114,12 @@ export interface BtcMapPlace {
    * is the canonical place to fix bad tags / addresses / payment flags.
    */
   osm_url?: string | null;
+  /**
+   * BTC Map's curated category list (e.g. `["cafe", "restaurant"]`).
+   * Comes back empty for many listings — BTC Map only populates this
+   * when their taxonomy team has classified the merchant.
+   */
+  categories?: string[] | null;
 }
 
 interface CachedDataset {
@@ -166,7 +173,10 @@ const reshape = (raw: Record<string, unknown>): BtcMapPlace | null => {
   const description = rawDesc && rawDesc.trim().length > 0 ? rawDesc.trim() : null;
   const icon = typeof raw['icon'] === 'string' ? (raw['icon'] as string) : null;
   const osm_url = typeof raw['osm_url'] === 'string' ? (raw['osm_url'] as string) : null;
-  return { id, lat, lon, tags, verified_at, description, icon, osm_url };
+  const categories = Array.isArray(raw['categories'])
+    ? (raw['categories'] as unknown[]).filter((x): x is string => typeof x === 'string')
+    : null;
+  return { id, lat, lon, tags, verified_at, description, icon, osm_url, categories };
 };
 
 // One-shot AsyncStorage hydration. Runs on first `fetchPlacesInBbox`

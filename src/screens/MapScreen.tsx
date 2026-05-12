@@ -97,6 +97,12 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   const VIEWPORT_KEY = '@lp:map-viewport';
   const lastViewport = useRef<{ lat: number; lng: number; zoom: number } | null>(null);
   const hydratedViewport = useRef(false);
+  // Render-gate. AsyncStorage is async, so on first render the WebView
+  // would otherwise mount with `injectedJavaScriptBeforeContentLoaded`
+  // referencing a not-yet-hydrated viewport and fall through to the
+  // London default. We block the WebView render until hydration
+  // finishes so the injected JS always carries the correct slot.
+  const [viewportHydrated, setViewportHydrated] = useState(false);
 
   const [permission, setPermission] = useState<PermissionState>('unknown');
   const [places, setPlaces] = useState<BtcMapPlace[]>([]);
@@ -138,6 +144,11 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         }
       } catch {
         // Storage IO is best-effort — fall through to GPS-centre flow.
+      } finally {
+        // Always flip — even on miss / IO error the WebView should
+        // render (it'll just open at the London fallback for users
+        // with no saved viewport yet).
+        setViewportHydrated(true);
       }
     })();
   }, []);
@@ -425,27 +436,34 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         colors={colors}
       />
       <View style={styles.webviewWrapper}>
-        <WebView
-          ref={webviewRef}
-          originWhitelist={['*']}
-          source={{ html: LEAFLET_HTML }}
-          onMessage={onMessage}
-          // Seed `window.LP_initialViewport` before Leaflet's first
-          // `setView` call so the map opens at the user's last centre
-          // instead of flashing London. Falls back inside the HTML to
-          // a sensible default when the slot isn't set (first run).
-          injectedJavaScriptBeforeContentLoaded={
-            lastViewport.current
-              ? `window.LP_initialViewport = ${JSON.stringify(lastViewport.current)}; true;`
-              : 'true;'
-          }
-          style={styles.webview}
-          javaScriptEnabled
-          domStorageEnabled
-          allowFileAccess={false}
-          mixedContentMode="never"
-          testID="map-webview"
-        />
+        {viewportHydrated ? (
+          <WebView
+            ref={webviewRef}
+            originWhitelist={['*']}
+            source={{ html: LEAFLET_HTML }}
+            onMessage={onMessage}
+            // Seed `window.LP_initialViewport` before Leaflet's first
+            // `setView` call so the map opens at the user's last centre
+            // instead of flashing London. Gated on `viewportHydrated`
+            // above — without that gate the WebView mounts before the
+            // AsyncStorage hydrate completes and falls through to the
+            // London default every time MapScreen remounts (e.g. after
+            // a navigation pop from PlaceDetail).
+            injectedJavaScriptBeforeContentLoaded={
+              lastViewport.current
+                ? `window.LP_initialViewport = ${JSON.stringify(lastViewport.current)}; true;`
+                : 'true;'
+            }
+            style={styles.webview}
+            javaScriptEnabled
+            domStorageEnabled
+            allowFileAccess={false}
+            mixedContentMode="never"
+            testID="map-webview"
+          />
+        ) : (
+          <View style={styles.webview} />
+        )}
         <TouchableOpacity
           style={styles.recenterButton}
           onPress={recenterOnUser}
