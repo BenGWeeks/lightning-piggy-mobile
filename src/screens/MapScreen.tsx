@@ -1167,17 +1167,14 @@ const LEAFLET_HTML = `<!DOCTYPE html>
       }).addTo(map);
     };
 
-    // Whitelist of Material Symbols names we accept from JS. Anything
-    // outside this set falls through to 'storefront' — keeps a malformed
-    // BTC Map payload from injecting arbitrary HTML/text into the DOM.
-    const ALLOWED_ICONS = new Set([
-      'storefront','shop','shopping_bag','cafe','coffee','restaurant','fast_food','pizza',
-      'bar','pub','hotel','lodging','chalet','bed','office','building','apartment',
-      'hospital','pharmacy','health','fuel','gas_station','car_repair','bicycle','bike',
-      'hardware','tools','scissors','salon','camera','photo','gym','fitness',
-      'palette','art','pet','veterinary','travel','airport','outdoor','park','delivery','truck',
-    ]);
-    const safeIcon = (name) => ALLOWED_ICONS.has(name) ? name : 'storefront';
+    // Validate Material Symbols name with a strict regex instead of a
+    // hardcoded whitelist — Material Symbols ships ~3000 glyphs and BTC
+    // Map uses many we'd otherwise miss (imagesearch_roller, etc.). The
+    // regex matches Google's own naming rules (lowercase letters,
+    // digits, underscore; max 64 chars) so a malformed payload can't
+    // inject HTML/text into the DOM.
+    const ICON_RE = /^[a-z0-9_]{1,64}$/;
+    const safeIcon = (name) => (typeof name === 'string' && ICON_RE.test(name)) ? name : 'storefront';
 
     window.LP_setMarkers = function(list) {
       markerLayer.clearLayers();
