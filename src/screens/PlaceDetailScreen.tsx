@@ -48,6 +48,7 @@ import { formatDistance, haversineMetres } from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
+import SocialIcon, { socialLabel, type SocialNetwork } from '../components/SocialIcon';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -78,18 +79,17 @@ const formatYMD = (iso: string): string => {
  * shown stripped of scheme + "www." for readability.
  */
 const SocialRow: React.FC<{
-  label: string;
+  network: SocialNetwork;
   url: string;
   // Loose styles type so we don't have to thread the full createStyles
   // signature through; this component is a one-off helper used only
   // inside PlaceDetailScreen.
   styles: Record<string, ReturnType<typeof StyleSheet.create>[string]>;
-  colors: Palette;
-}> = ({ label, url, styles, colors }) => (
+}> = ({ network, url, styles }) => (
   <TouchableOpacity style={styles.contactRow} onPress={() => Linking.openURL(url).catch(() => {})}>
-    <ExternalLink size={14} color={colors.brandPink} strokeWidth={2.5} />
+    <SocialIcon network={network} size={18} />
     <Text style={styles.contactText} numberOfLines={1}>
-      {label} · {url.replace(/^https?:\/\/(www\.)?/, '')}
+      {socialLabel(network)} · {url.replace(/^https?:\/\/(www\.)?/, '')}
     </Text>
   </TouchableOpacity>
 );
@@ -392,44 +392,19 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   </TouchableOpacity>
                 ) : null}
                 {place.facebookUrl ? (
-                  <SocialRow
-                    label="Facebook"
-                    url={place.facebookUrl}
-                    styles={styles}
-                    colors={colors}
-                  />
+                  <SocialRow network="facebook" url={place.facebookUrl} styles={styles} />
                 ) : null}
                 {place.twitterUrl ? (
-                  <SocialRow
-                    label="X / Twitter"
-                    url={place.twitterUrl}
-                    styles={styles}
-                    colors={colors}
-                  />
+                  <SocialRow network="x" url={place.twitterUrl} styles={styles} />
                 ) : null}
                 {place.instagramUrl ? (
-                  <SocialRow
-                    label="Instagram"
-                    url={place.instagramUrl}
-                    styles={styles}
-                    colors={colors}
-                  />
+                  <SocialRow network="instagram" url={place.instagramUrl} styles={styles} />
                 ) : null}
                 {place.telegramUrl ? (
-                  <SocialRow
-                    label="Telegram"
-                    url={place.telegramUrl}
-                    styles={styles}
-                    colors={colors}
-                  />
+                  <SocialRow network="telegram" url={place.telegramUrl} styles={styles} />
                 ) : null}
                 {place.whatsappUrl ? (
-                  <SocialRow
-                    label="WhatsApp"
-                    url={place.whatsappUrl}
-                    styles={styles}
-                    colors={colors}
-                  />
+                  <SocialRow network="whatsapp" url={place.whatsappUrl} styles={styles} />
                 ) : null}
               </View>
             ) : null}

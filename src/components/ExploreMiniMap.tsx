@@ -206,11 +206,13 @@ const makeHtml = (lat: number, lon: number, defaultZoom: number): string => `<!D
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const post=(m)=>window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify(m));
-// minZoom 8 caps the bbox at about 200 km wide at UK latitudes — any
-// wider and the list becomes "everything within a country" rather
+// minZoom 7 caps the bbox at about 400 km wide at UK latitudes — wider
+// than that and the list becomes "everything within a country" rather
 // than "nearby", which is the wrong product for an Explore-hub mini-map.
+// Was 8 before; raised to 7 after user feedback that one more level
+// out felt more natural on the Places list.
 // maxZoom 18 matches OSM tile availability.
-const map=L.map('map',{zoomControl:false,dragging:false,scrollWheelZoom:false,doubleClickZoom:false,touchZoom:false,boxZoom:false,keyboard:false,minZoom:8,maxZoom:18}).setView([${lat},${lon}],${defaultZoom});
+const map=L.map('map',{zoomControl:false,dragging:false,scrollWheelZoom:false,doubleClickZoom:false,touchZoom:false,boxZoom:false,keyboard:false,minZoom:7,maxZoom:18}).setView([${lat},${lon}],${defaultZoom});
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
 let merchantLayer=L.layerGroup().addTo(map),cacheLayer=L.layerGroup().addTo(map),eventLayer=L.layerGroup().addTo(map),meMarker=null;
 const dot=(cls,size)=>L.divIcon({className:'',html:'<div class="'+cls+'"></div>',iconSize:[size,size]});

@@ -47,6 +47,7 @@ import { subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
 import { encodeGeohash, geohashPrefixes } from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
+import SocialIcon from '../components/SocialIcon';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -698,7 +699,9 @@ const MerchantDetailSheet: React.FC<{
         {(place.tags['contact:website'] ||
           place.phone ||
           place.email ||
-          place.facebookUrl) && (
+          place.facebookUrl ||
+          place.twitterUrl ||
+          place.instagramUrl) && (
           <View style={styles.sheetContactRow}>
             {place.tags['contact:website'] ? (
               <TouchableOpacity
@@ -746,9 +749,35 @@ const MerchantDetailSheet: React.FC<{
                 testID="merchant-detail-facebook"
                 accessibilityLabel="Open Facebook page"
               >
-                <ExternalLink size={13} color={colors.brandPink} strokeWidth={2.5} />
+                <SocialIcon network="facebook" size={14} />
                 <Text style={styles.sheetContactText} numberOfLines={1}>
                   Facebook
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+            {place.twitterUrl ? (
+              <TouchableOpacity
+                style={styles.sheetContactChip}
+                onPress={() => Linking.openURL(place.twitterUrl!).catch(() => {})}
+                testID="merchant-detail-x"
+                accessibilityLabel="Open X profile"
+              >
+                <SocialIcon network="x" size={14} />
+                <Text style={styles.sheetContactText} numberOfLines={1}>
+                  X
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+            {place.instagramUrl ? (
+              <TouchableOpacity
+                style={styles.sheetContactChip}
+                onPress={() => Linking.openURL(place.instagramUrl!).catch(() => {})}
+                testID="merchant-detail-instagram"
+                accessibilityLabel="Open Instagram"
+              >
+                <SocialIcon network="instagram" size={14} />
+                <Text style={styles.sheetContactText} numberOfLines={1}>
+                  Instagram
                 </Text>
               </TouchableOpacity>
             ) : null}
