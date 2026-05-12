@@ -43,6 +43,8 @@ import { subscribeNearbyCaches, subscribeNearbyEvents } from '../services/nostrP
 import {
   loadCachedCaches,
   loadCachedEvents,
+  peekCachedCachesSync,
+  peekCachedEventsSync,
   saveCaches,
   saveEvents,
 } from '../services/nostrPlacesStorage';
@@ -214,8 +216,16 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     isTrustedRef.current = isTrusted;
   }, [isTrusted]);
 
-  const [caches, setCaches] = useState<Map<string, ParsedCache>>(new Map());
-  const [events, setEvents] = useState<Map<string, ParsedEvent>>(new Map());
+  // Pre-seed from the in-memory mirror — `nostrPlacesStorage` kicks
+  // hydrate() at module import, so by first render the cache is
+  // typically ready. The async useEffect below handles the cold-start
+  // path where hydrate hasn't yet resolved.
+  const [caches, setCaches] = useState<Map<string, ParsedCache>>(
+    () => new Map(peekCachedCachesSync().map((c) => [c.coord, c])),
+  );
+  const [events, setEvents] = useState<Map<string, ParsedEvent>>(
+    () => new Map(peekCachedEventsSync().map((e) => [e.coord, e])),
+  );
 
   // Hydrate last-known caches + events from AsyncStorage so the rails
   // render instantly on cold start while the live relay subs backfill.

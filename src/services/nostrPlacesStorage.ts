@@ -73,6 +73,21 @@ export const loadCachedEvents = async (): Promise<ParsedEvent[]> => {
   return memEvents?.items ?? [];
 };
 
+/**
+ * Synchronous peek at the in-memory mirror. Returns an empty array if
+ * hydrate() hasn't finished yet — callers should use this for the
+ * useState initial-value path (so a warm app session pre-paints
+ * cached data) and fall back to the async loader in a useEffect for
+ * the cold-start path.
+ */
+export const peekCachedCachesSync = (): ParsedCache[] => memCaches?.items ?? [];
+export const peekCachedEventsSync = (): ParsedEvent[] => memEvents?.items ?? [];
+
+// Kick off hydration the moment the module is imported so the first
+// useState init in a child component has a populated `memCaches` to
+// read. Best-effort — failures fall through silently.
+void hydrate();
+
 // Capped, write-through replace. Callers pass the current full Map
 // after a live-sub update; we slice to MAX_ENTRIES (newest by
 // createdAt / startsAt) and persist. Write is fire-and-forget — the

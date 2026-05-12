@@ -1,15 +1,19 @@
 // Seeds 2-3 kind 7516 NIP-GC found-log events against Big Piggy's
-// Geo-Cache 1 so the HuntPiggyDetail screen's "Find log" section
-// has realistic entries for screenshots + UX testing. Each log uses
-// a fresh disposable key (so they're unreplaceable) and carries an
-// `a` tag pointing to the cache's coord, an optional `image` tag,
-// and an `amount` tag for the "⚡ claimed N sats" badge.
+// Geo-Cache 1 so the HuntPiggyDetail screen's "Find log" section has
+// realistic entries for screenshots + UX testing.
+//
+// Each find is signed by a different Piggy fixture (Big / Middle /
+// Little) so the in-app `usePubkeyProfile` lookup resolves real
+// kind-0 display names + avatars, not anonymous hex pubkeys. (An
+// earlier version used `generateSecretKey()` per find — fresh
+// disposable keys that have no published kind-0 profile, so the find
+// rows fell back to a generic User icon.)
 //
 //   node scripts/publish-test-find-logs.mjs
 //
 // Override the cache via CACHE_COORD env var (default = the Big Piggy
 // Geo-Cache 1 coord baked into publish-test-piggy.mjs).
-import { generateSecretKey, getPublicKey, finalizeEvent } from 'nostr-tools';
+import { getPublicKey, finalizeEvent, nip19 } from 'nostr-tools';
 import { SimplePool } from 'nostr-tools/pool';
 import { useWebSocketImplementation } from 'nostr-tools/relay';
 import WebSocket from 'ws';
@@ -30,23 +34,38 @@ const RELAYS = [
   'wss://relay.primal.net',
 ];
 
+// Resolve nsec env vars to raw secret keys so each find signs as the
+// Piggy fixture it's meant to come from (real kind-0 profile = real
+// avatar + display name in the app's find log).
+const resolveNsec = (envVar) => {
+  const v = process.env[envVar];
+  if (!v) throw new Error(`Missing env var: ${envVar}`);
+  const decoded = nip19.decode(v.trim());
+  if (decoded.type !== 'nsec') throw new Error(`${envVar}: expected nsec, got ${decoded.type}`);
+  return decoded.data;
+};
+
 // Three realistic-looking finds — different tones (terse / chatty /
-// pictures-or-it-didn't-happen) + different sats amounts. No images
-// for now to keep the script free of upload deps; the parser falls
-// back gracefully and the demo still reads naturally.
+// pictures-or-it-didn't-happen) + different sats amounts. Each is
+// signed by a different Piggy fixture so the find log shows three
+// distinct profile chips. No images for now to keep the script free
+// of upload deps; the parser falls back gracefully.
 const FINDS = [
   {
+    nsecEnv: 'MAESTRO_NSEC_MIDDLE',
     age_seconds: 6 * 60 * 60, // 6 h ago
     sats: 21,
     content:
       'Quick lunchtime find! Nailed in seconds — telephone box was a dead giveaway. Cheers for the sats 🐷',
   },
   {
+    nsecEnv: 'MAESTRO_NSEC_LITTLE',
     age_seconds: 2 * 24 * 60 * 60, // 2 d ago
     sats: 21,
     content: 'Spotted it on the way through Longstanton. Beautiful spot — added to my saved list.',
   },
   {
+    nsecEnv: 'MAESTRO_NSEC_EVIL',
     age_seconds: 5 * 24 * 60 * 60, // 5 d ago
     sats: 21,
     content:
@@ -58,7 +77,7 @@ const pool = new SimplePool();
 const now = Math.floor(Date.now() / 1000);
 const results = [];
 for (const find of FINDS) {
-  const sk = generateSecretKey();
+  const sk = resolveNsec(find.nsecEnv);
   const pk = getPublicKey(sk);
   const evt = finalizeEvent(
     {

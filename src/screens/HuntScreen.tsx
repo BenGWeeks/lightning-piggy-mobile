@@ -27,7 +27,11 @@ import { ExploreNavigation } from '../navigation/types';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
 import { type ParsedCache } from '../services/nostrPlacesService';
 import { subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
-import { loadCachedCaches, saveCaches } from '../services/nostrPlacesStorage';
+import {
+  loadCachedCaches,
+  peekCachedCachesSync,
+  saveCaches,
+} from '../services/nostrPlacesStorage';
 import {
   decodeGeohash,
   encodeGeohash,
@@ -57,7 +61,9 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [pos, setPos] = useState<{ lat: number; lon: number } | null>(null);
-  const [caches, setCaches] = useState<Map<string, ParsedCache>>(new Map());
+  const [caches, setCaches] = useState<Map<string, ParsedCache>>(
+    () => new Map(peekCachedCachesSync().map((c) => [c.coord, c])),
+  );
 
   // Hydrate from AsyncStorage so the list paints instantly on cold
   // start while the live relay sub backfills.

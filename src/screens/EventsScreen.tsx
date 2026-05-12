@@ -36,7 +36,11 @@ import { getDevPinnedLocation } from '../utils/devLocation';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { type ParsedEvent } from '../services/nostrPlacesService';
 import { subscribeNearbyEvents } from '../services/nostrPlacesPublisher';
-import { loadCachedEvents, saveEvents } from '../services/nostrPlacesStorage';
+import {
+  loadCachedEvents,
+  peekCachedEventsSync,
+  saveEvents,
+} from '../services/nostrPlacesStorage';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -55,7 +59,9 @@ interface Props {
 const EventsScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const [events, setEvents] = useState<Map<string, ParsedEvent>>(new Map());
+  const [events, setEvents] = useState<Map<string, ParsedEvent>>(
+    () => new Map(peekCachedEventsSync().map((e) => [e.coord, e])),
+  );
 
   // Hydrate from AsyncStorage so the list paints instantly on cold
   // start while the live relay sub backfills.
