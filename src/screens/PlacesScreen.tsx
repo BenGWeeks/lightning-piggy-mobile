@@ -7,9 +7,18 @@ import {
   StyleSheet,
   FlatList,
   ActivityIndicator,
+  ScrollView,
 } from 'react-native';
 import * as Location from 'expo-location';
-import { ChevronLeft, ChevronRight, MapPin, RefreshCw, Search, Zap } from 'lucide-react-native';
+import {
+  ChevronLeft,
+  ChevronRight,
+  MapPin,
+  RefreshCw,
+  Search,
+  Sparkles,
+  Zap,
+} from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
@@ -19,6 +28,7 @@ import {
   acceptsOnchain,
   fetchPlacesInBbox,
   formatAddress,
+  isBoosted,
   lightningAddressOf,
 } from '../services/btcMapService';
 import { formatDistance, haversineMetres } from '../utils/geohash';
@@ -112,24 +122,56 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
           { lat: place.lat, lon: place.lon },
         ),
       }))
-      .sort((a, b) => a.distance - b.distance);
+      // Boosted listings surface first (BTC Map's paid-feature
+      // mechanism); within the same boost bucket we still sort by
+      // distance. Every boosted row carries a "Featured" pill so the
+      // user can see why it's at the top.
+      .sort((a, b) => {
+        const ab = isBoosted(a.place) ? 1 : 0;
+        const bb = isBoosted(b.place) ? 1 : 0;
+        if (ab !== bb) return bb - ab;
+        return a.distance - b.distance;
+      });
   }, [places, pos]);
+
+  // Selected category filters — empty = show every category (default).
+  // Categories are surfaced as chip toggles above the list; selected
+  // names compose with `searchQuery` (AND), not against each other (OR
+  // within the set so the list doesn't filter to zero — most listings
+  // carry 0-2 categories).
+  const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
+  const availableCategories = useMemo(() => {
+    const seen = new Set<string>();
+    for (const p of places) for (const c of p.categories ?? []) seen.add(c);
+    return [...seen].sort();
+  }, [places]);
 
   const filteredPlaces = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return sortedPlaces;
-    return sortedPlaces.filter(({ place }) => {
+    let items = sortedPlaces;
+    if (selectedCategories.size > 0) {
+      items = items.filter(({ place }) =>
+        (place.categories ?? []).some((c) => selectedCategories.has(c)),
+      );
+    }
+    if (!q) return items;
+    return items.filter(({ place }) => {
       const hay = [
         place.tags.name ?? '',
         place.tags['addr:street'] ?? '',
         place.tags['addr:city'] ?? '',
         place.tags['addr:postcode'] ?? '',
+        // Free-text search now also matches the curated category names
+        // and the OSM cuisine tag, so "italian" / "cafe" / "bicycle"
+        // resolve listings even when the user doesn't tap a chip.
+        ...(place.categories ?? []),
+        place.tags['cuisine'] ?? '',
       ]
         .join(' ')
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [sortedPlaces, searchQuery]);
+  }, [sortedPlaces, searchQuery, selectedCategories]);
 
   return (
     <View style={styles.container} testID="places-screen">
@@ -191,6 +233,46 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
         />
       </View>
 
+      {availableCategories.length > 0 ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.catChipsRow}
+        >
+          {availableCategories.map((cat) => {
+            const on = selectedCategories.has(cat);
+            return (
+              <TouchableOpacity
+                key={cat}
+                style={[styles.catChip, on ? styles.catChipOn : styles.catChipOff]}
+                onPress={() => {
+                  const next = new Set(selectedCategories);
+                  if (next.has(cat)) next.delete(cat);
+                  else next.add(cat);
+                  setSelectedCategories(next);
+                }}
+                testID={`places-cat-${cat}`}
+                accessibilityLabel={`${cat} category ${on ? 'on' : 'off'}`}
+              >
+                <Text style={[styles.catChipText, on ? styles.catChipTextOn : null]}>
+                  {cat.replace(/_/g, ' ')}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+          {selectedCategories.size > 0 ? (
+            <TouchableOpacity
+              style={styles.catChip}
+              onPress={() => setSelectedCategories(new Set())}
+              testID="places-cat-clear"
+              accessibilityLabel="Clear category filter"
+            >
+              <Text style={[styles.catChipText, { color: colors.brandPink }]}>Clear</Text>
+            </TouchableOpacity>
+          ) : null}
+        </ScrollView>
+      ) : null}
+
       {loading && places.length === 0 ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.brandPink} />
@@ -249,9 +331,10 @@ const PlaceRow: React.FC<{
   const lightning = acceptsLightning(place);
   const onchain = acceptsOnchain(place);
   const lud16 = lightningAddressOf(place);
+  const boosted = isBoosted(place);
   return (
     <TouchableOpacity
-      style={styles.row}
+      style={[styles.row, boosted ? styles.rowBoosted : null]}
       onPress={onPress}
       testID={`place-row-${place.id}`}
       accessibilityLabel={place.tags.name ?? 'Unnamed merchant'}
@@ -264,9 +347,17 @@ const PlaceRow: React.FC<{
         )}
       </View>
       <View style={styles.rowMain}>
-        <Text style={styles.rowTitle} numberOfLines={1}>
-          {place.tags.name ?? 'Unnamed merchant'}
-        </Text>
+        <View style={styles.rowTitleLine}>
+          <Text style={styles.rowTitle} numberOfLines={1}>
+            {place.tags.name ?? 'Unnamed merchant'}
+          </Text>
+          {boosted ? (
+            <View style={styles.rowFeaturedPill}>
+              <Sparkles size={10} color={colors.textHeader} strokeWidth={2.5} />
+              <Text style={styles.rowFeaturedText}>Featured</Text>
+            </View>
+          ) : null}
+        </View>
         <Text style={styles.rowMeta} numberOfLines={1}>
           {lightning ? '⚡ Lightning' : onchain ? 'On-chain' : 'Bitcoin'}
           {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
@@ -359,6 +450,12 @@ const createStyles = (colors: Palette) =>
       paddingVertical: 12,
       marginBottom: 10,
     },
+    rowBoosted: {
+      // 1px zap-yellow border + a hint of fill so a boosted row stands
+      // apart from the surface stack without screaming.
+      borderWidth: 1,
+      borderColor: colors.zapYellow,
+    },
     iconWrap: {
       width: 40,
       height: 40,
@@ -367,11 +464,48 @@ const createStyles = (colors: Palette) =>
       justifyContent: 'center',
     },
     iconLightning: { backgroundColor: colors.brandPink },
-    iconOnchain: { backgroundColor: '#F5A623' },
+    iconOnchain: { backgroundColor: '#F7931A' },
     rowMain: { flex: 1 },
-    rowTitle: { fontSize: 15, fontWeight: '700', color: colors.textHeader },
+    rowTitleLine: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    rowTitle: { flexShrink: 1, fontSize: 15, fontWeight: '700', color: colors.textHeader },
+    rowFeaturedPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 3,
+      backgroundColor: colors.zapYellow,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 999,
+    },
+    rowFeaturedText: { fontSize: 10, fontWeight: '800', color: colors.textHeader },
     rowMeta: { fontSize: 12, color: colors.textSupplementary, marginTop: 2 },
     rowSub: { fontSize: 12, color: colors.textSupplementary, marginTop: 2, fontStyle: 'italic' },
+    catChipsRow: {
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      gap: 8,
+    },
+    catChip: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 999,
+      borderWidth: 1,
+      marginRight: 6,
+    },
+    catChipOff: {
+      backgroundColor: 'transparent',
+      borderColor: colors.divider,
+    },
+    catChipOn: {
+      backgroundColor: colors.brandPink,
+      borderColor: colors.brandPink,
+    },
+    catChipText: { fontSize: 12, color: colors.textHeader, fontWeight: '600', textTransform: 'capitalize' },
+    catChipTextOn: { color: colors.white },
   });
 
 export default PlacesScreen;
