@@ -426,7 +426,8 @@ const createStyles = (colors: Palette) =>
       alignItems: 'flex-end',
     },
     miniMapContainer: {
-      paddingHorizontal: 16,
+      // Edge-to-edge to match Hunt + Explore — no horizontal inset so
+      // the three Explore-stack screens read as the same surface.
       paddingTop: 12,
     },
     searchInput: {
