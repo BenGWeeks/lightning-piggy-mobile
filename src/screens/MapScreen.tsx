@@ -6,6 +6,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   Linking,
+  ScrollView,
 } from 'react-native';
 import { WebView, WebViewMessageEvent } from 'react-native-webview';
 import * as Location from 'expo-location';
@@ -118,6 +119,11 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
     piglet: true,
     nipgcCache: true,
   });
+  // BTC Map category filter — empty set means "show every category"
+  // (default). Adding a category to the set narrows to just those.
+  // Multiple categories OR together (intersection semantics would
+  // filter most merchants out since each has 0-2 categories).
+  const [categoryFilter, setCategoryFilter] = useState<Set<string>>(new Set());
   const cachesCloserRef = useRef<(() => void) | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [webviewReady, setWebviewReady] = useState(false);
@@ -317,12 +323,29 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   useEffect(() => {
     if (!webviewReady) return;
     const filtered = places.filter((p) => {
-      if (acceptsLightning(p)) return filters.lightning;
-      if (acceptsOnchain(p)) return filters.onchain;
-      return filters.lightning || filters.onchain;
+      // Pin-type filter — Lightning vs On-chain.
+      const typeOk = acceptsLightning(p)
+        ? filters.lightning
+        : acceptsOnchain(p)
+          ? filters.onchain
+          : filters.lightning || filters.onchain;
+      if (!typeOk) return false;
+      // Category filter — empty set = show every category.
+      if (categoryFilter.size === 0) return true;
+      const cats = p.categories ?? [];
+      return cats.some((c) => categoryFilter.has(c));
     });
     sendMarkers(filtered);
-  }, [places, webviewReady, filters.lightning, filters.onchain, sendMarkers]);
+  }, [places, webviewReady, filters.lightning, filters.onchain, categoryFilter, sendMarkers]);
+
+  // Distinct categories across the currently-loaded places — fed into
+  // the FilterSheet so the available chips reflect what's actually on
+  // the map right now (rather than BTC Map's whole taxonomy).
+  const availableCategories = useMemo(() => {
+    const seen = new Set<string>();
+    for (const p of places) for (const c of p.categories ?? []) seen.add(c);
+    return [...seen].sort();
+  }, [places]);
 
   useEffect(() => {
     if (!webviewReady) return;
@@ -547,6 +570,9 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         <FilterSheet
           filters={filters}
           onChange={setFilters}
+          availableCategories={availableCategories}
+          categoryFilter={categoryFilter}
+          onChangeCategoryFilter={setCategoryFilter}
           onClose={() => setFiltersOpen(false)}
           colors={colors}
           styles={styles}
@@ -847,48 +873,117 @@ const FILTER_OPTIONS: ReadonlyArray<{
 const FilterSheet: React.FC<{
   filters: PinFilters;
   onChange: (next: PinFilters) => void;
+  availableCategories: string[];
+  categoryFilter: Set<string>;
+  onChangeCategoryFilter: (next: Set<string>) => void;
   onClose: () => void;
   colors: Palette;
   styles: ReturnType<typeof createStyles>;
-}> = ({ filters, onChange, onClose, colors, styles }) => {
+}> = ({
+  filters,
+  onChange,
+  availableCategories,
+  categoryFilter,
+  onChangeCategoryFilter,
+  onClose,
+  colors,
+  styles,
+}) => {
   const toggle = (k: keyof PinFilters) => onChange({ ...filters, [k]: !filters[k] });
+  const toggleCategory = (cat: string) => {
+    const next = new Set(categoryFilter);
+    if (next.has(cat)) next.delete(cat);
+    else next.add(cat);
+    onChangeCategoryFilter(next);
+  };
+  const clearCategories = () => onChangeCategoryFilter(new Set());
   return (
     <View style={styles.sheetBackdrop} testID="map-filter-sheet">
       <TouchableOpacity style={styles.sheetTapAway} onPress={onClose} activeOpacity={1} />
       <View style={styles.sheet}>
         <View style={styles.sheetHandle} />
-        <Text style={styles.sheetTitle}>Show on map</Text>
-        <Text style={styles.sheetSubtitle}>Tap a row to toggle that pin type.</Text>
-        <View style={{ marginTop: 8 }}>
-          {FILTER_OPTIONS.map((opt) => {
-            const on = filters[opt.key];
-            return (
-              <TouchableOpacity
-                key={opt.key}
-                style={styles.filterRow}
-                onPress={() => toggle(opt.key)}
-                testID={`map-filter-${opt.key}`}
-                accessibilityLabel={`${opt.label} pins ${on ? 'on' : 'off'}`}
-              >
-                <View
-                  style={[
-                    opt.diamond ? styles.filterSwatchDiamond : styles.filterSwatchDot,
-                    { backgroundColor: opt.swatch },
-                  ]}
-                />
-                <View style={styles.filterTextWrap}>
-                  <Text style={styles.filterLabel}>{opt.label}</Text>
-                  <Text style={styles.filterHint}>{opt.hint}</Text>
-                </View>
-                <View style={[styles.filterToggle, on && styles.filterToggleOn]}>
+        <ScrollView showsVerticalScrollIndicator={false}>
+          <Text style={styles.sheetTitle}>Show on map</Text>
+          <Text style={styles.sheetSubtitle}>Tap a row to toggle that pin type.</Text>
+          <View style={{ marginTop: 8 }}>
+            {FILTER_OPTIONS.map((opt) => {
+              const on = filters[opt.key];
+              return (
+                <TouchableOpacity
+                  key={opt.key}
+                  style={styles.filterRow}
+                  onPress={() => toggle(opt.key)}
+                  testID={`map-filter-${opt.key}`}
+                  accessibilityLabel={`${opt.label} pins ${on ? 'on' : 'off'}`}
+                >
                   <View
-                    style={[styles.filterToggleThumb, on && styles.filterToggleThumbOn]}
+                    style={[
+                      opt.diamond ? styles.filterSwatchDiamond : styles.filterSwatchDot,
+                      { backgroundColor: opt.swatch },
+                    ]}
                   />
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+                  <View style={styles.filterTextWrap}>
+                    <Text style={styles.filterLabel}>{opt.label}</Text>
+                    <Text style={styles.filterHint}>{opt.hint}</Text>
+                  </View>
+                  <View style={[styles.filterToggle, on && styles.filterToggleOn]}>
+                    <View
+                      style={[styles.filterToggleThumb, on && styles.filterToggleThumbOn]}
+                    />
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {availableCategories.length > 0 ? (
+            <View style={{ marginTop: 16, paddingBottom: 24 }}>
+              <View style={styles.categoryHeaderRow}>
+                <Text style={styles.sheetTitle}>Categories</Text>
+                {categoryFilter.size > 0 ? (
+                  <TouchableOpacity
+                    onPress={clearCategories}
+                    testID="map-filter-categories-clear"
+                    accessibilityLabel="Clear category filter"
+                  >
+                    <Text style={styles.categoryClearText}>Clear</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+              <Text style={styles.sheetSubtitle}>
+                {categoryFilter.size === 0
+                  ? 'Tap to narrow to one or more BTC Map categories.'
+                  : `${categoryFilter.size} selected`}
+              </Text>
+              <View style={styles.categoryChipsWrap}>
+                {availableCategories.map((cat) => {
+                  const on = categoryFilter.has(cat);
+                  return (
+                    <TouchableOpacity
+                      key={cat}
+                      onPress={() => toggleCategory(cat)}
+                      style={[
+                        styles.categoryChip,
+                        on ? styles.categoryChipOn : styles.categoryChipOff,
+                      ]}
+                      testID={`map-filter-category-${cat}`}
+                      accessibilityLabel={`${cat} category ${on ? 'on' : 'off'}`}
+                    >
+                      <Text
+                        style={[
+                          styles.categoryChipText,
+                          on ? styles.categoryChipTextOn : null,
+                        ]}
+                      >
+                        {cat.replace(/_/g, ' ')}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          ) : null}
+        </ScrollView>
       </View>
     </View>
   );
@@ -1275,6 +1370,9 @@ const createStyles = (colors: Palette) =>
       borderTopLeftRadius: 18,
       borderTopRightRadius: 18,
       gap: 8,
+      // Cap so the FilterSheet's category list can scroll instead of
+      // pushing the sheet off the top of the screen.
+      maxHeight: '80%',
     },
     sheetHandle: {
       alignSelf: 'center',
@@ -1508,6 +1606,45 @@ const createStyles = (colors: Palette) =>
     },
     filterToggleThumbOn: {
       transform: [{ translateX: 16 }],
+    },
+    categoryHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    categoryClearText: {
+      color: colors.brandPink,
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    categoryChipsWrap: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginTop: 10,
+    },
+    categoryChip: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 999,
+      borderWidth: 1,
+    },
+    categoryChipOff: {
+      backgroundColor: 'transparent',
+      borderColor: colors.divider,
+    },
+    categoryChipOn: {
+      backgroundColor: colors.brandPink,
+      borderColor: colors.brandPink,
+    },
+    categoryChipText: {
+      fontSize: 12,
+      color: colors.textHeader,
+      fontWeight: '600',
+      textTransform: 'capitalize',
+    },
+    categoryChipTextOn: {
+      color: colors.white,
     },
   });
 
