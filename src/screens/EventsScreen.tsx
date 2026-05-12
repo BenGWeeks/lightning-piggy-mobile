@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Image,
   Linking,
+  RefreshControl,
 } from 'react-native';
 import * as Location from 'expo-location';
 import {
@@ -17,7 +18,6 @@ import {
   ChevronRight,
   MapPinned,
   Plus,
-  RefreshCw,
   Search,
   ShieldCheck,
   ShieldOff,
@@ -252,31 +252,26 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={styles.container} testID="events-screen">
       <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          accessibilityLabel="Back to Explore"
-          testID="events-back-button"
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Events</Text>
-        <TouchableOpacity
-          onPress={onCreateEvent}
-          accessibilityLabel="Create event"
-          testID="events-create-button"
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Plus size={20} color={colors.white} strokeWidth={2.5} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={reload}
-          accessibilityLabel="Refresh"
-          testID="events-refresh-button"
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <RefreshCw size={20} color={colors.white} strokeWidth={2.5} />
-        </TouchableOpacity>
+        <View style={styles.headerRow}>
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            accessibilityLabel="Back to Explore"
+            testID="events-back-button"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Events</Text>
+          <TouchableOpacity
+            onPress={onCreateEvent}
+            accessibilityLabel="Create event"
+            testID="events-create-button"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Plus size={20} color={colors.white} strokeWidth={2.5} />
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.headerTagline}>Bitcoin meetups and gatherings near you</Text>
       </View>
 
       {/* Distance filter chips — choose how tight a radius to draw
@@ -408,6 +403,14 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
             {__DEV__ ? <Text style={styles.wotChipHint}>tap to toggle</Text> : null}
           </TouchableOpacity>
           <FlatList
+            refreshControl={
+              <RefreshControl
+                refreshing={loading && events.size > 0}
+                onRefresh={reload}
+                tintColor={colors.brandPink}
+                colors={[colors.brandPink]}
+              />
+            }
             // Hero card lives in the list header so it scrolls with the
             // rest. Showing a large image + description for the very
             // next event helps users orient at a glance; hidden when the
@@ -587,12 +590,15 @@ const createStyles = (colors: Palette) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
     header: {
-      flexDirection: 'row',
-      alignItems: 'center',
       paddingHorizontal: 16,
       paddingTop: 48,
-      paddingBottom: 16,
+      paddingBottom: 14,
       backgroundColor: colors.brandPink,
+      minHeight: 140,
+    },
+    headerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
       gap: 12,
     },
     headerTitle: {
@@ -601,6 +607,13 @@ const createStyles = (colors: Palette) =>
       fontSize: 18,
       fontWeight: '700',
       color: colors.white,
+    },
+    headerTagline: {
+      marginTop: 10,
+      paddingHorizontal: 4,
+      color: 'rgba(255,255,255,0.85)',
+      fontSize: 13,
+      fontWeight: '500',
     },
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 },
     subtle: { fontSize: 14, color: colors.textSupplementary, textAlign: 'center', lineHeight: 20 },

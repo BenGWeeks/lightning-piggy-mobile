@@ -27,11 +27,7 @@ import { ExploreNavigation } from '../navigation/types';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
 import { type ParsedCache } from '../services/nostrPlacesService';
 import { subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
-import {
-  loadCachedCaches,
-  peekCachedCachesSync,
-  saveCaches,
-} from '../services/nostrPlacesStorage';
+import { loadCachedCaches, peekCachedCachesSync, saveCaches } from '../services/nostrPlacesStorage';
 import {
   decodeGeohash,
   encodeGeohash,
@@ -211,7 +207,9 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
       items = items.filter(({ cache }) => (cache.terrain ?? 1) <= maxTerrain);
     }
     if (selectedTypes.size > 0) {
-      items = items.filter(({ cache }) => cache.cacheType ? selectedTypes.has(cache.cacheType) : false);
+      items = items.filter(({ cache }) =>
+        cache.cacheType ? selectedTypes.has(cache.cacheType) : false,
+      );
     }
     return items;
   }, [caches, pos, mapBbox, maxDifficulty, maxTerrain, selectedTypes]);
@@ -236,23 +234,26 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={styles.container} testID="geocaches-screen">
       <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          accessibilityLabel="Back to Explore"
-          testID="hunt-back-button"
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Geo-caches</Text>
-        <TouchableOpacity
-          onPress={() => navigation.navigate('HuntCreate')}
-          accessibilityLabel="Hide a Piglet"
-          testID="hunt-create-piggy-button"
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Plus size={22} color={colors.white} strokeWidth={2.5} />
-        </TouchableOpacity>
+        <View style={styles.headerRow}>
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            accessibilityLabel="Back to Explore"
+            testID="hunt-back-button"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Geo-caches</Text>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('HuntCreate')}
+            accessibilityLabel="Hide a Piglet"
+            testID="hunt-create-piggy-button"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Plus size={22} color={colors.white} strokeWidth={2.5} />
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.headerTagline}>Hunt for sats hidden in the wild</Text>
       </View>
 
       <FlatList
@@ -303,10 +304,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
                     accessibilityLabel={`Cap difficulty at ${n}`}
                   >
                     <Text
-                      style={[
-                        styles.filterChipText,
-                        active ? styles.filterChipTextActive : null,
-                      ]}
+                      style={[styles.filterChipText, active ? styles.filterChipTextActive : null]}
                     >
                       D{n}
                     </Text>
@@ -328,10 +326,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
                     accessibilityLabel={`Cap terrain at ${n}`}
                   >
                     <Text
-                      style={[
-                        styles.filterChipText,
-                        active ? styles.filterChipTextActive : null,
-                      ]}
+                      style={[styles.filterChipText, active ? styles.filterChipTextActive : null]}
                     >
                       T{n}
                     </Text>
@@ -359,10 +354,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
                       accessibilityLabel={`Filter to ${t} caches`}
                     >
                       <Text
-                        style={[
-                          styles.filterChipText,
-                          active ? styles.filterChipTextActive : null,
-                        ]}
+                        style={[styles.filterChipText, active ? styles.filterChipTextActive : null]}
                       >
                         {t}
                       </Text>
@@ -373,10 +365,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
             ) : null}
 
             <TouchableOpacity
-              style={[
-                styles.wotChip,
-                filterEnabled ? styles.wotChipOn : styles.wotChipOff,
-              ]}
+              style={[styles.wotChip, filterEnabled ? styles.wotChipOn : styles.wotChipOff]}
               onPress={() => {
                 if (__DEV__) setFilterEnabled(!filterEnabled);
               }}
@@ -497,12 +486,15 @@ const createStyles = (colors: Palette) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
     header: {
-      flexDirection: 'row',
-      alignItems: 'center',
       paddingHorizontal: 16,
       paddingTop: 48,
-      paddingBottom: 16,
+      paddingBottom: 14,
       backgroundColor: colors.brandPink,
+      minHeight: 140,
+    },
+    headerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
       gap: 12,
     },
     headerTitle: {
@@ -511,6 +503,13 @@ const createStyles = (colors: Palette) =>
       fontSize: 18,
       fontWeight: '700',
       color: colors.white,
+    },
+    headerTagline: {
+      marginTop: 10,
+      paddingHorizontal: 4,
+      color: 'rgba(255,255,255,0.85)',
+      fontSize: 13,
+      fontWeight: '500',
     },
     mapWrap: {
       marginTop: 12,

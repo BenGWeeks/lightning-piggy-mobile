@@ -9,17 +9,10 @@ import {
   ActivityIndicator,
   ScrollView,
   Linking,
+  RefreshControl,
 } from 'react-native';
 import * as Location from 'expo-location';
-import {
-  ChevronLeft,
-  ChevronRight,
-  MapPin,
-  RefreshCw,
-  Search,
-  Sparkles,
-  Zap,
-} from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, MapPin, Search, Sparkles, Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
@@ -197,31 +190,26 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={styles.container} testID="places-screen">
       <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          accessibilityLabel="Back to Explore"
-          testID="places-back-button"
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Places</Text>
-        <TouchableOpacity
-          onPress={() => navigation.navigate('Map')}
-          accessibilityLabel="Open map view"
-          testID="places-map-button"
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <MapPin size={20} color={colors.white} strokeWidth={2.5} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={reload}
-          accessibilityLabel="Refresh"
-          testID="places-refresh-button"
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <RefreshCw size={20} color={colors.white} strokeWidth={2.5} />
-        </TouchableOpacity>
+        <View style={styles.headerRow}>
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            accessibilityLabel="Back to Explore"
+            testID="places-back-button"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Places</Text>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Map')}
+            accessibilityLabel="Open map view"
+            testID="places-map-button"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <MapPin size={20} color={colors.white} strokeWidth={2.5} />
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.headerTagline}>Bitcoin-accepting merchants from BTC Map</Text>
       </View>
 
       <View style={styles.miniMapContainer}>
@@ -325,6 +313,14 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
           data={filteredPlaces}
           keyExtractor={({ place }) => String(place.id)}
           contentContainerStyle={styles.listContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={loading && places.length > 0}
+              onRefresh={reload}
+              tintColor={colors.brandPink}
+              colors={[colors.brandPink]}
+            />
+          }
           renderItem={({ item }) => (
             <PlaceRow
               place={item.place}
@@ -418,12 +414,15 @@ const createStyles = (colors: Palette) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
     header: {
-      flexDirection: 'row',
-      alignItems: 'center',
       paddingHorizontal: 16,
       paddingTop: 48,
-      paddingBottom: 16,
+      paddingBottom: 14,
       backgroundColor: colors.brandPink,
+      minHeight: 140,
+    },
+    headerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
       gap: 12,
     },
     headerTitle: {
@@ -432,6 +431,13 @@ const createStyles = (colors: Palette) =>
       fontSize: 18,
       fontWeight: '700',
       color: colors.white,
+    },
+    headerTagline: {
+      marginTop: 10,
+      paddingHorizontal: 4,
+      color: 'rgba(255,255,255,0.85)',
+      fontSize: 13,
+      fontWeight: '500',
     },
     searchRow: {
       flexDirection: 'row',
