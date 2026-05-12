@@ -11,7 +11,16 @@ import {
   Linking,
 } from 'react-native';
 import * as Location from 'expo-location';
-import { CalendarDays, ChevronLeft, MapPinned, Plus, RefreshCw, Search } from 'lucide-react-native';
+import {
+  CalendarDays,
+  ChevronLeft,
+  MapPinned,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  ShieldOff,
+} from 'lucide-react-native';
 import Toast from '../components/BrandedToast';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
@@ -62,9 +71,13 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
   // events in the user's web of trust regardless of distance).
   // Numeric value = haversine cap in metres.
   const [maxDistanceMetres, setMaxDistanceMetres] = useState<number | null>(null);
+  // Date-range ceiling expressed as seconds-from-now. `null` = no filter
+  // (default). Picked from a chip row so users can narrow the feed to
+  // "this week" / "this month" without committing to a calendar picker.
+  const [maxFromNowSec, setMaxFromNowSec] = useState<number | null>(null);
   const closerRef = useRef<(() => void) | null>(null);
 
-  const { isTrusted, filterEnabled } = useTrustGraph();
+  const { isTrusted, filterEnabled, setFilterEnabled } = useTrustGraph();
   const isTrustedRef = useRef(isTrusted);
   useEffect(() => {
     isTrustedRef.current = isTrusted;
@@ -171,6 +184,11 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
     if (maxDistanceMetres !== null) {
       items = items.filter(({ distance }) => distance <= maxDistanceMetres);
     }
+    if (maxFromNowSec !== null) {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const ceiling = nowSec + maxFromNowSec;
+      items = items.filter(({ event }) => event.startsAt !== null && event.startsAt <= ceiling);
+    }
     if (q) {
       items = items.filter(({ event }) => {
         const hay = [event.title, event.description, event.location ?? '', event.hashtags.join(' ')]
@@ -180,7 +198,7 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
       });
     }
     return items;
-  }, [sortedEvents, searchQuery, maxDistanceMetres]);
+  }, [sortedEvents, searchQuery, maxDistanceMetres, maxFromNowSec]);
 
   const onCreateEvent = useCallback(() => {
     // Full create flow lives behind a Nostr signer + venue picker we
@@ -265,6 +283,35 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
         })}
       </View>
 
+      {/* Date-range chips — narrow to today / this week / this month so
+          a long feed doesn't bury near-term plans. "All" is the default
+          so a fresh user sees everything WoT-trusted. */}
+      <View style={styles.filterRow} testID="events-date-filter">
+        {(
+          [
+            { label: 'Anytime', value: null },
+            { label: 'Today', value: 24 * 60 * 60 },
+            { label: 'This week', value: 7 * 24 * 60 * 60 },
+            { label: 'This month', value: 31 * 24 * 60 * 60 },
+          ] as const
+        ).map((opt) => {
+          const active = maxFromNowSec === opt.value;
+          return (
+            <TouchableOpacity
+              key={opt.label}
+              style={[styles.filterChip, active ? styles.filterChipActive : null]}
+              onPress={() => setMaxFromNowSec(opt.value)}
+              accessibilityLabel={`Show events ${opt.label}`}
+              testID={`events-date-${opt.label.replace(/\s/g, '')}`}
+            >
+              <Text style={[styles.filterChipText, active ? styles.filterChipTextActive : null]}>
+                {opt.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
       {/* Search bar — filters the loaded events client-side. Cheap, no
           extra relay queries. */}
       <View style={styles.searchRow}>
@@ -304,24 +351,75 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
         </View>
       ) : (
         <>
-          {untrustedHidden > 0 ? (
-            <Text style={styles.trustNote} testID="events-trust-note">
-              {untrustedHidden} {untrustedHidden === 1 ? 'event' : 'events'} hidden from outside
-              your trust graph.
+          <TouchableOpacity
+            style={[
+              styles.wotChip,
+              filterEnabled ? styles.wotChipOn : styles.wotChipOff,
+            ]}
+            onPress={() => {
+              if (__DEV__) setFilterEnabled(!filterEnabled);
+            }}
+            disabled={!__DEV__}
+            testID="events-wot-chip"
+            accessibilityLabel={
+              filterEnabled
+                ? `Web-of-trust filter on, ${untrustedHidden} hidden`
+                : 'Web-of-trust filter off (developer mode)'
+            }
+          >
+            {filterEnabled ? (
+              <ShieldCheck size={14} color={colors.brandPink} strokeWidth={2.5} />
+            ) : (
+              <ShieldOff size={14} color={colors.zapYellow} strokeWidth={2.5} />
+            )}
+            <Text style={styles.wotChipText}>
+              {filterEnabled
+                ? untrustedHidden > 0
+                  ? `WoT filter on • ${untrustedHidden} ${
+                      untrustedHidden === 1 ? 'event' : 'events'
+                    } hidden`
+                  : 'WoT filter on'
+                : 'WoT filter off (dev)'}
             </Text>
-          ) : null}
+            {__DEV__ ? <Text style={styles.wotChipHint}>tap to toggle</Text> : null}
+          </TouchableOpacity>
           <FlatList
-            data={filteredEvents}
+            // Hero card lives in the list header so it scrolls with the
+            // rest. Showing a large image + description for the very
+            // next event helps users orient at a glance; hidden when the
+            // user is searching (the hero would look stale).
+            data={
+              searchQuery.trim() === '' && filteredEvents.length > 0
+                ? filteredEvents.slice(1)
+                : filteredEvents
+            }
+            ListHeaderComponent={
+              searchQuery.trim() === '' && filteredEvents.length > 0 ? (
+                <EventHero
+                  event={filteredEvents[0].event}
+                  distance={filteredEvents[0].distance}
+                  onPress={() =>
+                    setExpandedCoord((prev) =>
+                      prev === filteredEvents[0].event.coord ? null : filteredEvents[0].event.coord,
+                    )
+                  }
+                  expanded={expandedCoord === filteredEvents[0].event.coord}
+                  onOpenInMaps={() => openInMaps(filteredEvents[0].event)}
+                  colors={colors}
+                  styles={styles}
+                />
+              ) : null
+            }
             keyExtractor={({ event }) => event.coord}
             contentContainerStyle={styles.listContent}
             renderItem={({ item, index }) => (
               <EventRow
                 event={item.event}
                 distance={item.distance}
-                // Highlight the first three unsearched results as
-                // "Up next" — when the user is filtering by query the
-                // highlight makes no sense, so skip it.
-                upNext={searchQuery.trim() === '' && index < 3}
+                // Highlight the first two unsearched rows as "Up next"
+                // (hero already pulls the very-next one out). When the
+                // user is searching the highlight makes no sense.
+                upNext={searchQuery.trim() === '' && index < 2}
                 expanded={expandedCoord === item.event.coord}
                 onToggle={() =>
                   setExpandedCoord((prev) => (prev === item.event.coord ? null : item.event.coord))
@@ -365,6 +463,58 @@ const dayLabel = (ts: number | null): { day: string; month: string } => {
     month: d.toLocaleString(undefined, { month: 'short' }).toUpperCase(),
   };
 };
+
+const EventHero: React.FC<{
+  event: ParsedEvent;
+  distance: number;
+  expanded: boolean;
+  onPress: () => void;
+  onOpenInMaps: () => void;
+  colors: Palette;
+  styles: ReturnType<typeof createStyles>;
+}> = ({ event, distance, expanded, onPress, onOpenInMaps, colors, styles }) => (
+  <TouchableOpacity
+    style={styles.heroCard}
+    onPress={onPress}
+    activeOpacity={0.85}
+    testID={`event-hero-${event.d}`}
+    accessibilityLabel={`Next event: ${event.title}`}
+  >
+    {event.imageUrl ? (
+      <Image source={{ uri: event.imageUrl }} style={styles.heroImage} resizeMode="cover" />
+    ) : (
+      <View style={[styles.heroImage, styles.heroImageFallback]}>
+        <CalendarDays size={48} color={colors.brandPink} strokeWidth={1.5} />
+      </View>
+    )}
+    <View style={styles.heroBody}>
+      <Text style={styles.heroUpNext}>UP NEXT</Text>
+      <Text style={styles.heroTitle} numberOfLines={2}>
+        {event.title}
+      </Text>
+      <Text style={styles.heroMeta} numberOfLines={2}>
+        {formatDate(event.startsAt)}
+        {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
+        {event.location ? ` · ${event.location}` : ''}
+      </Text>
+      {event.description ? (
+        <Text style={styles.heroDescription} numberOfLines={expanded ? 0 : 3}>
+          {event.description}
+        </Text>
+      ) : null}
+      {expanded && (event.location || event.geohash) ? (
+        <TouchableOpacity
+          style={styles.locationButton}
+          onPress={onOpenInMaps}
+          testID={`event-hero-${event.d}-open-in-maps`}
+        >
+          <MapPinned size={14} color={colors.brandPink} strokeWidth={2.5} />
+          <Text style={styles.locationButtonText}>Open in Maps</Text>
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  </TouchableOpacity>
+);
 
 const EventRow: React.FC<{
   event: ParsedEvent;
@@ -592,6 +742,82 @@ const createStyles = (colors: Palette) =>
       fontSize: 12,
       color: colors.textSupplementary,
       lineHeight: 17,
+    },
+    wotChip: {
+      marginHorizontal: 16,
+      marginTop: 8,
+      marginBottom: 4,
+      alignSelf: 'flex-start',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 999,
+      borderWidth: 1,
+    },
+    wotChipOn: {
+      backgroundColor: colors.surface,
+      borderColor: colors.brandPink,
+    },
+    wotChipOff: {
+      backgroundColor: colors.surface,
+      borderColor: colors.zapYellow,
+    },
+    wotChipText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.textHeader,
+    },
+    wotChipHint: {
+      fontSize: 10,
+      fontStyle: 'italic',
+      color: colors.textSupplementary,
+      marginLeft: 4,
+    },
+    heroCard: {
+      marginHorizontal: 16,
+      marginTop: 8,
+      marginBottom: 12,
+      borderRadius: 14,
+      backgroundColor: colors.surface,
+      overflow: 'hidden',
+    },
+    heroImage: {
+      width: '100%',
+      height: 180,
+      backgroundColor: colors.background,
+    },
+    heroImageFallback: {
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    heroBody: {
+      padding: 14,
+      gap: 6,
+    },
+    heroUpNext: {
+      fontSize: 11,
+      fontWeight: '800',
+      letterSpacing: 1,
+      color: colors.brandPink,
+    },
+    heroTitle: {
+      fontSize: 18,
+      fontWeight: '800',
+      color: colors.textHeader,
+      lineHeight: 22,
+    },
+    heroMeta: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      lineHeight: 17,
+    },
+    heroDescription: {
+      fontSize: 13,
+      color: colors.textBody,
+      lineHeight: 19,
+      marginTop: 4,
     },
   });
 
