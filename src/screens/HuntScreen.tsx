@@ -35,8 +35,6 @@ import {
   haversineMetres,
 } from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
-import { useNearbyRadius } from '../hooks/useNearbyRadius';
-import { RADIUS_OPTIONS } from '../services/nearbyRadiusService';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -66,7 +64,22 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   // Web-of-trust filter. Refs so the subscription callback always
   // reads the current `isTrusted` predicate without resubscribing.
   const { isTrusted, filterEnabled, setFilterEnabled } = useTrustGraph();
-  const { radius: maxDistanceMetres, setRadius } = useNearbyRadius();
+  // Visible bbox from the mini-map at the top of the screen. The list
+  // below filters to caches whose decoded geohash lies inside this
+  // bbox, so "zoom out → see more" emerges naturally and there's no
+  // distance chip row to bias the user.
+  const [mapBbox, setMapBbox] = useState<{
+    minLat: number;
+    maxLat: number;
+    minLon: number;
+    maxLon: number;
+  } | null>(null);
+  // NIP-GC difficulty / terrain are integer 1-5 scales (geocaching
+  // convention). Max-filter, so "D ≤ 2" keeps a beginner away from
+  // expert puzzles; null = no filter. Local to this screen since they
+  // only make sense for caches.
+  const [maxDifficulty, setMaxDifficulty] = useState<number | null>(null);
+  const [maxTerrain, setMaxTerrain] = useState<number | null>(null);
   const isTrustedRef = useRef(isTrusted);
   useEffect(() => {
     isTrustedRef.current = isTrusted;
@@ -128,7 +141,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   }, [pos, filterEnabled]);
 
   const sortedCaches = useMemo(() => {
-    const items = [...caches.values()].map((cache) => {
+    let items = [...caches.values()].map((cache) => {
       const center = cache.geohash ? decodeGeohash(cache.geohash) : null;
       const distance =
         pos && center
@@ -137,11 +150,32 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
       return { cache, distance };
     });
     items.sort((a, b) => a.distance - b.distance);
-    if (maxDistanceMetres !== null) {
-      return items.filter(({ distance }) => distance <= maxDistanceMetres);
+    // Restrict to caches whose decoded position is inside the
+    // mini-map's visible bbox. As the user zooms out the bbox grows
+    // and more caches surface; no chip-row to set "within X km".
+    if (mapBbox) {
+      items = items.filter(({ cache }) => {
+        if (!cache.geohash) return false;
+        const c = decodeGeohash(cache.geohash);
+        return (
+          c.lat >= mapBbox.minLat &&
+          c.lat <= mapBbox.maxLat &&
+          c.lng >= mapBbox.minLon &&
+          c.lng <= mapBbox.maxLon
+        );
+      });
+    }
+    if (maxDifficulty !== null) {
+      // A cache with no difficulty tag is treated as "1" — typical
+      // hider convention for a trivial walk-up; otherwise filtering
+      // would silently drop legitimate easy caches.
+      items = items.filter(({ cache }) => (cache.difficulty ?? 1) <= maxDifficulty);
+    }
+    if (maxTerrain !== null) {
+      items = items.filter(({ cache }) => (cache.terrain ?? 1) <= maxTerrain);
     }
     return items;
-  }, [caches, pos, maxDistanceMetres]);
+  }, [caches, pos, mapBbox, maxDifficulty, maxTerrain]);
 
   const filteredCaches = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -193,6 +227,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
                 caches={[...caches.values()]}
                 events={[]}
                 onTapMap={() => navigation.navigate('Map')}
+                onBoundsChange={setMapBbox}
               />
             </View>
 
@@ -210,16 +245,17 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
               />
             </View>
 
-            <View style={styles.filterRow} testID="hunt-distance-filter">
-              {RADIUS_OPTIONS.map((opt) => {
-                const active = maxDistanceMetres === opt.value;
+            <View style={styles.filterRow} testID="hunt-difficulty-filter">
+              <Text style={styles.filterLabel}>Difficulty ≤</Text>
+              {[1, 2, 3, 4, 5].map((n) => {
+                const active = maxDifficulty === n;
                 return (
                   <TouchableOpacity
-                    key={opt.label}
+                    key={n}
                     style={[styles.filterChip, active ? styles.filterChipActive : null]}
-                    onPress={() => setRadius(opt.value)}
-                    testID={`hunt-distance-${opt.label.replace(/\s/g, '')}`}
-                    accessibilityLabel={`Show caches within ${opt.label}`}
+                    onPress={() => setMaxDifficulty(active ? null : n)}
+                    testID={`hunt-difficulty-${n}`}
+                    accessibilityLabel={`Cap difficulty at ${n}`}
                   >
                     <Text
                       style={[
@@ -227,7 +263,32 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
                         active ? styles.filterChipTextActive : null,
                       ]}
                     >
-                      {opt.label}
+                      D{n}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <View style={styles.filterRow} testID="hunt-terrain-filter">
+              <Text style={styles.filterLabel}>Terrain ≤</Text>
+              {[1, 2, 3, 4, 5].map((n) => {
+                const active = maxTerrain === n;
+                return (
+                  <TouchableOpacity
+                    key={n}
+                    style={[styles.filterChip, active ? styles.filterChipActive : null]}
+                    onPress={() => setMaxTerrain(active ? null : n)}
+                    testID={`hunt-terrain-${n}`}
+                    accessibilityLabel={`Cap terrain at ${n}`}
+                  >
+                    <Text
+                      style={[
+                        styles.filterChipText,
+                        active ? styles.filterChipTextActive : null,
+                      ]}
+                    >
+                      T{n}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -429,6 +490,13 @@ const createStyles = (colors: Palette) =>
       fontWeight: '600',
     },
     filterChipTextActive: { color: colors.white },
+    filterLabel: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.textSupplementary,
+      marginRight: 2,
+      alignSelf: 'center',
+    },
     wotChip: {
       marginHorizontal: 16,
       marginTop: 4,

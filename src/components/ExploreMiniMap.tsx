@@ -8,6 +8,13 @@ import type { BtcMapPlace } from '../services/btcMapService';
 import { acceptsLightning } from '../services/btcMapService';
 import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 
+export interface MiniMapBbox {
+  minLat: number;
+  maxLat: number;
+  minLon: number;
+  maxLon: number;
+}
+
 interface Props {
   lat: number | null;
   lon: number | null;
@@ -16,6 +23,12 @@ interface Props {
   events: ParsedEvent[];
   loading?: boolean;
   onTapMap: () => void;
+  /**
+   * Called when the user's +/− interaction changes the visible bbox.
+   * List screens use this to filter their rows to whatever's currently
+   * on the mini-map, so "zoom out → see more" emerges naturally.
+   */
+  onBoundsChange?: (bbox: MiniMapBbox) => void;
 }
 
 /**
@@ -41,6 +54,7 @@ export const ExploreMiniMap: React.FC<Props> = ({
   events,
   loading,
   onTapMap,
+  onBoundsChange,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -106,7 +120,11 @@ export const ExploreMiniMap: React.FC<Props> = ({
           source={{ html: makeHtml(lat, lon) }}
           onMessage={(e) => {
             try {
-              if (JSON.parse(e.nativeEvent.data).type === 'ready') setReady(true);
+              const msg = JSON.parse(e.nativeEvent.data);
+              if (msg.type === 'ready') setReady(true);
+              else if (msg.type === 'bounds' && msg.bbox && onBoundsChange) {
+                onBoundsChange(msg.bbox);
+              }
             } catch {}
           }}
           // disable user gestures so the parent ScrollView wins; the only
@@ -184,6 +202,9 @@ const map=L.map('map',{zoomControl:false,dragging:false,scrollWheelZoom:false,do
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
 let merchantLayer=L.layerGroup().addTo(map),cacheLayer=L.layerGroup().addTo(map),eventLayer=L.layerGroup().addTo(map),meMarker=null;
 const dot=(cls,size)=>L.divIcon({className:'',html:'<div class="'+cls+'"></div>',iconSize:[size,size]});
+const emitBounds=()=>{const b=map.getBounds();post({type:'bounds',bbox:{minLat:b.getSouth(),maxLat:b.getNorth(),minLon:b.getWest(),maxLon:b.getEast()}});};
+map.on('moveend',emitBounds);
+map.on('zoomend',emitBounds);
 window.LP_zoomBy=function(delta){
   map.setZoom(map.getZoom()+delta);
 };
