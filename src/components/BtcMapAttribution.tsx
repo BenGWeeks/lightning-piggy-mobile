@@ -40,13 +40,13 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     gap: 6,
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 4,
     borderRadius: 999,
     backgroundColor: 'rgba(0, 0, 0, 0.55)',
   },
   logo: {
-    width: 14,
-    height: 18,
+    width: 18,
+    height: 22,
   },
   text: {
     fontSize: 11,

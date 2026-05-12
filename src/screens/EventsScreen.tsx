@@ -37,11 +37,7 @@ import { getDevPinnedLocation } from '../utils/devLocation';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { type ParsedEvent } from '../services/nostrPlacesService';
 import { subscribeNearbyEvents } from '../services/nostrPlacesPublisher';
-import {
-  loadCachedEvents,
-  peekCachedEventsSync,
-  saveEvents,
-} from '../services/nostrPlacesStorage';
+import { loadCachedEvents, peekCachedEventsSync, saveEvents } from '../services/nostrPlacesStorage';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -383,10 +379,7 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
       ) : (
         <>
           <TouchableOpacity
-            style={[
-              styles.wotChip,
-              filterEnabled ? styles.wotChipOn : styles.wotChipOff,
-            ]}
+            style={[styles.wotChip, filterEnabled ? styles.wotChipOn : styles.wotChipOff]}
             onPress={() => {
               if (__DEV__) setFilterEnabled(!filterEnabled);
             }}
@@ -779,7 +772,8 @@ const createStyles = (colors: Palette) =>
       marginLeft: 4,
     },
     heroCard: {
-      marginHorizontal: 16,
+      // No marginHorizontal — listContent already applies padding: 16,
+      // so the hero aligns flush with the rows below it.
       marginTop: 8,
       marginBottom: 12,
       borderRadius: 14,

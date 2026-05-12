@@ -8,6 +8,7 @@ import {
   FlatList,
   ActivityIndicator,
   ScrollView,
+  Linking,
 } from 'react-native';
 import * as Location from 'expo-location';
 import {
@@ -123,24 +124,26 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
 
   const sortedPlaces = useMemo(() => {
     if (!pos) return [] as { place: BtcMapPlace; distance: number }[];
-    return places
-      .map((place) => ({
-        place,
-        distance: haversineMetres(
-          { lat: pos.lat, lon: pos.lon },
-          { lat: place.lat, lon: place.lon },
-        ),
-      }))
-      // Boosted listings surface first (BTC Map's paid-feature
-      // mechanism); within the same boost bucket we still sort by
-      // distance. Every boosted row carries a "Featured" pill so the
-      // user can see why it's at the top.
-      .sort((a, b) => {
-        const ab = isBoosted(a.place) ? 1 : 0;
-        const bb = isBoosted(b.place) ? 1 : 0;
-        if (ab !== bb) return bb - ab;
-        return a.distance - b.distance;
-      });
+    return (
+      places
+        .map((place) => ({
+          place,
+          distance: haversineMetres(
+            { lat: pos.lat, lon: pos.lon },
+            { lat: place.lat, lon: place.lon },
+          ),
+        }))
+        // Boosted listings surface first (BTC Map's paid-feature
+        // mechanism); within the same boost bucket we still sort by
+        // distance. Every boosted row carries a "Featured" pill so the
+        // user can see why it's at the top.
+        .sort((a, b) => {
+          const ab = isBoosted(a.place) ? 1 : 0;
+          const bb = isBoosted(b.place) ? 1 : 0;
+          if (ab !== bb) return bb - ab;
+          return a.distance - b.distance;
+        })
+    );
   }, [places, pos]);
 
   // Selected category filters — empty = show every category (default).
@@ -355,6 +358,8 @@ const PlaceRow: React.FC<{
   const onchain = acceptsOnchain(place);
   const lud16 = lightningAddressOf(place);
   const boosted = isBoosted(place);
+  const website = place.tags['contact:website'];
+  const websiteLabel = website ? website.replace(/^https?:\/\/(www\.)?/i, '') : null;
   return (
     <TouchableOpacity
       style={[styles.row, boosted ? styles.rowBoosted : null]}
@@ -389,6 +394,20 @@ const PlaceRow: React.FC<{
         <Text style={styles.rowSub} numberOfLines={1}>
           {formatAddress(place)}
         </Text>
+        {website && websiteLabel ? (
+          <TouchableOpacity
+            onPress={() => {
+              Linking.openURL(website).catch(() => {});
+            }}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            testID={`place-row-${place.id}-website`}
+            accessibilityLabel={`Open website ${websiteLabel}`}
+          >
+            <Text style={styles.rowLink} numberOfLines={1}>
+              {websiteLabel}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
       <ChevronRight size={20} color={colors.textSupplementary} />
     </TouchableOpacity>
@@ -514,6 +533,13 @@ const createStyles = (colors: Palette) =>
     rowFeaturedText: { fontSize: 10, fontWeight: '800', color: colors.textHeader },
     rowMeta: { fontSize: 12, color: colors.textSupplementary, marginTop: 2 },
     rowSub: { fontSize: 12, color: colors.textSupplementary, marginTop: 2, fontStyle: 'italic' },
+    rowLink: {
+      fontSize: 12,
+      color: colors.brandPink,
+      marginTop: 2,
+      fontStyle: 'italic',
+      textDecorationLine: 'underline',
+    },
     catChipsRow: {
       paddingHorizontal: 16,
       paddingVertical: 8,
@@ -534,7 +560,12 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.brandPink,
       borderColor: colors.brandPink,
     },
-    catChipText: { fontSize: 12, color: colors.textHeader, fontWeight: '600', textTransform: 'capitalize' },
+    catChipText: {
+      fontSize: 12,
+      color: colors.textHeader,
+      fontWeight: '600',
+      textTransform: 'capitalize',
+    },
     catChipTextOn: { color: colors.white },
   });
 
