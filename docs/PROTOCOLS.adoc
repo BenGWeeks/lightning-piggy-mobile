@@ -216,4 +216,82 @@ Reasons it's the right call:
 | `src/services/nfcService.ts` :: `writeLnurlToTag` | Writes `lightning:LNURL…` to an NDEF URI record (case-preserving for LUD-17 paths) so any LNURL-aware wallet on tap opens. Tag-family inference (NTAG21x / Mifare Ultralight C / Mifare Classic) and `makeReadOnly()` locking are **Android-only** — `tag.techTypes` is Android-specific and CoreNFC has no equivalent permanent-lock primitive. iOS writes the NDEF record and returns `{ family: 'unknown', locked: false }` so the hider knows the tag is still re-writeable.
 | `src/screens/HuntCreateScreen.tsx` | Hider create flow — paste / validate LNURL, attach hint photo (EXIF-stripped via `imageUploadService`), drop GPS pin → 7-char geohash, optional cooldown / uses hints, optional Public toggle.
 | `src/screens/HuntFoundScreen.tsx` | Finder celebration / claim flow — opens via `lightning:` deep-link, resolves LUD-03, generates bolt11 via `useWallet().makeInvoice`, POSTs to LNURL callback, records to claim history.
+| `src/screens/HuntPiggyDetailScreen.tsx` | Full cache detail — listing fields, hint photo, hider profile (`usePubkeyProfile`), live find-log thread, per-finder Zap button.
+| `src/services/nostrPlacesService.ts` | Pure builders + parsers for kinds 37516 / 7516 / 1111 / 31923. Exposes `GC_LISTING_KIND`, `GC_FOUND_LOG_KIND`, `GC_COMMENT_KIND`, `NIP52_TIME_BASED_KIND`, `isLightningPiggyListing`, `parseCacheListing`, `parseFoundLog`, `parseNip52Event`.
+| `src/services/nostrPlacesPublisher.ts` | Subscribe-side: `subscribeNearbyCaches({geohashPrefixes}, onCache)`, `subscribeCacheFoundLog(cacheCoord, onLog)`, `subscribeCacheComments(cacheCoord, onComment)`, `subscribeNearbyEvents({geohashPrefixes}, onEvent)`. One pool, one filter per call.
+| `src/services/nostrPlacesStorage.ts` | AsyncStorage mirror of parsed caches + events (7-day TTL, 500-cap, sync peek). See `docs/SOLUTION_DESIGN.adoc` → "Explore tab".
 |===
+
+=== Events: NIP-52 calendar consumption
+
+==== Summary
+
+Lightning Piggy's "Events" sub-screen renders nearby Bitcoin meetups, conferences, and workshops as NIP-52 time-based calendar events (`kind 31923`). We are **read-only** for v1 — there's no in-app create flow. Organisers publish via Flockstr / Nostrudel / their own scripts; we surface them on the map and in the list.
+
+We only consume `kind 31923` (time-based). `kind 31922` (date-based all-day) and `kind 31925` (RSVP) are out of scope for v1 — most Bitcoin meetups have a precise start time and RSVP gating would require a kind-30200-equivalent state model we haven't budgeted yet.
+
+==== Tags read by the app
+
+[cols="1,3", options="header"]
+|===
+| Tag | What we do with it
+
+| `["d", str]` | Stable identifier scoped to the organiser pubkey. Forms half of the addressable coordinate `31923:<organiser>:<d>`.
+| `["title", str]` (fallback `["name", str]`) | Headline on the list row + detail screen. NIP-52 spec uses `title`; some early publishers emitted `name` so we accept both.
+| `["start", unix_secs]` | Start time. Required — events without a parseable `start` are dropped.
+| `["end", unix_secs]` | Optional end time. Drives the "ends in" copy on detail; if absent we just show the start.
+| `["location", str]` | Free-form venue / address / "video call link". NIP-52 leaves this open — we display verbatim.
+| `["g", geohash]` (any precision) | We pick the longest `g` tag as the canonical location for distance + map pinning. Multi-precision `g` tags (à la NIP-GC) are honoured because some clients emit them.
+| `["image", url]` | Hero image on EventDetail.
+| `["t", hashtag]` | Surfaced as chips on the detail row.
+| `event.content` | Long-form description, rendered with the same markdown sanitizer as cache descriptions.
+|===
+
+NIP-52 also defines optional `participants`, `references`, `summary`, and per-event RSVPs (`kind 31925`). We ignore these for v1; the loss is graceful (a tag we don't render is just data on the wire).
+
+==== Subscribe filter shape
+
+`subscribeNearbyEvents` opens a single filter:
+
+[source]
+----
+{ kinds: [31923], "#g": [<geohash prefixes for current viewport>] }
+----
+
+Prefix list comes from `geohashPrefixes(currentGh, 5)` so one subscribe covers a ~5 km city neighbourhood. The mini-map's `onBoundsChange` re-opens with a fresh prefix list when the viewport changes substantially.
+
+==== Add-to-Calendar (consumer-side native integration)
+
+`EventDetailScreen` exposes an **Add to Calendar** button. Tapping it:
+
+. Requests `expo-calendar` `READ_CALENDAR` + `WRITE_CALENDAR` permissions lazily (no upfront prompt at app launch).
+. Picks the device default calendar via `Calendar.getDefaultCalendarAsync()` (iOS) or the first writable calendar (Android).
+. Creates an event with `title`, `startDate = start*1000`, `endDate = (end ?? start + 2h)*1000`, `location`, `notes = nostr:nevent1… + description`.
+. Falls back to a "copy to clipboard" hint on permission denial.
+
+This is purely a consumer of the published kind 31923 — nothing is written back to relays.
+
+=== NIP-99: classified-listing consumer (Bag Charm purchase link)
+
+==== Summary
+
+Lightning Piggy uses NIP-99 (`kind 30402`, parameterised-replaceable classified listing) in **consumer-only** mode for the Robotechy Piggy Bag Charm purchase link on `HuntCreateScreen` (the "Hide a Piglet" flow).
+
+==== What's published vs what we render
+
+Robotechy publishes a `kind 30402` listing for the Bag Charm — a physical product the hider can buy to attach an NFC tag to. We don't decode the event ourselves; we link out to a `naddr1…`-encoded reference that resolves on https://www.robotechy.com[robotechy.com]:
+
+[source]
+----
+'https://www.robotechy.com/naddr1qvzqqqrkcgpzqgglxfd4895k3tqv0xmupgps6a5zqmfj43slj0c58hs39wzeh4r0qqdhqun0v36kxazlxymnvwpnxscnyvp3xgcrjhmzd5urxmcxaljpu'
+----
+
+This is the only NIP-99 surface in the app. There is no "marketplace" feature, no in-app price display, no Lightning Piggy-published classified listings. The `naddr` is hard-coded into the source for v1 because there's only one product and re-resolving it on every Hide-a-Piglet open would be wasted relay traffic for zero UX benefit.
+
+==== Why NIP-99 at all
+
+The hider could buy a Bag Charm anywhere — what makes NIP-99 useful here is that the seller (Robotechy) is a Nostr-native business and the canonical product page lives on their Nostr classified listing rather than a Web2 product database. Linking via `naddr` lets the URL stay valid even if Robotechy migrates hosting providers, and signals to other Nostr-aware clients that "this is a real Nostr-addressable product".
+
+==== Code reference
+
+* `src/screens/HuntCreateScreen.tsx` (around line 377) — the `Linking.openURL` call to the `naddr1…` resolver. Logos: `assets/images/robotechy-logo.png`.
