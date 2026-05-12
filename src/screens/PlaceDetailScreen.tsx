@@ -384,7 +384,7 @@ const createStyles = (colors: Palette) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 4,
-      backgroundColor: '#F5A623',
+      backgroundColor: '#F7931A',
       paddingHorizontal: 10,
       paddingVertical: 4,
       borderRadius: 100,

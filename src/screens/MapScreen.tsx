@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { WebView, WebViewMessageEvent } from 'react-native-webview';
 import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ChevronLeft,
   Clock,
@@ -51,6 +52,10 @@ type PermissionState = 'unknown' | 'granted' | 'denied';
 interface BridgeMessage {
   type: 'ready' | 'bounds' | 'markerTap' | 'cacheTap';
   bbox?: Bbox;
+  /** Viewport centre alongside the bbox — used to persist last-viewed. */
+  centre?: { lat: number; lng: number };
+  /** Leaflet zoom level alongside the bbox. */
+  zoom?: number;
   id?: number;
   /** Cache coord (`<kind>:<pubkey>:<d>`) for cacheTap messages. */
   coord?: string;
@@ -84,6 +89,15 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
     };
   }, [navigation]);
 
+  // Persist the last map viewport so re-opening the Map doesn't snap
+  // back to London while we wait for the GPS resolve. Hydrated in a
+  // useEffect on mount (async, can't be a useState init) and written on
+  // every `moveend` / `zoomend` (debounced inside the WebView's bounds
+  // event). One global slot — multiple maps would just race on the key.
+  const VIEWPORT_KEY = '@lp:map-viewport';
+  const lastViewport = useRef<{ lat: number; lng: number; zoom: number } | null>(null);
+  const hydratedViewport = useRef(false);
+
   const [permission, setPermission] = useState<PermissionState>('unknown');
   const [places, setPlaces] = useState<BtcMapPlace[]>([]);
   const [caches, setCaches] = useState<Map<string, ParsedCache>>(new Map());
@@ -103,6 +117,30 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   const [webviewReady, setWebviewReady] = useState(false);
 
   // ------- permissions + initial position --------------------------------
+
+  // Hydrate the last-saved viewport before the WebView bridge resolves.
+  // If found, we'll inject it instead of letting the location-resolve
+  // flow re-centre — the user picks up exactly where they left off.
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(VIEWPORT_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as { lat: number; lng: number; zoom: number };
+          if (
+            Number.isFinite(parsed.lat) &&
+            Number.isFinite(parsed.lng) &&
+            Number.isFinite(parsed.zoom)
+          ) {
+            lastViewport.current = parsed;
+            hydratedViewport.current = true;
+          }
+        }
+      } catch {
+        // Storage IO is best-effort — fall through to GPS-centre flow.
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -148,7 +186,24 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         // bridge fires `ready` in parallel with the (potentially slow)
         // merchant fetch, and we want the map centred on the user
         // regardless of whether the BTC-merchant query has come back.
-        setViewportInWebView(lat, lon, 10);
+        //
+        // If we already hydrated a saved viewport, prefer it over the
+        // fresh GPS centre — the user explicitly chose that pan/zoom
+        // last session and snapping them back to "where you are" feels
+        // hostile. We still drop a `me` marker at GPS so they know
+        // where they are; the recentre button + recenterOnUser puts
+        // them back on themselves on demand.
+        if (hydratedViewport.current && lastViewport.current) {
+          const v = lastViewport.current;
+          setViewportInWebView(v.lat, v.lng, v.zoom);
+          // Drop a me-marker at GPS without re-centring.
+          if (webviewReady && webviewRef.current) {
+            const js = `window.LP_setMeMarker && window.LP_setMeMarker(${lat}, ${lon}); true;`;
+            webviewRef.current.injectJavaScript(js);
+          }
+        } else {
+          setViewportInWebView(lat, lon, 10);
+        }
         await refreshPlaces(initBbox);
 
         // Subscribe to NIP-GC kind 37516 caches in the user's coarse
@@ -293,6 +348,18 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
           lastBbox.current = next;
           refreshPlaces(next);
         }, 500);
+        // Persist centre + zoom (when the WebView sent them alongside
+        // the bbox) so the next Map open re-uses this viewport instead
+        // of falling back to London / GPS.
+        if (
+          typeof msg.centre?.lat === 'number' &&
+          typeof msg.centre?.lng === 'number' &&
+          typeof msg.zoom === 'number'
+        ) {
+          const v = { lat: msg.centre.lat, lng: msg.centre.lng, zoom: msg.zoom };
+          lastViewport.current = v;
+          AsyncStorage.setItem(VIEWPORT_KEY, JSON.stringify(v)).catch(() => {});
+        }
       } else if (msg.type === 'markerTap' && typeof msg.id === 'number') {
         const hit = places.find((p) => p.id === msg.id);
         if (hit) setSelected(hit);
@@ -363,6 +430,15 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
           originWhitelist={['*']}
           source={{ html: LEAFLET_HTML }}
           onMessage={onMessage}
+          // Seed `window.LP_initialViewport` before Leaflet's first
+          // `setView` call so the map opens at the user's last centre
+          // instead of flashing London. Falls back inside the HTML to
+          // a sensible default when the slot isn't set (first run).
+          injectedJavaScriptBeforeContentLoaded={
+            lastViewport.current
+              ? `window.LP_initialViewport = ${JSON.stringify(lastViewport.current)}; true;`
+              : 'true;'
+          }
           style={styles.webview}
           javaScriptEnabled
           domStorageEnabled
@@ -546,8 +622,8 @@ const MerchantDetailSheet: React.FC<{
             </View>
           )}
           {acceptsOnchain(place) && (
-            <View style={styles.sheetChipGrey}>
-              <Text style={styles.sheetChipGreyText}>On-chain</Text>
+            <View style={styles.sheetChipOrange}>
+              <Text style={styles.sheetChipOrangeText}>On-chain</Text>
             </View>
           )}
         </View>
@@ -613,7 +689,9 @@ const MerchantDetailSheet: React.FC<{
             accessibilityLabel={lud16 ? `Pay ${lud16}` : 'No Lightning Address available'}
           >
             <Zap size={16} color={colors.white} strokeWidth={2.5} />
-            <Text style={styles.sheetButtonText}>{lud16 ? 'Pay' : 'No address'}</Text>
+            <Text style={styles.sheetButtonText}>
+              {lud16 ? 'Pay' : 'No Lightning address'}
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.sheetButtonSecondary}
@@ -890,24 +968,30 @@ const LEAFLET_HTML = `<!DOCTYPE html>
       font-variation-settings: 'FILL' 1, 'wght' 500;
       line-height: 1;
     }
-    /* NIP-GC cache pins — diamond shape so they're visually
-       distinguishable from circular merchant pins. */
+    /* Vanilla NIP-GC cache pin — grey diamond, no glyph. Diamond shape
+       distinguishes it from circular merchant pins on a busy map. */
     .lp-cache {
       width: 22px; height: 22px;
       background: #6c7b8a; border: 2px solid #fff;
       box-shadow: 0 1px 4px rgba(0,0,0,0.4);
       transform: rotate(45deg);
     }
-    .lp-cache.piggy { background: #EC008C; }
-    .lp-cache.piggy::after {
-      content: '🐷';
-      transform: rotate(-45deg);
-      display: inline-block;
-      font-size: 12px;
-      line-height: 18px;
-      width: 18px;
-      height: 18px;
-      text-align: center;
+    /* Piglet pin — pink circle with a piggy-bank glyph (Material
+       Symbols savings). Round, not diamond, because a Piglet pays
+       sats and shares visual language with merchant pins; the glyph +
+       brand pink mark it apart from the bitcoin-orange / white-glyph
+       merchant pins. */
+    .lp-piglet {
+      width: 32px; height: 32px; border-radius: 16px;
+      background: #EC008C; border: 2px solid #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+      display: flex; align-items: center; justify-content: center;
+      color: #fff;
+    }
+    .lp-piglet .material-symbols-outlined {
+      font-size: 18px;
+      font-variation-settings: 'FILL' 1, 'wght' 500;
+      line-height: 1;
     }
     .lp-me {
       width: 14px; height: 14px; border-radius: 7px;
@@ -921,7 +1005,13 @@ const LEAFLET_HTML = `<!DOCTYPE html>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     const post = (msg) => window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify(msg));
-    const map = L.map('map', { zoomControl: true }).setView([51.5074, -0.1278], 12);
+    // Honor a viewport injected via injectedJavaScriptBeforeContentLoaded
+    // — that's MapScreen's saved-viewport hydrate. Falls back to a UK
+    // central default only when there's truly nothing better.
+    const __iv = (window.LP_initialViewport && typeof window.LP_initialViewport.lat === 'number')
+      ? window.LP_initialViewport
+      : { lat: 51.5074, lng: -0.1278, zoom: 12 };
+    const map = L.map('map', { zoomControl: true }).setView([__iv.lat, __iv.lng], __iv.zoom);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '© OpenStreetMap contributors',
@@ -936,10 +1026,11 @@ const LEAFLET_HTML = `<!DOCTYPE html>
     };
     const emitBounds = debounce(() => {
       const b = map.getBounds();
+      const c = map.getCenter();
       post({ type: 'bounds', bbox: {
         minLon: b.getWest(), minLat: b.getSouth(),
         maxLon: b.getEast(), maxLat: b.getNorth(),
-      }});
+      }, centre: { lat: c.lat, lng: c.lng }, zoom: map.getZoom() });
     }, 350);
 
     map.on('moveend', emitBounds);
@@ -947,6 +1038,16 @@ const LEAFLET_HTML = `<!DOCTYPE html>
 
     window.LP_setViewport = function(lat, lng, zoom) {
       map.setView([lat, lng], zoom || map.getZoom());
+      if (meMarker) map.removeLayer(meMarker);
+      meMarker = L.marker([lat, lng], {
+        icon: L.divIcon({ className: '', html: '<div class="lp-me"></div>', iconSize: [14,14] }),
+      }).addTo(map);
+    };
+
+    // Drop / move the "you are here" marker without changing the
+    // viewport. Used after the user's last-seen viewport is restored
+    // so they can still see where they are on someone else's pan.
+    window.LP_setMeMarker = function(lat, lng) {
       if (meMarker) map.removeLayer(meMarker);
       meMarker = L.marker([lat, lng], {
         icon: L.divIcon({ className: '', html: '<div class="lp-me"></div>', iconSize: [14,14] }),
@@ -981,8 +1082,12 @@ const LEAFLET_HTML = `<!DOCTYPE html>
     window.LP_setCaches = function(list) {
       cacheLayer.clearLayers();
       list.forEach((c) => {
-        const cls = 'lp-cache' + (c.kind === 'piggy' ? ' piggy' : '');
-        const icon = L.divIcon({ className: '', html: '<div class="' + cls + '"></div>', iconSize: [22, 22] });
+        const isPiggy = c.kind === 'piggy';
+        const html = isPiggy
+          ? '<div class="lp-piglet"><span class="material-symbols-outlined">savings</span></div>'
+          : '<div class="lp-cache"></div>';
+        const size = isPiggy ? 32 : 22;
+        const icon = L.divIcon({ className: '', html: html, iconSize: [size, size] });
         const marker = L.marker([c.lat, c.lng], { icon });
         marker.on('click', () => post({ type: 'cacheTap', coord: c.coord }));
         marker.addTo(cacheLayer);
@@ -1197,6 +1302,17 @@ const createStyles = (colors: Palette) =>
     },
     sheetChipGreyText: {
       color: colors.textSupplementary,
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    sheetChipOrange: {
+      backgroundColor: '#F7931A',
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 100,
+    },
+    sheetChipOrangeText: {
+      color: colors.white,
       fontSize: 11,
       fontWeight: '700',
     },
