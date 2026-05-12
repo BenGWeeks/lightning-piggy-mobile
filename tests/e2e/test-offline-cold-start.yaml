@@ -1,0 +1,90 @@
+appId: com.lightningpiggy.app.dev
+name: All cached surfaces render on cold start without internet
+---
+# Asserts that with Wi-Fi + mobile data disabled, the app's persistent
+# caches paint every primary surface on cold start:
+#
+#   Home          balance + tx list (WalletContext cache)
+#   Friends       contact list (NostrContext contact cache)
+#   Messages      DM inbox preview (groupMessagesStorageService)
+#   Explore       Places + Geo-caches + Events rails
+#                 (BTC Map dataset + nostrPlacesStorage)
+#   Places        full merchant list
+#   Geo-caches    cache list
+#   Events        event list
+#
+# IMPORTANT: this flow assumes the device's network has ALREADY been
+# disabled by `scripts/test-offline-cold-start.sh` (the wrapper that
+# invokes this file). The wrapper also handles re-enabling network in
+# a trap so a failure here doesn't leave the device offline.
+#
+# Run: bash scripts/test-offline-cold-start.sh
+
+- waitForAnimationToEnd:
+    timeout: 12000
+
+# ─── Home tab — wallet + transactions cached ────────────────────────────
+- tapOn:
+    id: 'tab-home'
+- waitForAnimationToEnd:
+    timeout: 4000
+- assertVisible:
+    id: 'btn-send'
+- assertVisible:
+    id: 'btn-receive'
+- assertVisible:
+    id: 'btn-transfer'
+
+# ─── Friends tab — contact list cached ──────────────────────────────────
+- tapOn:
+    id: 'tab-friends'
+- waitForAnimationToEnd:
+    timeout: 4000
+- assertVisible:
+    id: 'search-toggle'
+
+# ─── Messages tab — DM inbox cached ─────────────────────────────────────
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 4000
+- assertVisible:
+    id: 'messages-search-toggle'
+
+# ─── Explore tab — hub rails (Places / Caches / Events) ─────────────────
+- tapOn:
+    id: 'tab-explore'
+- waitForAnimationToEnd:
+    timeout: 6000
+- assertVisible: 'Places near you'
+- assertVisible: 'Geo-caches near you'
+- assertVisible: 'Events near you'
+
+# ─── Places list — BTC Map dataset cached ───────────────────────────────
+- tapOn: 'Places near you'
+- waitForAnimationToEnd:
+    timeout: 4000
+- assertVisible:
+    id: 'places-screen'
+- tapOn:
+    id: 'places-back-button'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# ─── Geo-caches list — nostrPlacesStorage hydrate ───────────────────────
+- tapOn: 'Geo-caches near you'
+- waitForAnimationToEnd:
+    timeout: 4000
+- assertVisible:
+    id: 'hunt-screen'
+- tapOn:
+    id: 'hunt-discover-back-button'
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# ─── Events list — nostrPlacesStorage hydrate ───────────────────────────
+- tapOn: 'Events near you'
+- waitForAnimationToEnd:
+    timeout: 4000
+- assertVisible:
+    id: 'events-screen'
