@@ -7,6 +7,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Linking,
+  Share,
 } from 'react-native';
 import * as Location from 'expo-location';
 import {
@@ -19,6 +20,7 @@ import {
   MapPin,
   Navigation as NavigationIcon,
   Phone,
+  Share2,
   ShieldCheck,
   ShoppingBag,
   Sparkles,
@@ -305,8 +307,8 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               />
             </View>
 
-            <View style={styles.actionRow}>
-              {lightningAddressOf(place) ? (
+            {lightningAddressOf(place) ? (
+              <View style={styles.actionRow}>
                 <TouchableOpacity
                   style={styles.primaryAction}
                   testID="place-detail-pay-button"
@@ -321,17 +323,8 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   <Zap size={16} color={colors.white} strokeWidth={2.5} />
                   <Text style={styles.primaryActionText}>Pay</Text>
                 </TouchableOpacity>
-              ) : null}
-              <TouchableOpacity
-                style={styles.secondaryAction}
-                onPress={openDirections}
-                testID="place-detail-directions-button"
-                accessibilityLabel="Open directions"
-              >
-                <NavigationIcon size={16} color={colors.brandPink} strokeWidth={2.5} />
-                <Text style={styles.secondaryActionText}>Directions</Text>
-              </TouchableOpacity>
-            </View>
+              </View>
+            ) : null}
 
             {place.opening_hours ? (
               <View style={styles.contactSection}>
@@ -474,6 +467,20 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
             ) : null}
 
             <View style={styles.btcMapActionsRow}>
+              <TouchableOpacity
+                // Same pill geometry as Verify / Suggest-an-edit, but
+                // filled brand-pink so the primary "get me there" action
+                // pops over the outline buttons next to it.
+                style={[styles.btcMapActionButton, styles.btcMapActionButtonPrimary]}
+                onPress={openDirections}
+                testID="place-detail-directions-button"
+                accessibilityLabel="Open directions"
+              >
+                <NavigationIcon size={14} color={colors.white} strokeWidth={2.5} />
+                <Text style={[styles.btcMapActionText, styles.btcMapActionTextPrimary]}>
+                  Directions
+                </Text>
+              </TouchableOpacity>
               {btcMapVerifyUrl(place) ? (
                 <TouchableOpacity
                   style={styles.btcMapActionButton}
@@ -494,6 +501,25 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 >
                   <ExternalLink size={14} color={colors.brandPink} strokeWidth={2.5} />
                   <Text style={styles.btcMapActionText}>Suggest an edit</Text>
+                </TouchableOpacity>
+              ) : null}
+              {btcMapMerchantUrl(place) ? (
+                <TouchableOpacity
+                  style={styles.btcMapActionButton}
+                  onPress={() => {
+                    const url = btcMapMerchantUrl(place)!;
+                    const name = place.tags.name ?? 'this Bitcoin merchant';
+                    Share.share({
+                      message: `${name} accepts Bitcoin — ${url}`,
+                      url,
+                      title: name,
+                    }).catch(() => {});
+                  }}
+                  testID="place-detail-share"
+                  accessibilityLabel="Share this merchant"
+                >
+                  <Share2 size={14} color={colors.brandPink} strokeWidth={2.5} />
+                  <Text style={styles.btcMapActionText}>Share</Text>
                 </TouchableOpacity>
               ) : null}
             </View>
@@ -559,6 +585,13 @@ const createStyles = (colors: Palette) =>
       fontSize: 13,
       fontWeight: '700',
       color: colors.brandPink,
+    },
+    btcMapActionButtonPrimary: {
+      backgroundColor: colors.brandPink,
+      borderColor: colors.brandPink,
+    },
+    btcMapActionTextPrimary: {
+      color: colors.white,
     },
     chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
     chipPink: {
