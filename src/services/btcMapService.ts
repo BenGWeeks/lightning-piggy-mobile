@@ -39,6 +39,16 @@ const V4_FIELDS = [
   'icon',
   'osm_url',
   'categories',
+  // Top-level curated contact fields. BTC Map normalises these from
+  // the raw OSM tags + their own hand-fills, so they're often present
+  // when the OSM-prefixed `osm:contact:*` tags are not (e.g. Mill Road
+  // Butchers has phone/email/opening_hours at the top level only).
+  'phone',
+  'email',
+  'opening_hours',
+  // Social link — BTC Map doesn't curate a top-level field for this,
+  // so we reach into the raw OSM tag namespace.
+  'osm:contact:facebook',
   'osm:name',
   'osm:description',
   'osm:addr:street',
@@ -61,9 +71,10 @@ const DATASET_TTL_MS = 7 * 24 * 60 * 60 * 1_000; // 7 days
 // AsyncStorage key — namespaced so it's grepable + obviously
 // invalidatable from devtools. A single global dataset cache; v4 has
 // no bbox parameter so we fetch the whole world and filter in memory.
-// Bumped to `v4e` to invalidate caches written before `categories`
-// joined the parsed shape — old payloads would otherwise serve forever.
-const DATASET_STORAGE_KEY = '@lp:btcmap-dataset-v4e';
+// Bumped to `v4f` to invalidate caches written before the curated
+// `phone`/`email`/`opening_hours` + Facebook URL + created/updated
+// timestamps joined the parsed shape.
+const DATASET_STORAGE_KEY = '@lp:btcmap-dataset-v4f';
 
 export interface BtcMapPlace {
   id: number;
@@ -120,6 +131,26 @@ export interface BtcMapPlace {
    * when their taxonomy team has classified the merchant.
    */
   categories?: string[] | null;
+  /**
+   * Top-level curated contact fields. BTC Map normalises these from
+   * OSM + their own hand-fills, so we prefer them over `tags['contact:*']`
+   * (which is often empty even when the curated field is set). Null when
+   * not provided.
+   */
+  phone?: string | null;
+  email?: string | null;
+  opening_hours?: string | null;
+  /**
+   * Facebook profile URL pulled from the OSM `contact:facebook` tag.
+   * No equivalent top-level field on BTC Map; we read the raw tag.
+   */
+  facebookUrl?: string | null;
+  /**
+   * Unix-seconds timestamps for the listing lifecycle. Surfaced as
+   * "Listed since" / "Last updated" hints on the detail page.
+   */
+  createdAt?: string | null;
+  updatedAt?: string | null;
 }
 
 interface CachedDataset {
@@ -176,7 +207,37 @@ const reshape = (raw: Record<string, unknown>): BtcMapPlace | null => {
   const categories = Array.isArray(raw['categories'])
     ? (raw['categories'] as unknown[]).filter((x): x is string => typeof x === 'string')
     : null;
-  return { id, lat, lon, tags, verified_at, description, icon, osm_url, categories };
+  // Curated top-level fields > OSM-prefixed tag fallbacks. BTC Map
+  // ships these only when their team or the OSM tag has them populated;
+  // an empty string is normalised to null so the UI can branch cleanly.
+  const pickStr = (k: string): string | null => {
+    const v = raw[k];
+    if (typeof v === 'string' && v.trim().length > 0) return v.trim();
+    return null;
+  };
+  const phone = pickStr('phone') ?? tags['contact:phone'] ?? null;
+  const email = pickStr('email') ?? tags['contact:email'] ?? null;
+  const opening_hours = pickStr('opening_hours') ?? tags['opening_hours'] ?? null;
+  const facebookUrl = tags['contact:facebook'] ?? null;
+  const createdAt = pickStr('created_at');
+  const updatedAt = pickStr('updated_at');
+  return {
+    id,
+    lat,
+    lon,
+    tags,
+    verified_at,
+    description,
+    icon,
+    osm_url,
+    categories,
+    phone,
+    email,
+    opening_hours,
+    facebookUrl,
+    createdAt,
+    updatedAt,
+  };
 };
 
 // One-shot AsyncStorage hydration. Runs on first `fetchPlacesInBbox`

@@ -11,6 +11,7 @@ import {
 import * as Location from 'expo-location';
 import {
   ChevronLeft,
+  Clock,
   ExternalLink,
   Globe,
   Mail,
@@ -53,6 +54,15 @@ interface Props {
  * free). Renders address, payment methods, contact info, a
  * single-pin map preview, and pay / directions actions.
  */
+// Format BTC Map's ISO-ish timestamps (e.g. "2022-09-25T08:45:08Z") to
+// a friendly YYYY-MM-DD for the lifecycle block. Invalid dates return
+// the raw string so a malformed payload doesn't render "NaN-NaN-NaN".
+const formatYMD = (iso: string): string => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toISOString().slice(0, 10);
+};
+
 const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -239,18 +249,26 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               </TouchableOpacity>
             </View>
 
-            {place.tags['contact:phone'] ||
-            place.tags['contact:website'] ||
-            place.tags['contact:email'] ? (
+            {place.opening_hours ? (
+              <View style={styles.contactSection}>
+                <Text style={styles.sectionLabel}>Opening hours</Text>
+                <View style={styles.contactRow}>
+                  <Clock size={14} color={colors.brandPink} strokeWidth={2.5} />
+                  <Text style={styles.contactText}>{place.opening_hours}</Text>
+                </View>
+              </View>
+            ) : null}
+
+            {place.phone || place.tags['contact:website'] || place.email || place.facebookUrl ? (
               <View style={styles.contactSection}>
                 <Text style={styles.sectionLabel}>Contact</Text>
-                {place.tags['contact:phone'] ? (
+                {place.phone ? (
                   <TouchableOpacity
                     style={styles.contactRow}
-                    onPress={() => openContact('tel', place.tags['contact:phone']!)}
+                    onPress={() => openContact('tel', place.phone!)}
                   >
                     <Phone size={14} color={colors.brandPink} strokeWidth={2.5} />
-                    <Text style={styles.contactText}>{place.tags['contact:phone']}</Text>
+                    <Text style={styles.contactText}>{place.phone}</Text>
                   </TouchableOpacity>
                 ) : null}
                 {place.tags['contact:website'] ? (
@@ -265,22 +283,47 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                     <ExternalLink size={12} color={colors.textSupplementary} />
                   </TouchableOpacity>
                 ) : null}
-                {place.tags['contact:email'] ? (
+                {place.email ? (
                   <TouchableOpacity
                     style={styles.contactRow}
-                    onPress={() => openContact('mailto', place.tags['contact:email']!)}
+                    onPress={() => openContact('mailto', place.email!)}
                   >
                     <Mail size={14} color={colors.brandPink} strokeWidth={2.5} />
-                    <Text style={styles.contactText}>{place.tags['contact:email']}</Text>
+                    <Text style={styles.contactText}>{place.email}</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {place.facebookUrl ? (
+                  <TouchableOpacity
+                    style={styles.contactRow}
+                    onPress={() => Linking.openURL(place.facebookUrl!).catch(() => {})}
+                  >
+                    <ExternalLink size={14} color={colors.brandPink} strokeWidth={2.5} />
+                    <Text style={styles.contactText} numberOfLines={1}>
+                      {place.facebookUrl.replace(/^https?:\/\/(www\.)?/, '')}
+                    </Text>
                   </TouchableOpacity>
                 ) : null}
               </View>
             ) : null}
 
-            {place.verified_at ? (
-              <Text style={styles.verifyText}>
-                Last community-verified {daysSinceVerified(place)} days ago via OpenStreetMap.
-              </Text>
+            {place.verified_at || place.createdAt || place.updatedAt ? (
+              <View style={styles.lifecycleBlock}>
+                {place.verified_at ? (
+                  <Text style={styles.lifecycleText}>
+                    Last community-verified {daysSinceVerified(place)} days ago via OpenStreetMap.
+                  </Text>
+                ) : null}
+                {place.updatedAt ? (
+                  <Text style={styles.lifecycleText}>
+                    Last updated {formatYMD(place.updatedAt)}.
+                  </Text>
+                ) : null}
+                {place.createdAt ? (
+                  <Text style={styles.lifecycleText}>
+                    Listed since {formatYMD(place.createdAt)}.
+                  </Text>
+                ) : null}
+              </View>
             ) : null}
 
             <View style={styles.btcMapActionsRow}>
@@ -448,6 +491,15 @@ const createStyles = (colors: Palette) =>
       fontSize: 12,
       color: colors.textSupplementary,
       marginTop: 12,
+      fontStyle: 'italic',
+    },
+    lifecycleBlock: {
+      marginTop: 12,
+      gap: 2,
+    },
+    lifecycleText: {
+      fontSize: 12,
+      color: colors.textSupplementary,
       fontStyle: 'italic',
     },
     errorText: { fontSize: 14, color: colors.brandPink, textAlign: 'center', marginTop: 40 },

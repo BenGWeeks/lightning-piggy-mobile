@@ -14,7 +14,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ChevronLeft,
   Clock,
+  ExternalLink,
   Globe,
+  Mail,
   MapPin,
   Navigation as NavigationIcon,
   Phone,
@@ -676,16 +678,19 @@ const MerchantDetailSheet: React.FC<{
             {place.description}
           </Text>
         ) : null}
-        {place.tags.opening_hours ? (
+        {place.opening_hours ? (
           <View style={styles.sheetMetaRow}>
             <Clock size={13} color={colors.textSupplementary} strokeWidth={2.5} />
             <Text style={styles.sheetMetaText} numberOfLines={2}>
-              {place.tags.opening_hours}
+              {place.opening_hours}
             </Text>
           </View>
         ) : null}
         {verifyText && <Text style={styles.sheetVerify}>{verifyText}</Text>}
-        {(place.tags['contact:website'] || place.tags['contact:phone']) && (
+        {(place.tags['contact:website'] ||
+          place.phone ||
+          place.email ||
+          place.facebookUrl) && (
           <View style={styles.sheetContactRow}>
             {place.tags['contact:website'] ? (
               <TouchableOpacity
@@ -700,18 +705,42 @@ const MerchantDetailSheet: React.FC<{
                 </Text>
               </TouchableOpacity>
             ) : null}
-            {place.tags['contact:phone'] ? (
+            {place.phone ? (
               <TouchableOpacity
                 style={styles.sheetContactChip}
-                onPress={() =>
-                  Linking.openURL(`tel:${place.tags['contact:phone']!.replace(/\s+/g, '')}`)
-                }
+                onPress={() => Linking.openURL(`tel:${place.phone!.replace(/\s+/g, '')}`)}
                 testID="merchant-detail-phone"
-                accessibilityLabel={`Call ${place.tags['contact:phone']}`}
+                accessibilityLabel={`Call ${place.phone}`}
               >
                 <Phone size={13} color={colors.brandPink} strokeWidth={2.5} />
                 <Text style={styles.sheetContactText} numberOfLines={1}>
-                  {place.tags['contact:phone']}
+                  {place.phone}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+            {place.email ? (
+              <TouchableOpacity
+                style={styles.sheetContactChip}
+                onPress={() => Linking.openURL(`mailto:${place.email!}`)}
+                testID="merchant-detail-email"
+                accessibilityLabel={`Email ${place.email}`}
+              >
+                <Mail size={13} color={colors.brandPink} strokeWidth={2.5} />
+                <Text style={styles.sheetContactText} numberOfLines={1}>
+                  Email
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+            {place.facebookUrl ? (
+              <TouchableOpacity
+                style={styles.sheetContactChip}
+                onPress={() => Linking.openURL(place.facebookUrl!).catch(() => {})}
+                testID="merchant-detail-facebook"
+                accessibilityLabel="Open Facebook page"
+              >
+                <ExternalLink size={13} color={colors.brandPink} strokeWidth={2.5} />
+                <Text style={styles.sheetContactText} numberOfLines={1}>
+                  Facebook
                 </Text>
               </TouchableOpacity>
             ) : null}
