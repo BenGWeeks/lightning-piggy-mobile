@@ -322,21 +322,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
             accessibilityLabel="Pink 3D-printed Lightning Piggy bag charm with NFC keyring"
           />
           <View style={styles.getPiggyButtonsRow}>
+            {/* 3D-print button hidden until github.com/BenGWeeks/lightning-piggy-3d
+              * exists — was 404'ing for every user. Tracked in issue
+              * #527; restore this block once the repo is published. */}
             <TouchableOpacity
-              style={[styles.getPiggyButton, styles.getPiggyButtonPrint]}
-              onPress={() =>
-                Linking.openURL(
-                  'https://github.com/BenGWeeks/lightning-piggy-3d/tree/main/Piggy%20Bag%20Charm',
-                )
-              }
-              testID="get-a-piggy-print-button"
-              accessibilityLabel="3D print one"
-            >
-              <Printer size={18} color={colors.white} strokeWidth={2.5} />
-              <Text style={styles.getPiggyButtonText}>3D-print</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.getPiggyButton, styles.getPiggyButtonBuy]}
+              style={[styles.getPiggyButton, styles.getPiggyButtonBuy, { flex: 1 }]}
               onPress={() =>
                 Linking.openURL(
                   // NIP-99 classified listing (kind 30402) for the Lightning
