@@ -456,3 +456,21 @@ export const __resetCacheForTest = (): void => {
   // from AsyncStorage and never reaches the mocked fetch path.
   AsyncStorage.removeItem(DATASET_STORAGE_KEY).catch(() => {});
 };
+
+/**
+ * Public force-refresh — invalidates the in-memory + persisted cache
+ * and pulls a fresh dataset from BTC Map v4. Called from the
+ * pull-to-refresh handler on the Explore hub so newly-boosted listings
+ * (or fresh verifications) show up without waiting 7 days for the TTL
+ * to expire. Resolves with the new dataset.
+ */
+export const refreshDataset = async (): Promise<void> => {
+  memoryDataset = null;
+  hydratePromise = null;
+  try {
+    await AsyncStorage.removeItem(DATASET_STORAGE_KEY);
+  } catch {
+    // Best-effort wipe — even if it fails the next `fetchPlacesInBbox`
+    // sees `memoryDataset === null` and goes to the network.
+  }
+};

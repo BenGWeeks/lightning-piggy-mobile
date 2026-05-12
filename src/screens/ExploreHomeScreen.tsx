@@ -1,5 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Image, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import {
+  View,
+  Text,
+  Image,
+  TouchableOpacity,
+  ScrollView,
+  StyleSheet,
+  RefreshControl,
+} from 'react-native';
 import * as Location from 'expo-location';
 import { useFocusEffect } from '@react-navigation/native';
 import {
@@ -27,6 +35,7 @@ import {
   formatAddress,
   isBoosted,
   lightningAddressOf,
+  refreshDataset,
 } from '../services/btcMapService';
 import { type ParsedCache, type ParsedEvent } from '../services/nostrPlacesService';
 import { subscribeNearbyCaches, subscribeNearbyEvents } from '../services/nostrPlacesPublisher';
@@ -133,6 +142,11 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
   const [merchants, setMerchants] = useState<BtcMapPlace[]>([]);
   const [merchantsLoading, setMerchantsLoading] = useState(true);
+  // Bumped by pull-to-refresh to invalidate the merchant + relay-sub
+  // effects without disturbing `pos`. Lets us re-pull BTC Map + tear
+  // down/re-open NIP-GC + NIP-52 subscriptions in one gesture.
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
   useEffect(() => {
     if (!pos) return;
     let cancelled = false;
@@ -159,7 +173,27 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     return () => {
       cancelled = true;
     };
-  }, [pos]);
+  }, [pos, refreshKey]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    setCaches(new Map());
+    setEvents(new Map());
+    setUntrustedCacheCount(0);
+    setUntrustedEventCount(0);
+    try {
+      // Force a network re-pull of the BTC Map dataset — recent boosts
+      // / verifications won't show up until the 7-day TTL otherwise.
+      await refreshDataset();
+    } catch {
+      // Refresh is best-effort; keep the existing rails on failure.
+    }
+    setRefreshKey((n) => n + 1);
+    // Two-second floor on the spinner — relay subs trickle in
+    // continuously, so there's no clean "done" signal. Long enough to
+    // feel like work happened, short enough not to feel stuck.
+    setTimeout(() => setRefreshing(false), 2000);
+  }, []);
 
   // ----- NIP-GC caches + NIP-52 events (live subs) ------------------------
 
@@ -230,7 +264,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
       subsCloserRef.current.forEach((c) => c());
       subsCloserRef.current = [];
     };
-  }, [pos]);
+  }, [pos, refreshKey]);
 
   // ----- lessons progress (local) -----------------------------------------
 
@@ -318,6 +352,16 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         style={styles.scrollArea}
         contentContainerStyle={localStyles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            // Brand pink so the spinner reads as our UI, not a bare
+            // Android grey.
+            tintColor={colors.brandPink}
+            colors={[colors.brandPink]}
+          />
+        }
       >
         {locationDenied ? (
           <View style={localStyles.deniedCard}>
