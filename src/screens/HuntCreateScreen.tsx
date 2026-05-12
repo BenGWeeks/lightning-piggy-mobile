@@ -8,6 +8,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Image,
+  Linking,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
@@ -23,6 +24,8 @@ import {
   MapPin,
   Nfc,
   PiggyBank,
+  Printer,
+  ShoppingBag,
   X,
 } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -306,6 +309,57 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
       </View>
 
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+        <View style={styles.getPiggyCard} testID="get-a-piggy-card">
+          <Text style={styles.getPiggyTitle}>Need a physical Piggy?</Text>
+          <Text style={styles.getPiggyHelper}>
+            A Piglet lives on a physical artefact — a 3D-printed charm with an NFC tag, or a sticker
+            with a QR. Make one yourself, or buy a ready-made charm from Robotechy.
+          </Text>
+          <Image
+            source={require('../../assets/images/piggy-bag-charm.jpg')}
+            style={styles.getPiggyPhoto}
+            resizeMode="cover"
+            accessibilityLabel="Pink 3D-printed Lightning Piggy bag charm with NFC keyring"
+          />
+          <View style={styles.getPiggyButtonsRow}>
+            <TouchableOpacity
+              style={[styles.getPiggyButton, styles.getPiggyButtonPrint]}
+              onPress={() =>
+                Linking.openURL(
+                  'https://github.com/BenGWeeks/lightning-piggy-3d/tree/main/Piggy%20Bag%20Charm',
+                )
+              }
+              testID="get-a-piggy-print-button"
+              accessibilityLabel="3D print one"
+            >
+              <Printer size={18} color={colors.white} strokeWidth={2.5} />
+              <Text style={styles.getPiggyButtonText}>3D-print</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.getPiggyButton, styles.getPiggyButtonBuy]}
+              onPress={() =>
+                Linking.openURL(
+                  // NIP-99 classified listing (kind 30402) for the Lightning
+                  // Piggy Bag Charm at Robotechy. The naddr decodes to:
+                  //   pubkey 211f325b…d46f, identifier product_1768341201209_bm83o.
+                  'https://www.robotechy.com/naddr1qvzqqqrkcgpzqgglxfd4895k3tqv0xmupgps6a5zqmfj43slj0c58hs39wzeh4r0qqdhqun0v36kxazlxymnvwpnxscnyvp3xgcrjhmzd5urxmcxaljpu',
+                )
+              }
+              testID="get-a-piggy-buy-button"
+              accessibilityLabel="Buy from Robotechy"
+            >
+              <ShoppingBag size={18} color={colors.white} strokeWidth={2.5} />
+              <Text style={styles.getPiggyButtonText}>Buy from</Text>
+              <Image
+                source={require('../../assets/images/robotechy-logo.png')}
+                style={styles.robotechyLogo}
+                resizeMode="contain"
+                accessibilityLabel="Robotechy"
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
+
         <Text style={styles.sectionLabel}>LNURL-withdraw</Text>
         <Text style={styles.helper}>
           Create a withdraw link in your own wallet (LNbits, Alby, Mutiny, …) — set the per-claim
@@ -675,6 +729,65 @@ const createStyles = (colors: Palette) =>
     },
     headerRightSpacer: { width: 24 },
     body: { padding: 16, gap: 10 },
+    getPiggyCard: {
+      backgroundColor: colors.surface,
+      borderRadius: 14,
+      padding: 14,
+      marginBottom: 12,
+      gap: 10,
+    },
+    getPiggyTitle: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: colors.textHeader,
+    },
+    getPiggyHelper: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      lineHeight: 17,
+    },
+    getPiggyPhoto: {
+      width: '100%',
+      // Wide-and-short crop keeps the card compact so the title, photo,
+      // and both CTAs sit above the fold on a stock 6.1" device. The
+      // underlying photo is 4:3, so we let it letterbox via objectFit
+      // = "cover" inside the constrained box.
+      height: 140,
+      borderRadius: 10,
+      backgroundColor: colors.background,
+    },
+    getPiggyButtonsRow: {
+      flexDirection: 'row',
+      gap: 10,
+    },
+    getPiggyButton: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      paddingVertical: 12,
+      paddingHorizontal: 12,
+      borderRadius: 10,
+    },
+    getPiggyButtonPrint: {
+      backgroundColor: colors.brandPink,
+    },
+    getPiggyButtonBuy: {
+      // Robotechy's brand surface is a dark charcoal; keeps the logo
+      // legible without re-tinting it.
+      backgroundColor: '#1a1a1a',
+    },
+    getPiggyButtonText: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.white,
+    },
+    robotechyLogo: {
+      height: 16,
+      width: 70,
+      marginLeft: 2,
+    },
     sectionLabel: {
       fontSize: 13,
       fontWeight: '700',
