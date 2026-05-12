@@ -97,6 +97,14 @@ function HomeTabs() {
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
+        // Lazy-mount tabs so cold-start only pays for the focused one.
+        // Without this, react-navigation v7 mounts every Tab.Screen at
+        // boot — and the Explore stack alone fires a ~3 MB BTC Map
+        // fetch, two Nostr relay subscriptions, and a foreground
+        // location request before the user has ever tapped Explore.
+        // Combined with `freezeOnBlur: true` below, screens still hold
+        // their state across tab switches once they've been visited.
+        lazy: true,
         freezeOnBlur: true,
         tabBarStyle: {
           backgroundColor: colors.surface,
