@@ -419,10 +419,11 @@ const createStyles = (colors: Palette) =>
     },
     attributionRow: {
       paddingHorizontal: 16,
-      // Tighten so the chip hangs immediately below the map instead of
-      // separated by a search-row's worth of whitespace.
+      // Tight under the map, with breathing room before the search row
+      // so the chip reads as belonging to the map, not floating in
+      // mid-air above the input.
       paddingTop: 2,
-      paddingBottom: 4,
+      paddingBottom: 12,
       alignItems: 'flex-end',
     },
     miniMapContainer: {
