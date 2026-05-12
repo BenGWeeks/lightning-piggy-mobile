@@ -39,7 +39,7 @@ import {
   btcMapMerchantUrl,
   btcMapVerifyUrl,
   daysSinceVerified,
-  fetchPlacesInBbox,
+  fetchPlaceById,
   formatAddress,
   isBoosted,
   lightningAddressOf,
@@ -128,16 +128,12 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         }
         if (cancelled) return;
         setPos({ lat, lon });
-        // 50 km half-side bbox — same as PlacesScreen, so the
-        // AsyncStorage tile cache hits and we resolve in <100 ms.
-        const list = await fetchPlacesInBbox({
-          minLon: lon - 0.5,
-          minLat: lat - 0.5,
-          maxLon: lon + 0.5,
-          maxLat: lat + 0.5,
-        });
+        // Fast path: look up the single place by id from the in-memory
+        // BTC Map dataset (or hydrate from AsyncStorage). Avoids the
+        // 28k-row bbox filter we used to run just to .find() one item,
+        // which made the tap → detail transition feel sluggish.
+        const found = await fetchPlaceById(placeId);
         if (cancelled) return;
-        const found = list.find((p) => p.id === placeId);
         if (!found) {
           setError("This place isn't in our cached list anymore — try opening it from the map.");
         } else {

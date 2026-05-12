@@ -362,6 +362,28 @@ export const fetchPlacesInBbox = async (bbox: Bbox): Promise<BtcMapPlace[]> => {
 };
 
 /**
+ * Fast path for screens that already know a `placeId` — checks the
+ * in-memory dataset first, then hydrates from AsyncStorage, then
+ * (last resort) refetches. Avoids the 28k-row filter+find that
+ * PlaceDetailScreen was doing just to look up a single id.
+ */
+export const fetchPlaceById = async (id: number): Promise<BtcMapPlace | null> => {
+  // Hot path — id already in the memory dataset.
+  if (memoryDataset) {
+    const hit = memoryDataset.places.find((p) => p.id === id);
+    if (hit) return hit;
+  }
+  await hydrateFromStorage();
+  if (memoryDataset) {
+    const hit = memoryDataset.places.find((p) => p.id === id);
+    if (hit) return hit;
+  }
+  // Cold path — pull the dataset and try once more.
+  const dataset = memoryDataset && isFresh(memoryDataset) ? memoryDataset : await fetchDataset();
+  return dataset.places.find((p) => p.id === id) ?? null;
+};
+
+/**
  * Resolve a Lightning Address from a place's OSM tags. Tries common
  * tag variants in order; returns null if none present.
  */
