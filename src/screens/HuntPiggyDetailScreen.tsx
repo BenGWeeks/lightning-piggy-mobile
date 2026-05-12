@@ -28,6 +28,7 @@ import {
   PiggyBank,
   Send,
   Sparkles,
+  User,
   X,
   Zap,
 } from 'lucide-react-native';
@@ -494,9 +495,7 @@ const HiderAttribution: React.FC<{
         <Image source={{ uri: picture }} style={styles.hiderAvatar} />
       ) : (
         <View style={[styles.hiderAvatar, styles.hiderAvatarFallback]}>
-          <Text style={styles.hiderAvatarInitial}>
-            {(name ?? pubkey).slice(0, 1).toUpperCase()}
-          </Text>
+          <User size={20} color={colors.brandPink} strokeWidth={2.5} />
         </View>
       )}
       <View style={{ flex: 1 }}>
@@ -532,9 +531,7 @@ const LogRow: React.FC<{
           <Image source={{ uri: picture }} style={styles.logAvatar} />
         ) : (
           <View style={[styles.logAvatar, styles.hiderAvatarFallback]}>
-            <Text style={styles.hiderAvatarInitial}>
-              {(name ?? log.pubkey).slice(0, 1).toUpperCase()}
-            </Text>
+            <User size={16} color={colors.brandPink} strokeWidth={2.5} />
           </View>
         )}
         <View style={{ flex: 1 }}>
