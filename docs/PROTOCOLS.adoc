@@ -209,11 +209,11 @@ Reasons it's the right call:
 
 | `scripts/publish-test-piggy.mjs` | One-shot dev script that publishes a real NIP-GC kind 37516 event with the LP `com.lightningpiggy.app` label marker (no LNURL — by design, see schema notes above). Default values target Big Piggy's Geo-Cache 1 in Longstanton, Cambridge; override via env vars (LAT / LON / NAME / MEMO / HINT / DIFFICULTY / TERRAIN / SIZE / CACHE_TYPE / BIG_PIGGY_NSEC). The LNURL stays on the physical artifact only.
 | `src/services/lnurlWithdrawService.ts` | Decode + LUD-03 resolve + LUD-03 claim (`claimLnurlWithdraw`). Wallet-agnostic: takes a `getInvoice(sats, memo)` callback so no NWC import dependency.
-| `src/services/claimHistoryService.ts` | AsyncStorage-backed log of "I claimed this Piggy" history. Drives the `⚡ claimed N min ago` badge.
+| `src/services/claimHistoryService.ts` | AsyncStorage-backed log of "I claimed this Piggy" history. Drives the `⚡ claimed N min ago` badge. Persists SHA-256 hashes of the LNURL (`lnurlHash`), never the bearer string itself — AsyncStorage is unencrypted, so a stolen / rooted device must not be able to replay un-exhausted Piggies.
 | `src/services/piggyStorageService.ts` | Local SecureStore registry of the hider's own Piggies. Carries every NIP-GC field (`name, difficulty, terrain, size, cacheType, hint`) plus LP extension fields (`hintPhotoUrl, waitSecondsHint, usesHint, lat, lon, geohash`).
 | `src/utils/geohash.ts` | Tiny geohash encoder + `geohashPrefixes` helper.
 | `src/utils/rot13.ts` | Tiny ROT13 helper for NIP-GC hint encoding.
-| `src/services/nfcService.ts` :: `writeLnurlToTag` | Writes `lightning:LNURL…` to an NDEF URI record (case-preserving for LUD-17 paths) so any LNURL-aware wallet on tap opens.
+| `src/services/nfcService.ts` :: `writeLnurlToTag` | Writes `lightning:LNURL…` to an NDEF URI record (case-preserving for LUD-17 paths) so any LNURL-aware wallet on tap opens. Tag-family inference (NTAG21x / Mifare Ultralight C / Mifare Classic) and `makeReadOnly()` locking are **Android-only** — `tag.techTypes` is Android-specific and CoreNFC has no equivalent permanent-lock primitive. iOS writes the NDEF record and returns `{ family: 'unknown', locked: false }` so the hider knows the tag is still re-writeable.
 | `src/screens/HuntCreateScreen.tsx` | Hider create flow — paste / validate LNURL, attach hint photo (EXIF-stripped via `imageUploadService`), drop GPS pin → 7-char geohash, optional cooldown / uses hints, optional Public toggle.
 | `src/screens/HuntFoundScreen.tsx` | Finder celebration / claim flow — opens via `lightning:` deep-link, resolves LUD-03, generates bolt11 via `useWallet().makeInvoice`, POSTs to LNURL callback, records to claim history.
 |===

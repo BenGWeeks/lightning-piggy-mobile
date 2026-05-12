@@ -12,7 +12,15 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 
 ## What to test in the next release
 
-- New: pick a fiat currency from a searchable list of 38 (USD/EUR/GBP pinned at the top; DKK, KRW, CNY, INR and more supported). Account → Currency.
+- New: **Explore tab** replaces Learn. The hub surfaces four rails — Map (Bitcoin merchants near you, powered by BTC Map), Geo-caches (hide a Piglet → finders claim sats by tapping an NFC tag or scanning a QR), Events (Bitcoin meetups near you, NIP-52), and Lessons (the existing course content).
+- New: **Map** sub-screen shows Lightning-accepting (pink) and on-chain (orange) merchants within a 50 km window with a search bar, distance sort, and a tap-through to merchant detail with directions / Pay actions.
+- New: **Hide a Piglet** — paste any LNURL-withdraw, drop a hint photo and a GPS pin, and write to an NTAG213/215/216 or Mifare Ultralight C NFC tag. The tag is locked read-only after write on Android (iOS writes unlocked).
+- New: **Geo-caches** list shows your own hidden Piglets + nearby public caches (NIP-GC kind 37516) interop-compatible with treasures.to. Tap a row → detail screen with hint, hint photo, and a Claim button if you have a tag in range.
+- New: **Events** sub-screen surfaces NIP-52 calendar events near you with a 5km / 25km / 150km / 500km / All distance chip row. UP NEXT highlights the next three.
+- New: **Web-of-Trust filter** — Geo-caches and Events default to showing publishers in your Nostr follows + their friends. Toggle off in Account → Web of Trust.
+- New: opt-in **Nearby Bitcoin merchants** notifications — background geofence alerts when you walk near a Lightning- or Bitcoin-accepting shop. Off by default; configure radius + quiet hours in Account → Nearby merchants.
+- Fix (iOS): Lightning Piggy no longer captures every `lightning:` link system-wide. Bolt11 invoices and LNURL-pay links open in your default LN wallet again. LP still handles `lightning:lnurl…` withdraw URIs (the Hunt finder flow).
+
 - New: confirmation prompt before any Lightning send or wallet transfer at or above 10,000 sats. Threshold is configurable (Off / 1k / 10k / 100k / Custom) under Account → Security.
 - New: friends-profile sheet now shows the friend's npub QR code, a "Copy lud16" button, and a "Write to NFC tag" affordance directly on the bottom sheet.
 - Polish: amount-entry SATS↔fiat swap is now a bright pink pill with a white arrow instead of a small grey arrow — much easier to tap.
