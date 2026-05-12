@@ -41,6 +41,12 @@ import { useNearbyRadius } from '../hooks/useNearbyRadius';
 import { type ParsedCache, type ParsedEvent } from '../services/nostrPlacesService';
 import { subscribeNearbyCaches, subscribeNearbyEvents } from '../services/nostrPlacesPublisher';
 import {
+  loadCachedCaches,
+  loadCachedEvents,
+  saveCaches,
+  saveEvents,
+} from '../services/nostrPlacesStorage';
+import {
   decodeGeohash,
   encodeGeohash,
   formatDistance,
@@ -210,6 +216,48 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
   const [caches, setCaches] = useState<Map<string, ParsedCache>>(new Map());
   const [events, setEvents] = useState<Map<string, ParsedEvent>>(new Map());
+
+  // Hydrate last-known caches + events from AsyncStorage so the rails
+  // render instantly on cold start while the live relay subs backfill.
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([loadCachedCaches(), loadCachedEvents()]).then(([cs, es]) => {
+      if (cancelled) return;
+      if (cs.length > 0) {
+        setCaches((prev) => {
+          if (prev.size > 0) return prev; // live sub already filled in
+          const m = new Map<string, ParsedCache>();
+          for (const c of cs) m.set(c.coord, c);
+          return m;
+        });
+      }
+      if (es.length > 0) {
+        setEvents((prev) => {
+          if (prev.size > 0) return prev;
+          const m = new Map<string, ParsedEvent>();
+          for (const e of es) m.set(e.coord, e);
+          return m;
+        });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Write-through to AsyncStorage whenever the in-memory state grows
+  // so the next cold start has fresh content to hydrate from. Debounced
+  // via a slow useEffect — we don't need to persist on every event.
+  useEffect(() => {
+    if (caches.size === 0) return;
+    const t = setTimeout(() => saveCaches([...caches.values()]), 1500);
+    return () => clearTimeout(t);
+  }, [caches]);
+  useEffect(() => {
+    if (events.size === 0) return;
+    const t = setTimeout(() => saveEvents([...events.values()]), 1500);
+    return () => clearTimeout(t);
+  }, [events]);
   // Counts of events arriving from pubkeys outside the trust set.
   // Surfaced as "N hidden — from outside your trust graph" so users
   // know the filter is doing something.

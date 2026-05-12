@@ -36,6 +36,7 @@ import { getDevPinnedLocation } from '../utils/devLocation';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { type ParsedEvent } from '../services/nostrPlacesService';
 import { subscribeNearbyEvents } from '../services/nostrPlacesPublisher';
+import { loadCachedEvents, saveEvents } from '../services/nostrPlacesStorage';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -55,6 +56,29 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [events, setEvents] = useState<Map<string, ParsedEvent>>(new Map());
+
+  // Hydrate from AsyncStorage so the list paints instantly on cold
+  // start while the live relay sub backfills.
+  useEffect(() => {
+    let cancelled = false;
+    loadCachedEvents().then((es) => {
+      if (cancelled || es.length === 0) return;
+      setEvents((prev) => {
+        if (prev.size > 0) return prev;
+        const m = new Map<string, ParsedEvent>();
+        for (const e of es) m.set(e.coord, e);
+        return m;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  useEffect(() => {
+    if (events.size === 0) return;
+    const t = setTimeout(() => saveEvents([...events.values()]), 1500);
+    return () => clearTimeout(t);
+  }, [events]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedCoord, setExpandedCoord] = useState<string | null>(null);

@@ -27,6 +27,7 @@ import { ExploreNavigation } from '../navigation/types';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
 import { type ParsedCache } from '../services/nostrPlacesService';
 import { subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
+import { loadCachedCaches, saveCaches } from '../services/nostrPlacesStorage';
 import {
   decodeGeohash,
   encodeGeohash,
@@ -57,6 +58,30 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [pos, setPos] = useState<{ lat: number; lon: number } | null>(null);
   const [caches, setCaches] = useState<Map<string, ParsedCache>>(new Map());
+
+  // Hydrate from AsyncStorage so the list paints instantly on cold
+  // start while the live relay sub backfills.
+  useEffect(() => {
+    let cancelled = false;
+    loadCachedCaches().then((cs) => {
+      if (cancelled || cs.length === 0) return;
+      setCaches((prev) => {
+        if (prev.size > 0) return prev;
+        const m = new Map<string, ParsedCache>();
+        for (const c of cs) m.set(c.coord, c);
+        return m;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  // Write-through (debounced) so the next cold start has fresh data.
+  useEffect(() => {
+    if (caches.size === 0) return;
+    const t = setTimeout(() => saveCaches([...caches.values()]), 1500);
+    return () => clearTimeout(t);
+  }, [caches]);
   const [untrustedHidden, setUntrustedHidden] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
