@@ -231,7 +231,9 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
                 <Image
                   source={{ uri: profile.picture }}
                   style={styles.avatarImage}
-                  cachePolicy="disk"
+                  cachePolicy="memory-disk"
+                  recyclingKey={profile.picture}
+                  autoplay={false}
                 />
               ) : (
                 <View style={[styles.avatarImage, styles.avatarPlaceholder]}>
@@ -257,7 +259,9 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
                         <Image
                           source={{ uri: prof.picture }}
                           style={styles.avatarSmallImage}
-                          cachePolicy="disk"
+                          cachePolicy="memory-disk"
+                          recyclingKey={prof.picture}
+                          autoplay={false}
                         />
                       ) : (
                         <View style={[styles.avatarSmallImage, styles.avatarPlaceholder]}>
@@ -454,11 +458,15 @@ const createStyles = (colors: Palette) =>
       borderColor: colors.divider,
       alignItems: 'center',
       justifyContent: 'center',
-      // No marginLeft: 'auto' here — switcherAvatars already absorbs
-      // the available row space via its own auto-margin, pushing both
-      // it and this button to the right as one tight group. A second
-      // auto-margin would split the space evenly, leaving the
-      // switcher avatars marooned mid-row (#442 layout review).
+      // marginLeft: 'auto' here is a single-identity safety net. When
+      // `switcherAvatars` renders, its own `marginLeft: 'auto'` fires
+      // FIRST (consumes the available row space) and this one is a
+      // no-op — both elements end up flush-right adjacent to each
+      // other, as the original design intended. When `switcherAvatars`
+      // does NOT render (no other identities signed in), this auto-
+      // margin keeps the ⋯ button right-aligned. Without it, the
+      // button collapsed left next to the avatar (#492).
+      marginLeft: 'auto',
     },
     avatarPlaceholder: {
       backgroundColor: colors.background,

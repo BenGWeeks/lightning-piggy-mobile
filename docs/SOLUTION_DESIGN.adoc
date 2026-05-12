@@ -98,7 +98,7 @@ Uses https://docs.boltz.exchange[Boltz Exchange] v2 API for trustless cross-chai
 2. Generate temporary secp256k1 claim keypair
 3. `POST /v2/swap/reverse` with `preimageHash`, `claimPublicKey`, `claimAddress`, `invoiceAmount`, `referralId`
 4. Boltz returns a Lightning invoice + swap tree (Taproot HTLC scripts)
-5. Persist swap state (preimage, claimPrivateKey, lockupAddress) to SecureStore
+5. **Persist** the full swap state to SecureStore (preimage, claimPrivateKey, lockupAddress, destinationAddress, refundPublicKey, swapTree) AND register the swap ID in `swapRecoveryService` — see "Persistence + Recovery contract" below
 6. Pay the Lightning invoice via NWC
 7. Subscribe to swap status via WebSocket (`wss://api.boltz.exchange/v2/ws`) with polling fallback
 8. Wait for `transaction.mempool` or `transaction.confirmed`
@@ -132,6 +132,53 @@ Uses https://docs.boltz.exchange[Boltz Exchange] v2 API for trustless cross-chai
    - Internal key: Boltz's `claimPublicKey`
    - Merkle sibling: `claimLeafHash`
 3. Broadcast refund tx via BDK Electrum
+
+==== Persistence + Recovery contract
+
+The reverse and submarine flows generate **random** secrets in JS memory (preimage, claim privkey for reverse; refund privkey for submarine). If the app dies or `claimSwap` / `refundSwap` throws before the on-chain side is finalised, those secrets are lost and the funds in the HTLC become unspendable for the user.
+
+The contract that prevents that loss has three parts:
+
+. **Write-before-pay.** *Before* the Lightning invoice is paid (reverse) or the on-chain HTLC is broadcast (submarine), the caller writes:
++
+[source,ts]
+----
+await SecureStore.setItemAsync(`boltz_swap_${swap.id}`, JSON.stringify({
+  id, preimage, claimPrivateKey, lockupAddress,
+  destinationAddress, refundPublicKey, swapTree,
+}));
+await swapRecoveryService.registerPendingSwap(swap.id);
+----
+
+. **Delete-on-success.** When the swap fully settles, the same caller deletes the SecureStore record and unregisters from the index:
++
+[source,ts]
+----
+await SecureStore.deleteItemAsync(`boltz_swap_${swap.id}`);
+await swapRecoveryService.unregisterPendingSwap(swap.id);
+----
+
+. **Leave-on-failure.** Any throw between (1) and (2) is *re-thrown without cleanup*. The persisted record is the safety net — `swapRecoveryService.recoverPendingSwaps` re-reads it on next launch.
+
+**Caller surface.** Both code paths now follow this contract:
+
+* `src/components/TransferSheet.tsx` — Home → Transfer (LN→on-chain *and* on-chain→LN). Has done so since the original Boltz integration.
+* `src/components/SendSheet.tsx` — Home → Send → paste BIP-21. Brought up to contract by the #481 fix (was previously memory-only and lost secrets on every claim failure).
+
+**Recovery service.** `src/services/swapRecoveryService.ts` runs on every `WalletContext` mount (`src/contexts/WalletContext.tsx:426`). For each swap ID in the index it:
+
+. Reads the per-swap blob from SecureStore.
+. Calls Boltz `GET /v2/swap/{id}` to find current status.
+. If `transaction.mempool` or `transaction.confirmed`: builds and broadcasts a fresh claim tx using the persisted secrets, then deletes the record on success.
+. If the swap is already settled or failed: cleans up the record.
+. If the API rejects the swap as expired beyond recovery: surfaces a "Swap recovery failed" toast and clears the record so it doesn't retry forever.
+
+**User-facing affordances.**
+
+* `TransferSheet` shows a "Recovery retried" overlay after a background failure, with a **Retry now** button that re-runs the same recovery routine immediately rather than waiting for the next launch.
+* `SendSheet` (after the #481 fix) re-throws errors with a `"Boltz swap failed: <detail>"` prefix so the failure overlay shows the underlying claim error instead of "unknown Error". The persisted record means a force-stop + relaunch will quietly settle the on-chain side.
+
+**Observed during the #481 fix work (2026-05-10):** the first claim attempt on a freshly created reverse swap was failing *deterministically* with an opaque `"unknown Error"`. Root cause: the Alby SDK wraps NIP-47 responses with empty error bodies as `Nip47WalletError("unknown Error", "INTERNAL")` *even when the wallet processed the payment* — `nwcService.payInvoice` now looks up the invoice in that case (mirroring the existing "failed to publish" handler) and returns the preimage if found, so fresh swaps no longer trip the recovery path at all. The persistence + retry layer remains as defence in depth for genuine claim failures. Two real-money 30k swaps via SendSheet and TransferSheet on Big Piggy validated the end-to-end recovery path before the root-cause fix landed.
 
 ==== Taproot Internal Key Derivation (MuSig2)
 
@@ -494,7 +541,11 @@ Loading 500+ contacts with profiles requires careful optimization:
 - Batches of 50 pubkeys, 3 concurrent batches, 12s timeout per batch
 - 50ms yield between batch rounds for UI responsiveness
 - `onBatch` callback updates UI incrementally as profiles arrive
-- `expo-image` with `cachePolicy="disk"` for profile pictures
+- `expo-image` with `cachePolicy="memory-disk"` for profile pictures (see "Avatar caching convention" below)
+
+=== Avatar caching convention
+
+Every avatar render site (any `<Image>` / `<ExpoImage>` rendering a contact / account / team profile picture) must use `expo-image` with `cachePolicy="memory-disk"`, `recyclingKey={uri}`, and `autoplay={false}`. `memory-disk` keeps the decoded bitmap in memory across renders (no re-fetch on scroll); `recyclingKey` lets FlashList / FlatList reuse the decoded bitmap when a row recycles (no flash of the previous row's avatar); `autoplay={false}` shows the first frame only for animated WebP / GIF avatars (no per-row FrameDecoderExe thread). Audited and standardised across the codebase in issue #477. Banners, splash artwork, course / mission thumbnails, wallet card art, and link-preview thumbnails are deliberately out of scope — they have their own caching needs (or none).
 
 == Image Upload
 

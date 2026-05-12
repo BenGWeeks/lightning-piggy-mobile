@@ -31,7 +31,11 @@ import {
   reconcileSyntheticGroup,
 } from '../services/groupRoutingRegistry';
 import { isSyntheticGroupId, syntheticGroupIdForParticipants } from '../utils/syntheticGroupId';
-import { appendGroupMessage, type GroupMessage } from '../services/groupMessagesStorageService';
+import {
+  appendGroupMessage,
+  listPersistedGroupWrapIds,
+  type GroupMessage,
+} from '../services/groupMessagesStorageService';
 import { perAccountKey } from '../services/perAccountStorage';
 import {
   loadIdentities,
@@ -41,6 +45,7 @@ import {
   type StoredIdentity,
 } from '../services/identitiesStore';
 import { migrateToPerAccountStorage } from '../services/migrateToPerAccountStorage';
+import { perfLog } from '../utils/perfLog';
 import {
   setActivePubkeyForWalletStorage,
   deleteNwcUrl,
@@ -60,6 +65,13 @@ import {
  * path free and avoid serialising full-bundle JSON on every decrypt.
  */
 const nip04PlaintextCache = new LRUCache<string, string>({ max: 1000 });
+
+// Per-(viewer,partner) serialization chain for the optimistic local-
+// message disk-cache writes. Without this, two rapid sends (e.g.
+// double-tap retry, or two sequential tap-share-from-attach) could
+// each read-modify-write the conversation blob concurrently — last
+// write wins, losing the prior optimistic row. Per Copilot review #509.
+const appendLocalDmChains = new Map<string, Promise<void>>();
 export function __clearNip04PlaintextCacheForTests() {
   nip04PlaintextCache.clear();
 }
@@ -340,9 +352,15 @@ const DECRYPT_YIELD_EVERY = 15;
  * yields the JS thread regularly. The cache-hit path itself is cheap
  * (~ms), but on a >1000-wrap inbox the bulk processing piles up to
  * tens of seconds of unbroken JS work without a periodic yield, which
- * starves UI events (back-tap appears frozen — #286). 8 keeps each
- * yield-bounded burst well under a 60 fps frame budget. */
-const NIP17_LOOP_YIELD_EVERY = 8;
+ * starves UI events (back-tap appears frozen — #286). Lowered from 8
+ * to 4 in 2026-05 — perf testing on a real Pixel showed the
+ * post-cold-start "Send sheet feels frozen" window was dominated by
+ * back-to-back NIP-17 inbox processing without enough JS-thread
+ * breathing room for gorhom-bottom-sheet's open animation to schedule
+ * frames. Halving this doubles yield frequency, drops the per-burst
+ * blocking from ~8 ms to ~4 ms, and lets bottom-sheet opens stay
+ * smooth during inbox drain. */
+const NIP17_LOOP_YIELD_EVERY = 4;
 
 /**
  * Minimum gap between `refreshDmInbox` calls fired by
@@ -438,6 +456,12 @@ function mergeInboxEntries(
   return all.slice(0, cap);
 }
 
+// Window in seconds to match a fresh real-id message against a pending
+// optimistic local- echo (same fromMe + same text). Mirrors
+// appendGroupMessage's LOCAL_ECHO_MATCH_WINDOW_SECS so the same UX
+// invariant — one bubble per send, not two — holds across 1:1 + group.
+const LOCAL_DM_ECHO_WINDOW_SECS = 30;
+
 function mergeConversationMessages(
   cached: ConversationMessage[],
   fresh: ConversationMessage[],
@@ -445,7 +469,30 @@ function mergeConversationMessages(
 ): ConversationMessage[] {
   const map = new Map<string, ConversationMessage>();
   for (const m of cached) map.set(m.id, m);
-  for (const m of fresh) map.set(m.id, m);
+  for (const m of fresh) {
+    // When a real (non-local-) entry arrives, drop any pending local-
+    // echo with matching fromMe + text within the echo window. Without
+    // this the user would see two bubbles for the same GIF/text: the
+    // optimistic local- row persisted by ConversationScreen on send,
+    // plus the NIP-17 self-wrap echo from the relay.
+    if (!m.id.startsWith('local-')) {
+      let bestKey: string | null = null;
+      let bestDelta = Infinity;
+      for (const [k, prev] of map) {
+        if (!k.startsWith('local-')) continue;
+        if (prev.fromMe !== m.fromMe) continue;
+        if (prev.text !== m.text) continue;
+        const delta = Math.abs(prev.createdAt - m.createdAt);
+        if (delta > LOCAL_DM_ECHO_WINDOW_SECS) continue;
+        if (delta < bestDelta) {
+          bestDelta = delta;
+          bestKey = k;
+        }
+      }
+      if (bestKey !== null) map.delete(bestKey);
+    }
+    map.set(m.id, m);
+  }
   const all = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
   if (all.length <= cap) return all;
   // Keep the newest DM_CONV_CAP messages; drop oldest.
@@ -582,6 +629,15 @@ interface NostrContextType {
     plaintext: string,
   ) => Promise<{ success: boolean; error?: string }>;
   /**
+   * Persist an optimistic local- DM message to the per-conversation
+   * cache so it survives navigating away + back before the NIP-17
+   * self-wrap echo arrives. The matching merge dedup against the real
+   * relay echo lives in `mergeConversationMessages`. Without this,
+   * leaving the thread after sending a GIF (or any message) would
+   * drop the optimistic bubble until the relay round-trip completes.
+   */
+  appendLocalDmMessage: (otherPubkey: string, msg: ConversationMessage) => Promise<void>;
+  /**
    * Send a NIP-17 group chat message to multiple recipients. Builds one
    * kind-14 rumor with `subject` + `p` tags for every member, then NIP-59
    * seal+wraps it once per recipient (including the sender for cross-device
@@ -635,6 +691,13 @@ interface NostrContextType {
    */
   refreshDmInbox: (opts?: RefreshDmInboxOptions) => Promise<void>;
   /**
+   * Arm the live NIP-17 DM subscription. Idempotent. Call from any
+   * DM-receiving screen (Messages tab, ConversationScreen) via
+   * useFocusEffect — first call opens the sub, subsequent are no-ops.
+   * Cold-boot does NOT arm the sub by itself, so Home stays responsive.
+   */
+  armLiveDmSub: () => void;
+  /**
    * Tri-state for the NIP-17 silent-decrypt fast path.
    *  - 'unknown': haven't tried yet in this session
    *  - 'granted': a decrypt succeeded silently → cache the plaintext, no dialogs
@@ -670,7 +733,19 @@ export interface ConversationMessage {
 
 const NostrContext = createContext<NostrContextType | undefined>(undefined);
 
+// Module-evaluation perf marker. Fires the first time this file is parsed,
+// before any provider mounts. Catches "RN bundle finished loading,
+// JS engine started executing our code" — the upstream of every other
+// [Perf] line in this file.
+perfLog('NostrContext module-eval');
+
+let __nostrProviderFirstRenderLogged = false;
+let __nostrProviderLoggedInLogged = false;
 export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  if (!__nostrProviderFirstRenderLogged) {
+    __nostrProviderFirstRenderLogged = true;
+    perfLog('NostrProvider first render');
+  }
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [profile, setProfile] = useState<NostrProfile | null>(null);
@@ -680,6 +755,15 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [pubkey, setPubkey] = useState<string | null>(null);
   const [dmInbox, setDmInbox] = useState<DmInboxEntry[]>([]);
   const [dmInboxLoading, setDmInboxLoading] = useState(false);
+  // Gates the live NIP-17 DM sub useEffect below. False on cold boot
+  // so we don't burn JS-thread cycles unwrapping wraps the user can't
+  // see yet (they're on Home, the Messages tab isn't mounted). Flipped
+  // to true the first time Messages / Conversation / any DM-receiving
+  // surface focuses via `armLiveDmSub()`. Once armed it stays armed for
+  // the rest of the session. Cold-start Home stays responsive because
+  // the per-wrap unwrap/route work moves to after the user has
+  // explicitly chosen to look at messages.
+  const [liveSubArmed, setLiveSubArmed] = useState(false);
   const [amberNip44Permission, setAmberNip44Permission] = useState<
     'unknown' | 'granted' | 'denied'
   >('unknown');
@@ -769,18 +853,54 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [],
   );
 
+  /** Eagerly hydrate own `profile` state from the per-account cache so
+   * the drawer header + tab profile avatar paint on cold start without
+   * waiting for the deferred `loadProfile` relay round-trip. Matches the
+   * pattern of `loadContactsFromCache`. The cache-fresh setProfile-from-
+   * cache was previously only happening inside the deferred `loadProfile`
+   * fast path, which meant a fresh cold-start with grace-window deferral
+   * left `profile` null for ~1.5 s. */
+  const loadProfileFromCache = useCallback(async (pk: string) => {
+    try {
+      const raw = await AsyncStorage.getItem(perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, pk));
+      if (!raw) return false;
+      const cached = JSON.parse(raw) as NostrProfile;
+      setProfile(cached);
+      return true;
+    } catch (error) {
+      console.warn('Failed to load profile cache:', error);
+      return false;
+    }
+  }, []);
+
+  /** Eagerly hydrate `relays` state from the per-account cache so
+   * relay-dependent fan-out (kind-0 publish, NIP-17 send) uses the
+   * user's actual relays from the very first action instead of
+   * defaulting to `DEFAULT_RELAYS`. Same pattern as
+   * `loadProfileFromCache`. */
+  const loadRelaysFromCache = useCallback(async (pk: string) => {
+    try {
+      const raw = await AsyncStorage.getItem(perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk));
+      if (!raw) return false;
+      const cached = JSON.parse(raw) as RelayConfig[];
+      if (!Array.isArray(cached)) return false;
+      setRelays(cached);
+      return true;
+    } catch (error) {
+      console.warn('Failed to load relays cache:', error);
+      return false;
+    }
+  }, []);
+
   const loadContactsFromCache = useCallback(async (pk: string) => {
     try {
       const t0 = Date.now();
-      // One multiGet round-trip for all three caches. Contacts freshness
-      // is gated by CONTACTS_TIMESTAMP_KEY_BASE (the contact-list's own
-      // write time), not the profiles timestamp — they get separate keys
-      // so a successful contact refresh isn't blocked by an unrelated
-      // profiles cache entry. Per-account namespaced (#288).
+      perfLog('loadContactsFromCache: start');
       const contactsKey = perAccountKey(CONTACTS_CACHE_KEY_BASE, pk);
       const profilesKey = perAccountKey(PROFILES_CACHE_KEY_BASE, pk);
       const contactsTsKey = perAccountKey(CONTACTS_TIMESTAMP_KEY_BASE, pk);
       const pairs = await AsyncStorage.multiGet([contactsKey, profilesKey, contactsTsKey]);
+      perfLog('loadContactsFromCache: multiGet returned');
       let contactsJson: string | null = null;
       let profilesJson: string | null = null;
       let contactsTsStr: string | null = null;
@@ -789,29 +909,36 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         else if (k === profilesKey) profilesJson = v;
         else if (k === contactsTsKey) contactsTsStr = v;
       }
+      perfLog(
+        `loadContactsFromCache: blob sizes contacts=${contactsJson?.length ?? 0}B profiles=${profilesJson?.length ?? 0}B`,
+      );
       if (contactsTsStr && Date.now() - parseInt(contactsTsStr, 10) > CACHE_MAX_AGE_MS) {
-        if (__DEV__) console.log('[Nostr] contacts cache expired, skipping');
+        perfLog('loadContactsFromCache: contacts cache expired, skipping');
         return false;
       }
       if (contactsJson) {
+        const tParse = Date.now();
         const cached: NostrContact[] = JSON.parse(contactsJson);
+        perfLog(`loadContactsFromCache: JSON.parse(contacts) ${Date.now() - tParse}ms`);
         if (profilesJson) {
+          const tProfilesParse = Date.now();
           const profileMap: Record<string, NostrProfile> = JSON.parse(profilesJson);
+          perfLog(`loadContactsFromCache: JSON.parse(profiles) ${Date.now() - tProfilesParse}ms`);
+          const tMerge = Date.now();
           const withProfiles = cached.map((c) => ({
             ...c,
             profile: profileMap[c.pubkey] ?? c.profile,
           }));
+          perfLog(
+            `loadContactsFromCache: merge ${withProfiles.length} contacts ${Date.now() - tMerge}ms`,
+          );
           startTransition(() => setContacts(withProfiles));
-          if (__DEV__)
-            console.log(
-              `[Nostr] loaded ${withProfiles.length} contacts from cache in ${Date.now() - t0}ms`,
-            );
+          perfLog(`loadContactsFromCache: setContacts dispatched (total ${Date.now() - t0}ms)`);
         } else {
           startTransition(() => setContacts(cached));
-          if (__DEV__)
-            console.log(
-              `[Nostr] loaded ${cached.length} contacts (no profiles) from cache in ${Date.now() - t0}ms`,
-            );
+          perfLog(
+            `loadContactsFromCache: setContacts (no profiles) dispatched (total ${Date.now() - t0}ms)`,
+          );
         }
         return true;
       }
@@ -1078,8 +1205,18 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
   }, []);
 
+  // Single-fire perf log when isLoggedIn becomes true — the
+  // "login restored from cache" moment. Anchor for the boot path.
+  useEffect(() => {
+    if (isLoggedIn && !__nostrProviderLoggedInLogged) {
+      __nostrProviderLoggedInLogged = true;
+      perfLog('NostrProvider isLoggedIn=true');
+    }
+  }, [isLoggedIn]);
+
   // Auto-login on startup: load cache immediately, refresh from relays in background
   useEffect(() => {
+    perfLog('NostrProvider auto-login effect fires');
     (async () => {
       try {
         // Hydrate the multi-account registry first so the switcher has
@@ -1161,54 +1298,86 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
         }
 
-        // Load cached contacts immediately (no network, <100ms)
-        await loadContactsFromCache(pk);
+        // Eagerly hydrate cached state from disk in parallel — these
+        // are all small per-account AsyncStorage reads (<100 ms each)
+        // and they wire UI surfaces that would otherwise stay empty
+        // until the deferred parallel refresh fires:
+        //   - `profile` → drawer header + tab profile avatar
+        //   - `relays`  → relay-dependent fan-out (kind-0 publish,
+        //                 NIP-17 send, group membership republish)
+        //   - `contacts` → friends list + DM partner resolution
+        //   - `dmInbox`  → Messages tab paints on first frame
+        // Previously only contacts + dmInbox were sync-hydrated; the
+        // grace window before the deferred refresh left profile +
+        // relays null for ~1.5 s after Home rendered, which made
+        // drawer-header avatars and relay-aware code paths see empty
+        // state on cold start. (Followup of perf review on PR #495.)
+        await Promise.all([
+          loadProfileFromCache(pk),
+          loadRelaysFromCache(pk),
+          loadContactsFromCache(pk),
+          hydrateDmInboxFromCache(pk),
+        ]);
 
-        // Eagerly hydrate dmInbox from disk cache so the Messages tab
-        // paints conversations on cold start. The relay refresh below
-        // doesn't touch dmInbox; the eventual refreshDmInbox call
-        // (driven by Messages-tab focus) does its own cache read for
-        // the delta-fetch path and replaces this hydrated state with
-        // the merged disk+relay result.
-        await hydrateDmInboxFromCache(pk);
-
-        // Defer relay fetches until after animations/rendering complete.
+        // Defer relay fetches until after animations/rendering complete,
+        // PLUS a 1500 ms grace window so the user can tap Send / Receive
+        // / Transfer in the first ~1.5 s of cold-start without the JS
+        // thread being yanked away by parallel kind-3 + kind-0 +
+        // kind-10002 fetches. `runAfterInteractions` alone fires on the
+        // next tick when nothing is registered, so it doesn't actually
+        // give us breathing room here. The setTimeout pulls the bulk
+        // refresh out of the cold-start critical path entirely — the
+        // "Send sheet feels frozen for the first few seconds" symptom
+        // tracked in perf logcats lined up exactly with this batch
+        // running back-to-back with the inbox drain on the JS thread.
+        //
         // Seed the working relay set from the cached NIP-65 relay list so
         // `loadProfile` / `loadContacts` hit the relays the user actually
         // publishes to — not `DEFAULT_RELAYS`, which might miss their
         // kind-0/kind-3 entirely. Only falls back to DEFAULT_RELAYS on
         // the very first login (before any relay cache exists).
-        InteractionManager.runAfterInteractions(async () => {
-          let workingRelays: string[] = nostrService.DEFAULT_RELAYS;
-          // Ignore the timestamp here — even a stale cached relay list is
-          // better than DEFAULT_RELAYS for reaching user-only relays.
-          const { value: cachedRelays } = await readCachedWithTtl<RelayConfig[]>(
-            perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk!),
-            perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, pk!),
-          );
-          if (cachedRelays) {
-            const readRelays = cachedRelays.filter((r) => r.read).map((r) => r.url);
-            if (readRelays.length > 0) workingRelays = readRelays;
-          }
+        const COLD_START_GRACE_MS = 1500;
+        setTimeout(() => {
+          InteractionManager.runAfterInteractions(async () => {
+            let workingRelays: string[] = nostrService.DEFAULT_RELAYS;
+            // Ignore the timestamp here — even a stale cached relay list is
+            // better than DEFAULT_RELAYS for reaching user-only relays.
+            const { value: cachedRelays } = await readCachedWithTtl<RelayConfig[]>(
+              perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk!),
+              perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, pk!),
+            );
+            if (cachedRelays) {
+              const readRelays = cachedRelays.filter((r) => r.read).map((r) => r.url);
+              if (readRelays.length > 0) workingRelays = readRelays;
+            }
 
-          const t0 = Date.now();
-          Promise.all([
-            loadRelays(pk!).catch((e) => console.warn('[Nostr] relay refresh failed:', e)),
-            loadProfile(pk!, workingRelays).catch((e) =>
-              console.warn('[Nostr] profile refresh failed:', e),
-            ),
-            loadContacts(pk!, workingRelays).catch((e) =>
-              console.warn('[Nostr] contact refresh failed:', e),
-            ),
-          ]).then(() => {
-            if (__DEV__) console.log(`[Nostr] parallel refresh complete in ${Date.now() - t0}ms`);
+            const t0 = Date.now();
+            Promise.all([
+              loadRelays(pk!).catch((e) => console.warn('[Nostr] relay refresh failed:', e)),
+              loadProfile(pk!, workingRelays).catch((e) =>
+                console.warn('[Nostr] profile refresh failed:', e),
+              ),
+              loadContacts(pk!, workingRelays).catch((e) =>
+                console.warn('[Nostr] contact refresh failed:', e),
+              ),
+            ]).then(() => {
+              if (__DEV__) console.log(`[Nostr] parallel refresh complete in ${Date.now() - t0}ms`);
+            });
           });
-        });
+        }, COLD_START_GRACE_MS);
       } catch (error) {
         console.warn('Nostr auto-login failed:', error);
       }
     })();
-  }, [loadRelays, loadProfile, loadContacts, loadContactsFromCache, hydrateDmInboxFromCache]);
+  }, [
+    loadRelays,
+    loadProfile,
+    loadContacts,
+    loadProfileFromCache,
+    loadRelaysFromCache,
+    loadContactsFromCache,
+    hydrateDmInboxFromCache,
+  ]);
 
   const loginWithNsec = useCallback(
     async (nsec: string): Promise<{ success: boolean; error?: string }> => {
@@ -1406,6 +1575,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     clearMemoisedSecretKey();
     setAmberNip44Permission('unknown');
     nip04PlaintextCache.clear();
+    // Drop the in-memory NIP-17 wrap-id dedup Set — without this, a
+    // sign-out then sign-back-in to the SAME pubkey would keep wrap
+    // ids from the prior session alive in memory, and any wrap whose
+    // on-disk cache entry got wiped by `wipeAccountCaches` below
+    // would be permanently skipped by the live-sub early-return
+    // (since the in-memory Set would still claim "seen"). Per Copilot
+    // review on #508.
+    knownWrapIdsRef.current = { pubkey: null, set: new Set() };
     const loggedOutPubkey = pubkey;
     await SecureStore.deleteItemAsync(NSEC_KEY);
     await SecureStore.deleteItemAsync(PUBKEY_KEY);
@@ -2154,6 +2331,58 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       } catch {
         return [];
       }
+    },
+    [pubkey],
+  );
+
+  const appendLocalDmMessage = useCallback(
+    async (otherPubkey: string, msg: ConversationMessage): Promise<void> => {
+      if (!pubkey) return;
+      const normalized = otherPubkey.trim().toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(normalized)) return;
+      // Serialize concurrent appends to the same conversation. Without
+      // this, two rapid sends could both read the same `existing` array,
+      // each merge their msg, both write back — last write wins, the
+      // earlier optimistic row is silently lost. Per Copilot review #509.
+      const chainKey = `${pubkey}:${normalized}`;
+      const prev = appendLocalDmChains.get(chainKey) ?? Promise.resolve();
+      const next = prev.then(async () => {
+        try {
+          const key = convCacheKey(pubkey, normalized);
+          const raw = await AsyncStorage.getItem(key);
+          const existing: ConversationMessage[] = raw
+            ? (() => {
+                try {
+                  const parsed = JSON.parse(raw);
+                  return Array.isArray(parsed) ? parsed : [];
+                } catch {
+                  return [];
+                }
+              })()
+            : [];
+          // Dedup on id (same key would arise from a double-tap retry).
+          const map = new Map<string, ConversationMessage>();
+          for (const m of existing) map.set(m.id, m);
+          map.set(msg.id, msg);
+          const merged = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
+          const capped =
+            merged.length <= DM_CONV_CAP ? merged : merged.slice(merged.length - DM_CONV_CAP);
+          await AsyncStorage.setItem(key, JSON.stringify(capped));
+        } catch {
+          // Swallow — the in-memory setMessages above already painted
+          // the bubble. The remount-after-back regression is precisely
+          // what this method exists to fix, so a write failure is
+          // unfortunate but not destructive (next relay echo will
+          // repopulate the cache).
+        }
+      });
+      // `.catch` on the chain entry so a single failure doesn't poison
+      // every subsequent append on this conversation.
+      appendLocalDmChains.set(
+        chainKey,
+        next.catch(() => {}),
+      );
+      await next;
     },
     [pubkey],
   );
@@ -2997,6 +3226,29 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     followPubkeysRef.current = followPubkeys;
   }, [followPubkeys]);
 
+  // Idempotent — any DM-surface (Messages tab, ConversationScreen)
+  // calls this on focus. The first call flips `liveSubArmed`, the
+  // gated useEffect below re-runs and opens the live NIP-17 sub.
+  // Subsequent calls are no-ops (React bails on identical setState).
+  const armLiveDmSub = useCallback(() => {
+    setLiveSubArmed(true);
+  }, []);
+
+  // In-memory dedup Set that survives live-DM-sub re-opens. The sub
+  // useEffect below re-runs when getReadRelays changes — e.g. when the
+  // relay-list refresh adds a new relay 9 s into cold start. Without
+  // this ref, the new effect instance creates a fresh Set and re-seeds
+  // it from AsyncStorage's wrap cache. That snapshot is stale by the
+  // deferred-write window, so all wraps the prior sub already
+  // decrypted re-stream from the relays (same `since` cursor) and get
+  // re-routed/re-decrypted. Carrying the Set forward keeps the
+  // early-return in handleInboxEvent honest across the re-open.
+  // Reset only when the viewer changes (sign out / account switch).
+  const knownWrapIdsRef = useRef<{ pubkey: string | null; set: Set<string> }>({
+    pubkey: null,
+    set: new Set(),
+  });
+
   // Long-lived kind-1059 (NIP-17 gift wrap) subscription for the
   // current viewer (#349). Without this, new incoming wraps only
   // surface via pull-to-refresh or the 30 s-TTL useFocusEffect on
@@ -3037,14 +3289,33 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // single-flight guard in `refreshDmInbox` serialises on its side.
   useEffect(() => {
     if (!isLoggedIn || !pubkey || !signerType) return;
+    // Wait until a DM-surface (Messages tab, ConversationScreen) has
+    // focused at least once before opening the live sub. On cold boot
+    // the user is on Home, so we skip ~5 s of per-wrap unwrap/route/
+    // dedup JS-thread work. First Messages focus flips `liveSubArmed`,
+    // this effect re-runs, sub opens, drain happens then — when the
+    // user is explicitly looking at messages and a brief loading
+    // state is expected.
+    if (!liveSubArmed) return;
     const viewerPubkey = pubkey;
     const activeSigner = signerType;
     const readRelays = getReadRelays();
     const seen = new Set<string>();
     const SEEN_CAP = 4096;
-    // Lazy-populated in-memory mirror of the persisted NIP-17 wrap-id cache. Loaded
-    // on first wrap so we don't JSON.parse the full cache (up to 5000 entries) on every event.
-    let knownWrapIds: Set<string> | null = null;
+    // In-memory mirror of the persisted NIP-17 wrap-id cache. Backed
+    // by `knownWrapIdsRef` so the Set survives this effect's re-runs
+    // (relay-list change → fresh effect instance). Seeded by union
+    // below from AsyncStorage's wrap cache, but does NOT replace any
+    // entries the prior sub instance added in-memory but the deferred
+    // writeChain hasn't persisted yet. Per issue #505 — the relay
+    // re-streams the backlog since the last `since` cursor, and on a
+    // busy account that's 100+ wraps in ~12 s, almost all of which are
+    // already known; pre-#505 the dedup-cache hit check was
+    // lazy-populated and downstream of several per-event operations.
+    if (knownWrapIdsRef.current.pubkey !== viewerPubkey) {
+      knownWrapIdsRef.current = { pubkey: viewerPubkey, set: new Set() };
+    }
+    const knownWrapIds: Set<string> = knownWrapIdsRef.current.set;
     let cancelled = false;
     let writeChain: Promise<void> = Promise.resolve();
 
@@ -3075,6 +3346,23 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
 
     const handleInboxEvent = async (ev: nostrService.RawInboxDmEvent): Promise<void> => {
+      // Earliest-possible short-circuit for NIP-17 wraps we already
+      // decrypted on a previous launch. Cost saved per backlog wrap:
+      // console.log + seen.has + seen.add + kind dispatch + cacheKey
+      // build + the async AsyncStorage.getItem race. On a busy
+      // fixture with 100+ wraps in the backlog this compressed the
+      // cold-start JS-thread occupation window from ~12 s to <1 s.
+      // Per issue #505.
+      if (ev.kind === 1059 && knownWrapIds.has(ev.id)) return;
+      // Eagerly claim this wrap.id in the in-memory dedup Set before
+      // doing any async work. The deferred writeChain at the bottom of
+      // this handler also does this, but only after AsyncStorage I/O
+      // completes — leaving a window where a re-opened sub (relay-list
+      // change mid cold start) re-streams the same wrap and gets past
+      // the early-return because the Set hasn't been updated yet.
+      // Set.add is idempotent so the trailing writeChain add becomes
+      // a no-op. kind 4 has its own `seen` Set below.
+      if (ev.kind === 1059) knownWrapIds.add(ev.id);
       if (__DEV__) console.log(`[Nostr] live evt kind=${ev.kind} recv ${ev.id.slice(0, 8)}`);
       if (cancelled) return;
       if (seen.has(ev.id)) {
@@ -3210,20 +3498,36 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             ? perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, viewerPubkey)
             : null;
       if (!cacheKey) return;
-      if (knownWrapIds === null) {
-        // First wrap — pay the JSON.parse once to seed the in-memory mirror.
-        const seedRaw = await AsyncStorage.getItem(cacheKey);
-        const seedCache = safeParseRecord<Nip17CacheEntry>(seedRaw);
-        knownWrapIds = new Set(Object.keys(seedCache));
-      }
-      if (knownWrapIds.has(wrap.id)) {
-        if (__DEV__) console.log(`[Nostr] live wrap ${wrap.id.slice(0, 8)} dedup-cache`);
-        return;
-      }
+      // knownWrapIds is seeded eagerly up-front below (before the
+      // subscription opens) — the in-flow lazy-load was removed in
+      // #505 because it (a) raced when many wraps arrived together
+      // and each tried to seed the Set concurrently, and (b) made
+      // dedup hits pay through a long per-event prologue before the
+      // check fired. The check for cached IDs now lives at the very
+      // top of this function for kind-1059 events. This line is only
+      // reached for genuinely new (not-yet-cached) wraps, OR — in
+      // the rare case the seed failed (see the catch in the sub-open
+      // block) — for wraps that should have been pre-known. In that
+      // case the wrap re-decrypts; the persistent `wrapCache` write
+      // below still guards against the on-disk cache filling
+      // unboundedly, but the `dmMessageListeners` may fire a second
+      // time for messages already shown in a previous session.
+      // Acceptable trade-off because the seed only fails on
+      // AsyncStorage I/O error which is extremely rare on Android.
 
       const onSkip = (reason: string, wrapId: string) => {
         if (__DEV__) console.warn(`[Nostr] live NIP-17 unwrap skip (${wrapId}): ${reason}`);
       };
+
+      // Yield to the event loop before each per-wrap decryption. The
+      // live sub fans out wraps from the relay one at a time, but
+      // when the sub catches up a backlog after cold start, multiple
+      // wraps land in the same JS task — each sync `unwrapWrapNsec`
+      // is ~1-3 ms and they pile up to tens-of-ms of unbroken
+      // blocking, dropping bottom-sheet animation frames. A single
+      // setTimeout(0) per wrap costs ~0 ms but lets RN re-flush
+      // pending UI events between decryptions. See issue #496.
+      await yieldToEventLoop();
 
       let rumor: DecodedRumor | null = null;
       if (activeSigner === 'nsec') {
@@ -3360,6 +3664,59 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // Reuse loadLastSeen so parsing/validation matches refreshDmInbox's existing reads of the same key (#409 review). loadLastSeen returns undefined for missing/invalid values, which subscribeInboxDmsForViewer then falls back to its 7-day floor for.
       const sinceK4 = await loadLastSeen(inboxLastSeenKey(viewerPubkey)).catch(() => undefined);
       if (cancelled) return;
+      // Pre-seed `knownWrapIds` from the persisted NIP-17 wrap-id
+      // cache. One JSON.parse here saves N inline AsyncStorage reads
+      // + parses inside `handleInboxEvent` when the relay re-streams
+      // the backlog. The early-return in `handleInboxEvent` (top)
+      // checks this Set as the very first thing and skips all
+      // downstream per-event work for cache hits. Per issue #505.
+      const wrapCacheKey =
+        activeSigner === 'nsec'
+          ? perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, viewerPubkey)
+          : activeSigner === 'amber'
+            ? perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, viewerPubkey)
+            : null;
+      if (wrapCacheKey) {
+        try {
+          const seedRaw = await AsyncStorage.getItem(wrapCacheKey);
+          const seedCache = safeParseRecord<Nip17CacheEntry>(seedRaw);
+          for (const id of Object.keys(seedCache)) knownWrapIds.add(id);
+          // Also seed from persisted group messages — group-routed wraps
+          // never land in the 1:1 wrapCache (the tryRouteGroupRumor
+          // branch returns before the cache write). Without this union
+          // every cold start re-decrypts + re-routes the same group
+          // wraps the relay re-streams since the last `since` cursor.
+          const dmCount = knownWrapIds.size;
+          const groupWrapIds = await listPersistedGroupWrapIds();
+          for (const id of groupWrapIds) knownWrapIds.add(id);
+          if (__DEV__) {
+            console.log(
+              `[Nostr] live DM sub: seeded knownWrapIds with ${dmCount} dm + ${knownWrapIds.size - dmCount} group wraps`,
+            );
+          }
+        } catch (e) {
+          // Seed-from-disk failed — leave knownWrapIds as the empty
+          // Set we initialised at outer-scope. Cached wraps re-stream
+          // through the full handler (decrypt, route, write-cache,
+          // queueInboxEntry, notifyDmMessage). Two observable side
+          // effects vs the pre-#505 in-flow dedup check:
+          //   1. `dmMessageListeners` registered for an open
+          //      conversation will re-fire for messages already
+          //      surfaced in a prior session.
+          //   2. The `unwrapWrapNsec` / `unwrapWrapViaNip44` call
+          //      runs unnecessarily for each cached wrap (1–3 ms each).
+          // The persistent on-disk wrapCache write is idempotent —
+          // it doesn't grow unboundedly. We accept this regression on
+          // the failure path because (a) AsyncStorage.getItem I/O
+          // errors are extremely rare on Android, and (b) the
+          // alternative (resurrecting the lazy-load inside the
+          // handler) would re-introduce the race + per-event prologue
+          // cost that motivated #505 in the first place.
+          if (__DEV__)
+            console.warn('[Nostr] live DM sub: knownWrapIds seed failed, dedup degraded:', e);
+        }
+      }
+      if (cancelled) return;
       unsubscribe = nostrService.subscribeInboxDmsForViewer({
         viewerPubkey,
         relays: readRelays,
@@ -3383,7 +3740,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       flushPendingInbox();
       if (unsubscribe) unsubscribe();
     };
-  }, [isLoggedIn, pubkey, signerType, getReadRelays]);
+  }, [isLoggedIn, pubkey, signerType, getReadRelays, liveSubArmed]);
 
   const signEvent = useCallback(
     async (event: {
@@ -3444,9 +3801,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       publishGroupState,
       fetchConversation,
       getCachedConversation,
+      appendLocalDmMessage,
       dmInbox,
       dmInboxLoading,
       refreshDmInbox,
+      armLiveDmSub,
       amberNip44Permission,
       signEvent,
     }),
@@ -3476,9 +3835,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       publishGroupState,
       fetchConversation,
       getCachedConversation,
+      appendLocalDmMessage,
       dmInbox,
       dmInboxLoading,
       refreshDmInbox,
+      armLiveDmSub,
       amberNip44Permission,
       signEvent,
     ],

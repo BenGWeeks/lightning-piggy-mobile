@@ -42,6 +42,9 @@ import NearbyScreen from '../screens/account/NearbyScreen';
 import SecurityScreen from '../screens/account/SecurityScreen';
 import AboutScreen from '../screens/account/AboutScreen';
 import AccountDrawerContent from '../components/AccountDrawerContent';
+import { perfLog } from '../utils/perfLog';
+
+let __appNavigatorFirstRenderLogged = false;
 
 /**
  * Imperative navigation ref consumed by `App.tsx`'s Linking listener so
@@ -198,6 +201,10 @@ function MainDrawer() {
 }
 
 export default function AppNavigator() {
+  if (!__appNavigatorFirstRenderLogged) {
+    __appNavigatorFirstRenderLogged = true;
+    perfLog('AppNavigator first render');
+  }
   const { isLoading } = useWallet();
   const { scheme, colors } = useTheme();
 

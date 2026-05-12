@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { useFocusEffect } from '@react-navigation/native';
 import { UserRound } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
@@ -50,7 +51,13 @@ const ProfileScreen: React.FC = () => {
           )}
           <View style={styles.profileRow}>
             {profile.picture ? (
-              <Image source={{ uri: profile.picture }} style={styles.profilePicture} />
+              <ExpoImage
+                source={{ uri: profile.picture }}
+                style={styles.profilePicture}
+                cachePolicy="memory-disk"
+                recyclingKey={profile.picture}
+                autoplay={false}
+              />
             ) : (
               <View style={styles.profilePicturePlaceholder}>
                 <UserRound size={28} color={colors.textBody} strokeWidth={1.75} />

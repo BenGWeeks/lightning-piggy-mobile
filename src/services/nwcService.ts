@@ -541,6 +541,35 @@ export async function payInvoice(
       }
       throw createReplyTimeoutError();
     }
+    // The Alby SDK wraps a NIP-47 error response with no body as
+    // `Nip47WalletError("unknown Error", "INTERNAL")` (see
+    // node_modules/@getalby/sdk/dist/cjs/nwc.cjs:7006). LNbits has
+    // been observed to do this when the wallet *did* process the
+    // payment with its LND backend (LN balance dropped) but the
+    // response back through Nostr was malformed. Look up the invoice
+    // before treating it as a real failure — if the wallet can find
+    // the preimage, the payment succeeded and we should return it.
+    // See issue #481 — this was the underlying cause of the
+    // deterministic first-attempt claim failure on every reverse swap.
+    const errCode = (error as { code?: string })?.code;
+    if (msg === 'unknown Error' || errCode === 'INTERNAL') {
+      const paymentHash = extractPaymentHash(bolt11);
+      if (paymentHash) {
+        try {
+          const lookup = await provider.lookupInvoice({ paymentHash });
+          if (lookup?.preimage) {
+            console.log(
+              `[NWC] pay_invoice surfaced "${msg}" but invoice is already paid — returning preimage`,
+            );
+            return { preimage: lookup.preimage };
+          }
+        } catch {
+          // lookup failed — fall through, throw original error so the
+          // caller can decide. Do NOT retry the payment here, that would
+          // risk a double-pay on the wallets that *did* process it.
+        }
+      }
+    }
     throw error;
   }
 }

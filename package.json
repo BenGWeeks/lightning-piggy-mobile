@@ -1,6 +1,6 @@
 {
   "name": "lightning-piggy-app",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "main": "index.ts",
   "engines": {
     "node": ">=22.13.0"
@@ -90,6 +90,7 @@
     "@types/react": "~19.2.2",
     "@typescript-eslint/eslint-plugin": "^8.57.2",
     "@typescript-eslint/parser": "^8.57.2",
+    "babel-plugin-transform-remove-console": "^6.9.4",
     "eslint": "^9.39.4",
     "eslint-config-expo": "^55.0.0",
     "eslint-config-prettier": "^10.1.8",

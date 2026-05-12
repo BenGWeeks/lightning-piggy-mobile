@@ -28,7 +28,13 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 - Fix: Amber-signed NIP-17 group messages now send end-to-end (raw-JSON Intent encoding fix; was breaking kind-13 seals).
 - Fix: "Type message" composer in conversations no longer briefly jumps to the top of the screen on first open.
 - Fix: action row on the friends-profile sheet no longer overflows on narrower phone screens.
+- Fix: cold-start "Send button feels frozen for ~12 s" is gone — tap Send the moment Home appears and the bottom sheet opens within ~1 s on real hardware. Same for Receive and Transfer.
+- Fix: sending a GIF (or text, image, location, contact, invoice) in a 1:1 conversation no longer disappears when you tap back and reopen the chat — the bubble persists immediately, and dedups cleanly when the relay echo lands.
 - Perf: slow Lightning payments (e.g. via Boltz/RBTC swaps that take 30–90 s to settle) no longer mis-report as failed — wait extends to 90 s with an honest "still in flight" message; the conversation bubble only turns red on a definitive failure.
 - Perf: Lightning-zap sender avatars render instantly on cold start instead of waiting for a relay round-trip.
 - Perf: home wallet card clears the "Disconnected" indicator noticeably faster on cold app launch.
 - Perf: avatar grids no longer hit a decode-error storm when a contact has an unsupported image URL (`.svg` / `.heic`).
+- Perf: fiat balance (GBP / USD / etc.) renders on cold start from cache instead of being blank for 1-3 s while the BTC price fetch round-trips.
+- Perf: Nostr profile + relay list hydrate from cache on first paint, so own avatar + name appear in the drawer immediately instead of waiting on a relay round-trip.
+- Perf: messages tab populates faster on cold start — wrap-ID dedup carries across the live-DM sub re-open so the relay re-stream doesn't re-decrypt + re-route everything it already saw.
+- Perf: outgoing zap counterparty names + avatars resolve in a single batched relay round-trip instead of one query per transaction — fixes the multi-second JS-thread freeze when the transaction list has many unresolved senders.

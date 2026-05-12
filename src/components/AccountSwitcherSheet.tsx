@@ -206,7 +206,9 @@ const AccountSwitcherSheet: React.FC<Props> = ({ visible, onClose }) => {
                       <Image
                         source={{ uri: prof.picture }}
                         style={styles.avatarImage}
-                        cachePolicy="disk"
+                        cachePolicy="memory-disk"
+                        recyclingKey={prof.picture}
+                        autoplay={false}
                       />
                     ) : (
                       <View style={[styles.avatarImage, styles.avatarPlaceholder]}>

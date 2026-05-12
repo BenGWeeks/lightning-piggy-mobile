@@ -310,7 +310,9 @@ const ContactProfileSheet: React.FC<Props> = ({
             <Image
               source={{ uri: contact.picture }}
               style={styles.avatar}
-              cachePolicy="disk"
+              cachePolicy="memory-disk"
+              recyclingKey={contact.picture}
+              autoplay={false}
               transition={200}
               onError={() => setAvatarError(true)}
               onLoad={() => setAvatarLoaded(true)}
