@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Image,
   TextInput,
+  Linking,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import {
@@ -28,11 +29,13 @@ import {
   Send,
   Sparkles,
   X,
+  Zap,
 } from 'lucide-react-native';
 import type { RouteProp } from '@react-navigation/native';
 import type { VerifiedEvent } from 'nostr-tools';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useNostr } from '../contexts/NostrContext';
+import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation, ExploreStackParamList } from '../navigation/types';
 import { Alert } from '../components/BrandedAlert';
@@ -325,10 +328,11 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 have hidden this listing from any view if the hider
                 weren't in the user's trust graph (see
                 `trustGraphService` for the threat model). */}
-            <Text style={styles.attribution} testID="hunt-piggy-detail-attribution">
-              Hidden by {cache.hiderPubkey.slice(0, 8)}…{cache.hiderPubkey.slice(-4)} — verify you
-              trust them before going to the location.
-            </Text>
+            <HiderAttribution
+              pubkey={cache.hiderPubkey}
+              colors={colors}
+              styles={styles}
+            />
             {cache.hint ? (
               <TouchableOpacity
                 style={styles.hintCard}
@@ -471,11 +475,49 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   );
 };
 
+/**
+ * "Hidden by …" row at the top of the cache detail. Resolves the
+ * hider's display name + avatar via usePubkeyProfile so a finder
+ * can see who they're trusting before walking to a coordinate.
+ * Falls back to a shortened npub while the relay fetch is in flight.
+ */
+const HiderAttribution: React.FC<{
+  pubkey: string;
+  colors: Palette;
+  styles: ReturnType<typeof createStyles>;
+}> = ({ pubkey, colors, styles }) => {
+  const { name, picture } = usePubkeyProfile(pubkey);
+  const display = name ?? `${pubkey.slice(0, 8)}…${pubkey.slice(-4)}`;
+  return (
+    <View style={styles.hiderRow} testID="hunt-piggy-detail-attribution">
+      {picture ? (
+        <Image source={{ uri: picture }} style={styles.hiderAvatar} />
+      ) : (
+        <View style={[styles.hiderAvatar, styles.hiderAvatarFallback]}>
+          <Text style={styles.hiderAvatarInitial}>
+            {(name ?? pubkey).slice(0, 1).toUpperCase()}
+          </Text>
+        </View>
+      )}
+      <View style={{ flex: 1 }}>
+        <Text style={styles.hiderName} numberOfLines={1}>
+          Hidden by {display}
+        </Text>
+        <Text style={styles.hiderHint}>
+          Verify you trust them before going to the location.
+        </Text>
+      </View>
+    </View>
+  );
+};
+
 const LogRow: React.FC<{
   log: FoundLog;
   colors: Palette;
   styles: ReturnType<typeof createStyles>;
 }> = ({ log, colors, styles }) => {
+  const { name, picture, lud16 } = usePubkeyProfile(log.pubkey);
+  const display = name ?? `${log.pubkey.slice(0, 8)}…${log.pubkey.slice(-4)}`;
   const ageMins = Math.floor((Date.now() / 1000 - log.createdAt) / 60);
   const ageLabel =
     ageMins < 60
@@ -486,8 +528,38 @@ const LogRow: React.FC<{
   return (
     <View style={styles.logRow} testID={`hunt-log-${log.id.slice(0, 8)}`}>
       <View style={styles.logHeader}>
-        <Text style={styles.logAuthor}>{log.pubkey.slice(0, 12)}…</Text>
-        <Text style={styles.logAge}>{ageLabel}</Text>
+        {picture ? (
+          <Image source={{ uri: picture }} style={styles.logAvatar} />
+        ) : (
+          <View style={[styles.logAvatar, styles.hiderAvatarFallback]}>
+            <Text style={styles.hiderAvatarInitial}>
+              {(name ?? log.pubkey).slice(0, 1).toUpperCase()}
+            </Text>
+          </View>
+        )}
+        <View style={{ flex: 1 }}>
+          <Text style={styles.logAuthor} numberOfLines={1}>
+            {display}
+          </Text>
+          <Text style={styles.logAge}>{ageLabel}</Text>
+        </View>
+        {lud16 ? (
+          <TouchableOpacity
+            style={styles.logZapButton}
+            onPress={() => {
+              // Open the OS Lightning handler with the finder's LN
+              // address pre-filled. Full in-app zap UX (NIP-57) lands
+              // in a follow-up — for now we hand off to whichever
+              // wallet the user has set as default.
+              Linking.openURL(`lightning:${lud16}`).catch(() => {});
+            }}
+            testID={`hunt-log-${log.id.slice(0, 8)}-zap`}
+            accessibilityLabel={`Zap ${display}`}
+          >
+            <Zap size={14} color={colors.white} strokeWidth={2.5} />
+            <Text style={styles.logZapText}>Zap</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
       {log.imageUrl ? (
         <Image source={{ uri: log.imageUrl }} style={styles.logImage} resizeMode="cover" />
@@ -769,6 +841,60 @@ const createStyles = (colors: Palette) =>
       marginTop: 2,
       lineHeight: 17,
     },
+    hiderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      marginTop: 8,
+      marginBottom: 4,
+    },
+    hiderAvatar: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: colors.surface,
+    },
+    hiderAvatarFallback: {
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    hiderAvatarInitial: {
+      color: colors.brandPink,
+      fontSize: 14,
+      fontWeight: '800',
+    },
+    hiderName: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.textHeader,
+    },
+    hiderHint: {
+      fontSize: 11,
+      color: colors.textSupplementary,
+      fontStyle: 'italic',
+      marginTop: 1,
+    },
+    logAvatar: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      backgroundColor: colors.surface,
+      marginRight: 8,
+    },
+    logZapButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      backgroundColor: colors.brandPink,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 999,
+    },
+    logZapText: {
+      color: colors.white,
+      fontSize: 12,
+      fontWeight: '700',
+    },
     hintCard: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -879,7 +1005,7 @@ const createStyles = (colors: Palette) =>
       gap: 6,
       marginTop: 6,
     },
-    logHeader: { flexDirection: 'row', justifyContent: 'space-between' },
+    logHeader: { flexDirection: 'row', alignItems: 'center' },
     logAuthor: { color: colors.textSupplementary, fontSize: 12, fontFamily: 'monospace' },
     logAge: { color: colors.textSupplementary, fontSize: 12 },
     logImage: {

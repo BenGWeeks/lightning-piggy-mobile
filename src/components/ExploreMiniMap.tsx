@@ -29,6 +29,13 @@ interface Props {
    * on the mini-map, so "zoom out → see more" emerges naturally.
    */
   onBoundsChange?: (bbox: MiniMapBbox) => void;
+  /**
+   * Default zoom level when the map first centres on the user. 13 is
+   * the neighbourhood-level default that works for the Explore hub
+   * (mixed merchants + caches). Use a lower number (~10) for the
+   * Places list — most users want a wider Bitcoin-merchant net.
+   */
+  defaultZoom?: number;
 }
 
 /**
@@ -55,6 +62,7 @@ export const ExploreMiniMap: React.FC<Props> = ({
   loading,
   onTapMap,
   onBoundsChange,
+  defaultZoom = 13,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -117,7 +125,7 @@ export const ExploreMiniMap: React.FC<Props> = ({
         <WebView
           ref={webviewRef}
           originWhitelist={['*']}
-          source={{ html: makeHtml(lat, lon) }}
+          source={{ html: makeHtml(lat, lon, defaultZoom) }}
           onMessage={(e) => {
             try {
               const msg = JSON.parse(e.nativeEvent.data);
@@ -175,7 +183,7 @@ export const ExploreMiniMap: React.FC<Props> = ({
 
 // ---- Leaflet HTML (no controls, mirrors the MapScreen pin language) -------
 
-const makeHtml = (lat: number, lon: number): string => `<!DOCTYPE html>
+const makeHtml = (lat: number, lon: number, defaultZoom: number): string => `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
@@ -202,7 +210,7 @@ const post=(m)=>window.ReactNativeWebView&&window.ReactNativeWebView.postMessage
 // wider and the list becomes "everything within a country" rather
 // than "nearby", which is the wrong product for an Explore-hub mini-map.
 // maxZoom 18 matches OSM tile availability.
-const map=L.map('map',{zoomControl:false,dragging:false,scrollWheelZoom:false,doubleClickZoom:false,touchZoom:false,boxZoom:false,keyboard:false,minZoom:8,maxZoom:18}).setView([${lat},${lon}],11);
+const map=L.map('map',{zoomControl:false,dragging:false,scrollWheelZoom:false,doubleClickZoom:false,touchZoom:false,boxZoom:false,keyboard:false,minZoom:8,maxZoom:18}).setView([${lat},${lon}],${defaultZoom});
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
 let merchantLayer=L.layerGroup().addTo(map),cacheLayer=L.layerGroup().addTo(map),eventLayer=L.layerGroup().addTo(map),meMarker=null;
 const dot=(cls,size)=>L.divIcon({className:'',html:'<div class="'+cls+'"></div>',iconSize:[size,size]});
@@ -229,7 +237,7 @@ window.LP_setHub=function(d){
   // viewport is sacred — late-arriving caches / events would otherwise
   // snap the map back and undo any zoom out.
   if(!userHasInteracted && !window.__lpDidCentre){
-    map.setView([d.me.lat,d.me.lng],13);
+    map.setView([d.me.lat,d.me.lng],${defaultZoom});
     window.__lpDidCentre=true;
   }
   emitBounds();

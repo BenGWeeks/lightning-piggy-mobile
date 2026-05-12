@@ -228,6 +228,10 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
           loading={loading && sortedPlaces.length === 0}
           onTapMap={() => navigation.navigate('Map')}
           onBoundsChange={setMapBbox}
+          // Default zoom 10 ≈ "city + drive-away suburbs" — three
+          // levels wider than the hub default. Picked from the user's
+          // observed "− tapped 3 times feels about right" feedback.
+          defaultZoom={10}
         />
       </View>
 

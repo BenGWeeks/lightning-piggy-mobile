@@ -180,7 +180,26 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         <Text style={styles.headerTitle} numberOfLines={1}>
           {place?.tags.name ?? 'Place'}
         </Text>
-        <View style={styles.headerRightSpacer} />
+        {place && btcMapMerchantUrl(place) ? (
+          <TouchableOpacity
+            onPress={() => {
+              const url = btcMapMerchantUrl(place)!;
+              const name = place.tags.name ?? 'this Bitcoin merchant';
+              Share.share({
+                message: `${name} accepts Bitcoin — ${url}`,
+                url,
+                title: name,
+              }).catch(() => {});
+            }}
+            accessibilityLabel="Share this merchant"
+            testID="place-detail-share-header"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Share2 size={22} color={colors.white} strokeWidth={2.5} />
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.headerRightSpacer} />
+        )}
       </View>
 
       <ScrollView contentContainerStyle={styles.body}>
@@ -497,25 +516,6 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 >
                   <ExternalLink size={14} color={colors.brandPink} strokeWidth={2.5} />
                   <Text style={styles.btcMapActionText}>Suggest an edit</Text>
-                </TouchableOpacity>
-              ) : null}
-              {btcMapMerchantUrl(place) ? (
-                <TouchableOpacity
-                  style={styles.btcMapActionButton}
-                  onPress={() => {
-                    const url = btcMapMerchantUrl(place)!;
-                    const name = place.tags.name ?? 'this Bitcoin merchant';
-                    Share.share({
-                      message: `${name} accepts Bitcoin — ${url}`,
-                      url,
-                      title: name,
-                    }).catch(() => {});
-                  }}
-                  testID="place-detail-share"
-                  accessibilityLabel="Share this merchant"
-                >
-                  <Share2 size={14} color={colors.brandPink} strokeWidth={2.5} />
-                  <Text style={styles.btcMapActionText}>Share</Text>
                 </TouchableOpacity>
               ) : null}
             </View>
