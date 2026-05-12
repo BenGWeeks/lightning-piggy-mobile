@@ -35,6 +35,7 @@ import {
 import { formatDistance, haversineMetres } from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
+import { btcMapIconComponent } from '../utils/btcMapIcon';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -149,7 +150,17 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           <Text style={styles.errorText}>{error}</Text>
         ) : place ? (
           <>
-            <Text style={styles.title}>{place.tags.name ?? 'Unnamed merchant'}</Text>
+            <View style={styles.titleRow}>
+              {(() => {
+                const CategoryIcon = btcMapIconComponent(place.icon);
+                return (
+                  <View style={styles.categoryIconWrap}>
+                    <CategoryIcon size={20} color={colors.brandPink} strokeWidth={2.5} />
+                  </View>
+                );
+              })()}
+              <Text style={styles.title}>{place.tags.name ?? 'Unnamed merchant'}</Text>
+            </View>
             <View style={styles.chipRow}>
               {acceptsLightning(place) ? (
                 <View style={styles.chipPink}>
@@ -268,6 +279,18 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 Last community-verified {daysSinceVerified(place)} days ago via OpenStreetMap.
               </Text>
             ) : null}
+
+            {place.osm_url ? (
+              <TouchableOpacity
+                style={styles.suggestEditRow}
+                onPress={() => Linking.openURL(place.osm_url!)}
+                testID="place-detail-suggest-edit"
+                accessibilityLabel="Suggest an edit on OpenStreetMap"
+              >
+                <ExternalLink size={14} color={colors.brandPink} strokeWidth={2.5} />
+                <Text style={styles.suggestEditText}>Suggest an edit on OpenStreetMap</Text>
+              </TouchableOpacity>
+            ) : null}
           </>
         ) : null}
       </ScrollView>
@@ -296,7 +319,32 @@ const createStyles = (colors: Palette) =>
     },
     headerRightSpacer: { width: 24 },
     body: { padding: 16, gap: 14, paddingBottom: 40 },
-    title: { fontSize: 22, fontWeight: '800', color: colors.textHeader, lineHeight: 28 },
+    title: { flex: 1, fontSize: 22, fontWeight: '800', color: colors.textHeader, lineHeight: 28 },
+    titleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    categoryIconWrap: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: colors.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    suggestEditRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingVertical: 6,
+      marginTop: 8,
+    },
+    suggestEditText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.brandPink,
+    },
     chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
     chipPink: {
       flexDirection: 'row',

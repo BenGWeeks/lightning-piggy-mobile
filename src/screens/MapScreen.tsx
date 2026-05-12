@@ -35,6 +35,7 @@ import { subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
 import { encodeGeohash, geohashPrefixes } from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
 import BtcMapAttribution from '../components/BtcMapAttribution';
+import { btcMapIconComponent } from '../utils/btcMapIcon';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -445,9 +446,19 @@ const MerchantDetailSheet: React.FC<{
       <TouchableOpacity style={styles.sheetTapAway} onPress={onClose} activeOpacity={1} />
       <View style={styles.sheet}>
         <View style={styles.sheetHandle} />
-        <Text style={styles.sheetTitle} testID="merchant-detail-name">
-          {place.tags.name ?? 'Unnamed merchant'}
-        </Text>
+        <View style={styles.sheetTitleRow}>
+          {(() => {
+            const CategoryIcon = btcMapIconComponent(place.icon);
+            return (
+              <View style={styles.sheetIconWrap}>
+                <CategoryIcon size={18} color={colors.brandPink} strokeWidth={2.5} />
+              </View>
+            );
+          })()}
+          <Text style={styles.sheetTitle} testID="merchant-detail-name">
+            {place.tags.name ?? 'Unnamed merchant'}
+          </Text>
+        </View>
         <Text style={styles.sheetSubtitle}>{formatAddress(place)}</Text>
         <View style={styles.sheetChipRow}>
           {acceptsLightning(place) && (
@@ -527,6 +538,16 @@ const MerchantDetailSheet: React.FC<{
             <Text style={styles.sheetButtonSecondaryText}>View details</Text>
           </TouchableOpacity>
         </View>
+        {place.osm_url ? (
+          <TouchableOpacity
+            style={styles.sheetSuggestEditRow}
+            onPress={() => Linking.openURL(place.osm_url!)}
+            testID="merchant-detail-suggest-edit"
+            accessibilityLabel="Suggest an edit on OpenStreetMap"
+          >
+            <Text style={styles.sheetSuggestEditText}>Suggest an edit on OpenStreetMap →</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
     </View>
   );
@@ -986,6 +1007,32 @@ const createStyles = (colors: Palette) =>
       fontSize: 12,
       fontWeight: '600',
       maxWidth: 160,
+    },
+    sheetTitleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      marginBottom: 4,
+    },
+    sheetIconWrap: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: colors.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    sheetSuggestEditRow: {
+      marginTop: 12,
+      paddingTop: 10,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.divider,
+      alignItems: 'center',
+    },
+    sheetSuggestEditText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.brandPink,
     },
   });
 

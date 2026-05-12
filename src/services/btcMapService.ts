@@ -32,8 +32,12 @@ const V4_FIELDS = [
   'verified_at',
   // Top-level curated fields (cleaner than the OSM-prefixed equivalents
   // when BTC Map has normalised them — e.g. `description` is rare on the
-  // raw OSM node but BTC Map sometimes hand-fills it).
+  // raw OSM node but BTC Map sometimes hand-fills it). `icon` is BTC
+  // Map's curated category glyph name; `osm_url` lets the user open the
+  // raw OSM node for a "Suggest an edit" round-trip.
   'description',
+  'icon',
+  'osm_url',
   'osm:name',
   'osm:description',
   'osm:addr:street',
@@ -55,9 +59,9 @@ const DATASET_TTL_MS = 7 * 24 * 60 * 60 * 1_000; // 7 days
 // AsyncStorage key — namespaced so it's grepable + obviously
 // invalidatable from devtools. A single global dataset cache; v4 has
 // no bbox parameter so we fetch the whole world and filter in memory.
-// Bumped to `v4b` to invalidate caches written before `description` was
-// added to the parsed shape — old payloads would otherwise serve forever.
-const DATASET_STORAGE_KEY = '@lp:btcmap-dataset-v4b';
+// Bumped to `v4c` to invalidate caches written before `icon` + `osm_url`
+// joined the parsed shape — old payloads would otherwise serve forever.
+const DATASET_STORAGE_KEY = '@lp:btcmap-dataset-v4c';
 
 export interface BtcMapPlace {
   id: number;
@@ -94,6 +98,19 @@ export interface BtcMapPlace {
    * is normalised to null so the UI can branch on truthiness cleanly.
    */
   description?: string | null;
+  /**
+   * BTC Map's curated category glyph name — e.g. `storefront`, `chalet`,
+   * `cafe`, `bar`, `lodging`. Used by the UI to pick a matching Lucide
+   * icon for the place row / detail header. Null when BTC Map hasn't
+   * categorised the merchant.
+   */
+  icon?: string | null;
+  /**
+   * Direct link to the merchant's OpenStreetMap node. Surfaced as a
+   * "Suggest an edit on OpenStreetMap →" affordance — the OSM web UI
+   * is the canonical place to fix bad tags / addresses / payment flags.
+   */
+  osm_url?: string | null;
 }
 
 interface CachedDataset {
@@ -145,7 +162,9 @@ const reshape = (raw: Record<string, unknown>): BtcMapPlace | null => {
         ? tags['description']
         : null;
   const description = rawDesc && rawDesc.trim().length > 0 ? rawDesc.trim() : null;
-  return { id, lat, lon, tags, verified_at, description };
+  const icon = typeof raw['icon'] === 'string' ? (raw['icon'] as string) : null;
+  const osm_url = typeof raw['osm_url'] === 'string' ? (raw['osm_url'] as string) : null;
+  return { id, lat, lon, tags, verified_at, description, icon, osm_url };
 };
 
 // One-shot AsyncStorage hydration. Runs on first `fetchPlacesInBbox`
