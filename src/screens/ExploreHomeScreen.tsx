@@ -34,6 +34,7 @@ import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { createExploreHomeScreenStyles } from '../styles/ExploreHomeScreen.styles';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
+import BtcMapAttribution from '../components/BtcMapAttribution';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -349,6 +350,9 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
             />
           )}
         />
+        <View style={localStyles.attributionFooter}>
+          <BtcMapAttribution testID="explore-home-btcmap-attribution" />
+        </View>
 
         <ContentRail<{ cache: ParsedCache; distance: number }>
           title="Geo-caches near you"
@@ -642,6 +646,11 @@ const createLocalStyles = (colors: Palette) =>
       fontSize: 13,
       color: colors.textSupplementary,
       lineHeight: 19,
+    },
+    attributionFooter: {
+      paddingHorizontal: 16,
+      marginTop: 4,
+      marginBottom: 8,
     },
     deniedCard: {
       flexDirection: 'row',

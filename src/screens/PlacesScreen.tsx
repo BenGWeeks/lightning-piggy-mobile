@@ -23,6 +23,7 @@ import {
 } from '../services/btcMapService';
 import { formatDistance, haversineMetres } from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
+import BtcMapAttribution from '../components/BtcMapAttribution';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -173,6 +174,10 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
         />
       </View>
 
+      <View style={styles.attributionRow}>
+        <BtcMapAttribution testID="places-btcmap-attribution" />
+      </View>
+
       {loading && places.length === 0 ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.brandPink} />
@@ -291,6 +296,10 @@ const createStyles = (colors: Palette) =>
       paddingVertical: 8,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.divider,
+    },
+    attributionRow: {
+      paddingHorizontal: 16,
+      paddingVertical: 6,
     },
     searchInput: {
       flex: 1,
