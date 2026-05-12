@@ -34,7 +34,6 @@ import type { ParsedCache } from '../services/nostrPlacesService';
 import { subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
 import { encodeGeohash, geohashPrefixes } from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
-import BtcMapAttribution from '../components/BtcMapAttribution';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 
 interface Props {
@@ -357,10 +356,6 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
           <View style={[styles.legendDot, { backgroundColor: '#2D88FF' }]} />
           <Text style={styles.legendText}>You</Text>
         </View>
-      </View>
-
-      <View style={styles.attributionOverlay} pointerEvents="box-none">
-        <BtcMapAttribution variant="badge" testID="map-btcmap-attribution" />
       </View>
 
       <View style={styles.footer}>
@@ -777,13 +772,6 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.surface,
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: colors.divider,
-    },
-    attributionOverlay: {
-      // Float over the bottom-right of the WebView map, just above the
-      // legend strip. Matches OSM-style attribution conventions.
-      position: 'absolute',
-      bottom: 110,
-      right: 12,
     },
     legend: {
       flexDirection: 'row',

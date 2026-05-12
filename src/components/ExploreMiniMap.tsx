@@ -125,7 +125,11 @@ export const ExploreMiniMap: React.FC<Props> = ({
             testID="explore-minimap-zoom-in"
             hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
           >
-            <Plus size={16} color={colors.textHeader} strokeWidth={2.5} />
+            {/* `colors.textHeader` is near-white in dark mode and the
+             *  button surface is also near-white → invisible glyph.
+             *  Lock to a dark hex so the icon pops on the white pill in
+             *  either theme. */}
+            <Plus size={16} color="#1a1a1a" strokeWidth={3} />
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.zoomButton}
@@ -134,7 +138,7 @@ export const ExploreMiniMap: React.FC<Props> = ({
             testID="explore-minimap-zoom-out"
             hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
           >
-            <Minus size={16} color={colors.textHeader} strokeWidth={2.5} />
+            <Minus size={16} color="#1a1a1a" strokeWidth={3} />
           </TouchableOpacity>
         </View>
       ) : null}
@@ -190,19 +194,13 @@ window.LP_setHub=function(d){
   d.merchants.forEach(m=>L.marker([m.lat,m.lng],{icon:dot('lp-pin'+(m.lightning?'':' onchain'),14)}).addTo(merchantLayer));
   d.caches.forEach(c=>L.marker([c.lat,c.lng],{icon:dot('lp-cache'+(c.kind==='piggy'?' piggy':''),14)}).addTo(cacheLayer));
   d.events.forEach(e=>L.marker([e.lat,e.lng],{icon:dot('lp-event',14)}).addTo(eventLayer));
-  // Fit the viewport to include the user + every nearby pin so a
-  // rural user with caches 1-5 km away actually sees them on the
-  // preview, instead of staring at the user dot at zoom 14. Cap
-  // zoom so a single pin doesn't fly the viewport to street level.
-  var pts=[[d.me.lat,d.me.lng]];
-  d.merchants.forEach(m=>pts.push([m.lat,m.lng]));
-  d.caches.forEach(c=>pts.push([c.lat,c.lng]));
-  d.events.forEach(e=>pts.push([e.lat,e.lng]));
-  if(pts.length>1){
-    map.fitBounds(pts,{padding:[24,24],maxZoom:13});
-  } else {
-    map.setView([d.me.lat,d.me.lng],12);
-  }
+  // Always centre on the user at a consistent neighbourhood zoom.
+  // A previous version used fitBounds across user + every merchant,
+  // but a 50 km BTC Map bbox spans Cambridge → London → Norwich for
+  // rural users and Leaflet picked zoom ~9, which zooms out so far
+  // the user dot disappears. Pins outside the viewport still render
+  // when the user scrolls / opens the full map.
+  map.setView([d.me.lat,d.me.lng],13);
 };
 post({type:'ready'});
 </script>
