@@ -535,7 +535,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
             <EventCard
               event={event}
               distance={distance}
-              onPress={() => navigation.navigate('Events')}
+              onPress={() => navigation.navigate('EventDetail', { coord: event.coord })}
               colors={colors}
               styles={localStyles}
             />

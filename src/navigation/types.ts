@@ -66,6 +66,7 @@ export type ExploreStackParamList = {
   HuntFound: { lnurl: string };
   HuntPiggyDetail: { coord: string };
   Events: undefined;
+  EventDetail: { coord: string };
 };
 
 // Navigation prop shortcuts

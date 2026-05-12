@@ -14,6 +14,7 @@ import * as Location from 'expo-location';
 import {
   CalendarDays,
   ChevronLeft,
+  ChevronRight,
   MapPinned,
   Plus,
   RefreshCw,
@@ -429,11 +430,11 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
                   event={filteredEvents[0].event}
                   distance={filteredEvents[0].distance}
                   onPress={() =>
-                    setExpandedCoord((prev) =>
-                      prev === filteredEvents[0].event.coord ? null : filteredEvents[0].event.coord,
-                    )
+                    navigation.navigate('EventDetail', {
+                      coord: filteredEvents[0].event.coord,
+                    })
                   }
-                  expanded={expandedCoord === filteredEvents[0].event.coord}
+                  expanded={false}
                   onOpenInMaps={() => openInMaps(filteredEvents[0].event)}
                   colors={colors}
                   styles={styles}
@@ -450,10 +451,8 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
                 // (hero already pulls the very-next one out). When the
                 // user is searching the highlight makes no sense.
                 upNext={searchQuery.trim() === '' && index < 2}
-                expanded={expandedCoord === item.event.coord}
-                onToggle={() =>
-                  setExpandedCoord((prev) => (prev === item.event.coord ? null : item.event.coord))
-                }
+                expanded={false}
+                onToggle={() => navigation.navigate('EventDetail', { coord: item.event.coord })}
                 onOpenInMaps={() => openInMaps(item.event)}
                 colors={colors}
                 styles={styles}
@@ -585,34 +584,8 @@ const EventRow: React.FC<{
           {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
           {event.location ? ` · ${event.location}` : ''}
         </Text>
-        {expanded ? (
-          <View style={styles.expanded}>
-            {event.imageUrl ? (
-              <Image
-                source={{ uri: event.imageUrl }}
-                style={styles.expandedImage}
-                resizeMode="cover"
-              />
-            ) : null}
-            <Text style={styles.expandedDescription}>{event.description}</Text>
-            {event.hashtags.length > 0 ? (
-              <Text style={styles.expandedHashtags}>
-                {event.hashtags.map((h) => `#${h}`).join(' · ')}
-              </Text>
-            ) : null}
-            {event.location || event.geohash ? (
-              <TouchableOpacity
-                style={styles.locationButton}
-                onPress={onOpenInMaps}
-                testID={`event-row-${event.d}-open-in-maps`}
-              >
-                <MapPinned size={14} color={colors.brandPink} strokeWidth={2.5} />
-                <Text style={styles.locationButtonText}>Open in Maps</Text>
-              </TouchableOpacity>
-            ) : null}
-          </View>
-        ) : null}
       </View>
+      <ChevronRight size={20} color={colors.textSupplementary} strokeWidth={2.5} />
     </TouchableOpacity>
   );
 };
