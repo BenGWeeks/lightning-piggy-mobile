@@ -180,6 +180,10 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
             <Text style={styles.address}>{formatAddress(place)}</Text>
 
+            {place.description ? (
+              <Text style={styles.description}>{place.description}</Text>
+            ) : null}
+
             {/* Single-pin map preview — same component the Hub mini-map
                 uses, centred on the merchant. Tap → full Map. */}
             <View style={styles.mapWrap}>
@@ -321,6 +325,12 @@ const createStyles = (colors: Palette) =>
     },
     chipGreyText: { color: colors.textSupplementary, fontSize: 11, fontWeight: '700' },
     address: { fontSize: 14, color: colors.textSupplementary, lineHeight: 20 },
+    description: {
+      fontSize: 14,
+      color: colors.textBody,
+      lineHeight: 21,
+      marginTop: 4,
+    },
     mapWrap: { marginHorizontal: -16, marginVertical: 4 },
     actionRow: { flexDirection: 'row', gap: 10 },
     primaryAction: {

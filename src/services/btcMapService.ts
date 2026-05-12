@@ -30,7 +30,12 @@ const V4_FIELDS = [
   'lat',
   'lon',
   'verified_at',
+  // Top-level curated fields (cleaner than the OSM-prefixed equivalents
+  // when BTC Map has normalised them — e.g. `description` is rare on the
+  // raw OSM node but BTC Map sometimes hand-fills it).
+  'description',
   'osm:name',
+  'osm:description',
   'osm:addr:street',
   'osm:addr:city',
   'osm:addr:postcode',
@@ -50,7 +55,9 @@ const DATASET_TTL_MS = 7 * 24 * 60 * 60 * 1_000; // 7 days
 // AsyncStorage key — namespaced so it's grepable + obviously
 // invalidatable from devtools. A single global dataset cache; v4 has
 // no bbox parameter so we fetch the whole world and filter in memory.
-const DATASET_STORAGE_KEY = '@lp:btcmap-dataset-v4';
+// Bumped to `v4b` to invalidate caches written before `description` was
+// added to the parsed shape — old payloads would otherwise serve forever.
+const DATASET_STORAGE_KEY = '@lp:btcmap-dataset-v4b';
 
 export interface BtcMapPlace {
   id: number;
@@ -81,6 +88,12 @@ export interface BtcMapPlace {
    * Bitcoin. Surfaced as "Verified N days ago" in MerchantDetail.
    */
   verified_at?: string | null;
+  /**
+   * Free-text summary of the merchant. BTC Map curates this when set;
+   * otherwise we fall back to the OSM `description` tag. Empty string
+   * is normalised to null so the UI can branch on truthiness cleanly.
+   */
+  description?: string | null;
 }
 
 interface CachedDataset {
@@ -122,7 +135,17 @@ const reshape = (raw: Record<string, unknown>): BtcMapPlace | null => {
   }
   const verified_at =
     typeof raw['verified_at'] === 'string' ? (raw['verified_at'] as string) : null;
-  return { id, lat, lon, tags, verified_at };
+  // Prefer the curated top-level description; fall back to the raw OSM
+  // tag if BTC Map hasn't normalised one for this place. Trim and treat
+  // empty strings as missing.
+  const rawDesc =
+    typeof raw['description'] === 'string'
+      ? (raw['description'] as string)
+      : typeof tags['description'] === 'string'
+        ? tags['description']
+        : null;
+  const description = rawDesc && rawDesc.trim().length > 0 ? rawDesc.trim() : null;
+  return { id, lat, lon, tags, verified_at, description };
 };
 
 // One-shot AsyncStorage hydration. Runs on first `fetchPlacesInBbox`

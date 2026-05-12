@@ -462,6 +462,11 @@ const MerchantDetailSheet: React.FC<{
             </View>
           )}
         </View>
+        {place.description ? (
+          <Text style={styles.sheetDescription} numberOfLines={4}>
+            {place.description}
+          </Text>
+        ) : null}
         {verifyText && <Text style={styles.sheetVerify}>{verifyText}</Text>}
         {(place.tags['contact:website'] || place.tags['contact:phone']) && (
           <View style={styles.sheetContactRow}>
@@ -911,6 +916,13 @@ const createStyles = (colors: Palette) =>
       fontSize: 12,
       color: colors.textSupplementary,
       marginTop: 4,
+    },
+    sheetDescription: {
+      fontSize: 13,
+      color: colors.textBody,
+      lineHeight: 18,
+      marginTop: 8,
+      marginBottom: 4,
     },
     sheetActions: {
       flexDirection: 'row',
