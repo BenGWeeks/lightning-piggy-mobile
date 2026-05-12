@@ -10,7 +10,16 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import * as Location from 'expo-location';
-import { ChevronLeft, ChevronRight, MapPin, PiggyBank, Plus, Search } from 'lucide-react-native';
+import {
+  ChevronLeft,
+  ChevronRight,
+  MapPin,
+  PiggyBank,
+  Plus,
+  Search,
+  ShieldCheck,
+  ShieldOff,
+} from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import type { Palette } from '../styles/palettes';
@@ -54,7 +63,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
 
   // Web-of-trust filter. Refs so the subscription callback always
   // reads the current `isTrusted` predicate without resubscribing.
-  const { isTrusted, filterEnabled } = useTrustGraph();
+  const { isTrusted, filterEnabled, setFilterEnabled } = useTrustGraph();
   const isTrustedRef = useRef(isTrusted);
   useEffect(() => {
     isTrustedRef.current = isTrusted;
@@ -195,11 +204,42 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
               />
             </View>
 
-            {untrustedHidden > 0 ? (
+            <TouchableOpacity
+              style={[
+                styles.wotChip,
+                filterEnabled ? styles.wotChipOn : styles.wotChipOff,
+              ]}
+              onPress={() => {
+                if (__DEV__) setFilterEnabled(!filterEnabled);
+              }}
+              disabled={!__DEV__}
+              testID="hunt-discover-wot-chip"
+              accessibilityLabel={
+                filterEnabled
+                  ? `Web-of-trust filter on, ${untrustedHidden} hidden`
+                  : 'Web-of-trust filter off (developer mode)'
+              }
+            >
+              {filterEnabled ? (
+                <ShieldCheck size={14} color={colors.brandPink} strokeWidth={2.5} />
+              ) : (
+                <ShieldOff size={14} color={colors.zapYellow} strokeWidth={2.5} />
+              )}
+              <Text style={styles.wotChipText}>
+                {filterEnabled
+                  ? untrustedHidden > 0
+                    ? `WoT filter on • ${untrustedHidden} ${
+                        untrustedHidden === 1 ? 'cache' : 'caches'
+                      } hidden`
+                    : 'WoT filter on'
+                  : 'WoT filter off (dev)'}
+              </Text>
+              {__DEV__ ? <Text style={styles.wotChipHint}>tap to toggle</Text> : null}
+            </TouchableOpacity>
+            {filterEnabled && untrustedHidden > 0 ? (
               <Text style={styles.trustNote} testID="hunt-discover-trust-note">
-                {untrustedHidden} {untrustedHidden === 1 ? 'cache' : 'caches'} hidden from outside
-                your trust graph. An unverified geo-cache can be a lure — only listings from people
-                you (or your follows) trust are shown.
+                An unverified geo-cache can be a lure — only listings from people you (or your
+                follows) trust are shown.
               </Text>
             ) : null}
           </View>
@@ -331,6 +371,38 @@ const createStyles = (colors: Palette) =>
       fontSize: 12,
       color: colors.textSupplementary,
       lineHeight: 17,
+    },
+    wotChip: {
+      marginHorizontal: 16,
+      marginTop: 4,
+      marginBottom: 2,
+      alignSelf: 'flex-start',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 999,
+      borderWidth: 1,
+    },
+    wotChipOn: {
+      backgroundColor: colors.surface,
+      borderColor: colors.brandPink,
+    },
+    wotChipOff: {
+      backgroundColor: colors.surface,
+      borderColor: colors.zapYellow,
+    },
+    wotChipText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.textHeader,
+    },
+    wotChipHint: {
+      fontSize: 10,
+      fontStyle: 'italic',
+      color: colors.textSupplementary,
+      marginLeft: 4,
     },
     listContent: { paddingBottom: 32 },
     center: { alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 },
