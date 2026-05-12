@@ -11,10 +11,13 @@ import { WebView, WebViewMessageEvent } from 'react-native-webview';
 import * as Location from 'expo-location';
 import {
   ChevronLeft,
+  Clock,
   Globe,
   MapPin,
   Navigation as NavigationIcon,
   Phone,
+  PiggyBank,
+  SlidersHorizontal,
   Zap,
 } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -82,6 +85,16 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   const [places, setPlaces] = useState<BtcMapPlace[]>([]);
   const [caches, setCaches] = useState<Map<string, ParsedCache>>(new Map());
   const [selected, setSelected] = useState<BtcMapPlace | null>(null);
+  const [selectedCache, setSelectedCache] = useState<ParsedCache | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  // Default: every pin type visible. The filter sheet flips these
+  // independently so users can isolate (say) just Piglets near them.
+  const [filters, setFilters] = useState({
+    lightning: true,
+    onchain: true,
+    piglet: true,
+    nipgcCache: true,
+  });
   const cachesCloserRef = useRef<(() => void) | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [webviewReady, setWebviewReady] = useState(false);
@@ -223,14 +236,28 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
     webviewRef.current.injectJavaScript(js);
   }, []);
 
-  // Re-emit markers any time `places` changes after the bridge is ready.
+  // Re-emit markers any time `places` or pin-type filters change. The
+  // filter sheet flips lightning / onchain / piglet / nipgcCache flags;
+  // we apply them here so the WebView only ever sees the visible
+  // subset, keeping Leaflet layer state in sync without extra bridge
+  // calls.
   useEffect(() => {
-    if (webviewReady) sendMarkers(places);
-  }, [places, webviewReady, sendMarkers]);
+    if (!webviewReady) return;
+    const filtered = places.filter((p) => {
+      if (acceptsLightning(p)) return filters.lightning;
+      if (acceptsOnchain(p)) return filters.onchain;
+      return filters.lightning || filters.onchain;
+    });
+    sendMarkers(filtered);
+  }, [places, webviewReady, filters.lightning, filters.onchain, sendMarkers]);
 
   useEffect(() => {
-    if (webviewReady) sendCaches([...caches.values()]);
-  }, [caches, webviewReady, sendCaches]);
+    if (!webviewReady) return;
+    const filtered = [...caches.values()].filter((c) =>
+      c.isLpPiggy ? filters.piglet : filters.nipgcCache,
+    );
+    sendCaches(filtered);
+  }, [caches, webviewReady, filters.piglet, filters.nipgcCache, sendCaches]);
 
   const refreshPlaces = useCallback(async (bbox: Bbox) => {
     try {
@@ -263,10 +290,16 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         const hit = places.find((p) => p.id === msg.id);
         if (hit) setSelected(hit);
       } else if (msg.type === 'cacheTap' && typeof msg.coord === 'string') {
-        navigation.navigate('HuntPiggyDetail', { coord: msg.coord });
+        // Mirror the merchant flow: preview the cache in a bottom sheet
+        // first, then let the user opt into the full HuntPiggyDetail
+        // page via "View details". Jumping straight to a stack push
+        // burns navigation context that's expensive to recover when the
+        // user just wanted a quick look.
+        const hit = caches.get(msg.coord);
+        if (hit) setSelectedCache(hit);
       }
     },
-    [places, refreshPlaces, navigation],
+    [places, caches, refreshPlaces],
   );
 
   const recenterOnUser = useCallback(async () => {
@@ -286,7 +319,11 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   if (permission === 'denied') {
     return (
       <View style={styles.container} testID="map-screen">
-        <Header onBack={() => navigation.goBack()} colors={colors} />
+        <Header
+          onBack={() => navigation.goBack()}
+          onOpenFilters={() => setFiltersOpen(true)}
+          colors={colors}
+        />
         <View style={styles.deniedBody}>
           <MapPin size={64} color={colors.textSupplementary} strokeWidth={1.5} />
           <Text style={styles.deniedTitle}>Location permission required</Text>
@@ -308,7 +345,11 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
 
   return (
     <View style={styles.container} testID="map-screen">
-      <Header onBack={() => navigation.goBack()} colors={colors} />
+      <Header
+        onBack={() => navigation.goBack()}
+        onOpenFilters={() => setFiltersOpen(true)}
+        colors={colors}
+      />
       <View style={styles.webviewWrapper}>
         <WebView
           ref={webviewRef}
@@ -387,6 +428,30 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         />
       )}
 
+      {selectedCache && (
+        <CacheDetailSheet
+          cache={selectedCache}
+          onClose={() => setSelectedCache(null)}
+          onViewDetails={() => {
+            const coord = selectedCache.coord;
+            setSelectedCache(null);
+            navigation.navigate('HuntPiggyDetail', { coord });
+          }}
+          colors={colors}
+          styles={styles}
+        />
+      )}
+
+      {filtersOpen && (
+        <FilterSheet
+          filters={filters}
+          onChange={setFilters}
+          onClose={() => setFiltersOpen(false)}
+          colors={colors}
+          styles={styles}
+        />
+      )}
+
       {!webviewReady && (
         <View style={styles.loadingOverlay} pointerEvents="none">
           <ActivityIndicator size="large" color={colors.brandPink} />
@@ -400,7 +465,11 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
 // Sub-components
 // -----------------------------------------------------------------------------
 
-const Header: React.FC<{ onBack: () => void; colors: Palette }> = ({ onBack, colors }) => {
+const Header: React.FC<{
+  onBack: () => void;
+  onOpenFilters: () => void;
+  colors: Palette;
+}> = ({ onBack, onOpenFilters, colors }) => {
   const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <View style={styles.header}>
@@ -413,7 +482,14 @@ const Header: React.FC<{ onBack: () => void; colors: Palette }> = ({ onBack, col
         <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
       </TouchableOpacity>
       <Text style={styles.headerTitle}>Map</Text>
-      <View style={styles.headerRightSpacer} />
+      <TouchableOpacity
+        onPress={onOpenFilters}
+        accessibilityLabel="Filter pins on map"
+        testID="map-filter-button"
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      >
+        <SlidersHorizontal size={22} color={colors.white} strokeWidth={2.5} />
+      </TouchableOpacity>
     </View>
   );
 };
@@ -472,6 +548,14 @@ const MerchantDetailSheet: React.FC<{
           <Text style={styles.sheetDescription} numberOfLines={4}>
             {place.description}
           </Text>
+        ) : null}
+        {place.tags.opening_hours ? (
+          <View style={styles.sheetMetaRow}>
+            <Clock size={13} color={colors.textSupplementary} strokeWidth={2.5} />
+            <Text style={styles.sheetMetaText} numberOfLines={2}>
+              {place.tags.opening_hours}
+            </Text>
+          </View>
         ) : null}
         {verifyText && <Text style={styles.sheetVerify}>{verifyText}</Text>}
         {(place.tags['contact:website'] || place.tags['contact:phone']) && (
@@ -543,6 +627,150 @@ const MerchantDetailSheet: React.FC<{
             <Text style={styles.sheetSuggestEditText}>Suggest an edit on OpenStreetMap →</Text>
           </TouchableOpacity>
         ) : null}
+      </View>
+    </View>
+  );
+};
+
+const CacheDetailSheet: React.FC<{
+  cache: ParsedCache;
+  onClose: () => void;
+  onViewDetails: () => void;
+  colors: Palette;
+  styles: ReturnType<typeof createStyles>;
+}> = ({ cache, onClose, onViewDetails, colors, styles }) => {
+  const kindLabel = cache.isLpPiggy ? 'Piglet' : 'NIP-GC cache';
+  const specBits = [
+    cache.cacheType,
+    cache.size,
+    cache.difficulty != null ? `D${cache.difficulty}` : null,
+    cache.terrain != null ? `T${cache.terrain}` : null,
+  ].filter(Boolean) as string[];
+  return (
+    <View style={styles.sheetBackdrop} testID="cache-detail-sheet">
+      <TouchableOpacity style={styles.sheetTapAway} onPress={onClose} activeOpacity={1} />
+      <View style={styles.sheet}>
+        <View style={styles.sheetHandle} />
+        <View style={styles.sheetTitleRow}>
+          <View
+            style={[
+              styles.sheetIconWrap,
+              {
+                backgroundColor: cache.isLpPiggy ? colors.brandPink : colors.surface,
+              },
+            ]}
+          >
+            <PiggyBank
+              size={18}
+              color={cache.isLpPiggy ? colors.white : colors.brandPink}
+              strokeWidth={2.5}
+            />
+          </View>
+          <Text style={styles.sheetTitle} testID="cache-detail-name">
+            {cache.name}
+          </Text>
+        </View>
+        <View style={styles.sheetChipRow}>
+          <View
+            style={cache.isLpPiggy ? styles.sheetChipPink : styles.sheetChipGrey}
+          >
+            <Text
+              style={cache.isLpPiggy ? styles.sheetChipPinkText : styles.sheetChipGreyText}
+            >
+              {kindLabel}
+            </Text>
+          </View>
+          {specBits.length > 0 ? (
+            <View style={styles.sheetChipGrey}>
+              <Text style={styles.sheetChipGreyText}>{specBits.join(' · ')}</Text>
+            </View>
+          ) : null}
+        </View>
+        {cache.description ? (
+          <Text style={styles.sheetDescription} numberOfLines={4}>
+            {cache.description}
+          </Text>
+        ) : null}
+        <View style={styles.sheetActions}>
+          <TouchableOpacity
+            style={styles.sheetButton}
+            onPress={onViewDetails}
+            testID="cache-detail-view-button"
+            accessibilityLabel={`Open ${kindLabel} detail`}
+          >
+            <Text style={styles.sheetButtonText}>View details</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </View>
+  );
+};
+
+type PinFilters = {
+  lightning: boolean;
+  onchain: boolean;
+  piglet: boolean;
+  nipgcCache: boolean;
+};
+
+const FILTER_OPTIONS: ReadonlyArray<{
+  key: keyof PinFilters;
+  label: string;
+  hint: string;
+  swatch: string;
+  diamond?: boolean;
+}> = [
+  { key: 'lightning', label: 'Lightning', hint: 'Pays in sats over Lightning', swatch: '#EC008C' },
+  { key: 'onchain', label: 'On-chain', hint: 'Accepts bitcoin on-chain', swatch: '#F5A623' },
+  { key: 'piglet', label: 'Piglet', hint: 'Lightning Piggy stash', swatch: '#EC008C', diamond: true },
+  { key: 'nipgcCache', label: 'NIP-GC cache', hint: 'Geo-cache (treasures.to et al.)', swatch: '#6c7b8a', diamond: true },
+];
+
+const FilterSheet: React.FC<{
+  filters: PinFilters;
+  onChange: (next: PinFilters) => void;
+  onClose: () => void;
+  colors: Palette;
+  styles: ReturnType<typeof createStyles>;
+}> = ({ filters, onChange, onClose, colors, styles }) => {
+  const toggle = (k: keyof PinFilters) => onChange({ ...filters, [k]: !filters[k] });
+  return (
+    <View style={styles.sheetBackdrop} testID="map-filter-sheet">
+      <TouchableOpacity style={styles.sheetTapAway} onPress={onClose} activeOpacity={1} />
+      <View style={styles.sheet}>
+        <View style={styles.sheetHandle} />
+        <Text style={styles.sheetTitle}>Show on map</Text>
+        <Text style={styles.sheetSubtitle}>Tap a row to toggle that pin type.</Text>
+        <View style={{ marginTop: 8 }}>
+          {FILTER_OPTIONS.map((opt) => {
+            const on = filters[opt.key];
+            return (
+              <TouchableOpacity
+                key={opt.key}
+                style={styles.filterRow}
+                onPress={() => toggle(opt.key)}
+                testID={`map-filter-${opt.key}`}
+                accessibilityLabel={`${opt.label} pins ${on ? 'on' : 'off'}`}
+              >
+                <View
+                  style={[
+                    opt.diamond ? styles.filterSwatchDiamond : styles.filterSwatchDot,
+                    { backgroundColor: opt.swatch },
+                  ]}
+                />
+                <View style={styles.filterTextWrap}>
+                  <Text style={styles.filterLabel}>{opt.label}</Text>
+                  <Text style={styles.filterHint}>{opt.hint}</Text>
+                </View>
+                <View style={[styles.filterToggle, on && styles.filterToggleOn]}>
+                  <View
+                    style={[styles.filterToggleThumb, on && styles.filterToggleThumbOn]}
+                  />
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
       </View>
     </View>
   );
@@ -1021,6 +1249,68 @@ const createStyles = (colors: Palette) =>
       fontSize: 12,
       fontWeight: '600',
       color: colors.brandPink,
+    },
+    sheetMetaRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginTop: 6,
+    },
+    sheetMetaText: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      flexShrink: 1,
+    },
+    filterRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+      paddingVertical: 10,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.divider,
+    },
+    filterSwatchDot: {
+      width: 18,
+      height: 18,
+      borderRadius: 9,
+    },
+    filterSwatchDiamond: {
+      width: 14,
+      height: 14,
+      transform: [{ rotate: '45deg' }],
+    },
+    filterTextWrap: {
+      flex: 1,
+    },
+    filterLabel: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.textHeader,
+    },
+    filterHint: {
+      fontSize: 11,
+      color: colors.textSupplementary,
+      marginTop: 1,
+    },
+    filterToggle: {
+      width: 40,
+      height: 24,
+      borderRadius: 12,
+      backgroundColor: colors.divider,
+      padding: 2,
+      justifyContent: 'center',
+    },
+    filterToggleOn: {
+      backgroundColor: colors.brandPink,
+    },
+    filterToggleThumb: {
+      width: 20,
+      height: 20,
+      borderRadius: 10,
+      backgroundColor: colors.white,
+    },
+    filterToggleThumbOn: {
+      transform: [{ translateX: 16 }],
     },
   });
 

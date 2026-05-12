@@ -50,6 +50,7 @@ const V4_FIELDS = [
   'osm:contact:phone',
   'osm:contact:website',
   'osm:contact:email',
+  'osm:opening_hours',
   'osm:payment:lightning_address',
   'osm:lud16',
 ].join(',');
@@ -59,9 +60,9 @@ const DATASET_TTL_MS = 7 * 24 * 60 * 60 * 1_000; // 7 days
 // AsyncStorage key — namespaced so it's grepable + obviously
 // invalidatable from devtools. A single global dataset cache; v4 has
 // no bbox parameter so we fetch the whole world and filter in memory.
-// Bumped to `v4c` to invalidate caches written before `icon` + `osm_url`
+// Bumped to `v4d` to invalidate caches written before `opening_hours`
 // joined the parsed shape — old payloads would otherwise serve forever.
-const DATASET_STORAGE_KEY = '@lp:btcmap-dataset-v4c';
+const DATASET_STORAGE_KEY = '@lp:btcmap-dataset-v4d';
 
 export interface BtcMapPlace {
   id: number;
@@ -86,6 +87,7 @@ export interface BtcMapPlace {
      * the first one we find. */
     'payment:lightning_address'?: string;
     lud16?: string;
+    opening_hours?: string;
   };
   /**
    * Last time a community member confirmed the merchant still accepts
