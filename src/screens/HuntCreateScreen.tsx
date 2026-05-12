@@ -13,6 +13,9 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
+import { Asset } from 'expo-asset';
+import { File, Paths } from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import {
   Camera,
   CheckCircle2,
@@ -322,11 +325,53 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
             accessibilityLabel="Pink 3D-printed Lightning Piggy bag charm with NFC keyring"
           />
           <View style={styles.getPiggyButtonsRow}>
-            {/* 3D-print button hidden until github.com/BenGWeeks/lightning-piggy-3d
-              * exists — was 404'ing for every user. Tracked in issue
-              * #527; restore this block once the repo is published. */}
             <TouchableOpacity
-              style={[styles.getPiggyButton, styles.getPiggyButtonBuy, { flex: 1 }]}
+              style={[styles.getPiggyButton, styles.getPiggyButtonPrint]}
+              onPress={async () => {
+                try {
+                  // Resolve the bundled STL to a local file URI, then
+                  // copy into the cache dir with a friendly filename
+                  // before handing off to the OS share sheet (Android
+                  // file pickers won't preserve the require()-id
+                  // filename otherwise).
+                  const asset = Asset.fromModule(
+                    // eslint-disable-next-line @typescript-eslint/no-require-imports
+                    require('../../assets/3d/piggy-bag-charm.stl'),
+                  );
+                  await asset.downloadAsync();
+                  if (!asset.localUri) throw new Error('STL asset has no localUri after download');
+                  // expo-file-system SDK 55 ships a new class-based API
+                  // (Paths.cache, new File(...).copy()). Copying into the
+                  // cache dir under a friendly filename so the OS share
+                  // sheet shows "piggy-bag-charm.stl" instead of the
+                  // require-mangled asset name.
+                  const target = new File(Paths.cache, 'piggy-bag-charm.stl');
+                  if (target.exists) target.delete();
+                  const source = new File(asset.localUri);
+                  source.copy(target);
+                  if (await Sharing.isAvailableAsync()) {
+                    await Sharing.shareAsync(target.uri, {
+                      mimeType: 'model/stl',
+                      dialogTitle: 'Save Piggy Bag Charm STL',
+                      UTI: 'public.standard-tesselated-geometry-format',
+                    });
+                  }
+                } catch (e) {
+                  Toast.show({
+                    type: 'info',
+                    text1: 'Couldn’t share the STL',
+                    text2: (e as Error).message,
+                  });
+                }
+              }}
+              testID="get-a-piggy-print-button"
+              accessibilityLabel="Save Piggy Bag Charm STL"
+            >
+              <Printer size={18} color={colors.white} strokeWidth={2.5} />
+              <Text style={styles.getPiggyButtonText}>Save STL</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.getPiggyButton, styles.getPiggyButtonBuy]}
               onPress={() =>
                 Linking.openURL(
                   // NIP-99 classified listing (kind 30402) for the Lightning
