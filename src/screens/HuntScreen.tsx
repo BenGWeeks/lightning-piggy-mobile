@@ -35,6 +35,8 @@ import {
   haversineMetres,
 } from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
+import { useNearbyRadius } from '../hooks/useNearbyRadius';
+import { RADIUS_OPTIONS } from '../services/nearbyRadiusService';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -64,6 +66,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   // Web-of-trust filter. Refs so the subscription callback always
   // reads the current `isTrusted` predicate without resubscribing.
   const { isTrusted, filterEnabled, setFilterEnabled } = useTrustGraph();
+  const { radius: maxDistanceMetres, setRadius } = useNearbyRadius();
   const isTrustedRef = useRef(isTrusted);
   useEffect(() => {
     isTrustedRef.current = isTrusted;
@@ -134,8 +137,11 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
       return { cache, distance };
     });
     items.sort((a, b) => a.distance - b.distance);
+    if (maxDistanceMetres !== null) {
+      return items.filter(({ distance }) => distance <= maxDistanceMetres);
+    }
     return items;
-  }, [caches, pos]);
+  }, [caches, pos, maxDistanceMetres]);
 
   const filteredCaches = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -202,6 +208,30 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
                 autoCorrect={false}
                 testID="hunt-search-input"
               />
+            </View>
+
+            <View style={styles.filterRow} testID="hunt-distance-filter">
+              {RADIUS_OPTIONS.map((opt) => {
+                const active = maxDistanceMetres === opt.value;
+                return (
+                  <TouchableOpacity
+                    key={opt.label}
+                    style={[styles.filterChip, active ? styles.filterChipActive : null]}
+                    onPress={() => setRadius(opt.value)}
+                    testID={`hunt-distance-${opt.label.replace(/\s/g, '')}`}
+                    accessibilityLabel={`Show caches within ${opt.label}`}
+                  >
+                    <Text
+                      style={[
+                        styles.filterChipText,
+                        active ? styles.filterChipTextActive : null,
+                      ]}
+                    >
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
             <TouchableOpacity
@@ -314,7 +344,9 @@ const CacheRow: React.FC<{
       </Text>
       <Text style={styles.rowMeta} numberOfLines={1}>
         {cache.isLpPiggy ? 'Piglet' : 'NIP-GC cache'}
-        {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
+        {Number.isFinite(distance)
+          ? ` · ${distance < 50 ? 'Here' : formatDistance(distance)}`
+          : ''}
         {cache.cacheType ? ` · ${cache.cacheType}` : ''}
         {cache.size ? ` · ${cache.size}` : ''}
         {cache.difficulty ? ` · D${cache.difficulty}` : ''}
@@ -372,6 +404,31 @@ const createStyles = (colors: Palette) =>
       color: colors.textSupplementary,
       lineHeight: 17,
     },
+    filterRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+      paddingHorizontal: 16,
+      paddingBottom: 6,
+    },
+    filterChip: {
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.divider,
+      backgroundColor: 'transparent',
+    },
+    filterChipActive: {
+      backgroundColor: colors.brandPink,
+      borderColor: colors.brandPink,
+    },
+    filterChipText: {
+      fontSize: 12,
+      color: colors.textHeader,
+      fontWeight: '600',
+    },
+    filterChipTextActive: { color: colors.white },
     wotChip: {
       marginHorizontal: 16,
       marginTop: 4,

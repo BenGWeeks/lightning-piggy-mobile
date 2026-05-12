@@ -37,6 +37,7 @@ import {
   lightningAddressOf,
   refreshDataset,
 } from '../services/btcMapService';
+import { useNearbyRadius } from '../hooks/useNearbyRadius';
 import { type ParsedCache, type ParsedEvent } from '../services/nostrPlacesService';
 import { subscribeNearbyCaches, subscribeNearbyEvents } from '../services/nostrPlacesPublisher';
 import {
@@ -75,6 +76,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createExploreHomeScreenStyles(colors), [colors]);
   const localStyles = useMemo(() => createLocalStyles(colors), [colors]);
+  const { radius: maxDistanceMetres } = useNearbyRadius();
 
   // Perf marker — same hook scripts/perf-startup.sh consumes.
   const renderLoggedRef = useRef(false);
@@ -284,14 +286,17 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
   const sortedMerchants = useMemo(() => {
     if (!pos) return [] as { place: BtcMapPlace; distance: number }[];
-    return merchants
-      .map((place) => ({
-        place,
-        distance: haversineMetres(
-          { lat: pos.lat, lon: pos.lon },
-          { lat: place.lat, lon: place.lon },
-        ),
-      }))
+    let items = merchants.map((place) => ({
+      place,
+      distance: haversineMetres(
+        { lat: pos.lat, lon: pos.lon },
+        { lat: place.lat, lon: place.lon },
+      ),
+    }));
+    if (maxDistanceMetres !== null) {
+      items = items.filter((m) => m.distance <= maxDistanceMetres);
+    }
+    return items
       // Boosted merchants surface first on the rail (BTC Map's
       // paid-feature mechanism); within the same boost-bucket we still
       // sort by distance so the closest boosted / closest non-boosted
@@ -305,10 +310,10 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         return a.distance - b.distance;
       })
       .slice(0, 12);
-  }, [merchants, pos]);
+  }, [merchants, pos, maxDistanceMetres]);
 
   const sortedCaches = useMemo(() => {
-    const items = [...caches.values()].map((cache) => {
+    let items = [...caches.values()].map((cache) => {
       const center = cache.geohash ? decodeGeohash(cache.geohash) : null;
       const distance =
         pos && center
@@ -316,12 +321,15 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           : Number.POSITIVE_INFINITY;
       return { cache, distance };
     });
+    if (maxDistanceMetres !== null) {
+      items = items.filter((c) => c.distance <= maxDistanceMetres);
+    }
     items.sort((a, b) => a.distance - b.distance);
     return items.slice(0, 12);
-  }, [caches, pos]);
+  }, [caches, pos, maxDistanceMetres]);
 
   const sortedEvents = useMemo(() => {
-    const items = [...events.values()].map((event) => {
+    let items = [...events.values()].map((event) => {
       const center = event.geohash ? decodeGeohash(event.geohash) : null;
       const distance =
         pos && center
@@ -329,9 +337,12 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           : Number.POSITIVE_INFINITY;
       return { event, distance };
     });
+    if (maxDistanceMetres !== null) {
+      items = items.filter((e) => e.distance <= maxDistanceMetres);
+    }
     items.sort((a, b) => a.distance - b.distance);
     return items.slice(0, 12);
-  }, [events, pos]);
+  }, [events, pos, maxDistanceMetres]);
 
   return (
     <View style={styles.container}>

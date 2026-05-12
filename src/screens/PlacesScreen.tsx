@@ -35,6 +35,8 @@ import { formatDistance, haversineMetres } from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
 import BtcMapAttribution from '../components/BtcMapAttribution';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
+import { useNearbyRadius } from '../hooks/useNearbyRadius';
+import { RADIUS_OPTIONS } from '../services/nearbyRadiusService';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -57,6 +59,7 @@ interface Props {
 const PlacesScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const { radius: maxDistanceMetres, setRadius } = useNearbyRadius();
   const [places, setPlaces] = useState<BtcMapPlace[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -149,6 +152,9 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
   const filteredPlaces = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     let items = sortedPlaces;
+    if (maxDistanceMetres !== null) {
+      items = items.filter(({ distance }) => distance <= maxDistanceMetres);
+    }
     if (selectedCategories.size > 0) {
       items = items.filter(({ place }) =>
         (place.categories ?? []).some((c) => selectedCategories.has(c)),
@@ -171,7 +177,7 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [sortedPlaces, searchQuery, selectedCategories]);
+  }, [sortedPlaces, searchQuery, selectedCategories, maxDistanceMetres]);
 
   return (
     <View style={styles.container} testID="places-screen">
@@ -232,6 +238,30 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
           testID="places-search-input"
         />
       </View>
+
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.catChipsRow}
+        testID="places-distance-filter"
+      >
+        {RADIUS_OPTIONS.map((opt) => {
+          const active = maxDistanceMetres === opt.value;
+          return (
+            <TouchableOpacity
+              key={opt.label}
+              style={[styles.catChip, active ? styles.catChipOn : styles.catChipOff]}
+              onPress={() => setRadius(opt.value)}
+              testID={`places-distance-${opt.label.replace(/\s/g, '')}`}
+              accessibilityLabel={`Show places within ${opt.label}`}
+            >
+              <Text style={[styles.catChipText, active ? styles.catChipTextOn : null]}>
+                {opt.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
 
       {availableCategories.length > 0 ? (
         <ScrollView
