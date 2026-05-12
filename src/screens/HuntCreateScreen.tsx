@@ -358,6 +358,20 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
               />
             </TouchableOpacity>
           </View>
+          {/* Quick tag-spec hint up front — surfaces what to buy before
+            * the user clicks Buy/Print, so they don't come back with a
+            * Mifare Classic and find out it can't lock at NFC-write
+            * time. The full Supported-NFC-tags card stays below after
+            * Validate for the deeper "I'm actually writing the tag now"
+            * moment. */}
+          <View style={styles.getPiggyTagsHint}>
+            <Nfc size={12} color={colors.brandPink} strokeWidth={2.5} />
+            <Text style={styles.getPiggyTagsHintText}>
+              <Text style={styles.getPiggyTagsHintBold}>Tag chips:</Text>{' '}
+              NTAG213 / 215 / 216 (recommended), Mifare Ultralight C also fine. Avoid Mifare
+              Classic — it can't lock.
+            </Text>
+          </View>
         </View>
 
         <Text style={styles.sectionLabel}>LNURL-withdraw</Text>
@@ -787,6 +801,28 @@ const createStyles = (colors: Palette) =>
       height: 16,
       width: 70,
       marginLeft: 2,
+    },
+    getPiggyTagsHint: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 6,
+      marginTop: 8,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      borderRadius: 8,
+      backgroundColor: colors.background,
+      borderWidth: 1,
+      borderColor: colors.divider,
+    },
+    getPiggyTagsHintText: {
+      flex: 1,
+      fontSize: 11,
+      lineHeight: 15,
+      color: colors.textSupplementary,
+    },
+    getPiggyTagsHintBold: {
+      fontWeight: '700',
+      color: colors.textHeader,
     },
     sectionLabel: {
       fontSize: 13,
