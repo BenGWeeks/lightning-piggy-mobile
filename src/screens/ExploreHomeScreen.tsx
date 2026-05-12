@@ -168,10 +168,13 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         // to ~50 km surfaces the closest drive-away merchants on the
         // rail without paying for a country-wide query.
         const places = await fetchPlacesInBbox({
-          minLon: pos.lon - 0.5,
-          minLat: pos.lat - 0.5,
-          maxLon: pos.lon + 0.5,
-          maxLat: pos.lat + 0.5,
+          // ±2° (~220 km half-side) — keeps parity with PlacesScreen so
+          // zooming out on the hub mini-map surfaces the same merchant
+          // set the list page would. In-memory filter, no network cost.
+          minLon: pos.lon - 2,
+          minLat: pos.lat - 2,
+          maxLon: pos.lon + 2,
+          maxLat: pos.lat + 2,
         });
         if (!cancelled) setMerchants(places);
       } catch {

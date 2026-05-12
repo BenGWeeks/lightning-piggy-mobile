@@ -96,14 +96,17 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
         lon = fix.coords.longitude;
       }
       setPos({ lat, lon });
-      // Wide bbox (~50 km half-side) so rural users see drive-away
-      // merchants too. Service caches in AsyncStorage with a 7-day
-      // TTL — see `btcMapService`.
+      // ±2° (~220 km half-side) — wider than the on-screen mini-map's
+      // min-zoom bbox so the user can zoom out and still see merchants.
+      // The BTC Map dataset is already fully in memory; bbox filtering
+      // is an O(28k) in-memory walk, so a wider window costs nothing.
+      // Earlier ±0.5° (~55 km) capped the on-screen list at ~38 km no
+      // matter how far the user zoomed out — felt like a load bug.
       const list = await fetchPlacesInBbox({
-        minLon: lon - 0.5,
-        minLat: lat - 0.5,
-        maxLon: lon + 0.5,
-        maxLat: lat + 0.5,
+        minLon: lon - 2,
+        minLat: lat - 2,
+        maxLon: lon + 2,
+        maxLat: lat + 2,
       });
       setPlaces(list);
       lastReloadRef.current = Date.now();
