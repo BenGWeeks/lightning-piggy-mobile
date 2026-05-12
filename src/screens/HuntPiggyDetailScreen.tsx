@@ -37,6 +37,7 @@ import type { VerifiedEvent } from 'nostr-tools';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useNostr } from '../contexts/NostrContext';
 import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
+import ContactProfileSheet from '../components/ContactProfileSheet';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation, ExploreStackParamList } from '../navigation/types';
 import { Alert } from '../components/BrandedAlert';
@@ -112,6 +113,25 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   // time but only reveal in the UI when the hunter explicitly taps —
   // that preserves the "stuck? unhide" experience geocachers expect.
   const [hintRevealed, setHintRevealed] = useState(false);
+  // Reusable contact profile bottom sheet — opened when the user taps
+  // the hider's row at the top of the screen or any find-log row.
+  const [profileSheet, setProfileSheet] = useState<{
+    pubkey: string;
+    name: string;
+    picture: string | null;
+    lightningAddress: string | null;
+  } | null>(null);
+  const openProfileSheet = useCallback(
+    (pubkey: string, name: string | null, picture: string | null, lud16: string | null) => {
+      setProfileSheet({
+        pubkey,
+        name: name ?? `${pubkey.slice(0, 8)}…${pubkey.slice(-4)}`,
+        picture,
+        lightningAddress: lud16,
+      });
+    },
+    [],
+  );
   const [hasClaimed, setHasClaimed] = useState(false);
   const closerRef = useRef<(() => void) | null>(null);
 
@@ -333,6 +353,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               pubkey={cache.hiderPubkey}
               colors={colors}
               styles={styles}
+              onPressProfile={openProfileSheet}
             />
             {cache.hint ? (
               <TouchableOpacity
@@ -386,7 +407,13 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               </Text>
             ) : (
               sortedLogs.map((log) => (
-                <LogRow key={log.id} log={log} colors={colors} styles={styles} />
+                <LogRow
+                  key={log.id}
+                  log={log}
+                  colors={colors}
+                  styles={styles}
+                  onPressProfile={openProfileSheet}
+                />
               ))
             )}
 
@@ -472,6 +499,31 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           </>
         ) : null}
       </ScrollView>
+
+      <ContactProfileSheet
+        visible={profileSheet !== null}
+        onClose={() => setProfileSheet(null)}
+        contact={
+          profileSheet
+            ? {
+                pubkey: profileSheet.pubkey,
+                name: profileSheet.name,
+                picture: profileSheet.picture,
+                lightningAddress: profileSheet.lightningAddress,
+                source: 'nostr',
+              }
+            : null
+        }
+        onZap={
+          profileSheet?.lightningAddress
+            ? () => {
+                const lud16 = profileSheet.lightningAddress!;
+                setProfileSheet(null);
+                Linking.openURL(`lightning:${lud16}`).catch(() => {});
+              }
+            : undefined
+        }
+      />
     </View>
   );
 };
@@ -486,11 +538,22 @@ const HiderAttribution: React.FC<{
   pubkey: string;
   colors: Palette;
   styles: ReturnType<typeof createStyles>;
-}> = ({ pubkey, colors, styles }) => {
-  const { name, picture } = usePubkeyProfile(pubkey);
+  onPressProfile: (
+    pubkey: string,
+    name: string | null,
+    picture: string | null,
+    lud16: string | null,
+  ) => void;
+}> = ({ pubkey, colors, styles, onPressProfile }) => {
+  const { name, picture, lud16 } = usePubkeyProfile(pubkey);
   const display = name ?? `${pubkey.slice(0, 8)}…${pubkey.slice(-4)}`;
   return (
-    <View style={styles.hiderRow} testID="hunt-piggy-detail-attribution">
+    <TouchableOpacity
+      style={styles.hiderRow}
+      testID="hunt-piggy-detail-attribution"
+      onPress={() => onPressProfile(pubkey, name, picture, lud16)}
+      accessibilityLabel={`Open ${display} profile`}
+    >
       {picture ? (
         <Image source={{ uri: picture }} style={styles.hiderAvatar} />
       ) : (
@@ -506,7 +569,7 @@ const HiderAttribution: React.FC<{
           Verify you trust them before going to the location.
         </Text>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 };
 
@@ -514,7 +577,13 @@ const LogRow: React.FC<{
   log: FoundLog;
   colors: Palette;
   styles: ReturnType<typeof createStyles>;
-}> = ({ log, colors, styles }) => {
+  onPressProfile: (
+    pubkey: string,
+    name: string | null,
+    picture: string | null,
+    lud16: string | null,
+  ) => void;
+}> = ({ log, colors, styles, onPressProfile }) => {
   const { name, picture, lud16 } = usePubkeyProfile(log.pubkey);
   const display = name ?? `${log.pubkey.slice(0, 8)}…${log.pubkey.slice(-4)}`;
   const ageMins = Math.floor((Date.now() / 1000 - log.createdAt) / 60);
@@ -526,7 +595,12 @@ const LogRow: React.FC<{
         : `${Math.floor(ageMins / (60 * 24))}d ago`;
   return (
     <View style={styles.logRow} testID={`hunt-log-${log.id.slice(0, 8)}`}>
-      <View style={styles.logHeader}>
+      <TouchableOpacity
+        style={styles.logHeader}
+        onPress={() => onPressProfile(log.pubkey, name, picture, lud16)}
+        testID={`hunt-log-${log.id.slice(0, 8)}-profile`}
+        accessibilityLabel={`Open ${display} profile`}
+      >
         {picture ? (
           <Image source={{ uri: picture }} style={styles.logAvatar} />
         ) : (
@@ -557,7 +631,7 @@ const LogRow: React.FC<{
             <Text style={styles.logZapText}>Zap</Text>
           </TouchableOpacity>
         ) : null}
-      </View>
+      </TouchableOpacity>
       {log.imageUrl ? (
         <Image source={{ uri: log.imageUrl }} style={styles.logImage} resizeMode="cover" />
       ) : null}
