@@ -208,6 +208,12 @@ map.on('zoomend',emitBounds);
 window.LP_zoomBy=function(delta){
   map.setZoom(map.getZoom()+delta);
 };
+// Tracks whether the user has interacted with zoom; once true we
+// never re-centre on LP_setHub. Without this, a late-arriving relay
+// event (caches stream in for several seconds) would call setView
+// and snap the viewport back, undoing the user's zoom out.
+let userHasInteracted=false;
+map.on('zoomstart',function(e){if(e.zoom!==undefined)userHasInteracted=true;});
 window.LP_setHub=function(d){
   merchantLayer.clearLayers();cacheLayer.clearLayers();eventLayer.clearLayers();
   if(meMarker)map.removeLayer(meMarker);
@@ -215,15 +221,25 @@ window.LP_setHub=function(d){
   d.merchants.forEach(m=>L.marker([m.lat,m.lng],{icon:dot('lp-pin'+(m.lightning?'':' onchain'),14)}).addTo(merchantLayer));
   d.caches.forEach(c=>L.marker([c.lat,c.lng],{icon:dot('lp-cache'+(c.kind==='piggy'?' piggy':''),14)}).addTo(cacheLayer));
   d.events.forEach(e=>L.marker([e.lat,e.lng],{icon:dot('lp-event',14)}).addTo(eventLayer));
-  // Always centre on the user at a consistent neighbourhood zoom.
-  // A previous version used fitBounds across user + every merchant,
-  // but a 50 km BTC Map bbox spans Cambridge → London → Norwich for
-  // rural users and Leaflet picked zoom ~9, which zooms out so far
-  // the user dot disappears. Pins outside the viewport still render
-  // when the user scrolls / opens the full map.
-  map.setView([d.me.lat,d.me.lng],13);
+  // Only re-centre on the very first LP_setHub. After that the user's
+  // viewport is sacred — late-arriving caches / events would otherwise
+  // snap the map back and undo any zoom out.
+  if(!userHasInteracted && !window.__lpDidCentre){
+    map.setView([d.me.lat,d.me.lng],13);
+    window.__lpDidCentre=true;
+  }
+  emitBounds();
 };
+// Tag the LP_zoomBy entry-point too so RN-button taps mark interaction
+// before zoomstart fires (covers a race where zoomstart's event.zoom
+// is undefined on programmatic setZoom calls).
+const __origZoomBy=window.LP_zoomBy;
+window.LP_zoomBy=function(delta){userHasInteracted=true;__origZoomBy(delta);};
 post({type:'ready'});
+// Also emit straight away — covers the case where LP_setHub hasn't
+// been called yet (parent has no data) but the map already shows the
+// injected viewport from LP_initialViewport or the HTML default.
+emitBounds();
 </script>
 </body></html>`;
 

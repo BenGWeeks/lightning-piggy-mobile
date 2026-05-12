@@ -80,6 +80,11 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   // only make sense for caches.
   const [maxDifficulty, setMaxDifficulty] = useState<number | null>(null);
   const [maxTerrain, setMaxTerrain] = useState<number | null>(null);
+  // Cache type filter — empty set = show every type (default). Built
+  // dynamically from whatever types are present in the current caches
+  // dataset; selected entries OR together so the list doesn't filter
+  // to zero when a hider uses an unusual cache type.
+  const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
   const isTrustedRef = useRef(isTrusted);
   useEffect(() => {
     isTrustedRef.current = isTrusted;
@@ -174,8 +179,17 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
     if (maxTerrain !== null) {
       items = items.filter(({ cache }) => (cache.terrain ?? 1) <= maxTerrain);
     }
+    if (selectedTypes.size > 0) {
+      items = items.filter(({ cache }) => cache.cacheType ? selectedTypes.has(cache.cacheType) : false);
+    }
     return items;
-  }, [caches, pos, mapBbox, maxDifficulty, maxTerrain]);
+  }, [caches, pos, mapBbox, maxDifficulty, maxTerrain, selectedTypes]);
+
+  const availableTypes = useMemo(() => {
+    const seen = new Set<string>();
+    for (const c of caches.values()) if (c.cacheType) seen.add(c.cacheType);
+    return [...seen].sort();
+  }, [caches]);
 
   const filteredCaches = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -294,6 +308,38 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
                 );
               })}
             </View>
+
+            {availableTypes.length > 0 ? (
+              <View style={styles.filterRow} testID="hunt-type-filter">
+                <Text style={styles.filterLabel}>Type</Text>
+                {availableTypes.map((t) => {
+                  const active = selectedTypes.has(t);
+                  return (
+                    <TouchableOpacity
+                      key={t}
+                      style={[styles.filterChip, active ? styles.filterChipActive : null]}
+                      onPress={() => {
+                        const next = new Set(selectedTypes);
+                        if (next.has(t)) next.delete(t);
+                        else next.add(t);
+                        setSelectedTypes(next);
+                      }}
+                      testID={`hunt-type-${t}`}
+                      accessibilityLabel={`Filter to ${t} caches`}
+                    >
+                      <Text
+                        style={[
+                          styles.filterChipText,
+                          active ? styles.filterChipTextActive : null,
+                        ]}
+                      >
+                        {t}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ) : null}
 
             <TouchableOpacity
               style={[
