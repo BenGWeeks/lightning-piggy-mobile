@@ -76,9 +76,9 @@ name: All cached surfaces render on cold start without internet
 - waitForAnimationToEnd:
     timeout: 4000
 - assertVisible:
-    id: 'hunt-screen'
+    id: 'geocaches-screen'
 - tapOn:
-    id: 'hunt-discover-back-button'
+    id: 'hunt-back-button'
 - waitForAnimationToEnd:
     timeout: 2000
 
