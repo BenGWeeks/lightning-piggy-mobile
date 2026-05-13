@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { ChevronDown, ChevronUp, ShieldCheck, ShieldOff, X } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useGroups } from '../contexts/GroupsContext';
 import type { Palette } from '../styles/palettes';
 
 // NIP-GC difficulty + terrain scales (geocaching.com convention adopted
@@ -80,6 +81,9 @@ const HuntFilterSheet: React.FC<Props> = ({
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  // Web-of-Trust off is a "secret mode" feature — only tappable after the
+  // user triple-taps the version label on About to unlock devMode at runtime.
+  const { devMode } = useGroups();
   // Glossary is hidden by default — most users don't need it after
   // the first read. Each scale + the type vocab gets its own toggle.
   const [showDifficultyGloss, setShowDifficultyGloss] = useState(false);
@@ -131,7 +135,7 @@ const HuntFilterSheet: React.FC<Props> = ({
           <TouchableOpacity
             style={[styles.wotChip, wotFilterEnabled ? styles.wotChipOn : styles.wotChipOff]}
             onPress={onToggleWotFilter}
-            disabled={!__DEV__ && process.env.EXPO_PUBLIC_KEEP_PERF_LOGS !== '1'}
+            disabled={!devMode}
             testID="hunt-filter-wot-chip"
           >
             {wotFilterEnabled ? (
@@ -144,7 +148,7 @@ const HuntFilterSheet: React.FC<Props> = ({
                 ? wotUntrustedHidden > 0
                   ? `Web-of-Trust on • ${wotUntrustedHidden} hidden`
                   : 'Web-of-Trust on'
-                : 'Web-of-Trust off (dev)'}
+                : 'Web-of-Trust off (secret)'}
             </Text>
           </TouchableOpacity>
           {wotFilterEnabled ? (

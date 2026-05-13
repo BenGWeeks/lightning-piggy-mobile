@@ -48,11 +48,14 @@ const AboutScreen: React.FC = () => {
   const versionTapCount = useRef(0);
   const versionTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Fold dev into the build-number parenthetical so screen readers don't say "(build 13) (dev)".
+  // Fold the unlocked-mode marker into the build-number parenthetical so
+  // screen readers don't say "(build 13) (secret)". Internally we keep the
+  // `dev_mode` storage key + `devMode` state name for backwards compat with
+  // existing installs; user-facing copy says "secret" everywhere.
   const displayVersionLabel = devMode
     ? appVersionLabel.endsWith(')')
-      ? `${appVersionLabel.slice(0, -1)}, dev)`
-      : `${appVersionLabel} (dev)`
+      ? `${appVersionLabel.slice(0, -1)}, secret)`
+      : `${appVersionLabel} (secret)`
     : appVersionLabel;
 
   useEffect(() => {
@@ -117,10 +120,10 @@ const AboutScreen: React.FC = () => {
       setDevMode(newMode);
       AsyncStorage.setItem('dev_mode', newMode ? 'true' : 'false');
       Alert.alert(
-        newMode ? 'Developer Mode Enabled' : 'Developer Mode Disabled',
+        newMode ? 'Secret Mode Enabled' : 'Secret Mode Disabled',
         newMode
-          ? 'Dev features unlocked: hot wallet import in Add Wallet, "Following only" toggle on Messages and Groups tabs, and other in-app debug surfaces.'
-          : 'Dev features hidden. Restart the app if any toggle still appears.',
+          ? 'Secret features unlocked: hot wallet import in Add Wallet, "Following only" toggle on Messages and Groups tabs, the Web-of-Trust off chip on Hunt / Events filters, and other in-app debug surfaces.'
+          : 'Secret features hidden. Restart the app if any toggle still appears.',
       );
     } else {
       // Maestro tapOn cadence on Android emulator is ~400ms each, so 3 taps need >1s. Widen window in dev builds only.

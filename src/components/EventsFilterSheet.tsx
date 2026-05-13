@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { ShieldCheck, ShieldOff, X } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useGroups } from '../contexts/GroupsContext';
 import type { Palette } from '../styles/palettes';
 
 // Distance + date options live next to the component so the sheet
@@ -58,6 +59,10 @@ const EventsFilterSheet: React.FC<Props> = ({
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  // Web-of-Trust off is gated on runtime "secret mode" (triple-tap the
+  // version on About to unlock) — keeps prod users behind the WoT lure
+  // filter while letting power users + QA flip it.
+  const { devMode } = useGroups();
 
   const anyActive = maxDistanceMetres !== null || maxFromNowSec !== null || !wotFilterEnabled;
 
@@ -93,7 +98,7 @@ const EventsFilterSheet: React.FC<Props> = ({
           <TouchableOpacity
             style={[styles.wotChip, wotFilterEnabled ? styles.wotChipOn : styles.wotChipOff]}
             onPress={onToggleWotFilter}
-            disabled={!__DEV__ && process.env.EXPO_PUBLIC_KEEP_PERF_LOGS !== '1'}
+            disabled={!devMode}
             testID="events-filter-wot-chip"
           >
             {wotFilterEnabled ? (
@@ -106,7 +111,7 @@ const EventsFilterSheet: React.FC<Props> = ({
                 ? wotUntrustedHidden > 0
                   ? `Web-of-Trust on • ${wotUntrustedHidden} hidden`
                   : 'Web-of-Trust on'
-                : 'Web-of-Trust off (dev)'}
+                : 'Web-of-Trust off (secret)'}
             </Text>
           </TouchableOpacity>
           {wotFilterEnabled ? (
