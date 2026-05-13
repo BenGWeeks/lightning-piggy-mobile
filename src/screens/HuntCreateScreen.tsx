@@ -606,7 +606,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
             )}
             <Text style={styles.helper}>
               Stored locally so you can find your own Piggy later. Only published to Nostr (as the
-              kind-30408 `g` tag) if you toggle Public below.
+              kind 37516 `g` tag) if you toggle Public below.
             </Text>
 
             <Text style={[styles.sectionLabel, styles.sectionGap]}>Discoverability</Text>
@@ -622,7 +622,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
               <View style={styles.publicTextWrapper}>
                 <Text style={styles.publicTitle}>Make this Piggy public</Text>
                 <Text style={styles.publicSub}>
-                  Publishes to Nostr (kind-30408) so strangers can hunt for it. You can opt out per
+                  Publishes to Nostr (kind 37516) so strangers can hunt for it. You can opt out per
                   Piggy.
                 </Text>
               </View>

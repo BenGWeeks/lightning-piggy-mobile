@@ -107,27 +107,33 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     let cancelled = false;
     (async () => {
       try {
-        const pinned = getDevPinnedLocation();
-        let lat: number;
-        let lon: number;
-        if (pinned) {
-          lat = pinned.lat;
-          lon = pinned.lon;
-        } else {
-          const perm = await Location.requestForegroundPermissionsAsync();
-          if (perm.status !== 'granted') {
-            setError('Location permission required.');
-            setLoading(false);
-            return;
+        // Location is a *nice-to-have* on PlaceDetail — it powers the
+        // "X km away" chip and the Directions button. Without it the
+        // page still shows everything else about the merchant, so we
+        // shouldn't block rendering on permission. Try silently and
+        // fall through either way (Copilot review on PR #488 flagged
+        // the previous flow as a UX blocker: tap merchant → "Location
+        // permission required" instead of the merchant detail).
+        try {
+          const pinned = getDevPinnedLocation();
+          if (pinned) {
+            if (!cancelled) setPos({ lat: pinned.lat, lon: pinned.lon });
+          } else {
+            const perm = await Location.requestForegroundPermissionsAsync();
+            if (perm.status === 'granted') {
+              const fix = await Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.Balanced,
+              });
+              if (!cancelled) {
+                setPos({ lat: fix.coords.latitude, lon: fix.coords.longitude });
+              }
+            }
           }
-          const fix = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
-          });
-          lat = fix.coords.latitude;
-          lon = fix.coords.longitude;
+        } catch {
+          // Location lookup failed — keep going, `pos` stays null and the
+          // distance chip + Directions row hide themselves.
         }
         if (cancelled) return;
-        setPos({ lat, lon });
         // Fast path: look up the single place by id from the in-memory
         // BTC Map dataset (or hydrate from AsyncStorage). Avoids the
         // 28k-row bbox filter we used to run just to .find() one item,

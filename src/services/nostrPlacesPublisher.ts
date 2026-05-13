@@ -171,3 +171,25 @@ export const fetchCache = async (
   events.sort((a: NostrEvent, b: NostrEvent) => b.created_at - a.created_at);
   return parseCache(events[0] as VerifiedEvent);
 };
+
+/**
+ * One-shot lookup for a single NIP-52 calendar event by coord. Used by
+ * EventDetailScreen on mount when the event isn't in the AsyncStorage
+ * mirror (deep-link, Share / Linking handoff). Without this fallback the
+ * screen settles on a permanent "This event isn't in our local feed"
+ * empty state — Copilot review on PR #488 flagged the regression.
+ */
+export const fetchEvent = async (
+  organiserPubkey: string,
+  d: string,
+  relays: string[] = DEFAULT_RELAYS,
+): Promise<ParsedEvent | null> => {
+  const events = await pool.querySync(relays, {
+    kinds: [NIP52_TIME_BASED_KIND],
+    authors: [organiserPubkey],
+    '#d': [d],
+  });
+  if (events.length === 0) return null;
+  events.sort((a: NostrEvent, b: NostrEvent) => b.created_at - a.created_at);
+  return parseNip52Event(events[0] as VerifiedEvent);
+};

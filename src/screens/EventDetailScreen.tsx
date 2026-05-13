@@ -28,6 +28,8 @@ import type { Palette } from '../styles/palettes';
 import { ExploreNavigation, ExploreStackParamList } from '../navigation/types';
 import type { ParsedEvent } from '../services/nostrPlacesService';
 import { loadCachedEvents, peekCachedEventsSync } from '../services/nostrPlacesStorage';
+import { fetchEvent } from '../services/nostrPlacesPublisher';
+import { useNostr } from '../contexts/NostrContext';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
 import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
 import ContactProfileSheet from '../components/ContactProfileSheet';
@@ -92,19 +94,39 @@ const EventDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const [loading, setLoading] = useState(event === null);
   const [profileSheetOpen, setProfileSheetOpen] = useState(false);
 
+  const { relays } = useNostr();
   useEffect(() => {
     if (event !== null) return;
     let cancelled = false;
-    loadCachedEvents().then((events) => {
+    (async () => {
+      const cached = await loadCachedEvents();
       if (cancelled) return;
-      const found = events.find((e) => e.coord === coord);
-      if (found) setEvent(found);
+      const fromDisk = cached.find((e) => e.coord === coord);
+      if (fromDisk) {
+        setEvent(fromDisk);
+        setLoading(false);
+        return;
+      }
+      // Cache miss — fall through to a relay round-trip. Covers
+      // deep-link / share opens where the event was never streamed
+      // into the local NIP-52 mirror. Per the Copilot review on
+      // PR #488: without this branch the screen settles permanently
+      // on "This event isn't in our local feed".
+      const parts = coord.split(':');
+      if (parts.length >= 3) {
+        const organiserPubkey = parts[1];
+        const d = parts.slice(2).join(':');
+        const readRelays = relays.filter((r) => r.read).map((r) => r.url);
+        const fromRelays = await fetchEvent(organiserPubkey, d, readRelays).catch(() => null);
+        if (cancelled) return;
+        if (fromRelays) setEvent(fromRelays);
+      }
       setLoading(false);
-    });
+    })();
     return () => {
       cancelled = true;
     };
-  }, [coord, event]);
+  }, [coord, event, relays]);
 
   const organiser = usePubkeyProfile(event?.organiserPubkey ?? null);
   const organiserName =

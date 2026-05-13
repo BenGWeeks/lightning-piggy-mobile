@@ -18,6 +18,11 @@
 #
 # Pre-reqs:
 #   - Device is unlocked + on Home/launcher
+#   - **Run against a production / preview APK, not the `.dev` variant.**
+#     The dev variant fetches its JS bundle from Metro at every cold
+#     start, so disabling network leaves it stuck on "Unable to load
+#     script". The production + preview builds embed the JS, which is
+#     exactly the offline-cold-start path the test is meant to cover.
 #   - App has been opened at least once so caches exist on disk
 #     (BTC Map dataset, NIP-GC + NIP-52 events, contacts, tx list, etc.)
 #

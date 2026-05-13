@@ -32,6 +32,15 @@ const empty: PubkeyProfileSlice = { name: null, picture: null, lud16: null, load
 
 export const usePubkeyProfile = (pubkey: string | null | undefined): PubkeyProfileSlice => {
   const { relays } = useNostr();
+  // Stable serialised key — NostrContext re-emits a fresh `relays`
+  // array reference on every kind-10002 update, which would otherwise
+  // re-fire the fetchProfile effect across every mounted screen.
+  // Per Copilot review on PR #488.
+  const readRelaysKey = relays
+    .filter((r) => r.read)
+    .map((r) => r.url)
+    .sort()
+    .join('|');
   const [slice, setSlice] = useState<PubkeyProfileSlice>(empty);
 
   useEffect(() => {
@@ -58,7 +67,7 @@ export const usePubkeyProfile = (pubkey: string | null | undefined): PubkeyProfi
       // Always also try the relay (cheap when already known, fills in
       // lud16 / refreshes a stale name). Use the user's configured read
       // relays; PROFILE_RELAYS is unioned in `fetchProfile`.
-      const readRelays = relays.filter((r) => r.read).map((r) => r.url);
+      const readRelays = readRelaysKey.split('|').filter(Boolean);
       const profile: NostrProfile | null = await nostrService
         .fetchProfile(pubkey, readRelays)
         .catch(() => null);
@@ -94,7 +103,7 @@ export const usePubkeyProfile = (pubkey: string | null | undefined): PubkeyProfi
     return () => {
       cancelled = true;
     };
-  }, [pubkey, relays]);
+  }, [pubkey, readRelaysKey]);
 
   return slice;
 };
