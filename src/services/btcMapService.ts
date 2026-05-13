@@ -102,12 +102,18 @@ const V4_FIELDS_RICH = [
 
 const FETCH_TIMEOUT_MS = 45_000;
 const DATASET_TTL_MS = 7 * 24 * 60 * 60 * 1_000; // 7 days
+// Background delta-sync cadence — if the cached dataset's last sync is
+// older than this when the bbox is queried, fire a fire-and-forget delta
+// merge. Short enough that "the listing I added yesterday is here" feels
+// snappy; long enough that opening Explore twice in a minute doesn't
+// hammer the API.
+const SYNC_STALE_MS = 60 * 60 * 1_000; // 1 hour
 // AsyncStorage key — namespaced so it's grepable + obviously
 // invalidatable from devtools. A single global dataset cache; v4 has
 // no bbox parameter so we fetch the whole world and filter in memory.
 // Bumped to `v4s` (slim) when the bulk fetch was trimmed to list-only
 // fields; legacy v4i caches are ignored on hydrate.
-const DATASET_STORAGE_KEY = '@lp:btcmap-dataset-v4t';
+const DATASET_STORAGE_KEY = '@lp:btcmap-dataset-v4u';
 
 export interface BtcMapPlace {
   id: number;
@@ -205,7 +211,15 @@ export interface BtcMapPlace {
 }
 
 interface CachedDataset {
+  /** ms — when the full bulk dump was last fetched. Drives the 7-day TTL. */
   fetchedAt: number;
+  /**
+   * ms — when we last successfully synced (bulk fetch OR delta merge).
+   * Used as the `updated_since` cursor for the next delta call so warm
+   * launches pay only for places that changed since this timestamp.
+   * Always >= fetchedAt.
+   */
+  syncedAt: number;
   places: BtcMapPlace[];
 }
 
@@ -309,7 +323,7 @@ const reshape = (raw: Record<string, unknown>): BtcMapPlace | null => {
 // — the v4i dataset is ~22 MB so every persist was silently failing
 // with SQLITE_FULL. Writing to the document sandbox via
 // expo-file-system has no such limit and survives app upgrades.
-const datasetFile = () => new File(Paths.document, 'btcmap-dataset-v4t.json');
+const datasetFile = () => new File(Paths.document, 'btcmap-dataset-v4u.json');
 
 // One-shot hydration. Runs on first `fetchPlacesInBbox` call, not at
 // module load, because RN evaluates this file early in the bundle and
@@ -333,11 +347,23 @@ const hydrateFromStorage = async (): Promise<void> => {
         return;
       }
       const raw = await f.text();
-      const parsed = JSON.parse(raw) as CachedDataset;
+      const parsed = JSON.parse(raw) as Partial<CachedDataset>;
       // Only populate memoryDataset if it's still empty — a parallel
-      // network fetch may have raced ahead with fresher data.
-      if (!memoryDataset && parsed && Array.isArray(parsed.places) && isFresh(parsed)) {
-        memoryDataset = parsed;
+      // network fetch may have raced ahead with fresher data. Fill in
+      // `syncedAt` from `fetchedAt` for legacy entries that pre-date
+      // the delta-sync support.
+      if (
+        !memoryDataset &&
+        parsed &&
+        Array.isArray(parsed.places) &&
+        typeof parsed.fetchedAt === 'number' &&
+        isFresh(parsed as CachedDataset)
+      ) {
+        memoryDataset = {
+          fetchedAt: parsed.fetchedAt,
+          syncedAt: typeof parsed.syncedAt === 'number' ? parsed.syncedAt : parsed.fetchedAt,
+          places: parsed.places,
+        };
       }
     } catch {
       // Corrupt or unreadable cache shouldn't break the merchant fetch —
@@ -373,11 +399,12 @@ const fetchDataset = async (): Promise<CachedDataset> => {
       signal: controller.signal,
     });
     if (!res.ok) throw new Error(`BTC Map v4 ${res.status}`);
+    const startedAt = Date.now();
     const json = (await res.json()) as Record<string, unknown>[];
     const places = (Array.isArray(json) ? json : [])
       .map(reshape)
       .filter((p): p is BtcMapPlace => p !== null);
-    const dataset: CachedDataset = { fetchedAt: Date.now(), places };
+    const dataset: CachedDataset = { fetchedAt: startedAt, syncedAt: startedAt, places };
     memoryDataset = dataset;
     persistToStorage(dataset);
     return dataset;
@@ -386,26 +413,86 @@ const fetchDataset = async (): Promise<CachedDataset> => {
   }
 };
 
+// Delta-sync. Calls v4 with `updated_since=<lastSync>` so we pull only
+// records changed/deleted since the cached dataset was last synced.
+// Matches btcmap.org's own warm-start strategy (per their AGENTS.md +
+// sync/places.ts) — typical delta is tens of KB rather than several MB.
+//
+// `deleted_at` rows are dropped from memoryDataset; live rows are
+// upserted by id. memoryDataset.syncedAt advances to `startedAt` so the
+// next sync only needs the new tail. Fire-and-forget — failures are
+// non-fatal (we'll retry on the next bbox call).
+let syncInFlight: Promise<void> | null = null;
+const syncDelta = async (since: number): Promise<void> => {
+  if (syncInFlight) return syncInFlight;
+  syncInFlight = (async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const sinceIso = new Date(since).toISOString();
+      const url =
+        `${BTCMAP_V4_PLACES_URL}?fields=${encodeURIComponent(V4_FIELDS)}` +
+        `&updated_since=${encodeURIComponent(sinceIso)}&include_deleted=true`;
+      const startedAt = Date.now();
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        signal: controller.signal,
+      });
+      if (!res.ok) return;
+      const json = (await res.json()) as Record<string, unknown>[];
+      if (!Array.isArray(json) || !memoryDataset) return;
+      const placesById = new Map(memoryDataset.places.map((p) => [p.id, p]));
+      for (const raw of json) {
+        const id = raw['id'];
+        if (typeof id !== 'number') continue;
+        // Deleted rows carry a `deleted_at` string. Strip them.
+        if (typeof raw['deleted_at'] === 'string') {
+          placesById.delete(id);
+          continue;
+        }
+        const reshaped = reshape(raw);
+        if (reshaped) placesById.set(id, reshaped);
+      }
+      memoryDataset = {
+        ...memoryDataset,
+        syncedAt: startedAt,
+        places: Array.from(placesById.values()),
+      };
+      persistToStorage(memoryDataset);
+    } catch {
+      // Sync is best-effort; retry on next bbox call.
+    } finally {
+      clearTimeout(timer);
+      syncInFlight = null;
+    }
+  })();
+  return syncInFlight;
+};
+
 /**
- * Fetch merchants in a bounding box. Returns cached results if the
- * global dataset is still fresh; otherwise refreshes from v4 and then
- * filters. Caller should debounce on map-pan/zoom so we're not
- * re-filtering on every gesture frame (the filter itself is O(n)
- * over ~28k items — millisecond-fast, but still worth debouncing).
+ * Fetch merchants in a bounding box. If a fresh cache exists, returns
+ * its bbox-filtered slice immediately and kicks off a fire-and-forget
+ * delta-sync to apply server-side changes since `syncedAt`. Otherwise
+ * does a full network fetch.
+ *
+ * Implementation notes:
+ *  - We never `await` hydrate inside this call. On Android, reading the
+ *    ~5 MB cache file blocks the JS thread for several seconds —
+ *    slower than a fresh `fetchDataset` call. `prefetchDataset()`
+ *    (called on ExploreHome mount) kicks hydrate off in the background
+ *    so by the time the user reaches Places it has usually settled.
+ *  - Delta sync only runs when the cached `syncedAt` is older than
+ *    `SYNC_STALE_MS` (1h). Within an hour, repeated bbox calls reuse
+ *    `memoryDataset` with no network traffic at all.
+ *  - The bbox filter is O(n) over the global set (~28k rows); callers
+ *    should debounce map-pan / zoom so this doesn't run per frame.
  */
 export const fetchPlacesInBbox = async (bbox: Bbox): Promise<BtcMapPlace[]> => {
-  // Race: hydrate-from-disk vs network-fetch. Whichever populates
-  // memoryDataset first wins.
-  //
-  // On Android, `File.text()` on the 13 MB slim cache blocks the JS
-  // thread for ~19 s — slower than a fresh `fetchDataset` call (~7 s
-  // network + ~400 ms JSON.parse). So we never `await` hydrate inside
-  // the bbox call: `prefetchDataset()` (called on ExploreHome mount)
-  // kicked it off in the background, and if it landed in time we use
-  // it; otherwise we go straight to the network. Hydrate still settles
-  // eventually and is useful for the offline-cold-start path (no
-  // network), but never blocks the fast path.
   if (memoryDataset && isFresh(memoryDataset)) {
+    if (Date.now() - memoryDataset.syncedAt > SYNC_STALE_MS) {
+      syncDelta(memoryDataset.syncedAt).catch(() => {});
+    }
     return memoryDataset.places.filter((p) => inBbox(p, bbox));
   }
   const dataset = await fetchDataset();
