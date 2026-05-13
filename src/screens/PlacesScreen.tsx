@@ -7,13 +7,20 @@ import {
   StyleSheet,
   FlatList,
   ActivityIndicator,
-  ScrollView,
   Linking,
   RefreshControl,
   Image,
 } from 'react-native';
 import * as Location from 'expo-location';
-import { ChevronLeft, ChevronRight, MapPin, Search, Sparkles, Zap } from 'lucide-react-native';
+import {
+  ChevronLeft,
+  ChevronRight,
+  MapPin,
+  Search,
+  SlidersHorizontal,
+  Sparkles,
+  Zap,
+} from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
@@ -30,6 +37,7 @@ import { formatDistance, haversineMetres } from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
 import BtcMapAttribution from '../components/BtcMapAttribution';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
+import PlacesFilterSheet, { countActiveFilters } from '../components/PlacesFilterSheet';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -141,16 +149,20 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
   }, [places, pos]);
 
   // Selected category filters — empty = show every category (default).
-  // Categories are surfaced as chip toggles above the list; selected
-  // names compose with `searchQuery` (AND), not against each other (OR
-  // within the set so the list doesn't filter to zero — most listings
-  // carry 0-2 categories).
+  // Categories are surfaced in the filter bottom-sheet; selected names
+  // compose with `searchQuery` (AND), but OR within the set so the list
+  // doesn't filter to zero (most listings carry 0-2 categories).
   const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const availableCategories = useMemo(() => {
     const seen = new Set<string>();
     for (const p of places) for (const c of p.categories ?? []) seen.add(c);
     return [...seen].sort();
   }, [places]);
+  const activeFilterCount = useMemo(
+    () => countActiveFilters({ selectedCategories }),
+    [selectedCategories],
+  );
 
   const filteredPlaces = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -252,47 +264,21 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
           autoCorrect={false}
           testID="places-search-input"
         />
-      </View>
-
-      {availableCategories.length > 0 ? (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.catChipsRow}
+        <TouchableOpacity
+          style={styles.filterIconButton}
+          onPress={() => setFilterSheetOpen(true)}
+          testID="places-filter-button"
+          accessibilityLabel={`Filters${activeFilterCount > 0 ? `, ${activeFilterCount} active` : ''}`}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          {availableCategories.map((cat) => {
-            const on = selectedCategories.has(cat);
-            return (
-              <TouchableOpacity
-                key={cat}
-                style={[styles.catChip, on ? styles.catChipOn : styles.catChipOff]}
-                onPress={() => {
-                  const next = new Set(selectedCategories);
-                  if (next.has(cat)) next.delete(cat);
-                  else next.add(cat);
-                  setSelectedCategories(next);
-                }}
-                testID={`places-cat-${cat}`}
-                accessibilityLabel={`${cat} category ${on ? 'on' : 'off'}`}
-              >
-                <Text style={[styles.catChipText, on ? styles.catChipTextOn : null]}>
-                  {cat.replace(/_/g, ' ')}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-          {selectedCategories.size > 0 ? (
-            <TouchableOpacity
-              style={styles.catChip}
-              onPress={() => setSelectedCategories(new Set())}
-              testID="places-cat-clear"
-              accessibilityLabel="Clear category filter"
-            >
-              <Text style={[styles.catChipText, { color: colors.brandPink }]}>Clear</Text>
-            </TouchableOpacity>
+          <SlidersHorizontal size={18} color={colors.textHeader} strokeWidth={2.5} />
+          {activeFilterCount > 0 ? (
+            <View style={styles.filterIconBadge}>
+              <Text style={styles.filterIconBadgeText}>{activeFilterCount}</Text>
+            </View>
           ) : null}
-        </ScrollView>
-      ) : null}
+        </TouchableOpacity>
+      </View>
 
       {loading && places.length === 0 ? (
         <View style={styles.center}>
@@ -346,6 +332,14 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
           }
         />
       )}
+      <PlacesFilterSheet
+        visible={filterSheetOpen}
+        onClose={() => setFilterSheetOpen(false)}
+        availableCategories={availableCategories}
+        selectedCategories={selectedCategories}
+        onChangeCategories={setSelectedCategories}
+        onClearAll={() => setSelectedCategories(new Set())}
+      />
     </View>
   );
 };
@@ -561,33 +555,32 @@ const createStyles = (colors: Palette) =>
       fontStyle: 'italic',
       textDecorationLine: 'underline',
     },
-    catChipsRow: {
-      paddingHorizontal: 16,
-      paddingVertical: 8,
-      gap: 8,
+    filterIconButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginLeft: 8,
     },
-    catChip: {
-      paddingHorizontal: 12,
-      paddingVertical: 6,
-      borderRadius: 999,
-      borderWidth: 1,
-      marginRight: 6,
-    },
-    catChipOff: {
-      backgroundColor: 'transparent',
-      borderColor: colors.divider,
-    },
-    catChipOn: {
+    filterIconBadge: {
+      position: 'absolute',
+      top: -2,
+      right: -2,
+      minWidth: 16,
+      height: 16,
+      paddingHorizontal: 4,
+      borderRadius: 8,
       backgroundColor: colors.brandPink,
-      borderColor: colors.brandPink,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
-    catChipText: {
-      fontSize: 12,
-      color: colors.textHeader,
-      fontWeight: '600',
-      textTransform: 'capitalize',
+    filterIconBadgeText: {
+      color: colors.white,
+      fontSize: 10,
+      fontWeight: '800',
     },
-    catChipTextOn: { color: colors.white },
   });
 
 export default PlacesScreen;
