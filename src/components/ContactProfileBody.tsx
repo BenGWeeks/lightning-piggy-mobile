@@ -233,7 +233,13 @@ const ContactProfileBody: React.FC<Props> = ({
       {variant === 'sheet' && (
         <View style={styles.bannerContainer}>
           {contact.banner ? (
-            <Image source={{ uri: contact.banner }} style={styles.bannerImage} cachePolicy="disk" />
+            <Image
+              source={{ uri: contact.banner }}
+              style={styles.bannerImage}
+              cachePolicy="memory-disk"
+              recyclingKey={contact.pubkey ?? undefined}
+              autoplay={false}
+            />
           ) : (
             <View style={styles.bannerPlaceholder} />
           )}
@@ -245,7 +251,13 @@ const ContactProfileBody: React.FC<Props> = ({
 
       {variant === 'screen' && contact.banner && (
         <View style={styles.screenBannerContainer}>
-          <Image source={{ uri: contact.banner }} style={styles.bannerImage} cachePolicy="disk" />
+          <Image
+            source={{ uri: contact.banner }}
+            style={styles.bannerImage}
+            cachePolicy="memory-disk"
+            recyclingKey={contact.pubkey ?? undefined}
+            autoplay={false}
+          />
         </View>
       )}
 
@@ -260,7 +272,9 @@ const ContactProfileBody: React.FC<Props> = ({
           <Image
             source={{ uri: contact.picture }}
             style={styles.avatar}
-            cachePolicy="disk"
+            cachePolicy="memory-disk"
+            recyclingKey={contact.pubkey ?? undefined}
+            autoplay={false}
             transition={200}
             onError={() => setAvatarError(true)}
             onLoad={() => setAvatarLoaded(true)}
