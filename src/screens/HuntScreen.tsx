@@ -90,7 +90,10 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
 
   // Web-of-trust filter. Refs so the subscription callback always
   // reads the current `isTrusted` predicate without resubscribing.
-  const { isTrusted, filterEnabled, setFilterEnabled } = useTrustGraph();
+  // Post-#535: `wotTier` replaces the legacy `filterEnabled` boolean;
+  // `isTrusted` is now tier-aware and short-circuits to `true` for the
+  // 'all' tier, so the call sites can stop branching on the tier.
+  const { isTrusted, wotTier } = useTrustGraph();
   // Visible bbox from the mini-map at the top of the screen. The list
   // below filters to caches whose decoded geohash lies inside this
   // bbox, so "zoom out → see more" emerges naturally and there's no
@@ -153,7 +156,8 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
     const prefixes = geohashPrefixes(myGeohash, 5).filter((p) => p.length === 5);
     const closer = subscribeNearbyCaches(prefixes, (c) => {
       // WoT filter — see `trustGraphService` for the threat model.
-      if (filterEnabled && !isTrustedRef.current(c.hiderPubkey)) {
+      // `isTrusted` is tier-aware post-#535 (returns true for 'all').
+      if (!isTrustedRef.current(c.hiderPubkey)) {
         setUntrustedHidden((n) => n + 1);
         return;
       }
@@ -171,7 +175,9 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
       closer();
       clearTimeout(settleTimer);
     };
-  }, [pos, filterEnabled]);
+    // Re-subscribe whenever the active tier changes so the filtered
+    // stream is correct without a manual refresh.
+  }, [pos, wotTier]);
 
   const sortedCaches = useMemo(() => {
     let items = [...caches.values()].map((cache) => {
@@ -221,9 +227,9 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
         selectedDifficulties,
         selectedTerrains,
         selectedTypes,
-        wotFilterEnabled: filterEnabled,
+        wotTier,
       }),
-    [selectedDifficulties, selectedTerrains, selectedTypes, filterEnabled],
+    [selectedDifficulties, selectedTerrains, selectedTypes, wotTier],
   );
 
   const availableTypes = useMemo(() => {
@@ -367,16 +373,14 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
         availableTypes={availableTypes}
         selectedTypes={selectedTypes}
         onChangeTypes={setSelectedTypes}
-        wotFilterEnabled={filterEnabled}
         wotUntrustedHidden={untrustedHidden}
-        onToggleWotFilter={() => {
-          if (__DEV__) setFilterEnabled(!filterEnabled);
-        }}
         onClearAll={() => {
           setSelectedDifficulties(new Set());
           setSelectedTerrains(new Set());
           setSelectedTypes(new Set());
-          if (__DEV__) setFilterEnabled(true);
+          // WoT tier reset is intentionally not bundled here — the user
+          // controls it via the bottom-sheet picker so "Clear all" stays
+          // a filter-only action, not a safety-affecting one.
         }}
       />
     </View>

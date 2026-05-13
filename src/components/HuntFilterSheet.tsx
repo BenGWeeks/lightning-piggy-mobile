@@ -8,9 +8,11 @@ import {
   Modal,
   Pressable,
 } from 'react-native';
-import { ChevronDown, ChevronUp, ShieldCheck, ShieldOff, X } from 'lucide-react-native';
+import { ChevronDown, ChevronUp, X } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useGroups } from '../contexts/GroupsContext';
+import { useTrustGraph } from '../contexts/TrustGraphContext';
+import WebOfTrustChip from './WebOfTrustChip';
+import WebOfTrustBottomSheet from './WebOfTrustBottomSheet';
 import type { Palette } from '../styles/palettes';
 
 // NIP-GC difficulty + terrain scales (geocaching.com convention adopted
@@ -58,9 +60,9 @@ interface Props {
   availableTypes: string[];
   selectedTypes: Set<string>;
   onChangeTypes: (next: Set<string>) => void;
-  wotFilterEnabled: boolean;
+  // How many caches were hidden by the current WoT tier. Displayed next to
+  // the chip as a small hint ("N hidden") when > 0.
   wotUntrustedHidden: number;
-  onToggleWotFilter: () => void;
   onClearAll: () => void;
 }
 
@@ -74,16 +76,16 @@ const HuntFilterSheet: React.FC<Props> = ({
   availableTypes,
   selectedTypes,
   onChangeTypes,
-  wotFilterEnabled,
   wotUntrustedHidden,
-  onToggleWotFilter,
   onClearAll,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  // Web-of-Trust off is a "secret mode" feature — only tappable after the
-  // user triple-taps the version label on About to unlock secretMode at runtime.
-  const { secretMode } = useGroups();
+  // The WoT picker is owned by `WebOfTrustBottomSheet` — this sheet
+  // surfaces the *current* tier via `WebOfTrustChip` and opens the
+  // tier-picker sheet on tap. Single source of truth across surfaces.
+  const { wotTier } = useTrustGraph();
+  const [wotSheetVisible, setWotSheetVisible] = useState(false);
   // Glossary is hidden by default — most users don't need it after
   // the first read. Each scale + the type vocab gets its own toggle.
   const [showDifficultyGloss, setShowDifficultyGloss] = useState(false);
@@ -101,7 +103,7 @@ const HuntFilterSheet: React.FC<Props> = ({
     selectedDifficulties.size > 0 ||
     selectedTerrains.size > 0 ||
     selectedTypes.size > 0 ||
-    !wotFilterEnabled;
+    wotTier !== 'friends';
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -130,33 +132,22 @@ const HuntFilterSheet: React.FC<Props> = ({
         </View>
 
         <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
-          {/* Web-of-Trust */}
+          {/* Web-of-Trust — chip + tap-to-open-sheet (#535) */}
           <Text style={styles.section}>Safety</Text>
-          <TouchableOpacity
-            style={[styles.wotChip, wotFilterEnabled ? styles.wotChipOn : styles.wotChipOff]}
-            onPress={onToggleWotFilter}
-            disabled={!secretMode}
-            testID="hunt-filter-wot-chip"
-          >
-            {wotFilterEnabled ? (
-              <ShieldCheck size={14} color={colors.brandPink} strokeWidth={2.5} />
-            ) : (
-              <ShieldOff size={14} color={colors.zapYellow} strokeWidth={2.5} />
-            )}
-            <Text style={styles.wotChipText}>
-              {wotFilterEnabled
-                ? wotUntrustedHidden > 0
-                  ? `Web-of-Trust on • ${wotUntrustedHidden} hidden`
-                  : 'Web-of-Trust on'
-                : 'Web-of-Trust off (secret)'}
-            </Text>
-          </TouchableOpacity>
-          {wotFilterEnabled ? (
-            <Text style={styles.sectionHint}>
-              An unverified geo-cache can be a lure — only listings from people you (or your
-              follows) trust are shown.
-            </Text>
-          ) : null}
+          <View style={styles.wotRow}>
+            <WebOfTrustChip
+              currentTier={wotTier}
+              onPress={() => setWotSheetVisible(true)}
+              testID="hunt-filter-wot-chip"
+            />
+            {wotUntrustedHidden > 0 ? (
+              <Text style={styles.wotHiddenCount}>{wotUntrustedHidden} hidden</Text>
+            ) : null}
+          </View>
+          <Text style={styles.sectionHint}>
+            An unverified geo-cache can be a lure — tap the chip to choose which trust tier should
+            pass.
+          </Text>
 
           {/* Difficulty */}
           <View style={styles.sectionHeader}>
@@ -287,6 +278,12 @@ const HuntFilterSheet: React.FC<Props> = ({
         >
           <Text style={styles.doneText}>Done</Text>
         </TouchableOpacity>
+
+        {/* Nested sheet — opens on chip tap. */}
+        <WebOfTrustBottomSheet
+          visible={wotSheetVisible}
+          onClose={() => setWotSheetVisible(false)}
+        />
       </View>
     </Modal>
   );
@@ -299,13 +296,14 @@ export const countActiveFilters = (params: {
   selectedDifficulties: Set<number>;
   selectedTerrains: Set<number>;
   selectedTypes: Set<string>;
-  wotFilterEnabled: boolean;
+  // Active when the user has widened past the default 'friends' tier.
+  wotTier: 'friends' | 'fof' | 'all';
 }): number => {
   let n = 0;
   if (params.selectedDifficulties.size > 0) n += 1;
   if (params.selectedTerrains.size > 0) n += 1;
   if (params.selectedTypes.size > 0) n += 1;
-  if (!params.wotFilterEnabled) n += 1;
+  if (params.wotTier !== 'friends') n += 1;
   return n;
 };
 
@@ -423,29 +421,15 @@ const createStyles = (colors: Palette) =>
     chipTextActive: {
       color: colors.white,
     },
-    wotChip: {
+    wotRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      alignSelf: 'flex-start',
-      gap: 8,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      borderRadius: 999,
-      borderWidth: 1,
+      gap: 10,
       marginTop: 8,
     },
-    wotChipOn: {
-      backgroundColor: colors.surface,
-      borderColor: colors.brandPink,
-    },
-    wotChipOff: {
-      backgroundColor: colors.surface,
-      borderColor: colors.zapYellow,
-    },
-    wotChipText: {
-      fontSize: 13,
-      fontWeight: '600',
-      color: colors.textHeader,
+    wotHiddenCount: {
+      fontSize: 12,
+      color: colors.textSupplementary,
     },
     doneButton: {
       marginTop: 16,

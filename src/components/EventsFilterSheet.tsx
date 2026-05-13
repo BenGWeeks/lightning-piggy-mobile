@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -8,9 +8,11 @@ import {
   Modal,
   Pressable,
 } from 'react-native';
-import { ShieldCheck, ShieldOff, X } from 'lucide-react-native';
+import { X } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useGroups } from '../contexts/GroupsContext';
+import { useTrustGraph } from '../contexts/TrustGraphContext';
+import WebOfTrustChip from './WebOfTrustChip';
+import WebOfTrustBottomSheet from './WebOfTrustBottomSheet';
 import type { Palette } from '../styles/palettes';
 
 // Distance + date options live next to the component so the sheet
@@ -49,9 +51,9 @@ interface Props {
   onChangeMaxDistance: (next: number | null) => void;
   maxFromNowSec: number | null;
   onChangeMaxFromNow: (next: number | null) => void;
-  wotFilterEnabled: boolean;
+  // How many events the current WoT tier is hiding — displayed alongside
+  // the chip as a small "N hidden" hint when > 0.
   wotUntrustedHidden: number;
-  onToggleWotFilter: () => void;
   sortBy: EventsSortKey;
   onChangeSortBy: (next: EventsSortKey) => void;
   onClearAll: () => void;
@@ -64,21 +66,20 @@ const EventsFilterSheet: React.FC<Props> = ({
   onChangeMaxDistance,
   maxFromNowSec,
   onChangeMaxFromNow,
-  wotFilterEnabled,
   wotUntrustedHidden,
-  onToggleWotFilter,
   sortBy,
   onChangeSortBy,
   onClearAll,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  // Web-of-Trust off is gated on runtime "secret mode" (triple-tap the
-  // version on About to unlock) — keeps prod users behind the WoT lure
-  // filter while letting power users + QA flip it.
-  const { secretMode } = useGroups();
+  // The WoT tier lives in TrustGraphContext; the picker UI is the shared
+  // `WebOfTrustBottomSheet`. This sheet just renders the current-tier
+  // chip and opens the picker on tap.
+  const { wotTier } = useTrustGraph();
+  const [wotSheetVisible, setWotSheetVisible] = useState(false);
 
-  const anyActive = maxDistanceMetres !== null || maxFromNowSec !== null || !wotFilterEnabled;
+  const anyActive = maxDistanceMetres !== null || maxFromNowSec !== null || wotTier !== 'friends';
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -107,32 +108,22 @@ const EventsFilterSheet: React.FC<Props> = ({
         </View>
 
         <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
-          {/* Web-of-Trust */}
+          {/* Web-of-Trust — chip + tap-to-open-sheet (#535) */}
           <Text style={styles.section}>Safety</Text>
-          <TouchableOpacity
-            style={[styles.wotChip, wotFilterEnabled ? styles.wotChipOn : styles.wotChipOff]}
-            onPress={onToggleWotFilter}
-            disabled={!secretMode}
-            testID="events-filter-wot-chip"
-          >
-            {wotFilterEnabled ? (
-              <ShieldCheck size={14} color={colors.brandPink} strokeWidth={2.5} />
-            ) : (
-              <ShieldOff size={14} color={colors.zapYellow} strokeWidth={2.5} />
-            )}
-            <Text style={styles.wotChipText}>
-              {wotFilterEnabled
-                ? wotUntrustedHidden > 0
-                  ? `Web-of-Trust on • ${wotUntrustedHidden} hidden`
-                  : 'Web-of-Trust on'
-                : 'Web-of-Trust off (secret)'}
-            </Text>
-          </TouchableOpacity>
-          {wotFilterEnabled ? (
-            <Text style={styles.sectionHint}>
-              Only events from organisers you (or your follows) trust are shown.
-            </Text>
-          ) : null}
+          <View style={styles.wotRow}>
+            <WebOfTrustChip
+              currentTier={wotTier}
+              onPress={() => setWotSheetVisible(true)}
+              testID="events-filter-wot-chip"
+            />
+            {wotUntrustedHidden > 0 ? (
+              <Text style={styles.wotHiddenCount}>{wotUntrustedHidden} hidden</Text>
+            ) : null}
+          </View>
+          <Text style={styles.sectionHint}>
+            Only events from organisers your trust graph reaches are shown — tap the chip to widen
+            the tier.
+          </Text>
 
           {/* Sort by — single-select. Default 'date' (chronological is the
             most natural ordering for a meetup list), but distance-sort
@@ -209,6 +200,11 @@ const EventsFilterSheet: React.FC<Props> = ({
         >
           <Text style={styles.doneText}>Done</Text>
         </TouchableOpacity>
+
+        <WebOfTrustBottomSheet
+          visible={wotSheetVisible}
+          onClose={() => setWotSheetVisible(false)}
+        />
       </View>
     </Modal>
   );
@@ -219,12 +215,12 @@ const EventsFilterSheet: React.FC<Props> = ({
 export const countActiveFilters = (params: {
   maxDistanceMetres: number | null;
   maxFromNowSec: number | null;
-  wotFilterEnabled: boolean;
+  wotTier: 'friends' | 'fof' | 'all';
 }): number => {
   let n = 0;
   if (params.maxDistanceMetres !== null) n += 1;
   if (params.maxFromNowSec !== null) n += 1;
-  if (!params.wotFilterEnabled) n += 1;
+  if (params.wotTier !== 'friends') n += 1;
   return n;
 };
 
@@ -315,29 +311,15 @@ const createStyles = (colors: Palette) =>
     chipTextActive: {
       color: colors.white,
     },
-    wotChip: {
+    wotRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      alignSelf: 'flex-start',
-      gap: 8,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      borderRadius: 999,
-      borderWidth: 1,
+      gap: 10,
       marginTop: 8,
     },
-    wotChipOn: {
-      backgroundColor: colors.surface,
-      borderColor: colors.brandPink,
-    },
-    wotChipOff: {
-      backgroundColor: colors.surface,
-      borderColor: colors.zapYellow,
-    },
-    wotChipText: {
-      fontSize: 13,
-      fontWeight: '600',
-      color: colors.textHeader,
+    wotHiddenCount: {
+      fontSize: 12,
+      color: colors.textSupplementary,
     },
     doneButton: {
       marginTop: 16,
