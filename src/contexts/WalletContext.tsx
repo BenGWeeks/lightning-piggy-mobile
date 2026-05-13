@@ -11,6 +11,7 @@ import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nwcService from '../services/nwcService';
 import * as nostrService from '../services/nostrService';
+import { initialiseSendThresholdForNewInstall } from '../services/sendThresholdService';
 import * as lnurlService from '../services/lnurlService';
 import * as zapCounterpartyStorage from '../services/zapCounterpartyStorage';
 import * as zapSenderProfileStorage from '../services/zapSenderProfileStorage';
@@ -30,6 +31,10 @@ import {
 // Captured at module-evaluation time, which is the closest proxy we have to "JS bundle started executing after app launch". Used by the [Perf] wallet-connect marker so perf scripts can report time-from-launch-to-first-NWC-connect without needing a separate launch timestamp source.
 const WALLET_MODULE_LOAD_T0 = Date.now();
 let firstWalletConnectLogged = false;
+import { perfLog } from '../utils/perfLog';
+perfLog('WalletContext module-eval');
+let __walletProviderFirstRenderLogged = false;
+let __walletProviderHydratedLogged = false;
 
 export interface IncomingPayment {
   walletId: string;
@@ -46,6 +51,7 @@ export interface IncomingPayment {
 }
 
 const CURRENCY_KEY = 'user_fiat_currency';
+const BTC_PRICE_CACHE_PREFIX = 'btc_price_';
 
 // The #P-tagged outgoing zap-receipt relay fetch is expensive (500-event
 // filter). With local-storage attribution being the common path, this
@@ -192,6 +198,10 @@ interface WalletContextType {
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
 
 export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  if (!__walletProviderFirstRenderLogged) {
+    __walletProviderFirstRenderLogged = true;
+    perfLog('WalletProvider first render');
+  }
   const [wallets, setWallets] = useState<WalletState[]>([]);
   const [activeWalletId, setActiveWalletId] = useState<string | null>(null);
   const [isOnboarded, setIsOnboarded] = useState(false);
@@ -223,15 +233,33 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     await AsyncStorage.setItem(CURRENCY_KEY, cur);
     const price = await getBtcPrice(cur);
     setBtcPrice(price);
+    if (price != null) {
+      AsyncStorage.setItem(`${BTC_PRICE_CACHE_PREFIX}${cur}`, String(price)).catch(() => {});
+    }
   }, []);
 
   const fetchPrice = useCallback(async (cur: FiatCurrency) => {
     const price = await getBtcPrice(cur);
     setBtcPrice(price);
+    // Persist for cold-start hydration — without this, GBP/USD/etc. show
+    // empty for the first 1-3 s of every cold start while we wait on the
+    // CoinGecko fetch. Cached value is "stale-ok": still in the right
+    // ballpark for converting balance/transactions, and the next interval
+    // tick (5 min) or focus refresh replaces it.
+    if (price != null) {
+      AsyncStorage.setItem(`${BTC_PRICE_CACHE_PREFIX}${cur}`, String(price)).catch(() => {});
+    }
   }, []);
 
   const updateWalletInState = useCallback((walletId: string, updates: Partial<WalletState>) => {
     setWallets((prev) => prev.map((w) => (w.id === walletId ? { ...w, ...updates } : w)));
+    // Persist fresh balance to disk so the next cold start can hydrate
+    // it instantly (vs paying ~9 s BDK.Wallet.create + Electrum.sync to
+    // re-derive it). Fire-and-forget; failure mode is "next boot shows
+    // stale-or-null balance, refreshes lazily" — same as before.
+    if (typeof updates.balance === 'number') {
+      AsyncStorage.setItem(`balance_${walletId}`, String(updates.balance)).catch(() => {});
+    }
   }, []);
 
   // Forward-declared so `fetchTransactionsForWallet` can call into it without
@@ -280,13 +308,39 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           ? (savedCurrency as FiatCurrency)
           : 'USD';
         setCurrencyState(cur);
+        // Hydrate cached BTC price from disk so the fiat column renders
+        // on first paint — without this, every cold start shows an
+        // empty/zero fiat value for 1-3 s while the CoinGecko fetch
+        // round-trips. `fetchPrice` below overwrites with the fresh
+        // value once it arrives.
+        AsyncStorage.getItem(`${BTC_PRICE_CACHE_PREFIX}${cur}`)
+          .then((raw) => {
+            if (raw == null) return;
+            const n = Number(raw);
+            if (Number.isFinite(n) && n > 0) setBtcPrice(n);
+          })
+          .catch(() => {});
         fetchPrice(cur);
 
-        // Check onboarding status
+        // Check onboarding status (independent of wallet-list key —
+        // ONBOARDING_KEY isn't per-account namespaced).
         const onboarded = await walletStorage.isOnboarded();
         setIsOnboarded(onboarded);
 
-        // Migrate legacy single-wallet data
+        // Wait for NostrContext to hydrate its identity BEFORE any
+        // wallet-list read or write. `migrateLegacy`, `getWalletList`,
+        // `saveWalletList` and `initialiseSendThresholdForNewInstall`
+        // all key off `walletStorageService._activePubkey` — running
+        // them while `_activePubkey` is still null would migrate /
+        // read / write against the legacy unsuffixed `wallet_list`
+        // key and then the per-account `wallet_list_${pubkey}` read
+        // below would see different data (#442 Copilot review).
+        // 2 s timeout means a wedged NostrContext still falls
+        // through to legacy-key behaviour matching pre-#288 installs.
+        await walletStorage.awaitActivePubkeyHydrated();
+
+        // Migrate legacy single-wallet data — now safely runs against
+        // the correct per-account key.
         await walletStorage.migrateLegacy();
 
         // Re-check onboarding after migration (migration sets it)
@@ -295,29 +349,69 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           setIsOnboarded(onboardedAfterMigration);
         }
 
+        // Distinguish new-install vs upgrade for the high-value-send
+        // confirmation default — runs after migrateLegacy so the install-
+        // state signals (wallet_list, onboarding_complete) are stable.
+        // Idempotent; short-circuits once initialised (#82 acceptance).
+        await initialiseSendThresholdForNewInstall();
+
         // Load and reconnect all wallets
+        perfLog('WalletProvider startup: getWalletList begin');
         const walletList = await walletStorage.getWalletList();
+        perfLog(`WalletProvider startup: getWalletList -> ${walletList.length} wallets`);
         const walletStates: WalletState[] = await Promise.all(
           walletList.map(async (w) => {
             // Load cached transactions from AsyncStorage
             let cachedTxs: WalletTransaction[] = [];
             try {
+              const tTxRead = Date.now();
               const txJson = await AsyncStorage.getItem(`txs_${w.id}`);
-              if (txJson) cachedTxs = JSON.parse(txJson);
+              perfLog(
+                `WalletProvider: txs_${w.id.slice(0, 8)} read ${Date.now() - tTxRead}ms (${txJson?.length ?? 0}B)`,
+              );
+              if (txJson) {
+                const tTxParse = Date.now();
+                cachedTxs = JSON.parse(txJson);
+                perfLog(
+                  `WalletProvider: txs_${w.id.slice(0, 8)} parse ${Date.now() - tTxParse}ms (${cachedTxs.length} txs)`,
+                );
+              }
             } catch (err) {
               console.warn(`Corrupted cached txs for ${w.id}, clearing:`, err);
               await AsyncStorage.removeItem(`txs_${w.id}`);
             }
+            // Hydrate cached balance from disk so the wallet card shows
+            // a number on cold start instead of `---` while we hold off
+            // the BDK `Wallet.create() + Electrum.sync()` work (~9 s of
+            // JS-thread time per onchain wallet) until the user actually
+            // asks for fresh data (pull-to-refresh, open wallet detail,
+            // open Send sheet for that wallet). Closes the cold-start
+            // "Send button feels frozen for 12 s" symptom: BDK is the
+            // dominant blocker, and BDK isn't needed to paint Home.
+            let cachedBalance: number | null = null;
+            try {
+              const bRaw = await AsyncStorage.getItem(`balance_${w.id}`);
+              if (bRaw) {
+                const n = Number(bRaw);
+                if (Number.isFinite(n)) cachedBalance = n;
+              }
+            } catch {
+              // Corrupted balance cache — ignore; live fetch will repopulate.
+            }
             return {
               ...w,
               isConnected: false,
-              balance: null,
+              balance: cachedBalance,
               walletAlias: null,
               transactions: cachedTxs,
             };
           }),
         );
         setWallets(walletStates);
+        if (!__walletProviderHydratedLogged) {
+          __walletProviderHydratedLogged = true;
+          perfLog(`WalletProvider hydrated ${walletStates.length} wallets`);
+        }
         // Mark the initial AsyncStorage read complete BEFORE flipping
         // `isLoading`. Consumers gating cold-start UI (e.g. HomeScreen's
         // Send/Receive button styles) need to know "we tried to load and
@@ -342,16 +436,22 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // call will auto-await the connect because `nwcService.connect`
         // is idempotent and provider-map-keyed.
         setIsLoading(false);
+        // No eager onchain `getBalance` at boot. Each call does
+        // `BDK.Wallet.create() + Electrum.sync()` — ~9 s of JS-thread
+        // time even for ONE wallet (measured on Big Piggy's AVD fixture
+        // with 230 NIP-17 wraps in the inbox). That 9 s landed inside
+        // the cold-start window where the user is most likely to tap
+        // Send, and tap events queued behind it — root cause of the
+        // "Send button feels frozen for 12 s" symptom. Cached balances
+        // from the previous session are hydrated above; fresh balances
+        // arrive on pull-to-refresh / wallet detail open / explicit
+        // `refreshBalanceForWallet` calls, all of which lazily init
+        // BDK on demand (the `bdkWallets` cache in onchainService
+        // already memoises per walletId).
         void Promise.all(
           walletList.map(async (wallet) => {
             try {
               if (wallet.walletType === 'onchain') {
-                const bal = await onchainService.getBalance(wallet.id);
-                setWallets((prev) =>
-                  prev.map((w) =>
-                    w.id === wallet.id ? { ...w, isConnected: false, balance: bal } : w,
-                  ),
-                );
                 return;
               }
 
@@ -413,6 +513,117 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
     })();
   }, [fetchPrice]);
+
+  // Re-hydrate wallets when the active Nostr identity changes (#288).
+  // The startup useEffect above runs once on mount; it doesn't react to
+  // switchIdentity, so without this effect the previous identity's
+  // wallet list stayed visible after a switch (per-account namespacing
+  // is correct on disk, the UI just wasn't reading it again).
+  useEffect(() => {
+    let cancelled = false;
+    let lastSeenPubkey = walletStorage.getActivePubkey();
+    const unsubscribe = walletStorage.subscribeActivePubkey((nextPubkey) => {
+      if (nextPubkey === lastSeenPubkey) return;
+      lastSeenPubkey = nextPubkey;
+      // Disconnect every current NWC connection so we don't leak the
+      // previous identity's WebSockets / pay_invoice handlers.
+      for (const w of walletsRef.current) {
+        if (w.walletType === 'nwc') nwcService.disconnect(w.id);
+      }
+      // Clear in-memory wallet list immediately so the UI reflects the
+      // switch without ghosting the old wallets.
+      setWallets([]);
+      setActiveWalletId(null);
+      // Re-hydrate from per-account-keyed storage.
+      (async () => {
+        if (cancelled) return;
+        try {
+          const walletList = await walletStorage.getWalletList();
+          if (cancelled) return;
+          const walletStates: WalletState[] = await Promise.all(
+            walletList.map(async (w) => {
+              let cachedTxs: WalletTransaction[] = [];
+              try {
+                const txJson = await AsyncStorage.getItem(`txs_${w.id}`);
+                if (txJson) cachedTxs = JSON.parse(txJson);
+              } catch (err) {
+                console.warn(`Corrupted cached txs for ${w.id}, clearing:`, err);
+                await AsyncStorage.removeItem(`txs_${w.id}`);
+              }
+              // Hydrate cached balance from disk (matches the startup-
+              // hydration path). Identity-switch is treated identically:
+              // never run BDK init eagerly. Fresh balance comes lazily on
+              // refresh / wallet-detail open.
+              let cachedBalance: number | null = null;
+              try {
+                const bRaw = await AsyncStorage.getItem(`balance_${w.id}`);
+                if (bRaw) {
+                  const n = Number(bRaw);
+                  if (Number.isFinite(n)) cachedBalance = n;
+                }
+              } catch {
+                // Ignore corrupted cache.
+              }
+              return {
+                ...w,
+                isConnected: false,
+                balance: cachedBalance,
+                walletAlias: null,
+                transactions: cachedTxs,
+              };
+            }),
+          );
+          if (cancelled) return;
+          setWallets(walletStates);
+          if (walletStates.length > 0) setActiveWalletId(walletStates[0].id);
+          // Kick off NWC connects in parallel; same fire-and-forget
+          // pattern as the startup hydration. Onchain wallets are NOT
+          // fetched eagerly (BDK init costs ~9 s of JS-thread time on
+          // a real fixture) — they hydrate from `balance_<id>` cache
+          // above and refresh lazily on user action.
+          void Promise.all(
+            walletList.map(async (wallet) => {
+              if (cancelled) return;
+              try {
+                if (wallet.walletType === 'onchain') {
+                  return;
+                }
+                const nwcUrl = await walletStorage.getNwcUrl(wallet.id);
+                if (!nwcUrl || cancelled) return;
+                const result = await nwcService.connect(wallet.id, nwcUrl, () => {
+                  setWallets((prev) =>
+                    prev.map((w) => (w.id === wallet.id ? { ...w, isConnected: true } : w)),
+                  );
+                });
+                if (cancelled) return;
+                if (result.success) {
+                  setWallets((prev) =>
+                    prev.map((w) =>
+                      w.id === wallet.id
+                        ? {
+                            ...w,
+                            isConnected: true,
+                            balance: result.balance ?? w.balance ?? null,
+                          }
+                        : w,
+                    ),
+                  );
+                }
+              } catch (error) {
+                console.warn(`[Wallet] re-hydrate connect failed for ${wallet.id}:`, error);
+              }
+            }),
+          );
+        } catch (e) {
+          console.warn('[Wallet] re-hydrate failed:', e);
+        }
+      })();
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
 
   // Refresh BTC price every 5 minutes
   useEffect(() => {
@@ -875,6 +1086,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const resolveZapSendersForWallet = useCallback(
     async (walletId: string) => {
+      const __zapResolveStart = Date.now();
+      perfLog(`resolveZapSenders[${walletId.slice(0, 8)}]: start`);
       const userPubkey = nostrService.getCurrentUserPubkey();
       // Collect recipient pubkeys for the `#p` filter: the user's own Nostr
       // pubkey plus every lightning-address LNURL server's `nostrPubkey`.
@@ -979,24 +1192,66 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             const b = r.tags.find((t) => t[0] === 'bolt11')?.[1];
             if (b) byBolt11Outgoing.set(b, r);
           }
+          // Two-phase resolution so profile fetches batch into ONE
+          // relay round-trip instead of N sequential ones. The old
+          // per-tx `await fetchProfile` loop was the dominant
+          // cold-start freeze: with ~50 unmatched outgoing zaps and
+          // no cached recipient profiles, each ~500-2000 ms relay
+          // round-trip serialised → 7-15 s of JS-thread
+          // contention exactly when the user is most likely to tap
+          // Send. Now: collect every recipient pubkey, `getMany`
+          // from disk, single batched `fetchProfiles` for misses.
+          // Mirrors the incoming branch below.
+          type OutgoingEntry = {
+            tx: WalletTransaction;
+            receipt: (typeof sentReceipts)[number];
+            recipientPubkey: string | null;
+            comment: { comment: string; anonymous: boolean } | null;
+          };
+          const outgoingEntries: OutgoingEntry[] = [];
+          const outgoingPubkeys = new Set<string>();
           for (const { tx } of unmatched) {
             if (!tx.bolt11) continue;
             const r = byBolt11Outgoing.get(tx.bolt11);
             if (!r) continue;
-            // The receipt's `p` tag carries the recipient pubkey. We
-            // fetch their profile lazily; anon zaps skip the profile.
             const recipientPubkey = r.tags.find((t) => t[0] === 'p')?.[1] ?? null;
             const commentTag = nostrService.parseZapReceipt(r);
+            outgoingEntries.push({ tx, receipt: r, recipientPubkey, comment: commentTag });
+            if (recipientPubkey) outgoingPubkeys.add(recipientPubkey);
+          }
+          // Phase 1: persistent cache hits for all recipients in one read.
+          const outgoingCached =
+            outgoingPubkeys.size > 0
+              ? await zapSenderProfileStorage.getMany([...outgoingPubkeys])
+              : new Map<string, zapSenderProfileStorage.CachedZapSenderProfile>();
+          // Phase 2: single batched relay round-trip for whatever the cache missed.
+          const outgoingStillToFetch = [...outgoingPubkeys].filter((pk) => !outgoingCached.has(pk));
+          const outgoingProfileMap =
+            outgoingStillToFetch.length > 0
+              ? await nostrService.fetchProfiles(outgoingStillToFetch, queryRelays)
+              : undefined;
+          // Write-through any newly-resolved profiles for next cold start.
+          if (outgoingProfileMap && outgoingProfileMap.size > 0) {
+            const toPersist = new Map<string, zapSenderProfileStorage.CachedZapSenderProfile>();
+            for (const [pk, p] of outgoingProfileMap) {
+              toPersist.set(pk, {
+                npub: p.npub,
+                name: p.name,
+                displayName: p.displayName,
+                picture: p.picture,
+                nip05: p.nip05,
+              });
+            }
+            void zapSenderProfileStorage.setMany(toPersist);
+          }
+          for (const e of outgoingEntries) {
             let profile: ZapCounterpartyInfo['profile'] = null;
-            if (recipientPubkey) {
-              // Same persistent-cache shortcut as the incoming branch
-              // — saves the kind-0 round-trip when this recipient was
-              // resolved on a previous cold start (#95).
-              const hit = await zapSenderProfileStorage.get(recipientPubkey);
+            if (e.recipientPubkey) {
+              const hit = outgoingCached.get(e.recipientPubkey);
               if (hit) {
                 profile = hit;
               } else {
-                const p = await nostrService.fetchProfile(recipientPubkey, queryRelays);
+                const p = outgoingProfileMap?.get(e.recipientPubkey);
                 if (p) {
                   profile = {
                     npub: p.npub,
@@ -1005,16 +1260,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                     picture: p.picture,
                     nip05: p.nip05,
                   };
-                  // Write-through for the next cold start.
-                  void zapSenderProfileStorage.setMany(new Map([[recipientPubkey, profile]]));
                 }
               }
             }
-            byHash.set(tx.paymentHash!, {
-              pubkey: recipientPubkey,
+            byHash.set(e.tx.paymentHash!, {
+              pubkey: e.recipientPubkey,
               profile,
-              comment: commentTag?.comment ?? '',
-              anonymous: commentTag?.anonymous ?? false,
+              comment: e.comment?.comment ?? '',
+              anonymous: e.comment?.anonymous ?? false,
             });
           }
           // Persist negative attributions for any tx that survived the relay
@@ -1225,6 +1478,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         );
       }
       mergeResolverResults(walletId, resultsByIdx);
+      perfLog(
+        `resolveZapSenders[${walletId.slice(0, 8)}]: done ${Date.now() - __zapResolveStart}ms (merged ${resultsByIdx.size})`,
+      );
     },
     [resolveLud16ToNostrPubkey, mergeResolverResults],
   );

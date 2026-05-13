@@ -15,7 +15,11 @@ import TransactionDetailSheet, {
 import SendSheet from './SendSheet';
 import TransactionTypeIcon from './TransactionTypeIcon';
 import { getTxCategory } from '../utils/txCategory';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 import type { WalletTransaction, ZapCounterpartyInfo } from '../types/wallet';
+import { perfLog } from '../utils/perfLog';
+
+let __transactionListFirstRenderLogged = false;
 import type { RootStackParamList } from '../navigation/types';
 
 interface Props {
@@ -88,6 +92,10 @@ function txKey(tx: WalletTransaction, fallbackIndex: number): string {
 }
 
 const TransactionList: React.FC<Props> = ({ transactions }) => {
+  if (!__transactionListFirstRenderLogged) {
+    __transactionListFirstRenderLogged = true;
+    perfLog(`TransactionList first render (${transactions.length} txs)`);
+  }
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { btcPrice, currency, activeWalletId } = useWallet();
@@ -262,11 +270,13 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
             accessibilityLabel={`Open details for ${primary}`}
           >
             <View style={styles.avatarWrap}>
-              {counterpartyAvatar ? (
+              {counterpartyAvatar && isSupportedImageUrl(counterpartyAvatar) ? (
                 <Image
                   source={{ uri: counterpartyAvatar }}
                   style={styles.avatar}
-                  cachePolicy="disk"
+                  cachePolicy="memory-disk"
+                  recyclingKey={counterpartyAvatar}
+                  autoplay={false}
                   contentFit="cover"
                 />
               ) : (

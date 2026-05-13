@@ -21,6 +21,7 @@ import NostrLoginSheet from './NostrLoginSheet';
 import { createDmSender } from '../utils/nostrDm';
 import { truncateMiddle, formatFriendlyDateTime } from '../utils/format';
 import { getTxCategory } from '../utils/txCategory';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 import TransactionTypeIcon from './TransactionTypeIcon';
 import type { ZapCounterpartyInfo } from '../types/wallet';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -373,11 +374,14 @@ const TransactionDetailSheet: React.FC<Props> = ({
                 accessibilityLabel={`${isIncoming ? 'Sender' : 'Recipient'} ${zapCounterpartyName(zapCounterparty)}`}
                 testID="tx-detail-sender-card"
               >
-                {zapCounterparty.profile?.picture ? (
+                {zapCounterparty.profile?.picture &&
+                isSupportedImageUrl(zapCounterparty.profile.picture) ? (
                   <Image
                     source={{ uri: zapCounterparty.profile.picture }}
                     style={styles.senderAvatar}
-                    cachePolicy="disk"
+                    cachePolicy="memory-disk"
+                    recyclingKey={zapCounterparty.profile.picture}
+                    autoplay={false}
                     contentFit="cover"
                   />
                 ) : (

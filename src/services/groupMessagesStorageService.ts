@@ -92,3 +92,35 @@ export async function appendGroupMessage(
 export async function clearGroupMessages(groupId: string): Promise<void> {
   await AsyncStorage.removeItem(KEY(groupId));
 }
+
+// Scan AsyncStorage for every `group_messages_*` blob and return the
+// set of message ids that look like NIP-17 wrap ids (64-char hex —
+// `local_*` optimistic rows are excluded). Used by NostrContext to
+// pre-seed `knownWrapIds` on cold start so the live DM sub doesn't
+// redundantly decrypt + re-route group wraps it already processed in
+// a previous session. Single AsyncStorage round-trip per stored group.
+const WRAP_ID_PATTERN = /^[0-9a-f]{64}$/;
+export async function listPersistedGroupWrapIds(): Promise<string[]> {
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    const groupKeys = keys.filter((k) => k.startsWith('group_messages_'));
+    if (groupKeys.length === 0) return [];
+    const pairs = await AsyncStorage.multiGet(groupKeys);
+    const ids: string[] = [];
+    for (const [, raw] of pairs) {
+      if (!raw) continue;
+      try {
+        const parsed = JSON.parse(raw) as GroupMessage[];
+        if (!Array.isArray(parsed)) continue;
+        for (const m of parsed) {
+          if (typeof m.id === 'string' && WRAP_ID_PATTERN.test(m.id)) ids.push(m.id);
+        }
+      } catch {
+        // Skip malformed blob — better than aborting the whole scan.
+      }
+    }
+    return ids;
+  } catch {
+    return [];
+  }
+}

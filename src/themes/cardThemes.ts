@@ -131,9 +131,11 @@ export const cardThemes: Record<CardTheme, CardThemeConfig> = {
     // TODO: revolut-logo.png is a PLACEHOLDER (ImageMagick-rendered
     // DejaVu-Sans-Bold "Revolut" wordmark — revolut.com aggressively
     // blocks bot fetches so we couldn't pull the real asset). Swap in
-    // an officially-sourced wordmark before any wide distribution; the
-    // geometry (white text, 100×60dp, opacity 0.85) is correct so the
-    // PNG can be replaced in-place without other code changes.
+    // an officially-sourced wordmark before any wide distribution. The
+    // bgStyle box is sized to the placeholder's ~3.33:1 aspect (70×21dp)
+    // and pinned bottom-right at opacity 0.85 — see src/themes/cards/revolut.ts.
+    // A replacement asset with a *different* aspect ratio will need that
+    // bgStyle updated to match, or the card will look off.
     backgroundImage: require('../../assets/images/revolut-logo.png'),
     backgroundImageStyle: 'revolut',
   },

@@ -2,6 +2,8 @@ import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { decodeProfileReference } from '../services/nostrService';
 import { extractGifUrl } from '../services/giphyService';
 import { parseGeoMessage, SharedLocation } from '../services/locationService';
+import { isBitcoinAddress } from '../services/boltzService';
+import { parseBip21, ParsedBip21 } from './bip21';
 
 // Bolt11 invoices are self-identifying by their `lnXX` HRP, so detection
 // here matches them with or without the `lightning:` prefix.
@@ -36,6 +38,8 @@ export interface SharedContactRef {
   pubkey: string;
   relays: string[];
 }
+
+export type BitcoinUri = ParsedBip21;
 
 export function extractImageUrl(text: string): string | null {
   if (!text) return null;
@@ -83,6 +87,18 @@ export function extractLightningAddress(text: string): string | null {
   if (!text) return null;
   const match = text.match(LN_ADDRESS_REGEX);
   return match ? match[1] : null;
+}
+
+export function extractBitcoinUri(text: string): BitcoinUri | null {
+  const parsed = parseBip21(text);
+  if (!parsed) return null;
+  // parseBip21 only matches the URI shape (`bitcoin:[8+ alnum chars]`).
+  // Without an address-checksum check, garbage like `bitcoin:hello12345`
+  // would render a Pay button + open SendSheet on an invalid
+  // destination. Validate via bitcoinjs-lib's address parse so only
+  // well-formed mainnet addresses produce the Pay affordance.
+  if (!isBitcoinAddress(parsed.address)) return null;
+  return parsed;
 }
 
 export function extractSharedContact(text: string): SharedContactRef | null {

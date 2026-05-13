@@ -66,6 +66,7 @@ const MessagesScreen: React.FC = () => {
     refreshProfile,
     dmInbox,
     refreshDmInbox,
+    armLiveDmSub,
   } = useNostr();
   const { wallets } = useWallet();
   const { groupSummaries, followingOnly, setFollowingOnly, devMode } = useGroups();
@@ -185,6 +186,11 @@ const MessagesScreen: React.FC = () => {
   useFocusEffect(
     useCallback(() => {
       if (!isLoggedIn) return;
+      // Tell NostrContext to open the live NIP-17 sub — idempotent;
+      // cold-boot left it disarmed so Home stays responsive. First
+      // Messages-tab focus pays the wrap-drain cost here, where a
+      // brief loading state is the expected UX.
+      armLiveDmSub();
       const handle = InteractionManager.runAfterInteractions(() => {
         if (Date.now() - dmInboxLastRefreshAt.current < DM_INBOX_REFRESH_TTL_MS) return;
         // Bump the TTL marker only after the refresh resolves successfully — if it's aborted (tab blur) or throws, leave the marker untouched so the next focus retries instead of suppressing for 30 s. (#413 review)
@@ -206,7 +212,7 @@ const MessagesScreen: React.FC = () => {
         refreshAbortRef.current?.abort();
         refreshAbortRef.current = null;
       };
-    }, [isLoggedIn, refreshDmInbox, newRefreshSignal]),
+    }, [isLoggedIn, refreshDmInbox, newRefreshSignal, armLiveDmSub]),
   );
 
   // Avatar prefetch is split into its own focus effect so it can depend on `contacts` (the content it iterates) without invalidating the DM-refresh callback above. (#413 review)

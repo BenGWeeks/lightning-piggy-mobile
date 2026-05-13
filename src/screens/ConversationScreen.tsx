@@ -8,14 +8,16 @@ import {
   FlatList,
   ActivityIndicator,
   RefreshControl,
-  AppState,
   BackHandler,
-  Image,
   Linking,
   StyleSheet,
 } from 'react-native';
 import { Alert } from '../components/BrandedAlert';
-import { KeyboardController } from 'react-native-keyboard-controller';
+import {
+  KeyboardController,
+  useReanimatedKeyboardAnimation,
+} from 'react-native-keyboard-controller';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Zap, ArrowDown } from 'lucide-react-native';
 import { Image as ExpoImage } from 'expo-image';
@@ -25,7 +27,6 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr, subscribeDmMessages } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
-import * as nwcService from '../services/nwcService';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
@@ -61,6 +62,8 @@ import {
   extractSharedContact,
   formatTime,
 } from '../utils/messageContent';
+import { isSupportedImageUrl } from '../utils/imageUrl';
+import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
 
 type ConversationRoute = RouteProp<RootStackParamList, 'Conversation'>;
 type ConversationNavigation = NativeStackNavigationProp<RootStackParamList, 'Conversation'>;
@@ -131,6 +134,19 @@ const ConversationScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   // The composer owns its own keyboard wiring (KeyboardStickyView +
   // useReanimatedKeyboardAnimation) — see ConversationComposer.tsx.
+  // ConversationScreen ALSO listens to the keyboard so the FlatList
+  // shrinks by the keyboard height when the IME opens — without this
+  // the bottom-most bubbles render under the keyboard because
+  // KeyboardStickyView only translates the composer visually, it
+  // doesn't reduce the FlatList's layout footprint (#470).
+  const keyboard = useReanimatedKeyboardAnimation();
+  const animatedListLiftStyle = useAnimatedStyle(() => ({
+    // RNKC convention: keyboard.height.value is negative when the IME
+    // is up, 0 when down. Negating it gives a positive marginBottom
+    // equal to the keyboard height — pulls the FlatList's bottom edge
+    // up flush with the (now-floating) composer's top.
+    marginBottom: -keyboard.height.value,
+  }));
   const { pubkey, name, picture, lightningAddress } = route.params;
 
   const {
@@ -138,10 +154,17 @@ const ConversationScreen: React.FC = () => {
     fetchConversation,
     getCachedConversation,
     sendDirectMessage,
+    appendLocalDmMessage,
     signEvent,
     contacts,
     relays,
+    armLiveDmSub,
   } = useNostr();
+  // Cover the deep-link path (notification → straight to ConversationScreen
+  // without passing the Messages tab). Idempotent — no-op if already armed.
+  useEffect(() => {
+    armLiveDmSub();
+  }, [armLiveDmSub]);
   const { wallets, activeWalletId, activeWallet } = useWallet();
 
   const [messages, setMessages] = useState<
@@ -206,8 +229,6 @@ const ConversationScreen: React.FC = () => {
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
   const [fullscreenGifUrl, setFullscreenGifUrl] = useState<string | null>(null);
   const [sharingLocation, setSharingLocation] = useState(false);
-  // Payment hashes of outgoing invoices the active NWC wallet reports paid.
-  const [paidHashes, setPaidHashes] = useState<Set<string>>(() => new Set());
   const listRef = useRef<FlatList<Item>>(null);
 
   const zapItems = useMemo<TimedItem[]>(() => {
@@ -407,111 +428,7 @@ const ConversationScreen: React.FC = () => {
     return () => clearTimeout(t);
   }, [items.length]);
 
-  // Payment hashes of outgoing invoices that are plausibly still payable —
-  // not expired, not already known paid, and (as a belt-and-braces cap)
-  // Payment hashes known paid from our wallet's own transaction history,
-  // split by direction so we don't mis-flag an invoice paid just because
-  // its payment_hash happens to appear on the wrong side of the ledger
-  // (e.g. a self-payment or a routed tx reusing the same hash).
-  //   - Outgoing invoice we sent, counterparty paid → match an *incoming*
-  //     wallet tx carrying the same payment_hash.
-  //   - Incoming invoice we received, we paid → match an *outgoing* wallet
-  //     tx carrying the same payment_hash.
-  // Wallet-tx sync keeps these fresh for free; no per-invoice NWC poll
-  // needed for either direction.
-  const { paidOutgoingHashes, paidIncomingHashes } = useMemo(() => {
-    const out = new Set<string>();
-    const inc = new Set<string>();
-    for (const w of wallets) {
-      for (const tx of w.transactions) {
-        if (!tx.paymentHash) continue;
-        if (tx.type === 'incoming') out.add(tx.paymentHash);
-        else if (tx.type === 'outgoing') inc.add(tx.paymentHash);
-      }
-    }
-    return { paidOutgoingHashes: out, paidIncomingHashes: inc };
-  }, [wallets]);
-
-  // Helper used in the render path — picks the appropriate set based on the
-  // invoice's direction, layered with the NWC-polled outgoing results.
-  const isInvoicePaid = useCallback(
-    (paymentHash: string, fromMe: boolean): boolean => {
-      if (fromMe) return paidOutgoingHashes.has(paymentHash) || paidHashes.has(paymentHash);
-      return paidIncomingHashes.has(paymentHash);
-    },
-    [paidOutgoingHashes, paidIncomingHashes, paidHashes],
-  );
-
-  // Payment hashes of outgoing invoices that are plausibly still payable —
-  // not expired, not already known paid, and (as a belt-and-braces cap)
-  // not older than 24 h even if they claimed no expiry. That cap keeps the
-  // polling loop from growing without bound across long-running sessions
-  // where old unpaid invoices accumulate in the DM history.
-  const POLL_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-  const outgoingOpenHashes = useMemo(() => {
-    const now = Date.now();
-    const cutoff = now - POLL_MAX_AGE_MS;
-    const hashes: string[] = [];
-    for (const m of messages) {
-      if (!m.fromMe) continue;
-      if (m.createdAt * 1000 < cutoff) continue;
-      const inv = extractInvoice(m.text);
-      if (!inv || !inv.paymentHash) continue;
-      if (paidOutgoingHashes.has(inv.paymentHash)) continue;
-      if (paidHashes.has(inv.paymentHash)) continue;
-      if (inv.expiresAt !== null && inv.expiresAt * 1000 < now) continue;
-      hashes.push(inv.paymentHash);
-    }
-    return hashes;
-  }, [messages, paidOutgoingHashes, paidHashes]);
-
-  // Poll NWC for the paid status of outgoing invoices. Lightning-only.
-  // Gated on `AppState === 'active'` so we don't burn battery or hammer
-  // the relay while the app is backgrounded. We assume the active wallet
-  // is the one that issued the invoice — not strictly true if the user
-  // switched wallets mid-session, but a miss just means the UI stays
-  // "unpaid" until the next wallet tx sync resolves it.
-  useEffect(() => {
-    if (!activeWalletId || activeWallet?.walletType === 'onchain') return;
-    if (outgoingOpenHashes.length === 0) return;
-    let cancelled = false;
-    let intervalId: ReturnType<typeof setInterval> | null = null;
-    const poll = async () => {
-      for (const hash of outgoingOpenHashes) {
-        if (cancelled) return;
-        const result = await nwcService.lookupInvoice(activeWalletId, hash);
-        if (cancelled) return;
-        if (result?.paid) {
-          setPaidHashes((prev) => {
-            if (prev.has(hash)) return prev;
-            const next = new Set(prev);
-            next.add(hash);
-            return next;
-          });
-        }
-      }
-    };
-    const start = () => {
-      if (intervalId !== null) return;
-      poll();
-      intervalId = setInterval(poll, 15_000);
-    };
-    const stop = () => {
-      if (intervalId === null) return;
-      clearInterval(intervalId);
-      intervalId = null;
-    };
-    if (AppState.currentState === 'active') start();
-    const sub = AppState.addEventListener('change', (next) => {
-      if (next === 'active') start();
-      else stop();
-    });
-    return () => {
-      cancelled = true;
-      stop();
-      sub.remove();
-    };
-  }, [activeWalletId, activeWallet?.walletType, outgoingOpenHashes]);
+  const { isInvoicePaid } = usePaidInvoiceTracker(messages);
 
   // Batch-fetch profiles for every `nostr:` profile reference that appears
   // in the conversation. Relay hints from the nprofile (when present) are
@@ -580,6 +497,25 @@ const ConversationScreen: React.FC = () => {
     }
   }, [load]);
 
+  // Append an optimistic local- message to BOTH React state (instant
+  // paint) AND the per-conversation cache on disk (survives back-then-
+  // reopen before the NIP-17 self-wrap echo arrives). The merge-side
+  // dedup in mergeConversationMessages drops this local- row when the
+  // real wrap echoes back from the relay.
+  const appendOptimisticLocal = useCallback(
+    (text: string) => {
+      const optimistic = {
+        id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        fromMe: true,
+        text,
+        createdAt: Math.floor(Date.now() / 1000),
+      };
+      setMessages((prev) => [...prev, optimistic]);
+      void appendLocalDmMessage(pubkey, optimistic);
+    },
+    [appendLocalDmMessage, pubkey],
+  );
+
   const handleSend = useCallback(async () => {
     const text = draft.trim();
     if (!text || sending) return;
@@ -591,17 +527,11 @@ const ConversationScreen: React.FC = () => {
         return;
       }
       setDraft('');
-      const optimistic = {
-        id: `local-${Date.now()}`,
-        fromMe: true,
-        text,
-        createdAt: Math.floor(Date.now() / 1000),
-      };
-      setMessages((prev) => [...prev, optimistic]);
+      appendOptimisticLocal(text);
     } finally {
       setSending(false);
     }
-  }, [draft, sending, sendDirectMessage, pubkey]);
+  }, [draft, sending, sendDirectMessage, pubkey, appendOptimisticLocal]);
 
   const handleShareLocation = useCallback(async () => {
     if (sharingLocation) return;
@@ -643,15 +573,7 @@ const ConversationScreen: React.FC = () => {
                 if (!sendResult.success) {
                   Alert.alert('Send failed', sendResult.error ?? 'Could not send location.');
                 } else {
-                  setMessages((prev) => [
-                    ...prev,
-                    {
-                      id: `local-${Date.now()}`,
-                      fromMe: true,
-                      text,
-                      createdAt: Math.floor(Date.now() / 1000),
-                    },
-                  ]);
+                  appendOptimisticLocal(text);
                 }
                 resolve();
               },
@@ -668,7 +590,7 @@ const ConversationScreen: React.FC = () => {
     } finally {
       setSharingLocation(false);
     }
-  }, [sharingLocation, name, pubkey, sendDirectMessage]);
+  }, [sharingLocation, name, pubkey, sendDirectMessage, appendOptimisticLocal]);
 
   // Shared send-image path for both gallery and camera entry points.
   // Strips EXIF from the picked image, uploads to the user's configured
@@ -685,22 +607,14 @@ const ConversationScreen: React.FC = () => {
           Alert.alert('Send failed', sendResult.error ?? 'Could not send image.');
           return;
         }
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `local-${Date.now()}`,
-            fromMe: true,
-            text: url,
-            createdAt: Math.floor(Date.now() / 1000),
-          },
-        ]);
+        appendOptimisticLocal(url);
       } catch (error) {
         Alert.alert('Upload failed', error instanceof Error ? error.message : 'Please try again.');
       } finally {
         setUploadingImage(false);
       }
     },
-    [signEvent, sendDirectMessage, pubkey],
+    [signEvent, sendDirectMessage, pubkey, appendOptimisticLocal],
   );
 
   const handlePickAndSendImage = useCallback(async () => {
@@ -762,17 +676,9 @@ const ConversationScreen: React.FC = () => {
         Alert.alert('Share failed', result.error ?? 'Could not share contact.');
         return;
       }
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `local-${Date.now()}`,
-          fromMe: true,
-          text: payload,
-          createdAt: Math.floor(Date.now() / 1000),
-        },
-      ]);
+      appendOptimisticLocal(payload);
     },
-    [pubkey, sendDirectMessage, contacts, relays],
+    [pubkey, sendDirectMessage, contacts, relays, appendOptimisticLocal],
   );
 
   const handleSendGif = useCallback(
@@ -785,21 +691,9 @@ const ConversationScreen: React.FC = () => {
         Alert.alert('Send failed', result.error ?? 'Could not send GIF.');
         return;
       }
-      // `local-<ms>` on its own collides if two sends land in the same
-      // millisecond (e.g. a double-tap on a slow network). Append a
-      // short random suffix so the FlatList keyExtractor stays unique.
-      const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: localId,
-          fromMe: true,
-          text: payload,
-          createdAt: Math.floor(Date.now() / 1000),
-        },
-      ]);
+      appendOptimisticLocal(payload);
     },
-    [pubkey, sendDirectMessage],
+    [pubkey, sendDirectMessage, appendOptimisticLocal],
   );
 
   const openLocation = useCallback((loc: SharedLocation) => {
@@ -911,10 +805,13 @@ const ConversationScreen: React.FC = () => {
   );
 
   const avatarNode =
-    picture && !avatarError ? (
-      <Image
+    picture && !avatarError && isSupportedImageUrl(picture) ? (
+      <ExpoImage
         source={{ uri: picture }}
         style={styles.headerAvatar}
+        cachePolicy="memory-disk"
+        recyclingKey={picture}
+        autoplay={false}
         onError={() => setAvatarError(true)}
       />
     ) : (
@@ -991,89 +888,98 @@ const ConversationScreen: React.FC = () => {
           pulls the composer flush against the keyboard's top edge
           (RNKC's canonical chat pattern). */}
       <View style={styles.flex}>
-        {loading ? (
-          <View style={styles.loading}>
-            <ActivityIndicator color={colors.brandPink} />
-            <Text style={styles.loadingText}>Loading messages…</Text>
-          </View>
-        ) : (
-          <FlatList
-            ref={listRef}
-            style={styles.flex}
-            data={items}
-            keyExtractor={(it) => it.id}
-            renderItem={renderItem}
-            contentContainerStyle={listContentStyle}
-            inverted
-            // Window the list so a thread with hundreds of messages
-            // doesn't mount every row up front — first-frame work goes
-            // from "render all N bubbles + avatars" to "render the
-            // 20 newest then lazy-mount as the user scrolls". These
-            // defaults are chosen for chat-style threads: one screen
-            // fits ~8-10 bubbles, so 20 covers the visible viewport
-            // plus one screen of pre-roll for smooth momentum scrolls.
-            //
-            // NOTE: `removeClippedSubviews` is deliberately OFF. It's
-            // broken with `inverted` on Android — breaks the contentOffset
-            // reporting so onScroll's `y < 200` check flips when the user
-            // is visually at the bottom, making the scroll-to-bottom FAB
-            // show spuriously. See facebook/react-native#30521 / #26061.
-            initialNumToRender={20}
-            maxToRenderPerBatch={10}
-            windowSize={10}
-            ListEmptyComponent={
-              <View style={styles.empty}>
-                <Text style={styles.emptyTitle}>No messages yet</Text>
-                <Text style={styles.emptySubtitle}>
-                  Say hi{lightningAddress ? ' — or send a zap.' : '.'}
-                </Text>
-              </View>
-            }
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
-            onScroll={(e) => {
-              const y = e.nativeEvent.contentOffset.y;
-              // "Near bottom" in an inverted list = scroll offset ~0.
-              // 200 px of slack covers the contentContainer padding +
-              // one message bubble, so sitting at the newest message
-              // reliably registers as "at bottom" for both the
-              // auto-scroll-on-new-message behaviour and the FAB.
-              const isNear = y < 200;
-              nearBottomRef.current = isNear;
-              // Mirror to state only when the boolean actually flips —
-              // this keeps onScroll cheap while still triggering a
-              // re-render for the FAB's appearance.
-              setAtBottom((prev) => (prev !== isNear ? isNear : prev));
-            }}
-            scrollEventThrottle={100}
-          />
-        )}
+        {/* Wrapping the list (and scroll-to-bottom FAB) in an
+            Animated.View whose marginBottom tracks the keyboard
+            height — shrinks the list's layout footprint so the
+            bottom-most bubbles aren't hidden under the IME. The
+            composer below this wrapper sits OUTSIDE the lifted
+            block; KeyboardStickyView handles the composer's own
+            keyboard avoidance independently. */}
+        <Animated.View style={[styles.flex, animatedListLiftStyle]}>
+          {loading ? (
+            <View style={styles.loading}>
+              <ActivityIndicator color={colors.brandPink} />
+              <Text style={styles.loadingText}>Loading messages…</Text>
+            </View>
+          ) : (
+            <FlatList
+              ref={listRef}
+              style={styles.flex}
+              data={items}
+              keyExtractor={(it) => it.id}
+              renderItem={renderItem}
+              contentContainerStyle={listContentStyle}
+              inverted
+              // Window the list so a thread with hundreds of messages
+              // doesn't mount every row up front — first-frame work goes
+              // from "render all N bubbles + avatars" to "render the
+              // 20 newest then lazy-mount as the user scrolls". These
+              // defaults are chosen for chat-style threads: one screen
+              // fits ~8-10 bubbles, so 20 covers the visible viewport
+              // plus one screen of pre-roll for smooth momentum scrolls.
+              //
+              // NOTE: `removeClippedSubviews` is deliberately OFF. It's
+              // broken with `inverted` on Android — breaks the contentOffset
+              // reporting so onScroll's `y < 200` check flips when the user
+              // is visually at the bottom, making the scroll-to-bottom FAB
+              // show spuriously. See facebook/react-native#30521 / #26061.
+              initialNumToRender={20}
+              maxToRenderPerBatch={10}
+              windowSize={10}
+              ListEmptyComponent={
+                <View style={styles.empty}>
+                  <Text style={styles.emptyTitle}>No messages yet</Text>
+                  <Text style={styles.emptySubtitle}>
+                    Say hi{lightningAddress ? ' — or send a zap.' : '.'}
+                  </Text>
+                </View>
+              }
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+              onScroll={(e) => {
+                const y = e.nativeEvent.contentOffset.y;
+                // "Near bottom" in an inverted list = scroll offset ~0.
+                // 200 px of slack covers the contentContainer padding +
+                // one message bubble, so sitting at the newest message
+                // reliably registers as "at bottom" for both the
+                // auto-scroll-on-new-message behaviour and the FAB.
+                const isNear = y < 200;
+                nearBottomRef.current = isNear;
+                // Mirror to state only when the boolean actually flips —
+                // this keeps onScroll cheap while still triggering a
+                // re-render for the FAB's appearance.
+                setAtBottom((prev) => (prev !== isNear ? isNear : prev));
+              }}
+              scrollEventThrottle={100}
+            />
+          )}
 
-        {/* Backdrop tap-to-close: when the attach panel is open, an
+          {/* Backdrop tap-to-close: when the attach panel is open, an
             absolute transparent Pressable sits above the FlatList area.
             Tapping anywhere on the messages closes the panel (matches
             WhatsApp behaviour). Trade-off: you can't tap a message bubble
             while the panel is open — close the panel first. */}
-        {attachPanelOpen ? (
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            onPress={closeAttachPanel}
-            accessibilityLabel="Close attachment panel"
-            testID="conversation-attach-backdrop"
-          />
-        ) : null}
+          {attachPanelOpen ? (
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={closeAttachPanel}
+              accessibilityLabel="Close attachment panel"
+              testID="conversation-attach-backdrop"
+            />
+          ) : null}
 
-        {!atBottom && !loading ? (
-          <View style={styles.scrollToBottomWrap} pointerEvents="box-none">
-            <TouchableOpacity
-              style={styles.scrollToBottomFab}
-              onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
-              accessibilityLabel="Scroll to most recent message"
-              testID="conversation-scroll-to-bottom"
-            >
-              <ArrowDown size={20} color={colors.white} />
-            </TouchableOpacity>
-          </View>
-        ) : null}
+          {!atBottom && !loading ? (
+            <View style={styles.scrollToBottomWrap} pointerEvents="box-none">
+              <TouchableOpacity
+                style={styles.scrollToBottomFab}
+                onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
+                accessibilityLabel="Scroll to most recent message"
+                testID="conversation-scroll-to-bottom"
+              >
+                <ArrowDown size={20} color={colors.white} />
+              </TouchableOpacity>
+            </View>
+          ) : null}
+        </Animated.View>
 
         {/* Composer + attach panel + IME-aware safe area now live in the
             shared ConversationComposer (#251). Both the 1:1 and group
@@ -1189,15 +1095,7 @@ const ConversationScreen: React.FC = () => {
           lightningAddress: lightningAddress ?? null,
         }}
         onSent={(payload) => {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `local-${Date.now()}`,
-              fromMe: true,
-              text: payload,
-              createdAt: Math.floor(Date.now() / 1000),
-            },
-          ]);
+          appendOptimisticLocal(payload);
         }}
       />
       <SendSheet

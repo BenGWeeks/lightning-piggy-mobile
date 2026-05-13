@@ -17,7 +17,7 @@ name: Group send via Amber — #356 regression (no Send-failed alert)
 # ContentResolver fast-path; the message lands in the thread.
 #
 # Prerequisites (same as test-group-send-via-amber.yaml):
-#   - test-amber-import-key.yaml has run (Amber holds MAESTRO_NSEC,
+#   - test-amber-import-key.yaml has run (Amber holds MAESTRO_NSEC_BIG,
 #     "Approve basic actions" was selected).
 #   - test-3way-group-create-as-big.yaml has run as the same identity
 #     so a group named "Triad" exists and is cached locally.
@@ -26,7 +26,7 @@ name: Group send via Amber — #356 regression (no Send-failed alert)
 #
 # Run:
 #   source .env && \
-#     maestro test -e MAESTRO_NSEC="$MAESTRO_NSEC" \
+#     maestro test -e MAESTRO_NSEC_BIG="$MAESTRO_NSEC_BIG" \
 #     tests/e2e/test-group-send-amber-356.yaml
 
 - runFlow: test-login-amber.yaml

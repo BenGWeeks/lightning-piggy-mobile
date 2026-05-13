@@ -1,0 +1,31 @@
+appId: com.lightningpiggy.app.dev
+name: Subflow — send a lightning address into the open thread
+---
+# Reusable subflow: from the currently-open conversation thread (1:1
+# OR group), composes a message containing `lightning:${LUD16}` and
+# sends it. Works for both because both threads use the same
+# conversation-input + conversation-send testIDs.
+#
+# After the send the bubble renders as a "Lightning address" card
+# with a Pay button on the receiver side (per MessageBubble.tsx
+# line ~384). On the sender side it shows as "Lightning address sent"
+# (or similar) without a Pay button.
+#
+# Caller must already have the thread open. Suggested env:
+#   MY_LUD16 — e.g. little.piggy@bank.weeksfamily.me
+#
+# The lightning: prefix is mandatory — without it MessageBubble's
+# extractLightningAddress regex won't match and the message renders
+# as plain text.
+
+- tapOn:
+    id: 'conversation-input'
+- waitForAnimationToEnd: { timeout: 800 }
+- inputText: 'lightning:${MY_LUD16}'
+- tapOn:
+    id: 'conversation-send'
+- waitForAnimationToEnd: { timeout: 4000 }
+
+# Confirmation: a Lightning-address bubble appeared. The card label
+# differs slightly between own / other, so match the lud16 itself.
+- assertVisible: '${MY_LUD16}'

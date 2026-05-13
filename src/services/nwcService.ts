@@ -397,11 +397,21 @@ type Nip47Internals = {
 async function sendPaymentWithTimeout(
   provider: NostrWebLNProvider,
   bolt11: string,
+  amountMsats?: number,
 ): Promise<{ preimage: string }> {
   // Runtime guard — `executeNip47Request` is a private @getalby/sdk surface;
   // if a future SDK update removes it, fall back to the public sendPayment.
   const client = provider.client as unknown as Nip47Internals | undefined;
   if (!client || typeof client.executeNip47Request !== 'function') {
+    // The public `provider.sendPayment(bolt11)` doesn't accept the
+    // optional msats param NIP-47 defines for zero-amount invoices,
+    // so we'd silently send a bolt11-amount-of-0 if we let this path
+    // through. Fail loudly instead — caller can surface the error.
+    if (amountMsats && amountMsats > 0) {
+      throw new Error(
+        'Amount-less bolt11 requires NIP-47 `amount` param — SDK fallback path does not support it',
+      );
+    }
     if (__DEV__)
       console.warn(
         '[NWC] executeNip47Request unavailable — falling back to public sendPayment (no per-call timeout)',
@@ -412,9 +422,15 @@ async function sendPaymentWithTimeout(
     }
     return { preimage: fallback.preimage };
   }
+  // NIP-47 `pay_invoice` accepts an optional `amount` (in msats) for
+  // zero-amount invoices — the wallet picks up the user-specified
+  // amount at send time. Omit when null/undefined so amount-bearing
+  // invoices behave exactly as before.
+  const params: { invoice: string; amount?: number } = { invoice: bolt11 };
+  if (amountMsats && amountMsats > 0) params.amount = amountMsats;
   const result = await client.executeNip47Request<{ preimage: string }>(
     'pay_invoice',
-    { invoice: bolt11 },
+    params,
     // Validator: require a non-empty string preimage so { preimage: undefined }
     // can't be silently treated as success.
     (r) => !!r && typeof r.preimage === 'string' && r.preimage.length > 0,
@@ -426,6 +442,8 @@ async function sendPaymentWithTimeout(
 export interface PayInvoiceOptions {
   signal?: AbortSignal;
   onReplyTimeout?: () => void;
+  /** Amount in millisats; only used for zero-amount invoices. */
+  amountMsats?: number;
 }
 
 export async function payInvoice(
@@ -437,12 +455,12 @@ export async function payInvoice(
     signalOrOptions && 'aborted' in signalOrOptions
       ? { signal: signalOrOptions as AbortSignal }
       : ((signalOrOptions as PayInvoiceOptions | undefined) ?? {});
-  const { signal, onReplyTimeout } = options;
+  const { signal, onReplyTimeout, amountMsats } = options;
   throwIfAborted(signal);
   let provider = await ensureConnected(walletId);
   if (!provider) throw new Error('Not connected');
   try {
-    const result = await sendPaymentWithTimeout(provider, bolt11);
+    const result = await sendPaymentWithTimeout(provider, bolt11, amountMsats);
     throwIfAborted(signal);
     return { preimage: result.preimage };
   } catch (error) {
@@ -478,7 +496,7 @@ export async function payInvoice(
         }
       }
       throwIfAborted(signal);
-      const result = await sendPaymentWithTimeout(provider, bolt11);
+      const result = await sendPaymentWithTimeout(provider, bolt11, amountMsats);
       return { preimage: result.preimage };
     }
     if (msg.includes('reply timeout')) {
@@ -522,6 +540,62 @@ export async function payInvoice(
         }
       }
       throw createReplyTimeoutError();
+    }
+    // The Alby SDK wraps a NIP-47 error response with no body as
+    // `Nip47WalletError("unknown Error", "INTERNAL")` (see
+    // node_modules/@getalby/sdk/dist/cjs/nwc.cjs:7006). LNbits has
+    // been observed to do this when the wallet *did* process the
+    // payment with its LND backend (LN balance dropped) but the
+    // response back through Nostr was malformed. Look up the invoice
+    // before treating it as a real failure — if the wallet can find
+    // the preimage, the payment succeeded and we should return it.
+    // See issue #481 — this was the underlying cause of the
+    // deterministic first-attempt claim failure on every reverse swap.
+    const errCode = (error as { code?: string })?.code;
+    if (msg === 'unknown Error' || errCode === 'INTERNAL') {
+      const paymentHash = extractPaymentHash(bolt11);
+      if (paymentHash) {
+        try {
+          const lookup = await provider.lookupInvoice({ paymentHash });
+          if (lookup?.paid && lookup.preimage) {
+            // `warn` (not `log`) so this survives the production
+            // `transform-remove-console` strip — without it field logs
+            // can't tell a benign Alby-SDK-wrapping case (wallet did
+            // process the payment) from a real failure. `paid` is the
+            // canonical settled signal (settled_at>0) — `preimage` alone
+            // isn't, per the lookupInvoice notes below.
+            console.warn(
+              `[NWC] pay_invoice surfaced "${msg}" but lookup confirms paid + has preimage — returning it (paymentHash=${paymentHash.slice(0, 8)})`,
+            );
+            return { preimage: lookup.preimage };
+          }
+          // No usable preimage. Either the lookup says unpaid/pending,
+          // or it's paid but the backend omitted preimage (LNbits has
+          // been seen to do this). Both are real-failure surfaces for
+          // pay_invoice; the caller re-throws and the swap is treated
+          // as unpaid until the next recovery pass.
+          console.warn(
+            `[NWC] pay_invoice "${msg}" + lookup returned no usable preimage (paid=${lookup?.paid === true ? 'true' : lookup?.paid === false ? 'false' : 'unknown'}) — treating as failure (paymentHash=${paymentHash.slice(0, 8)})`,
+          );
+        } catch (lookupErr) {
+          // lookup itself threw — most ambiguous case. We don't know if
+          // the payment succeeded or not. Log so field diagnostics can
+          // correlate, then fall through + re-throw the ORIGINAL error
+          // so the caller decides. Do NOT retry the payment here —
+          // would risk a double-pay on wallets that *did* process it.
+          const lookupMsg =
+            lookupErr instanceof Error
+              ? lookupErr.message || lookupErr.toString()
+              : String(lookupErr);
+          console.warn(
+            `[NWC] pay_invoice "${msg}" + lookupInvoice ALSO failed (${lookupMsg || 'no message'}) — payment status unknown (paymentHash=${paymentHash.slice(0, 8)})`,
+          );
+        }
+      } else {
+        console.warn(
+          `[NWC] pay_invoice "${msg}" + could not extract paymentHash from bolt11 — payment status unknown`,
+        );
+      }
     }
     throw error;
   }

@@ -12,7 +12,11 @@ import {
   Pressable,
 } from 'react-native';
 import { Alert } from '../components/BrandedAlert';
-import { KeyboardController } from 'react-native-keyboard-controller';
+import {
+  KeyboardController,
+  useReanimatedKeyboardAnimation,
+} from 'react-native-keyboard-controller';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { Image as ExpoImage } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import Svg, { Path } from 'react-native-svg';
@@ -57,6 +61,7 @@ import {
   extractSharedContact,
   type BubbleContent,
 } from '../utils/messageContent';
+import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
 import type { NostrProfile } from '../types/nostr';
 import type { GroupConversationRoute, RootStackParamList } from '../navigation/types';
 
@@ -77,15 +82,29 @@ interface MemberRow {
 
 const GroupConversationScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
-  // Composer + keyboard handling now live inside ConversationComposer
-  // (#251) — no per-screen useReanimatedKeyboardAnimation /
-  // useAnimatedStyle plumbing needed.
+  // The composer's own keyboard wiring lives in ConversationComposer
+  // (#251). The screen ALSO listens to the keyboard so the FlatList
+  // shrinks by the keyboard height when the IME opens — without this
+  // the bottom bubbles render under the keyboard because
+  // KeyboardStickyView only translates the composer visually, it
+  // doesn't reduce the FlatList's layout footprint (#470).
+  const keyboard = useReanimatedKeyboardAnimation();
+  const animatedListLiftStyle = useAnimatedStyle(() => ({
+    marginBottom: -keyboard.height.value,
+  }));
   const navigation = useNavigation<GroupConversationNavigation>();
   const route = useRoute<GroupConversationRoute>();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { getGroup, deleteGroup } = useGroups();
-  const { contacts, sendGroupMessage, pubkey: myPubkey, signEvent, relays } = useNostr();
+  const {
+    contacts,
+    sendGroupMessage,
+    pubkey: myPubkey,
+    profile: myProfile,
+    signEvent,
+    relays,
+  } = useNostr();
   const [renameVisible, setRenameVisible] = useState(false);
   const [membersSheetVisible, setMembersSheetVisible] = useState(false);
   const [draft, setDraft] = useState('');
@@ -163,22 +182,45 @@ const GroupConversationScreen: React.FC = () => {
   // land while the screen is open; missed wraps from before mount get
   // drained on the next MessagesScreen focus or app-foreground refresh.
 
+  // Stored `memberPubkeys` excludes the viewer by LP convention (see
+  // GroupsContext). For display we re-include self pinned at the top so
+  // the header count and the members sheet reflect the true group size,
+  // matching Signal / WhatsApp / Telegram (#473). The "You" suffix on
+  // the self row is wired via `memberNameByPubkey` below + the sheet's
+  // own self-row marker.
   const members: MemberRow[] = useMemo(() => {
     if (!group) return [];
     const byPubkey = new Map(contacts.map((c) => [c.pubkey, c]));
-    return group.memberPubkeys.map((pk) => {
-      const c = byPubkey.get(pk);
-      return {
-        pubkey: pk,
-        name:
-          c?.profile?.displayName ||
-          c?.profile?.name ||
-          c?.petname ||
-          `${pk.slice(0, 8)}...${pk.slice(-4)}`,
-        picture: c?.profile?.picture ?? null,
-      };
-    });
-  }, [group, contacts]);
+    // Dedupe against self (case-insensitive) before mapping. Defends
+    // against legacy / accidentally-self-included memberPubkeys lists
+    // that would otherwise produce a double "You" row + an off-by-one
+    // header count.
+    const myLower = myPubkey?.toLowerCase();
+    const others: MemberRow[] = group.memberPubkeys
+      .filter((pk) => !myLower || pk.toLowerCase() !== myLower)
+      .map((pk) => {
+        const c = byPubkey.get(pk);
+        return {
+          pubkey: pk,
+          name:
+            c?.profile?.displayName ||
+            c?.profile?.name ||
+            c?.petname ||
+            `${pk.slice(0, 8)}...${pk.slice(-4)}`,
+          picture: c?.profile?.picture ?? null,
+        };
+      });
+    if (!myPubkey) return others;
+    const selfRow: MemberRow = {
+      pubkey: myPubkey,
+      name:
+        myProfile?.displayName ||
+        myProfile?.name ||
+        `${myPubkey.slice(0, 8)}...${myPubkey.slice(-4)}`,
+      picture: myProfile?.picture ?? null,
+    };
+    return [selfRow, ...others];
+  }, [group, contacts, myPubkey, myProfile]);
 
   const memberNameByPubkey = useMemo(() => {
     const map = new Map<string, string>();
@@ -467,6 +509,17 @@ const GroupConversationScreen: React.FC = () => {
     [messages],
   );
 
+  const trackedMessages = useMemo(
+    () =>
+      messages.map((m) => ({
+        text: m.text,
+        fromMe: m.senderPubkey === myPubkey,
+        createdAt: m.createdAt,
+      })),
+    [messages, myPubkey],
+  );
+  const { isInvoicePaid } = usePaidInvoiceTracker(trackedMessages);
+
   const renderMessage = useCallback(
     ({ item }: { item: ClassifiedMessage }) => {
       const fromMe = item.senderPubkey === myPubkey;
@@ -491,6 +544,7 @@ const GroupConversationScreen: React.FC = () => {
           onOpenContact={openSharedContact}
           onOpenLocation={openLocation}
           onOpenGifFullscreen={setFullscreenGifUrl}
+          isInvoicePaid={isInvoicePaid}
           testIdPrefix="group-conversation"
         />
       );
@@ -502,6 +556,7 @@ const GroupConversationScreen: React.FC = () => {
       handlePayInvoice,
       openSharedContact,
       openLocation,
+      isInvoicePaid,
     ],
   );
 
@@ -631,23 +686,30 @@ const GroupConversationScreen: React.FC = () => {
       </View>
 
       <View style={styles.content}>
-        {loadingMessages ? (
-          <ActivityIndicator color={colors.brandPink} style={{ marginTop: 32 }} />
-        ) : (
-          <FlatList
-            ref={listRef}
-            data={classifiedMessages}
-            keyExtractor={(item) => item.id}
-            renderItem={renderMessage}
-            contentContainerStyle={styles.messagesList}
-            testID="group-messages-list"
-            ListEmptyComponent={
-              <View style={styles.emptyState}>
-                <Text style={styles.emptySubtitle}>No messages yet. Say hi!</Text>
-              </View>
-            }
-          />
-        )}
+        {/* See #470 — wrap the FlatList (NOT the composer) in an
+            Animated.View whose marginBottom tracks the keyboard
+            height so the IME doesn't hide the bottom messages. The
+            composer below this wrapper handles its own keyboard
+            avoidance via KeyboardStickyView. */}
+        <Animated.View style={[{ flex: 1 }, animatedListLiftStyle]}>
+          {loadingMessages ? (
+            <ActivityIndicator color={colors.brandPink} style={{ marginTop: 32 }} />
+          ) : (
+            <FlatList
+              ref={listRef}
+              data={classifiedMessages}
+              keyExtractor={(item) => item.id}
+              renderItem={renderMessage}
+              contentContainerStyle={styles.messagesList}
+              testID="group-messages-list"
+              ListEmptyComponent={
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptySubtitle}>No messages yet. Say hi!</Text>
+                </View>
+              }
+            />
+          )}
+        </Animated.View>
 
         {/* Composer + attach panel + IME-aware safe area now live in the
             shared ConversationComposer (#251). Style overrides preserve

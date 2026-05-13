@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Linking,
 } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from '../../components/BrandedAlert';
 import * as nip19 from 'nostr-tools/nip19';
@@ -148,9 +149,12 @@ const AboutScreen: React.FC = () => {
             )}
             <View style={styles.teamRow}>
               {teamProfile.picture && !teamPictureError ? (
-                <Image
+                <ExpoImage
                   source={{ uri: teamProfile.picture }}
                   style={styles.teamPicture}
+                  cachePolicy="memory-disk"
+                  recyclingKey={teamProfile.picture}
+                  autoplay={false}
                   onError={() => setTeamPictureError(true)}
                 />
               ) : (

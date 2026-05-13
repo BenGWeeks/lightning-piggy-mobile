@@ -69,6 +69,9 @@ A glossary of key terms used throughout this document.
 | **HTLC**
 | Hash Time-Locked Contract — a conditional payment used in Lightning channels and atomic swaps. Funds are locked by a hash and released when the preimage is revealed, or refunded after a timeout.
 
+| **Jank**
+| A user-visible stutter or freeze caused by a frame missing its render budget (16.6 ms at 60 fps). Android's `OpenGLRenderer` emits a `Davey!` warning to logcat when a frame takes >700 ms — the kernel's "severe jank" alarm, named after Dave Burke (Android engineering lead at the time). Common causes in RN: heavy synchronous work on the JS thread blocking the bridge, image decoding on the UI thread, or React reconciliation cascades from rapid `setState` calls.
+
 | **Key-path Spend**
 | Spending a Taproot output using a single Schnorr signature against the tweaked output key. No script is revealed on-chain, maximising privacy. For Boltz swaps this requires cooperative MuSig2 between user and Boltz.
 

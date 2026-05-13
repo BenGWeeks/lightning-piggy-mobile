@@ -186,6 +186,8 @@ export const MiniWalletCard: React.FC<MiniCardProps> = ({ theme, selected, onPre
       style={[styles.miniCardContainer, selected && styles.miniCardSelected]}
       onPress={onPress}
       activeOpacity={0.7}
+      accessibilityLabel={`${theme.name} card design`}
+      testID={`theme-${theme.id}`}
     >
       <View style={styles.miniScaleWrapper}>
         <View

@@ -517,13 +517,61 @@ export async function claimSwap(
   // Set witness: <sig> <preimage> <claim_script> <control_block>
   tx.setWitness(0, [sig, preimageBytes, claimScript, controlBlock]);
 
-  // Broadcast via the configured Electrum server (BDK)
+  // Broadcast via the configured Electrum server (BDK).
+  //
+  // Retry on transient failures: when waitForLockup returns at
+  // `transaction.mempool`, Boltz has just broadcast the lockup tx but
+  // it may not yet have propagated to *our* Electrum server. The first
+  // claim broadcast can then fail because the input UTXO it spends
+  // from is unknown to our Electrum, and BDK surfaces this with an
+  // empty `localizedMessage` that historically reached the user as a
+  // bare "unknown Error". A short exponential-backoff retry papers
+  // over the propagation race in the common case (~5–15 s gap) and
+  // makes the underlying Electrum complaint visible if the failure
+  // turns out to be terminal. See issue #481.
   const txId = tx.getId();
   console.log(`[Boltz] Broadcasting claim tx: ${txId} (${tx.toHex().length / 2} bytes)`);
   const onchainService = await import('./onchainService');
-  await onchainService.broadcastRawTx(tx.toHex());
+  await broadcastWithRetry(() => onchainService.broadcastRawTx(tx.toHex()), 'claim', txId);
   console.log(`[Boltz] Claim tx broadcast successfully: ${txId}`);
   return txId;
+}
+
+// Retry broadcast against transient Electrum propagation gaps. Throws
+// the *last* error with a contextualised message so the caller doesn't
+// surface a bare "unknown Error" if BDK gave us a null message.
+async function broadcastWithRetry(
+  fn: () => Promise<void>,
+  label: 'claim' | 'refund',
+  txId: string,
+  maxAttempts: number = 4,
+): Promise<void> {
+  let lastError: unknown;
+  let delayMs = 2000;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await fn();
+      if (attempt > 1) {
+        console.log(`[Boltz] ${label} broadcast succeeded on attempt ${attempt}/${maxAttempts}`);
+      }
+      return;
+    } catch (e) {
+      lastError = e;
+      const msg = e instanceof Error ? e.message || e.toString() : String(e);
+      console.warn(
+        `[Boltz] ${label} broadcast attempt ${attempt}/${maxAttempts} failed for ${txId}: ${msg || '(no message)'}`,
+      );
+      if (attempt < maxAttempts) {
+        await new Promise((r) => setTimeout(r, delayMs));
+        delayMs *= 2;
+      }
+    }
+  }
+  const detail =
+    lastError instanceof Error ? lastError.message || lastError.toString() : String(lastError);
+  throw new Error(
+    `Boltz ${label} broadcast failed after ${maxAttempts} attempts (${detail || 'no underlying message — likely Electrum propagation gap or RPC error'})`,
+  );
 }
 
 /**
@@ -673,7 +721,7 @@ export async function refundSwap(
   const txId = tx.getId();
   console.log(`[Boltz] Broadcasting refund tx: ${txId}`);
   const onchainService = await import('./onchainService');
-  await onchainService.broadcastRawTx(tx.toHex());
+  await broadcastWithRetry(() => onchainService.broadcastRawTx(tx.toHex()), 'refund', txId);
   console.log(`[Boltz] Refund tx broadcast successfully: ${txId}`);
   return txId;
 }
