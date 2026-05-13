@@ -17,11 +17,11 @@ import {
   PiggyBank,
   Plus,
   Search,
-  ShieldCheck,
-  ShieldOff,
+  SlidersHorizontal,
 } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
+import HuntFilterSheet, { countActiveFilters } from '../components/HuntFilterSheet';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
@@ -102,11 +102,12 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
     maxLon: number;
   } | null>(null);
   // NIP-GC difficulty / terrain are integer 1-5 scales (geocaching
-  // convention). Max-filter, so "D ≤ 2" keeps a beginner away from
-  // expert puzzles; null = no filter. Local to this screen since they
-  // only make sense for caches.
-  const [maxDifficulty, setMaxDifficulty] = useState<number | null>(null);
-  const [maxTerrain, setMaxTerrain] = useState<number | null>(null);
+  // convention). Multi-select Sets so a user can pick e.g. D1 + D3
+  // (skip the cunning level in the middle). Empty Set = no filter.
+  const [selectedDifficulties, setSelectedDifficulties] = useState<Set<number>>(new Set());
+  const [selectedTerrains, setSelectedTerrains] = useState<Set<number>>(new Set());
+  // Whether the bottom-sheet filter UI is open.
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   // Cache type filter — empty set = show every type (default). Built
   // dynamically from whatever types are present in the current caches
   // dataset; selected entries OR together so the list doesn't filter
@@ -197,14 +198,14 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
         );
       });
     }
-    if (maxDifficulty !== null) {
+    if (selectedDifficulties.size > 0) {
       // A cache with no difficulty tag is treated as "1" — typical
       // hider convention for a trivial walk-up; otherwise filtering
       // would silently drop legitimate easy caches.
-      items = items.filter(({ cache }) => (cache.difficulty ?? 1) <= maxDifficulty);
+      items = items.filter(({ cache }) => selectedDifficulties.has(cache.difficulty ?? 1));
     }
-    if (maxTerrain !== null) {
-      items = items.filter(({ cache }) => (cache.terrain ?? 1) <= maxTerrain);
+    if (selectedTerrains.size > 0) {
+      items = items.filter(({ cache }) => selectedTerrains.has(cache.terrain ?? 1));
     }
     if (selectedTypes.size > 0) {
       items = items.filter(({ cache }) =>
@@ -212,7 +213,18 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
       );
     }
     return items;
-  }, [caches, pos, mapBbox, maxDifficulty, maxTerrain, selectedTypes]);
+  }, [caches, pos, mapBbox, selectedDifficulties, selectedTerrains, selectedTypes]);
+
+  const activeFilterCount = useMemo(
+    () =>
+      countActiveFilters({
+        selectedDifficulties,
+        selectedTerrains,
+        selectedTypes,
+        wotFilterEnabled: filterEnabled,
+      }),
+    [selectedDifficulties, selectedTerrains, selectedTypes, filterEnabled],
+  );
 
   const availableTypes = useMemo(() => {
     const seen = new Set<string>();
@@ -295,116 +307,21 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
                 autoCorrect={false}
                 testID="hunt-search-input"
               />
+              <TouchableOpacity
+                style={styles.filterIconButton}
+                onPress={() => setFilterSheetOpen(true)}
+                testID="hunt-filter-button"
+                accessibilityLabel={`Filters${activeFilterCount > 0 ? `, ${activeFilterCount} active` : ''}`}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <SlidersHorizontal size={18} color={colors.textHeader} strokeWidth={2.5} />
+                {activeFilterCount > 0 ? (
+                  <View style={styles.filterIconBadge}>
+                    <Text style={styles.filterIconBadgeText}>{activeFilterCount}</Text>
+                  </View>
+                ) : null}
+              </TouchableOpacity>
             </View>
-
-            <View style={styles.filterRow} testID="hunt-difficulty-filter">
-              <Text style={styles.filterLabel}>Difficulty ≤</Text>
-              {[1, 2, 3, 4, 5].map((n) => {
-                const active = maxDifficulty === n;
-                return (
-                  <TouchableOpacity
-                    key={n}
-                    style={[styles.filterChip, active ? styles.filterChipActive : null]}
-                    onPress={() => setMaxDifficulty(active ? null : n)}
-                    testID={`hunt-difficulty-${n}`}
-                    accessibilityLabel={`Cap difficulty at ${n}`}
-                  >
-                    <Text
-                      style={[styles.filterChipText, active ? styles.filterChipTextActive : null]}
-                    >
-                      D{n}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            <View style={styles.filterRow} testID="hunt-terrain-filter">
-              <Text style={styles.filterLabel}>Terrain ≤</Text>
-              {[1, 2, 3, 4, 5].map((n) => {
-                const active = maxTerrain === n;
-                return (
-                  <TouchableOpacity
-                    key={n}
-                    style={[styles.filterChip, active ? styles.filterChipActive : null]}
-                    onPress={() => setMaxTerrain(active ? null : n)}
-                    testID={`hunt-terrain-${n}`}
-                    accessibilityLabel={`Cap terrain at ${n}`}
-                  >
-                    <Text
-                      style={[styles.filterChipText, active ? styles.filterChipTextActive : null]}
-                    >
-                      T{n}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            {availableTypes.length > 0 ? (
-              <View style={styles.filterRow} testID="hunt-type-filter">
-                <Text style={styles.filterLabel}>Type</Text>
-                {availableTypes.map((t) => {
-                  const active = selectedTypes.has(t);
-                  return (
-                    <TouchableOpacity
-                      key={t}
-                      style={[styles.filterChip, active ? styles.filterChipActive : null]}
-                      onPress={() => {
-                        const next = new Set(selectedTypes);
-                        if (next.has(t)) next.delete(t);
-                        else next.add(t);
-                        setSelectedTypes(next);
-                      }}
-                      testID={`hunt-type-${t}`}
-                      accessibilityLabel={`Filter to ${t} caches`}
-                    >
-                      <Text
-                        style={[styles.filterChipText, active ? styles.filterChipTextActive : null]}
-                      >
-                        {t}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            ) : null}
-
-            <TouchableOpacity
-              style={[styles.wotChip, filterEnabled ? styles.wotChipOn : styles.wotChipOff]}
-              onPress={() => {
-                if (__DEV__) setFilterEnabled(!filterEnabled);
-              }}
-              disabled={!__DEV__}
-              testID="hunt-discover-wot-chip"
-              accessibilityLabel={
-                filterEnabled
-                  ? `Web-of-trust filter on, ${untrustedHidden} hidden`
-                  : 'Web-of-trust filter off (developer mode)'
-              }
-            >
-              {filterEnabled ? (
-                <ShieldCheck size={14} color={colors.brandPink} strokeWidth={2.5} />
-              ) : (
-                <ShieldOff size={14} color={colors.zapYellow} strokeWidth={2.5} />
-              )}
-              <Text style={styles.wotChipText}>
-                {filterEnabled
-                  ? untrustedHidden > 0
-                    ? `WoT filter on • ${untrustedHidden} ${
-                        untrustedHidden === 1 ? 'cache' : 'caches'
-                      } hidden`
-                    : 'WoT filter on'
-                  : 'WoT filter off (dev)'}
-              </Text>
-              {__DEV__ ? <Text style={styles.wotChipHint}>tap to toggle</Text> : null}
-            </TouchableOpacity>
-            {filterEnabled && untrustedHidden > 0 ? (
-              <Text style={styles.trustNote} testID="hunt-discover-trust-note">
-                An unverified geo-cache can be a lure — only listings from people you (or your
-                follows) trust are shown.
-              </Text>
-            ) : null}
           </View>
         }
         renderItem={({ item, index }) => (
@@ -439,6 +356,28 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
             </View>
           )
         }
+      />
+      <HuntFilterSheet
+        visible={filterSheetOpen}
+        onClose={() => setFilterSheetOpen(false)}
+        selectedDifficulties={selectedDifficulties}
+        onChangeDifficulties={setSelectedDifficulties}
+        selectedTerrains={selectedTerrains}
+        onChangeTerrains={setSelectedTerrains}
+        availableTypes={availableTypes}
+        selectedTypes={selectedTypes}
+        onChangeTypes={setSelectedTypes}
+        wotFilterEnabled={filterEnabled}
+        wotUntrustedHidden={untrustedHidden}
+        onToggleWotFilter={() => {
+          if (__DEV__) setFilterEnabled(!filterEnabled);
+        }}
+        onClearAll={() => {
+          setSelectedDifficulties(new Set());
+          setSelectedTerrains(new Set());
+          setSelectedTypes(new Set());
+          if (__DEV__) setFilterEnabled(true);
+        }}
       />
     </View>
   );
@@ -546,76 +485,31 @@ const createStyles = (colors: Palette) =>
       color: colors.textHeader,
       paddingVertical: 4,
     },
-    trustNote: {
-      paddingHorizontal: 16,
-      paddingVertical: 6,
-      fontSize: 12,
-      color: colors.textSupplementary,
-      lineHeight: 17,
-    },
-    filterRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 6,
-      paddingHorizontal: 16,
-      paddingBottom: 6,
-    },
-    filterChip: {
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 999,
-      borderWidth: 1,
-      borderColor: colors.divider,
-      backgroundColor: 'transparent',
-    },
-    filterChipActive: {
-      backgroundColor: colors.brandPink,
-      borderColor: colors.brandPink,
-    },
-    filterChipText: {
-      fontSize: 12,
-      color: colors.textHeader,
-      fontWeight: '600',
-    },
-    filterChipTextActive: { color: colors.white },
-    filterLabel: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: colors.textSupplementary,
-      marginRight: 2,
-      alignSelf: 'center',
-    },
-    wotChip: {
-      marginHorizontal: 16,
-      marginTop: 4,
-      marginBottom: 2,
-      alignSelf: 'flex-start',
-      flexDirection: 'row',
+    filterIconButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: colors.background,
       alignItems: 'center',
-      gap: 6,
-      paddingHorizontal: 10,
-      paddingVertical: 6,
-      borderRadius: 999,
-      borderWidth: 1,
+      justifyContent: 'center',
+      marginLeft: 8,
     },
-    wotChipOn: {
-      backgroundColor: colors.surface,
-      borderColor: colors.brandPink,
+    filterIconBadge: {
+      position: 'absolute',
+      top: -2,
+      right: -2,
+      minWidth: 16,
+      height: 16,
+      paddingHorizontal: 4,
+      borderRadius: 8,
+      backgroundColor: colors.brandPink,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
-    wotChipOff: {
-      backgroundColor: colors.surface,
-      borderColor: colors.zapYellow,
-    },
-    wotChipText: {
-      fontSize: 12,
-      fontWeight: '600',
-      color: colors.textHeader,
-    },
-    wotChipHint: {
+    filterIconBadgeText: {
+      color: colors.white,
       fontSize: 10,
-      fontStyle: 'italic',
-      color: colors.textSupplementary,
-      marginLeft: 4,
+      fontWeight: '800',
     },
     listContent: { paddingBottom: 32 },
     center: { alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 },
