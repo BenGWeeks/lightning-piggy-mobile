@@ -326,7 +326,10 @@ const createStyles = (colors: Palette) =>
   StyleSheet.create({
     sheetContent: {
       alignItems: 'center',
-      paddingBottom: 40,
+      // 80 leaves clear breathing room above the Android gesture-nav
+      // bar — the previous 40 was tight enough that the View-profile
+      // pill sat almost flush with the bar on a Pixel 8a.
+      paddingBottom: 80,
     },
     screenContent: {
       alignItems: 'center',
