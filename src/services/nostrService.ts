@@ -1361,9 +1361,17 @@ export function subscribeAuthorNotes(input: {
   relays: string[];
   limit?: number;
   onEvent: (note: RawAuthorNote) => void;
+  // Fires once after every read relay has signalled end-of-stored-events
+  // (EOSE). Callers use this to drop the "loading" spinner so quiet
+  // authors don't keep spinning forever — the grace timer downstream
+  // is just a backstop. Wired-up callers don't need to do anything
+  // beyond `setLoading(false)` here; the subscription remains active
+  // for live events.
+  onEose?: () => void;
 }): () => void {
   trackRelays(input.relays);
   const limit = input.limit ?? 30;
+  let eoseFired = false;
   const sub = pool.subscribeMany(
     input.relays,
     {
@@ -1379,6 +1387,13 @@ export function subscribeAuthorNotes(input: {
           created_at: ev.created_at,
           content: ev.content,
         });
+      },
+      oneose: () => {
+        // pool.subscribeMany fires oneose per relay; collapse to one
+        // callback so consumers don't need their own dedupe.
+        if (eoseFired) return;
+        eoseFired = true;
+        input.onEose?.();
       },
     },
   );

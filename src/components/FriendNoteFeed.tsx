@@ -37,7 +37,26 @@ const FriendNoteFeed: React.FC<Props> = ({ authorPubkey, limit = 30 }) => {
   // through to the empty-state branch rather than fanning out a fresh
   // SimplePool against DEFAULT_RELAYS — the dedicated subscribe helper
   // already calls trackRelays() on whatever it's given.
-  const readRelays = useMemo(() => relays.filter((r) => r.read).map((r) => r.url), [relays]);
+  //
+  // Stabilise on the joined URL string (sorted) so NostrContext
+  // re-publishing its relays state (e.g. after a refresh) doesn't
+  // tear down + re-establish the subscription unless the read-relay
+  // set actually changed. The previous `useMemo([relays])` produced a
+  // fresh array every time the context value updated, even when the
+  // URLs themselves were stable.
+  const readRelaysKey = useMemo(
+    () =>
+      relays
+        .filter((r) => r.read)
+        .map((r) => r.url)
+        .sort()
+        .join('|'),
+    [relays],
+  );
+  const readRelays = useMemo(
+    () => (readRelaysKey ? readRelaysKey.split('|') : []),
+    [readRelaysKey],
+  );
 
   useEffect(() => {
     if (!authorPubkey || readRelays.length === 0) {
@@ -54,6 +73,7 @@ const FriendNoteFeed: React.FC<Props> = ({ authorPubkey, limit = 30 }) => {
       authorPubkey,
       relays: readRelays,
       limit,
+      onEose: () => setLoading(false),
       onEvent: (note) => {
         if (seen.has(note.id)) return;
         seen.add(note.id);

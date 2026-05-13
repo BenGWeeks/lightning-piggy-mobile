@@ -193,27 +193,34 @@ const ContactProfileScreen: React.FC = () => {
 
   const handleFollowToggle = useCallback(async () => {
     if (!contact.pubkey || loadingFollow) return;
-    setLoadingFollow(true);
-    try {
-      if (following) {
-        Alert.alert('Unfollow', `Stop following ${contact.name}?`, [
-          { text: 'Cancel', style: 'cancel', onPress: () => setLoadingFollow(false) },
-          {
-            text: 'Unfollow',
-            style: 'destructive',
-            onPress: async () => {
+    if (following) {
+      // Don't flip loadingFollow until the user actually confirms the
+      // Unfollow — back-gesture / tap-outside dismissal doesn't fire
+      // either button's onPress and would otherwise leave the chip
+      // stuck spinning forever.
+      Alert.alert('Unfollow', `Stop following ${contact.name}?`, [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unfollow',
+          style: 'destructive',
+          onPress: async () => {
+            setLoadingFollow(true);
+            try {
               const success = await unfollowContact(contact.pubkey!);
               if (success) setFollowing(false);
+            } finally {
               setLoadingFollow(false);
-            },
+            }
           },
-        ]);
-      } else {
-        const success = await followContact(contact.pubkey);
-        if (success) setFollowing(true);
-        setLoadingFollow(false);
-      }
-    } catch {
+        },
+      ]);
+      return;
+    }
+    setLoadingFollow(true);
+    try {
+      const success = await followContact(contact.pubkey);
+      if (success) setFollowing(true);
+    } finally {
       setLoadingFollow(false);
     }
   }, [contact.pubkey, contact.name, loadingFollow, following, followContact, unfollowContact]);

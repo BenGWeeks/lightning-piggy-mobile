@@ -123,27 +123,35 @@ const ContactProfileBody: React.FC<Props> = ({
 
   const handleFollowToggle = async () => {
     if (!contact.pubkey || loadingFollow) return;
-    setLoadingFollow(true);
-    try {
-      if (following) {
-        Alert.alert('Unfollow', `Stop following ${contact.name}?`, [
-          { text: 'Cancel', style: 'cancel', onPress: () => setLoadingFollow(false) },
-          {
-            text: 'Unfollow',
-            style: 'destructive',
-            onPress: async () => {
+    if (following) {
+      // Don't flip the loading flag yet — the alert may be dismissed
+      // via back-gesture / tap-outside without firing either button's
+      // onPress, leaving the Follow chip stuck spinning until the
+      // sheet unmounts. Only one of Cancel / Unfollow's handlers
+      // actually drives async work, so move the flag there.
+      Alert.alert('Unfollow', `Stop following ${contact.name}?`, [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unfollow',
+          style: 'destructive',
+          onPress: async () => {
+            setLoadingFollow(true);
+            try {
               const success = await unfollowContact(contact.pubkey!);
               if (success) setFollowing(false);
+            } finally {
               setLoadingFollow(false);
-            },
+            }
           },
-        ]);
-      } else {
-        const success = await followContact(contact.pubkey);
-        if (success) setFollowing(true);
-        setLoadingFollow(false);
-      }
-    } catch {
+        },
+      ]);
+      return;
+    }
+    setLoadingFollow(true);
+    try {
+      const success = await followContact(contact.pubkey);
+      if (success) setFollowing(true);
+    } finally {
       setLoadingFollow(false);
     }
   };

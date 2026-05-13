@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
@@ -91,11 +91,14 @@ function txKey(tx: WalletTransaction, fallbackIndex: number): string {
   return `fb:${tx.type}:${tx.created_at ?? tx.settled_at ?? 'pending'}:${tx.amount}:${fallbackIndex}`;
 }
 
-let __transactionListFirstRenderLogged = false;
-
 const TransactionList: React.FC<Props> = ({ transactions }) => {
-  if (!__transactionListFirstRenderLogged) {
-    __transactionListFirstRenderLogged = true;
+  // Per-mount first-render marker. The previous module-scope `let`
+  // never reset, so navigating away + back (or switching wallets,
+  // which forces a remount via the activeWalletId effect) silently
+  // dropped the perf log on every subsequent mount.
+  const firstRenderLogged = useRef(false);
+  if (!firstRenderLogged.current) {
+    firstRenderLogged.current = true;
     perfLog(`TransactionList first render (${transactions.length} txs)`);
   }
   const colors = useThemeColors();
