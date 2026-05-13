@@ -179,7 +179,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // Default ON; only flip OFF if the user explicitly persisted false.
       setFollowingOnlyState(v !== 'false');
     });
-    AsyncStorage.getItem('dev_mode').then((v) => setSecretMode(v === 'true'));
+    AsyncStorage.getItem('secret_mode').then((v) => setSecretMode(v === 'true'));
   }, [pubkey]);
 
   const setFollowingOnly = useCallback(

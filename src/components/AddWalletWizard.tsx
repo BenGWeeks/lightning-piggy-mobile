@@ -58,7 +58,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   // No explicit snapPoints — content-height only, not user-draggable.
 
   useEffect(() => {
-    AsyncStorage.getItem('dev_mode').then((v) => setSecretMode(v === 'true'));
+    AsyncStorage.getItem('secret_mode').then((v) => setSecretMode(v === 'true'));
   }, [visible]);
 
   const reset = useCallback(() => {

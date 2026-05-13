@@ -49,10 +49,7 @@ const AboutScreen: React.FC = () => {
   const versionTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fold the unlocked-mode marker into the build-number parenthetical so
-  // screen readers don't say "(build 13) (secret)". The state is named
-  // `secretMode` but persists under the legacy `dev_mode` AsyncStorage key
-  // so existing unlocks survive the rename — see GroupsContext for the
-  // matching read site.
+  // screen readers don't say "(build 13) (secret)".
   const displayVersionLabel = secretMode
     ? appVersionLabel.endsWith(')')
       ? `${appVersionLabel.slice(0, -1)}, secret)`
@@ -60,7 +57,7 @@ const AboutScreen: React.FC = () => {
     : appVersionLabel;
 
   useEffect(() => {
-    AsyncStorage.getItem('dev_mode').then((v) => setSecretMode(v === 'true'));
+    AsyncStorage.getItem('secret_mode').then((v) => setSecretMode(v === 'true'));
   }, []);
 
   // Clear the load-failure flag whenever the picture URL changes so a refreshed kind-0 retries.
@@ -119,7 +116,7 @@ const AboutScreen: React.FC = () => {
       versionTapCount.current = 0;
       const newMode = !secretMode;
       setSecretMode(newMode);
-      AsyncStorage.setItem('dev_mode', newMode ? 'true' : 'false');
+      AsyncStorage.setItem('secret_mode', newMode ? 'true' : 'false');
       Alert.alert(
         newMode ? 'Secret Mode Enabled' : 'Secret Mode Disabled',
         newMode
