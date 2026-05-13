@@ -52,7 +52,7 @@ const TierRow: React.FC<TierRowProps> = ({ tier, title, subtitle, active, disabl
       testID={`wot-tier-${tier}-chip`}
       accessibilityRole="radio"
       accessibilityState={{ selected: active, disabled }}
-      accessibilityLabel={`${title}. ${disabled ? 'Disabled. Enable secret mode to unlock.' : ''}`}
+      accessibilityLabel={`${title}. ${disabled ? 'Locked. Stick to Friends for now.' : ''}`}
     >
       <View style={styles.tierIcon}>
         <Icon
