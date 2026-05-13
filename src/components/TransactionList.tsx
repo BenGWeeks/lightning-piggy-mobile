@@ -20,9 +20,9 @@ import { getTxCategory } from '../utils/txCategory';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import type { WalletTransaction, ZapCounterpartyInfo } from '../types/wallet';
 import { perfLog } from '../utils/perfLog';
+import type { RootStackParamList } from '../navigation/types';
 
 let __transactionListFirstRenderLogged = false;
-import type { RootStackParamList } from '../navigation/types';
 
 interface Props {
   transactions: WalletTransaction[];
@@ -397,11 +397,18 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
                 const c = sheetContact;
                 if (!c) return;
                 setProfileSheetVisible(false);
+                // CounterpartyContact's source is strictly 'nostr'; the
+                // counterparty data in TransactionDetailSheet only ever
+                // carries that, so the widening to ContactProfileBodyData
+                // is safe to narrow back here.
                 setZapContact({
                   pubkey: c.pubkey ?? '',
                   name: c.name,
                   picture: c.picture,
                   lightningAddress: c.lightningAddress,
+                  banner: c.banner ?? null,
+                  nip05: c.nip05 ?? null,
+                  source: 'nostr',
                 });
               }
             : undefined

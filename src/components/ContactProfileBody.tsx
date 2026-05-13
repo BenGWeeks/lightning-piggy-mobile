@@ -13,7 +13,8 @@ import { Alert } from './BrandedAlert';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
 import QRCode from 'react-native-qrcode-svg';
-import { Zap, Copy, MoreHorizontal, UserRound } from 'lucide-react-native';
+import QrWithIdentityToggle from './QrWithIdentityToggle';
+import { Zap, Copy, MoreHorizontal, UserRound, ChevronRight } from 'lucide-react-native';
 import NfcWriteSheet from './NfcWriteSheet';
 import ContactActionsSheet from './ContactActionsSheet';
 import { isNfcSupported } from '../services/nfcService';
@@ -326,7 +327,24 @@ const ContactProfileBody: React.FC<Props> = ({
         </Text>
       )}
 
-      {npub && (
+      {/* QR + identity toggle. Sheet variant reuses the shared
+          QrWithIdentityToggle (same tabs + copy/share/NFC affordance
+          as QrSheet) so the friend's npub and Lightning address are
+          both scannable; full-page variant keeps a single static QR
+          + the long-form npub copy row below for the same reason
+          the screen has its own header bar. */}
+      {npub && variant === 'sheet' ? (
+        <View style={styles.qrToggleWrapper}>
+          <QrWithIdentityToggle
+            npub={npub}
+            lightningAddress={contact.lightningAddress}
+            nfcSupported={nfcSupported}
+            onNfcWrite={() => setNfcWriteVisible(true)}
+          />
+        </View>
+      ) : null}
+
+      {npub && variant === 'screen' ? (
         <View
           style={styles.qrContainer}
           accessible
@@ -335,9 +353,9 @@ const ContactProfileBody: React.FC<Props> = ({
         >
           <QRCode value={`nostr:${npub}`} size={160} backgroundColor="#FFFFFF" color="#000000" />
         </View>
-      )}
+      ) : null}
 
-      {npubDisplay && (
+      {variant === 'screen' && npubDisplay ? (
         <TouchableOpacity
           style={styles.npubRow}
           onPress={handleCopyNpub}
@@ -347,9 +365,15 @@ const ContactProfileBody: React.FC<Props> = ({
           <Text style={styles.npubText}>{npubDisplay}</Text>
           <Copy size={20} color={colors.brandPink} />
         </TouchableOpacity>
-      )}
+      ) : null}
 
-      {contact.source === 'contacts' && onSetLightningAddress ? (
+      {/* Sheet variant skips the lud16 copy / edit row entirely — the
+          QrWithIdentityToggle's "Lightning" tab already surfaces the
+          address with its own copy/share affordance, so duplicating
+          it below the QR is noise. Full-page variant keeps the row
+          (and the in-place editor for the phone-contact path) since
+          it doesn't show the toggle. */}
+      {variant === 'screen' && contact.source === 'contacts' && onSetLightningAddress ? (
         editingLnAddress ? (
           <View style={styles.lnAddressEditRow}>
             <TextInput
@@ -399,7 +423,7 @@ const ContactProfileBody: React.FC<Props> = ({
             </Svg>
           </TouchableOpacity>
         )
-      ) : contact.lightningAddress ? (
+      ) : variant === 'screen' && contact.lightningAddress ? (
         <TouchableOpacity
           style={styles.lnAddressRow}
           onPress={handleCopyLnAddress}
@@ -413,10 +437,10 @@ const ContactProfileBody: React.FC<Props> = ({
         </TouchableOpacity>
       ) : null}
 
-      {/* Sheet variant: pared-down peek — just Message + Zap icons (no
-          Follow / Unfollow, no "…" actions). The "View full profile →"
-          row below drills into the full route where the wider set of
-          actions lives. Full-page variant keeps the original action row. */}
+      {/* Sheet variant: pared-down peek — Message + Zap + View-profile
+          icons, no Follow/Unfollow, no "…". The View-profile button
+          drills into the full route where the wider set of actions
+          lives. Full-page variant keeps the original action row. */}
       {variant === 'sheet' ? (
         <View style={styles.actionRowSheet}>
           {contact.pubkey && onMessage ? (
@@ -445,6 +469,17 @@ const ContactProfileBody: React.FC<Props> = ({
               testID="profile-sheet-zap-button"
             >
               <Zap size={20} color={colors.white} fill={colors.white} />
+            </TouchableOpacity>
+          ) : null}
+          {onViewFullProfile ? (
+            <TouchableOpacity
+              style={styles.viewProfileButton}
+              onPress={onViewFullProfile}
+              accessibilityLabel="View full profile"
+              testID="contact-view-full-profile"
+            >
+              <Text style={styles.viewProfileButtonText}>View profile</Text>
+              <ChevronRight size={16} color={colors.white} strokeWidth={2.5} />
             </TouchableOpacity>
           ) : null}
         </View>
@@ -513,22 +548,6 @@ const ContactProfileBody: React.FC<Props> = ({
           )}
         </View>
       )}
-
-      {/* Sheet variant only — explicit "drill into the full profile"
-          affordance. Without this the sheet is a dead-end peek; with
-          it the user can dismiss the sheet and land on the full route
-          (which has banner-up-to-status-bar layout + post feed + edit
-          surfaces the sheet trims for brevity). */}
-      {variant === 'sheet' && onViewFullProfile ? (
-        <TouchableOpacity
-          style={styles.viewFullProfileRow}
-          onPress={onViewFullProfile}
-          testID="contact-view-full-profile"
-          accessibilityLabel="View full profile"
-        >
-          <Text style={styles.viewFullProfileText}>View full profile →</Text>
-        </TouchableOpacity>
-      ) : null}
 
       {npub && (
         <NfcWriteSheet
@@ -789,6 +808,16 @@ const createStyles = (colors: Palette) =>
       borderColor: colors.textSupplementary,
       opacity: 0.6,
     },
+    qrToggleWrapper: {
+      // Override the sheetContent's `alignItems: 'center'` so the
+      // QrWithIdentityToggle's pink-bordered card stretches edge-to-
+      // edge inside the sheet (with the standard 20 px sheet inset on
+      // each side). QR itself stays a fixed size — the box widens
+      // around it.
+      alignSelf: 'stretch',
+      paddingHorizontal: 4,
+      marginTop: 8,
+    },
     actionRowSheet: {
       flexDirection: 'row',
       justifyContent: 'center',
@@ -807,6 +836,21 @@ const createStyles = (colors: Palette) =>
     },
     iconCircleButtonYellow: {
       backgroundColor: colors.zapYellow,
+    },
+    viewProfileButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      height: 52,
+      paddingHorizontal: 18,
+      borderRadius: 26,
+      backgroundColor: colors.brandPink,
+    },
+    viewProfileButtonText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.white,
     },
     viewFullProfileRow: {
       alignItems: 'center',
