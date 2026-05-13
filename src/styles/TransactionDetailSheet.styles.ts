@@ -59,6 +59,31 @@ export const createTransactionDetailSheetStyles = (colors: Palette) =>
       fontSize: 12,
       fontWeight: '700',
     },
+    // "Needs attention" callout — shown below the status pill when the
+    // matching prop is true. Bootstrap-style warning alert: warm surface,
+    // amber accent bar, amber ink. Tokens live in `palettes.ts`.
+    warningCallout: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      marginTop: 12,
+      padding: 12,
+      backgroundColor: colors.zapYellowLight,
+      borderLeftWidth: 4,
+      borderLeftColor: colors.zapYellow,
+      borderRadius: 8,
+      gap: 10,
+      alignSelf: 'stretch',
+    },
+    warningCalloutBody: { flex: 1 },
+    warningCalloutHeading: {
+      color: colors.zapYellowDark,
+      fontWeight: '700',
+      marginBottom: 4,
+    },
+    warningCalloutText: {
+      color: colors.zapYellowDark,
+      lineHeight: 18,
+    },
     row: {
       flexDirection: 'row',
       justifyContent: 'space-between',

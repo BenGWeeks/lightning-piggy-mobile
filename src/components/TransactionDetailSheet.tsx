@@ -365,30 +365,18 @@ const TransactionDetailSheet: React.FC<Props> = ({
             ) : null}
             {needsAttention ? (
               <View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'flex-start',
-                  marginTop: 12,
-                  padding: 12,
-                  backgroundColor: '#FFF3CD',
-                  borderLeftWidth: 4,
-                  borderLeftColor: colors.zapYellow,
-                  borderRadius: 8,
-                  gap: 10,
-                  alignSelf: 'stretch',
-                }}
+                style={styles.warningCallout}
                 accessibilityRole="alert"
                 accessibilityLabel="Needs attention: on-chain claim not yet broadcast"
               >
-                <AlertTriangle size={24} color="#856404" strokeWidth={2.5} />
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: '#856404', fontWeight: '700', marginBottom: 4 }}>
-                    Needs attention
-                  </Text>
-                  <Text style={{ color: '#856404', lineHeight: 18 }}>
+                <AlertTriangle size={24} color={colors.zapYellowDark} strokeWidth={2.5} />
+                <View style={styles.warningCalloutBody}>
+                  <Text style={styles.warningCalloutHeading}>Needs attention</Text>
+                  <Text style={styles.warningCalloutText}>
                     Lightning was paid and the Boltz lockup confirmed, but the on-chain claim hasn
-                    {'’'}t broadcast yet. Your funds are safe — the swap will retry automatically.
-                    Pull-to-refresh to check progress.
+                    {'’'}t broadcast yet. Your funds are safe — tap{' '}
+                    <Text style={{ fontWeight: '700' }}>Retry claim</Text> below if it hasn{'’'}t
+                    cleared.
                   </Text>
                 </View>
               </View>

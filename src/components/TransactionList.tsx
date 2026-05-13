@@ -279,8 +279,9 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
             style={[styles.item, isPending && styles.itemPending]}
             onPress={() => {
               setDetail(item as TransactionDetailData);
-              // TODO(#519): pass true when this tx's swap is `claimable` per
-              // swapRecoveryService — same predicate as the row badge below.
+              // TODO(#519): set this from the same `claimable` predicate
+              // the row badge will use once swapRecoveryService is wired,
+              // so the sheet callout and the row badge stay in lockstep.
               setDetailNeedsAttention(false);
             }}
             accessibilityLabel={`Open details for ${primary}`}

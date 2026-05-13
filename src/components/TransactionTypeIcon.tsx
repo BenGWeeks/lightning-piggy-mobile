@@ -69,13 +69,14 @@ const TransactionTypeIcon: React.FC<Props> = ({ category, size = 40, needsAttent
               top: -badgeOverhang,
               right: -badgeOverhang,
               backgroundColor: colors.zapYellow,
+              borderColor: colors.white,
             },
           ]}
           accessible
           accessibilityRole="image"
           accessibilityLabel="Needs attention"
         >
-          <AlertTriangle size={badgeGlyph} color="#000" strokeWidth={2.5} />
+          <AlertTriangle size={badgeGlyph} color={colors.textHeader} strokeWidth={2.5} />
         </View>
       ) : null}
     </View>
@@ -100,10 +101,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     alignItems: 'center',
     justifyContent: 'center',
-    // Crisp 2 px white ring around the badge so it pops against any
-    // background colour (the bitcoin-orange or boltz-navy underneath).
+    // Crisp 2 px ring around the badge so it pops against any underlying
+    // category colour. `borderColor` comes from the theme palette inline.
     borderWidth: 2,
-    borderColor: '#fff',
   },
 });
 

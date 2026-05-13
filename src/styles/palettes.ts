@@ -22,6 +22,10 @@ export const lightPalette = {
   bitcoinOrangeLight: '#FFF1E0',
   boltzNavy: '#232742',
   zapYellow: '#FFC107',
+  // Warning-callout surface + ink. Pairs with `zapYellow` for the badge
+  // and matches the Bootstrap-style alert convention readers recognise.
+  zapYellowLight: '#FFF3CD',
+  zapYellowDark: '#856404',
 };
 
 // Dark palette: keep the Lightning Piggy brand hot-pink intact, swap the
@@ -48,6 +52,10 @@ export const darkPalette: typeof lightPalette = {
   bitcoinOrangeLight: '#3A2410',
   boltzNavy: '#3A3F5C',
   zapYellow: '#FFC107',
+  // Dim warm-brown surface (matches the bitcoin/red light variants) and
+  // a brighter ink so the warning copy stays readable on a dark sheet.
+  zapYellowLight: '#3A2F10',
+  zapYellowDark: '#FFD566',
 };
 
 export type Palette = typeof lightPalette;
