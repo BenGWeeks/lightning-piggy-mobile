@@ -651,7 +651,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         // diagnosing field reports like "swap failed with 'unknown
         // Error'" without having to read the user's screenshot for
         // which sheet stage they got stuck at.
-        let stage: 'payInvoice' | 'waitForLockup' | 'claimSwap' | 'refresh' = 'payInvoice';
+        let stage: 'payInvoice' | 'waitForLockup' | 'claimSwap' | 'cleanup' | 'refresh' =
+          'payInvoice';
         (async () => {
           try {
             await payInvoiceForWallet(sourceId, swap.invoice);
@@ -673,6 +674,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
               position: 'top',
               visibilityTime: 10000,
             });
+            stage = 'cleanup';
             await SecureStore.deleteItemAsync(`boltz_swap_${swap.id}`);
             await swapRecoveryService.unregisterPendingSwap(swap.id);
             stage = 'refresh';
