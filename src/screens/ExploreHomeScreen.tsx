@@ -508,10 +508,9 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           emptyState={
             untrustedCacheCount > 0 ? (
               <Text style={localStyles.emptyText}>
-                {untrustedCacheCount} nearby{' '}
-                {untrustedCacheCount === 1 ? 'cache is' : 'caches are'} hidden because their hider
-                isn't in your Web-of-Trust. Follow people who hide Piggies on Nostr to start seeing
-                their caches here.
+                {untrustedCacheCount} nearby {untrustedCacheCount === 1 ? 'cache is' : 'caches are'}{' '}
+                hidden because their hider isn't in your Web-of-Trust. Follow people who hide
+                Piggies on Nostr to start seeing their caches here.
               </Text>
             ) : (
               <Text style={localStyles.emptyText}>
