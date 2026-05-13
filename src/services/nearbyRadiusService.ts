@@ -28,6 +28,7 @@ export const RADIUS_OPTIONS: ReadonlyArray<RadiusOption> = [
   { label: '25 km', value: 25_000 },
   { label: '50 km', value: 50_000 },
   { label: '150 km', value: 150_000 },
+  { label: 'All', value: null },
 ];
 
 export const loadNearbyRadius = async (): Promise<number | null> => {

@@ -48,9 +48,10 @@ export type RootStackParamList = {
 
 // Explore sub-stack — the renamed Learn tab now hosts a hub plus Lessons
 // (existing course content), Map (BTC Map merchants), Hunt (geocaching
-// game), and Events (NIP-52 meetups). Defined BEFORE MainTabParamList
-// uses NavigatorScreenParams<ExploreStackParamList> above; the forward-
-// reference works at type-level but is brittle so we keep the order.
+// game), and Events (NIP-52 meetups). MainTabParamList above references
+// this via NavigatorScreenParams<ExploreStackParamList>; the lexical
+// definition order is reversed (forward reference at type level), which
+// TypeScript resolves fine — keep the order as-is.
 // See plan .claude/plans/look-through-the-issues-squishy-wigderson.md
 // for motivation; closes parts of #467 and #468.
 export type ExploreStackParamList = {
