@@ -23,10 +23,12 @@ const TransactionTypeIcon: React.FC<Props> = ({ category, size = 40, needsAttent
   // the row's text content on either side.
   const badgeSize = Math.round(size * 0.35);
   const badgeGlyph = Math.round(badgeSize * 0.62);
-  // Badge half-overhangs the circle edge so it reads as "attached" to
-  // the icon. Outer wrapper is `overflow: 'visible'` so the colored
-  // disc's implicit `borderRadius` clipping doesn't hide it.
-  const badgeOffset = -Math.round(badgeSize * 0.25);
+  // Badge overhangs the disc's top-right corner via negative top/right
+  // on an absolutely-positioned sibling. Layout box stays exactly
+  // `size × size` so callers (e.g. TransactionList's 40×40 avatarWrap)
+  // get the dimensions they asked for; only the badge visually escapes
+  // via the outer wrapper's `overflow: 'visible'`.
+  const badgeOverhang = Math.round(badgeSize * 0.25);
 
   const bg =
     category === 'onchain'
@@ -37,12 +39,7 @@ const TransactionTypeIcon: React.FC<Props> = ({ category, size = 40, needsAttent
   const fg = colors.zapYellow;
 
   return (
-    <View
-      style={[
-        styles.outer,
-        { width: size + Math.abs(badgeOffset) * 2, height: size + Math.abs(badgeOffset) * 2 },
-      ]}
-    >
+    <View style={[styles.outer, { width: size, height: size }]}>
       <View
         style={[
           styles.disc,
@@ -56,6 +53,12 @@ const TransactionTypeIcon: React.FC<Props> = ({ category, size = 40, needsAttent
         )}
       </View>
       {needsAttention ? (
+        // Sibling of the disc, positioned with negative top/right so it
+        // visually overhangs into the outer wrapper's overflow:visible
+        // padding. The visual "attached to corner" effect comes from the
+        // overhang, not from clipping — the disc has overflow:hidden
+        // (implied by borderRadius on Android) but the badge isn't a
+        // descendant so it's never clipped by it.
         <View
           style={[
             styles.badge,
@@ -63,11 +66,13 @@ const TransactionTypeIcon: React.FC<Props> = ({ category, size = 40, needsAttent
               width: badgeSize,
               height: badgeSize,
               borderRadius: badgeSize / 2,
-              top: 0,
-              right: 0,
+              top: -badgeOverhang,
+              right: -badgeOverhang,
               backgroundColor: colors.zapYellow,
             },
           ]}
+          accessible
+          accessibilityRole="image"
           accessibilityLabel="Needs attention"
         >
           <AlertTriangle size={badgeGlyph} color="#000" strokeWidth={2.5} />
@@ -79,9 +84,10 @@ const TransactionTypeIcon: React.FC<Props> = ({ category, size = 40, needsAttent
 
 const styles = StyleSheet.create({
   outer: {
-    // Outer wrapper sized slightly bigger than the disc so an absolutely-
-    // positioned badge with a top-right anchor doesn't get clipped by
-    // the disc's borderRadius (Android implicit overflow:hidden).
+    // Layout box is exactly the requested `size × size` (set inline) so
+    // callers with fixed-width rows (e.g. TransactionList's avatarWrap)
+    // don't see the icon overflow their slot. The badge escapes this box
+    // visually via negative top/right + the wrapper's overflow:visible.
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'visible',
