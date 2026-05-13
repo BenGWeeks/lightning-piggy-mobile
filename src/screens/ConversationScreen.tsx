@@ -1144,6 +1144,29 @@ const ConversationScreen: React.FC = () => {
         onClose={() => setProfileSheetVisible(false)}
         contact={sheetContact}
         onViewFullProfile={handleViewFullProfile}
+        onMessage={
+          sheetContact?.pubkey && sheetContact.pubkey !== pubkey
+            ? () => {
+                const c = sheetContact;
+                if (!c?.pubkey) return;
+                setProfileSheetVisible(false);
+                navigation.replace('Conversation', {
+                  pubkey: c.pubkey,
+                  name: c.name,
+                  picture: c.picture,
+                  lightningAddress: c.lightningAddress,
+                });
+              }
+            : undefined
+        }
+        onZap={
+          sheetContact?.lightningAddress
+            ? () => {
+                setProfileSheetVisible(false);
+                setSendSheetOpen(true);
+              }
+            : undefined
+        }
       />
     </View>
   );

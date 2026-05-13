@@ -874,6 +874,21 @@ const GroupConversationScreen: React.FC = () => {
         onClose={() => setProfileSheetVisible(false)}
         contact={sheetContact}
         onViewFullProfile={handleViewFullProfile}
+        onMessage={
+          sheetContact?.pubkey
+            ? () => {
+                const c = sheetContact;
+                if (!c?.pubkey) return;
+                setProfileSheetVisible(false);
+                navigation.navigate('Conversation', {
+                  pubkey: c.pubkey,
+                  name: c.name,
+                  picture: c.picture,
+                  lightningAddress: c.lightningAddress,
+                });
+              }
+            : undefined
+        }
       />
     </View>
   );

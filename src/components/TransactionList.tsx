@@ -376,6 +376,36 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
           setProfileSheetVisible(false);
           navigation.navigate('ContactProfile', { contact: sheetContact });
         }}
+        onMessage={
+          sheetContact?.pubkey
+            ? () => {
+                const c = sheetContact;
+                if (!c?.pubkey) return;
+                setProfileSheetVisible(false);
+                navigation.navigate('Conversation', {
+                  pubkey: c.pubkey,
+                  name: c.name,
+                  picture: c.picture,
+                  lightningAddress: c.lightningAddress,
+                });
+              }
+            : undefined
+        }
+        onZap={
+          sheetContact?.lightningAddress
+            ? () => {
+                const c = sheetContact;
+                if (!c) return;
+                setProfileSheetVisible(false);
+                setZapContact({
+                  pubkey: c.pubkey ?? '',
+                  name: c.name,
+                  picture: c.picture,
+                  lightningAddress: c.lightningAddress,
+                });
+              }
+            : undefined
+        }
       />
     </View>
   );
