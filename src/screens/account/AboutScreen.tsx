@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Alert } from '../../components/BrandedAlert';
+import SecretModeCelebration from '../../components/SecretModeCelebration';
 import * as nip19 from 'nostr-tools/nip19';
 import { UserRound } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
@@ -51,6 +51,12 @@ const AboutScreen: React.FC = () => {
   // calls setSecretMode, which both updates context state AND
   // persists to AsyncStorage.
   const { secretMode, setSecretMode } = useGroups();
+  // Drives the SecretModeCelebration overlay (confetti + card) on
+  // each toggle. `pendingEnabled` carries which state was reached
+  // when the overlay popped so the same component can render both
+  // the enable and disable copy.
+  const [celebrationVisible, setCelebrationVisible] = useState(false);
+  const [pendingEnabled, setPendingEnabled] = useState(false);
   const versionTapCount = useRef(0);
   const versionTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -116,18 +122,18 @@ const AboutScreen: React.FC = () => {
     if (versionTapTimer.current) clearTimeout(versionTapTimer.current);
     if (versionTapCount.current >= 3) {
       versionTapCount.current = 0;
-      // setSecretMode lives on GroupsContext (#537 fix) — it persists
-      // to AsyncStorage AND notifies every other consumer in the same
+      // setSecretMode lives on GroupsContext — it persists to
+      // AsyncStorage AND notifies every other consumer in the same
       // tick, so the WoT picker, Messages tab and Groups tab unlock
       // their secret-mode surfaces right away rather than waiting for
-      // a full restart.
-      setSecretMode(!secretMode);
-      Alert.alert(
-        !secretMode ? 'Secret Mode Enabled' : 'Secret Mode Disabled',
-        !secretMode
-          ? 'Secret features unlocked: hot wallet import in Add Wallet, "Following only" toggle on Messages and Groups tabs, the Web-of-Trust "All" tier on Hunt / Events filters, and other in-app debug surfaces.'
-          : 'Secret features hidden.',
-      );
+      // a full restart. The celebration overlay replaces the previous
+      // Alert.alert reveal — confetti for enable, plain card for
+      // disable (the SecretModeCelebration component branches on
+      // `enabled`).
+      const newMode = !secretMode;
+      setSecretMode(newMode);
+      setPendingEnabled(newMode);
+      setCelebrationVisible(true);
     } else {
       // Maestro tapOn cadence on Android emulator is ~400ms each, so 3 taps need >1s. Widen window in dev builds only.
       versionTapTimer.current = setTimeout(
@@ -248,6 +254,12 @@ const AboutScreen: React.FC = () => {
         onLoginPress={() => setLoginSheetOpen(true)}
       />
       <NostrLoginSheet visible={loginSheetOpen} onClose={() => setLoginSheetOpen(false)} />
+
+      <SecretModeCelebration
+        visible={celebrationVisible}
+        enabled={pendingEnabled}
+        onDismiss={() => setCelebrationVisible(false)}
+      />
     </AccountScreenLayout>
   );
 };
