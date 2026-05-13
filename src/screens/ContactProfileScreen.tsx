@@ -317,7 +317,7 @@ const ContactProfileScreen: React.FC = () => {
           testID="contact-profile-back"
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <ChevronLeft size={26} color={colors.white} strokeWidth={2.4} />
+          <ChevronLeft size={22} color={colors.white} strokeWidth={2.4} />
         </TouchableOpacity>
         {contact.pubkey && (
           <TouchableOpacity
@@ -328,7 +328,7 @@ const ContactProfileScreen: React.FC = () => {
             testID="contact-more-button"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
-            <MoreHorizontal size={24} color={colors.white} strokeWidth={2.4} />
+            <MoreHorizontal size={22} color={colors.white} strokeWidth={2.4} />
           </TouchableOpacity>
         )}
       </View>
