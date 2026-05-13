@@ -84,7 +84,14 @@ const EventsFilterSheet: React.FC<Props> = ({
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} testID="events-filter-backdrop" />
-      <View style={styles.sheet} testID="events-filter-sheet">
+      {/* Hide the filter sheet while the WoT bottom sheet is open so its
+          Done button doesn't peek out below — see matching note in
+          HuntFilterSheet. */}
+      <View
+        style={[styles.sheet, wotSheetVisible && styles.sheetHidden]}
+        pointerEvents={wotSheetVisible ? 'none' : 'auto'}
+        testID="events-filter-sheet"
+      >
         <View style={styles.handleBar} />
         <View style={styles.titleRow}>
           <Text style={styles.title}>Filters</Text>
@@ -242,6 +249,9 @@ const createStyles = (colors: Palette) =>
       paddingHorizontal: 20,
       paddingBottom: 28,
       paddingTop: 8,
+    },
+    sheetHidden: {
+      opacity: 0,
     },
     handleBar: {
       alignSelf: 'center',

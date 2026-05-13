@@ -108,7 +108,17 @@ const HuntFilterSheet: React.FC<Props> = ({
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} testID="hunt-filter-backdrop" />
-      <View style={styles.sheet} testID="hunt-filter-sheet">
+      {/* Hide the filter sheet itself while the WoT bottom sheet is open
+          so its "Done" button doesn't peek out below the WoT sheet — both
+          sheets are bottom-anchored Modals, and the WoT sheet's translucent
+          backdrop would otherwise let the underlying filter Done bleed
+          through. Keep the View mounted (just visually hidden + pointer-
+          inert) so the WoT modal's state remains intact. */}
+      <View
+        style={[styles.sheet, wotSheetVisible && styles.sheetHidden]}
+        pointerEvents={wotSheetVisible ? 'none' : 'auto'}
+        testID="hunt-filter-sheet"
+      >
         <View style={styles.handleBar} />
         <View style={styles.titleRow}>
           <Text style={styles.title}>Filters</Text>
@@ -325,6 +335,9 @@ const createStyles = (colors: Palette) =>
       paddingHorizontal: 20,
       paddingBottom: 28,
       paddingTop: 8,
+    },
+    sheetHidden: {
+      opacity: 0,
     },
     handleBar: {
       alignSelf: 'center',
