@@ -144,7 +144,15 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
     [myFinds],
   );
   const friendList = useMemo(
-    () => [...friendFinds.values()].sort((a, b) => b.createdAt - a.createdAt).slice(0, 50),
+    () =>
+      [...friendFinds.values()]
+        // Drop find-logs whose cache event hasn't reached local storage —
+        // showing "Cache no longer on relays" for every one looks broken
+        // to the user even though it's a real state. They'll surface once
+        // the cache subscription backfills.
+        .filter((e) => e.cache !== null)
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, 50),
     [friendFinds],
   );
 
