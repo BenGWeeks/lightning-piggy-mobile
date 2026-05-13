@@ -231,107 +231,112 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
         <Text style={styles.headerTagline}>Bitcoin-accepting merchants from BTC Map</Text>
       </View>
 
-      <View style={styles.miniMapContainer}>
-        <ExploreMiniMap
-          lat={pos?.lat ?? null}
-          lon={pos?.lon ?? null}
-          merchants={sortedPlaces.map((p) => p.place)}
-          caches={[]}
-          events={[]}
-          loading={loading && sortedPlaces.length === 0}
-          onTapMap={() => navigation.navigate('Map')}
-          onBoundsChange={setMapBbox}
-          // Default zoom 10 ≈ "city + drive-away suburbs" — three
-          // levels wider than the hub default. Picked from the user's
-          // observed "− tapped 3 times feels about right" feedback.
-          defaultZoom={10}
-        />
-      </View>
-
-      <View style={styles.attributionRow}>
-        <BtcMapAttribution testID="places-btcmap-attribution" />
-      </View>
-
-      <View style={styles.searchRow}>
-        <Search size={16} color={colors.textSupplementary} strokeWidth={2.5} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search places by name or address…"
-          placeholderTextColor={colors.textSupplementary}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          autoCapitalize="none"
-          autoCorrect={false}
-          testID="places-search-input"
-        />
-        <TouchableOpacity
-          style={styles.filterIconButton}
-          onPress={() => setFilterSheetOpen(true)}
-          testID="places-filter-button"
-          accessibilityLabel={`Filters${activeFilterCount > 0 ? `, ${activeFilterCount} active` : ''}`}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <SlidersHorizontal size={18} color={colors.textHeader} strokeWidth={2.5} />
-          {activeFilterCount > 0 ? (
-            <View style={styles.filterIconBadge}>
-              <Text style={styles.filterIconBadgeText}>{activeFilterCount}</Text>
+      <FlatList
+        data={
+          loading && places.length === 0
+            ? []
+            : error
+              ? []
+              : sortedPlaces.length === 0
+                ? []
+                : filteredPlaces
+        }
+        keyExtractor={({ place }) => String(place.id)}
+        contentContainerStyle={styles.listContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={loading && places.length > 0}
+            onRefresh={reload}
+            tintColor={colors.brandPink}
+            colors={[colors.brandPink]}
+          />
+        }
+        ListHeaderComponent={
+          <>
+            <View style={styles.miniMapContainer}>
+              <ExploreMiniMap
+                lat={pos?.lat ?? null}
+                lon={pos?.lon ?? null}
+                merchants={sortedPlaces.map((p) => p.place)}
+                caches={[]}
+                events={[]}
+                loading={loading && sortedPlaces.length === 0}
+                onTapMap={() => navigation.navigate('Map')}
+                onBoundsChange={setMapBbox}
+                defaultZoom={10}
+              />
             </View>
-          ) : null}
-        </TouchableOpacity>
-      </View>
-
-      {loading && places.length === 0 ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={colors.brandPink} />
-          <Text style={styles.subtle}>Looking for Bitcoin-accepting places near you…</Text>
-        </View>
-      ) : error ? (
-        <View style={styles.center}>
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={reload}>
-            <Text style={styles.retryButtonText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      ) : sortedPlaces.length === 0 ? (
-        <View style={styles.center} testID="places-empty-state">
-          <MapPin size={56} color={colors.textSupplementary} strokeWidth={1.5} />
-          <Text style={styles.emptyTitle}>No places nearby</Text>
-          <Text style={styles.subtle}>
-            We searched a ~50 km area. Try opening the full map to pan further afield, or refresh
-            later — the OSM merchant list updates daily.
-          </Text>
-        </View>
-      ) : (
-        <FlatList
-          data={filteredPlaces}
-          keyExtractor={({ place }) => String(place.id)}
-          contentContainerStyle={styles.listContent}
-          refreshControl={
-            <RefreshControl
-              refreshing={loading && places.length > 0}
-              onRefresh={reload}
-              tintColor={colors.brandPink}
-              colors={[colors.brandPink]}
-            />
-          }
-          renderItem={({ item }) => (
-            <PlaceRow
-              place={item.place}
-              distance={item.distance}
-              colors={colors}
-              styles={styles}
-              onPress={() => navigation.navigate('PlaceDetail', { placeId: item.place.id })}
-            />
-          )}
-          ListEmptyComponent={
-            searchQuery.trim() !== '' ? (
-              <Text style={styles.emptySearchText}>
-                Nothing matches “{searchQuery.trim()}”. Try a city or street name.
-              </Text>
-            ) : null
-          }
-        />
-      )}
+            <View style={styles.attributionRow}>
+              <BtcMapAttribution testID="places-btcmap-attribution" />
+            </View>
+            <View style={styles.searchRow}>
+              <Search size={16} color={colors.textSupplementary} strokeWidth={2.5} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search places by name or address…"
+                placeholderTextColor={colors.textSupplementary}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                autoCapitalize="none"
+                autoCorrect={false}
+                testID="places-search-input"
+              />
+              <TouchableOpacity
+                style={styles.filterIconButton}
+                onPress={() => setFilterSheetOpen(true)}
+                testID="places-filter-button"
+                accessibilityLabel={`Filters${activeFilterCount > 0 ? `, ${activeFilterCount} active` : ''}`}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <SlidersHorizontal size={18} color={colors.textHeader} strokeWidth={2.5} />
+                {activeFilterCount > 0 ? (
+                  <View style={styles.filterIconBadge}>
+                    <Text style={styles.filterIconBadgeText}>{activeFilterCount}</Text>
+                  </View>
+                ) : null}
+              </TouchableOpacity>
+            </View>
+            {loading && places.length === 0 ? (
+              <View style={styles.center}>
+                <ActivityIndicator color={colors.brandPink} />
+                <Text style={styles.subtle}>Looking for Bitcoin-accepting places near you…</Text>
+              </View>
+            ) : error ? (
+              <View style={styles.center}>
+                <Text style={styles.errorText}>{error}</Text>
+                <TouchableOpacity style={styles.retryButton} onPress={reload}>
+                  <Text style={styles.retryButtonText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : sortedPlaces.length === 0 ? (
+              <View style={styles.center} testID="places-empty-state">
+                <MapPin size={56} color={colors.textSupplementary} strokeWidth={1.5} />
+                <Text style={styles.emptyTitle}>No places nearby</Text>
+                <Text style={styles.subtle}>
+                  We searched a ~50 km area. Try opening the full map to pan further afield, or
+                  refresh later — the OSM merchant list updates daily.
+                </Text>
+              </View>
+            ) : null}
+          </>
+        }
+        renderItem={({ item }) => (
+          <PlaceRow
+            place={item.place}
+            distance={item.distance}
+            colors={colors}
+            styles={styles}
+            onPress={() => navigation.navigate('PlaceDetail', { placeId: item.place.id })}
+          />
+        )}
+        ListEmptyComponent={
+          searchQuery.trim() !== '' && sortedPlaces.length > 0 ? (
+            <Text style={styles.emptySearchText}>
+              Nothing matches “{searchQuery.trim()}”. Try a city or street name.
+            </Text>
+          ) : null
+        }
+      />
       <PlacesFilterSheet
         visible={filterSheetOpen}
         onClose={() => setFilterSheetOpen(false)}
