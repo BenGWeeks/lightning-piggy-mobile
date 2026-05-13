@@ -72,6 +72,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
   const [memo, setMemo] = useState('');
   const [isPublic, setIsPublic] = useState(false);
   const [stage, setStage] = useState<Stage>({ kind: 'idle' });
+  // Wizard pagination — 1 to 5. Each step renders its own page; Back
+  // and Next live under each step's content. Top StepProgressBar pips
+  // also let the user jump between steps directly.
+  const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4 | 5>(1);
   const [hintPhotoUrl, setHintPhotoUrl] = useState<string | null>(null);
   const [uploadingHint, setUploadingHint] = useState(false);
   const [waitMinutesText, setWaitMinutesText] = useState('');
@@ -317,422 +321,472 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
         <View style={styles.headerRightSpacer} />
       </View>
 
-      <StepProgressBar stage={stage} hasPin={!!pin} colors={colors} styles={styles} />
+      <StepProgressBar
+        stage={stage}
+        hasPin={!!pin}
+        currentStep={currentStep}
+        onPipPress={(n) => setCurrentStep(n)}
+        colors={colors}
+        styles={styles}
+      />
 
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-        <StepHeader
-          n={1}
-          title="Get the hardware"
-          subtitle="A Piglet lives on a physical artefact. Make or buy one."
-          status="active"
-          styles={styles}
-          colors={colors}
-        />
-        <View style={styles.getPiggyCard} testID="get-a-piggy-card">
-          <Text style={styles.getPiggyTitle}>Need a physical Piggy?</Text>
-          <Text style={styles.getPiggyHelper}>
-            A Piglet lives on a physical artefact — a 3D-printed charm with an NFC tag, or a sticker
-            with a QR. Make one yourself, or buy a ready-made charm from Robotechy.
-          </Text>
-          <Image
-            source={require('../../assets/images/piggy-bag-charm.jpg')}
-            style={styles.getPiggyPhoto}
-            resizeMode="cover"
-            accessibilityLabel="Pink 3D-printed Lightning Piggy bag charm with NFC keyring"
-          />
-          <View style={styles.getPiggyButtonsRow}>
-            <TouchableOpacity
-              style={[styles.getPiggyButton, styles.getPiggyButtonPrint]}
-              onPress={async () => {
-                try {
-                  // Resolve the bundled STL to a local file URI, then
-                  // copy into the cache dir with a friendly filename
-                  // before handing off to the OS share sheet (Android
-                  // file pickers won't preserve the require()-id
-                  // filename otherwise).
-                  const asset = Asset.fromModule(
-                    // eslint-disable-next-line @typescript-eslint/no-require-imports
-                    require('../../assets/3d/piggy-bag-charm.stl'),
-                  );
-                  await asset.downloadAsync();
-                  if (!asset.localUri) throw new Error('STL asset has no localUri after download');
-                  // expo-file-system SDK 55 ships a new class-based API
-                  // (Paths.cache, new File(...).copy()). Copying into the
-                  // cache dir under a friendly filename so the OS share
-                  // sheet shows "piggy-bag-charm.stl" instead of the
-                  // require-mangled asset name.
-                  const target = new File(Paths.cache, 'piggy-bag-charm.stl');
-                  if (target.exists) target.delete();
-                  const source = new File(asset.localUri);
-                  source.copy(target);
-                  if (await Sharing.isAvailableAsync()) {
-                    await Sharing.shareAsync(target.uri, {
-                      mimeType: 'model/stl',
-                      dialogTitle: 'Save Piggy Bag Charm STL',
-                      UTI: 'public.standard-tesselated-geometry-format',
-                    });
-                  }
-                } catch (e) {
-                  Toast.show({
-                    type: 'info',
-                    text1: 'Couldn’t share the STL',
-                    text2: (e as Error).message,
-                  });
-                }
-              }}
-              testID="get-a-piggy-print-button"
-              accessibilityLabel="Save Piggy Bag Charm STL"
-            >
-              <Printer size={18} color={colors.white} strokeWidth={2.5} />
-              <Text style={styles.getPiggyButtonText}>Save STL</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.getPiggyButton, styles.getPiggyButtonBuy]}
-              onPress={() =>
-                Linking.openURL(
-                  // NIP-99 classified listing (kind 30402) for the Lightning
-                  // Piggy Bag Charm at Robotechy. The naddr decodes to:
-                  //   pubkey 211f325b…d46f, identifier product_1768341201209_bm83o.
-                  'https://www.robotechy.com/naddr1qvzqqqrkcgpzqgglxfd4895k3tqv0xmupgps6a5zqmfj43slj0c58hs39wzeh4r0qqdhqun0v36kxazlxymnvwpnxscnyvp3xgcrjhmzd5urxmcxaljpu',
-                )
-              }
-              testID="get-a-piggy-buy-button"
-              accessibilityLabel="Buy from Robotechy"
-            >
-              <ShoppingBag size={18} color={colors.white} strokeWidth={2.5} />
-              <Text style={styles.getPiggyButtonText}>Buy from</Text>
+        {currentStep === 1 && (
+          <>
+            <StepHeader
+              n={1}
+              title="Get the hardware"
+              subtitle="A Piglet lives on a physical artefact. Make or buy one."
+              status="active"
+              styles={styles}
+              colors={colors}
+            />
+            <View style={styles.getPiggyCard} testID="get-a-piggy-card">
+              <Text style={styles.getPiggyTitle}>Need a physical Piggy?</Text>
+              <Text style={styles.getPiggyHelper}>
+                A Piglet lives on a physical artefact — a 3D-printed charm with an NFC tag, or a
+                sticker with a QR. Make one yourself, or buy a ready-made charm from Robotechy.
+              </Text>
               <Image
-                source={require('../../assets/images/robotechy-logo.png')}
-                style={styles.robotechyLogo}
-                resizeMode="contain"
-                accessibilityLabel="Robotechy"
+                source={require('../../assets/images/piggy-bag-charm.jpg')}
+                style={styles.getPiggyPhoto}
+                resizeMode="cover"
+                accessibilityLabel="Pink 3D-printed Lightning Piggy bag charm with NFC keyring"
               />
-            </TouchableOpacity>
-          </View>
-          {/* Quick tag-spec hint up front — surfaces what to buy before
-           * the user clicks Buy/Print, so they don't come back with a
-           * Mifare Classic and find out it can't lock at NFC-write
-           * time. The full Supported-NFC-tags card stays below after
-           * Validate for the deeper "I'm actually writing the tag now"
-           * moment. */}
-          <View style={styles.getPiggyTagsHint}>
-            <Nfc size={12} color={colors.brandPink} strokeWidth={2.5} />
-            <Text style={styles.getPiggyTagsHintText}>
-              <Text style={styles.getPiggyTagsHintBold}>Tag chips:</Text> NTAG213 / 215 / 216
-              (recommended), Mifare Ultralight C also fine. Avoid Mifare Classic — it can't lock.
-            </Text>
-          </View>
-        </View>
-
-        <StepHeader
-          n={2}
-          title="Make the prize"
-          subtitle="A withdraw link from your wallet — the sats the finder claims. (Video URL prize coming soon.)"
-          status={
-            stage.kind === 'validated' || stage.kind === 'saved' || stage.kind === 'wrote-nfc'
-              ? 'done'
-              : 'active'
-          }
-          styles={styles}
-          colors={colors}
-        />
-        <Text style={styles.helper}>
-          Create a withdraw link in your own wallet (LNbits, Alby, Mutiny, …) — set the per-claim
-          amount, daily limit, and total uses there — then paste it here.
-        </Text>
-        <View style={styles.inputRow}>
-          <TextInput
-            style={styles.input}
-            placeholder="lnurl1… or lightning:LNURL1…"
-            placeholderTextColor={colors.textSupplementary}
-            value={lnurl}
-            onChangeText={(s) => {
-              setLnurl(s);
-              if (stage.kind === 'validated') setStage({ kind: 'idle' });
-            }}
-            autoCapitalize="none"
-            autoCorrect={false}
-            multiline
-            testID="hunt-piggy-lnurl-input"
-          />
-          <TouchableOpacity
-            onPress={handlePaste}
-            style={styles.pasteButton}
-            accessibilityLabel="Paste from clipboard"
-            testID="hunt-piggy-paste-button"
-          >
-            <ClipboardIcon size={18} color={colors.brandPink} strokeWidth={2} />
-          </TouchableOpacity>
-        </View>
-
-        {stage.kind !== 'validated' && stage.kind !== 'saved' && stage.kind !== 'wrote-nfc' && (
-          <TouchableOpacity
-            style={[styles.primaryButton, !lnurl.trim() && styles.primaryButtonDisabled]}
-            disabled={!lnurl.trim() || stage.kind === 'validating'}
-            onPress={handleValidate}
-            testID="hunt-piggy-validate-button"
-          >
-            {stage.kind === 'validating' ? (
-              <ActivityIndicator color={colors.white} />
-            ) : (
-              <Text style={styles.primaryButtonText}>Validate</Text>
-            )}
-          </TouchableOpacity>
-        )}
-
-        {stage.kind === 'validated' && (
-          <View style={styles.validatedCard}>
-            <CheckCircle2 size={20} color={colors.green} strokeWidth={2.5} />
-            <View style={styles.validatedTextWrapper}>
-              <Text style={styles.validatedTitle}>Looks good</Text>
-              {validatedSatsLine && <Text style={styles.validatedMeta}>{validatedSatsLine}</Text>}
-              {stage.params.defaultDescription ? (
-                <Text style={styles.validatedDescription}>
-                  &ldquo;{stage.params.defaultDescription}&rdquo;
-                </Text>
-              ) : null}
-            </View>
-          </View>
-        )}
-
-        {/* Steps 3-5 render unconditionally so the hider can see the full
-            shape of the flow from first open. Inputs + CTAs inside each
-            step are disabled until their prerequisite stage is reached. */}
-        <>
-          <StepHeader
-            n={3}
-            title="Write the tag"
-            subtitle="Write the prize link onto a physical NFC tag the finder will tap."
-            status={stage.kind === 'wrote-nfc' ? 'done' : 'active'}
-            styles={styles}
-            colors={colors}
-          />
-          <NfcSupportedTagsCard colors={colors} styles={styles} />
-          <TouchableOpacity
-            style={[
-              styles.primaryButton,
-              (stage.kind === 'idle' ||
-                stage.kind === 'validating' ||
-                stage.kind === 'writing-nfc') &&
-                styles.primaryButtonDisabled,
-            ]}
-            onPress={handleWriteNfc}
-            disabled={
-              stage.kind === 'idle' || stage.kind === 'validating' || stage.kind === 'writing-nfc'
-            }
-            testID="hunt-write-nfc-button"
-          >
-            {stage.kind === 'writing-nfc' ? (
-              <ActivityIndicator color={colors.white} />
-            ) : (
-              <>
-                <Nfc size={18} color={colors.white} strokeWidth={2.5} />
-                <Text style={styles.primaryButtonText}>
-                  {stage.kind === 'wrote-nfc' ? 'Write another tag' : 'Write to NFC tag'}
-                </Text>
-              </>
-            )}
-          </TouchableOpacity>
-
-          <StepHeader
-            n={4}
-            title="Pick the location"
-            subtitle="Stash the Piglet first, then drop a pin where you hid it."
-            status={pin ? 'done' : 'active'}
-            styles={styles}
-            colors={colors}
-          />
-          {pin ? (
-            <View style={styles.pinRow}>
-              <MapPin size={20} color={colors.brandPink} strokeWidth={2} />
-              <View style={styles.pinTextWrapper}>
-                <Text style={styles.pinTitle}>
-                  {pin.lat.toFixed(5)}, {pin.lon.toFixed(5)}
-                </Text>
-                <Text style={styles.pinSub}>geohash {pin.geohash}</Text>
+              <View style={styles.getPiggyButtonsRow}>
+                <TouchableOpacity
+                  style={[styles.getPiggyButton, styles.getPiggyButtonPrint]}
+                  onPress={async () => {
+                    try {
+                      // Resolve the bundled STL to a local file URI, then
+                      // copy into the cache dir with a friendly filename
+                      // before handing off to the OS share sheet (Android
+                      // file pickers won't preserve the require()-id
+                      // filename otherwise).
+                      const asset = Asset.fromModule(
+                        // eslint-disable-next-line @typescript-eslint/no-require-imports
+                        require('../../assets/3d/piggy-bag-charm.stl'),
+                      );
+                      await asset.downloadAsync();
+                      if (!asset.localUri)
+                        throw new Error('STL asset has no localUri after download');
+                      // expo-file-system SDK 55 ships a new class-based API
+                      // (Paths.cache, new File(...).copy()). Copying into the
+                      // cache dir under a friendly filename so the OS share
+                      // sheet shows "piggy-bag-charm.stl" instead of the
+                      // require-mangled asset name.
+                      const target = new File(Paths.cache, 'piggy-bag-charm.stl');
+                      if (target.exists) target.delete();
+                      const source = new File(asset.localUri);
+                      source.copy(target);
+                      if (await Sharing.isAvailableAsync()) {
+                        await Sharing.shareAsync(target.uri, {
+                          mimeType: 'model/stl',
+                          dialogTitle: 'Save Piggy Bag Charm STL',
+                          UTI: 'public.standard-tesselated-geometry-format',
+                        });
+                      }
+                    } catch (e) {
+                      Toast.show({
+                        type: 'info',
+                        text1: 'Couldn’t share the STL',
+                        text2: (e as Error).message,
+                      });
+                    }
+                  }}
+                  testID="get-a-piggy-print-button"
+                  accessibilityLabel="Save Piggy Bag Charm STL"
+                >
+                  <Printer size={18} color={colors.white} strokeWidth={2.5} />
+                  <Text style={styles.getPiggyButtonText}>Save STL</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.getPiggyButton, styles.getPiggyButtonBuy]}
+                  onPress={() =>
+                    Linking.openURL(
+                      // NIP-99 classified listing (kind 30402) for the Lightning
+                      // Piggy Bag Charm at Robotechy. The naddr decodes to:
+                      //   pubkey 211f325b…d46f, identifier product_1768341201209_bm83o.
+                      'https://www.robotechy.com/naddr1qvzqqqrkcgpzqgglxfd4895k3tqv0xmupgps6a5zqmfj43slj0c58hs39wzeh4r0qqdhqun0v36kxazlxymnvwpnxscnyvp3xgcrjhmzd5urxmcxaljpu',
+                    )
+                  }
+                  testID="get-a-piggy-buy-button"
+                  accessibilityLabel="Buy from Robotechy"
+                >
+                  <ShoppingBag size={18} color={colors.white} strokeWidth={2.5} />
+                  <Text style={styles.getPiggyButtonText}>Buy from</Text>
+                  <Image
+                    source={require('../../assets/images/robotechy-logo.png')}
+                    style={styles.robotechyLogo}
+                    resizeMode="contain"
+                    accessibilityLabel="Robotechy"
+                  />
+                </TouchableOpacity>
               </View>
+              {/* Quick tag-spec hint up front — surfaces what to buy before
+               * the user clicks Buy/Print, so they don't come back with a
+               * Mifare Classic and find out it can't lock at NFC-write
+               * time. The full Supported-NFC-tags card stays below after
+               * Validate for the deeper "I'm actually writing the tag now"
+               * moment. */}
+              <View style={styles.getPiggyTagsHint}>
+                <Nfc size={12} color={colors.brandPink} strokeWidth={2.5} />
+                <Text style={styles.getPiggyTagsHintText}>
+                  <Text style={styles.getPiggyTagsHintBold}>Tag chips:</Text> NTAG213 / 215 / 216
+                  (recommended), Mifare Ultralight C also fine. Avoid Mifare Classic — it can't
+                  lock.
+                </Text>
+              </View>
+            </View>
+            <StepNavRow onNext={() => setCurrentStep(2)} styles={styles} colors={colors} />
+          </>
+        )}
+
+        {currentStep === 2 && (
+          <>
+            <StepHeader
+              n={2}
+              title="Make the prize"
+              subtitle="A withdraw link from your wallet — the sats the finder claims. (Video URL prize coming soon.)"
+              status={
+                stage.kind === 'validated' || stage.kind === 'saved' || stage.kind === 'wrote-nfc'
+                  ? 'done'
+                  : 'active'
+              }
+              styles={styles}
+              colors={colors}
+            />
+            <Text style={styles.helper}>
+              Create a withdraw link in your own wallet (LNbits, Alby, Mutiny, …) — set the
+              per-claim amount, daily limit, and total uses there — then paste it here.
+            </Text>
+            <View style={styles.inputRow}>
+              <TextInput
+                style={styles.input}
+                placeholder="lnurl1… or lightning:LNURL1…"
+                placeholderTextColor={colors.textSupplementary}
+                value={lnurl}
+                onChangeText={(s) => {
+                  setLnurl(s);
+                  if (stage.kind === 'validated') setStage({ kind: 'idle' });
+                }}
+                autoCapitalize="none"
+                autoCorrect={false}
+                multiline
+                testID="hunt-piggy-lnurl-input"
+              />
               <TouchableOpacity
-                style={styles.pinClearButton}
-                onPress={handleClearPin}
-                testID="hunt-piggy-clear-pin-button"
-                accessibilityLabel="Clear pin"
+                onPress={handlePaste}
+                style={styles.pasteButton}
+                accessibilityLabel="Paste from clipboard"
+                testID="hunt-piggy-paste-button"
               >
-                <X size={16} color={colors.white} strokeWidth={2.5} />
+                <ClipboardIcon size={18} color={colors.brandPink} strokeWidth={2} />
               </TouchableOpacity>
             </View>
-          ) : (
+
+            {stage.kind !== 'validated' && stage.kind !== 'saved' && stage.kind !== 'wrote-nfc' && (
+              <TouchableOpacity
+                style={[styles.primaryButton, !lnurl.trim() && styles.primaryButtonDisabled]}
+                disabled={!lnurl.trim() || stage.kind === 'validating'}
+                onPress={handleValidate}
+                testID="hunt-piggy-validate-button"
+              >
+                {stage.kind === 'validating' ? (
+                  <ActivityIndicator color={colors.white} />
+                ) : (
+                  <Text style={styles.primaryButtonText}>Validate</Text>
+                )}
+              </TouchableOpacity>
+            )}
+
+            {stage.kind === 'validated' && (
+              <View style={styles.validatedCard}>
+                <CheckCircle2 size={20} color={colors.green} strokeWidth={2.5} />
+                <View style={styles.validatedTextWrapper}>
+                  <Text style={styles.validatedTitle}>Looks good</Text>
+                  {validatedSatsLine && (
+                    <Text style={styles.validatedMeta}>{validatedSatsLine}</Text>
+                  )}
+                  {stage.params.defaultDescription ? (
+                    <Text style={styles.validatedDescription}>
+                      &ldquo;{stage.params.defaultDescription}&rdquo;
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
+            )}
+            <StepNavRow
+              onBack={() => setCurrentStep(1)}
+              onNext={() => setCurrentStep(3)}
+              styles={styles}
+              colors={colors}
+            />
+          </>
+        )}
+
+        {currentStep === 3 && (
+          <>
+            <StepHeader
+              n={3}
+              title="Write the tag"
+              subtitle="Write the prize link onto a physical NFC tag the finder will tap."
+              status={stage.kind === 'wrote-nfc' ? 'done' : 'active'}
+              styles={styles}
+              colors={colors}
+            />
+            <NfcSupportedTagsCard colors={colors} styles={styles} />
             <TouchableOpacity
-              style={styles.pinButton}
-              onPress={handlePinHere}
-              disabled={pinning}
-              testID="hunt-piggy-pin-here-button"
+              style={[
+                styles.primaryButton,
+                (stage.kind === 'idle' ||
+                  stage.kind === 'validating' ||
+                  stage.kind === 'writing-nfc') &&
+                  styles.primaryButtonDisabled,
+              ]}
+              onPress={handleWriteNfc}
+              disabled={
+                stage.kind === 'idle' || stage.kind === 'validating' || stage.kind === 'writing-nfc'
+              }
+              testID="hunt-write-nfc-button"
             >
-              {pinning ? (
-                <ActivityIndicator color={colors.brandPink} />
+              {stage.kind === 'writing-nfc' ? (
+                <ActivityIndicator color={colors.white} />
               ) : (
                 <>
-                  <MapPin size={18} color={colors.brandPink} strokeWidth={2} />
-                  <Text style={styles.pinButtonText}>Drop pin at my location</Text>
+                  <Nfc size={18} color={colors.white} strokeWidth={2.5} />
+                  <Text style={styles.primaryButtonText}>
+                    {stage.kind === 'wrote-nfc' ? 'Write another tag' : 'Write to NFC tag'}
+                  </Text>
                 </>
               )}
             </TouchableOpacity>
-          )}
-          <Text style={styles.helper}>
-            Stored locally so you can find your own Piggy later. Only published to Nostr (as the
-            kind 37516 `g` tag) if you toggle Public on step 5. Map-based pin drop coming soon.
-          </Text>
+            <StepNavRow
+              onBack={() => setCurrentStep(2)}
+              onNext={() => setCurrentStep(4)}
+              styles={styles}
+              colors={colors}
+            />
+          </>
+        )}
 
-          <StepHeader
-            n={5}
-            title="Publish"
-            subtitle="Write the cache to Nostr — finder-facing message, rules and visibility."
-            status={stage.kind === 'saved' || stage.kind === 'wrote-nfc' ? 'done' : 'active'}
-            styles={styles}
-            colors={colors}
-          />
-          <Text style={styles.subSectionLabel}>Memo (optional)</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Happy birthday Lily 🎂"
-            placeholderTextColor={colors.textSupplementary}
-            value={memo}
-            onChangeText={setMemo}
-            maxLength={140}
-            editable={stage.kind === 'validated'}
-            testID="hunt-piggy-memo-input"
-          />
-          <Text style={styles.helper}>Shown to the finder on the celebration screen.</Text>
-
-          <Text style={[styles.subSectionLabel, styles.sectionGap]}>Hint photo (optional)</Text>
-          {hintPhotoUrl ? (
-            <View style={styles.hintPreviewWrapper}>
-              <Image source={{ uri: hintPhotoUrl }} style={styles.hintPreview} resizeMode="cover" />
+        {currentStep === 4 && (
+          <>
+            <StepHeader
+              n={4}
+              title="Pick the location"
+              subtitle="Stash the Piglet first, then drop a pin where you hid it."
+              status={pin ? 'done' : 'active'}
+              styles={styles}
+              colors={colors}
+            />
+            {pin ? (
+              <View style={styles.pinRow}>
+                <MapPin size={20} color={colors.brandPink} strokeWidth={2} />
+                <View style={styles.pinTextWrapper}>
+                  <Text style={styles.pinTitle}>
+                    {pin.lat.toFixed(5)}, {pin.lon.toFixed(5)}
+                  </Text>
+                  <Text style={styles.pinSub}>geohash {pin.geohash}</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.pinClearButton}
+                  onPress={handleClearPin}
+                  testID="hunt-piggy-clear-pin-button"
+                  accessibilityLabel="Clear pin"
+                >
+                  <X size={16} color={colors.white} strokeWidth={2.5} />
+                </TouchableOpacity>
+              </View>
+            ) : (
               <TouchableOpacity
-                style={styles.hintRemoveButton}
-                onPress={handleRemoveHintPhoto}
-                accessibilityLabel="Remove hint photo"
-                testID="hunt-piggy-remove-hint-button"
+                style={styles.pinButton}
+                onPress={handlePinHere}
+                disabled={pinning}
+                testID="hunt-piggy-pin-here-button"
               >
-                <X size={16} color={colors.white} strokeWidth={2.5} />
+                {pinning ? (
+                  <ActivityIndicator color={colors.brandPink} />
+                ) : (
+                  <>
+                    <MapPin size={18} color={colors.brandPink} strokeWidth={2} />
+                    <Text style={styles.pinButtonText}>Drop pin at my location</Text>
+                  </>
+                )}
               </TouchableOpacity>
-            </View>
-          ) : uploadingHint ? (
-            <View style={styles.hintUploadingWrapper}>
-              <ActivityIndicator color={colors.brandPink} />
-              <Text style={styles.helper}>Stripping EXIF + uploading…</Text>
-            </View>
-          ) : (
-            <View style={styles.hintButtonsRow}>
-              <TouchableOpacity
-                style={styles.hintButton}
-                onPress={handleTakeHintPhoto}
-                disabled={stage.kind !== 'validated'}
-                testID="hunt-piggy-take-hint-button"
-              >
-                <Camera size={18} color={colors.brandPink} strokeWidth={2} />
-                <Text style={styles.hintButtonText}>Take photo</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.hintButton}
-                onPress={handlePickHintFromLibrary}
-                disabled={stage.kind !== 'validated'}
-                testID="hunt-piggy-pick-hint-button"
-              >
-                <ImagePlus size={18} color={colors.brandPink} strokeWidth={2} />
-                <Text style={styles.hintButtonText}>From library</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-          <Text style={styles.helper}>
-            EXIF data (incl. GPS) is stripped before upload. Pick a clue photo, not a photo taken at
-            the cache itself.
-          </Text>
+            )}
+            <Text style={styles.helper}>
+              Stored locally so you can find your own Piggy later. Only published to Nostr (as the
+              kind 37516 `g` tag) if you toggle Public on step 5. Map-based pin drop coming soon.
+            </Text>
+            <StepNavRow
+              onBack={() => setCurrentStep(3)}
+              onNext={() => setCurrentStep(5)}
+              styles={styles}
+              colors={colors}
+            />
+          </>
+        )}
 
-          <Text style={[styles.subSectionLabel, styles.sectionGap]}>
-            Cooldown &amp; uses (optional)
-          </Text>
-          <View style={styles.hintsRow}>
-            <View style={styles.hintField}>
-              <Text style={styles.hintFieldLabel}>Cooldown (mins)</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="180"
-                placeholderTextColor={colors.textSupplementary}
-                keyboardType="number-pad"
-                value={waitMinutesText}
-                onChangeText={setWaitMinutesText}
-                editable={stage.kind === 'validated'}
-                testID="hunt-piggy-wait-input"
-              />
-            </View>
-            <View style={styles.hintField}>
-              <Text style={styles.hintFieldLabel}>Total uses</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="100"
-                placeholderTextColor={colors.textSupplementary}
-                keyboardType="number-pad"
-                value={usesText}
-                onChangeText={setUsesText}
-                editable={stage.kind === 'validated'}
-                testID="hunt-piggy-uses-input"
-              />
-            </View>
-          </View>
-          <Text style={styles.helper}>
-            These mirror your wallet&apos;s wait_time + uses settings — finders see them as soft
-            hints. The wallet still does the actual enforcement.
-          </Text>
+        {currentStep === 5 && (
+          <>
+            <StepHeader
+              n={5}
+              title="Publish"
+              subtitle="Write the cache to Nostr — finder-facing message, rules and visibility."
+              status={stage.kind === 'saved' || stage.kind === 'wrote-nfc' ? 'done' : 'active'}
+              styles={styles}
+              colors={colors}
+            />
+            <Text style={styles.subSectionLabel}>Memo (optional)</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Happy birthday Lily 🎂"
+              placeholderTextColor={colors.textSupplementary}
+              value={memo}
+              onChangeText={setMemo}
+              maxLength={140}
+              editable={stage.kind === 'validated'}
+              testID="hunt-piggy-memo-input"
+            />
+            <Text style={styles.helper}>Shown to the finder on the celebration screen.</Text>
 
-          <Text style={[styles.subSectionLabel, styles.sectionGap]}>Discoverability</Text>
-          <TouchableOpacity
-            style={styles.publicRow}
-            onPress={() => stage.kind === 'validated' && setIsPublic(!isPublic)}
-            accessibilityRole="switch"
-            accessibilityState={{ checked: isPublic }}
-            testID="hunt-piggy-public-toggle"
-            disabled={stage.kind !== 'validated'}
-          >
-            <Globe size={20} color={colors.brandPink} strokeWidth={2} />
-            <View style={styles.publicTextWrapper}>
-              <Text style={styles.publicTitle}>Make this Piggy public</Text>
-              <Text style={styles.publicSub}>
-                Publishes to Nostr (kind 37516) so strangers can hunt for it. You can opt out per
-                Piggy.
-              </Text>
-            </View>
-            <View style={[styles.toggleTrack, isPublic && styles.toggleTrackOn]}>
-              <View style={[styles.toggleThumb, isPublic && styles.toggleThumbOn]} />
-            </View>
-          </TouchableOpacity>
+            <Text style={[styles.subSectionLabel, styles.sectionGap]}>Hint photo (optional)</Text>
+            {hintPhotoUrl ? (
+              <View style={styles.hintPreviewWrapper}>
+                <Image
+                  source={{ uri: hintPhotoUrl }}
+                  style={styles.hintPreview}
+                  resizeMode="cover"
+                />
+                <TouchableOpacity
+                  style={styles.hintRemoveButton}
+                  onPress={handleRemoveHintPhoto}
+                  accessibilityLabel="Remove hint photo"
+                  testID="hunt-piggy-remove-hint-button"
+                >
+                  <X size={16} color={colors.white} strokeWidth={2.5} />
+                </TouchableOpacity>
+              </View>
+            ) : uploadingHint ? (
+              <View style={styles.hintUploadingWrapper}>
+                <ActivityIndicator color={colors.brandPink} />
+                <Text style={styles.helper}>Stripping EXIF + uploading…</Text>
+              </View>
+            ) : (
+              <View style={styles.hintButtonsRow}>
+                <TouchableOpacity
+                  style={styles.hintButton}
+                  onPress={handleTakeHintPhoto}
+                  disabled={stage.kind !== 'validated'}
+                  testID="hunt-piggy-take-hint-button"
+                >
+                  <Camera size={18} color={colors.brandPink} strokeWidth={2} />
+                  <Text style={styles.hintButtonText}>Take photo</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.hintButton}
+                  onPress={handlePickHintFromLibrary}
+                  disabled={stage.kind !== 'validated'}
+                  testID="hunt-piggy-pick-hint-button"
+                >
+                  <ImagePlus size={18} color={colors.brandPink} strokeWidth={2} />
+                  <Text style={styles.hintButtonText}>From library</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            <Text style={styles.helper}>
+              EXIF data (incl. GPS) is stripped before upload. Pick a clue photo, not a photo taken
+              at the cache itself.
+            </Text>
 
-          <Text style={styles.warning}>
-            ⚠ The URL on your Piggy is a bearer token — anyone who finds the tag (or sees the URL)
-            can claim sats up to your daily limit. Set a per-find amount you&apos;re OK losing if it
-            leaks.
-          </Text>
+            <Text style={[styles.subSectionLabel, styles.sectionGap]}>
+              Cooldown &amp; uses (optional)
+            </Text>
+            <View style={styles.hintsRow}>
+              <View style={styles.hintField}>
+                <Text style={styles.hintFieldLabel}>Cooldown (mins)</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="180"
+                  placeholderTextColor={colors.textSupplementary}
+                  keyboardType="number-pad"
+                  value={waitMinutesText}
+                  onChangeText={setWaitMinutesText}
+                  editable={stage.kind === 'validated'}
+                  testID="hunt-piggy-wait-input"
+                />
+              </View>
+              <View style={styles.hintField}>
+                <Text style={styles.hintFieldLabel}>Total uses</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="100"
+                  placeholderTextColor={colors.textSupplementary}
+                  keyboardType="number-pad"
+                  value={usesText}
+                  onChangeText={setUsesText}
+                  editable={stage.kind === 'validated'}
+                  testID="hunt-piggy-uses-input"
+                />
+              </View>
+            </View>
+            <Text style={styles.helper}>
+              These mirror your wallet&apos;s wait_time + uses settings — finders see them as soft
+              hints. The wallet still does the actual enforcement.
+            </Text>
 
-          {stage.kind === 'validated' && (
+            <Text style={[styles.subSectionLabel, styles.sectionGap]}>Discoverability</Text>
             <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={handleSave}
-              testID="hunt-piggy-save-button"
+              style={styles.publicRow}
+              onPress={() => stage.kind === 'validated' && setIsPublic(!isPublic)}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: isPublic }}
+              testID="hunt-piggy-public-toggle"
+              disabled={stage.kind !== 'validated'}
             >
-              <PiggyBank size={18} color={colors.white} strokeWidth={2.5} />
-              <Text style={styles.primaryButtonText}>Publish this Piggy</Text>
+              <Globe size={20} color={colors.brandPink} strokeWidth={2} />
+              <View style={styles.publicTextWrapper}>
+                <Text style={styles.publicTitle}>Make this Piggy public</Text>
+                <Text style={styles.publicSub}>
+                  Publishes to Nostr (kind 37516) so strangers can hunt for it. You can opt out per
+                  Piggy.
+                </Text>
+              </View>
+              <View style={[styles.toggleTrack, isPublic && styles.toggleTrackOn]}>
+                <View style={[styles.toggleThumb, isPublic && styles.toggleThumbOn]} />
+              </View>
             </TouchableOpacity>
-          )}
 
-          {(stage.kind === 'saved' || stage.kind === 'wrote-nfc') && (
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={handleDone}
-              testID="hunt-piggy-done-button"
-            >
-              <Text style={styles.secondaryButtonText}>Done</Text>
-            </TouchableOpacity>
-          )}
-        </>
+            <Text style={styles.warning}>
+              ⚠ The URL on your Piggy is a bearer token — anyone who finds the tag (or sees the URL)
+              can claim sats up to your daily limit. Set a per-find amount you&apos;re OK losing if
+              it leaks.
+            </Text>
+
+            {stage.kind === 'validated' && (
+              <TouchableOpacity
+                style={styles.primaryButton}
+                onPress={handleSave}
+                testID="hunt-piggy-save-button"
+              >
+                <PiggyBank size={18} color={colors.white} strokeWidth={2.5} />
+                <Text style={styles.primaryButtonText}>Publish this Piggy</Text>
+              </TouchableOpacity>
+            )}
+
+            {(stage.kind === 'saved' || stage.kind === 'wrote-nfc') && (
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={handleDone}
+                testID="hunt-piggy-done-button"
+              >
+                <Text style={styles.secondaryButtonText}>Done</Text>
+              </TouchableOpacity>
+            )}
+            <StepNavRow onBack={() => setCurrentStep(4)} styles={styles} colors={colors} />
+          </>
+        )}
       </ScrollView>
     </View>
   );
@@ -836,26 +890,35 @@ const stepStatuses = (stage: Stage, hasPin: boolean): Record<1 | 2 | 3 | 4 | 5, 
 const StepProgressBar: React.FC<{
   stage: Stage;
   hasPin: boolean;
+  currentStep: 1 | 2 | 3 | 4 | 5;
+  onPipPress: (n: 1 | 2 | 3 | 4 | 5) => void;
   colors: Palette;
   styles: ReturnType<typeof createStyles>;
-}> = ({ stage, hasPin, colors, styles }) => {
+}> = ({ stage, hasPin, currentStep, onPipPress, colors, styles }) => {
   const statuses = stepStatuses(stage, hasPin);
   return (
     <View style={styles.stepperRow} accessibilityRole="progressbar">
       {STEP_LABELS.map(({ n, label }, idx) => {
         const status = statuses[n as 1 | 2 | 3 | 4 | 5];
+        const isCurrent = currentStep === n;
         return (
           <React.Fragment key={n}>
-            <View style={styles.stepperPipWrap}>
+            <TouchableOpacity
+              style={styles.stepperPipWrap}
+              onPress={() => onPipPress(n as 1 | 2 | 3 | 4 | 5)}
+              testID={`hunt-piggy-step-pip-${n}`}
+              accessibilityLabel={`Step ${n} of 5: ${label}`}
+            >
               <View
                 style={[
                   styles.stepperPip,
                   status === 'done' && styles.stepperPipDone,
                   status === 'active' && styles.stepperPipActive,
                   status === 'pending' && styles.stepperPipPending,
+                  isCurrent && styles.stepperPipCurrent,
                 ]}
               >
-                {status === 'done' ? (
+                {status === 'done' && !isCurrent ? (
                   <Check size={12} color={colors.white} strokeWidth={3} />
                 ) : (
                   <Text
@@ -869,12 +932,16 @@ const StepProgressBar: React.FC<{
                 )}
               </View>
               <Text
-                style={[styles.stepperLabel, status === 'pending' && styles.stepperLabelPending]}
+                style={[
+                  styles.stepperLabel,
+                  status === 'pending' && styles.stepperLabelPending,
+                  isCurrent && styles.stepperLabelCurrent,
+                ]}
                 numberOfLines={1}
               >
                 {label}
               </Text>
-            </View>
+            </TouchableOpacity>
             {idx < STEP_LABELS.length - 1 ? (
               <View
                 style={[
@@ -892,6 +959,45 @@ const StepProgressBar: React.FC<{
     </View>
   );
 };
+
+// Back / Next row that lives under each wizard step's content. Step 1
+// has no Back; step 5 swaps Next for the Publish CTA so the row is
+// usually just rendered without `onNext` on the final page.
+const StepNavRow: React.FC<{
+  onBack?: () => void;
+  onNext?: () => void;
+  nextLabel?: string;
+  nextDisabled?: boolean;
+  styles: ReturnType<typeof createStyles>;
+  colors: Palette;
+}> = ({ onBack, onNext, nextLabel = 'Next', nextDisabled, styles, colors }) => (
+  <View style={styles.stepNavRow}>
+    {onBack ? (
+      <TouchableOpacity
+        style={styles.stepNavBackButton}
+        onPress={onBack}
+        testID="hunt-piggy-step-back"
+        accessibilityLabel="Back to previous step"
+      >
+        <ChevronLeft size={16} color={colors.textHeader} strokeWidth={2.5} />
+        <Text style={styles.stepNavBackText}>Back</Text>
+      </TouchableOpacity>
+    ) : (
+      <View style={styles.stepNavSpacer} />
+    )}
+    {onNext ? (
+      <TouchableOpacity
+        style={[styles.stepNavNextButton, nextDisabled && styles.stepNavNextButtonDisabled]}
+        onPress={onNext}
+        disabled={nextDisabled}
+        testID="hunt-piggy-step-next"
+        accessibilityLabel={nextLabel}
+      >
+        <Text style={styles.stepNavNextText}>{nextLabel} ›</Text>
+      </TouchableOpacity>
+    ) : null}
+  </View>
+);
 
 const NfcSupportedTagsCard: React.FC<{
   colors: Palette;
@@ -1132,6 +1238,47 @@ const createStyles = (colors: Palette) =>
     },
     stepperConnectorDone: { backgroundColor: colors.green },
     stepperConnectorPending: { backgroundColor: colors.divider },
+    stepperPipCurrent: {
+      backgroundColor: colors.brandPink,
+      borderColor: colors.brandPink,
+      transform: [{ scale: 1.08 }],
+    },
+    stepperLabelCurrent: { color: colors.brandPink, fontWeight: '800' },
+    // Bottom-of-step Back / Next navigation row.
+    stepNavRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginTop: 24,
+      marginBottom: 8,
+      gap: 12,
+    },
+    stepNavBackButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      backgroundColor: colors.surface,
+    },
+    stepNavBackText: {
+      marginLeft: 4,
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.textHeader,
+    },
+    stepNavSpacer: { width: 1 },
+    stepNavNextButton: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 12,
+      paddingHorizontal: 18,
+      borderRadius: 10,
+      backgroundColor: colors.brandPink,
+    },
+    stepNavNextButtonDisabled: { backgroundColor: colors.textSupplementary },
+    stepNavNextText: { fontSize: 15, fontWeight: '800', color: colors.white },
     helper: {
       fontSize: 12,
       color: colors.textSupplementary,
