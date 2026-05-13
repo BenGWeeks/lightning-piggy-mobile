@@ -51,9 +51,16 @@ const CourseDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
   return (
     <View style={styles.container}>
-      {/* Back button floats above scroll */}
-      <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-        <ChevronLeft size={28} color="#FFFFFF" />
+      {/* Back button floats above scroll — pink chevron on white pill so
+       * it stays visible against any course hero image. */}
+      <TouchableOpacity
+        style={styles.backButton}
+        onPress={() => navigation.goBack()}
+        accessibilityLabel="Back to Lessons"
+        testID="course-detail-back-button"
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      >
+        <ChevronLeft size={24} color={colors.brandPink} strokeWidth={2.5} />
       </TouchableOpacity>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
