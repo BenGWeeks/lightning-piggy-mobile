@@ -82,12 +82,16 @@ const ContactProfileScreen: React.FC = () => {
 
   // React Navigation may reuse this screen instance and only update params
   // when navigating to ContactProfile while it's already in the stack.
-  // Re-sync the local `contact` state when the param identity changes so
-  // derived state (lnAddressDraft, avatar load, fetched bio) doesn't go stale.
+  // Re-sync the local `contact` state when the param identity changes —
+  // gated on `pubkey` so navigating from FriendsScreen → profile → back
+  // → tap-same-friend (which builds a fresh `ContactProfileBodyData`
+  // each time but with the same pubkey) doesn't blow away our locally
+  // fetched `about` bio + avatar-load state.
   const paramContact = route.params.contact;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     setContact(paramContact);
-  }, [paramContact]);
+  }, [paramContact.pubkey]);
 
   const npub = useMemo(
     () => (contact.pubkey ? npubEncode(contact.pubkey) : null),
@@ -110,11 +114,13 @@ const ContactProfileScreen: React.FC = () => {
   // navigation params. Most entry points pre-build ContactProfileBodyData
   // without the bio (it isn't shown on the row item), so we lazily
   // fetch it here for the description block.
-  // Fire once per pubkey: after the fetch resolves we either get a
-  // bio string or `null`, but in both cases we don't want to re-fetch.
-  // Keying the effect on `contact.about` would loop forever for users
-  // whose kind-0 omits `about` — successful fetch writes `null`, the
-  // null-check sees null and re-runs the effect.
+  //
+  // The actual loop-breaker is `aboutFetchedFor.current === contact.pubkey` —
+  // the `about !== undefined && about !== null` early-return only short-
+  // circuits when a bio was passed in via params (i.e. about already set
+  // to a non-null string). Users whose kind-0 omits `about` write `null`
+  // back via `setContact`, which would re-trigger this effect (deps
+  // include `contact.about`); the ref blocks the re-fetch.
   const aboutFetchedFor = useRef<string | null>(null);
   useEffect(() => {
     if (!contact.pubkey) return;
