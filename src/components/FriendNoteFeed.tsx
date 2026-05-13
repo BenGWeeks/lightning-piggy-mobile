@@ -117,13 +117,6 @@ const FriendNoteFeed: React.FC<Props> = ({ authorPubkey, limit = 30 }) => {
           data={notes}
           keyExtractor={(item) => item.id}
           scrollEnabled={false}
-          // FlashList warns "rendered size is not usable" when nested
-          // in a parent ScrollView with scrollEnabled=false unless an
-          // explicit item-size hint is provided. NotePreview cards
-          // run ~120 px tall on a Pixel 8 (avatar + 2-3 lines of body
-          // + spacing); the hint is a recycler guess, not a hard
-          // value, so being approximately right is enough.
-          estimatedItemSize={120}
           renderItem={({ item, index }) => (
             <NotePreview
               content={item.content}
