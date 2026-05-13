@@ -263,6 +263,11 @@ const ContactProfileBody: React.FC<Props> = ({
     <Container>
       {variant === 'sheet' && (
         <View style={styles.bannerContainer}>
+          {/* Fall back to the brand pink-ostrich texture when the
+              contact has no kind-0 banner — matches the full-page
+              ContactProfileScreen. The empty placeholder used to
+              render as a flat dark band, which read as a broken
+              image. */}
           {contact.banner ? (
             <Image
               source={{ uri: contact.banner }}
@@ -272,7 +277,12 @@ const ContactProfileBody: React.FC<Props> = ({
               autoplay={false}
             />
           ) : (
-            <View style={styles.bannerPlaceholder} />
+            <Image
+              source={require('../../assets/images/friends-bg.png')}
+              style={styles.bannerImage}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+            />
           )}
           <View style={styles.handleOverlay}>
             <View style={styles.handleBar} />
