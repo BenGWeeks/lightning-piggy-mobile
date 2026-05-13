@@ -94,6 +94,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // on it don't regress — can remove once verified.
     './plugins/withAdjustResize',
     './plugins/withAmberQueries',
+    './plugins/withLargeHeap',
     './plugins/withNfc',
     'expo-secure-store',
     [
