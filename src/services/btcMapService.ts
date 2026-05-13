@@ -471,6 +471,18 @@ export const daysSinceVerified = (place: BtcMapPlace): number | null => {
   return Math.floor((Date.now() - ts) / (24 * 60 * 60 * 1_000));
 };
 
+// Warm the in-memory dataset from AsyncStorage without making any
+// network call. Cheap, fire-and-forget — used by ExploreHomeScreen on
+// mount so the hydrate (which includes a multi-MB JSON.parse) runs in
+// parallel with location resolution. By the time `fetchPlacesInBbox`
+// is called for real, the hydrate promise is already settled and the
+// `await` is instant. Without this, the first bbox call serialises
+// AsyncStorage read + parse before returning, which the user sees as
+// "Places loads slowly" even though the cache is in place.
+export const prefetchDataset = (): void => {
+  hydrateFromStorage().catch(() => {});
+};
+
 /**
  * Test-only escape hatch — the in-memory dataset survives across
  * unit-test invocations otherwise.

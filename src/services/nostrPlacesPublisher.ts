@@ -80,6 +80,24 @@ export const subscribeFoundLogs = (
   return () => sub.close();
 };
 
+// Subscribe to every kind 7516 found-log published by a given author
+// (set). MyPigletsScreen uses this twice: once with `[myPubkey]` for
+// the "Found" section and once with the WoT-trusted set (minus me) for
+// "Friends' finds". Empty list short-circuits — relays reject empty
+// `authors` filters as a free-firehose request.
+export const subscribeFoundLogsByAuthors = (
+  authors: string[],
+  onEvent: (event: VerifiedEvent) => void,
+  relays: string[] = DEFAULT_RELAYS,
+): (() => void) => {
+  if (authors.length === 0) return () => {};
+  const filter: Filter = { kinds: [GC_FOUND_LOG_KIND], authors };
+  const sub = pool.subscribeMany(relays, filter, {
+    onevent: (e: NostrEvent) => onEvent(e as VerifiedEvent),
+  });
+  return () => sub.close();
+};
+
 export const subscribeComments = (
   cacheCoord: string,
   onEvent: (event: VerifiedEvent) => void,

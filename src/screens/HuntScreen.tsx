@@ -15,7 +15,6 @@ import {
   ChevronRight,
   MapPin,
   PiggyBank,
-  Plus,
   Search,
   SlidersHorizontal,
 } from 'lucide-react-native';
@@ -269,12 +268,12 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Geo-caches</Text>
           <TouchableOpacity
-            onPress={() => navigation.navigate('HuntCreate')}
-            accessibilityLabel="Hide a Piglet"
-            testID="hunt-create-piggy-button"
+            onPress={() => navigation.navigate('MyPiglets')}
+            accessibilityLabel="My Piglets"
+            testID="hunt-my-piglets-button"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
-            <Plus size={22} color={colors.white} strokeWidth={2.5} />
+            <PiggyBank size={22} color={colors.white} strokeWidth={2.5} />
           </TouchableOpacity>
         </View>
         <Text style={styles.headerTagline}>Hunt for sats hidden in the wild</Text>

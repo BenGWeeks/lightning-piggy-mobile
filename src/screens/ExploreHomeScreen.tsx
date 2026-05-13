@@ -35,6 +35,7 @@ import {
   formatAddress,
   isBoosted,
   lightningAddressOf,
+  prefetchDataset,
   refreshDataset,
 } from '../services/btcMapService';
 import { useNearbyRadius } from '../hooks/useNearbyRadius';
@@ -92,6 +93,17 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     if (renderLoggedRef.current) return;
     renderLoggedRef.current = true;
     console.log(`[Perf] ExploreHomeScreen first render`);
+  }, []);
+
+  // Warm the BTC Map cache off the JS thread's critical path. The bbox
+  // fetch below is gated on a real GPS fix, but `prefetchDataset` only
+  // touches AsyncStorage + the in-memory parse — so kicking it off here
+  // runs the multi-MB JSON.parse in parallel with location resolution
+  // instead of serially on the first `fetchPlacesInBbox`. Cold-launch
+  // and Home-tab users pay nothing — the prefetch only fires when the
+  // Explore tab is first visited.
+  useEffect(() => {
+    prefetchDataset();
   }, []);
 
   // ----- location ---------------------------------------------------------
