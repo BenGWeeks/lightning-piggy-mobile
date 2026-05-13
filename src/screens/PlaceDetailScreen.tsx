@@ -72,27 +72,48 @@ const formatYMD = (iso: string): string => {
   return d.toISOString().slice(0, 10);
 };
 
-/**
- * One row in the Contact section for a social URL — Lucide dropped the
- * brand glyphs (Facebook / Twitter etc.) so we use a generic
- * `ExternalLink` icon and label the row with the network name. URL is
- * shown stripped of scheme + "www." for readability.
- */
+// BTC Map / OSM stores some contact:* tags as bare handles
+// ("tasteofcambridgefalafels") instead of full URLs. Map each network to its
+// canonical web host so the row always renders a recognisable URL.
+const SOCIAL_HOSTS: Record<SocialNetwork, string> = {
+  facebook: 'facebook.com',
+  x: 'x.com',
+  instagram: 'instagram.com',
+  telegram: 't.me',
+  whatsapp: 'wa.me',
+};
+
+const normaliseSocialUrl = (
+  network: SocialNetwork,
+  value: string,
+): { display: string; href: string } => {
+  const trimmed = value.trim().replace(/^@/, '');
+  const isUrl = /^https?:\/\//i.test(trimmed);
+  const host = SOCIAL_HOSTS[network];
+  const display = isUrl ? trimmed.replace(/^https?:\/\/(www\.)?/i, '') : `${host}/${trimmed}`;
+  const href = isUrl ? trimmed : `https://${host}/${trimmed}`;
+  return { display, href };
+};
+
 const SocialRow: React.FC<{
   network: SocialNetwork;
   url: string;
-  // Loose styles type so we don't have to thread the full createStyles
-  // signature through; this component is a one-off helper used only
-  // inside PlaceDetailScreen.
   styles: Record<string, ReturnType<typeof StyleSheet.create>[string]>;
-}> = ({ network, url, styles }) => (
-  <TouchableOpacity style={styles.contactRow} onPress={() => Linking.openURL(url).catch(() => {})}>
-    <SocialIcon network={network} size={18} />
-    <Text style={styles.contactText} numberOfLines={1}>
-      {socialLabel(network)} · {url.replace(/^https?:\/\/(www\.)?/, '')}
-    </Text>
-  </TouchableOpacity>
-);
+}> = ({ network, url, styles }) => {
+  const { display, href } = normaliseSocialUrl(network, url);
+  return (
+    <TouchableOpacity
+      style={styles.contactRow}
+      onPress={() => Linking.openURL(href).catch(() => {})}
+      accessibilityLabel={`${socialLabel(network)}: ${display}`}
+    >
+      <SocialIcon network={network} size={18} />
+      <Text style={styles.contactText} numberOfLines={1}>
+        {display}
+      </Text>
+    </TouchableOpacity>
+  );
+};
 
 const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();

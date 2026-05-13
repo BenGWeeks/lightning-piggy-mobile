@@ -93,7 +93,7 @@ const EventsFilterSheet: React.FC<Props> = ({
           <TouchableOpacity
             style={[styles.wotChip, wotFilterEnabled ? styles.wotChipOn : styles.wotChipOff]}
             onPress={onToggleWotFilter}
-            disabled={!__DEV__}
+            disabled={!__DEV__ && process.env.EXPO_PUBLIC_KEEP_PERF_LOGS !== '1'}
             testID="events-filter-wot-chip"
           >
             {wotFilterEnabled ? (
