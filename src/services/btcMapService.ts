@@ -24,30 +24,28 @@ const BTCMAP_V4_PLACES_URL = 'https://api.btcmap.org/v4/places';
 // Slim field list for the bulk dataset fetch. Pulled fields are
 // strictly what the list / rail / map markers need:
 //   - id / lat / lon : required by reshape
-//   - osm:name : title
+//   - osm:name : title (also used by the PlacesScreen search index)
 //   - icon : rail glyph
 //   - boosted_until : sort tie-break + "Featured" badge
-//   - verified_at : "Verified N days ago" hint
+//   - categories : PlacesScreen category-chip filter + search index
 //   - osm:payment:lightning + osm:payment:bitcoin : payment chip
-//   - osm:payment:lightning_address + osm:lud16 : LN address chip
-//   - osm:addr:street + osm:addr:city : address line on row
+//   - osm:addr:street + osm:addr:city : address line + search index
 //
-// Rich fields (cuisine, wheelchair, brand, contact:*, opening_hours, etc.)
-// land on PlaceDetail via a per-id lazy fetch (see fetchPlaceRich).
-// Trimming this list cut the response from ~22 MB / 7 s to ~4 MB / ~1 s
-// on first cold launch — see scripts/perf-explore-cold-start.sh.
+// Rich fields (verified_at, lightning_address, cuisine, wheelchair,
+// contact:*, opening_hours, etc.) land on PlaceDetail via a per-id
+// lazy fetch (see fetchPlaceRich). Trimming this list cut the bulk
+// response from ~22 MB / 7 s → ~5 MB / ~2 s on cold launch — see
+// scripts/perf-explore-cold-start.sh.
 const V4_FIELDS = [
   'id',
   'lat',
   'lon',
   'icon',
   'boosted_until',
-  'verified_at',
+  'categories',
   'osm:name',
   'osm:payment:lightning',
   'osm:payment:bitcoin',
-  'osm:payment:lightning_address',
-  'osm:lud16',
   'osm:addr:street',
   'osm:addr:city',
 ].join(',');
@@ -109,7 +107,7 @@ const DATASET_TTL_MS = 7 * 24 * 60 * 60 * 1_000; // 7 days
 // no bbox parameter so we fetch the whole world and filter in memory.
 // Bumped to `v4s` (slim) when the bulk fetch was trimmed to list-only
 // fields; legacy v4i caches are ignored on hydrate.
-const DATASET_STORAGE_KEY = '@lp:btcmap-dataset-v4s';
+const DATASET_STORAGE_KEY = '@lp:btcmap-dataset-v4t';
 
 export interface BtcMapPlace {
   id: number;
@@ -311,7 +309,7 @@ const reshape = (raw: Record<string, unknown>): BtcMapPlace | null => {
 // — the v4i dataset is ~22 MB so every persist was silently failing
 // with SQLITE_FULL. Writing to the document sandbox via
 // expo-file-system has no such limit and survives app upgrades.
-const datasetFile = () => new File(Paths.document, 'btcmap-dataset-v4s.json');
+const datasetFile = () => new File(Paths.document, 'btcmap-dataset-v4t.json');
 
 // One-shot hydration. Runs on first `fetchPlacesInBbox` call, not at
 // module load, because RN evaluates this file early in the bundle and
