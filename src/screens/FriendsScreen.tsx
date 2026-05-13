@@ -108,11 +108,10 @@ const FriendsScreen: React.FC = () => {
     [contacts.length],
   );
 
-  useEffect(() => {
-    fetchPhoneContacts()
-      .then(setPhoneContacts)
-      .catch(() => {});
-  }, []);
+  // Phone contacts are fetched via useFocusEffect below — it fires on
+  // every focus including the first mount, so the mount-time useEffect
+  // that previously ran the same fetch was a duplicate. Dropped to
+  // avoid two back-to-back fetches on initial mount (#439 review).
 
   // Restore the persisted Friends-tab filter selection on mount so it
   // survives app restarts (#311). Mirrors the AsyncStorage pattern

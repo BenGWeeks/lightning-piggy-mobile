@@ -64,9 +64,24 @@ const FriendNoteFeed: React.FC<Props> = ({ authorPubkey, limit = 30 }) => {
           );
         }
         setNotes((prev) => {
-          const next = [...prev, note];
-          next.sort((a, b) => b.created_at - a.created_at);
-          return next.slice(0, RENDER_CAP);
+          // Binary-insert into a desc-sorted-by-created_at array
+          // (newest-first) instead of pushing + full-sort on every
+          // event. With 5 relays × limit = up to 150 events on a
+          // wide-following user, the full-sort cost was O(n² log n)
+          // total; binary insert + splice is O(n²) and avoids the
+          // log factor.
+          let lo = 0;
+          let hi = prev.length;
+          while (lo < hi) {
+            const mid = (lo + hi) >>> 1;
+            if (prev[mid].created_at > note.created_at) lo = mid + 1;
+            else hi = mid;
+          }
+          if (lo >= RENDER_CAP) return prev; // newer events already saturate the cap
+          const next = prev.slice();
+          next.splice(lo, 0, note);
+          if (next.length > RENDER_CAP) next.length = RENDER_CAP;
+          return next;
         });
         setLoading(false);
       },
@@ -102,6 +117,13 @@ const FriendNoteFeed: React.FC<Props> = ({ authorPubkey, limit = 30 }) => {
           data={notes}
           keyExtractor={(item) => item.id}
           scrollEnabled={false}
+          // FlashList warns "rendered size is not usable" when nested
+          // in a parent ScrollView with scrollEnabled=false unless an
+          // explicit item-size hint is provided. NotePreview cards
+          // run ~120 px tall on a Pixel 8 (avatar + 2-3 lines of body
+          // + spacing); the hint is a recycler guess, not a hard
+          // value, so being approximately right is enough.
+          estimatedItemSize={120}
           renderItem={({ item, index }) => (
             <NotePreview
               content={item.content}

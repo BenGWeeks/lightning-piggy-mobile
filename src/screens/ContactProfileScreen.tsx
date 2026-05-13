@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -110,9 +110,17 @@ const ContactProfileScreen: React.FC = () => {
   // navigation params. Most entry points pre-build ContactProfileBodyData
   // without the bio (it isn't shown on the row item), so we lazily
   // fetch it here for the description block.
+  // Fire once per pubkey: after the fetch resolves we either get a
+  // bio string or `null`, but in both cases we don't want to re-fetch.
+  // Keying the effect on `contact.about` would loop forever for users
+  // whose kind-0 omits `about` — successful fetch writes `null`, the
+  // null-check sees null and re-runs the effect.
+  const aboutFetchedFor = useRef<string | null>(null);
   useEffect(() => {
     if (!contact.pubkey) return;
     if (contact.about !== undefined && contact.about !== null) return;
+    if (aboutFetchedFor.current === contact.pubkey) return;
+    aboutFetchedFor.current = contact.pubkey;
     let cancelled = false;
     const readRelays = relays.filter((r) => r.read).map((r) => r.url);
     fetchProfile(contact.pubkey, readRelays)
@@ -155,7 +163,12 @@ const ContactProfileScreen: React.FC = () => {
 
   const handleMessage = useCallback(() => {
     if (!contact.pubkey) return;
-    navigation.replace('Conversation', {
+    // `navigate` (not `replace`) so the user can back-button from
+    // Conversation → Profile → previous screen. The dedupe inside the
+    // Conversation route already collapses re-opens of the same DM
+    // peer, so we don't worry about a profile→conversation→profile
+    // bounce stacking duplicates.
+    navigation.navigate('Conversation', {
       pubkey: contact.pubkey,
       name: contact.name,
       picture: contact.picture,
@@ -340,6 +353,7 @@ const ContactProfileScreen: React.FC = () => {
             <Image
               source={{ uri: contact.banner }}
               style={styles.bannerImage}
+              contentFit="cover"
               cachePolicy="memory-disk"
               recyclingKey={contact.banner}
               autoplay={false}

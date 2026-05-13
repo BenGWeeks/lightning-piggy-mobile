@@ -125,6 +125,11 @@ const GroupConversationScreen: React.FC = () => {
   const [sendSheetOpen, setSendSheetOpen] = useState(false);
   const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
   const [fullscreenGifUrl, setFullscreenGifUrl] = useState<string | null>(null);
+  // Contact preview sheet — peek a member or shared contact without
+  // leaving the group conversation. The sheet's "View full profile"
+  // link drills into ContactProfile when the user wants the deep view.
+  const [sheetContact, setSheetContact] = useState<ContactProfileBodyData | null>(null);
+  const [profileSheetVisible, setProfileSheetVisible] = useState(false);
   // Cache of kind-0 profiles for shared-contact cards. Populated by the
   // batch-fetch effect below, keyed by pubkey. `null` value = fetch
   // attempted and resolved with no profile (so MessageBubble can drop
@@ -431,11 +436,6 @@ const GroupConversationScreen: React.FC = () => {
     setSendSheetOpen(true);
   }, []);
 
-  // Contact preview sheet — peek a member or shared contact without
-  // leaving the group conversation. The sheet's "View full profile"
-  // link drills into ContactProfile when the user wants the deep view.
-  const [sheetContact, setSheetContact] = useState<ContactProfileBodyData | null>(null);
-  const [profileSheetVisible, setProfileSheetVisible] = useState(false);
   const presentContactSheet = useCallback((contact: ContactProfileBodyData) => {
     setSheetContact(contact);
     setProfileSheetVisible(true);
