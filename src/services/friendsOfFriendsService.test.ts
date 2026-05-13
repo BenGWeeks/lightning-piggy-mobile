@@ -168,4 +168,79 @@ describe('friendsOfFriendsService — heuristics from #535', () => {
       expect(excludedFriends).toBe(0);
     });
   });
+
+  // Additional coverage scenarios (PR #536 hardening): each scenario
+  // exercises a specific boundary in the heuristic logic so a future
+  // refactor that breaks one of them surfaces immediately rather than
+  // leaking through to relay-fetch integration tests.
+  describe('PR #536 hardening: additional scenarios', () => {
+    it('soft-cap fallback with mixed fanout — 3-of-4 heavy → fallback kicks in, heuristic 2 still slices', () => {
+      // 4 friends. 3 follow 600 each (over cap), 1 follows 100.
+      // Without fallback: only 1 friend contributes (25 %) → fallback fires.
+      // With fallback: all 4 contribute, but heuristic 2 still slices the
+      // heavies to FANOUT_CAP entries each. Distinct prefixes per heavy
+      // mean their slices never collide, so the union is
+      //   3 × FANOUT_CAP   (heavy contributions)
+      // + 100              (light contribution)
+      // unique pubkeys.
+      const heavy = Array.from({ length: 3 }, (_, i) => pk(`heavy${i}`, 0));
+      const light = pk('light', 0);
+      const lists: Record<string, string[]> = {
+        [heavy[0]]: gen('hh0', 600),
+        [heavy[1]]: gen('hh1', 600),
+        [heavy[2]]: gen('hh2', 600),
+        [light]: gen('ll', 100),
+      };
+      const { set, excludedFriends } = buildFofSet(user, [...heavy, light], lists);
+      expect(excludedFriends).toBe(0);
+      expect(set.size).toBe(3 * FANOUT_CAP + 100);
+      // Heuristic 2 still applied: 501st entry of each heavy must NOT be in.
+      for (const h of heavy) expect(set.has(lists[h][FANOUT_CAP])).toBe(false);
+    });
+
+    it("single-friend graph — FoF set is exactly that friend's follows minus the user's own", () => {
+      const onlyFriend = pk('only', 0);
+      const friendFollows = gen('ff', 200);
+      const { set, excludedFriends } = buildFofSet(user, [onlyFriend], {
+        [onlyFriend]: friendFollows,
+      });
+      // None of the friend's follows overlap user / friend, so all 200 land.
+      expect(set.size).toBe(200);
+      expect(excludedFriends).toBe(0);
+      for (const p of friendFollows) expect(set.has(p)).toBe(true);
+    });
+
+    it('empty contact graph — FoF set is empty, excludedFriends = 0', () => {
+      const { set, excludedFriends } = buildFofSet(user, [], {});
+      expect(set.size).toBe(0);
+      expect(excludedFriends).toBe(0);
+    });
+
+    it("self-exclusion — the user's own pubkey is never in the FoF set", () => {
+      // Friend's follow list includes the user. Buried mid-list so we
+      // exercise the loop rather than a first-element shortcut.
+      const friendList = [pk('x', 1), user, pk('x', 2), pk('x', 3)];
+      const { set } = buildFofSet(user, [friendA], { [friendA]: friendList });
+      expect(set.has(user)).toBe(false);
+      // Sanity: the other three followees are present.
+      expect(set.size).toBe(3);
+    });
+
+    it('cross-presence dedup — two friends both follow the same third party → appears once', () => {
+      const shared = pk('shared', 0);
+      const lists: Record<string, string[]> = {
+        [friendA]: [shared, pk('a1', 0), pk('a2', 0)],
+        [friendB]: [shared, pk('b1', 0), pk('b2', 0)],
+      };
+      const { set } = buildFofSet(user, [friendA, friendB], lists);
+      // Count the shared pubkey by enumeration — Set inherently dedups
+      // but we want an explicit assertion in case the implementation
+      // accidentally switches to an array.
+      let occurrences = 0;
+      for (const p of set) if (p === shared) occurrences += 1;
+      expect(occurrences).toBe(1);
+      // Total: 1 shared + 2 unique-A + 2 unique-B = 5.
+      expect(set.size).toBe(5);
+    });
+  });
 });

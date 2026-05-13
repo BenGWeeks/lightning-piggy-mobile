@@ -49,7 +49,7 @@ const TierRow: React.FC<TierRowProps> = ({ tier, title, subtitle, active, disabl
       ]}
       onPress={onSelect}
       disabled={disabled}
-      testID={`wot-tier-${tier}`}
+      testID={`wot-tier-${tier}-chip`}
       accessibilityRole="radio"
       accessibilityState={{ selected: active, disabled }}
       accessibilityLabel={`${title}. ${disabled ? 'Disabled. Enable secret mode to unlock.' : ''}`}
@@ -102,7 +102,7 @@ const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose }) => {
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} testID="wot-sheet-backdrop" />
-      <View style={styles.sheet} testID="wot-sheet">
+      <View style={styles.sheet} testID="wot-bottom-sheet">
         <View style={styles.handleBar} />
         <View style={styles.titleRow}>
           <Text style={styles.title}>Web of Trust</Text>
