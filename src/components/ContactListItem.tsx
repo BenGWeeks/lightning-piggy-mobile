@@ -12,9 +12,17 @@ interface Props {
   lightningAddress?: string | null;
   onPress?: () => void;
   onZap?: () => void;
+  testID?: string;
 }
 
-const ContactListItem: React.FC<Props> = ({ name, picture, lightningAddress, onPress, onZap }) => {
+const ContactListItem: React.FC<Props> = ({
+  name,
+  picture,
+  lightningAddress,
+  onPress,
+  onZap,
+  testID,
+}) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [avatarError, setAvatarError] = useState(false);
@@ -33,7 +41,14 @@ const ContactListItem: React.FC<Props> = ({ name, picture, lightningAddress, onP
   const showImage = !!picture && !avatarError && isSupportedImageUrl(picture);
 
   return (
-    <TouchableOpacity style={styles.container} onPress={onPress} activeOpacity={onPress ? 0.6 : 1}>
+    <TouchableOpacity
+      style={styles.container}
+      onPress={onPress}
+      activeOpacity={onPress ? 0.6 : 1}
+      testID={testID}
+      accessibilityLabel={name}
+      accessible
+    >
       <View style={styles.avatar}>
         {showImage ? (
           <Image

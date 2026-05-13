@@ -38,10 +38,10 @@ import ReceiveSheet from '../components/ReceiveSheet';
 import MessageBubble from '../components/MessageBubble';
 import TransactionDetailSheet, {
   TransactionDetailData,
-  CounterpartyContact,
 } from '../components/TransactionDetailSheet';
-import ContactProfileSheet from '../components/ContactProfileSheet';
 import FriendPickerSheet, { PickedFriend } from '../components/FriendPickerSheet';
+import ContactProfileSheet from '../components/ContactProfileSheet';
+import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 import {
   getCurrentLocation,
   formatGeoMessage,
@@ -181,7 +181,6 @@ const ConversationScreen: React.FC = () => {
   const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState(false);
   const [detailTx, setDetailTx] = useState<TransactionDetailData | null>(null);
-  const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
   // Profiles resolved from `nostr:` contact references the other party
   // has shared in this conversation. Keyed by hex pubkey; a `null` value
   // means we tried and the kind-0 lookup came back empty.
@@ -473,18 +472,37 @@ const ConversationScreen: React.FC = () => {
     };
   }, [messages]);
 
-  const openSharedContact = useCallback((pk: string, profile: NostrProfile | null) => {
-    const name = profile?.displayName || profile?.name || `${pk.slice(0, 8)}…`;
-    setProfileContact({
-      pubkey: pk,
-      name,
-      picture: profile?.picture ?? null,
-      banner: profile?.banner ?? null,
-      nip05: profile?.nip05 ?? null,
-      lightningAddress: profile?.lud16 ?? null,
-      source: 'nostr',
-    });
+  // Contact preview sheet — peek a counterparty without leaving the
+  // conversation. Tapping "View full profile" inside the sheet drills
+  // into the ContactProfile route. Shared across header avatar tap,
+  // shared-contact-card tap, and tx-detail counterparty tap.
+  const [sheetContact, setSheetContact] = useState<ContactProfileBodyData | null>(null);
+  const [profileSheetVisible, setProfileSheetVisible] = useState(false);
+  const presentContactSheet = useCallback((contact: ContactProfileBodyData) => {
+    setSheetContact(contact);
+    setProfileSheetVisible(true);
   }, []);
+  const handleViewFullProfile = useCallback(() => {
+    if (!sheetContact) return;
+    setProfileSheetVisible(false);
+    navigation.navigate('ContactProfile', { contact: sheetContact });
+  }, [sheetContact, navigation]);
+
+  const openSharedContact = useCallback(
+    (pk: string, profile: NostrProfile | null) => {
+      const name = profile?.displayName || profile?.name || `${pk.slice(0, 8)}…`;
+      presentContactSheet({
+        pubkey: pk,
+        name,
+        picture: profile?.picture ?? null,
+        banner: profile?.banner ?? null,
+        nip05: profile?.nip05 ?? null,
+        lightningAddress: profile?.lud16 ?? null,
+        source: 'nostr',
+      });
+    },
+    [presentContactSheet],
+  );
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -855,7 +873,7 @@ const ConversationScreen: React.FC = () => {
           style={styles.headerPeer}
           onPress={() => {
             const known = contacts.find((c) => c.pubkey === pubkey)?.profile ?? null;
-            setProfileContact({
+            presentContactSheet({
               pubkey,
               name,
               picture: known?.picture ?? picture ?? null,
@@ -1118,18 +1136,20 @@ const ConversationScreen: React.FC = () => {
         onClose={() => setDetailTx(null)}
         onCounterpartyPress={(contact) => {
           setDetailTx(null);
-          setProfileContact(contact);
+          presentContactSheet(contact);
         }}
       />
       <ContactProfileSheet
-        visible={profileContact !== null}
-        onClose={() => setProfileContact(null)}
-        contact={profileContact}
+        visible={profileSheetVisible}
+        onClose={() => setProfileSheetVisible(false)}
+        contact={sheetContact}
+        onViewFullProfile={handleViewFullProfile}
         onMessage={
-          profileContact && profileContact.pubkey !== pubkey
+          sheetContact?.pubkey && sheetContact.pubkey !== pubkey
             ? () => {
-                const c = profileContact;
-                setProfileContact(null);
+                const c = sheetContact;
+                if (!c?.pubkey) return;
+                setProfileSheetVisible(false);
                 navigation.replace('Conversation', {
                   pubkey: c.pubkey,
                   name: c.name,
@@ -1140,9 +1160,9 @@ const ConversationScreen: React.FC = () => {
             : undefined
         }
         onZap={
-          profileContact?.lightningAddress
+          sheetContact?.lightningAddress
             ? () => {
-                setProfileContact(null);
+                setProfileSheetVisible(false);
                 setSendSheetOpen(true);
               }
             : undefined

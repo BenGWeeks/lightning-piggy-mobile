@@ -2,6 +2,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { DrawerNavigationProp } from '@react-navigation/drawer';
 import { RouteProp } from '@react-navigation/native';
 import { NavigatorScreenParams } from '@react-navigation/native';
+import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 
 // Main tab param list
 export type MainTabParamList = {
@@ -39,6 +40,12 @@ export type RootStackParamList = {
   };
   Groups: undefined;
   GroupConversation: { groupId: string };
+  // Full-page friends profile (#435). `phoneContactId` is set when the
+  // contact came from the device address book and can be edited inline.
+  ContactProfile: {
+    contact: ContactProfileBodyData;
+    phoneContactId?: string;
+  };
 };
 
 // Learn sub-stack

@@ -26,7 +26,7 @@ import ContactProfileSheet from '../components/ContactProfileSheet';
 import AddFriendSheet from '../components/AddFriendSheet';
 import SendSheet from '../components/SendSheet';
 import AlphabetBar from '../components/AlphabetBar';
-import { fetchPhoneContacts, PhoneContact, setLightningAddress } from '../services/contactsService';
+import { fetchPhoneContacts, PhoneContact } from '../services/contactsService';
 import { createFriendsScreenStyles } from '../styles/FriendsScreen.styles';
 import type { MainTabParamList, RootStackParamList } from '../navigation/types';
 
@@ -108,11 +108,10 @@ const FriendsScreen: React.FC = () => {
     [contacts.length],
   );
 
-  useEffect(() => {
-    fetchPhoneContacts()
-      .then(setPhoneContacts)
-      .catch(() => {});
-  }, []);
+  // Phone contacts are fetched via useFocusEffect below — it fires on
+  // every focus including the first mount, so the mount-time useEffect
+  // that previously ran the same fetch was a duplicate. Dropped to
+  // avoid two back-to-back fetches on initial mount (#439 review).
 
   // Restore the persisted Friends-tab filter selection on mount so it
   // survives app restarts (#311). Mirrors the AsyncStorage pattern
@@ -148,6 +147,17 @@ const FriendsScreen: React.FC = () => {
       const handle = InteractionManager.runAfterInteractions(() => refreshProfile());
       return () => handle.cancel();
     }, [isLoggedIn, refreshProfile]),
+  );
+
+  // Re-fetch phone contacts on focus so a Lightning-address edit
+  // applied in ContactProfileScreen is reflected here when the user
+  // returns. Cheap (AsyncStorage read + a bit of Contacts API merge).
+  useFocusEffect(
+    useCallback(() => {
+      fetchPhoneContacts()
+        .then(setPhoneContacts)
+        .catch(() => {});
+    }, []),
   );
 
   // Step 1: build + sort the full list. This memo invalidates only when
@@ -303,10 +313,33 @@ const FriendsScreen: React.FC = () => {
     setSendOpen(true);
   }, []);
 
+  // Tap on a friend row → open the bottom-sheet preview. The sheet
+  // gives a quick peek (QR, npub, copy, Zap / Message / Share) without
+  // leaving the list; its "View full profile" link drills into the
+  // full ContactProfile route when the user wants the deep view.
   const handleContactPress = useCallback((item: ListItem) => {
     setSelectedContact(item);
     setProfileSheetVisible(true);
   }, []);
+
+  const handleViewFullProfile = useCallback(() => {
+    if (!selectedContact) return;
+    const item = selectedContact;
+    const phoneContactId = item.source === 'contacts' ? item.id.replace('phone-', '') : undefined;
+    setProfileSheetVisible(false);
+    navigation.navigate('ContactProfile', {
+      contact: {
+        pubkey: item.pubkey,
+        name: item.name,
+        picture: item.picture,
+        banner: item.banner,
+        nip05: item.nip05,
+        lightningAddress: item.lightningAddress,
+        source: item.source,
+      },
+      phoneContactId,
+    });
+  }, [selectedContact, navigation]);
 
   const handleAddFriend = useCallback(
     async (npubOrHex: string) => {
@@ -327,6 +360,7 @@ const FriendsScreen: React.FC = () => {
         lightningAddress={item.lightningAddress}
         onPress={() => handleContactPress(item)}
         onZap={item.lightningAddress ? () => handleZap(item) : undefined}
+        testID={`friend-row-${item.id}`}
       />
     ),
     [handleZap, handleContactPress],
@@ -509,44 +543,37 @@ const FriendsScreen: React.FC = () => {
       <ContactProfileSheet
         visible={profileSheetVisible}
         onClose={() => {
+          // Clear the staged contact alongside hiding the sheet so
+          // re-opening with a different friend doesn't flash the
+          // previous contact's banner / avatar / name before
+          // handleContactPress restages the new selection.
           setProfileSheetVisible(false);
           setSelectedContact(null);
         }}
         contact={selectedContact}
+        onViewFullProfile={handleViewFullProfile}
         onZap={
           selectedContact?.lightningAddress
             ? () => {
                 setProfileSheetVisible(false);
-                handleZap(selectedContact);
+                setZapTarget(selectedContact);
+                setSendOpen(true);
               }
             : undefined
         }
         onMessage={
           selectedContact?.pubkey
             ? () => {
-                const c = selectedContact;
+                const item = selectedContact;
+                if (!item || !item.pubkey) return;
                 setProfileSheetVisible(false);
                 setSelectedContact(null);
                 navigation.navigate('Conversation', {
-                  pubkey: c.pubkey!,
-                  name: c.name,
-                  picture: c.picture,
-                  lightningAddress: c.lightningAddress,
+                  pubkey: item.pubkey,
+                  name: item.name,
+                  picture: item.picture,
+                  lightningAddress: item.lightningAddress,
                 });
-              }
-            : undefined
-        }
-        onSetLightningAddress={
-          selectedContact?.source === 'contacts'
-            ? async (address: string) => {
-                const phoneId = selectedContact.id.replace('phone-', '');
-                await setLightningAddress(phoneId, address);
-                setPhoneContacts((prev) =>
-                  prev.map((c) => (c.id === phoneId ? { ...c, lightningAddress: address } : c)),
-                );
-                setSelectedContact((prev) =>
-                  prev ? { ...prev, lightningAddress: address } : prev,
-                );
               }
             : undefined
         }
