@@ -50,6 +50,10 @@ interface Props {
   // Fired when an action wants the host (sheet) to dismiss itself —
   // e.g. share-via-DM completes. Screens ignore this.
   onRequestClose?: () => void;
+  // Sheet-variant only: when the host wants the sheet to dismiss and
+  // navigate to the full ContactProfile route. Renders a "View full
+  // profile" affordance at the top of the sheet body.
+  onViewFullProfile?: () => void;
 }
 
 const ContactProfileBody: React.FC<Props> = ({
@@ -59,6 +63,7 @@ const ContactProfileBody: React.FC<Props> = ({
   onMessage,
   onSetLightningAddress,
   onRequestClose,
+  onViewFullProfile,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -472,6 +477,22 @@ const ContactProfileBody: React.FC<Props> = ({
         )}
       </View>
 
+      {/* Sheet variant only — explicit "drill into the full profile"
+          affordance. Without this the sheet is a dead-end peek; with
+          it the user can dismiss the sheet and land on the full route
+          (which has banner-up-to-status-bar layout + post feed + edit
+          surfaces the sheet trims for brevity). */}
+      {variant === 'sheet' && onViewFullProfile ? (
+        <TouchableOpacity
+          style={styles.viewFullProfileRow}
+          onPress={onViewFullProfile}
+          testID="contact-view-full-profile"
+          accessibilityLabel="View full profile"
+        >
+          <Text style={styles.viewFullProfileText}>View full profile →</Text>
+        </TouchableOpacity>
+      ) : null}
+
       {npub && (
         <NfcWriteSheet
           visible={nfcWriteVisible}
@@ -730,6 +751,18 @@ const createStyles = (colors: Palette) =>
     iconButtonDisabled: {
       borderColor: colors.textSupplementary,
       opacity: 0.6,
+    },
+    viewFullProfileRow: {
+      alignItems: 'center',
+      paddingVertical: 14,
+      marginTop: 10,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.divider,
+    },
+    viewFullProfileText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.brandPink,
     },
   });
 

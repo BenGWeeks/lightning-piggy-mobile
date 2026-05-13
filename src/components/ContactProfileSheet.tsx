@@ -21,6 +21,10 @@ interface Props {
   onZap?: () => void;
   onMessage?: () => void;
   onSetLightningAddress?: (address: string) => void;
+  // Optional drill-in: closes the sheet then navigates to the full
+  // ContactProfile route. Renders a "View full profile" link in the
+  // sheet when wired up.
+  onViewFullProfile?: () => void;
 }
 
 const ContactProfileSheet: React.FC<Props> = ({
@@ -30,6 +34,7 @@ const ContactProfileSheet: React.FC<Props> = ({
   onZap,
   onMessage,
   onSetLightningAddress,
+  onViewFullProfile,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -80,6 +85,7 @@ const ContactProfileSheet: React.FC<Props> = ({
           onMessage={onMessage}
           onSetLightningAddress={onSetLightningAddress}
           onRequestClose={onClose}
+          onViewFullProfile={onViewFullProfile}
         />
       </BottomSheetView>
     </BottomSheetModal>

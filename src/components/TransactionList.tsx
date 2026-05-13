@@ -8,6 +8,8 @@ import type { Palette } from '../styles/palettes';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
+import ContactProfileSheet from './ContactProfileSheet';
+import type { ContactProfileBodyData } from './ContactProfileBody';
 import TransactionDetailSheet, {
   TransactionDetailData,
   CounterpartyContact,
@@ -147,6 +149,11 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
   const [showAll, setShowAll] = useState(false);
   const [detail, setDetail] = useState<TransactionDetailData | null>(null);
   const [zapContact, setZapContact] = useState<CounterpartyContact | null>(null);
+  // Counterparty preview — opened from TransactionDetailSheet → "view
+  // profile". A quick-peek bottom sheet first; "View full profile"
+  // inside drills into the ContactProfile route.
+  const [sheetContact, setSheetContact] = useState<ContactProfileBodyData | null>(null);
+  const [profileSheetVisible, setProfileSheetVisible] = useState(false);
 
   // Collapse the list back to the initial N rows when the active wallet
   // changes, but NOT on every transactions-array update. WalletContext
@@ -335,7 +342,8 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
         onClose={() => setDetail(null)}
         onCounterpartyPress={(contact) => {
           setDetail(null);
-          navigation.navigate('ContactProfile', { contact });
+          setSheetContact(contact);
+          setProfileSheetVisible(true);
         }}
         onZapCounterparty={(contact) => {
           setDetail(null);
@@ -358,6 +366,16 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
         initialPicture={zapContact?.picture ?? undefined}
         recipientPubkey={zapContact?.pubkey ?? undefined}
         recipientName={zapContact?.name ?? undefined}
+      />
+      <ContactProfileSheet
+        visible={profileSheetVisible}
+        onClose={() => setProfileSheetVisible(false)}
+        contact={sheetContact}
+        onViewFullProfile={() => {
+          if (!sheetContact) return;
+          setProfileSheetVisible(false);
+          navigation.navigate('ContactProfile', { contact: sheetContact });
+        }}
       />
     </View>
   );

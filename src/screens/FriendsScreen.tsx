@@ -22,6 +22,7 @@ import { useNostr } from '../contexts/NostrContext';
 import TabHeader from '../components/TabHeader';
 import { useThemeColors } from '../contexts/ThemeContext';
 import ContactListItem, { CONTACT_LIST_ITEM_HEIGHT } from '../components/ContactListItem';
+import ContactProfileSheet from '../components/ContactProfileSheet';
 import AddFriendSheet from '../components/AddFriendSheet';
 import SendSheet from '../components/SendSheet';
 import AlphabetBar from '../components/AlphabetBar';
@@ -73,6 +74,8 @@ const FriendsScreen: React.FC = () => {
   const searchInputRef = useRef<TextInput>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [phoneContacts, setPhoneContacts] = useState<PhoneContact[]>([]);
+  const [selectedContact, setSelectedContact] = useState<ListItem | null>(null);
+  const [profileSheetVisible, setProfileSheetVisible] = useState(false);
   const [addFriendVisible, setAddFriendVisible] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
   const [zapTarget, setZapTarget] = useState<ListItem | null>(null);
@@ -311,24 +314,33 @@ const FriendsScreen: React.FC = () => {
     setSendOpen(true);
   }, []);
 
-  const handleContactPress = useCallback(
-    (item: ListItem) => {
-      const phoneContactId = item.source === 'contacts' ? item.id.replace('phone-', '') : undefined;
-      navigation.navigate('ContactProfile', {
-        contact: {
-          pubkey: item.pubkey,
-          name: item.name,
-          picture: item.picture,
-          banner: item.banner,
-          nip05: item.nip05,
-          lightningAddress: item.lightningAddress,
-          source: item.source,
-        },
-        phoneContactId,
-      });
-    },
-    [navigation],
-  );
+  // Tap on a friend row → open the bottom-sheet preview. The sheet
+  // gives a quick peek (QR, npub, copy, Zap / Message / Share) without
+  // leaving the list; its "View full profile" link drills into the
+  // full ContactProfile route when the user wants the deep view.
+  const handleContactPress = useCallback((item: ListItem) => {
+    setSelectedContact(item);
+    setProfileSheetVisible(true);
+  }, []);
+
+  const handleViewFullProfile = useCallback(() => {
+    if (!selectedContact) return;
+    const item = selectedContact;
+    const phoneContactId = item.source === 'contacts' ? item.id.replace('phone-', '') : undefined;
+    setProfileSheetVisible(false);
+    navigation.navigate('ContactProfile', {
+      contact: {
+        pubkey: item.pubkey,
+        name: item.name,
+        picture: item.picture,
+        banner: item.banner,
+        nip05: item.nip05,
+        lightningAddress: item.lightningAddress,
+        source: item.source,
+      },
+      phoneContactId,
+    });
+  }, [selectedContact, navigation]);
 
   const handleAddFriend = useCallback(
     async (npubOrHex: string) => {
@@ -528,6 +540,37 @@ const FriendsScreen: React.FC = () => {
           </View>
         )}
       </View>
+
+      <ContactProfileSheet
+        visible={profileSheetVisible}
+        onClose={() => setProfileSheetVisible(false)}
+        contact={selectedContact}
+        onViewFullProfile={handleViewFullProfile}
+        onZap={
+          selectedContact?.lightningAddress
+            ? () => {
+                setProfileSheetVisible(false);
+                setZapTarget(selectedContact);
+                setSendOpen(true);
+              }
+            : undefined
+        }
+        onMessage={
+          selectedContact?.pubkey
+            ? () => {
+                const item = selectedContact;
+                if (!item || !item.pubkey) return;
+                setProfileSheetVisible(false);
+                navigation.navigate('Conversation', {
+                  pubkey: item.pubkey,
+                  name: item.name,
+                  picture: item.picture,
+                  lightningAddress: item.lightningAddress,
+                });
+              }
+            : undefined
+        }
+      />
 
       <AddFriendSheet
         visible={addFriendVisible}

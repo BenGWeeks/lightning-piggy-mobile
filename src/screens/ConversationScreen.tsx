@@ -40,6 +40,8 @@ import TransactionDetailSheet, {
   TransactionDetailData,
 } from '../components/TransactionDetailSheet';
 import FriendPickerSheet, { PickedFriend } from '../components/FriendPickerSheet';
+import ContactProfileSheet from '../components/ContactProfileSheet';
+import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 import {
   getCurrentLocation,
   formatGeoMessage,
@@ -470,22 +472,36 @@ const ConversationScreen: React.FC = () => {
     };
   }, [messages]);
 
+  // Contact preview sheet — peek a counterparty without leaving the
+  // conversation. Tapping "View full profile" inside the sheet drills
+  // into the ContactProfile route. Shared across header avatar tap,
+  // shared-contact-card tap, and tx-detail counterparty tap.
+  const [sheetContact, setSheetContact] = useState<ContactProfileBodyData | null>(null);
+  const [profileSheetVisible, setProfileSheetVisible] = useState(false);
+  const presentContactSheet = useCallback((contact: ContactProfileBodyData) => {
+    setSheetContact(contact);
+    setProfileSheetVisible(true);
+  }, []);
+  const handleViewFullProfile = useCallback(() => {
+    if (!sheetContact) return;
+    setProfileSheetVisible(false);
+    navigation.navigate('ContactProfile', { contact: sheetContact });
+  }, [sheetContact, navigation]);
+
   const openSharedContact = useCallback(
     (pk: string, profile: NostrProfile | null) => {
       const name = profile?.displayName || profile?.name || `${pk.slice(0, 8)}…`;
-      navigation.navigate('ContactProfile', {
-        contact: {
-          pubkey: pk,
-          name,
-          picture: profile?.picture ?? null,
-          banner: profile?.banner ?? null,
-          nip05: profile?.nip05 ?? null,
-          lightningAddress: profile?.lud16 ?? null,
-          source: 'nostr',
-        },
+      presentContactSheet({
+        pubkey: pk,
+        name,
+        picture: profile?.picture ?? null,
+        banner: profile?.banner ?? null,
+        nip05: profile?.nip05 ?? null,
+        lightningAddress: profile?.lud16 ?? null,
+        source: 'nostr',
       });
     },
-    [navigation],
+    [presentContactSheet],
   );
 
   const handleRefresh = useCallback(async () => {
@@ -857,16 +873,14 @@ const ConversationScreen: React.FC = () => {
           style={styles.headerPeer}
           onPress={() => {
             const known = contacts.find((c) => c.pubkey === pubkey)?.profile ?? null;
-            navigation.navigate('ContactProfile', {
-              contact: {
-                pubkey,
-                name,
-                picture: known?.picture ?? picture ?? null,
-                banner: known?.banner ?? null,
-                nip05: known?.nip05 ?? null,
-                lightningAddress: known?.lud16 ?? lightningAddress ?? null,
-                source: 'nostr',
-              },
+            presentContactSheet({
+              pubkey,
+              name,
+              picture: known?.picture ?? picture ?? null,
+              banner: known?.banner ?? null,
+              nip05: known?.nip05 ?? null,
+              lightningAddress: known?.lud16 ?? lightningAddress ?? null,
+              source: 'nostr',
             });
           }}
           accessibilityLabel={`Open ${name}'s profile`}
@@ -1122,8 +1136,14 @@ const ConversationScreen: React.FC = () => {
         onClose={() => setDetailTx(null)}
         onCounterpartyPress={(contact) => {
           setDetailTx(null);
-          navigation.navigate('ContactProfile', { contact });
+          presentContactSheet(contact);
         }}
+      />
+      <ContactProfileSheet
+        visible={profileSheetVisible}
+        onClose={() => setProfileSheetVisible(false)}
+        contact={sheetContact}
+        onViewFullProfile={handleViewFullProfile}
       />
     </View>
   );
