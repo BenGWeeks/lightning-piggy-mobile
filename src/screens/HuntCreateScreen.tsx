@@ -18,6 +18,7 @@ import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import {
   Camera,
+  Check,
   CheckCircle2,
   ChevronLeft,
   Clipboard as ClipboardIcon,
@@ -312,6 +313,14 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
       </View>
 
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+        <StepHeader
+          n={1}
+          title="Get the hardware"
+          subtitle="A Piglet lives on a physical artefact. Make or buy one."
+          status="active"
+          styles={styles}
+          colors={colors}
+        />
         <View style={styles.getPiggyCard} testID="get-a-piggy-card">
           <Text style={styles.getPiggyTitle}>Need a physical Piggy?</Text>
           <Text style={styles.getPiggyHelper}>
@@ -408,7 +417,18 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
           </View>
         </View>
 
-        <Text style={styles.sectionLabel}>LNURL-withdraw</Text>
+        <StepHeader
+          n={2}
+          title="Connect the loot"
+          subtitle="A withdraw link from your wallet — the sats the finder claims."
+          status={
+            stage.kind === 'validated' || stage.kind === 'saved' || stage.kind === 'wrote-nfc'
+              ? 'done'
+              : 'active'
+          }
+          styles={styles}
+          colors={colors}
+        />
         <Text style={styles.helper}>
           Create a withdraw link in your own wallet (LNbits, Alby, Mutiny, …) — set the per-claim
           amount, daily limit, and total uses there — then paste it here.
@@ -470,7 +490,15 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
 
         {(stage.kind === 'validated' || stage.kind === 'saved' || stage.kind === 'wrote-nfc') && (
           <>
-            <Text style={[styles.sectionLabel, styles.sectionGap]}>Memo</Text>
+            <StepHeader
+              n={3}
+              title="Write a message"
+              subtitle="What the finder sees when they claim the Piglet."
+              status="active"
+              styles={styles}
+              colors={colors}
+            />
+            <Text style={styles.subSectionLabel}>Memo</Text>
             <TextInput
               style={styles.input}
               placeholder="Happy birthday Lily 🎂"
@@ -483,7 +511,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
             />
             <Text style={styles.helper}>Shown to the finder on the celebration screen.</Text>
 
-            <Text style={[styles.sectionLabel, styles.sectionGap]}>Hint photo (optional)</Text>
+            <Text style={[styles.subSectionLabel, styles.sectionGap]}>Hint photo (optional)</Text>
             {hintPhotoUrl ? (
               <View style={styles.hintPreviewWrapper}>
                 <Image
@@ -532,9 +560,15 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
               at the cache itself.
             </Text>
 
-            <Text style={[styles.sectionLabel, styles.sectionGap]}>
-              Cooldown &amp; uses (optional)
-            </Text>
+            <StepHeader
+              n={4}
+              title="Set the rules"
+              subtitle="How often and how many times finders can claim."
+              status="active"
+              styles={styles}
+              colors={colors}
+            />
+            <Text style={styles.subSectionLabel}>Cooldown &amp; uses (optional)</Text>
             <View style={styles.hintsRow}>
               <View style={styles.hintField}>
                 <Text style={styles.hintFieldLabel}>Cooldown (mins)</Text>
@@ -568,7 +602,15 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
               hints. The wallet still does the actual enforcement.
             </Text>
 
-            <Text style={[styles.sectionLabel, styles.sectionGap]}>Location pin (optional)</Text>
+            <StepHeader
+              n={5}
+              title="Hide & publish"
+              subtitle="Pin where you stashed it, then decide who can hunt."
+              status="active"
+              styles={styles}
+              colors={colors}
+            />
+            <Text style={styles.subSectionLabel}>Location pin (optional)</Text>
             {pin ? (
               <View style={styles.pinRow}>
                 <MapPin size={20} color={colors.brandPink} strokeWidth={2} />
@@ -609,7 +651,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
               kind 37516 `g` tag) if you toggle Public below.
             </Text>
 
-            <Text style={[styles.sectionLabel, styles.sectionGap]}>Discoverability</Text>
+            <Text style={[styles.subSectionLabel, styles.sectionGap]}>Discoverability</Text>
             <TouchableOpacity
               style={styles.publicRow}
               onPress={() => stage.kind === 'validated' && setIsPublic(!isPublic)}
@@ -717,6 +759,35 @@ const SUPPORTED_TAGS: Array<{
     status: 'avoid',
   },
 ];
+
+// Numbered step header for the Hide-a-Piglet flow. The screen used to
+// be a flat list of section labels; now each stage gets a visible
+// "Step N · Title" card with a coloured numbered badge so the hider can
+// see the whole arc at a glance. `status` drives the badge tint —
+// active vs done — so completed steps fade back once the user moves on
+// (e.g. Step 2 marks done once LNURL validation lands).
+const StepHeader: React.FC<{
+  n: number;
+  title: string;
+  subtitle: string;
+  status: 'active' | 'done';
+  colors: Palette;
+  styles: ReturnType<typeof createStyles>;
+}> = ({ n, title, subtitle, status, colors, styles }) => (
+  <View style={styles.stepHeader} accessibilityRole="header">
+    <View style={[styles.stepBadge, status === 'done' && styles.stepBadgeDone]}>
+      {status === 'done' ? (
+        <Check size={14} color={colors.white} strokeWidth={2.8} />
+      ) : (
+        <Text style={styles.stepBadgeText}>{n}</Text>
+      )}
+    </View>
+    <View style={styles.stepHeaderText}>
+      <Text style={styles.stepHeaderTitle}>{title}</Text>
+      <Text style={styles.stepHeaderSubtitle}>{subtitle}</Text>
+    </View>
+  </View>
+);
 
 const NfcSupportedTagsCard: React.FC<{
   colors: Palette;
@@ -864,7 +935,53 @@ const createStyles = (colors: Palette) =>
       color: colors.textHeader,
       marginBottom: 4,
     },
+    // Sub-section heading inside a Step (e.g. "Memo" under Step 3, "Hint
+    // photo" under Step 3) — same weight as the legacy sectionLabel so
+    // existing copy keeps its visual rhythm, just renamed to reflect the
+    // new outer-step containers.
+    subSectionLabel: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.textHeader,
+      marginBottom: 4,
+    },
     sectionGap: { marginTop: 16 },
+    stepHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      marginTop: 18,
+      marginBottom: 8,
+    },
+    stepBadge: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      backgroundColor: colors.brandPink,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    stepBadgeDone: {
+      backgroundColor: colors.green,
+    },
+    stepBadgeText: {
+      fontSize: 13,
+      fontWeight: '800',
+      color: colors.white,
+    },
+    stepHeaderText: {
+      flex: 1,
+    },
+    stepHeaderTitle: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: colors.textHeader,
+    },
+    stepHeaderSubtitle: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      marginTop: 1,
+    },
     helper: {
       fontSize: 12,
       color: colors.textSupplementary,
