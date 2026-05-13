@@ -82,8 +82,8 @@ const HuntFilterSheet: React.FC<Props> = ({
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   // Web-of-Trust off is a "secret mode" feature — only tappable after the
-  // user triple-taps the version label on About to unlock devMode at runtime.
-  const { devMode } = useGroups();
+  // user triple-taps the version label on About to unlock secretMode at runtime.
+  const { secretMode } = useGroups();
   // Glossary is hidden by default — most users don't need it after
   // the first read. Each scale + the type vocab gets its own toggle.
   const [showDifficultyGloss, setShowDifficultyGloss] = useState(false);
@@ -135,7 +135,7 @@ const HuntFilterSheet: React.FC<Props> = ({
           <TouchableOpacity
             style={[styles.wotChip, wotFilterEnabled ? styles.wotChipOn : styles.wotChipOff]}
             onPress={onToggleWotFilter}
-            disabled={!devMode}
+            disabled={!secretMode}
             testID="hunt-filter-wot-chip"
           >
             {wotFilterEnabled ? (

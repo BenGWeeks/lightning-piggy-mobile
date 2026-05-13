@@ -62,7 +62,7 @@ const EventsFilterSheet: React.FC<Props> = ({
   // Web-of-Trust off is gated on runtime "secret mode" (triple-tap the
   // version on About to unlock) — keeps prod users behind the WoT lure
   // filter while letting power users + QA flip it.
-  const { devMode } = useGroups();
+  const { secretMode } = useGroups();
 
   const anyActive = maxDistanceMetres !== null || maxFromNowSec !== null || !wotFilterEnabled;
 
@@ -98,7 +98,7 @@ const EventsFilterSheet: React.FC<Props> = ({
           <TouchableOpacity
             style={[styles.wotChip, wotFilterEnabled ? styles.wotChipOn : styles.wotChipOff]}
             onPress={onToggleWotFilter}
-            disabled={!devMode}
+            disabled={!secretMode}
             testID="events-filter-wot-chip"
           >
             {wotFilterEnabled ? (
