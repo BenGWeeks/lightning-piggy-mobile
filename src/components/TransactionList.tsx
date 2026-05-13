@@ -147,6 +147,7 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
   };
   const [showAll, setShowAll] = useState(false);
   const [detail, setDetail] = useState<TransactionDetailData | null>(null);
+  const [detailNeedsAttention, setDetailNeedsAttention] = useState(false);
   const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
   const [zapContact, setZapContact] = useState<CounterpartyContact | null>(null);
 
@@ -268,7 +269,12 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
           <TouchableOpacity
             key={row.key}
             style={[styles.item, isPending && styles.itemPending]}
-            onPress={() => setDetail(item as TransactionDetailData)}
+            onPress={() => {
+              setDetail(item as TransactionDetailData);
+              // TODO(#519): pass true when this tx's swap is `claimable` per
+              // swapRecoveryService — same predicate as the row badge below.
+              setDetailNeedsAttention(false);
+            }}
             accessibilityLabel={`Open details for ${primary}`}
           >
             <View style={styles.avatarWrap}>
@@ -341,6 +347,7 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
       <TransactionDetailSheet
         visible={detail !== null}
         tx={detail}
+        needsAttention={detailNeedsAttention}
         onClose={() => setDetail(null)}
         onCounterpartyPress={(contact) => {
           setDetail(null);

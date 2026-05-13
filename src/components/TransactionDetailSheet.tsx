@@ -26,7 +26,7 @@ import TransactionTypeIcon from './TransactionTypeIcon';
 import type { ZapCounterpartyInfo } from '../types/wallet';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { BOLTZ_SUPPORT_NPUB, dmRecipient } from '../constants/npubs';
-import { Copy, Zap, MessageCircle } from 'lucide-react-native';
+import { AlertTriangle, Copy, Zap, MessageCircle } from 'lucide-react-native';
 
 export interface TransactionDetailData {
   type: 'incoming' | 'outgoing' | string;
@@ -75,6 +75,10 @@ interface Props {
   onZapCounterparty?: (contact: CounterpartyContact) => void;
   /** Fired when the user taps the Message icon in the recipient/sender card. */
   onMessageCounterparty?: (contact: CounterpartyContact) => void;
+  /** Mirrors the same-named prop on TransactionTypeIcon. When true the
+   *  sheet shows a yellow callout explaining the warning — without this
+   *  the badge in the row would be orphaned from any explanation. See #519. */
+  needsAttention?: boolean;
 }
 
 type BoltzSwapView = {
@@ -94,6 +98,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
   onCounterpartyPress,
   onZapCounterparty,
   onMessageCounterparty,
+  needsAttention = false,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createTransactionDetailSheetStyles(colors), [colors]);
@@ -356,6 +361,36 @@ const TransactionDetailSheet: React.FC<Props> = ({
             {statusBadge ? (
               <View style={[styles.badge, statusBadge.style]}>
                 <Text style={styles.badgeText}>{statusBadge.text}</Text>
+              </View>
+            ) : null}
+            {needsAttention ? (
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'flex-start',
+                  marginTop: 12,
+                  padding: 12,
+                  backgroundColor: '#FFF3CD',
+                  borderLeftWidth: 4,
+                  borderLeftColor: colors.zapYellow,
+                  borderRadius: 8,
+                  gap: 10,
+                  alignSelf: 'stretch',
+                }}
+                accessibilityRole="alert"
+                accessibilityLabel="Needs attention: on-chain claim not yet broadcast"
+              >
+                <AlertTriangle size={24} color="#856404" strokeWidth={2.5} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: '#856404', fontWeight: '700', marginBottom: 4 }}>
+                    Needs attention
+                  </Text>
+                  <Text style={{ color: '#856404', lineHeight: 18 }}>
+                    Lightning was paid and the Boltz lockup confirmed, but the on-chain claim hasn
+                    {'’'}t broadcast yet. Your funds are safe — the swap will retry automatically.
+                    Pull-to-refresh to check progress.
+                  </Text>
+                </View>
               </View>
             ) : null}
           </View>

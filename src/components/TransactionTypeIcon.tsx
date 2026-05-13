@@ -18,11 +18,11 @@ const TransactionTypeIcon: React.FC<Props> = ({ category, size = 40, needsAttent
   const colors = useThemeColors();
   const radius = size / 2;
   const glyphSize = Math.round(size * 0.5);
-  // Badge is ~35 % of the icon — visible at a glance, doesn't crowd
-  // the underlying glyph. Anchored top-right so it doesn't overlap
-  // the row's text content on either side.
-  const badgeSize = Math.round(size * 0.35);
-  const badgeGlyph = Math.round(badgeSize * 0.62);
+  // Badge is ~45 % of the icon — large enough that the AlertTriangle
+  // glyph survives the pixel budget (was 35 % → 9 px glyph rendered as
+  // a blob). Anchored top-right so it doesn't overlap the row text.
+  const badgeSize = Math.round(size * 0.45);
+  const badgeGlyph = Math.round(badgeSize * 0.7);
   // Badge overhangs the disc's top-right corner via negative top/right
   // on an absolutely-positioned sibling. Layout box stays exactly
   // `size × size` so callers (e.g. TransactionList's 40×40 avatarWrap)
