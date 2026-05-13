@@ -19,10 +19,10 @@ import {
   MapPinned,
   Plus,
   Search,
-  ShieldCheck,
-  ShieldOff,
+  SlidersHorizontal,
 } from 'lucide-react-native';
 import Toast from '../components/BrandedToast';
+import EventsFilterSheet, { countActiveFilters } from '../components/EventsFilterSheet';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
@@ -102,6 +102,7 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
   // (default). Picked from a chip row so users can narrow the feed to
   // "this week" / "this month" without committing to a calendar picker.
   const [maxFromNowSec, setMaxFromNowSec] = useState<number | null>(null);
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const closerRef = useRef<(() => void) | null>(null);
 
   const { isTrusted, filterEnabled, setFilterEnabled } = useTrustGraph();
@@ -227,6 +228,16 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
     return items;
   }, [sortedEvents, searchQuery, maxDistanceMetres, maxFromNowSec]);
 
+  const activeFilterCount = useMemo(
+    () =>
+      countActiveFilters({
+        maxDistanceMetres,
+        maxFromNowSec,
+        wotFilterEnabled: filterEnabled,
+      }),
+    [maxDistanceMetres, maxFromNowSec, filterEnabled],
+  );
+
   const onCreateEvent = useCallback(() => {
     // Full create flow lives behind a Nostr signer + venue picker we
     // haven't built yet. Surface a friendly placeholder so the
@@ -280,68 +291,9 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
         <Text style={styles.headerTagline}>Bitcoin meetups and gatherings near you</Text>
       </View>
 
-      {/* Distance filter chips — choose how tight a radius to draw
-          around the user. Default "All" shows every WoT-trusted event
-          worldwide (per UX feedback: "we don't want to just filter
-          stuff out if we're not getting anything anyway"). */}
-      <View style={styles.filterRow} testID="events-distance-filter">
-        {(
-          [
-            { label: 'All', value: null },
-            { label: '5 km', value: 5_000 },
-            { label: '25 km', value: 25_000 },
-            { label: '150 km', value: 150_000 },
-            { label: '500 km', value: 500_000 },
-          ] as const
-        ).map((opt) => {
-          const active = maxDistanceMetres === opt.value;
-          return (
-            <TouchableOpacity
-              key={opt.label}
-              style={[styles.filterChip, active ? styles.filterChipActive : null]}
-              onPress={() => setMaxDistanceMetres(opt.value)}
-              accessibilityLabel={`Show events within ${opt.label}`}
-              testID={`events-distance-${opt.label.replace(/\s/g, '')}`}
-            >
-              <Text style={[styles.filterChipText, active ? styles.filterChipTextActive : null]}>
-                {opt.label}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      {/* Date-range chips — narrow to today / this week / this month so
-          a long feed doesn't bury near-term plans. "All" is the default
-          so a fresh user sees everything WoT-trusted. */}
-      <View style={styles.filterRow} testID="events-date-filter">
-        {(
-          [
-            { label: 'Anytime', value: null },
-            { label: 'Today', value: 24 * 60 * 60 },
-            { label: 'This week', value: 7 * 24 * 60 * 60 },
-            { label: 'This month', value: 31 * 24 * 60 * 60 },
-          ] as const
-        ).map((opt) => {
-          const active = maxFromNowSec === opt.value;
-          return (
-            <TouchableOpacity
-              key={opt.label}
-              style={[styles.filterChip, active ? styles.filterChipActive : null]}
-              onPress={() => setMaxFromNowSec(opt.value)}
-              accessibilityLabel={`Show events ${opt.label}`}
-              testID={`events-date-${opt.label.replace(/\s/g, '')}`}
-            >
-              <Text style={[styles.filterChipText, active ? styles.filterChipTextActive : null]}>
-                {opt.label}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
       {/* Search bar — filters the loaded events client-side. Cheap, no
-          extra relay queries. */}
+          extra relay queries. Distance / Date / WoT live in the filter
+          sheet behind the slider icon. */}
       <View style={styles.searchRow}>
         <Search size={16} color={colors.textSupplementary} strokeWidth={2.5} />
         <TextInput
@@ -354,6 +306,20 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
           autoCorrect={false}
           testID="events-search-input"
         />
+        <TouchableOpacity
+          style={styles.filterIconButton}
+          onPress={() => setFilterSheetOpen(true)}
+          testID="events-filter-button"
+          accessibilityLabel={`Filters${activeFilterCount > 0 ? `, ${activeFilterCount} active` : ''}`}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <SlidersHorizontal size={18} color={colors.textHeader} strokeWidth={2.5} />
+          {activeFilterCount > 0 ? (
+            <View style={styles.filterIconBadge}>
+              <Text style={styles.filterIconBadgeText}>{activeFilterCount}</Text>
+            </View>
+          ) : null}
+        </TouchableOpacity>
       </View>
 
       {loading && events.size === 0 ? (
@@ -379,35 +345,6 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
         </View>
       ) : (
         <>
-          <TouchableOpacity
-            style={[styles.wotChip, filterEnabled ? styles.wotChipOn : styles.wotChipOff]}
-            onPress={() => {
-              if (__DEV__) setFilterEnabled(!filterEnabled);
-            }}
-            disabled={!__DEV__}
-            testID="events-wot-chip"
-            accessibilityLabel={
-              filterEnabled
-                ? `Web-of-trust filter on, ${untrustedHidden} hidden`
-                : 'Web-of-trust filter off (developer mode)'
-            }
-          >
-            {filterEnabled ? (
-              <ShieldCheck size={14} color={colors.brandPink} strokeWidth={2.5} />
-            ) : (
-              <ShieldOff size={14} color={colors.zapYellow} strokeWidth={2.5} />
-            )}
-            <Text style={styles.wotChipText}>
-              {filterEnabled
-                ? untrustedHidden > 0
-                  ? `WoT filter on • ${untrustedHidden} ${
-                      untrustedHidden === 1 ? 'event' : 'events'
-                    } hidden`
-                  : 'WoT filter on'
-                : 'WoT filter off (dev)'}
-            </Text>
-            {__DEV__ ? <Text style={styles.wotChipHint}>tap to toggle</Text> : null}
-          </TouchableOpacity>
           <FlatList
             refreshControl={
               <RefreshControl
@@ -470,6 +407,24 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
           />
         </>
       )}
+      <EventsFilterSheet
+        visible={filterSheetOpen}
+        onClose={() => setFilterSheetOpen(false)}
+        maxDistanceMetres={maxDistanceMetres}
+        onChangeMaxDistance={setMaxDistanceMetres}
+        maxFromNowSec={maxFromNowSec}
+        onChangeMaxFromNow={setMaxFromNowSec}
+        wotFilterEnabled={filterEnabled}
+        wotUntrustedHidden={untrustedHidden}
+        onToggleWotFilter={() => {
+          if (__DEV__) setFilterEnabled(!filterEnabled);
+        }}
+        onClearAll={() => {
+          setMaxDistanceMetres(null);
+          setMaxFromNowSec(null);
+          if (__DEV__) setFilterEnabled(true);
+        }}
+      />
     </View>
   );
 };
@@ -696,32 +651,31 @@ const createStyles = (colors: Palette) =>
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.divider,
     },
-    filterRow: {
-      flexDirection: 'row',
-      gap: 6,
-      backgroundColor: colors.surface,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-    },
-    filterChip: {
-      paddingHorizontal: 12,
-      paddingVertical: 6,
-      borderRadius: 100,
+    filterIconButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
       backgroundColor: colors.background,
-      borderWidth: 1,
-      borderColor: colors.divider,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginLeft: 8,
     },
-    filterChipActive: {
+    filterIconBadge: {
+      position: 'absolute',
+      top: -2,
+      right: -2,
+      minWidth: 16,
+      height: 16,
+      paddingHorizontal: 4,
+      borderRadius: 8,
       backgroundColor: colors.brandPink,
-      borderColor: colors.brandPink,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
-    filterChipText: {
-      fontSize: 12,
-      fontWeight: '600',
-      color: colors.textSupplementary,
-    },
-    filterChipTextActive: {
+    filterIconBadgeText: {
       color: colors.white,
+      fontSize: 10,
+      fontWeight: '800',
     },
     searchInput: {
       flex: 1,
@@ -758,46 +712,6 @@ const createStyles = (colors: Palette) =>
       alignSelf: 'flex-start',
     },
     locationButtonText: { color: colors.brandPink, fontSize: 13, fontWeight: '700' },
-    trustNote: {
-      paddingHorizontal: 16,
-      paddingTop: 10,
-      paddingBottom: 6,
-      fontSize: 12,
-      color: colors.textSupplementary,
-      lineHeight: 17,
-    },
-    wotChip: {
-      marginHorizontal: 16,
-      marginTop: 8,
-      marginBottom: 4,
-      alignSelf: 'flex-start',
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      paddingHorizontal: 10,
-      paddingVertical: 6,
-      borderRadius: 999,
-      borderWidth: 1,
-    },
-    wotChipOn: {
-      backgroundColor: colors.surface,
-      borderColor: colors.brandPink,
-    },
-    wotChipOff: {
-      backgroundColor: colors.surface,
-      borderColor: colors.zapYellow,
-    },
-    wotChipText: {
-      fontSize: 12,
-      fontWeight: '600',
-      color: colors.textHeader,
-    },
-    wotChipHint: {
-      fontSize: 10,
-      fontStyle: 'italic',
-      color: colors.textSupplementary,
-      marginLeft: 4,
-    },
     heroCard: {
       // No marginHorizontal — listContent already applies padding: 16,
       // so the hero aligns flush with the rows below it.
