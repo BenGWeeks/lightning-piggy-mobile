@@ -565,9 +565,7 @@ const HiderAttribution: React.FC<{
         <Text style={styles.hiderName} numberOfLines={1}>
           Hidden by {display}
         </Text>
-        <Text style={styles.hiderHint}>
-          Verify you trust them before going to the location.
-        </Text>
+        <Text style={styles.hiderHint}>Verify you trust them before going to the location.</Text>
       </View>
     </TouchableOpacity>
   );

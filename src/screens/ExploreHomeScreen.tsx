@@ -349,28 +349,27 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     if (!pos) return [] as { place: BtcMapPlace; distance: number }[];
     let items = merchants.map((place) => ({
       place,
-      distance: haversineMetres(
-        { lat: pos.lat, lon: pos.lon },
-        { lat: place.lat, lon: place.lon },
-      ),
+      distance: haversineMetres({ lat: pos.lat, lon: pos.lon }, { lat: place.lat, lon: place.lon }),
     }));
     if (maxDistanceMetres !== null) {
       items = items.filter((m) => m.distance <= maxDistanceMetres);
     }
-    return items
-      // Boosted merchants surface first on the rail (BTC Map's
-      // paid-feature mechanism); within the same boost-bucket we still
-      // sort by distance so the closest boosted / closest non-boosted
-      // sit at the front of each half. Honest visual: each boosted
-      // card gets a "Featured" badge so the user knows why it's
-      // prominent.
-      .sort((a, b) => {
-        const ab = isBoosted(a.place) ? 1 : 0;
-        const bb = isBoosted(b.place) ? 1 : 0;
-        if (ab !== bb) return bb - ab;
-        return a.distance - b.distance;
-      })
-      .slice(0, 12);
+    return (
+      items
+        // Boosted merchants surface first on the rail (BTC Map's
+        // paid-feature mechanism); within the same boost-bucket we still
+        // sort by distance so the closest boosted / closest non-boosted
+        // sit at the front of each half. Honest visual: each boosted
+        // card gets a "Featured" badge so the user knows why it's
+        // prominent.
+        .sort((a, b) => {
+          const ab = isBoosted(a.place) ? 1 : 0;
+          const bb = isBoosted(b.place) ? 1 : 0;
+          if (ab !== bb) return bb - ab;
+          return a.distance - b.distance;
+        })
+        .slice(0, 12)
+    );
   }, [merchants, pos, maxDistanceMetres]);
 
   const sortedCaches = useMemo(() => {

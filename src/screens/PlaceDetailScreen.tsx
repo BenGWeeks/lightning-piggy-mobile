@@ -255,8 +255,7 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               {/* Accessibility — OSM `wheelchair=yes/limited/no`. We only
                   surface yes/limited (a hard "no" feels stigmatising and
                   the data is too sparse to act on). */}
-              {place.tags['wheelchair'] === 'yes' ||
-              place.tags['wheelchair'] === 'limited' ? (
+              {place.tags['wheelchair'] === 'yes' || place.tags['wheelchair'] === 'limited' ? (
                 <View style={styles.chipFeature}>
                   <Accessibility size={12} color={colors.textHeader} strokeWidth={2.5} />
                   <Text style={styles.chipFeatureText}>
@@ -305,9 +304,7 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               <Text style={styles.metaLine}>{place.tags['wheelchair:description']}</Text>
             ) : null}
 
-            {place.description ? (
-              <Text style={styles.description}>{place.description}</Text>
-            ) : null}
+            {place.description ? <Text style={styles.description}>{place.description}</Text> : null}
 
             {/* Single-pin map preview — same component the Hub mini-map
                 uses, centred on the merchant. Tap → full Map. */}
@@ -432,9 +429,7 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   </Text>
                 ) : null}
                 {place.tags['start_date'] ? (
-                  <Text style={styles.lifecycleText}>
-                    Open since {place.tags['start_date']}.
-                  </Text>
+                  <Text style={styles.lifecycleText}>Open since {place.tags['start_date']}.</Text>
                 ) : null}
                 {place.createdAt ? (
                   <Text style={styles.lifecycleText}>
@@ -448,8 +443,8 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   >
                     <Text style={[styles.lifecycleText, styles.commentsLink]}>
                       {place.commentsCount}{' '}
-                      {place.commentsCount === 1 ? 'community note' : 'community notes'} on BTC
-                      Map →
+                      {place.commentsCount === 1 ? 'community note' : 'community notes'} on BTC Map
+                      →
                     </Text>
                   </TouchableOpacity>
                 ) : null}

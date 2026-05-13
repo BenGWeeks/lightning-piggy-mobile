@@ -59,8 +59,7 @@ const EventsFilterSheet: React.FC<Props> = ({
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
-  const anyActive =
-    maxDistanceMetres !== null || maxFromNowSec !== null || !wotFilterEnabled;
+  const anyActive = maxDistanceMetres !== null || maxFromNowSec !== null || !wotFilterEnabled;
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>

@@ -799,9 +799,7 @@ const MerchantDetailSheet: React.FC<{
             accessibilityLabel={lud16 ? `Pay ${lud16}` : 'No Lightning Address available'}
           >
             <Zap size={16} color={colors.white} strokeWidth={2.5} />
-            <Text style={styles.sheetButtonText}>
-              {lud16 ? 'Pay' : 'No Lightning address'}
-            </Text>
+            <Text style={styles.sheetButtonText}>{lud16 ? 'Pay' : 'No Lightning address'}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.sheetButtonSecondary}
@@ -881,12 +879,8 @@ const CacheDetailSheet: React.FC<{
           </Text>
         </View>
         <View style={styles.sheetChipRow}>
-          <View
-            style={cache.isLpPiggy ? styles.sheetChipPink : styles.sheetChipGrey}
-          >
-            <Text
-              style={cache.isLpPiggy ? styles.sheetChipPinkText : styles.sheetChipGreyText}
-            >
+          <View style={cache.isLpPiggy ? styles.sheetChipPink : styles.sheetChipGrey}>
+            <Text style={cache.isLpPiggy ? styles.sheetChipPinkText : styles.sheetChipGreyText}>
               {kindLabel}
             </Text>
           </View>
@@ -932,8 +926,20 @@ const FILTER_OPTIONS: ReadonlyArray<{
 }> = [
   { key: 'lightning', label: 'Lightning', hint: 'Pays in sats over Lightning', swatch: '#EC008C' },
   { key: 'onchain', label: 'On-chain', hint: 'Accepts bitcoin on-chain', swatch: '#F7931A' },
-  { key: 'piglet', label: 'Piglet', hint: 'Lightning Piggy stash', swatch: '#EC008C', diamond: true },
-  { key: 'nipgcCache', label: 'NIP-GC cache', hint: 'Geo-cache (treasures.to et al.)', swatch: '#6c7b8a', diamond: true },
+  {
+    key: 'piglet',
+    label: 'Piglet',
+    hint: 'Lightning Piggy stash',
+    swatch: '#EC008C',
+    diamond: true,
+  },
+  {
+    key: 'nipgcCache',
+    label: 'NIP-GC cache',
+    hint: 'Geo-cache (treasures.to et al.)',
+    swatch: '#6c7b8a',
+    diamond: true,
+  },
 ];
 
 const FilterSheet: React.FC<{
@@ -993,9 +999,7 @@ const FilterSheet: React.FC<{
                     <Text style={styles.filterHint}>{opt.hint}</Text>
                   </View>
                   <View style={[styles.filterToggle, on && styles.filterToggleOn]}>
-                    <View
-                      style={[styles.filterToggleThumb, on && styles.filterToggleThumbOn]}
-                    />
+                    <View style={[styles.filterToggleThumb, on && styles.filterToggleThumbOn]} />
                   </View>
                 </TouchableOpacity>
               );
@@ -1036,10 +1040,7 @@ const FilterSheet: React.FC<{
                       accessibilityLabel={`${cat} category ${on ? 'on' : 'off'}`}
                     >
                       <Text
-                        style={[
-                          styles.categoryChipText,
-                          on ? styles.categoryChipTextOn : null,
-                        ]}
+                        style={[styles.categoryChipText, on ? styles.categoryChipTextOn : null]}
                       >
                         {cat.replace(/_/g, ' ')}
                       </Text>

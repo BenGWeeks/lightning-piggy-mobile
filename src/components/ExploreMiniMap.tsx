@@ -193,7 +193,10 @@ const makeHtml = (lat: number, lon: number, defaultZoom: number): string => `<!D
     html,body,#map{margin:0;padding:0;height:100%;width:100%;background:#eee}
     .lp-pin{width:14px;height:14px;border-radius:7px;background:#EC008C;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.4)}
     .lp-pin.onchain{background:#F5A623}
-    .lp-cache{width:14px;height:14px;background:#6c7b8a;border:1.5px solid #fff;transform:rotate(45deg);box-shadow:0 1px 3px rgba(0,0,0,0.4)}
+    /* Round circles match the list-row iconWrap (pink for Piglet,
+       slate for vanilla NIP-GC). Earlier diamond version made the
+       map<>list mapping ambiguous at a glance. */
+    .lp-cache{width:14px;height:14px;border-radius:7px;background:#6c7b8a;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.4)}
     .lp-cache.piggy{background:#EC008C}
     .lp-event{width:14px;height:14px;border-radius:3px;background:#5b3aff;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.4)}
     .lp-me{width:12px;height:12px;border-radius:6px;background:#2D88FF;border:2px solid #fff;box-shadow:0 0 0 5px rgba(45,136,255,0.25)}

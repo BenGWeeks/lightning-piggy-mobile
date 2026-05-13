@@ -394,17 +394,16 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
             </TouchableOpacity>
           </View>
           {/* Quick tag-spec hint up front — surfaces what to buy before
-            * the user clicks Buy/Print, so they don't come back with a
-            * Mifare Classic and find out it can't lock at NFC-write
-            * time. The full Supported-NFC-tags card stays below after
-            * Validate for the deeper "I'm actually writing the tag now"
-            * moment. */}
+           * the user clicks Buy/Print, so they don't come back with a
+           * Mifare Classic and find out it can't lock at NFC-write
+           * time. The full Supported-NFC-tags card stays below after
+           * Validate for the deeper "I'm actually writing the tag now"
+           * moment. */}
           <View style={styles.getPiggyTagsHint}>
             <Nfc size={12} color={colors.brandPink} strokeWidth={2.5} />
             <Text style={styles.getPiggyTagsHintText}>
-              <Text style={styles.getPiggyTagsHintBold}>Tag chips:</Text>{' '}
-              NTAG213 / 215 / 216 (recommended), Mifare Ultralight C also fine. Avoid Mifare
-              Classic — it can't lock.
+              <Text style={styles.getPiggyTagsHintBold}>Tag chips:</Text> NTAG213 / 215 / 216
+              (recommended), Mifare Ultralight C also fine. Avoid Mifare Classic — it can't lock.
             </Text>
           </View>
         </View>

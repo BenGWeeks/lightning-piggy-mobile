@@ -177,9 +177,7 @@ const HuntFilterSheet: React.FC<Props> = ({
                   testID={`hunt-filter-difficulty-${n}`}
                   accessibilityLabel={`Toggle difficulty ${n}`}
                 >
-                  <Text style={[styles.chipText, active ? styles.chipTextActive : null]}>
-                    D{n}
-                  </Text>
+                  <Text style={[styles.chipText, active ? styles.chipTextActive : null]}>D{n}</Text>
                 </TouchableOpacity>
               );
             })}
@@ -217,9 +215,7 @@ const HuntFilterSheet: React.FC<Props> = ({
                   testID={`hunt-filter-terrain-${n}`}
                   accessibilityLabel={`Toggle terrain ${n}`}
                 >
-                  <Text style={[styles.chipText, active ? styles.chipTextActive : null]}>
-                    T{n}
-                  </Text>
+                  <Text style={[styles.chipText, active ? styles.chipTextActive : null]}>T{n}</Text>
                 </TouchableOpacity>
               );
             })}

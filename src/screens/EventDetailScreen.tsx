@@ -27,10 +27,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation, ExploreStackParamList } from '../navigation/types';
 import type { ParsedEvent } from '../services/nostrPlacesService';
-import {
-  loadCachedEvents,
-  peekCachedEventsSync,
-} from '../services/nostrPlacesStorage';
+import { loadCachedEvents, peekCachedEventsSync } from '../services/nostrPlacesStorage';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
 import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
 import ContactProfileSheet from '../components/ContactProfileSheet';
@@ -121,7 +118,7 @@ const EventDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const onOpenInMaps = useCallback(() => {
     if (!event) return;
-    const q = event.location ?? (event.geohash ?? event.title);
+    const q = event.location ?? event.geohash ?? event.title;
     Linking.openURL(`geo:0,0?q=${encodeURIComponent(q)}`).catch(() => {
       Linking.openURL(`https://www.openstreetmap.org/search?query=${encodeURIComponent(q)}`).catch(
         () => {},
@@ -254,9 +251,7 @@ const EventDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               </View>
             ) : null}
 
-            {event.description ? (
-              <Text style={styles.description}>{event.description}</Text>
-            ) : null}
+            {event.description ? <Text style={styles.description}>{event.description}</Text> : null}
 
             {event.hashtags.length > 0 ? (
               <View style={styles.hashtagRow}>
