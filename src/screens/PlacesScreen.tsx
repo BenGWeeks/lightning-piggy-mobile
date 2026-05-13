@@ -10,6 +10,7 @@ import {
   ScrollView,
   Linking,
   RefreshControl,
+  Image,
 } from 'react-native';
 import * as Location from 'expo-location';
 import { ChevronLeft, ChevronRight, MapPin, Search, Sparkles, Zap } from 'lucide-react-native';
@@ -190,6 +191,12 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={styles.container} testID="places-screen">
       <View style={styles.header}>
+        <Image
+          source={require('../../assets/images/learn-header-bg.png')}
+          style={styles.headerImage}
+          resizeMode="cover"
+        />
+        <View style={styles.headerOverlay} />
         <View style={styles.headerRow}>
           <TouchableOpacity
             onPress={() => navigation.goBack()}
@@ -419,6 +426,14 @@ const createStyles = (colors: Palette) =>
       paddingBottom: 14,
       backgroundColor: colors.brandPink,
       minHeight: 140,
+      overflow: 'hidden',
+    },
+    headerImage: {
+      ...StyleSheet.absoluteFillObject,
+    },
+    headerOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: 'rgba(236, 0, 140, 0.65)',
     },
     headerRow: {
       flexDirection: 'row',

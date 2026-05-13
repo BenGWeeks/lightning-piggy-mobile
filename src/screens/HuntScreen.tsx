@@ -234,6 +234,12 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={styles.container} testID="geocaches-screen">
       <View style={styles.header}>
+        <Image
+          source={require('../../assets/images/learn-header-bg.png')}
+          style={styles.headerImage}
+          resizeMode="cover"
+        />
+        <View style={styles.headerOverlay} />
         <View style={styles.headerRow}>
           <TouchableOpacity
             onPress={() => navigation.goBack()}
@@ -491,6 +497,14 @@ const createStyles = (colors: Palette) =>
       paddingBottom: 14,
       backgroundColor: colors.brandPink,
       minHeight: 140,
+      overflow: 'hidden',
+    },
+    headerImage: {
+      ...StyleSheet.absoluteFillObject,
+    },
+    headerOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: 'rgba(236, 0, 140, 0.65)',
     },
     headerRow: {
       flexDirection: 'row',
