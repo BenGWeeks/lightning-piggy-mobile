@@ -20,10 +20,9 @@ interface Props {
   contact: ContactProfileBodyData | null;
   onZap?: () => void;
   onMessage?: () => void;
-  onSetLightningAddress?: (address: string) => void;
   // Optional drill-in: closes the sheet then navigates to the full
-  // ContactProfile route. Renders a "View full profile" link in the
-  // sheet when wired up.
+  // ContactProfile route. Renders a "View profile" pill in the sheet
+  // body when wired up.
   onViewFullProfile?: () => void;
 }
 
@@ -33,7 +32,6 @@ const ContactProfileSheet: React.FC<Props> = ({
   contact,
   onZap,
   onMessage,
-  onSetLightningAddress,
   onViewFullProfile,
 }) => {
   const colors = useThemeColors();
@@ -80,10 +78,8 @@ const ContactProfileSheet: React.FC<Props> = ({
       <BottomSheetView>
         <ContactProfileBody
           contact={contact}
-          variant="sheet"
           onZap={onZap}
           onMessage={onMessage}
-          onSetLightningAddress={onSetLightningAddress}
           onRequestClose={onClose}
           onViewFullProfile={onViewFullProfile}
         />

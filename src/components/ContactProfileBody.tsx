@@ -1,24 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  Linking,
-  ScrollView,
-  Share,
-} from 'react-native';
-import { Alert } from './BrandedAlert';
+import { View, Text, TouchableOpacity, StyleSheet, Linking, Share } from 'react-native';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
-import QRCode from 'react-native-qrcode-svg';
 import QrWithIdentityToggle from './QrWithIdentityToggle';
-import { Zap, Copy, MoreHorizontal, UserRound, ChevronRight } from 'lucide-react-native';
+import { Zap, UserRound, ChevronRight } from 'lucide-react-native';
 import NfcWriteSheet from './NfcWriteSheet';
 import ContactActionsSheet from './ContactActionsSheet';
 import { isNfcSupported } from '../services/nfcService';
-import * as Clipboard from 'expo-clipboard';
 import Toast from './BrandedToast';
 import { npubEncode, nprofileEncode, buildProfileRelayHints } from '../services/nostrService';
 import { useNostr } from '../contexts/NostrContext';
@@ -41,28 +29,25 @@ export interface ContactProfileBodyData {
 
 interface Props {
   contact: ContactProfileBodyData;
-  // Layout flag: the bottom-sheet variant renders the banner with a
-  // pull-handle overlay; the full-page screen omits both because the
-  // screen has its own header bar.
-  variant: 'sheet' | 'screen';
   onZap?: () => void;
   onMessage?: () => void;
-  onSetLightningAddress?: (address: string) => void;
-  // Fired when an action wants the host (sheet) to dismiss itself —
-  // e.g. share-via-DM completes. Screens ignore this.
+  // Fired when an action wants the host sheet to dismiss itself —
+  // e.g. share-via-DM completes.
   onRequestClose?: () => void;
-  // Sheet-variant only: when the host wants the sheet to dismiss and
-  // navigate to the full ContactProfile route. Renders a "View full
-  // profile" affordance at the top of the sheet body.
+  // Fires when the user taps "View profile" — host should dismiss the
+  // sheet and navigate to the full ContactProfile route.
   onViewFullProfile?: () => void;
 }
 
+// Body of ContactProfileSheet — the bottom-sheet preview rendered when
+// the user taps a contact row from Friends / Messages / Conversation /
+// Group / TransactionList. The full-page ContactProfileScreen built its
+// own UI (see #439) so this component is sheet-only; an earlier
+// `variant` prop is gone (#439 review round-4).
 const ContactProfileBody: React.FC<Props> = ({
   contact,
-  variant,
   onZap,
   onMessage,
-  onSetLightningAddress,
   onRequestClose,
   onViewFullProfile,
 }) => {
@@ -72,13 +57,9 @@ const ContactProfileBody: React.FC<Props> = ({
     () => (contact.pubkey ? npubEncode(contact.pubkey) : null),
     [contact.pubkey],
   );
-  const { contacts, followContact, unfollowContact, sendDirectMessage, relays } = useNostr();
-  const [following, setFollowing] = useState(false);
-  const [loadingFollow, setLoadingFollow] = useState(false);
+  const { contacts, sendDirectMessage, relays } = useNostr();
   const [avatarError, setAvatarError] = useState(false);
   const [avatarLoaded, setAvatarLoaded] = useState(false);
-  const [editingLnAddress, setEditingLnAddress] = useState(false);
-  const [lnAddressDraft, setLnAddressDraft] = useState('');
   const [shareOpen, setShareOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [nfcWriteVisible, setNfcWriteVisible] = useState(false);
@@ -106,77 +87,9 @@ const ContactProfileBody: React.FC<Props> = ({
   }, [contact.picture, avatarLoaded, avatarError]);
 
   useEffect(() => {
-    if (contact.pubkey) {
-      setFollowing(contacts.some((c) => c.pubkey === contact.pubkey));
-    }
-  }, [contact.pubkey, contacts]);
-
-  useEffect(() => {
     setAvatarError(false);
     setAvatarLoaded(false);
   }, [contact.picture]);
-
-  useEffect(() => {
-    setEditingLnAddress(false);
-    setLnAddressDraft(contact.lightningAddress ?? '');
-  }, [contact.name, contact.lightningAddress]);
-
-  const handleFollowToggle = async () => {
-    if (!contact.pubkey || loadingFollow) return;
-    if (following) {
-      // Don't flip the loading flag yet — the alert may be dismissed
-      // via back-gesture / tap-outside without firing either button's
-      // onPress, leaving the Follow chip stuck spinning until the
-      // sheet unmounts. Only one of Cancel / Unfollow's handlers
-      // actually drives async work, so move the flag there.
-      Alert.alert('Unfollow', `Stop following ${contact.name}?`, [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Unfollow',
-          style: 'destructive',
-          onPress: async () => {
-            setLoadingFollow(true);
-            try {
-              const success = await unfollowContact(contact.pubkey!);
-              if (success) setFollowing(false);
-            } finally {
-              setLoadingFollow(false);
-            }
-          },
-        },
-      ]);
-      return;
-    }
-    setLoadingFollow(true);
-    try {
-      const success = await followContact(contact.pubkey);
-      if (success) setFollowing(true);
-    } finally {
-      setLoadingFollow(false);
-    }
-  };
-
-  const handleCopyNpub = async () => {
-    if (!npub) return;
-    await Clipboard.setStringAsync(npub);
-    Toast.show({
-      type: 'success',
-      text1: 'Public key copied',
-      position: 'top',
-      visibilityTime: 1800,
-    });
-  };
-
-  const handleCopyLnAddress = async () => {
-    if (!contact.lightningAddress) return;
-    await Clipboard.setStringAsync(contact.lightningAddress);
-    Toast.show({
-      type: 'success',
-      text1: 'Lightning address copied',
-      position: 'top',
-      visibilityTime: 1800,
-    });
-  };
 
   // "Share to friend" — opens the FriendPicker so the user can DM the
   // contact card as an encrypted Nostr message.
@@ -253,47 +166,20 @@ const ContactProfileBody: React.FC<Props> = ({
     }
   }, [npub]);
 
-  const npubDisplay = npub ? `${npub.slice(0, 16)}...${npub.slice(-8)}` : null;
-
   // Don't wrap children in an inline-defined component — that would
   // give the wrapper a fresh function identity per render and force
   // React to unmount/remount the entire subtree on every parent
   // re-render (losing scroll position, in-flight image loads, focused
-  // inputs). Render the wrapper element directly based on variant.
+  // inputs). Render the wrapper element directly.
   const body = (
     <>
-      {variant === 'sheet' && (
-        <View style={styles.bannerContainer}>
-          {/* Fall back to the brand pink-ostrich texture when the
+      <View style={styles.bannerContainer}>
+        {/* Fall back to the brand pink-ostrich texture when the
               contact has no kind-0 banner — matches the full-page
               ContactProfileScreen. The empty placeholder used to
               render as a flat dark band, which read as a broken
               image. */}
-          {contact.banner ? (
-            <Image
-              source={{ uri: contact.banner }}
-              style={styles.bannerImage}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-              recyclingKey={contact.banner}
-              autoplay={false}
-            />
-          ) : (
-            <Image
-              source={require('../../assets/images/friends-bg.png')}
-              style={styles.bannerImage}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-            />
-          )}
-          <View style={styles.handleOverlay}>
-            <View style={styles.handleBar} />
-          </View>
-        </View>
-      )}
-
-      {variant === 'screen' && contact.banner && (
-        <View style={styles.screenBannerContainer}>
+        {contact.banner ? (
           <Image
             source={{ uri: contact.banner }}
             style={styles.bannerImage}
@@ -302,16 +188,20 @@ const ContactProfileBody: React.FC<Props> = ({
             recyclingKey={contact.banner}
             autoplay={false}
           />
+        ) : (
+          <Image
+            source={require('../../assets/images/friends-bg.png')}
+            style={styles.bannerImage}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+          />
+        )}
+        <View style={styles.handleOverlay}>
+          <View style={styles.handleBar} />
         </View>
-      )}
+      </View>
 
-      <View
-        style={
-          variant === 'screen' && !contact.banner
-            ? styles.avatarContainerNoBanner
-            : styles.avatarContainer
-        }
-      >
+      <View style={styles.avatarContainer}>
         {contact.picture && !avatarError ? (
           <Image
             source={{ uri: contact.picture }}
@@ -343,10 +233,8 @@ const ContactProfileBody: React.FC<Props> = ({
       {/* QR + identity toggle. Sheet variant reuses the shared
           QrWithIdentityToggle (same tabs + copy/share/NFC affordance
           as QrSheet) so the friend's npub and Lightning address are
-          both scannable; full-page variant keeps a single static QR
-          + the long-form npub copy row below for the same reason
-          the screen has its own header bar. */}
-      {npub && variant === 'sheet' ? (
+          both scannable. */}
+      {npub ? (
         <View style={styles.qrToggleWrapper}>
           <QrWithIdentityToggle
             npub={npub}
@@ -357,210 +245,50 @@ const ContactProfileBody: React.FC<Props> = ({
         </View>
       ) : null}
 
-      {npub && variant === 'screen' ? (
-        <View
-          style={styles.qrContainer}
-          accessible
-          accessibilityRole="image"
-          accessibilityLabel="Friend npub QR code"
-        >
-          <QRCode value={`nostr:${npub}`} size={160} backgroundColor="#FFFFFF" color="#000000" />
-        </View>
-      ) : null}
-
-      {variant === 'screen' && npubDisplay ? (
-        <TouchableOpacity
-          style={styles.npubRow}
-          onPress={handleCopyNpub}
-          accessibilityLabel="Copy npub"
-          testID="contact-copy-npub-button"
-        >
-          <Text style={styles.npubText}>{npubDisplay}</Text>
-          <Copy size={20} color={colors.brandPink} />
-        </TouchableOpacity>
-      ) : null}
-
-      {/* Sheet variant skips the lud16 copy / edit row entirely — the
-          QrWithIdentityToggle's "Lightning" tab already surfaces the
-          address with its own copy/share affordance, so duplicating
-          it below the QR is noise. Full-page variant keeps the row
-          (and the in-place editor for the phone-contact path) since
-          it doesn't show the toggle. */}
-      {variant === 'screen' && contact.source === 'contacts' && onSetLightningAddress ? (
-        editingLnAddress ? (
-          <View style={styles.lnAddressEditRow}>
-            <TextInput
-              style={styles.lnAddressInput}
-              placeholder="user@domain.com"
-              placeholderTextColor={colors.textSupplementary}
-              value={lnAddressDraft}
-              onChangeText={setLnAddressDraft}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="email-address"
-            />
-            <TouchableOpacity
-              style={styles.lnAddressSaveButton}
-              onPress={() => {
-                const trimmed = lnAddressDraft.trim();
-                if (trimmed) {
-                  onSetLightningAddress(trimmed);
-                }
-                setEditingLnAddress(false);
-              }}
-            >
-              <Text style={styles.lnAddressSaveText}>
-                {lnAddressDraft.trim() ? 'Save' : 'Cancel'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
+      {/* Pared-down peek — Message + Zap + View-profile pill. The
+          View-profile button drills into the full ContactProfile route
+          where the richer Follow / "…" actions live. */}
+      <View style={styles.actionRowSheet}>
+        {contact.pubkey && onMessage ? (
           <TouchableOpacity
-            style={styles.lnAddressRow}
-            onPress={() => {
-              setLnAddressDraft(contact.lightningAddress ?? '');
-              setEditingLnAddress(true);
-            }}
+            style={styles.iconCircleButton}
+            onPress={onMessage}
+            accessibilityLabel="Message"
+            testID="contact-message-button"
           >
-            <Text style={styles.lightningAddress} numberOfLines={1}>
-              {contact.lightningAddress || 'Add Lightning Address'}
-            </Text>
-            <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
+            <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
               <Path
-                d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"
-                stroke={colors.brandPink}
+                d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+                stroke={colors.white}
                 strokeWidth={2}
                 strokeLinecap="round"
                 strokeLinejoin="round"
               />
             </Svg>
           </TouchableOpacity>
-        )
-      ) : variant === 'screen' && contact.lightningAddress ? (
-        <TouchableOpacity
-          style={styles.lnAddressRow}
-          onPress={handleCopyLnAddress}
-          accessibilityLabel="Copy Lightning address"
-          testID="contact-copy-lud16-button"
-        >
-          <Text style={styles.lightningAddress} numberOfLines={1}>
-            {contact.lightningAddress}
-          </Text>
-          <Copy size={14} color={colors.brandPink} />
-        </TouchableOpacity>
-      ) : null}
-
-      {/* Sheet variant: pared-down peek — Message + Zap + View-profile
-          icons, no Follow/Unfollow, no "…". The View-profile button
-          drills into the full route where the wider set of actions
-          lives. Full-page variant keeps the original action row. */}
-      {variant === 'sheet' ? (
-        <View style={styles.actionRowSheet}>
-          {contact.pubkey && onMessage ? (
-            <TouchableOpacity
-              style={styles.iconCircleButton}
-              onPress={onMessage}
-              accessibilityLabel="Message"
-              testID="contact-message-button"
-            >
-              <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-                <Path
-                  d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
-                  stroke={colors.white}
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </Svg>
-            </TouchableOpacity>
-          ) : null}
-          {contact.lightningAddress && onZap ? (
-            <TouchableOpacity
-              style={[styles.iconCircleButton, styles.iconCircleButtonYellow]}
-              onPress={onZap}
-              accessibilityLabel="Zap"
-              testID="profile-sheet-zap-button"
-            >
-              <Zap size={20} color={colors.white} fill={colors.white} />
-            </TouchableOpacity>
-          ) : null}
-          {onViewFullProfile ? (
-            <TouchableOpacity
-              style={styles.viewProfileButton}
-              onPress={onViewFullProfile}
-              accessibilityLabel="View full profile"
-              testID="contact-view-full-profile"
-            >
-              <Text style={styles.viewProfileButtonText}>View profile</Text>
-              <ChevronRight size={16} color={colors.white} strokeWidth={2.5} />
-            </TouchableOpacity>
-          ) : null}
-        </View>
-      ) : (
-        <View style={styles.actionRow}>
-          {contact.pubkey && contact.source === 'nostr' && (
-            <TouchableOpacity
-              style={[styles.followButton, following && styles.followingButton]}
-              onPress={handleFollowToggle}
-              disabled={loadingFollow}
-              accessibilityLabel={following ? 'Unfollow' : 'Follow'}
-              testID="profile-sheet-follow-button"
-            >
-              <Text
-                style={[styles.followButtonText, following && styles.followingButtonText]}
-                numberOfLines={1}
-              >
-                {loadingFollow ? '...' : following ? 'Unfollow' : 'Follow'}
-              </Text>
-            </TouchableOpacity>
-          )}
-          {contact.pubkey && onMessage && (
-            <TouchableOpacity
-              style={styles.messageButton}
-              onPress={onMessage}
-              accessibilityLabel="Message"
-              testID="contact-message-button"
-            >
-              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                <Path
-                  d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
-                  stroke={colors.white}
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </Svg>
-              <Text style={styles.messageButtonText} numberOfLines={1}>
-                Message
-              </Text>
-            </TouchableOpacity>
-          )}
-          {contact.lightningAddress && onZap && (
-            <TouchableOpacity
-              style={styles.zapButton}
-              onPress={onZap}
-              accessibilityLabel="Zap"
-              testID="profile-sheet-zap-button"
-            >
-              <Zap size={20} color={colors.white} fill={colors.white} />
-              <Text style={styles.zapButtonText} numberOfLines={1}>
-                Zap
-              </Text>
-            </TouchableOpacity>
-          )}
-          {contact.pubkey && (
-            <TouchableOpacity
-              style={styles.iconButton}
-              onPress={() => setActionsSheetOpen(true)}
-              disabled={sharing}
-              accessibilityLabel="More actions"
-              testID="contact-more-button"
-            >
-              <MoreHorizontal size={18} color={colors.brandPink} />
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
+        ) : null}
+        {contact.lightningAddress && onZap ? (
+          <TouchableOpacity
+            style={[styles.iconCircleButton, styles.iconCircleButtonYellow]}
+            onPress={onZap}
+            accessibilityLabel="Zap"
+            testID="profile-sheet-zap-button"
+          >
+            <Zap size={20} color={colors.white} fill={colors.white} />
+          </TouchableOpacity>
+        ) : null}
+        {onViewFullProfile ? (
+          <TouchableOpacity
+            style={styles.viewProfileButton}
+            onPress={onViewFullProfile}
+            accessibilityLabel="View full profile"
+            testID="contact-view-full-profile"
+          >
+            <Text style={styles.viewProfileButtonText}>View profile</Text>
+            <ChevronRight size={16} color={colors.white} strokeWidth={2.5} />
+          </TouchableOpacity>
+        ) : null}
+      </View>
 
       {npub && (
         <NfcWriteSheet
@@ -591,13 +319,7 @@ const ContactProfileBody: React.FC<Props> = ({
     </>
   );
 
-  return variant === 'screen' ? (
-    <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
-      {body}
-    </ScrollView>
-  ) : (
-    <View style={styles.sheetContent}>{body}</View>
-  );
+  return <View style={styles.sheetContent}>{body}</View>;
 };
 
 const createStyles = (colors: Palette) =>
