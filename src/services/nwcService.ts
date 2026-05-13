@@ -557,19 +557,25 @@ export async function payInvoice(
       if (paymentHash) {
         try {
           const lookup = await provider.lookupInvoice({ paymentHash });
-          if (lookup?.preimage) {
+          if (lookup?.paid && lookup.preimage) {
             // `warn` (not `log`) so this survives the production
             // `transform-remove-console` strip — without it field logs
             // can't tell a benign Alby-SDK-wrapping case (wallet did
-            // process the payment) from a real failure.
+            // process the payment) from a real failure. `paid` is the
+            // canonical settled signal (settled_at>0) — `preimage` alone
+            // isn't, per the lookupInvoice notes below.
             console.warn(
-              `[NWC] pay_invoice surfaced "${msg}" but invoice IS paid — returning preimage (paymentHash=${paymentHash.slice(0, 8)})`,
+              `[NWC] pay_invoice surfaced "${msg}" but lookup confirms paid + has preimage — returning it (paymentHash=${paymentHash.slice(0, 8)})`,
             );
             return { preimage: lookup.preimage };
           }
-          // lookup succeeded but reported invoice unpaid — payment really failed.
+          // No usable preimage. Either the lookup says unpaid/pending,
+          // or it's paid but the backend omitted preimage (LNbits has
+          // been seen to do this). Both are real-failure surfaces for
+          // pay_invoice; the caller re-throws and the swap is treated
+          // as unpaid until the next recovery pass.
           console.warn(
-            `[NWC] pay_invoice "${msg}" + lookup says invoice unpaid — treating as real failure (paymentHash=${paymentHash.slice(0, 8)})`,
+            `[NWC] pay_invoice "${msg}" + lookup returned no usable preimage (paid=${lookup?.paid === true ? 'true' : lookup?.paid === false ? 'false' : 'unknown'}) — treating as failure (paymentHash=${paymentHash.slice(0, 8)})`,
           );
         } catch (lookupErr) {
           // lookup itself threw — most ambiguous case. We don't know if

@@ -335,6 +335,122 @@ function yieldToEventLoop(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+/** Half of a 60 fps frame (~8.3 ms). The NIP-17 inbox loops aim to
+ * stay under this many ms of unbroken JS work per yield. With the
+ * old count-based yield (every 4 wraps) a slow path could still
+ * blow past 50–200 ms in a single burst — enough to drop several
+ * frames on tab-switch. See #532. */
+const DECRYPT_FRAME_BUDGET_MS = 4;
+
+/** Cooperative-yield scheduler for the NIP-17 inbox loops (#532).
+ *
+ * Two improvements over the old `if (i % N === 0) await yieldToEventLoop()`
+ * pattern:
+ *
+ * 1. **Time-budget yields.** We only pay for a `setTimeout(0)` round-
+ *    trip when wall-clock since the last yield exceeds
+ *    `DECRYPT_FRAME_BUDGET_MS`. A run of cheap cache hits no longer
+ *    forces a yield every Nth iteration even though there's been no
+ *    blocking work. The count-based modulo still acts as a safety
+ *    cap (set by the caller) so a pathological iteration that
+ *    somehow underestimates its own runtime can't starve the thread.
+ *
+ * 2. **Hard-cancel on abort.** When the caller's `AbortSignal` fires
+ *    mid-loop, an `abort` listener clears the currently-pending
+ *    `setTimeout` and resolves the awaiter immediately. Without this,
+ *    the loop would still drain one more `setTimeout(0)` round-trip
+ *    (plus whatever sync work follows it) before the next abort
+ *    check — visible as a slug of pinned-thread time after a
+ *    tab-switch blurs MessagesScreen.
+ *
+ * Returned object:
+ * - `maybeYield()` — call once per loop iteration. No-op unless the
+ *   frame budget is exceeded OR the safety-cap counter ticks.
+ * - `yieldCount` — number of actual yields performed (perfLog).
+ * - `dispose()` — detach the abort listener after the loop exits.
+ */
+type YieldScheduler = {
+  maybeYield: () => Promise<void>;
+  readonly yieldCount: number;
+  dispose: () => void;
+};
+
+function createYieldScheduler(opts: {
+  signal?: AbortSignal;
+  /** Safety cap — always yield when iteration % safetyEvery === 0,
+   * even if the frame budget hasn't been blown. */
+  safetyEvery: number;
+  /** ms of unbroken JS work before we force a yield. */
+  budgetMs?: number;
+}): YieldScheduler {
+  const { signal, safetyEvery, budgetMs = DECRYPT_FRAME_BUDGET_MS } = opts;
+  let iteration = 0;
+  let yields = 0;
+  let lastYieldAt = performance.now();
+  let pendingHandle: ReturnType<typeof setTimeout> | null = null;
+  let pendingReject: ((reason?: unknown) => void) | null = null;
+
+  // On abort: clear the in-flight setTimeout so the awaiter unwinds
+  // immediately instead of waiting for the next scheduler tick.
+  const onAbort = () => {
+    if (pendingHandle !== null) {
+      clearTimeout(pendingHandle);
+      pendingHandle = null;
+    }
+    if (pendingReject) {
+      const reject = pendingReject;
+      pendingReject = null;
+      reject(new Error('aborted'));
+    }
+  };
+  if (signal) {
+    if (signal.aborted) {
+      // Already aborted before the loop started — caller is expected
+      // to check signal.aborted itself, but make maybeYield a no-op
+      // resolver so we don't queue work.
+    } else {
+      signal.addEventListener('abort', onAbort);
+    }
+  }
+
+  const maybeYield = async () => {
+    iteration++;
+    if (signal?.aborted) return;
+    const now = performance.now();
+    const overBudget = now - lastYieldAt >= budgetMs;
+    const safetyHit = iteration % safetyEvery === 0;
+    if (!overBudget && !safetyHit) return;
+    yields++;
+    await new Promise<void>((resolve, reject) => {
+      pendingReject = reject;
+      pendingHandle = setTimeout(() => {
+        pendingHandle = null;
+        pendingReject = null;
+        resolve();
+      }, 0);
+    }).catch(() => {
+      // Aborted — swallow; caller checks signal.aborted after maybeYield.
+    });
+    lastYieldAt = performance.now();
+  };
+
+  const dispose = () => {
+    if (signal) signal.removeEventListener('abort', onAbort);
+    if (pendingHandle !== null) {
+      clearTimeout(pendingHandle);
+      pendingHandle = null;
+    }
+  };
+
+  return {
+    maybeYield,
+    get yieldCount() {
+      return yields;
+    },
+    dispose,
+  };
+}
+
 /** Chunk size for yielding between decrypt attempts. Sized for the
  * nsec path: `nip04.decrypt` / `unwrapWrapNsec` are ~1 ms each on
  * mid-range mobile CPUs, so 15 iterations ≈ 15 ms of blocking work
@@ -2799,6 +2915,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           let nip17Misses = 0;
           let nip17Evictions = 0;
           let nip17CacheSize = 0;
+          // Number of actual `setTimeout(0)` yields the NIP-17 loop
+          // performed this refresh — emitted in the [Perf] nip17-cache
+          // line so we can track how often the new frame-budget
+          // scheduler trips (#532). Higher = more breathing room
+          // given back to the UI thread.
+          let nip17YieldCount = 0;
 
           // PR B: load persisted inbox + last-seen so we can (a) paint
           // cached entries before the relay round-trip finishes and
@@ -2933,87 +3055,99 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               const cache = safeParseRecord<Nip17CacheEntry>(raw);
               const newlyCached: Nip17CacheEntry[] = [];
               let unfollowedPurged = 0;
-              let nip17Decrypted = 0;
-              let nip17Iterated = 0;
               let touched = 0;
-              for (const wrap of kind1059) {
-                // Periodic yield + abort check covers the cache-hit path
-                // too (#286). Without this, a long run of cache hits
-                // (or skipped/unfollowed entries) walks the whole
-                // kind1059 list synchronously between the per-decrypt
-                // yields below — bad on a >1000-wrap inbox where any
-                // back-tap during refresh appears frozen.
-                if (++nip17Iterated % NIP17_LOOP_YIELD_EVERY === 0) {
+              // Frame-budget scheduler (#532): yield whenever we've held
+              // the JS thread for >= DECRYPT_FRAME_BUDGET_MS, with the
+              // count-based modulo kept as a safety cap. On abort, the
+              // scheduler hard-cancels any pending setTimeout so the
+              // loop unwinds in the next microtask instead of waiting
+              // out one more scheduler round-trip.
+              const nsecYield = createYieldScheduler({
+                signal,
+                safetyEvery: NIP17_LOOP_YIELD_EVERY,
+              });
+              try {
+                for (const wrap of kind1059) {
+                  // Time-budget yield + abort check (#286, #532). Covers
+                  // the cache-hit path too — without it, a long run of
+                  // cache hits walks the whole kind1059 list synchronously
+                  // and any back-tap during refresh appears frozen.
+                  await nsecYield.maybeYield();
                   if (signal?.aborted) return;
-                  await yieldToEventLoop();
-                }
-                const cached = cache[wrap.id];
-                if (cached) {
-                  nip17Hits++;
-                  // Cache entry exists → it was from a followed sender
-                  // when first stored. Re-check against the *current*
-                  // follow set so unfollowed partners don't keep
-                  // surfacing from cache. Purge the stale entry so we
-                  // don't keep dragging it through every refresh until
-                  // the 5000-cap LRU finally evicts it.
-                  if (!passesFollowGate(cached.partnerPubkey)) {
-                    delete cache[wrap.id];
-                    unfollowedPurged++;
+                  const cached = cache[wrap.id];
+                  if (cached) {
+                    nip17Hits++;
+                    // Cache entry exists → it was from a followed sender
+                    // when first stored. Re-check against the *current*
+                    // follow set so unfollowed partners don't keep
+                    // surfacing from cache. Purge the stale entry so we
+                    // don't keep dragging it through every refresh until
+                    // the 5000-cap LRU finally evicts it.
+                    if (!passesFollowGate(cached.partnerPubkey)) {
+                      delete cache[wrap.id];
+                      unfollowedPurged++;
+                      continue;
+                    }
+                    // LRU touch (#193): re-insert at the tail so this hot
+                    // entry survives the next overflow eviction. Without
+                    // this the cache is FIFO-by-first-write — a thread
+                    // the user re-opens regularly can be evicted just
+                    // because 5000 newer wraps happened to arrive first.
+                    touchNip17CacheEntry(cache, wrap.id);
+                    touched++;
+                    entries.push({
+                      id: cached.wrapId,
+                      partnerPubkey: cached.partnerPubkey,
+                      fromMe: cached.fromMe,
+                      createdAt: cached.createdAt,
+                      text: cached.text,
+                      wireKind: cached.wireKind,
+                    });
                     continue;
                   }
-                  // LRU touch (#193): re-insert at the tail so this hot
-                  // entry survives the next overflow eviction. Without
-                  // this the cache is FIFO-by-first-write — a thread
-                  // the user re-opens regularly can be evicted just
-                  // because 5000 newer wraps happened to arrive first.
-                  touchNip17CacheEntry(cache, wrap.id);
-                  touched++;
+                  nip17Misses++;
+                  const rumor = unwrapWrapNsec(wrap, secretKey, onSkip);
+                  // No per-decrypt yield here: the frame-budget scheduler
+                  // at the top of the loop already yields whenever the
+                  // accumulated work exceeds DECRYPT_FRAME_BUDGET_MS,
+                  // which captures the cost of unwrapWrapNsec naturally.
+                  if (!rumor) continue;
+                  // Multi-recipient (group) rumors: route to group storage
+                  // and short-circuit the DM-inbox path. The 1:1 inbox
+                  // never sees group messages — they belong to a different
+                  // surface (GroupConversationScreen).
+                  const routeResult = await tryRouteGroupRumor(rumor, refreshForPubkey, wrap.id);
+                  if (routeResult.kind !== 'not-group') continue;
+                  const partnership = partnerFromRumor(rumor, refreshForPubkey);
+                  if (!partnership) continue;
+                  // B1 — drop non-follows at the data layer. No caching, no
+                  // state. The filter is load-bearing ("parental control"),
+                  // so it runs here not in the view.
+                  if (!passesFollowGate(partnership.partnerPubkey)) continue;
+                  const entry: Nip17CacheEntry = {
+                    id: wrap.id,
+                    wrapId: wrap.id,
+                    partnerPubkey: partnership.partnerPubkey,
+                    fromMe: partnership.fromMe,
+                    createdAt: rumor.created_at,
+                    text: rumor.content,
+                    wireKind: rumor.kind,
+                  };
+                  cache[wrap.id] = entry;
+                  newlyCached.push(entry);
                   entries.push({
-                    id: cached.wrapId,
-                    partnerPubkey: cached.partnerPubkey,
-                    fromMe: cached.fromMe,
-                    createdAt: cached.createdAt,
-                    text: cached.text,
-                    wireKind: cached.wireKind,
+                    id: entry.id,
+                    partnerPubkey: entry.partnerPubkey,
+                    fromMe: entry.fromMe,
+                    createdAt: entry.createdAt,
+                    text: entry.text,
+                    wireKind: entry.wireKind,
                   });
-                  continue;
                 }
-                nip17Misses++;
-                const rumor = unwrapWrapNsec(wrap, secretKey, onSkip);
-                if (++nip17Decrypted % DECRYPT_YIELD_EVERY === 0) await yieldToEventLoop();
-                if (!rumor) continue;
-                // Multi-recipient (group) rumors: route to group storage
-                // and short-circuit the DM-inbox path. The 1:1 inbox
-                // never sees group messages — they belong to a different
-                // surface (GroupConversationScreen).
-                const routeResult = await tryRouteGroupRumor(rumor, refreshForPubkey, wrap.id);
-                if (routeResult.kind !== 'not-group') continue;
-                const partnership = partnerFromRumor(rumor, refreshForPubkey);
-                if (!partnership) continue;
-                // B1 — drop non-follows at the data layer. No caching, no
-                // state. The filter is load-bearing ("parental control"),
-                // so it runs here not in the view.
-                if (!passesFollowGate(partnership.partnerPubkey)) continue;
-                const entry: Nip17CacheEntry = {
-                  id: wrap.id,
-                  wrapId: wrap.id,
-                  partnerPubkey: partnership.partnerPubkey,
-                  fromMe: partnership.fromMe,
-                  createdAt: rumor.created_at,
-                  text: rumor.content,
-                  wireKind: rumor.kind,
-                };
-                cache[wrap.id] = entry;
-                newlyCached.push(entry);
-                entries.push({
-                  id: entry.id,
-                  partnerPubkey: entry.partnerPubkey,
-                  fromMe: entry.fromMe,
-                  createdAt: entry.createdAt,
-                  text: entry.text,
-                  wireKind: entry.wireKind,
-                });
+              } finally {
+                nsecYield.dispose();
               }
+              nip17YieldCount += nsecYield.yieldCount;
 
               // Persist if we mutated the cache for any reason: new
               // entries, follow-set purges, or LRU touches (#193) — the
@@ -3032,89 +3166,95 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             const cache = safeParseRecord<Nip17CacheEntry>(raw);
             const newlyCached: Nip17CacheEntry[] = [];
             let permissionDenied = false;
-            let nip17Iterated = 0;
             let touched = 0;
             let unfollowedPurged = 0;
-
-            for (const wrap of kind1059) {
-              // Periodic yield + abort check (#286) — see the nsec branch above for rationale.
-              if (++nip17Iterated % NIP17_LOOP_YIELD_EVERY === 0) {
+            // Frame-budget scheduler (#532) — see nsec branch above.
+            const amberYield = createYieldScheduler({
+              signal,
+              safetyEvery: NIP17_LOOP_YIELD_EVERY,
+            });
+            try {
+              for (const wrap of kind1059) {
+                // Time-budget yield + abort check (#286, #532) — see nsec branch above for rationale.
+                await amberYield.maybeYield();
                 if (signal?.aborted) return;
-                await yieldToEventLoop();
-              }
-              const cached = cache[wrap.id];
-              if (cached) {
-                nip17Hits++;
-                // Re-check against current follow set; purge if no longer followed so we don't drag stale entries through every refresh.
-                if (!passesFollowGate(cached.partnerPubkey)) {
-                  delete cache[wrap.id];
-                  unfollowedPurged++;
+                const cached = cache[wrap.id];
+                if (cached) {
+                  nip17Hits++;
+                  // Re-check against current follow set; purge if no longer followed so we don't drag stale entries through every refresh.
+                  if (!passesFollowGate(cached.partnerPubkey)) {
+                    delete cache[wrap.id];
+                    unfollowedPurged++;
+                    continue;
+                  }
+                  touchNip17CacheEntry(cache, wrap.id);
+                  touched++;
+                  entries.push({
+                    id: cached.wrapId,
+                    partnerPubkey: cached.partnerPubkey,
+                    fromMe: cached.fromMe,
+                    createdAt: cached.createdAt,
+                    text: cached.text,
+                    wireKind: cached.wireKind,
+                  });
                   continue;
                 }
-                touchNip17CacheEntry(cache, wrap.id);
-                touched++;
-                entries.push({
-                  id: cached.wrapId,
-                  partnerPubkey: cached.partnerPubkey,
-                  fromMe: cached.fromMe,
-                  createdAt: cached.createdAt,
-                  text: cached.text,
-                  wireKind: cached.wireKind,
-                });
-                continue;
-              }
-              nip17Misses++;
-              // Uncached — unwrap via Amber's silent content-resolver path.
-              // If Amber hasn't granted blanket nip44_decrypt permission,
-              // this throws PERMISSION_NOT_GRANTED and we stop iterating.
-              try {
-                const rumor = await unwrapWrapViaNip44(wrap, amberNip44DecryptSilent, onSkip);
-                if (!rumor) continue;
-                // Multi-recipient (group) rumors: route to group storage
-                // and short-circuit the DM-inbox path.
-                const routeResult = await tryRouteGroupRumor(rumor, refreshForPubkey, wrap.id);
-                if (routeResult.kind !== 'not-group') continue;
-                const partnership = partnerFromRumor(rumor, refreshForPubkey);
-                if (!partnership) continue;
-                // B1 — never cache rumors from non-followed senders. The
-                // cost is re-decrypting them on the next refresh, but the
-                // silent path is ~1 ms per call and keeps plaintext off
-                // AsyncStorage.
-                if (!passesFollowGate(partnership.partnerPubkey)) continue;
-                const entry: Nip17CacheEntry = {
-                  id: wrap.id,
-                  wrapId: wrap.id,
-                  partnerPubkey: partnership.partnerPubkey,
-                  fromMe: partnership.fromMe,
-                  createdAt: rumor.created_at,
-                  text: rumor.content,
-                  wireKind: rumor.kind,
-                };
-                cache[wrap.id] = entry;
-                newlyCached.push(entry);
-                entries.push({
-                  id: entry.id,
-                  partnerPubkey: entry.partnerPubkey,
-                  fromMe: entry.fromMe,
-                  createdAt: entry.createdAt,
-                  text: entry.text,
-                  wireKind: entry.wireKind,
-                });
-              } catch (error) {
-                const code = (error as { code?: string })?.code;
-                const message = (error as Error)?.message ?? '';
-                if (code === 'PERMISSION_NOT_GRANTED' || /PERMISSION_NOT_GRANTED/.test(message)) {
-                  permissionDenied = true;
-                  if (__DEV__) {
-                    console.log(
-                      `[Nostr] Amber NIP-44 permission not granted — stopping NIP-17 unwrap for this refresh`,
-                    );
+                nip17Misses++;
+                // Uncached — unwrap via Amber's silent content-resolver path.
+                // If Amber hasn't granted blanket nip44_decrypt permission,
+                // this throws PERMISSION_NOT_GRANTED and we stop iterating.
+                try {
+                  const rumor = await unwrapWrapViaNip44(wrap, amberNip44DecryptSilent, onSkip);
+                  if (!rumor) continue;
+                  // Multi-recipient (group) rumors: route to group storage
+                  // and short-circuit the DM-inbox path.
+                  const routeResult = await tryRouteGroupRumor(rumor, refreshForPubkey, wrap.id);
+                  if (routeResult.kind !== 'not-group') continue;
+                  const partnership = partnerFromRumor(rumor, refreshForPubkey);
+                  if (!partnership) continue;
+                  // B1 — never cache rumors from non-followed senders. The
+                  // cost is re-decrypting them on the next refresh, but the
+                  // silent path is ~1 ms per call and keeps plaintext off
+                  // AsyncStorage.
+                  if (!passesFollowGate(partnership.partnerPubkey)) continue;
+                  const entry: Nip17CacheEntry = {
+                    id: wrap.id,
+                    wrapId: wrap.id,
+                    partnerPubkey: partnership.partnerPubkey,
+                    fromMe: partnership.fromMe,
+                    createdAt: rumor.created_at,
+                    text: rumor.content,
+                    wireKind: rumor.kind,
+                  };
+                  cache[wrap.id] = entry;
+                  newlyCached.push(entry);
+                  entries.push({
+                    id: entry.id,
+                    partnerPubkey: entry.partnerPubkey,
+                    fromMe: entry.fromMe,
+                    createdAt: entry.createdAt,
+                    text: entry.text,
+                    wireKind: entry.wireKind,
+                  });
+                } catch (error) {
+                  const code = (error as { code?: string })?.code;
+                  const message = (error as Error)?.message ?? '';
+                  if (code === 'PERMISSION_NOT_GRANTED' || /PERMISSION_NOT_GRANTED/.test(message)) {
+                    permissionDenied = true;
+                    if (__DEV__) {
+                      console.log(
+                        `[Nostr] Amber NIP-44 permission not granted — stopping NIP-17 unwrap for this refresh`,
+                      );
+                    }
+                    break;
                   }
-                  break;
+                  if (__DEV__) console.warn('[Nostr] Amber NIP-17 unwrap failed:', error);
                 }
-                if (__DEV__) console.warn('[Nostr] Amber NIP-17 unwrap failed:', error);
               }
+            } finally {
+              amberYield.dispose();
             }
+            nip17YieldCount += amberYield.yieldCount;
 
             setAmberNip44Permission(permissionDenied ? 'denied' : 'granted');
 
@@ -3159,7 +3299,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               `hits=${nip17Hits}, ` +
               `misses=${nip17Misses}, ` +
               `evictions=${nip17Evictions}, ` +
-              `size=${nip17CacheSize}`,
+              `size=${nip17CacheSize}, ` +
+              `yields=${nip17YieldCount} (budget=${DECRYPT_FRAME_BUDGET_MS}ms, cap=${NIP17_LOOP_YIELD_EVERY})`,
           );
 
           setDmInbox(filteredFinal);
