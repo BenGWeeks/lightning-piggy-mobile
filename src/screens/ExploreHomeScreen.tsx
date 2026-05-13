@@ -213,7 +213,9 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // Web-of-trust filter — kept in a ref so the subscription callbacks
   // always see the current `isTrusted` predicate without resubscribing
   // every time the trust set churns (L2 backfill, contact-list updates).
-  const { isTrusted, filterEnabled } = useTrustGraph();
+  // Post-#535: `isTrusted` is tier-aware; consumers no longer branch on a
+  // separate `filterEnabled` flag (returns true unconditionally for 'all').
+  const { isTrusted } = useTrustGraph();
   const isTrustedRef = useRef(isTrusted);
   useEffect(() => {
     isTrustedRef.current = isTrusted;
@@ -293,7 +295,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         // trust graph (an unverified cache could be a phishing LNURL
         // or, worse, a physical lure). Surfaced as a count instead so
         // users know they exist without being lured into inspecting them.
-        if (filterEnabled && !isTrustedRef.current(c.hiderPubkey)) {
+        if (!isTrustedRef.current(c.hiderPubkey)) {
           setUntrustedCacheCount((n) => n + 1);
           return;
         }
@@ -310,7 +312,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
       subscribeNearbyEvents(eventPrefixes, (e) => {
         // Skip events that already started > 1h ago.
         if (e.startsAt && e.startsAt < Math.floor(Date.now() / 1000) - 60 * 60) return;
-        if (filterEnabled && !isTrustedRef.current(e.organiserPubkey)) {
+        if (!isTrustedRef.current(e.organiserPubkey)) {
           setUntrustedEventCount((n) => n + 1);
           return;
         }

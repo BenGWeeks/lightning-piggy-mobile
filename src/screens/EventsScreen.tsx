@@ -111,7 +111,10 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const closerRef = useRef<(() => void) | null>(null);
 
-  const { isTrusted, filterEnabled, setFilterEnabled } = useTrustGraph();
+  // Post-#535: `wotTier` replaces the legacy `filterEnabled` boolean.
+  // `isTrusted` is tier-aware (returns true for 'all') so callers no
+  // longer need to gate on a separate "enabled" flag.
+  const { isTrusted, wotTier } = useTrustGraph();
   const isTrustedRef = useRef(isTrusted);
   useEffect(() => {
     isTrustedRef.current = isTrusted;
@@ -159,7 +162,8 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
           return;
         }
         // WoT filter — see `trustGraphService` for the threat model.
-        if (filterEnabled && !isTrustedRef.current(e.organiserPubkey)) {
+        // `isTrusted` is tier-aware post-#535 (returns true for 'all').
+        if (!isTrustedRef.current(e.organiserPubkey)) {
           setUntrustedHidden((n) => n + 1);
           return;
         }
@@ -245,9 +249,9 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
       countActiveFilters({
         maxDistanceMetres,
         maxFromNowSec,
-        wotFilterEnabled: filterEnabled,
+        wotTier,
       }),
-    [maxDistanceMetres, maxFromNowSec, filterEnabled],
+    [maxDistanceMetres, maxFromNowSec, wotTier],
   );
 
   const onCreateEvent = useCallback(() => {
@@ -426,18 +430,15 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
         onChangeMaxDistance={setMaxDistanceMetres}
         maxFromNowSec={maxFromNowSec}
         onChangeMaxFromNow={setMaxFromNowSec}
-        wotFilterEnabled={filterEnabled}
         wotUntrustedHidden={untrustedHidden}
-        onToggleWotFilter={() => {
-          if (__DEV__) setFilterEnabled(!filterEnabled);
-        }}
         sortBy={sortBy}
         onChangeSortBy={setSortBy}
         onClearAll={() => {
           setMaxDistanceMetres(null);
           setMaxFromNowSec(null);
           setSortBy('date');
-          if (__DEV__) setFilterEnabled(true);
+          // WoT tier reset is intentionally not bundled here — the user
+          // controls it via the bottom-sheet picker.
         }}
       />
     </View>
