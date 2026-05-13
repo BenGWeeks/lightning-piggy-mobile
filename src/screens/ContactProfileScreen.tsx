@@ -303,19 +303,34 @@ const ContactProfileScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      {/* Back chevron pinned over the banner. The banner extends up behind
+      {/* Header strip pinned over the banner. The banner extends up behind
           the status bar (battery / clock / wifi) — `topBar` is absolute so
-          the chevron stays at a consistent inset.top + 8 offset. */}
+          the buttons stay at a consistent inset.top + 8 offset. Back on
+          the left, the "More" actions button on the right (mirrors the
+          back chevron). Both buttons use a solid dark-pill background for
+          contrast against busy banner imagery. */}
       <View style={[styles.topBar, { top: insets.top + 8 }]}>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
-          style={styles.backButton}
+          style={styles.headerButton}
           accessibilityLabel="Go back"
           testID="contact-profile-back"
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <ChevronLeft size={26} color={colors.white} strokeWidth={2.4} />
         </TouchableOpacity>
+        {contact.pubkey && (
+          <TouchableOpacity
+            onPress={() => setActionsSheetOpen(true)}
+            disabled={sharing}
+            style={styles.headerButton}
+            accessibilityLabel="More actions"
+            testID="contact-more-button"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <MoreHorizontal size={24} color={colors.white} strokeWidth={2.4} />
+          </TouchableOpacity>
+        )}
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -517,24 +532,6 @@ const ContactProfileScreen: React.FC = () => {
 
         {/* Friend's recent kind-1 notes. Hidden for phone-only contacts. */}
         {contact.pubkey && <FriendNoteFeed authorPubkey={contact.pubkey} />}
-
-        {/* Secondary affordance row — single "More" button opens a
-            bottom sheet with Share / Open in / Share to friend / Write
-            to NFC. Replaces the previous 3 inline icon buttons; #439. */}
-        {contact.pubkey && (
-          <View style={styles.secondaryRow}>
-            <TouchableOpacity
-              style={styles.secondaryIconButton}
-              onPress={() => setActionsSheetOpen(true)}
-              disabled={sharing}
-              accessibilityLabel="More actions"
-              testID="contact-more-button"
-            >
-              <MoreHorizontal size={18} color={colors.textSupplementary} />
-              <Text style={styles.secondaryIconLabel}>More</Text>
-            </TouchableOpacity>
-          </View>
-        )}
       </ScrollView>
 
       {npub && (
@@ -594,16 +591,21 @@ const createStyles = (colors: Palette) =>
     topBar: {
       position: 'absolute',
       left: 8,
+      right: 8,
       zIndex: 10,
       flexDirection: 'row',
       alignItems: 'center',
+      justifyContent: 'space-between',
       paddingHorizontal: 4,
       paddingVertical: 2,
     },
-    backButton: {
-      padding: 6,
-      backgroundColor: 'rgba(0,0,0,0.25)',
+    headerButton: {
+      width: 36,
+      height: 36,
       borderRadius: 18,
+      backgroundColor: 'rgba(0,0,0,0.6)',
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     scrollContent: {
       paddingBottom: 48,
@@ -764,34 +766,6 @@ const createStyles = (colors: Palette) =>
       fontSize: 14,
       lineHeight: 20,
       color: colors.textBody,
-    },
-    secondaryRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-around',
-      alignItems: 'center',
-      paddingHorizontal: 16,
-      marginTop: 24,
-      paddingTop: 16,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.divider,
-    },
-    secondaryIconButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      paddingHorizontal: 8,
-      paddingVertical: 6,
-    },
-    secondaryIconButtonDisabled: {
-      opacity: 0.5,
-    },
-    secondaryIconLabel: {
-      fontSize: 13,
-      fontWeight: '500',
-      color: colors.textSupplementary,
-    },
-    secondaryIconLabelDisabled: {
-      color: colors.divider,
     },
   });
 
