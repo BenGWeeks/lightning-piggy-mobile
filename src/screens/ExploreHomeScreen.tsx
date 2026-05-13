@@ -493,7 +493,12 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
               : 'Piglets + classic NIP-GC caches'
           }
           items={sortedCaches}
-          loading={!!pos && caches.size === 0}
+          // Loading skeleton only while we haven't received *anything*.
+          // If WoT has dropped one or more nearby caches the relay query
+          // has clearly returned — keep loading false so the empty state
+          // can explain *why* the rail is empty instead of looping the
+          // skeleton forever.
+          loading={!!pos && caches.size === 0 && untrustedCacheCount === 0}
           // "See all" lands on the merged Geo-caches page (map + list
           // + [+] in header for the hider flow). Was a two-screen
           // Hunt/Discover split before the May 2026 UX merge.
@@ -501,9 +506,18 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           seeAllTestId="explore-card-hunt"
           keyExtractor={(c) => c.cache.coord}
           emptyState={
-            <Text style={localStyles.emptyText}>
-              No caches in your area yet. Tap See all → Hide a Piggy to be the first.
-            </Text>
+            untrustedCacheCount > 0 ? (
+              <Text style={localStyles.emptyText}>
+                {untrustedCacheCount} nearby{' '}
+                {untrustedCacheCount === 1 ? 'cache is' : 'caches are'} hidden because their hider
+                isn't in your Web-of-Trust. Follow people who hide Piggies on Nostr to start seeing
+                their caches here.
+              </Text>
+            ) : (
+              <Text style={localStyles.emptyText}>
+                No caches in your area yet. Tap See all → Hide a Piggy to be the first.
+              </Text>
+            )
           }
           renderItem={({ cache, distance }) => (
             <CacheCard
