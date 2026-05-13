@@ -345,7 +345,11 @@ const TransactionDetailSheet: React.FC<Props> = ({
         <BottomSheetView style={styles.content}>
           <View style={styles.header}>
             <View style={styles.headerIcon}>
-              <TransactionTypeIcon category={getTxCategory(tx)} size={56} />
+              <TransactionTypeIcon
+                category={getTxCategory(tx)}
+                size={56}
+                needsAttention={needsAttention}
+              />
             </View>
             <Text
               style={[
