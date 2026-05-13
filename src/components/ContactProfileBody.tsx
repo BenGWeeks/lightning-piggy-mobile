@@ -7,14 +7,15 @@ import {
   StyleSheet,
   Linking,
   ScrollView,
+  Share,
 } from 'react-native';
 import { Alert } from './BrandedAlert';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
 import QRCode from 'react-native-qrcode-svg';
-import { Zap, Copy, Share2, UserRound } from 'lucide-react-native';
-import NfcIcon from './icons/NfcIcon';
+import { Zap, Copy, MoreHorizontal, UserRound } from 'lucide-react-native';
 import NfcWriteSheet from './NfcWriteSheet';
+import ContactActionsSheet from './ContactActionsSheet';
 import { isNfcSupported } from '../services/nfcService';
 import * as Clipboard from 'expo-clipboard';
 import Toast from './BrandedToast';
@@ -76,6 +77,7 @@ const ContactProfileBody: React.FC<Props> = ({
   const [sharing, setSharing] = useState(false);
   const [nfcWriteVisible, setNfcWriteVisible] = useState(false);
   const [nfcSupported, setNfcSupported] = useState(false);
+  const [actionsSheetOpen, setActionsSheetOpen] = useState(false);
 
   // Probe NFC capability once on mount.
   useEffect(() => {
@@ -162,10 +164,33 @@ const ContactProfileBody: React.FC<Props> = ({
     });
   };
 
-  const handleShare = useCallback(() => {
+  // "Share to friend" — opens the FriendPicker so the user can DM the
+  // contact card as an encrypted Nostr message.
+  const handleShareToFriendOpen = useCallback(() => {
     if (!contact.pubkey) return;
     setShareOpen(true);
   }, [contact.pubkey]);
+
+  // "Share" — OS share sheet (other apps, clipboard, etc). The Nostr URI
+  // is the primary handle; we include a friendly label so apps that just
+  // surface the message-string (eg Signal) have human-readable context.
+  const handleOsShare = useCallback(async () => {
+    if (!contact.pubkey || !npub) return;
+    const readRelays = relays.filter((r) => r.read).map((r) => r.url);
+    const relayHints = buildProfileRelayHints(contact.pubkey, contacts, readRelays);
+    const nprofile = nprofileEncode(contact.pubkey, relayHints);
+    const label = contact.name || 'a contact';
+    const nostrUri = `nostr:${nprofile}`;
+    const webUrl = `https://njump.me/${npub}`;
+    try {
+      await Share.share({
+        message: `${label}\n${nostrUri}\n${webUrl}`,
+        url: webUrl,
+      });
+    } catch {
+      // User dismissed or platform rejected — nothing actionable to surface.
+    }
+  }, [contact.pubkey, contact.name, npub, contacts, relays]);
 
   const handleShareToFriend = useCallback(
     async (friend: PickedFriend) => {
@@ -437,44 +462,12 @@ const ContactProfileBody: React.FC<Props> = ({
         {contact.pubkey && (
           <TouchableOpacity
             style={styles.iconButton}
-            onPress={handleShare}
+            onPress={() => setActionsSheetOpen(true)}
             disabled={sharing}
-            accessibilityLabel="Share contact"
-            testID="contact-share-button"
+            accessibilityLabel="More actions"
+            testID="contact-more-button"
           >
-            <Share2 size={18} color={colors.brandPink} />
-          </TouchableOpacity>
-        )}
-        {contact.pubkey && (
-          <TouchableOpacity
-            style={styles.iconButton}
-            onPress={handleViewProfile}
-            accessibilityLabel="Open in external client"
-            testID="contact-view-profile-button"
-          >
-            <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3"
-                stroke={colors.brandPink}
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </Svg>
-          </TouchableOpacity>
-        )}
-        {contact.pubkey && (
-          <TouchableOpacity
-            style={[styles.iconButton, !nfcSupported && styles.iconButtonDisabled]}
-            onPress={() => setNfcWriteVisible(true)}
-            disabled={!nfcSupported}
-            accessibilityLabel={
-              nfcSupported ? 'Write to NFC tag' : 'Write to NFC tag (not supported on this device)'
-            }
-            accessibilityState={{ disabled: !nfcSupported }}
-            testID="contact-nfc-write-button"
-          >
-            <NfcIcon size={18} color={nfcSupported ? colors.brandPink : colors.textSupplementary} />
+            <MoreHorizontal size={18} color={colors.brandPink} />
           </TouchableOpacity>
         )}
       </View>
@@ -494,6 +487,16 @@ const ContactProfileBody: React.FC<Props> = ({
         onSelect={handleShareToFriend}
         title={`Share ${contact.name || 'contact'}`}
         subtitle="They'll receive an encrypted Nostr DM with a person card."
+      />
+
+      <ContactActionsSheet
+        visible={actionsSheetOpen}
+        onClose={() => setActionsSheetOpen(false)}
+        onShare={handleOsShare}
+        onOpenIn={handleViewProfile}
+        onShareToFriend={handleShareToFriendOpen}
+        onWriteToNfc={() => setNfcWriteVisible(true)}
+        nfcSupported={nfcSupported}
       />
     </Container>
   );
