@@ -33,6 +33,7 @@ import FriendsScreen from '../screens/FriendsScreen';
 import ConversationScreen from '../screens/ConversationScreen';
 import GroupsScreen from '../screens/GroupsScreen';
 import GroupConversationScreen from '../screens/GroupConversationScreen';
+import ContactProfileScreen from '../screens/ContactProfileScreen';
 import ProfileScreen from '../screens/account/ProfileScreen';
 import WalletsScreen from '../screens/account/WalletsScreen';
 import NostrScreen from '../screens/account/NostrScreen';
@@ -254,6 +255,7 @@ export default function AppNavigator() {
         <Stack.Screen name="Conversation" component={ConversationScreen} />
         <Stack.Screen name="Groups" component={GroupsScreen} />
         <Stack.Screen name="GroupConversation" component={GroupConversationScreen} />
+        <Stack.Screen name="ContactProfile" component={ContactProfileScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

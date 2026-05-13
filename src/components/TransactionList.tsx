@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
@@ -8,19 +8,18 @@ import type { Palette } from '../styles/palettes';
 import { satsToFiatString } from '../services/fiatService';
 import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
+import ContactProfileSheet from './ContactProfileSheet';
+import type { ContactProfileBodyData } from './ContactProfileBody';
 import TransactionDetailSheet, {
   TransactionDetailData,
   CounterpartyContact,
 } from './TransactionDetailSheet';
-import ContactProfileSheet from './ContactProfileSheet';
 import SendSheet from './SendSheet';
 import TransactionTypeIcon from './TransactionTypeIcon';
 import { getTxCategory } from '../utils/txCategory';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import type { WalletTransaction, ZapCounterpartyInfo } from '../types/wallet';
 import { perfLog } from '../utils/perfLog';
-
-let __transactionListFirstRenderLogged = false;
 import type { RootStackParamList } from '../navigation/types';
 
 interface Props {
@@ -93,8 +92,13 @@ function txKey(tx: WalletTransaction, fallbackIndex: number): string {
 }
 
 const TransactionList: React.FC<Props> = ({ transactions }) => {
-  if (!__transactionListFirstRenderLogged) {
-    __transactionListFirstRenderLogged = true;
+  // Per-mount first-render marker. The previous module-scope `let`
+  // never reset, so navigating away + back (or switching wallets,
+  // which forces a remount via the activeWalletId effect) silently
+  // dropped the perf log on every subsequent mount.
+  const firstRenderLogged = useRef(false);
+  if (!firstRenderLogged.current) {
+    firstRenderLogged.current = true;
     perfLog(`TransactionList first render (${transactions.length} txs)`);
   }
   const colors = useThemeColors();
@@ -147,8 +151,12 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
   };
   const [showAll, setShowAll] = useState(false);
   const [detail, setDetail] = useState<TransactionDetailData | null>(null);
-  const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
   const [zapContact, setZapContact] = useState<CounterpartyContact | null>(null);
+  // Counterparty preview — opened from TransactionDetailSheet → "view
+  // profile". A quick-peek bottom sheet first; "View full profile"
+  // inside drills into the ContactProfile route.
+  const [sheetContact, setSheetContact] = useState<ContactProfileBodyData | null>(null);
+  const [profileSheetVisible, setProfileSheetVisible] = useState(false);
 
   // Collapse the list back to the initial N rows when the active wallet
   // changes, but NOT on every transactions-array update. WalletContext
@@ -337,7 +345,8 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
         onClose={() => setDetail(null)}
         onCounterpartyPress={(contact) => {
           setDetail(null);
-          setProfileContact(contact);
+          setSheetContact(contact);
+          setProfileSheetVisible(true);
         }}
         onZapCounterparty={(contact) => {
           setDetail(null);
@@ -353,15 +362,29 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
           });
         }}
       />
+      <SendSheet
+        visible={zapContact !== null}
+        onClose={() => setZapContact(null)}
+        initialAddress={zapContact?.lightningAddress ?? undefined}
+        initialPicture={zapContact?.picture ?? undefined}
+        recipientPubkey={zapContact?.pubkey ?? undefined}
+        recipientName={zapContact?.name ?? undefined}
+      />
       <ContactProfileSheet
-        visible={profileContact !== null}
-        onClose={() => setProfileContact(null)}
-        contact={profileContact}
+        visible={profileSheetVisible}
+        onClose={() => setProfileSheetVisible(false)}
+        contact={sheetContact}
+        onViewFullProfile={() => {
+          if (!sheetContact) return;
+          setProfileSheetVisible(false);
+          navigation.navigate('ContactProfile', { contact: sheetContact });
+        }}
         onMessage={
-          profileContact
+          sheetContact?.pubkey
             ? () => {
-                const c = profileContact;
-                setProfileContact(null);
+                const c = sheetContact;
+                if (!c?.pubkey) return;
+                setProfileSheetVisible(false);
                 navigation.navigate('Conversation', {
                   pubkey: c.pubkey,
                   name: c.name,
@@ -372,22 +395,28 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
             : undefined
         }
         onZap={
-          profileContact?.lightningAddress
+          // Require both a pubkey AND a lightning address — SendSheet's
+          // zap path needs a real pubkey to attach the zap receipt to
+          // (NIP-57 verification fails on an empty-string sender).
+          // Anonymous-zap counterparties (no pubkey) hide the icon
+          // rather than silently mis-target.
+          sheetContact?.pubkey && sheetContact.lightningAddress
             ? () => {
-                const c = profileContact;
-                setProfileContact(null);
-                setZapContact(c);
+                const c = sheetContact;
+                if (!c?.pubkey) return;
+                setProfileSheetVisible(false);
+                setZapContact({
+                  pubkey: c.pubkey,
+                  name: c.name,
+                  picture: c.picture,
+                  lightningAddress: c.lightningAddress,
+                  banner: c.banner ?? null,
+                  nip05: c.nip05 ?? null,
+                  source: 'nostr',
+                });
               }
             : undefined
         }
-      />
-      <SendSheet
-        visible={zapContact !== null}
-        onClose={() => setZapContact(null)}
-        initialAddress={zapContact?.lightningAddress ?? undefined}
-        initialPicture={zapContact?.picture ?? undefined}
-        recipientPubkey={zapContact?.pubkey ?? undefined}
-        recipientName={zapContact?.name ?? undefined}
       />
     </View>
   );

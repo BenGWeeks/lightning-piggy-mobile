@@ -30,13 +30,14 @@ import { useGroups } from '../contexts/GroupsContext';
 import { useNostr, subscribeGroupMessages, notifyGroupMessage } from '../contexts/NostrContext';
 import RenameGroupSheet from '../components/RenameGroupSheet';
 import GroupMembersSheet from '../components/GroupMembersSheet';
-import ContactProfileSheet from '../components/ContactProfileSheet';
 import AttachPanel from '../components/AttachPanel';
 import ConversationComposer from '../components/ConversationComposer';
 import GifPickerSheet from '../components/GifPickerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
 import SendSheet from '../components/SendSheet';
 import FriendPickerSheet, { PickedFriend } from '../components/FriendPickerSheet';
+import ContactProfileSheet from '../components/ContactProfileSheet';
+import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 import MessageBubble from '../components/MessageBubble';
 import { isConfigured as isGifConfigured, type Gif } from '../services/giphyService';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
@@ -65,7 +66,6 @@ import {
 import { usePaidInvoiceTracker } from '../hooks/usePaidInvoiceTracker';
 import type { NostrProfile } from '../types/nostr';
 import type { GroupConversationRoute, RootStackParamList } from '../navigation/types';
-import type { CounterpartyContact } from '../components/TransactionDetailSheet';
 
 type GroupConversationNavigation = NativeStackNavigationProp<
   RootStackParamList,
@@ -124,8 +124,12 @@ const GroupConversationScreen: React.FC = () => {
   // same in groups.
   const [sendSheetOpen, setSendSheetOpen] = useState(false);
   const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
-  const [profileContact, setProfileContact] = useState<CounterpartyContact | null>(null);
   const [fullscreenGifUrl, setFullscreenGifUrl] = useState<string | null>(null);
+  // Contact preview sheet — peek a member or shared contact without
+  // leaving the group conversation. The sheet's "View full profile"
+  // link drills into ContactProfile when the user wants the deep view.
+  const [sheetContact, setSheetContact] = useState<ContactProfileBodyData | null>(null);
+  const [profileSheetVisible, setProfileSheetVisible] = useState(false);
   // Cache of kind-0 profiles for shared-contact cards. Populated by the
   // batch-fetch effect below, keyed by pubkey. `null` value = fetch
   // attempted and resolved with no profile (so MessageBubble can drop
@@ -432,21 +436,34 @@ const GroupConversationScreen: React.FC = () => {
     setSendSheetOpen(true);
   }, []);
 
-  // MessageBubble handler — opens ContactProfileSheet for the shared
-  // contact, falling back to a short-pubkey placeholder when the kind-0
-  // hasn't loaded yet (sharedProfiles fetch is below).
-  const openSharedContact = useCallback((pk: string, profile: NostrProfile | null) => {
-    const name = profile?.displayName || profile?.name || `${pk.slice(0, 8)}…`;
-    setProfileContact({
-      pubkey: pk,
-      name,
-      picture: profile?.picture ?? null,
-      banner: profile?.banner ?? null,
-      nip05: profile?.nip05 ?? null,
-      lightningAddress: profile?.lud16 ?? null,
-      source: 'nostr',
-    });
+  const presentContactSheet = useCallback((contact: ContactProfileBodyData) => {
+    setSheetContact(contact);
+    setProfileSheetVisible(true);
   }, []);
+  const handleViewFullProfile = useCallback(() => {
+    if (!sheetContact) return;
+    setProfileSheetVisible(false);
+    navigation.navigate('ContactProfile', { contact: sheetContact });
+  }, [sheetContact, navigation]);
+
+  // MessageBubble handler — open the contact preview sheet for the
+  // shared contact, falling back to a short-pubkey placeholder when
+  // the kind-0 hasn't loaded yet (sharedProfiles fetch is below).
+  const openSharedContact = useCallback(
+    (pk: string, profile: NostrProfile | null) => {
+      const name = profile?.displayName || profile?.name || `${pk.slice(0, 8)}…`;
+      presentContactSheet({
+        pubkey: pk,
+        name,
+        picture: profile?.picture ?? null,
+        banner: profile?.banner ?? null,
+        nip05: profile?.nip05 ?? null,
+        lightningAddress: profile?.lud16 ?? null,
+        source: 'nostr',
+      });
+    },
+    [presentContactSheet],
+  );
 
   // MessageBubble handler — opens OSM in the system browser. Identical
   // to 1:1 conversation behaviour.
@@ -772,12 +789,12 @@ const GroupConversationScreen: React.FC = () => {
         groupId={group.id}
         onClose={() => setMembersSheetVisible(false)}
         onMemberTap={(pk) => {
-          // Close the manage-members sheet first so the profile sheet
-          // doesn't stack on top — keeps the back-stack predictable
-          // and matches the FriendPickerSheet → CreateGroupSheet hand-off.
+          // Close the manage-members sheet first so the preview sheet
+          // doesn't stack on top of an open sheet — keeps the back-stack
+          // predictable and matches the FriendPickerSheet handoff.
           const c = contacts.find((x) => x.pubkey === pk);
           setMembersSheetVisible(false);
-          setProfileContact({
+          presentContactSheet({
             pubkey: pk,
             name: c?.profile?.displayName || c?.profile?.name || c?.petname || `${pk.slice(0, 8)}…`,
             picture: c?.profile?.picture ?? null,
@@ -828,13 +845,6 @@ const GroupConversationScreen: React.FC = () => {
         initialAddress={invoiceToPay ?? undefined}
       />
 
-      {/* Tap a shared-contact card → opens the contact's profile sheet. */}
-      <ContactProfileSheet
-        visible={profileContact !== null}
-        onClose={() => setProfileContact(null)}
-        contact={profileContact}
-      />
-
       <Modal
         visible={fullscreenGifUrl !== null}
         transparent
@@ -858,6 +868,28 @@ const GroupConversationScreen: React.FC = () => {
           ) : null}
         </Pressable>
       </Modal>
+
+      <ContactProfileSheet
+        visible={profileSheetVisible}
+        onClose={() => setProfileSheetVisible(false)}
+        contact={sheetContact}
+        onViewFullProfile={handleViewFullProfile}
+        onMessage={
+          sheetContact?.pubkey
+            ? () => {
+                const c = sheetContact;
+                if (!c?.pubkey) return;
+                setProfileSheetVisible(false);
+                navigation.navigate('Conversation', {
+                  pubkey: c.pubkey,
+                  name: c.name,
+                  picture: c.picture,
+                  lightningAddress: c.lightningAddress,
+                });
+              }
+            : undefined
+        }
+      />
     </View>
   );
 };

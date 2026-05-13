@@ -28,8 +28,9 @@ import { useGroups } from '../contexts/GroupsContext';
 import ConversationRow from '../components/ConversationRow';
 import GroupRow from '../components/GroupRow';
 import type { ContactInfo } from '../components/GroupAvatar';
-import ContactProfileSheet from '../components/ContactProfileSheet';
 import FriendPickerSheet, { type PickedFriend } from '../components/FriendPickerSheet';
+import ContactProfileSheet from '../components/ContactProfileSheet';
+import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 import CreateGroupSheet from '../components/CreateGroupSheet';
 import type { GroupSummary } from '../types/groups';
 import { MessageCircle } from 'lucide-react-native';
@@ -49,17 +50,6 @@ type MessagesNavigation = CompositeNavigationProp<
   BottomTabNavigationProp<MainTabParamList, 'Messages'>,
   NativeStackNavigationProp<RootStackParamList>
 >;
-
-interface AnonContact {
-  id: string;
-  name: string;
-  picture: string | null;
-  banner: string | null;
-  nip05: string | null;
-  lightningAddress: string | null;
-  pubkey: string | null;
-  source: 'nostr' | 'contacts';
-}
 
 const MessagesScreen: React.FC = () => {
   const colors = useThemeColors();
@@ -107,7 +97,8 @@ const MessagesScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [pickerVisible, setPickerVisible] = useState(false);
   const [createGroupVisible, setCreateGroupVisible] = useState(false);
-  const [anonSheetContact, setAnonSheetContact] = useState<AnonContact | null>(null);
+  const [sheetContact, setSheetContact] = useState<ContactProfileBodyData | null>(null);
+  const [profileSheetVisible, setProfileSheetVisible] = useState(false);
   const [windowDays, setWindowDays] = useState<30 | 90>(30);
   // Default OFF so the inbox starts as DMs-only (#147). When ON, the
   // memo below re-merges zap-counterparty rows into the conversation
@@ -434,17 +425,20 @@ const MessagesScreen: React.FC = () => {
         return;
       }
       // Anonymous zap: no pubkey to thread against. Surface what we have via
-      // the profile sheet so the user can at least see the zap metadata.
-      setAnonSheetContact({
-        id: `conv-${summary.id}`,
+      // the bottom-sheet peek instead of straight to the full profile — the
+      // sheet's "View full profile" link drills in if the user wants the
+      // wider view; staying as a peek matches every other contact-tap entry
+      // point in the app.
+      setSheetContact({
+        pubkey: null,
         name: summary.name,
         picture,
         banner: null,
         nip05: summary.nip05,
         lightningAddress,
-        pubkey: null,
         source: 'nostr',
       });
+      setProfileSheetVisible(true);
     },
     [contactInfoMap, navigation],
   );
@@ -698,9 +692,14 @@ const MessagesScreen: React.FC = () => {
       />
 
       <ContactProfileSheet
-        visible={anonSheetContact !== null}
-        onClose={() => setAnonSheetContact(null)}
-        contact={anonSheetContact}
+        visible={profileSheetVisible}
+        onClose={() => setProfileSheetVisible(false)}
+        contact={sheetContact}
+        onViewFullProfile={() => {
+          if (!sheetContact) return;
+          setProfileSheetVisible(false);
+          navigation.navigate('ContactProfile', { contact: sheetContact });
+        }}
       />
 
       <WebOfTrustBottomSheet visible={wotSheetVisible} onClose={() => setWotSheetVisible(false)} />

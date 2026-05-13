@@ -644,6 +644,15 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         // ORIGINAL transfer's destination, which may be in another
         // profile's wallet list.
         const destIsCrossProfile = isCrossProfile;
+        // Stage tracker so the catch handler can report WHICH step of
+        // the reverse-swap pipeline failed, not just the bare error
+        // message. Surfaces in `console.warn` so it survives the
+        // production `transform-remove-console` strip — critical for
+        // diagnosing field reports like "swap failed with 'unknown
+        // Error'" without having to read the user's screenshot for
+        // which sheet stage they got stuck at.
+        let stage: 'payInvoice' | 'waitForLockup' | 'claimSwap' | 'cleanup' | 'refresh' =
+          'payInvoice';
         (async () => {
           try {
             await payInvoiceForWallet(sourceId, swap.invoice);
@@ -654,7 +663,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
               position: 'top',
               visibilityTime: 5000,
             });
+            stage = 'waitForLockup';
             const lockup = await boltzService.waitForLockup(swap.id, 900000);
+            stage = 'claimSwap';
             const claimed = await boltzService.claimSwap(swap, lockup, address);
             Toast.show({
               type: 'success',
@@ -663,8 +674,10 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
               position: 'top',
               visibilityTime: 10000,
             });
+            stage = 'cleanup';
             await SecureStore.deleteItemAsync(`boltz_swap_${swap.id}`);
             await swapRecoveryService.unregisterPendingSwap(swap.id);
+            stage = 'refresh';
             try {
               const refreshTasks: Promise<unknown>[] = [
                 refreshBalanceForWallet(sourceId),
@@ -678,7 +691,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             } catch {}
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
-            console.warn('[Transfer] Background reverse swap failed:', msg);
+            console.warn(
+              `[Transfer] reverse swap ${swap.id.slice(0, 8)} failed at stage="${stage}": ${msg || '(no message)'}`,
+            );
             // Surface the error on the sheet itself — the previous version
             // only showed a toast and left the progress message stuck on
             // "Swap underway" forever. Users need an in-sheet signal so they
