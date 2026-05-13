@@ -17,36 +17,55 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { File, Paths } from 'expo-file-system';
 
 const BTCMAP_V4_PLACES_URL = 'https://api.btcmap.org/v4/places';
 
-// v4 returns one prefixed field per requested OSM key. The prefix
-// (`osm:`) names the upstream data source — v4 is designed to fuse
-// multiple sources later, so the prefix is required even when only
-// OSM is in play. We pull every tag a caller in this codebase reads,
-// plus `verified_at` for the "Verified N days ago" UI hint.
+// Slim field list for the bulk dataset fetch. Pulled fields are
+// strictly what the list / rail / map markers need:
+//   - id / lat / lon : required by reshape
+//   - osm:name : title
+//   - icon : rail glyph
+//   - boosted_until : sort tie-break + "Featured" badge
+//   - verified_at : "Verified N days ago" hint
+//   - osm:payment:lightning + osm:payment:bitcoin : payment chip
+//   - osm:payment:lightning_address + osm:lud16 : LN address chip
+//   - osm:addr:street + osm:addr:city : address line on row
+//
+// Rich fields (cuisine, wheelchair, brand, contact:*, opening_hours, etc.)
+// land on PlaceDetail via a per-id lazy fetch (see fetchPlaceRich).
+// Trimming this list cut the response from ~22 MB / 7 s to ~4 MB / ~1 s
+// on first cold launch — see scripts/perf-explore-cold-start.sh.
 const V4_FIELDS = [
   'id',
   'lat',
   'lon',
+  'icon',
+  'boosted_until',
   'verified_at',
-  // Top-level curated fields (cleaner than the OSM-prefixed equivalents
-  // when BTC Map has normalised them — e.g. `description` is rare on the
-  // raw OSM node but BTC Map sometimes hand-fills it). `icon` is BTC
-  // Map's curated category glyph name; `osm_url` lets the user open the
-  // raw OSM node for a "Suggest an edit" round-trip.
+  'osm:name',
+  'osm:payment:lightning',
+  'osm:payment:bitcoin',
+  'osm:payment:lightning_address',
+  'osm:lud16',
+  'osm:addr:street',
+  'osm:addr:city',
+].join(',');
+
+// Rich field list — used by the per-id fetch from PlaceDetail. Mirrors
+// what the detail screen actually renders (cuisine, wheelchair, contact
+// links, opening hours, etc.).
+const V4_FIELDS_RICH = [
+  'id',
+  'lat',
+  'lon',
+  'verified_at',
   'description',
   'icon',
   'osm_url',
   'categories',
-  // Merchants pay a few sats to BTC Map (a non-profit) to feature
-  // their listing for a window of time; surfaced in-app as a small
-  // "Featured" pill + sort tie-break.
   'boosted_until',
   'comments_count',
-  // Richer OSM-tag fields — surfaced on PlaceDetail as chips / lines.
-  // All optional, often null. `osm:` prefix is stripped by `reshape`
-  // so they land in `place.tags['cuisine']`, etc.
   'osm:cuisine',
   'osm:wheelchair',
   'osm:wheelchair:description',
@@ -54,24 +73,15 @@ const V4_FIELDS = [
   'osm:delivery',
   'osm:outdoor_seating',
   'osm:brand',
-  'osm:brand:wikidata',
   'osm:level',
   'osm:addr:floor',
   'osm:contact:twitter',
   'osm:contact:instagram',
   'osm:contact:telegram',
   'osm:contact:whatsapp',
-  'osm:start_date',
-  'osm:check_date:currency:XBT',
-  // Top-level curated contact fields. BTC Map normalises these from
-  // the raw OSM tags + their own hand-fills, so they're often present
-  // when the OSM-prefixed `osm:contact:*` tags are not (e.g. Mill Road
-  // Butchers has phone/email/opening_hours at the top level only).
   'phone',
   'email',
   'opening_hours',
-  // Social link — BTC Map doesn't curate a top-level field for this,
-  // so we reach into the raw OSM tag namespace.
   'osm:contact:facebook',
   'osm:name',
   'osm:description',
@@ -88,9 +98,6 @@ const V4_FIELDS = [
   'osm:opening_hours',
   'osm:payment:lightning_address',
   'osm:lud16',
-  // Listing lifecycle timestamps. BTC Map v4 requires these to be
-  // requested explicitly — they're not returned by default. Surfaced
-  // on PlaceDetailScreen as "Listed since" / "Last updated".
   'created_at',
   'updated_at',
 ].join(',');
@@ -100,9 +107,9 @@ const DATASET_TTL_MS = 7 * 24 * 60 * 60 * 1_000; // 7 days
 // AsyncStorage key — namespaced so it's grepable + obviously
 // invalidatable from devtools. A single global dataset cache; v4 has
 // no bbox parameter so we fetch the whole world and filter in memory.
-// Bumped to `v4i` to invalidate caches written before created_at /
-// updated_at joined the field list.
-const DATASET_STORAGE_KEY = '@lp:btcmap-dataset-v4i';
+// Bumped to `v4s` (slim) when the bulk fetch was trimmed to list-only
+// fields; legacy v4i caches are ignored on hydrate.
+const DATASET_STORAGE_KEY = '@lp:btcmap-dataset-v4s';
 
 export interface BtcMapPlace {
   id: number;
@@ -299,22 +306,43 @@ const reshape = (raw: Record<string, unknown>): BtcMapPlace | null => {
   };
 };
 
-// One-shot AsyncStorage hydration. Runs on first `fetchPlacesInBbox`
-// call, not at module load, because RN evaluates this file early in
-// the bundle and AsyncStorage's native module may not be ready yet.
+// File-system path for the cached dataset. AsyncStorage uses SQLite on
+// Android with a per-row size limit (~2 MB practical, hard fail beyond)
+// — the v4i dataset is ~22 MB so every persist was silently failing
+// with SQLITE_FULL. Writing to the document sandbox via
+// expo-file-system has no such limit and survives app upgrades.
+const datasetFile = () => new File(Paths.document, 'btcmap-dataset-v4s.json');
+
+// One-shot hydration. Runs on first `fetchPlacesInBbox` call, not at
+// module load, because RN evaluates this file early in the bundle and
+// the file-system module may not be ready yet.
 let hydratePromise: Promise<void> | null = null;
 const hydrateFromStorage = async (): Promise<void> => {
   if (hydratePromise) return hydratePromise;
   hydratePromise = (async () => {
     try {
-      const raw = await AsyncStorage.getItem(DATASET_STORAGE_KEY);
-      if (!raw) return;
+      const f = datasetFile();
+      if (!f.exists) {
+        // Best-effort migration: if a prior install somehow squeezed
+        // the dataset into AsyncStorage, honour it once then drop the
+        // key so we stop poking SQLite for nothing on subsequent boots.
+        const legacy = await AsyncStorage.getItem(DATASET_STORAGE_KEY).catch(() => null);
+        if (legacy) {
+          const parsed = JSON.parse(legacy) as CachedDataset;
+          if (parsed && Array.isArray(parsed.places) && isFresh(parsed)) memoryDataset = parsed;
+          AsyncStorage.removeItem(DATASET_STORAGE_KEY).catch(() => {});
+        }
+        return;
+      }
+      const raw = await f.text();
       const parsed = JSON.parse(raw) as CachedDataset;
-      if (parsed && Array.isArray(parsed.places) && isFresh(parsed)) {
+      // Only populate memoryDataset if it's still empty — a parallel
+      // network fetch may have raced ahead with fresher data.
+      if (!memoryDataset && parsed && Array.isArray(parsed.places) && isFresh(parsed)) {
         memoryDataset = parsed;
       }
     } catch {
-      // Corrupt or unreadable storage shouldn't break merchant fetch —
+      // Corrupt or unreadable cache shouldn't break the merchant fetch —
       // we'll just hit v4 and re-persist on success.
     }
   })();
@@ -322,7 +350,15 @@ const hydrateFromStorage = async (): Promise<void> => {
 };
 
 const persistToStorage = (dataset: CachedDataset): void => {
-  AsyncStorage.setItem(DATASET_STORAGE_KEY, JSON.stringify(dataset)).catch(() => {});
+  try {
+    const f = datasetFile();
+    if (f.exists) f.delete();
+    f.create();
+    f.write(JSON.stringify(dataset));
+  } catch {
+    // Persist failures are non-fatal — memoryDataset still serves the
+    // rest of the session, next launch will re-fetch over the network.
+  }
 };
 
 // Fetch the full v4 dataset with our explicit field list, reshape into
@@ -360,8 +396,21 @@ const fetchDataset = async (): Promise<CachedDataset> => {
  * over ~28k items — millisecond-fast, but still worth debouncing).
  */
 export const fetchPlacesInBbox = async (bbox: Bbox): Promise<BtcMapPlace[]> => {
-  await hydrateFromStorage();
-  const dataset = memoryDataset && isFresh(memoryDataset) ? memoryDataset : await fetchDataset();
+  // Race: hydrate-from-disk vs network-fetch. Whichever populates
+  // memoryDataset first wins.
+  //
+  // On Android, `File.text()` on the 13 MB slim cache blocks the JS
+  // thread for ~19 s — slower than a fresh `fetchDataset` call (~7 s
+  // network + ~400 ms JSON.parse). So we never `await` hydrate inside
+  // the bbox call: `prefetchDataset()` (called on ExploreHome mount)
+  // kicked it off in the background, and if it landed in time we use
+  // it; otherwise we go straight to the network. Hydrate still settles
+  // eventually and is useful for the offline-cold-start path (no
+  // network), but never blocks the fast path.
+  if (memoryDataset && isFresh(memoryDataset)) {
+    return memoryDataset.places.filter((p) => inBbox(p, bbox));
+  }
+  const dataset = await fetchDataset();
   return dataset.places.filter((p) => inBbox(p, bbox));
 };
 
@@ -393,6 +442,28 @@ export const fetchPlaceById = async (id: number): Promise<BtcMapPlace | null> =>
  */
 export const lightningAddressOf = (place: BtcMapPlace): string | null =>
   place.tags['payment:lightning_address'] ?? place.tags.lud16 ?? null;
+
+/**
+ * Fetch the rich field set for a single place by id. PlaceDetail
+ * opens with the slim listing already in memory, then overlays the
+ * rich shape (cuisine, contact links, opening_hours, …) onto it once
+ * this resolves. Returns null on any failure — the slim record is
+ * still usable.
+ */
+export const fetchPlaceRich = async (id: number): Promise<BtcMapPlace | null> => {
+  try {
+    const url = `${BTCMAP_V4_PLACES_URL}/${id}?fields=${encodeURIComponent(V4_FIELDS_RICH)}`;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as Record<string, unknown>;
+    return reshape(json);
+  } catch {
+    return null;
+  }
+};
 
 /**
  * Extract the OSM `<type>:<id>` token (e.g. `node:12062799158`) from a

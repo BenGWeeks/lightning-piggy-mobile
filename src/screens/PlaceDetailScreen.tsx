@@ -40,6 +40,7 @@ import {
   btcMapVerifyUrl,
   daysSinceVerified,
   fetchPlaceById,
+  fetchPlaceRich,
   formatAddress,
   isBoosted,
   lightningAddressOf,
@@ -165,6 +166,14 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           setError("This place isn't in our cached list anymore — try opening it from the map.");
         } else {
           setPlace(found);
+          // Bulk dataset only carries list-essential fields (id/lat/lon/
+          // name/icon/lightning/etc). Detail screen renders the rich
+          // shape (cuisine, contact links, opening_hours, …) so lazy-
+          // fetch per-id and overlay. Failure is silent — the slim
+          // record is still usable.
+          fetchPlaceRich(placeId).then((rich) => {
+            if (!cancelled && rich) setPlace((prev) => (prev ? { ...prev, ...rich } : rich));
+          });
         }
       } catch (e) {
         if (!cancelled) setError((e as Error).message);
