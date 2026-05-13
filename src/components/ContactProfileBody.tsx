@@ -413,69 +413,106 @@ const ContactProfileBody: React.FC<Props> = ({
         </TouchableOpacity>
       ) : null}
 
-      <View style={styles.actionRow}>
-        {contact.pubkey && contact.source === 'nostr' && (
-          <TouchableOpacity
-            style={[styles.followButton, following && styles.followingButton]}
-            onPress={handleFollowToggle}
-            disabled={loadingFollow}
-            accessibilityLabel={following ? 'Unfollow' : 'Follow'}
-            testID="profile-sheet-follow-button"
-          >
-            <Text
-              style={[styles.followButtonText, following && styles.followingButtonText]}
-              numberOfLines={1}
+      {/* Sheet variant: pared-down peek — just Message + Zap icons (no
+          Follow / Unfollow, no "…" actions). The "View full profile →"
+          row below drills into the full route where the wider set of
+          actions lives. Full-page variant keeps the original action row. */}
+      {variant === 'sheet' ? (
+        <View style={styles.actionRowSheet}>
+          {contact.pubkey && onMessage ? (
+            <TouchableOpacity
+              style={styles.iconCircleButton}
+              onPress={onMessage}
+              accessibilityLabel="Message"
+              testID="contact-message-button"
             >
-              {loadingFollow ? '...' : following ? 'Unfollow' : 'Follow'}
-            </Text>
-          </TouchableOpacity>
-        )}
-        {contact.pubkey && onMessage && (
-          <TouchableOpacity
-            style={styles.messageButton}
-            onPress={onMessage}
-            accessibilityLabel="Message"
-            testID="contact-message-button"
-          >
-            <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-              <Path
-                d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
-                stroke={colors.white}
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </Svg>
-            <Text style={styles.messageButtonText} numberOfLines={1}>
-              Message
-            </Text>
-          </TouchableOpacity>
-        )}
-        {contact.lightningAddress && onZap && (
-          <TouchableOpacity
-            style={styles.zapButton}
-            onPress={onZap}
-            accessibilityLabel="Zap"
-            testID="profile-sheet-zap-button"
-          >
-            <Zap size={20} color={colors.white} fill={colors.white} />
-            <Text style={styles.zapButtonText} numberOfLines={1}>
-              Zap
-            </Text>
-          </TouchableOpacity>
-        )}
-        {contact.pubkey && (
-          <TouchableOpacity
-            style={styles.iconButton}
-            onPress={() => setActionsSheetOpen(true)}
-            disabled={sharing}
-            accessibilityLabel="More actions"
-            testID="contact-more-button"
-          >
-            <MoreHorizontal size={18} color={colors.brandPink} />
-          </TouchableOpacity>
-        )}
-      </View>
+              <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+                <Path
+                  d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+                  stroke={colors.white}
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </Svg>
+            </TouchableOpacity>
+          ) : null}
+          {contact.lightningAddress && onZap ? (
+            <TouchableOpacity
+              style={[styles.iconCircleButton, styles.iconCircleButtonYellow]}
+              onPress={onZap}
+              accessibilityLabel="Zap"
+              testID="profile-sheet-zap-button"
+            >
+              <Zap size={20} color={colors.white} fill={colors.white} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      ) : (
+        <View style={styles.actionRow}>
+          {contact.pubkey && contact.source === 'nostr' && (
+            <TouchableOpacity
+              style={[styles.followButton, following && styles.followingButton]}
+              onPress={handleFollowToggle}
+              disabled={loadingFollow}
+              accessibilityLabel={following ? 'Unfollow' : 'Follow'}
+              testID="profile-sheet-follow-button"
+            >
+              <Text
+                style={[styles.followButtonText, following && styles.followingButtonText]}
+                numberOfLines={1}
+              >
+                {loadingFollow ? '...' : following ? 'Unfollow' : 'Follow'}
+              </Text>
+            </TouchableOpacity>
+          )}
+          {contact.pubkey && onMessage && (
+            <TouchableOpacity
+              style={styles.messageButton}
+              onPress={onMessage}
+              accessibilityLabel="Message"
+              testID="contact-message-button"
+            >
+              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+                <Path
+                  d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+                  stroke={colors.white}
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </Svg>
+              <Text style={styles.messageButtonText} numberOfLines={1}>
+                Message
+              </Text>
+            </TouchableOpacity>
+          )}
+          {contact.lightningAddress && onZap && (
+            <TouchableOpacity
+              style={styles.zapButton}
+              onPress={onZap}
+              accessibilityLabel="Zap"
+              testID="profile-sheet-zap-button"
+            >
+              <Zap size={20} color={colors.white} fill={colors.white} />
+              <Text style={styles.zapButtonText} numberOfLines={1}>
+                Zap
+              </Text>
+            </TouchableOpacity>
+          )}
+          {contact.pubkey && (
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={() => setActionsSheetOpen(true)}
+              disabled={sharing}
+              accessibilityLabel="More actions"
+              testID="contact-more-button"
+            >
+              <MoreHorizontal size={18} color={colors.brandPink} />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
 
       {/* Sheet variant only — explicit "drill into the full profile"
           affordance. Without this the sheet is a dead-end peek; with
@@ -751,6 +788,25 @@ const createStyles = (colors: Palette) =>
     iconButtonDisabled: {
       borderColor: colors.textSupplementary,
       opacity: 0.6,
+    },
+    actionRowSheet: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      alignItems: 'center',
+      gap: 16,
+      paddingVertical: 12,
+      marginTop: 4,
+    },
+    iconCircleButton: {
+      width: 52,
+      height: 52,
+      borderRadius: 26,
+      backgroundColor: colors.brandPink,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    iconCircleButtonYellow: {
+      backgroundColor: colors.zapYellow,
     },
     viewFullProfileRow: {
       alignItems: 'center',

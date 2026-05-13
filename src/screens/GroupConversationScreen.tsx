@@ -36,6 +36,8 @@ import GifPickerSheet from '../components/GifPickerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
 import SendSheet from '../components/SendSheet';
 import FriendPickerSheet, { PickedFriend } from '../components/FriendPickerSheet';
+import ContactProfileSheet from '../components/ContactProfileSheet';
+import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 import MessageBubble from '../components/MessageBubble';
 import { isConfigured as isGifConfigured, type Gif } from '../services/giphyService';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
@@ -429,25 +431,38 @@ const GroupConversationScreen: React.FC = () => {
     setSendSheetOpen(true);
   }, []);
 
-  // MessageBubble handler — opens the contact profile screen for the
+  // Contact preview sheet — peek a member or shared contact without
+  // leaving the group conversation. The sheet's "View full profile"
+  // link drills into ContactProfile when the user wants the deep view.
+  const [sheetContact, setSheetContact] = useState<ContactProfileBodyData | null>(null);
+  const [profileSheetVisible, setProfileSheetVisible] = useState(false);
+  const presentContactSheet = useCallback((contact: ContactProfileBodyData) => {
+    setSheetContact(contact);
+    setProfileSheetVisible(true);
+  }, []);
+  const handleViewFullProfile = useCallback(() => {
+    if (!sheetContact) return;
+    setProfileSheetVisible(false);
+    navigation.navigate('ContactProfile', { contact: sheetContact });
+  }, [sheetContact, navigation]);
+
+  // MessageBubble handler — open the contact preview sheet for the
   // shared contact, falling back to a short-pubkey placeholder when
   // the kind-0 hasn't loaded yet (sharedProfiles fetch is below).
   const openSharedContact = useCallback(
     (pk: string, profile: NostrProfile | null) => {
       const name = profile?.displayName || profile?.name || `${pk.slice(0, 8)}…`;
-      navigation.navigate('ContactProfile', {
-        contact: {
-          pubkey: pk,
-          name,
-          picture: profile?.picture ?? null,
-          banner: profile?.banner ?? null,
-          nip05: profile?.nip05 ?? null,
-          lightningAddress: profile?.lud16 ?? null,
-          source: 'nostr',
-        },
+      presentContactSheet({
+        pubkey: pk,
+        name,
+        picture: profile?.picture ?? null,
+        banner: profile?.banner ?? null,
+        nip05: profile?.nip05 ?? null,
+        lightningAddress: profile?.lud16 ?? null,
+        source: 'nostr',
       });
     },
-    [navigation],
+    [presentContactSheet],
   );
 
   // MessageBubble handler — opens OSM in the system browser. Identical
@@ -774,22 +789,19 @@ const GroupConversationScreen: React.FC = () => {
         groupId={group.id}
         onClose={() => setMembersSheetVisible(false)}
         onMemberTap={(pk) => {
-          // Close the manage-members sheet first so the profile screen
-          // doesn't push on top of an open sheet — keeps the back-stack
+          // Close the manage-members sheet first so the preview sheet
+          // doesn't stack on top of an open sheet — keeps the back-stack
           // predictable and matches the FriendPickerSheet handoff.
           const c = contacts.find((x) => x.pubkey === pk);
           setMembersSheetVisible(false);
-          navigation.navigate('ContactProfile', {
-            contact: {
-              pubkey: pk,
-              name:
-                c?.profile?.displayName || c?.profile?.name || c?.petname || `${pk.slice(0, 8)}…`,
-              picture: c?.profile?.picture ?? null,
-              banner: c?.profile?.banner ?? null,
-              nip05: c?.profile?.nip05 ?? null,
-              lightningAddress: c?.profile?.lud16 ?? null,
-              source: 'nostr',
-            },
+          presentContactSheet({
+            pubkey: pk,
+            name: c?.profile?.displayName || c?.profile?.name || c?.petname || `${pk.slice(0, 8)}…`,
+            picture: c?.profile?.picture ?? null,
+            banner: c?.profile?.banner ?? null,
+            nip05: c?.profile?.nip05 ?? null,
+            lightningAddress: c?.profile?.lud16 ?? null,
+            source: 'nostr',
           });
         }}
       />
@@ -856,6 +868,13 @@ const GroupConversationScreen: React.FC = () => {
           ) : null}
         </Pressable>
       </Modal>
+
+      <ContactProfileSheet
+        visible={profileSheetVisible}
+        onClose={() => setProfileSheetVisible(false)}
+        contact={sheetContact}
+        onViewFullProfile={handleViewFullProfile}
+      />
     </View>
   );
 };
