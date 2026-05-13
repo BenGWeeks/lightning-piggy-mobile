@@ -349,6 +349,7 @@ const FriendsScreen: React.FC = () => {
         lightningAddress={item.lightningAddress}
         onPress={() => handleContactPress(item)}
         onZap={item.lightningAddress ? () => handleZap(item) : undefined}
+        testID={`friend-row-${item.id}`}
       />
     ),
     [handleZap, handleContactPress],
