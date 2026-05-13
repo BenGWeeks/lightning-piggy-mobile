@@ -264,8 +264,9 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
   const handleRemoveHintPhoto = useCallback(() => setHintPhotoUrl(null), []);
 
   const handleWriteNfc = useCallback(async () => {
-    if (stage.kind !== 'saved' && stage.kind !== 'wrote-nfc') return;
-    const value = stage.kind === 'saved' ? stage.lnurlw : lnurl;
+    const value = lnurl.trim();
+    if (!value) return;
+    const previousStage = stage;
     setStage({ kind: 'writing-nfc' });
     try {
       const result = await writeLnurlToTag(value);
@@ -279,7 +280,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
         visibilityTime: 5000,
       });
     } catch (e) {
-      setStage({ kind: 'saved', lnurlw: value });
+      // Roll back to whatever stage we came from so we don't get stuck
+      // in writing-nfc. If we came from `validated` (write-before-save
+      // path), preserve the validation params so the user doesn't have
+      // to re-paste + re-validate.
+      setStage(previousStage);
       Alert.alert('Could not write tag', (e as Error).message, [{ text: 'OK' }]);
     }
   }, [stage, lnurl]);
@@ -311,6 +316,8 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
         <Text style={styles.headerTitle}>Hide a Piglet</Text>
         <View style={styles.headerRightSpacer} />
       </View>
+
+      <StepProgressBar stage={stage} hasPin={!!pin} colors={colors} styles={styles} />
 
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         <StepHeader
@@ -419,8 +426,8 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
 
         <StepHeader
           n={2}
-          title="Connect the loot"
-          subtitle="A withdraw link from your wallet — the sats the finder claims."
+          title="Make the prize"
+          subtitle="A withdraw link from your wallet — the sats the finder claims. (Video URL prize coming soon.)"
           status={
             stage.kind === 'validated' || stage.kind === 'saved' || stage.kind === 'wrote-nfc'
               ? 'done'
@@ -488,17 +495,98 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
           </View>
         )}
 
-        {(stage.kind === 'validated' || stage.kind === 'saved' || stage.kind === 'wrote-nfc') && (
+        {(stage.kind === 'validated' ||
+          stage.kind === 'saved' ||
+          stage.kind === 'writing-nfc' ||
+          stage.kind === 'wrote-nfc') && (
           <>
             <StepHeader
               n={3}
-              title="Write a message"
-              subtitle="What the finder sees when they claim the Piglet."
-              status="active"
+              title="Write the tag"
+              subtitle="Write the prize link onto a physical NFC tag the finder will tap."
+              status={stage.kind === 'wrote-nfc' ? 'done' : 'active'}
               styles={styles}
               colors={colors}
             />
-            <Text style={styles.subSectionLabel}>Memo</Text>
+            <NfcSupportedTagsCard colors={colors} styles={styles} />
+            <TouchableOpacity
+              style={[
+                styles.primaryButton,
+                stage.kind === 'writing-nfc' && styles.primaryButtonDisabled,
+              ]}
+              onPress={handleWriteNfc}
+              disabled={stage.kind === 'writing-nfc'}
+              testID="hunt-write-nfc-button"
+            >
+              {stage.kind === 'writing-nfc' ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <>
+                  <Nfc size={18} color={colors.white} strokeWidth={2.5} />
+                  <Text style={styles.primaryButtonText}>
+                    {stage.kind === 'wrote-nfc' ? 'Write another tag' : 'Write to NFC tag'}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            <StepHeader
+              n={4}
+              title="Pick the location"
+              subtitle="Stash the Piglet first, then drop a pin where you hid it."
+              status={pin ? 'done' : 'active'}
+              styles={styles}
+              colors={colors}
+            />
+            {pin ? (
+              <View style={styles.pinRow}>
+                <MapPin size={20} color={colors.brandPink} strokeWidth={2} />
+                <View style={styles.pinTextWrapper}>
+                  <Text style={styles.pinTitle}>
+                    {pin.lat.toFixed(5)}, {pin.lon.toFixed(5)}
+                  </Text>
+                  <Text style={styles.pinSub}>geohash {pin.geohash}</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.pinClearButton}
+                  onPress={handleClearPin}
+                  testID="hunt-piggy-clear-pin-button"
+                  accessibilityLabel="Clear pin"
+                >
+                  <X size={16} color={colors.white} strokeWidth={2.5} />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.pinButton}
+                onPress={handlePinHere}
+                disabled={pinning}
+                testID="hunt-piggy-pin-here-button"
+              >
+                {pinning ? (
+                  <ActivityIndicator color={colors.brandPink} />
+                ) : (
+                  <>
+                    <MapPin size={18} color={colors.brandPink} strokeWidth={2} />
+                    <Text style={styles.pinButtonText}>Drop pin at my location</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
+            <Text style={styles.helper}>
+              Stored locally so you can find your own Piggy later. Only published to Nostr (as the
+              kind 37516 `g` tag) if you toggle Public on step 5. Map-based pin drop coming soon.
+            </Text>
+
+            <StepHeader
+              n={5}
+              title="Publish"
+              subtitle="Write the cache to Nostr — finder-facing message, rules and visibility."
+              status={stage.kind === 'saved' || stage.kind === 'wrote-nfc' ? 'done' : 'active'}
+              styles={styles}
+              colors={colors}
+            />
+            <Text style={styles.subSectionLabel}>Memo (optional)</Text>
             <TextInput
               style={styles.input}
               placeholder="Happy birthday Lily 🎂"
@@ -560,15 +648,9 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
               at the cache itself.
             </Text>
 
-            <StepHeader
-              n={4}
-              title="Set the rules"
-              subtitle="How often and how many times finders can claim."
-              status="active"
-              styles={styles}
-              colors={colors}
-            />
-            <Text style={styles.subSectionLabel}>Cooldown &amp; uses (optional)</Text>
+            <Text style={[styles.subSectionLabel, styles.sectionGap]}>
+              Cooldown &amp; uses (optional)
+            </Text>
             <View style={styles.hintsRow}>
               <View style={styles.hintField}>
                 <Text style={styles.hintFieldLabel}>Cooldown (mins)</Text>
@@ -602,55 +684,6 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
               hints. The wallet still does the actual enforcement.
             </Text>
 
-            <StepHeader
-              n={5}
-              title="Hide & publish"
-              subtitle="Pin where you stashed it, then decide who can hunt."
-              status="active"
-              styles={styles}
-              colors={colors}
-            />
-            <Text style={styles.subSectionLabel}>Location pin (optional)</Text>
-            {pin ? (
-              <View style={styles.pinRow}>
-                <MapPin size={20} color={colors.brandPink} strokeWidth={2} />
-                <View style={styles.pinTextWrapper}>
-                  <Text style={styles.pinTitle}>
-                    {pin.lat.toFixed(5)}, {pin.lon.toFixed(5)}
-                  </Text>
-                  <Text style={styles.pinSub}>geohash {pin.geohash}</Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.pinClearButton}
-                  onPress={handleClearPin}
-                  testID="hunt-piggy-clear-pin-button"
-                  accessibilityLabel="Clear pin"
-                >
-                  <X size={16} color={colors.white} strokeWidth={2.5} />
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <TouchableOpacity
-                style={styles.pinButton}
-                onPress={handlePinHere}
-                disabled={stage.kind !== 'validated' || pinning}
-                testID="hunt-piggy-pin-here-button"
-              >
-                {pinning ? (
-                  <ActivityIndicator color={colors.brandPink} />
-                ) : (
-                  <>
-                    <MapPin size={18} color={colors.brandPink} strokeWidth={2} />
-                    <Text style={styles.pinButtonText}>Drop pin at my location</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            )}
-            <Text style={styles.helper}>
-              Stored locally so you can find your own Piggy later. Only published to Nostr (as the
-              kind 37516 `g` tag) if you toggle Public below.
-            </Text>
-
             <Text style={[styles.subSectionLabel, styles.sectionGap]}>Discoverability</Text>
             <TouchableOpacity
               style={styles.publicRow}
@@ -678,48 +711,28 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
               can claim sats up to your daily limit. Set a per-find amount you&apos;re OK losing if
               it leaks.
             </Text>
+
+            {stage.kind === 'validated' && (
+              <TouchableOpacity
+                style={styles.primaryButton}
+                onPress={handleSave}
+                testID="hunt-piggy-save-button"
+              >
+                <PiggyBank size={18} color={colors.white} strokeWidth={2.5} />
+                <Text style={styles.primaryButtonText}>Publish this Piggy</Text>
+              </TouchableOpacity>
+            )}
+
+            {(stage.kind === 'saved' || stage.kind === 'wrote-nfc') && (
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={handleDone}
+                testID="hunt-piggy-done-button"
+              >
+                <Text style={styles.secondaryButtonText}>Done</Text>
+              </TouchableOpacity>
+            )}
           </>
-        )}
-
-        {stage.kind === 'validated' && (
-          <TouchableOpacity
-            style={styles.primaryButton}
-            onPress={handleSave}
-            testID="hunt-piggy-save-button"
-          >
-            <PiggyBank size={18} color={colors.white} strokeWidth={2.5} />
-            <Text style={styles.primaryButtonText}>Hide this Piggy</Text>
-          </TouchableOpacity>
-        )}
-
-        {(stage.kind === 'saved' || stage.kind === 'writing-nfc' || stage.kind === 'wrote-nfc') && (
-          <View style={styles.savedActions}>
-            <NfcSupportedTagsCard colors={colors} styles={styles} />
-            <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={handleWriteNfc}
-              disabled={stage.kind === 'writing-nfc'}
-              testID="hunt-write-nfc-button"
-            >
-              {stage.kind === 'writing-nfc' ? (
-                <ActivityIndicator color={colors.white} />
-              ) : (
-                <>
-                  <Nfc size={18} color={colors.white} strokeWidth={2.5} />
-                  <Text style={styles.primaryButtonText}>
-                    {stage.kind === 'wrote-nfc' ? 'Write another tag' : 'Write to NFC tag'}
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={handleDone}
-              testID="hunt-piggy-done-button"
-            >
-              <Text style={styles.secondaryButtonText}>Done</Text>
-            </TouchableOpacity>
-          </View>
         )}
       </ScrollView>
     </View>
@@ -788,6 +801,98 @@ const StepHeader: React.FC<{
     </View>
   </View>
 );
+
+// Top-of-screen horizontal stepper. Renders all 5 numbered pips with
+// short labels so the hider sees the shape of the flow at a glance.
+// Each pip is tinted by status: done = filled pink + check, active =
+// filled pink + number, pending = grey outline + number. Computed
+// outside the component so React.memo would be a clean win later.
+type StepPipStatus = 'done' | 'active' | 'pending';
+
+const STEP_LABELS: { n: number; label: string }[] = [
+  { n: 1, label: 'Hardware' },
+  { n: 2, label: 'Prize' },
+  { n: 3, label: 'Write NFC' },
+  { n: 4, label: 'Location' },
+  { n: 5, label: 'Publish' },
+];
+
+const stepStatuses = (stage: Stage, hasPin: boolean): Record<1 | 2 | 3 | 4 | 5, StepPipStatus> => {
+  const validated =
+    stage.kind === 'validated' ||
+    stage.kind === 'saved' ||
+    stage.kind === 'writing-nfc' ||
+    stage.kind === 'wrote-nfc';
+  const wroteNfc = stage.kind === 'wrote-nfc';
+  const saved = stage.kind === 'saved' || wroteNfc;
+  return {
+    1: 'done',
+    2: validated ? 'done' : 'active',
+    3: wroteNfc ? 'done' : validated ? 'active' : 'pending',
+    4: hasPin ? 'done' : validated ? 'active' : 'pending',
+    5: saved ? 'done' : validated && hasPin ? 'active' : 'pending',
+  };
+};
+
+const StepProgressBar: React.FC<{
+  stage: Stage;
+  hasPin: boolean;
+  colors: Palette;
+  styles: ReturnType<typeof createStyles>;
+}> = ({ stage, hasPin, colors, styles }) => {
+  const statuses = stepStatuses(stage, hasPin);
+  return (
+    <View style={styles.stepperRow} accessibilityRole="progressbar">
+      {STEP_LABELS.map(({ n, label }, idx) => {
+        const status = statuses[n as 1 | 2 | 3 | 4 | 5];
+        return (
+          <React.Fragment key={n}>
+            <View style={styles.stepperPipWrap}>
+              <View
+                style={[
+                  styles.stepperPip,
+                  status === 'done' && styles.stepperPipDone,
+                  status === 'active' && styles.stepperPipActive,
+                  status === 'pending' && styles.stepperPipPending,
+                ]}
+              >
+                {status === 'done' ? (
+                  <Check size={12} color={colors.white} strokeWidth={3} />
+                ) : (
+                  <Text
+                    style={[
+                      styles.stepperPipText,
+                      status === 'pending' && styles.stepperPipTextPending,
+                    ]}
+                  >
+                    {n}
+                  </Text>
+                )}
+              </View>
+              <Text
+                style={[styles.stepperLabel, status === 'pending' && styles.stepperLabelPending]}
+                numberOfLines={1}
+              >
+                {label}
+              </Text>
+            </View>
+            {idx < STEP_LABELS.length - 1 ? (
+              <View
+                style={[
+                  styles.stepperConnector,
+                  statuses[(n + 1) as 1 | 2 | 3 | 4 | 5] === 'pending' &&
+                  statuses[n as 1 | 2 | 3 | 4 | 5] !== 'done'
+                    ? styles.stepperConnectorPending
+                    : styles.stepperConnectorDone,
+                ]}
+              />
+            ) : null}
+          </React.Fragment>
+        );
+      })}
+    </View>
+  );
+};
 
 const NfcSupportedTagsCard: React.FC<{
   colors: Palette;
@@ -982,6 +1087,52 @@ const createStyles = (colors: Palette) =>
       color: colors.textSupplementary,
       marginTop: 1,
     },
+    // Horizontal 5-pip progress bar at the top of the screen. Sits
+    // between the brand-pink screen header and the scrollable body so
+    // it's always visible while the user works through the form.
+    stepperRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      paddingHorizontal: 12,
+      paddingTop: 14,
+      paddingBottom: 10,
+      backgroundColor: colors.surface,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.divider,
+    },
+    stepperPipWrap: {
+      alignItems: 'center',
+      width: 56,
+    },
+    stepperPip: {
+      width: 26,
+      height: 26,
+      borderRadius: 13,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1.5,
+    },
+    stepperPipDone: { backgroundColor: colors.green, borderColor: colors.green },
+    stepperPipActive: { backgroundColor: colors.brandPink, borderColor: colors.brandPink },
+    stepperPipPending: { backgroundColor: 'transparent', borderColor: colors.textSupplementary },
+    stepperPipText: { fontSize: 12, fontWeight: '800', color: colors.white },
+    stepperPipTextPending: { color: colors.textSupplementary },
+    stepperLabel: {
+      marginTop: 4,
+      fontSize: 10,
+      fontWeight: '700',
+      color: colors.textHeader,
+      textAlign: 'center',
+    },
+    stepperLabelPending: { color: colors.textSupplementary, fontWeight: '500' },
+    stepperConnector: {
+      flex: 1,
+      height: 2,
+      marginTop: 13,
+      marginHorizontal: -4,
+    },
+    stepperConnectorDone: { backgroundColor: colors.green },
+    stepperConnectorPending: { backgroundColor: colors.divider },
     helper: {
       fontSize: 12,
       color: colors.textSupplementary,
