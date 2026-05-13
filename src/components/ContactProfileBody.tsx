@@ -247,20 +247,13 @@ const ContactProfileBody: React.FC<Props> = ({
 
   const npubDisplay = npub ? `${npub.slice(0, 16)}...${npub.slice(-8)}` : null;
 
-  const Container: React.ComponentType<{ children: React.ReactNode }> =
-    variant === 'screen'
-      ? ({ children }) => (
-          <ScrollView
-            contentContainerStyle={styles.screenContent}
-            showsVerticalScrollIndicator={false}
-          >
-            {children}
-          </ScrollView>
-        )
-      : ({ children }) => <View style={styles.sheetContent}>{children}</View>;
-
-  return (
-    <Container>
+  // Don't wrap children in an inline-defined component — that would
+  // give the wrapper a fresh function identity per render and force
+  // React to unmount/remount the entire subtree on every parent
+  // re-render (losing scroll position, in-flight image loads, focused
+  // inputs). Render the wrapper element directly based on variant.
+  const body = (
+    <>
       {variant === 'sheet' && (
         <View style={styles.bannerContainer}>
           {/* Fall back to the brand pink-ostrich texture when the
@@ -272,8 +265,9 @@ const ContactProfileBody: React.FC<Props> = ({
             <Image
               source={{ uri: contact.banner }}
               style={styles.bannerImage}
+              contentFit="cover"
               cachePolicy="memory-disk"
-              recyclingKey={contact.pubkey ?? undefined}
+              recyclingKey={contact.banner}
               autoplay={false}
             />
           ) : (
@@ -295,8 +289,9 @@ const ContactProfileBody: React.FC<Props> = ({
           <Image
             source={{ uri: contact.banner }}
             style={styles.bannerImage}
+            contentFit="cover"
             cachePolicy="memory-disk"
-            recyclingKey={contact.pubkey ?? undefined}
+            recyclingKey={contact.banner}
             autoplay={false}
           />
         </View>
@@ -314,7 +309,7 @@ const ContactProfileBody: React.FC<Props> = ({
             source={{ uri: contact.picture }}
             style={styles.avatar}
             cachePolicy="memory-disk"
-            recyclingKey={contact.pubkey ?? undefined}
+            recyclingKey={contact.picture}
             autoplay={false}
             transition={200}
             onError={() => setAvatarError(true)}
@@ -585,7 +580,15 @@ const ContactProfileBody: React.FC<Props> = ({
         onWriteToNfc={() => setNfcWriteVisible(true)}
         nfcSupported={nfcSupported}
       />
-    </Container>
+    </>
+  );
+
+  return variant === 'screen' ? (
+    <ScrollView contentContainerStyle={styles.screenContent} showsVerticalScrollIndicator={false}>
+      {body}
+    </ScrollView>
+  ) : (
+    <View style={styles.sheetContent}>{body}</View>
   );
 };
 
@@ -861,18 +864,6 @@ const createStyles = (colors: Palette) =>
       fontSize: 14,
       fontWeight: '700',
       color: colors.white,
-    },
-    viewFullProfileRow: {
-      alignItems: 'center',
-      paddingVertical: 14,
-      marginTop: 10,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.divider,
-    },
-    viewFullProfileText: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: colors.brandPink,
     },
   });
 

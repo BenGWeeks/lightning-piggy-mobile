@@ -22,8 +22,6 @@ import type { WalletTransaction, ZapCounterpartyInfo } from '../types/wallet';
 import { perfLog } from '../utils/perfLog';
 import type { RootStackParamList } from '../navigation/types';
 
-let __transactionListFirstRenderLogged = false;
-
 interface Props {
   transactions: WalletTransaction[];
 }
@@ -92,6 +90,8 @@ function txKey(tx: WalletTransaction, fallbackIndex: number): string {
   if (tx.bolt11) return `b11:${tx.type}:${tx.bolt11}`;
   return `fb:${tx.type}:${tx.created_at ?? tx.settled_at ?? 'pending'}:${tx.amount}:${fallbackIndex}`;
 }
+
+let __transactionListFirstRenderLogged = false;
 
 const TransactionList: React.FC<Props> = ({ transactions }) => {
   if (!__transactionListFirstRenderLogged) {
@@ -392,17 +392,18 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
             : undefined
         }
         onZap={
-          sheetContact?.lightningAddress
+          // Require both a pubkey AND a lightning address — SendSheet's
+          // zap path needs a real pubkey to attach the zap receipt to
+          // (NIP-57 verification fails on an empty-string sender).
+          // Anonymous-zap counterparties (no pubkey) hide the icon
+          // rather than silently mis-target.
+          sheetContact?.pubkey && sheetContact.lightningAddress
             ? () => {
                 const c = sheetContact;
-                if (!c) return;
+                if (!c?.pubkey) return;
                 setProfileSheetVisible(false);
-                // CounterpartyContact's source is strictly 'nostr'; the
-                // counterparty data in TransactionDetailSheet only ever
-                // carries that, so the widening to ContactProfileBodyData
-                // is safe to narrow back here.
                 setZapContact({
-                  pubkey: c.pubkey ?? '',
+                  pubkey: c.pubkey,
                   name: c.name,
                   picture: c.picture,
                   lightningAddress: c.lightningAddress,
