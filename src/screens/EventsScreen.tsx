@@ -22,7 +22,10 @@ import {
   SlidersHorizontal,
 } from 'lucide-react-native';
 import Toast from '../components/BrandedToast';
-import EventsFilterSheet, { countActiveFilters } from '../components/EventsFilterSheet';
+import EventsFilterSheet, {
+  countActiveFilters,
+  type EventsSortKey,
+} from '../components/EventsFilterSheet';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
@@ -102,6 +105,9 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
   // (default). Picked from a chip row so users can narrow the feed to
   // "this week" / "this month" without committing to a calendar picker.
   const [maxFromNowSec, setMaxFromNowSec] = useState<number | null>(null);
+  // Sort key — 'date' (chronological, default) or 'distance' (nearest
+  // first). Persisted via the filter sheet so users keep their pick.
+  const [sortBy, setSortBy] = useState<EventsSortKey>('date');
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const closerRef = useRef<(() => void) | null>(null);
 
@@ -182,10 +188,11 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
   }, []);
 
   const sortedEvents = useMemo(() => {
-    // Primary sort key: distance from user (nearest first). Falls
-    // back to start time for events lacking a geohash. Each row
-    // carries its precomputed distance so the badge text doesn't
-    // re-haversine on every paint.
+    // Each row carries its precomputed distance so the badge text
+    // doesn't re-haversine on every paint. Primary sort key is chosen
+    // by the user (sortBy = 'date' | 'distance'); the other key is the
+    // tiebreaker so a 0-distance pair never randomly flips order between
+    // renders.
     const items = [...events.values()].map((event) => {
       const center = event.geohash ? decodeGeohash(event.geohash) : null;
       const distance =
@@ -195,13 +202,18 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
       return { event, distance };
     });
     items.sort((a, b) => {
-      if (a.distance !== b.distance) return a.distance - b.distance;
-      const sa = a.event.startsAt ?? Number.MAX_SAFE_INTEGER;
-      const sb = b.event.startsAt ?? Number.MAX_SAFE_INTEGER;
-      return sa - sb;
+      const startA = a.event.startsAt ?? Number.MAX_SAFE_INTEGER;
+      const startB = b.event.startsAt ?? Number.MAX_SAFE_INTEGER;
+      if (sortBy === 'distance') {
+        if (a.distance !== b.distance) return a.distance - b.distance;
+        return startA - startB;
+      }
+      // sortBy === 'date'
+      if (startA !== startB) return startA - startB;
+      return a.distance - b.distance;
     });
     return items;
-  }, [events, pos]);
+  }, [events, pos, sortBy]);
 
   // Filtered slice — search query (substring match) AND optional
   // distance ceiling. Both default to "no filter" so a fresh user
@@ -419,9 +431,12 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
         onToggleWotFilter={() => {
           if (__DEV__) setFilterEnabled(!filterEnabled);
         }}
+        sortBy={sortBy}
+        onChangeSortBy={setSortBy}
         onClearAll={() => {
           setMaxDistanceMetres(null);
           setMaxFromNowSec(null);
+          setSortBy('date');
           if (__DEV__) setFilterEnabled(true);
         }}
       />
@@ -538,8 +553,13 @@ const EventRow: React.FC<{
         </Text>
         <Text style={styles.rowMeta} numberOfLines={1}>
           {formatDate(event.startsAt)}
-          {Number.isFinite(distance) ? ` · ${formatDistance(distance)}` : ''}
           {event.location ? ` · ${event.location}` : ''}
+        </Text>
+        {/* Distance gets its own line so it's never truncated by a long
+            venue address; events without a geohash render an em-dash so
+            the layout stays consistent row-to-row. */}
+        <Text style={styles.rowDistance} numberOfLines={1}>
+          {Number.isFinite(distance) ? formatDistance(distance) : '— distance unknown'}
         </Text>
       </View>
       <ChevronRight size={20} color={colors.textSupplementary} strokeWidth={2.5} />
@@ -692,6 +712,12 @@ const createStyles = (colors: Palette) =>
     rowMain: { flex: 1 },
     rowTitle: { fontSize: 15, fontWeight: '700', color: colors.textHeader },
     rowMeta: { fontSize: 12, color: colors.textSupplementary, marginTop: 2 },
+    rowDistance: {
+      fontSize: 12,
+      color: colors.brandPink,
+      marginTop: 2,
+      fontWeight: '600',
+    },
     expanded: { marginTop: 10, gap: 10 },
     expandedImage: {
       width: '100%',

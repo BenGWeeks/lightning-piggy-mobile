@@ -23,6 +23,16 @@ const DISTANCE_OPTIONS: readonly { label: string; value: number | null }[] = [
   { label: '25 km', value: 25_000 },
   { label: '150 km', value: 150_000 },
   { label: '500 km', value: 500_000 },
+  { label: '1000 km', value: 1_000_000 },
+];
+
+// "Sort by" options on the Events list. Distance-first when location is
+// known; date-first when the user wants chronological ordering regardless
+// of where the meetup is.
+export type EventsSortKey = 'date' | 'distance';
+const SORT_OPTIONS: readonly { label: string; value: EventsSortKey }[] = [
+  { label: 'Date', value: 'date' },
+  { label: 'Distance', value: 'distance' },
 ];
 
 const DATE_OPTIONS: readonly { label: string; value: number | null }[] = [
@@ -42,6 +52,8 @@ interface Props {
   wotFilterEnabled: boolean;
   wotUntrustedHidden: number;
   onToggleWotFilter: () => void;
+  sortBy: EventsSortKey;
+  onChangeSortBy: (next: EventsSortKey) => void;
   onClearAll: () => void;
 }
 
@@ -55,6 +67,8 @@ const EventsFilterSheet: React.FC<Props> = ({
   wotFilterEnabled,
   wotUntrustedHidden,
   onToggleWotFilter,
+  sortBy,
+  onChangeSortBy,
   onClearAll,
 }) => {
   const colors = useThemeColors();
@@ -119,6 +133,30 @@ const EventsFilterSheet: React.FC<Props> = ({
               Only events from organisers you (or your follows) trust are shown.
             </Text>
           ) : null}
+
+          {/* Sort by — single-select. Default 'date' (chronological is the
+            most natural ordering for a meetup list), but distance-sort
+            useful when the user is filtering for a wide radius and wants
+            to see the nearest meetups first. */}
+          <Text style={styles.section}>Sort by</Text>
+          <View style={styles.chipRow}>
+            {SORT_OPTIONS.map((opt) => {
+              const active = sortBy === opt.value;
+              return (
+                <TouchableOpacity
+                  key={opt.value}
+                  style={[styles.chip, active ? styles.chipActive : null]}
+                  onPress={() => onChangeSortBy(opt.value)}
+                  testID={`events-filter-sort-${opt.value}`}
+                  accessibilityLabel={`Sort by ${opt.label}`}
+                >
+                  <Text style={[styles.chipText, active ? styles.chipTextActive : null]}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
 
           {/* Distance — single-select max-cap */}
           <Text style={styles.section}>Distance</Text>
