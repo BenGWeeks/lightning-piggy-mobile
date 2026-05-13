@@ -14,40 +14,41 @@ import {
   isPubkeyTrusted,
 } from '../services/trustGraphService';
 import { fetchL2Follows, loadL2Cache, persistL2Cache } from '../services/trustGraphFetcher';
-import { loadWotSettings, saveWotSettings, type WotSettings } from '../services/wotSettingsService';
+import {
+  loadWotSettings,
+  saveWotSettings,
+  type WotSettings,
+  type WotTier,
+} from '../services/wotSettingsService';
+
+// Re-export the tier type so consumers (chip + sheet) can type their props
+// without reaching into the service layer.
+export type { WotTier } from '../services/wotSettingsService';
 
 interface TrustGraphContextType {
-  /**
-   * Lowercase hex set of every pubkey the user trusts to surface
-   * caches/events from. Always includes the user, L1 follows, L2
-   * friends-of-follows, and the platform-curated seed pubkeys.
-   */
+  // Lowercase-hex union of every pubkey that passes the *currently selected*
+  // tier. Consumers should keep using `isTrusted(pubkey)` rather than reading
+  // `trustSet` directly so tier transitions don't require call-site changes.
   trustSet: ReadonlySet<string>;
-  /** Predicate convenience — `isTrusted(pubkey)` returns true iff `pubkey`
-   * (case-insensitive) is in `trustSet`. */
+  // Tier-aware membership predicate (#535).
+  //   'friends' — kind-3 follow list + user + seeds
+  //   'fof'     — friends + cached friends-of-follows
+  //   'all'     — always returns true (filter disabled)
   isTrusted: (pubkey: string) => boolean;
-  /**
-   * Whether the filter is active. Caches/events from outside `trustSet`
-   * should be hidden by consumers when this is true.
-   *
-   * **Production builds ignore the persisted setting and force this
-   * to `true`** — the threat model (geo-cache as physical lure) makes
-   * it too easy to footgun yourself if a regular user toggles it off.
-   * Dev builds honour the toggle so we can test the unfiltered view.
-   */
-  filterEnabled: boolean;
-  /** Update + persist the dev-mode toggle. No-op in production builds. */
-  setFilterEnabled: (next: boolean) => void;
-  /**
-   * L2 backfill state — `loading` until the friends-of-follows fetch
-   * resolves; consumers can show a subtle "filter is still loading"
-   * note while this is true.
-   */
+  // Active tier (#535). Replaces the legacy `filterEnabled` boolean.
+  wotTier: WotTier;
+  // Persist + apply a new tier. Wider tiers (fof / all) are gated on
+  // secretMode at the UI layer (WebOfTrustBottomSheet); this setter
+  // doesn't enforce the gate so a power user with secretMode flipped
+  // can still tier-switch without ceremony.
+  setWotTier: (next: WotTier) => void;
+  // L2 backfill state — `loading` until the friends-of-follows fetch
+  // resolves; consumers can show a subtle "filter is still loading"
+  // note while this is true.
   l2Loading: boolean;
-  /** Number of pubkeys in the L2 (friends-of-follows) set. */
+  // Number of pubkeys in the L2 (friends-of-follows) set.
   l2Size: number;
-  /** Trigger an explicit L2 refresh (bypasses cache). Useful from a
-   * Settings → Refresh trust graph button. */
+  // Trigger an explicit L2 refresh (bypasses cache).
   refreshL2: () => Promise<void>;
 }
 
@@ -117,37 +118,52 @@ export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
     };
   }, [pubkey, l1Follows]);
 
-  // Persisted dev-mode toggle. In production builds we hard-code true.
-  const [storedSettings, setStoredSettings] = useState<WotSettings>({ filterEnabled: true });
+  // Persisted tier. Default 'friends' (#535). Legacy boolean payloads
+  // are migrated inside `loadWotSettings`.
+  const [storedSettings, setStoredSettings] = useState<WotSettings>({ wotTier: 'friends' });
   useEffect(() => {
     loadWotSettings().then(setStoredSettings);
   }, []);
 
-  const filterEnabled = __DEV__ ? storedSettings.filterEnabled : true;
+  const wotTier = storedSettings.wotTier;
 
-  const setFilterEnabled = useCallback((next: boolean) => {
-    if (!__DEV__) return; // Hard-locked ON outside dev builds.
-    setStoredSettings({ filterEnabled: next });
-    saveWotSettings({ filterEnabled: next }).catch(() => {});
+  const setWotTier = useCallback((next: WotTier) => {
+    setStoredSettings({ wotTier: next });
+    saveWotSettings({ wotTier: next }).catch(() => {});
   }, []);
 
-  const trustSet = useMemo(
-    () => computeTrustSet(pubkey, l1Follows, l2Follows, true),
-    [pubkey, l1Follows, l2Follows],
+  // For 'friends' tier the trust set is L1 + user + seeds.
+  // For 'fof' tier it adds L2 (cached friends-of-follows).
+  // For 'all' tier we still compute a trust set (so the UI can show
+  // "n hidden" counts symmetrically) but `isTrusted` short-circuits to
+  // true below.
+  const trustSet = useMemo(() => {
+    const effectiveL2 = wotTier === 'fof' || wotTier === 'all' ? l2Follows : new Set<string>();
+    return computeTrustSet(pubkey, l1Follows, effectiveL2, true);
+  }, [pubkey, l1Follows, l2Follows, wotTier]);
+
+  const isTrusted = useCallback(
+    (pk: string) => {
+      // 'all' tier disables the filter entirely. Consumers still call
+      // `isTrusted` (so the call sites don't have to branch on tier);
+      // we just return true unconditionally.
+      if (wotTier === 'all') return true;
+      return isPubkeyTrusted(pk, trustSet);
+    },
+    [trustSet, wotTier],
   );
-  const isTrusted = useCallback((pk: string) => isPubkeyTrusted(pk, trustSet), [trustSet]);
 
   const value = useMemo<TrustGraphContextType>(
     () => ({
       trustSet,
       isTrusted,
-      filterEnabled,
-      setFilterEnabled,
+      wotTier,
+      setWotTier,
       l2Loading,
       l2Size: l2Follows.size,
       refreshL2,
     }),
-    [trustSet, isTrusted, filterEnabled, setFilterEnabled, l2Loading, l2Follows, refreshL2],
+    [trustSet, isTrusted, wotTier, setWotTier, l2Loading, l2Follows, refreshL2],
   );
 
   return <TrustGraphContext.Provider value={value}>{children}</TrustGraphContext.Provider>;
