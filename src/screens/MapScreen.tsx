@@ -62,6 +62,10 @@ interface BridgeMessage {
   centre?: { lat: number; lng: number };
   /** Leaflet zoom level alongside the bbox. */
   zoom?: number;
+  /** True when the bounds change came from a user gesture (drag/zoom),
+   * false / undefined when it came from a programmatic LP_setViewport
+   * call or Leaflet's initial bootstrap setView. */
+  userInitiated?: boolean;
   id?: number;
   /** Cache coord (`<kind>:<pubkey>:<d>`) for cacheTap messages. */
   coord?: string;
@@ -144,13 +148,24 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         const raw = await AsyncStorage.getItem(VIEWPORT_KEY);
         if (raw) {
           const parsed = JSON.parse(raw) as { lat: number; lng: number; zoom: number };
+          // Detect the legacy bug where Leaflet's hardcoded London fallback
+          // got persisted as the "user's last viewport" via the initial
+          // setView's moveend. Treat that exact triple as unhydrated and
+          // wipe the slot so the GPS-centre branch takes over.
+          const isLondonFallback =
+            Math.abs(parsed.lat - 51.5074) < 1e-4 &&
+            Math.abs(parsed.lng - -0.1278) < 1e-4 &&
+            parsed.zoom === 12;
           if (
             Number.isFinite(parsed.lat) &&
             Number.isFinite(parsed.lng) &&
-            Number.isFinite(parsed.zoom)
+            Number.isFinite(parsed.zoom) &&
+            !isLondonFallback
           ) {
             lastViewport.current = parsed;
             hydratedViewport.current = true;
+          } else if (isLondonFallback) {
+            await AsyncStorage.removeItem(VIEWPORT_KEY).catch(() => {});
           }
         }
       } catch {
@@ -387,10 +402,12 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
           lastBbox.current = next;
           refreshPlaces(next);
         }, 500);
-        // Persist centre + zoom (when the WebView sent them alongside
-        // the bbox) so the next Map open re-uses this viewport instead
-        // of falling back to London / GPS.
+        // Persist centre + zoom only when the move was user-initiated —
+        // never persist programmatic LP_setViewport calls or Leaflet's
+        // own initial setView fallback, otherwise London (the bootstrap
+        // default) gets baked in as the user's "last viewport" forever.
         if (
+          msg.userInitiated === true &&
           typeof msg.centre?.lat === 'number' &&
           typeof msg.centre?.lng === 'number' &&
           typeof msg.zoom === 'number'
@@ -1201,22 +1218,41 @@ const LEAFLET_HTML = `<!DOCTYPE html>
     let markerLayer = L.layerGroup().addTo(map);
     let cacheLayer = L.layerGroup().addTo(map);
 
+    // Distinguish programmatic vs user-initiated moves. The initial
+    // setView above (and every LP_setViewport call) is programmatic;
+    // drag/zoom gestures are not. React only persists user-initiated
+    // viewport changes so the London bootstrap fallback never gets
+    // baked into AsyncStorage as the "user's last viewport".
+    let __pendingProgrammatic = true;
+    let __userMovedInBatch = false;
+
     const debounce = (fn, ms) => {
       let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
     };
     const emitBounds = debounce(() => {
       const b = map.getBounds();
       const c = map.getCenter();
+      const userInitiated = __userMovedInBatch;
+      __userMovedInBatch = false;
       post({ type: 'bounds', bbox: {
         minLon: b.getWest(), minLat: b.getSouth(),
         maxLon: b.getEast(), maxLat: b.getNorth(),
-      }, centre: { lat: c.lat, lng: c.lng }, zoom: map.getZoom() });
+      }, centre: { lat: c.lat, lng: c.lng }, zoom: map.getZoom(), userInitiated });
     }, 350);
 
-    map.on('moveend', emitBounds);
-    map.on('zoomend', emitBounds);
+    map.on('moveend', () => {
+      if (!__pendingProgrammatic) __userMovedInBatch = true;
+      __pendingProgrammatic = false;
+      emitBounds();
+    });
+    map.on('zoomend', () => {
+      if (!__pendingProgrammatic) __userMovedInBatch = true;
+      __pendingProgrammatic = false;
+      emitBounds();
+    });
 
     window.LP_setViewport = function(lat, lng, zoom) {
+      __pendingProgrammatic = true;
       map.setView([lat, lng], zoom || map.getZoom());
       if (meMarker) map.removeLayer(meMarker);
       meMarker = L.marker([lat, lng], {
