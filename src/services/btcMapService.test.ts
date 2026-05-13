@@ -123,6 +123,22 @@ describe('fetchPlacesInBbox cache', () => {
       lon: -0.1,
       tags: { name: 'Cached café' },
       verified_at: null,
+      description: null,
+      icon: null,
+      osm_url: null,
+      categories: null,
+      phone: null,
+      email: null,
+      opening_hours: null,
+      facebookUrl: null,
+      twitterUrl: null,
+      instagramUrl: null,
+      telegramUrl: null,
+      whatsappUrl: null,
+      createdAt: null,
+      updatedAt: null,
+      boostedUntil: null,
+      commentsCount: null,
     };
     const bbox = { minLon: -0.2, minLat: 51.4, maxLon: 0.0, maxLat: 51.6 };
     const first = await fetchPlacesInBbox(bbox);
