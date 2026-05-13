@@ -88,10 +88,16 @@ const ContactProfileScreen: React.FC = () => {
   // each time but with the same pubkey) doesn't blow away our locally
   // fetched `about` bio + avatar-load state.
   const paramContact = route.params.contact;
+  // Use the pubkey for Nostr contacts (stable hex) and the phone
+  // contact id for phone-only contacts (where pubkey is null). Without
+  // the phone fallback, navigating between two different phone contacts
+  // while the screen is reused would no-op (`null === null`) and keep
+  // showing the previous contact's data.
+  const paramIdentityKey = paramContact.pubkey ?? route.params.phoneContactId ?? null;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     setContact(paramContact);
-  }, [paramContact.pubkey]);
+  }, [paramIdentityKey]);
 
   const npub = useMemo(
     () => (contact.pubkey ? npubEncode(contact.pubkey) : null),

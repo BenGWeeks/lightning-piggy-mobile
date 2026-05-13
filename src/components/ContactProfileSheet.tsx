@@ -80,7 +80,6 @@ const ContactProfileSheet: React.FC<Props> = ({
           contact={contact}
           onZap={onZap}
           onMessage={onMessage}
-          onRequestClose={onClose}
           onViewFullProfile={onViewFullProfile}
         />
       </BottomSheetView>

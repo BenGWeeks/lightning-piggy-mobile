@@ -542,7 +542,14 @@ const FriendsScreen: React.FC = () => {
 
       <ContactProfileSheet
         visible={profileSheetVisible}
-        onClose={() => setProfileSheetVisible(false)}
+        onClose={() => {
+          // Clear the staged contact alongside hiding the sheet so
+          // re-opening with a different friend doesn't flash the
+          // previous contact's banner / avatar / name before
+          // handleContactPress restages the new selection.
+          setProfileSheetVisible(false);
+          setSelectedContact(null);
+        }}
         contact={selectedContact}
         onViewFullProfile={handleViewFullProfile}
         onZap={
@@ -560,6 +567,7 @@ const FriendsScreen: React.FC = () => {
                 const item = selectedContact;
                 if (!item || !item.pubkey) return;
                 setProfileSheetVisible(false);
+                setSelectedContact(null);
                 navigation.navigate('Conversation', {
                   pubkey: item.pubkey,
                   name: item.name,
