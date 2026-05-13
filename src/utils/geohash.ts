@@ -125,6 +125,11 @@ export const haversineMetres = (
  */
 export const formatDistance = (metres: number): string => {
   if (!Number.isFinite(metres) || metres < 0) return '';
+  // Rounding to nearest 10 m floors any value < 5 m to "0 m", which
+  // reads as broken even when the cache is genuinely 1-2 m away
+  // (typical in dev with a pinned location matching a fixture cache).
+  // Surface a friendlier "< 5 m" instead.
+  if (metres < 5) return '< 5 m';
   if (metres < 950) {
     const rounded = Math.round(metres / 10) * 10;
     return `${rounded} m`;

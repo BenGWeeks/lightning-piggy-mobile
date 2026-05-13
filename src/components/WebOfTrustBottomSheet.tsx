@@ -150,7 +150,8 @@ const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose }) => {
 
           {!secretMode ? (
             <Text style={styles.gateHint} testID="wot-sheet-gate-hint">
-              Enable Secret mode on About to unlock wider trust tiers.
+              Wider trust tiers are unlocked under specific conditions — stick to Friends for the
+              safest feed.
             </Text>
           ) : null}
 

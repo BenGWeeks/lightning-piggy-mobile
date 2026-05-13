@@ -92,4 +92,12 @@ describe('formatDistance', () => {
     expect(formatDistance(NaN)).toBe('');
     expect(formatDistance(-1)).toBe('');
   });
+
+  it('returns "< 5 m" for tiny distances that would round to 0 m', () => {
+    expect(formatDistance(0)).toBe('< 5 m');
+    expect(formatDistance(1.2)).toBe('< 5 m');
+    expect(formatDistance(4)).toBe('< 5 m');
+    // 5 m and above round normally
+    expect(formatDistance(5)).toBe('10 m');
+  });
 });
