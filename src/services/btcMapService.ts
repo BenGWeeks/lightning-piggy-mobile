@@ -19,7 +19,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { File, Paths } from 'expo-file-system';
 
-const BTCMAP_V4_PLACES_URL = 'https://api.btcmap.org/v4/places';
+// Base URL for the BTC Map v4 API. Production points at api.btcmap.org,
+// but a developer can swap to a local fork or tunneled endpoint by
+// setting `EXPO_PUBLIC_BTC_MAP_API_BASE` in `.env` before starting
+// Metro — useful while testing the in-flight upstream bbox PR. The
+// value must include the `/v4` path segment but no trailing slash.
+const BTC_MAP_API_BASE =
+  process.env.EXPO_PUBLIC_BTC_MAP_API_BASE?.replace(/\/$/, '') ?? 'https://api.btcmap.org/v4';
+const BTCMAP_V4_PLACES_URL = `${BTC_MAP_API_BASE}/places`;
 
 // Slim field list for the bulk dataset fetch. Pulled fields are
 // strictly what the list / rail / map markers need:
