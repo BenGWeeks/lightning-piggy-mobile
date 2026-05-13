@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -133,7 +133,6 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     [],
   );
   const [hasClaimed, setHasClaimed] = useState(false);
-  const closerRef = useRef<(() => void) | null>(null);
 
   // ----- load listing + subscribe found-logs ------------------------------
 
@@ -169,7 +168,6 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         return next;
       });
     });
-    closerRef.current = closer;
     return () => {
       cancelled = true;
       closer();
@@ -191,7 +189,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
       // Simpler heuristic for now: assume the claim was recorded against
       // the same lnurl we'd see from this cache's physical tag — which we
       // don't have. Just enable the composer for any user who's claimed
-      // ANY Piggy in the last hour. Refine in M8.
+      // ANY Piggy in the last 24 h. Refine in M8.
       const recent = await lastClaimFor(coord);
       if (!cancelled && recent && Date.now() / 1000 - recent.claimedAt < 24 * 60 * 60) {
         setHasClaimed(true);

@@ -88,6 +88,11 @@ const V4_FIELDS = [
   'osm:opening_hours',
   'osm:payment:lightning_address',
   'osm:lud16',
+  // Listing lifecycle timestamps. BTC Map v4 requires these to be
+  // requested explicitly — they're not returned by default. Surfaced
+  // on PlaceDetailScreen as "Listed since" / "Last updated".
+  'created_at',
+  'updated_at',
 ].join(',');
 
 const FETCH_TIMEOUT_MS = 45_000;
@@ -95,10 +100,9 @@ const DATASET_TTL_MS = 7 * 24 * 60 * 60 * 1_000; // 7 days
 // AsyncStorage key — namespaced so it's grepable + obviously
 // invalidatable from devtools. A single global dataset cache; v4 has
 // no bbox parameter so we fetch the whole world and filter in memory.
-// Bumped to `v4h` to invalidate caches written before boostedUntil +
-// the social URLs (twitter/instagram/telegram/whatsapp) + commentsCount
-// joined the parsed shape.
-const DATASET_STORAGE_KEY = '@lp:btcmap-dataset-v4h';
+// Bumped to `v4i` to invalidate caches written before created_at /
+// updated_at joined the field list.
+const DATASET_STORAGE_KEY = '@lp:btcmap-dataset-v4i';
 
 export interface BtcMapPlace {
   id: number;
