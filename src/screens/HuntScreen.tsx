@@ -419,7 +419,7 @@ const CacheRow: React.FC<{
           (the LNURL-withdraw is optional metadata). */}
       {cache.isLpPiggy && cache.payoutSats != null ? (
         <View style={styles.payoutBadge}>
-          <Zap size={10} color={colors.brandPink} fill={colors.brandPink} strokeWidth={2} />
+          <Zap size={13} color={colors.zapYellow} fill={colors.zapYellow} strokeWidth={2} />
         </View>
       ) : null}
     </View>
@@ -566,11 +566,11 @@ const createStyles = (colors: Palette) =>
     iconContainer: { position: 'relative' },
     payoutBadge: {
       position: 'absolute',
-      top: -2,
-      right: -2,
-      width: 17,
-      height: 17,
-      borderRadius: 8.5,
+      top: -5,
+      right: -5,
+      width: 22,
+      height: 22,
+      borderRadius: 11,
       backgroundColor: colors.surface,
       alignItems: 'center',
       justifyContent: 'center',
