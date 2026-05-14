@@ -485,7 +485,10 @@ const createStyles = (colors: Palette) =>
       // Negative horizontal margin cancels the list padding so the map
       // lands at a true 16dp inset, consistent across the Explore stack.
       marginHorizontal: -16,
-      paddingTop: 12,
+      // No extra paddingTop — `listContent`'s own `padding: 16` already
+      // gives the 16dp header-to-map gap shared across Explore / Places
+      // / Geo-caches. The old `paddingTop: 12` stacked on top of that
+      // (28dp total) and made this screen's gap inconsistent.
     },
     searchInput: {
       flex: 1,

@@ -760,7 +760,10 @@ const LessonCard: React.FC<{
 const createLocalStyles = (colors: Palette) =>
   StyleSheet.create({
     scrollContent: {
-      paddingTop: 18,
+      // 16dp gap between the brand header and the mini-map — kept in
+      // sync with PlacesScreen + HuntScreen so the three Explore-stack
+      // screens have an identical header-to-map rhythm.
+      paddingTop: 16,
       paddingBottom: 32,
     },
     card: {

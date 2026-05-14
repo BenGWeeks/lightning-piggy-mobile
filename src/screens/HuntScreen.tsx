@@ -468,7 +468,10 @@ const createStyles = (colors: Palette) =>
       fontWeight: '500',
     },
     mapWrap: {
-      marginTop: 12,
+      // 16dp header-to-map gap — kept in sync with ExploreHome's
+      // `scrollContent.paddingTop` and PlacesScreen's `listContent`
+      // top padding so the three Explore-stack screens match.
+      marginTop: 16,
       marginBottom: 8,
     },
     searchRow: {
