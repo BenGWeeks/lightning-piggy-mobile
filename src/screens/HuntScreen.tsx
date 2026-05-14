@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -84,15 +84,12 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
     const t = setTimeout(() => saveCaches([...caches.values()]), 1500);
     return () => clearTimeout(t);
   }, [caches]);
-  const [untrustedHidden, setUntrustedHidden] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
 
-  // Web-of-trust filter. Refs so the subscription callback always
-  // reads the current `isTrusted` predicate without resubscribing.
-  // Post-#535: `wotTier` replaces the legacy `filterEnabled` boolean;
-  // `isTrusted` is now tier-aware and short-circuits to `true` for the
-  // 'all' tier, so the call sites can stop branching on the tier.
+  // Web-of-trust filter. `isTrusted` is tier-aware (short-circuits to
+  // true for the 'all' tier) and is applied at render time in
+  // `sortedCaches`, so flipping the tier re-filters instantly.
   const { isTrusted, wotTier } = useTrustGraph();
   // Visible bbox from the mini-map at the top of the screen. The list
   // below filters to caches whose decoded geohash lies inside this
@@ -116,10 +113,6 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   // dataset; selected entries OR together so the list doesn't filter
   // to zero when a hider uses an unusual cache type.
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
-  const isTrustedRef = useRef(isTrusted);
-  useEffect(() => {
-    isTrustedRef.current = isTrusted;
-  }, [isTrusted]);
 
   // Location resolve — dev-fallback first, then real GPS.
   useEffect(() => {
@@ -154,13 +147,10 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
     if (!pos) return;
     const myGeohash = encodeGeohash(pos.lat, pos.lon, 7);
     const prefixes = geohashPrefixes(myGeohash, 5).filter((p) => p.length === 5);
+    // Load every nearby cache regardless of trust — the WoT filter is
+    // applied at render time (sortedCaches), so flipping the tier
+    // re-filters instantly with no re-subscribe or relay round-trip.
     const closer = subscribeNearbyCaches(prefixes, (c) => {
-      // WoT filter — see `trustGraphService` for the threat model.
-      // `isTrusted` is tier-aware post-#535 (returns true for 'all').
-      if (!isTrustedRef.current(c.hiderPubkey)) {
-        setUntrustedHidden((n) => n + 1);
-        return;
-      }
       setCaches((prev) => {
         const existing = prev.get(c.coord);
         if (existing && existing.createdAt >= c.createdAt) return prev;
@@ -175,9 +165,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
       closer();
       clearTimeout(settleTimer);
     };
-    // Re-subscribe whenever the active tier changes so the filtered
-    // stream is correct without a manual refresh.
-  }, [pos, wotTier]);
+  }, [pos]);
 
   const sortedCaches = useMemo(() => {
     let items = [...caches.values()].map((cache) => {
@@ -189,6 +177,10 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
       return { cache, distance };
     });
     items.sort((a, b) => a.distance - b.distance);
+    // Drop NIP-40-expired caches — relays that don't honour expiration
+    // keep serving them, so the client filters them out here.
+    const nowSec = Date.now() / 1000;
+    items = items.filter(({ cache }) => cache.expiresAt === null || cache.expiresAt > nowSec);
     // Restrict to caches whose decoded position is inside the
     // mini-map's visible bbox. As the user zooms out the bbox grows
     // and more caches surface; no chip-row to set "within X km".
@@ -218,8 +210,11 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
         cache.cacheType ? selectedTypes.has(cache.cacheType) : false,
       );
     }
+    // Web-of-trust filter — drop caches from hiders outside the active
+    // tier's trust graph. `isTrusted` short-circuits to true for 'all'.
+    items = items.filter(({ cache }) => isTrusted(cache.hiderPubkey));
     return items;
-  }, [caches, pos, mapBbox, selectedDifficulties, selectedTerrains, selectedTypes]);
+  }, [caches, pos, mapBbox, selectedDifficulties, selectedTerrains, selectedTypes, isTrusted]);
 
   const activeFilterCount = useMemo(
     () =>
@@ -237,6 +232,14 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
     for (const c of caches.values()) if (c.cacheType) seen.add(c.cacheType);
     return [...seen].sort();
   }, [caches]);
+
+  // Count of loaded caches the WoT filter is hiding — 0 for the 'all'
+  // tier. Recomputes on tier change so the "n hidden" line stays
+  // accurate without a re-subscribe.
+  const wotHiddenCount = useMemo(
+    () => [...caches.values()].filter((c) => !isTrusted(c.hiderPubkey)).length,
+    [caches, isTrusted],
+  );
 
   const filteredCaches = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -373,7 +376,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
         availableTypes={availableTypes}
         selectedTypes={selectedTypes}
         onChangeTypes={setSelectedTypes}
-        wotUntrustedHidden={untrustedHidden}
+        wotUntrustedHidden={wotHiddenCount}
         onClearAll={() => {
           setSelectedDifficulties(new Set());
           setSelectedTerrains(new Set());
