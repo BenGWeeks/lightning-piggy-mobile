@@ -33,6 +33,7 @@ import {
   acceptsLightning,
   fetchPlacesInBbox,
   formatAddress,
+  getCachedPlaces,
   isBoosted,
   lightningAddressOf,
   prefetchDataset,
@@ -147,7 +148,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         if (!cancelled) {
           setPos({ lat: current.coords.latitude, lon: current.coords.longitude });
         }
-      } catch (e) {
+      } catch {
         // If getCurrentPositionAsync rejects AND we never got a
         // last-known, mark the rails as denied so they show the
         // friendlier "grant location" copy.
@@ -169,6 +170,21 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // down/re-open NIP-GC + NIP-52 subscriptions in one gesture.
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  // Stale-while-revalidate: paint the last-known merchant set from disk
+  // straight away so the "Places near you" rail isn't empty on a cold
+  // start while we wait for a GPS fix + the network round-trip below.
+  // The functional update yields to fresh network data if it lands first.
+  useEffect(() => {
+    let cancelled = false;
+    getCachedPlaces().then((cached) => {
+      if (!cancelled && cached.length > 0) {
+        setMerchants((prev) => (prev.length === 0 ? cached : prev));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   useEffect(() => {
     if (!pos) return;
     let cancelled = false;
