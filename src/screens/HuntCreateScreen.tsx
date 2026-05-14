@@ -446,7 +446,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
           <>
             <StepHeader
               n={2}
-              title="Make the prize"
+              title="Make the prize (optional)"
               subtitle="A withdraw link from your wallet — the sats the finder claims. (Video URL prize coming soon.)"
               status={
                 stage.kind === 'validated' || stage.kind === 'saved' || stage.kind === 'wrote-nfc'
@@ -946,10 +946,13 @@ const StepProgressBar: React.FC<{
               <View
                 style={[
                   styles.stepperConnector,
-                  statuses[(n + 1) as 1 | 2 | 3 | 4 | 5] === 'pending' &&
-                  statuses[n as 1 | 2 | 3 | 4 | 5] !== 'done'
-                    ? styles.stepperConnectorPending
-                    : styles.stepperConnectorDone,
+                  // The connector after step N fills in once step N itself
+                  // is done — standard progressive-stepper behaviour. The
+                  // old rule keyed off the *next* step's status, so only
+                  // the 1→2 line ever lit up.
+                  statuses[n as 1 | 2 | 3 | 4 | 5] === 'done'
+                    ? styles.stepperConnectorDone
+                    : styles.stepperConnectorPending,
                 ]}
               />
             ) : null}
