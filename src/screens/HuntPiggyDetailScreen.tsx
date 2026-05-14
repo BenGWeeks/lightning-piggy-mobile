@@ -16,6 +16,7 @@ import {
   Box,
   Camera,
   CalendarDays,
+  CheckCircle2,
   ChevronLeft,
   Clock,
   Cloud,
@@ -24,7 +25,7 @@ import {
   HelpCircle,
   ImagePlus,
   MapPin,
-  Mountain,
+  Navigation,
   PiggyBank,
   Repeat,
   Send,
@@ -45,6 +46,7 @@ import { Alert } from '../components/BrandedAlert';
 import Toast from '../components/BrandedToast';
 import { buildFoundLog, parseCacheCoord, type ParsedCache } from '../services/nostrPlacesService';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
+import CacheSpecSheet from '../components/CacheSpecSheet';
 import { decodeGeohash } from '../utils/geohash';
 import {
   fetchCache,
@@ -134,9 +136,9 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     [],
   );
   const [hasClaimed, setHasClaimed] = useState(false);
-  // Cache / Finds segmented control — keeps the long detail page from
-  // being one endless scroll.
-  const [segment, setSegment] = useState<'cache' | 'finds'>('cache');
+  // Hero slot toggles between the cache photo and a map; defaults to the
+  // photo when one exists, otherwise the render falls back to the map.
+  const [heroView, setHeroView] = useState<'photo' | 'map'>('photo');
 
   // ----- load listing + subscribe found-logs ------------------------------
 
@@ -306,6 +308,23 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   // presence); plain NIP-GC caches have no claim step, so anyone can log.
   const canLog = hasClaimed || (cache != null && !cache.isLpPiggy);
 
+  // Hero shows the photo when the toggle picks it AND a photo exists;
+  // otherwise it falls back to the map.
+  const showHeroPhoto = !!cache?.imageUrl && (heroView === 'photo' || !cache?.geohash);
+
+  // Hand off to the device's maps app for walking directions to the
+  // cache's geohash centroid; fall back to a Google Maps web URL.
+  const openNavigation = useCallback(() => {
+    if (!cache?.geohash) return;
+    const { lat, lng } = decodeGeohash(cache.geohash);
+    const label = encodeURIComponent(cache.name ?? 'Geo-cache');
+    Linking.openURL(`geo:${lat},${lng}?q=${lat},${lng}(${label})`).catch(() => {
+      Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`).catch(
+        () => {},
+      );
+    });
+  }, [cache]);
+
   return (
     <View style={styles.container} testID="hunt-piggy-detail-screen">
       <View style={styles.header}>
@@ -330,96 +349,14 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           <Text style={styles.errorText}>{error}</Text>
         ) : cache ? (
           <>
-            {cache.imageUrl ? (
-              <Image source={{ uri: cache.imageUrl }} style={styles.heroImage} resizeMode="cover" />
-            ) : null}
-            <CacheSpecPanel cache={cache} colors={colors} styles={styles} />
-            {cache.isLpPiggy ? (
-              <View style={styles.claimSection}>
-                <TouchableOpacity
-                  style={[styles.claimButton, styles.claimButtonDisabled]}
-                  disabled
-                  accessibilityState={{ disabled: true }}
-                  accessibilityLabel="Claim prize — tap the Piglet's NFC tag to unlock"
-                  testID="hunt-piggy-detail-claim-button"
-                >
-                  <Zap size={18} color={colors.white} fill={colors.white} strokeWidth={2} />
-                  <Text style={styles.claimButtonText}>
-                    {cache.payoutSats != null
-                      ? `Claim ${cache.payoutSats.toLocaleString()} sats`
-                      : 'Claim prize'}
-                  </Text>
-                </TouchableOpacity>
-                <Text style={styles.claimNote}>
-                  Tap the Piglet&apos;s NFC tag (or scan its QR) at the cache to unlock the claim.
-                </Text>
-              </View>
-            ) : null}
-
-            <View style={styles.segmentRow}>
-              <TouchableOpacity
-                style={[styles.segment, segment === 'cache' && styles.segmentActive]}
-                onPress={() => setSegment('cache')}
-                testID="hunt-piggy-detail-segment-cache"
-              >
-                <Text style={[styles.segmentText, segment === 'cache' && styles.segmentTextActive]}>
-                  Cache
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.segment, segment === 'finds' && styles.segmentActive]}
-                onPress={() => setSegment('finds')}
-                testID="hunt-piggy-detail-segment-finds"
-              >
-                <Text style={[styles.segmentText, segment === 'finds' && styles.segmentTextActive]}>
-                  Finds ({sortedLogs.length})
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            {segment === 'cache' ? (
-              <>
-                <Text style={styles.description}>{cache.description}</Text>
-                {/* Attribution — surface the hider so the finder knows
-                whose word they're trusting before walking to a
-                coordinate. The npub is shorthand-formatted; full
-                profile UI lands later. The WoT filter would already
-                have hidden this listing from any view if the hider
-                weren't in the user's trust graph (see
-                `trustGraphService` for the threat model). */}
-                <HiderAttribution
-                  pubkey={cache.hiderPubkey}
-                  colors={colors}
-                  styles={styles}
-                  onPressProfile={openProfileSheet}
-                />
-                {cache.hint ? (
-                  <TouchableOpacity
-                    style={styles.hintCard}
-                    onPress={() => setHintRevealed((r) => !r)}
-                    accessibilityLabel={hintRevealed ? 'Hide hint' : 'Reveal hint'}
-                    testID="hunt-piggy-detail-hint"
-                  >
-                    {hintRevealed ? (
-                      <EyeOff size={14} color={colors.brandPink} strokeWidth={2.5} />
-                    ) : (
-                      <Eye size={14} color={colors.brandPink} strokeWidth={2.5} />
-                    )}
-                    <Text style={styles.hintText}>
-                      {hintRevealed ? `Hint: ${cache.hint}` : 'Stuck? Tap to reveal the hint'}
-                    </Text>
-                  </TouchableOpacity>
-                ) : null}
-
-                {/* Location preview — single-pin map centred on the cache's
-                geohash centroid. Tap → opens the full Map for pan/zoom.
-                NIP-GC publishes geohash precision 9 (≈ 5 m) at the
-                tightest tag, so this is "exact spot" not "rough area"
-                — the hider's choice of hashed precision controls the
-                fidelity, not the client. */}
-                {cache.geohash ? (
-                  <View style={styles.mapPreviewWrap}>
+            {cache.imageUrl || cache.geohash ? (
+              <View style={styles.heroWrap}>
+                {showHeroPhoto && cache.imageUrl ? (
+                  <Image source={{ uri: cache.imageUrl }} style={styles.hero} resizeMode="cover" />
+                ) : cache.geohash ? (
+                  <View style={styles.hero}>
                     <ExploreMiniMap
+                      fill
                       lat={decodeGeohash(cache.geohash).lat}
                       lon={decodeGeohash(cache.geohash).lng}
                       merchants={[]}
@@ -428,111 +365,196 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                       onTapMap={() => navigation.navigate('Map')}
                     />
                   </View>
+                ) : cache.imageUrl ? (
+                  <Image source={{ uri: cache.imageUrl }} style={styles.hero} resizeMode="cover" />
                 ) : null}
-              </>
-            ) : (
-              <>
-                <Text style={styles.sectionLabel}>Find log ({sortedLogs.length})</Text>
-                {sortedLogs.length === 0 ? (
-                  <Text style={styles.subtle}>
-                    No finds logged yet. {canLog ? 'Be the first to drop a log entry!' : ''}
-                  </Text>
-                ) : (
-                  sortedLogs.map((log) => (
-                    <LogRow
-                      key={log.id}
-                      log={log}
-                      colors={colors}
-                      styles={styles}
-                      onPressProfile={openProfileSheet}
-                    />
-                  ))
-                )}
-
-                {canLog && !composerOpen ? (
-                  <TouchableOpacity
-                    style={styles.composeCta}
-                    onPress={() => setComposerOpen(true)}
-                    testID="hunt-piggy-detail-compose-button"
-                  >
-                    <Sparkles size={16} color={colors.white} strokeWidth={2.5} />
-                    <Text style={styles.composeCtaText}>Drop a log entry</Text>
-                  </TouchableOpacity>
-                ) : null}
-
-                {composerOpen ? (
-                  <View style={styles.composer}>
-                    <TextInput
-                      style={styles.composerInput}
-                      placeholder="Found it! Tucked behind the bench, cleverly hidden."
-                      placeholderTextColor={colors.textSupplementary}
-                      value={composerText}
-                      onChangeText={setComposerText}
-                      multiline
-                      testID="hunt-piggy-detail-compose-input"
-                    />
-                    {composerPhotoUrl ? (
-                      <View style={styles.composerPhotoPreviewWrap}>
-                        <Image
-                          source={{ uri: composerPhotoUrl }}
-                          style={styles.composerPhotoPreview}
-                          resizeMode="cover"
-                        />
-                        <TouchableOpacity
-                          style={styles.composerPhotoRemove}
-                          onPress={() => setComposerPhotoUrl(null)}
-                          accessibilityLabel="Remove photo"
-                        >
-                          <X size={14} color={colors.white} strokeWidth={2.5} />
-                        </TouchableOpacity>
-                      </View>
-                    ) : composerUploading ? (
-                      <ActivityIndicator color={colors.brandPink} />
-                    ) : (
-                      <View style={styles.composerPhotoButtons}>
-                        <TouchableOpacity
-                          style={styles.composerPhotoButton}
-                          onPress={handleTakePhoto}
-                        >
-                          <Camera size={16} color={colors.brandPink} strokeWidth={2} />
-                          <Text style={styles.composerPhotoButtonText}>Camera</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={styles.composerPhotoButton}
-                          onPress={handlePickFromLibrary}
-                        >
-                          <ImagePlus size={16} color={colors.brandPink} strokeWidth={2} />
-                          <Text style={styles.composerPhotoButtonText}>Library</Text>
-                        </TouchableOpacity>
-                      </View>
-                    )}
-                    <View style={styles.composerActions}>
-                      <TouchableOpacity
-                        style={styles.composerCancel}
-                        onPress={() => setComposerOpen(false)}
-                      >
-                        <Text style={styles.composerCancelText}>Cancel</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.composerPost, posting && styles.composerPostDim]}
-                        disabled={posting}
-                        onPress={handlePostLog}
-                        testID="hunt-piggy-detail-post-button"
-                      >
-                        {posting ? (
-                          <ActivityIndicator color={colors.white} />
-                        ) : (
-                          <>
-                            <Send size={16} color={colors.white} strokeWidth={2.5} />
-                            <Text style={styles.composerPostText}>Post log</Text>
-                          </>
-                        )}
-                      </TouchableOpacity>
-                    </View>
+                {cache.imageUrl && cache.geohash ? (
+                  <View style={styles.heroToggle}>
+                    <TouchableOpacity
+                      style={[styles.heroToggleBtn, showHeroPhoto && styles.heroToggleBtnActive]}
+                      onPress={() => setHeroView('photo')}
+                      accessibilityLabel="Show photo"
+                      testID="hunt-piggy-detail-hero-photo"
+                    >
+                      <Camera size={18} color={colors.white} strokeWidth={2.5} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.heroToggleBtn, !showHeroPhoto && styles.heroToggleBtnActive]}
+                      onPress={() => setHeroView('map')}
+                      accessibilityLabel="Show map"
+                      testID="hunt-piggy-detail-hero-map"
+                    >
+                      <MapPin size={18} color={colors.white} strokeWidth={2.5} />
+                    </TouchableOpacity>
                   </View>
                 ) : null}
-              </>
+              </View>
+            ) : null}
+            <CacheSpecPanel cache={cache} colors={colors} styles={styles} />
+            {cache.isLpPiggy ? (
+              <View style={styles.claimSection}>
+                <View style={styles.actionRow}>
+                  <TouchableOpacity
+                    style={styles.actionButtonSecondary}
+                    onPress={openNavigation}
+                    accessibilityLabel="Navigate to this cache"
+                    testID="hunt-piggy-detail-navigate-button"
+                  >
+                    <Navigation size={18} color={colors.brandPink} strokeWidth={2.5} />
+                    <Text style={styles.actionButtonSecondaryText}>Navigate</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.actionButtonPrimary, !hasClaimed && styles.claimButtonDisabled]}
+                    disabled={!hasClaimed}
+                    onPress={() => setComposerOpen(true)}
+                    accessibilityState={{ disabled: !hasClaimed }}
+                    accessibilityLabel={
+                      hasClaimed
+                        ? 'Claim found — log your find'
+                        : 'Claim found — scan the Piglet to unlock'
+                    }
+                    testID="hunt-piggy-detail-claim-button"
+                  >
+                    <CheckCircle2 size={18} color={colors.white} strokeWidth={2.5} />
+                    <Text style={styles.actionButtonPrimaryText}>Claim found</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.claimNote}>
+                  {hasClaimed
+                    ? 'Sats received! Log your find so other hunters can see it.'
+                    : "Scan the Piglet's NFC tag (or its QR) at the cache to unlock Claim found."}
+                </Text>
+              </View>
+            ) : null}
+
+            <Text style={styles.description}>{cache.description}</Text>
+            {cache.hint ? (
+              <TouchableOpacity
+                style={styles.hintCard}
+                onPress={() => setHintRevealed((r) => !r)}
+                accessibilityLabel={hintRevealed ? 'Hide hint' : 'Reveal hint'}
+                testID="hunt-piggy-detail-hint"
+              >
+                {hintRevealed ? (
+                  <EyeOff size={14} color={colors.brandPink} strokeWidth={2.5} />
+                ) : (
+                  <Eye size={14} color={colors.brandPink} strokeWidth={2.5} />
+                )}
+                <Text style={styles.hintText}>
+                  {hintRevealed ? `Hint: ${cache.hint}` : 'Stuck? Tap to reveal the hint'}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+            {/* Attribution — surface the hider so the finder knows
+                whose word they're trusting before walking to a
+                coordinate. The npub is shorthand-formatted; full
+                profile UI lands later. The WoT filter would already
+                have hidden this listing from any view if the hider
+                weren't in the user's trust graph (see
+                `trustGraphService` for the threat model). */}
+            <HiderAttribution
+              pubkey={cache.hiderPubkey}
+              colors={colors}
+              styles={styles}
+              onPressProfile={openProfileSheet}
+            />
+
+            <Text style={styles.sectionLabel}>Find log ({sortedLogs.length})</Text>
+            {sortedLogs.length === 0 ? (
+              <Text style={styles.subtle}>
+                No finds logged yet. {canLog ? 'Be the first to drop a log entry!' : ''}
+              </Text>
+            ) : (
+              sortedLogs.map((log) => (
+                <LogRow
+                  key={log.id}
+                  log={log}
+                  colors={colors}
+                  styles={styles}
+                  onPressProfile={openProfileSheet}
+                />
+              ))
             )}
+
+            {canLog && !composerOpen ? (
+              <TouchableOpacity
+                style={styles.composeCta}
+                onPress={() => setComposerOpen(true)}
+                testID="hunt-piggy-detail-compose-button"
+              >
+                <Sparkles size={16} color={colors.white} strokeWidth={2.5} />
+                <Text style={styles.composeCtaText}>Drop a log entry</Text>
+              </TouchableOpacity>
+            ) : null}
+
+            {composerOpen ? (
+              <View style={styles.composer}>
+                <TextInput
+                  style={styles.composerInput}
+                  placeholder="Found it! Tucked behind the bench, cleverly hidden."
+                  placeholderTextColor={colors.textSupplementary}
+                  value={composerText}
+                  onChangeText={setComposerText}
+                  multiline
+                  testID="hunt-piggy-detail-compose-input"
+                />
+                {composerPhotoUrl ? (
+                  <View style={styles.composerPhotoPreviewWrap}>
+                    <Image
+                      source={{ uri: composerPhotoUrl }}
+                      style={styles.composerPhotoPreview}
+                      resizeMode="cover"
+                    />
+                    <TouchableOpacity
+                      style={styles.composerPhotoRemove}
+                      onPress={() => setComposerPhotoUrl(null)}
+                      accessibilityLabel="Remove photo"
+                    >
+                      <X size={14} color={colors.white} strokeWidth={2.5} />
+                    </TouchableOpacity>
+                  </View>
+                ) : composerUploading ? (
+                  <ActivityIndicator color={colors.brandPink} />
+                ) : (
+                  <View style={styles.composerPhotoButtons}>
+                    <TouchableOpacity style={styles.composerPhotoButton} onPress={handleTakePhoto}>
+                      <Camera size={16} color={colors.brandPink} strokeWidth={2} />
+                      <Text style={styles.composerPhotoButtonText}>Camera</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.composerPhotoButton}
+                      onPress={handlePickFromLibrary}
+                    >
+                      <ImagePlus size={16} color={colors.brandPink} strokeWidth={2} />
+                      <Text style={styles.composerPhotoButtonText}>Library</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+                <View style={styles.composerActions}>
+                  <TouchableOpacity
+                    style={styles.composerCancel}
+                    onPress={() => setComposerOpen(false)}
+                  >
+                    <Text style={styles.composerCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.composerPost, posting && styles.composerPostDim]}
+                    disabled={posting}
+                    onPress={handlePostLog}
+                    testID="hunt-piggy-detail-post-button"
+                  >
+                    {posting ? (
+                      <ActivityIndicator color={colors.white} />
+                    ) : (
+                      <>
+                        <Send size={16} color={colors.white} strokeWidth={2.5} />
+                        <Text style={styles.composerPostText}>Post log</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : null}
           </>
         ) : null}
       </ScrollView>
@@ -649,23 +671,32 @@ const LogRow: React.FC<{
           </Text>
           <Text style={styles.logAge}>{ageLabel}</Text>
         </View>
-        {lud16 ? (
-          <TouchableOpacity
-            style={styles.logZapButton}
-            onPress={() => {
+        {/* Always visible so a hider can thank any finder at a glance.
+            When the finder hasn't shared a Lightning address there's
+            nothing to zap — the button dims and explains via a toast. */}
+        <TouchableOpacity
+          style={[styles.logZapButton, !lud16 && styles.logZapButtonDim]}
+          onPress={() => {
+            if (lud16) {
               // Open the OS Lightning handler with the finder's LN
               // address pre-filled. Full in-app zap UX (NIP-57) lands
               // in a follow-up — for now we hand off to whichever
               // wallet the user has set as default.
               Linking.openURL(`lightning:${lud16}`).catch(() => {});
-            }}
-            testID={`hunt-log-${log.id.slice(0, 8)}-zap`}
-            accessibilityLabel={`Zap ${display}`}
-          >
-            <Zap size={14} color={colors.white} strokeWidth={2.5} />
-            <Text style={styles.logZapText}>Zap</Text>
-          </TouchableOpacity>
-        ) : null}
+            } else {
+              Toast.show({
+                type: 'info',
+                text1: 'No Lightning address',
+                text2: `${display} hasn't shared one to zap.`,
+              });
+            }
+          }}
+          testID={`hunt-log-${log.id.slice(0, 8)}-zap`}
+          accessibilityLabel={`Zap ${display}`}
+        >
+          <Zap size={14} color={colors.white} strokeWidth={2.5} />
+          <Text style={styles.logZapText}>Zap</Text>
+        </TouchableOpacity>
       </TouchableOpacity>
       {log.imageUrl ? (
         <Image source={{ uri: log.imageUrl }} style={styles.logImage} resizeMode="cover" />
@@ -743,11 +774,15 @@ const TERRAIN_DESCRIPTIONS: Record<string, string> = {
   '5': 'Special gear needed',
 };
 
-type SpecChip = {
-  key: string;
+type SpecOption = { label: string; description: string; isCurrent: boolean };
+
+// Shared explanation payload — every chip and every D/T/S meter opens the
+// same popup. `options`, when present, lists the full vocab for that field
+// with the cache's current value highlighted.
+type SpecInfo = { key: string; title: string; body: string; options?: SpecOption[] };
+
+type SpecChip = SpecInfo & {
   label: string;
-  title: string;
-  body: string;
   Icon: typeof Box;
   // The Piglet chip stays bright pink so a payout cache reads at a glance;
   // every other chip is a neutral outline chip.
@@ -756,6 +791,28 @@ type SpecChip = {
   iconFill?: string;
 };
 
+type SpecMeter = SpecInfo & {
+  name: string;
+  value: number;
+};
+
+// 5-segment level bar for difficulty / terrain / size.
+const SegmentBar: React.FC<{ value: number; colors: Palette }> = ({ value, colors }) => (
+  <View style={{ flexDirection: 'row', gap: 3 }}>
+    {[1, 2, 3, 4, 5].map((i) => (
+      <View
+        key={i}
+        style={{
+          flex: 1,
+          height: 6,
+          borderRadius: 2,
+          backgroundColor: i <= value ? colors.brandPink : colors.divider,
+        }}
+      />
+    ))}
+  </View>
+);
+
 const CacheSpecPanel: React.FC<{
   cache: ParsedCache;
   colors: Palette;
@@ -763,8 +820,10 @@ const CacheSpecPanel: React.FC<{
 }> = ({ cache, colors, styles }) => {
   const [openKey, setOpenKey] = useState<string | null>(null);
 
-  const typeInfo = TYPE_LABELS[(cache.cacheType ?? 'traditional').toLowerCase()];
-  const sizeInfo = SIZE_LABELS[(cache.size ?? '').toLowerCase()];
+  const typeKey = (cache.cacheType ?? 'traditional').toLowerCase();
+  const sizeKey = (cache.size ?? '').toLowerCase();
+  const typeInfo = TYPE_LABELS[typeKey];
+  const sizeInfo = SIZE_LABELS[sizeKey];
 
   const chips: SpecChip[] = [
     {
@@ -776,6 +835,18 @@ const CacheSpecPanel: React.FC<{
         : 'A standard geocache published by another NIP-GC client — no Lightning payout, just the find.',
       Icon: cache.isLpPiggy ? PiggyBank : MapPin,
       accent: cache.isLpPiggy,
+      options: [
+        {
+          label: 'Lightning Piggy',
+          description: 'Has a Lightning payout you claim at the cache.',
+          isCurrent: cache.isLpPiggy,
+        },
+        {
+          label: 'NIP-GC cache',
+          description: 'A standard geocache — no payout, just the find.',
+          isCurrent: !cache.isLpPiggy,
+        },
+      ],
     },
   ];
 
@@ -816,43 +887,61 @@ const CacheSpecPanel: React.FC<{
       key: 'type',
       label: typeInfo.label,
       title: `Type · ${typeInfo.label}`,
-      body: typeInfo.description,
+      body: 'What style of geocache this is — how a finder reaches the coordinates.',
       Icon: typeInfo.Icon,
-    });
-  }
-  if (sizeInfo) {
-    chips.push({
-      key: 'size',
-      label: sizeInfo.label,
-      title: `Size · ${sizeInfo.label}`,
-      body: sizeInfo.description,
-      Icon: Box,
-    });
-  }
-  if (cache.difficulty) {
-    chips.push({
-      key: 'difficulty',
-      label: `Difficulty ${cache.difficulty}/5`,
-      title: `Difficulty ${cache.difficulty}/5`,
-      body:
-        DIFFICULTY_DESCRIPTIONS[String(cache.difficulty)] ??
-        `Difficulty ${cache.difficulty} of 5 — how tricky the cache is to find.`,
-      Icon: HelpCircle,
-    });
-  }
-  if (cache.terrain) {
-    chips.push({
-      key: 'terrain',
-      label: `Terrain ${cache.terrain}/5`,
-      title: `Terrain ${cache.terrain}/5`,
-      body:
-        TERRAIN_DESCRIPTIONS[String(cache.terrain)] ??
-        `Terrain ${cache.terrain} of 5 — how rough the walk to the cache is.`,
-      Icon: Mountain,
+      options: Object.entries(TYPE_LABELS).map(([k, v]) => ({
+        label: v.label,
+        description: v.description,
+        isCurrent: k === typeKey,
+      })),
     });
   }
 
-  const open = chips.find((c) => c.key === openKey) ?? null;
+  const meters: SpecMeter[] = [];
+  if (cache.difficulty) {
+    meters.push({
+      key: 'difficulty',
+      name: 'Difficulty',
+      value: cache.difficulty,
+      title: `Difficulty ${cache.difficulty}/5`,
+      body: 'How tricky this cache is to find — rated 1 (quick) to 5 (very difficult) on the NIP-GC scale.',
+      options: Object.entries(DIFFICULTY_DESCRIPTIONS).map(([level, desc]) => ({
+        label: `Level ${level}`,
+        description: desc,
+        isCurrent: Number(level) === cache.difficulty,
+      })),
+    });
+  }
+  if (cache.terrain) {
+    meters.push({
+      key: 'terrain',
+      name: 'Terrain',
+      value: cache.terrain,
+      title: `Terrain ${cache.terrain}/5`,
+      body: 'How rough the journey to the cache is — rated 1 (easy walk) to 5 (special gear needed).',
+      options: Object.entries(TERRAIN_DESCRIPTIONS).map(([level, desc]) => ({
+        label: `Level ${level}`,
+        description: desc,
+        isCurrent: Number(level) === cache.terrain,
+      })),
+    });
+  }
+  if (sizeInfo) {
+    meters.push({
+      key: 'size',
+      name: 'Size',
+      value: Object.keys(SIZE_LABELS).indexOf(sizeKey) + 1,
+      title: `Size · ${sizeInfo.label}`,
+      body: 'Roughly how big the cache container is — from a matchbox to a bucket.',
+      options: Object.entries(SIZE_LABELS).map(([k, v]) => ({
+        label: v.label,
+        description: v.description,
+        isCurrent: k === sizeKey,
+      })),
+    });
+  }
+
+  const open: SpecInfo | null = [...chips, ...meters].find((x) => x.key === openKey) ?? null;
 
   return (
     <View testID="hunt-piggy-detail-spec-panel">
@@ -885,12 +974,31 @@ const CacheSpecPanel: React.FC<{
           );
         })}
       </View>
-      {open ? (
-        <View style={styles.chipExplain} testID="hunt-piggy-detail-chip-explain">
-          <Text style={styles.chipExplainTitle}>{open.title}</Text>
-          <Text style={styles.chipExplainBody}>{open.body}</Text>
+
+      {meters.length > 0 ? (
+        <View style={styles.meterRow}>
+          {meters.map((meter) => {
+            const active = openKey === meter.key;
+            return (
+              <TouchableOpacity
+                key={meter.key}
+                style={styles.meter}
+                onPress={() => setOpenKey(active ? null : meter.key)}
+                testID={`hunt-piggy-detail-meter-${meter.key}`}
+                accessibilityLabel={meter.title}
+                accessibilityHint="Tap for an explanation"
+              >
+                <Text style={[styles.meterName, active && styles.meterNameActive]}>
+                  {meter.name}
+                </Text>
+                <SegmentBar value={meter.value} colors={colors} />
+              </TouchableOpacity>
+            );
+          })}
         </View>
       ) : null}
+
+      <CacheSpecSheet spec={open} onClose={() => setOpenKey(null)} />
     </View>
   );
 };
@@ -917,12 +1025,34 @@ const createStyles = (colors: Palette) =>
     body: { padding: 16, gap: 12 },
     errorText: { fontSize: 14, color: colors.brandPink, textAlign: 'center' },
     subtle: { fontSize: 13, color: colors.textSupplementary, lineHeight: 20 },
-    heroImage: {
+    heroWrap: { position: 'relative' },
+    // Photo and map share one fixed-size hero slot so toggling between
+    // them never shifts the layout.
+    hero: {
       width: '100%',
-      aspectRatio: 16 / 9,
+      height: 200,
       borderRadius: 12,
+      overflow: 'hidden',
       backgroundColor: colors.divider,
     },
+    heroToggle: {
+      position: 'absolute',
+      top: 8,
+      right: 8,
+      flexDirection: 'row',
+      gap: 4,
+      padding: 4,
+      borderRadius: 100,
+      backgroundColor: 'rgba(0,0,0,0.55)',
+    },
+    heroToggleBtn: {
+      width: 42,
+      height: 42,
+      borderRadius: 100,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    heroToggleBtnActive: { backgroundColor: colors.brandPink },
     chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
     chip: {
       flexDirection: 'row',
@@ -939,17 +1069,16 @@ const createStyles = (colors: Palette) =>
     chipActive: { backgroundColor: colors.brandPinkLight, borderColor: colors.brandPink },
     chipText: { fontSize: 12, fontWeight: '700', color: colors.textHeader },
     chipTextAccent: { color: colors.white },
-    chipExplain: {
-      marginTop: 8,
-      padding: 12,
-      borderRadius: 12,
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.divider,
-      gap: 4,
+    meterRow: {
+      flexDirection: 'row',
+      gap: 22,
+      marginTop: 12,
+      marginBottom: 8,
+      paddingHorizontal: 12,
     },
-    chipExplainTitle: { fontSize: 13, fontWeight: '700', color: colors.textHeader },
-    chipExplainBody: { fontSize: 12, color: colors.textSupplementary, lineHeight: 17 },
+    meter: { flex: 1, gap: 6 },
+    meterName: { fontSize: 11, fontWeight: '700', color: colors.textSupplementary },
+    meterNameActive: { color: colors.brandPink },
     metaPill: {
       backgroundColor: colors.surface,
       color: colors.textSupplementary,
@@ -958,13 +1087,6 @@ const createStyles = (colors: Palette) =>
       borderRadius: 100,
       fontSize: 11,
       fontWeight: '600',
-    },
-    mapPreviewWrap: {
-      // ExploreMiniMap brings its own horizontal margin in for the hub
-      // layout — neutralise that here so it lines up with the detail
-      // screen's content padding instead.
-      marginHorizontal: -16,
-      marginVertical: 4,
     },
     description: { fontSize: 14, color: colors.textHeader, lineHeight: 20 },
     attribution: {
@@ -1023,6 +1145,7 @@ const createStyles = (colors: Palette) =>
       paddingVertical: 5,
       borderRadius: 999,
     },
+    logZapButtonDim: { opacity: 0.4 },
     logZapText: {
       color: colors.white,
       fontSize: 12,
@@ -1038,7 +1161,9 @@ const createStyles = (colors: Palette) =>
     },
     hintText: { color: colors.brandPink, fontSize: 13, fontWeight: '600', flex: 1 },
     claimSection: { gap: 8 },
-    claimButton: {
+    actionRow: { flexDirection: 'row', gap: 10 },
+    actionButtonPrimary: {
+      flex: 1,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
@@ -1047,30 +1172,27 @@ const createStyles = (colors: Palette) =>
       paddingVertical: 14,
       borderRadius: 100,
     },
+    actionButtonPrimaryText: { color: colors.white, fontSize: 15, fontWeight: '700' },
+    actionButtonSecondary: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.brandPink,
+      paddingVertical: 14,
+      borderRadius: 100,
+    },
+    actionButtonSecondaryText: { color: colors.brandPink, fontSize: 15, fontWeight: '700' },
     claimButtonDisabled: { opacity: 0.45 },
-    claimButtonText: { color: colors.white, fontSize: 15, fontWeight: '700' },
     claimNote: {
       color: colors.textSupplementary,
       fontSize: 12,
       lineHeight: 16,
       textAlign: 'center',
     },
-    segmentRow: {
-      flexDirection: 'row',
-      backgroundColor: colors.surface,
-      borderRadius: 10,
-      padding: 3,
-      gap: 3,
-    },
-    segment: {
-      flex: 1,
-      alignItems: 'center',
-      paddingVertical: 8,
-      borderRadius: 8,
-    },
-    segmentActive: { backgroundColor: colors.brandPink },
-    segmentText: { fontSize: 13, fontWeight: '700', color: colors.textSupplementary },
-    segmentTextActive: { color: colors.white },
     sectionLabel: {
       fontSize: 13,
       fontWeight: '700',

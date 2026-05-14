@@ -36,6 +36,12 @@ interface Props {
    * Places list — most users want a wider Bitcoin-merchant net.
    */
   defaultZoom?: number;
+  /**
+   * When set, the map drops its own fixed height + margins and fills its
+   * parent instead. Used by the cache detail hero, where the parent owns
+   * a fixed photo-sized slot the map must match exactly.
+   */
+  fill?: boolean;
 }
 
 /**
@@ -63,6 +69,7 @@ export const ExploreMiniMap: React.FC<Props> = ({
   onTapMap,
   onBoundsChange,
   defaultZoom = 13,
+  fill = false,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -110,7 +117,7 @@ export const ExploreMiniMap: React.FC<Props> = ({
 
   return (
     <TouchableOpacity
-      style={styles.container}
+      style={fill ? styles.containerFill : styles.container}
       activeOpacity={0.85}
       onPress={onTapMap}
       accessibilityLabel="Open full map"
@@ -296,6 +303,14 @@ const createStyles = (colors: Palette) =>
       marginHorizontal: 16,
       marginBottom: 18,
       borderRadius: 14,
+      overflow: 'hidden',
+      backgroundColor: colors.surface,
+      position: 'relative',
+    },
+    // `fill` variant — no fixed height or margins; the parent owns the
+    // size (e.g. the cache detail hero slot).
+    containerFill: {
+      flex: 1,
       overflow: 'hidden',
       backgroundColor: colors.surface,
       position: 'relative',
