@@ -15,6 +15,8 @@ import { initialiseSendThresholdForNewInstall } from '../services/sendThresholdS
 import * as lnurlService from '../services/lnurlService';
 import * as zapCounterpartyStorage from '../services/zapCounterpartyStorage';
 import * as zapSenderProfileStorage from '../services/zapSenderProfileStorage';
+import * as zapResolverFingerprintStorage from '../services/zapResolverFingerprintStorage';
+import { computePendingHash, shouldSkipResolve } from '../utils/zapResolverGuard';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
@@ -59,10 +61,11 @@ const BTC_PRICE_CACHE_PREFIX = 'btc_price_';
 const OUTGOING_RECEIPT_FETCH_TTL_MS = 5 * 60 * 1000;
 const lastOutgoingReceiptFetch = new Map<string, number>();
 
-// Short-circuit the resolver when nothing has changed since the last run:
-// the same set of pending paymentHashes AND no new storage writes since.
-type ResolverFingerprint = { pendingHash: string; storageVersion: number };
-const lastResolverFingerprint = new Map<string, ResolverFingerprint>();
+// In-flight zap-resolver AbortControllers, keyed by walletId. A fresh
+// `resolveZapSendersForWallet` call for a wallet aborts the previous
+// (now-stale) run for that same wallet so two passes don't compete for
+// the JS thread (#526). Cleared when a run finishes.
+const zapResolverControllers = new Map<string, AbortController>();
 
 function parseNwcLud16(nwcUrl: string | null): string | null {
   if (!nwcUrl) return null;
@@ -146,7 +149,7 @@ interface WalletContextType {
     signalOrOptions?: AbortSignal | nwcService.PayInvoiceOptions,
   ) => Promise<{ preimage: string }>;
   refreshBalanceForWallet: (walletId: string) => Promise<void>;
-  fetchTransactionsForWallet: (walletId: string) => Promise<void>;
+  fetchTransactionsForWallet: (walletId: string, opts?: { force?: boolean }) => Promise<void>;
 
   // Transaction helpers
   addPendingTransaction: (walletId: string, tx: WalletTransaction) => void;
@@ -264,7 +267,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Forward-declared so `fetchTransactionsForWallet` can call into it without
   // pulling the resolver's dependencies into its useCallback deps list.
-  const resolveZapSendersRef = useRef<((walletId: string) => Promise<void>) | null>(null);
+  const resolveZapSendersRef = useRef<
+    ((walletId: string, opts?: { force?: boolean }) => Promise<void>) | null
+  >(null);
 
   // In-memory cache for `lightning_address -> LNURL server nostrPubkey`.
   // NIP-57 zap receipts tag `#p` with the recipient pubkey *as advertised by
@@ -944,7 +949,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   const fetchTransactionsForWallet = useCallback(
-    async (walletId: string) => {
+    async (walletId: string, opts?: { force?: boolean }) => {
       // Read from walletsRef, not the closure's captured `wallets`: this
       // callback is fired-and-forgotten by SendSheet after pay-success,
       // so by the time the awaited setTimeout resolves, the closure's
@@ -1040,9 +1045,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         await AsyncStorage.setItem(`txs_${walletId}`, JSON.stringify(txs));
 
         // Kick off background zap sender resolution for any incoming
-        // transactions that haven't been resolved yet.
+        // transactions that haven't been resolved yet. `force` (set by
+        // an explicit pull-to-refresh) bypasses the fingerprint skip so
+        // the resolver always does a full pass — see resolveZapSenders.
         resolveZapSendersRef
-          .current?.(walletId)
+          .current?.(walletId, { force: opts?.force })
           .catch((e) => console.warn(`resolveZapSenders failed for ${walletId}:`, e));
       } catch (error) {
         console.warn(`fetchTransactions failed for ${walletId}:`, error);
@@ -1085,9 +1092,26 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   const resolveZapSendersForWallet = useCallback(
-    async (walletId: string) => {
+    async (walletId: string, opts?: { force?: boolean }) => {
+      const force = opts?.force ?? false;
       const __zapResolveStart = Date.now();
       perfLog(`resolveZapSenders[${walletId.slice(0, 8)}]: start`);
+
+      // Supersede any in-flight run for this wallet — a newer refresh
+      // makes the old pass stale, and two passes competing for the JS
+      // thread is exactly the contention we're trying to kill (#526).
+      zapResolverControllers.get(walletId)?.abort();
+      const abortController = new AbortController();
+      zapResolverControllers.set(walletId, abortController);
+      const { signal } = abortController;
+      // Only clear the map slot if it still points at *our* controller —
+      // a later run may have already replaced it.
+      const releaseController = (): void => {
+        if (zapResolverControllers.get(walletId) === abortController) {
+          zapResolverControllers.delete(walletId);
+        }
+      };
+
       const userPubkey = nostrService.getCurrentUserPubkey();
       // Collect recipient pubkeys for the `#p` filter: the user's own Nostr
       // pubkey plus every lightning-address LNURL server's `nostrPubkey`.
@@ -1102,7 +1126,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const pk = await resolveLud16ToNostrPubkey(lud16);
         if (pk) recipients.push(pk);
       }
-      if (recipients.length === 0) return;
+      if (recipients.length === 0) {
+        releaseController();
+        return;
+      }
+      if (signal.aborted) {
+        releaseController();
+        return;
+      }
 
       // Snapshot the pending list via a setter so we always read the latest
       // transactions without having to thread a ref through this callback.
@@ -1130,21 +1161,39 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
         return prev;
       });
-      if (pending.length === 0) return;
+      if (pending.length === 0) {
+        releaseController();
+        return;
+      }
 
       // Fingerprint-based short-circuit: if the same pending set was
       // already attempted at the same storage version, nothing has
       // changed since the last run — skip the work and the re-render.
-      const pendingHash = pending
-        .map(({ tx, idx }) => `${idx}:${tx.paymentHash ?? tx.bolt11 ?? tx.created_at ?? ''}`)
-        .join('|');
-      const storageVersion = zapCounterpartyStorage.getWriteVersion();
-      const last = lastResolverFingerprint.get(walletId);
-      if (last && last.pendingHash === pendingHash && last.storageVersion === storageVersion) {
+      // The fingerprint is persisted to disk (not just in-memory) so
+      // this skip also covers an unchanged *cold start*; a `force` run
+      // (explicit pull-to-refresh) ignores it and always does a full
+      // pass. See `utils/zapResolverGuard` + `zapResolverFingerprintStorage`.
+      const currentFingerprint = {
+        pendingHash: computePendingHash(pending),
+        storageVersion: zapCounterpartyStorage.getWriteVersion(),
+      };
+      const persistedFingerprint = await zapResolverFingerprintStorage.get(walletId);
+      if (
+        shouldSkipResolve({ current: currentFingerprint, persisted: persistedFingerprint, force })
+      ) {
         if (__DEV__) console.log(`[Zap/${walletAlias}] skip: fingerprint unchanged`);
+        releaseController();
         return;
       }
-      lastResolverFingerprint.set(walletId, { pendingHash, storageVersion });
+
+      // Persist the fingerprint only once the pass *completes* — a run
+      // that crashes or is superseded must not "claim" this pending set,
+      // or the next launch would wrongly skip it. Called at each
+      // success-return path below.
+      const commitFingerprint = (): void => {
+        void zapResolverFingerprintStorage.set(walletId, currentFingerprint);
+        releaseController();
+      };
 
       const incomingPending = pending.filter(({ tx }) => tx.type === 'incoming');
       const outgoingPending = pending.filter(({ tx }) => tx.type === 'outgoing');
@@ -1315,6 +1364,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           );
         }
         mergeResolverResults(walletId, resultsByIdx);
+        commitFingerprint();
         return;
       }
 
@@ -1326,12 +1376,20 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const receipts = await nostrService.fetchZapReceiptsForRecipient(recipients, queryRelays, {
         limit: 500,
       });
+      // A newer refresh superseded us mid-fetch — drop the (now stale)
+      // results instead of merging them + persisting a fingerprint the
+      // newer run is also about to write.
+      if (signal.aborted) {
+        releaseController();
+        return;
+      }
       if (__DEV__)
         console.log(
           `[Zap/${walletAlias}] incoming=${incomingPending.length} outgoing=${outgoingPending.length} recipients=${recipients.length} receipts=${receipts.length}`,
         );
       if (receipts.length === 0) {
         mergeResolverResults(walletId, resultsByIdx);
+        commitFingerprint();
         return;
       }
 
@@ -1431,6 +1489,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           ? await nostrService.fetchProfiles(stillToFetch, queryRelays)
           : undefined;
 
+      // Superseded mid-fetch — bail before merging stale results.
+      if (signal.aborted) {
+        releaseController();
+        return;
+      }
+
       // Write-through any newly-resolved profiles so the next cold start
       // serves them from disk.
       if (profileMap && profileMap.size > 0) {
@@ -1478,6 +1542,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         );
       }
       mergeResolverResults(walletId, resultsByIdx);
+      commitFingerprint();
       perfLog(
         `resolveZapSenders[${walletId.slice(0, 8)}]: done ${Date.now() - __zapResolveStart}ms (merged ${resultsByIdx.size})`,
       );

@@ -124,22 +124,31 @@ const HomeScreen: React.FC = () => {
     fetchTransactionsForWalletRef.current = fetchTransactionsForWallet;
   }, [wallets, refreshActiveBalance, fetchTransactionsForWallet]);
 
-  const fetchTransactions = useCallback(async () => {
-    if (!activeWalletId) return;
-    await fetchTransactionsForWalletRef.current(activeWalletId);
-  }, [activeWalletId]);
+  const fetchTransactions = useCallback(
+    async (opts?: { force?: boolean }) => {
+      if (!activeWalletId) return;
+      await fetchTransactionsForWalletRef.current(activeWalletId, opts);
+    },
+    [activeWalletId],
+  );
 
-  const fetchData = useCallback(async () => {
-    // For on-chain wallets, fetchTransactions already does syncAndRefresh
-    // which updates both balance and transactions in a single sync.
-    // Only call refreshActiveBalance separately for NWC wallets.
-    const wallet = walletsRef.current.find((w) => w.id === activeWalletId);
-    if (wallet?.walletType === 'onchain') {
-      await fetchTransactions();
-    } else {
-      await Promise.all([refreshActiveBalanceRef.current(), fetchTransactions()]);
-    }
-  }, [activeWalletId, fetchTransactions]);
+  // `force` is set by an explicit pull-to-refresh — it bypasses the
+  // zap-resolver's fingerprint skip so a manual refresh always does a
+  // full attribution pass even when nothing looks changed (#526).
+  const fetchData = useCallback(
+    async (opts?: { force?: boolean }) => {
+      // For on-chain wallets, fetchTransactions already does syncAndRefresh
+      // which updates both balance and transactions in a single sync.
+      // Only call refreshActiveBalance separately for NWC wallets.
+      const wallet = walletsRef.current.find((w) => w.id === activeWalletId);
+      if (wallet?.walletType === 'onchain') {
+        await fetchTransactions(opts);
+      } else {
+        await Promise.all([refreshActiveBalanceRef.current(), fetchTransactions(opts)]);
+      }
+    },
+    [activeWalletId, fetchTransactions],
+  );
 
   const isWalletAvailable =
     activeWallet?.walletType === 'onchain' ? true : (activeWallet?.isConnected ?? false);
@@ -176,7 +185,8 @@ const HomeScreen: React.FC = () => {
   const handleRefresh = async () => {
     setRefreshing(true);
     if (activeWalletId) fetchedWallets.current.delete(activeWalletId);
-    await fetchData();
+    // Explicit pull-to-refresh — force a full zap-resolver pass.
+    await fetchData({ force: true });
     setRefreshing(false);
   };
 
