@@ -16,7 +16,6 @@ import {
   Box,
   Camera,
   CalendarDays,
-  CheckCircle2,
   ChevronLeft,
   Clock,
   Cloud,
@@ -303,6 +302,10 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     [logs],
   );
 
+  // LP Piggies gate find-logging behind a successful claim (proof of
+  // presence); plain NIP-GC caches have no claim step, so anyone can log.
+  const canLog = hasClaimed || (cache != null && !cache.isLpPiggy);
+
   return (
     <View style={styles.container} testID="hunt-piggy-detail-screen">
       <View style={styles.header}>
@@ -330,19 +333,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
             {cache.imageUrl ? (
               <Image source={{ uri: cache.imageUrl }} style={styles.heroImage} resizeMode="cover" />
             ) : null}
-            <View style={styles.kindRow}>
-              {cache.isLpPiggy ? (
-                <View style={styles.lpBadge}>
-                  <PiggyBank size={14} color={colors.white} strokeWidth={2.5} />
-                  <Text style={styles.lpBadgeText}>Piglet</Text>
-                </View>
-              ) : (
-                <View style={styles.standardBadge}>
-                  <MapPin size={14} color={colors.white} strokeWidth={2.5} />
-                  <Text style={styles.lpBadgeText}>NIP-GC cache</Text>
-                </View>
-              )}
-            </View>
+            <CacheSpecPanel cache={cache} colors={colors} styles={styles} />
             {cache.isLpPiggy ? (
               <View style={styles.claimSection}>
                 <TouchableOpacity
@@ -388,7 +379,6 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
             {segment === 'cache' ? (
               <>
-                <CacheSpecPanel cache={cache} colors={colors} styles={styles} />
                 <Text style={styles.description}>{cache.description}</Text>
                 {/* Attribution — surface the hider so the finder knows
                 whose word they're trusting before walking to a
@@ -445,7 +435,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 <Text style={styles.sectionLabel}>Find log ({sortedLogs.length})</Text>
                 {sortedLogs.length === 0 ? (
                   <Text style={styles.subtle}>
-                    No finds logged yet. {hasClaimed ? 'Be the first to drop a log entry!' : ''}
+                    No finds logged yet. {canLog ? 'Be the first to drop a log entry!' : ''}
                   </Text>
                 ) : (
                   sortedLogs.map((log) => (
@@ -459,7 +449,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   ))
                 )}
 
-                {hasClaimed && !composerOpen ? (
+                {canLog && !composerOpen ? (
                   <TouchableOpacity
                     style={styles.composeCta}
                     onPress={() => setComposerOpen(true)}
@@ -682,9 +672,11 @@ const LogRow: React.FC<{
       ) : null}
       <Text style={styles.logContent}>{log.content}</Text>
       {log.amountSats ? (
+        // Self-reported by the finder — the found-log event isn't verifiable,
+        // so the copy says "reported", not "claimed".
         <View style={styles.logBadge}>
-          <CheckCircle2 size={12} color={colors.brandPink} strokeWidth={2.5} />
-          <Text style={styles.logBadgeText}>⚡ claimed {log.amountSats} sats</Text>
+          <Zap size={12} color={colors.zapYellow} fill={colors.zapYellow} strokeWidth={2.5} />
+          <Text style={styles.logBadgeText}>Reported {log.amountSats.toLocaleString()} sats</Text>
         </View>
       ) : null}
     </View>
@@ -751,27 +743,17 @@ const TERRAIN_DESCRIPTIONS: Record<string, string> = {
   '5': 'Special gear needed',
 };
 
-const DotScale: React.FC<{
-  value: number;
-  max?: number;
-  colors: Palette;
-}> = ({ value, max = 5, colors }) => {
-  const dots: React.ReactNode[] = [];
-  for (let i = 1; i <= max; i += 1) {
-    dots.push(
-      <View
-        key={i}
-        style={{
-          width: 8,
-          height: 8,
-          borderRadius: 4,
-          backgroundColor: i <= value ? colors.brandPink : colors.divider,
-          marginRight: i === max ? 0 : 4,
-        }}
-      />,
-    );
-  }
-  return <View style={{ flexDirection: 'row', alignItems: 'center' }}>{dots}</View>;
+type SpecChip = {
+  key: string;
+  label: string;
+  title: string;
+  body: string;
+  Icon: typeof Box;
+  // The Piglet chip stays bright pink so a payout cache reads at a glance;
+  // every other chip is a neutral outline chip.
+  accent?: boolean;
+  iconColor?: string;
+  iconFill?: string;
 };
 
 const CacheSpecPanel: React.FC<{
@@ -779,115 +761,134 @@ const CacheSpecPanel: React.FC<{
   colors: Palette;
   styles: ReturnType<typeof createStyles>;
 }> = ({ cache, colors, styles }) => {
-  const typeKey = (cache.cacheType ?? 'traditional').toLowerCase();
-  const sizeKey = (cache.size ?? '').toLowerCase();
-  const typeInfo = TYPE_LABELS[typeKey];
-  const sizeInfo = SIZE_LABELS[sizeKey];
-  const difficulty = cache.difficulty;
-  const terrain = cache.terrain;
+  const [openKey, setOpenKey] = useState<string | null>(null);
+
+  const typeInfo = TYPE_LABELS[(cache.cacheType ?? 'traditional').toLowerCase()];
+  const sizeInfo = SIZE_LABELS[(cache.size ?? '').toLowerCase()];
+
+  const chips: SpecChip[] = [
+    {
+      key: 'kind',
+      label: cache.isLpPiggy ? 'Piglet' : 'NIP-GC cache',
+      title: cache.isLpPiggy ? 'Lightning Piggy' : 'NIP-GC geocache',
+      body: cache.isLpPiggy
+        ? 'A geocache with a Lightning payout. Tap its NFC tag (or scan its QR) at the cache to claim the sats.'
+        : 'A standard geocache published by another NIP-GC client — no Lightning payout, just the find.',
+      Icon: cache.isLpPiggy ? PiggyBank : MapPin,
+      accent: cache.isLpPiggy,
+    },
+  ];
+
+  if (cache.payoutSats != null) {
+    chips.push({
+      key: 'prize',
+      label: `${cache.payoutSats.toLocaleString()} sats`,
+      title: 'Prize',
+      body: "The Lightning payout this Piggy was stocked with. Claim it by tapping the Piggy's NFC tag at the cache — the balance isn't guaranteed once other finders have claimed.",
+      Icon: Zap,
+      iconColor: colors.zapYellow,
+      iconFill: colors.zapYellow,
+    });
+  }
+  if (cache.waitSeconds != null) {
+    chips.push({
+      key: 'cooldown',
+      label:
+        cache.waitSeconds >= 3600
+          ? `${Math.round(cache.waitSeconds / 3600)}h cooldown`
+          : `${Math.round(cache.waitSeconds / 60)}m cooldown`,
+      title: 'Cooldown',
+      body: 'How long a finder must wait between claims on this Piggy.',
+      Icon: Clock,
+    });
+  }
+  if (cache.uses != null) {
+    chips.push({
+      key: 'uses',
+      label: `${cache.uses.toLocaleString()} claims`,
+      title: 'Total claims',
+      body: 'How many times the prize can be claimed in all, across every finder.',
+      Icon: Repeat,
+    });
+  }
+  if (typeInfo) {
+    chips.push({
+      key: 'type',
+      label: typeInfo.label,
+      title: `Type · ${typeInfo.label}`,
+      body: typeInfo.description,
+      Icon: typeInfo.Icon,
+    });
+  }
+  if (sizeInfo) {
+    chips.push({
+      key: 'size',
+      label: sizeInfo.label,
+      title: `Size · ${sizeInfo.label}`,
+      body: sizeInfo.description,
+      Icon: Box,
+    });
+  }
+  if (cache.difficulty) {
+    chips.push({
+      key: 'difficulty',
+      label: `Difficulty ${cache.difficulty}/5`,
+      title: `Difficulty ${cache.difficulty}/5`,
+      body:
+        DIFFICULTY_DESCRIPTIONS[String(cache.difficulty)] ??
+        `Difficulty ${cache.difficulty} of 5 — how tricky the cache is to find.`,
+      Icon: HelpCircle,
+    });
+  }
+  if (cache.terrain) {
+    chips.push({
+      key: 'terrain',
+      label: `Terrain ${cache.terrain}/5`,
+      title: `Terrain ${cache.terrain}/5`,
+      body:
+        TERRAIN_DESCRIPTIONS[String(cache.terrain)] ??
+        `Terrain ${cache.terrain} of 5 — how rough the walk to the cache is.`,
+      Icon: Mountain,
+    });
+  }
+
+  const open = chips.find((c) => c.key === openKey) ?? null;
 
   return (
-    <View style={styles.specPanel} testID="hunt-piggy-detail-spec-panel">
-      {cache.payoutSats != null ? (
-        <View style={styles.specRow}>
-          <View style={styles.specIconWrap}>
-            <Zap size={16} color={colors.zapYellow} fill={colors.zapYellow} strokeWidth={2.5} />
-          </View>
-          <View style={styles.specRowMain}>
-            <Text style={styles.specLabel}>Prize · {cache.payoutSats.toLocaleString()} sats</Text>
-            <Text style={styles.specDescription}>
-              Lightning payout — claim it by tapping the Piggy&apos;s NFC tag.
-            </Text>
-          </View>
-        </View>
-      ) : null}
-
-      {cache.waitSeconds != null ? (
-        <View style={styles.specRow}>
-          <View style={styles.specIconWrap}>
-            <Clock size={16} color={colors.brandPink} strokeWidth={2.5} />
-          </View>
-          <View style={styles.specRowMain}>
-            <Text style={styles.specLabel}>
-              Cooldown ·{' '}
-              {cache.waitSeconds >= 3600
-                ? `${Math.round(cache.waitSeconds / 3600)}h`
-                : `${Math.round(cache.waitSeconds / 60)}m`}
-            </Text>
-            <Text style={styles.specDescription}>Wait time between claims on this Piggy.</Text>
-          </View>
-        </View>
-      ) : null}
-
-      {cache.uses != null ? (
-        <View style={styles.specRow}>
-          <View style={styles.specIconWrap}>
-            <Repeat size={16} color={colors.brandPink} strokeWidth={2.5} />
-          </View>
-          <View style={styles.specRowMain}>
-            <Text style={styles.specLabel}>Total claims · {cache.uses.toLocaleString()}</Text>
-            <Text style={styles.specDescription}>
-              How many times the prize can be claimed in all.
-            </Text>
-          </View>
-        </View>
-      ) : null}
-
-      {typeInfo ? (
-        <View style={styles.specRow}>
-          <View style={styles.specIconWrap}>
-            <typeInfo.Icon size={16} color={colors.brandPink} strokeWidth={2.5} />
-          </View>
-          <View style={styles.specRowMain}>
-            <Text style={styles.specLabel}>Type · {typeInfo.label}</Text>
-            <Text style={styles.specDescription}>{typeInfo.description}</Text>
-          </View>
-        </View>
-      ) : null}
-
-      {sizeInfo ? (
-        <View style={styles.specRow}>
-          <View style={styles.specIconWrap}>
-            <Box size={16} color={colors.brandPink} strokeWidth={2.5} />
-          </View>
-          <View style={styles.specRowMain}>
-            <Text style={styles.specLabel}>Size · {sizeInfo.label}</Text>
-            <Text style={styles.specDescription}>{sizeInfo.description}</Text>
-          </View>
-        </View>
-      ) : null}
-
-      {difficulty ? (
-        <View style={styles.specRow}>
-          <View style={styles.specIconWrap}>
-            <HelpCircle size={16} color={colors.brandPink} strokeWidth={2.5} />
-          </View>
-          <View style={styles.specRowMain}>
-            <View style={styles.specLabelRow}>
-              <Text style={styles.specLabel}>Difficulty</Text>
-              <DotScale value={difficulty} colors={colors} />
-            </View>
-            <Text style={styles.specDescription}>
-              {DIFFICULTY_DESCRIPTIONS[String(difficulty)] ?? `${difficulty}/5`}
-            </Text>
-          </View>
-        </View>
-      ) : null}
-
-      {terrain ? (
-        <View style={styles.specRow}>
-          <View style={styles.specIconWrap}>
-            <Mountain size={16} color={colors.brandPink} strokeWidth={2.5} />
-          </View>
-          <View style={styles.specRowMain}>
-            <View style={styles.specLabelRow}>
-              <Text style={styles.specLabel}>Terrain</Text>
-              <DotScale value={terrain} colors={colors} />
-            </View>
-            <Text style={styles.specDescription}>
-              {TERRAIN_DESCRIPTIONS[String(terrain)] ?? `${terrain}/5`}
-            </Text>
-          </View>
+    <View testID="hunt-piggy-detail-spec-panel">
+      <View style={styles.chipRow}>
+        {chips.map((chip) => {
+          const active = openKey === chip.key;
+          return (
+            <TouchableOpacity
+              key={chip.key}
+              style={[
+                styles.chip,
+                chip.accent && styles.chipAccent,
+                active && !chip.accent && styles.chipActive,
+              ]}
+              onPress={() => setOpenKey(active ? null : chip.key)}
+              testID={`hunt-piggy-detail-chip-${chip.key}`}
+              accessibilityLabel={chip.title}
+              accessibilityHint="Tap for an explanation"
+            >
+              <chip.Icon
+                size={13}
+                color={chip.accent ? colors.white : (chip.iconColor ?? colors.brandPink)}
+                fill={chip.iconFill ?? 'none'}
+                strokeWidth={2.5}
+              />
+              <Text style={[styles.chipText, chip.accent && styles.chipTextAccent]}>
+                {chip.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+      {open ? (
+        <View style={styles.chipExplain} testID="hunt-piggy-detail-chip-explain">
+          <Text style={styles.chipExplainTitle}>{open.title}</Text>
+          <Text style={styles.chipExplainBody}>{open.body}</Text>
         </View>
       ) : null}
     </View>
@@ -922,26 +923,33 @@ const createStyles = (colors: Palette) =>
       borderRadius: 12,
       backgroundColor: colors.divider,
     },
-    kindRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' },
-    lpBadge: {
+    chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+    chip: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 4,
-      backgroundColor: colors.brandPink,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.divider,
       paddingHorizontal: 10,
-      paddingVertical: 4,
+      paddingVertical: 5,
       borderRadius: 100,
     },
-    standardBadge: {
-      flexDirection: 'row',
-      alignItems: 'center',
+    chipAccent: { backgroundColor: colors.brandPink, borderColor: colors.brandPink },
+    chipActive: { backgroundColor: colors.brandPinkLight, borderColor: colors.brandPink },
+    chipText: { fontSize: 12, fontWeight: '700', color: colors.textHeader },
+    chipTextAccent: { color: colors.white },
+    chipExplain: {
+      marginTop: 8,
+      padding: 12,
+      borderRadius: 12,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.divider,
       gap: 4,
-      backgroundColor: colors.textSupplementary,
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 100,
     },
-    lpBadgeText: { color: colors.white, fontSize: 11, fontWeight: '700' },
+    chipExplainTitle: { fontSize: 13, fontWeight: '700', color: colors.textHeader },
+    chipExplainBody: { fontSize: 12, color: colors.textSupplementary, lineHeight: 17 },
     metaPill: {
       backgroundColor: colors.surface,
       color: colors.textSupplementary,
@@ -951,48 +959,12 @@ const createStyles = (colors: Palette) =>
       fontSize: 11,
       fontWeight: '600',
     },
-    specPanel: {
-      gap: 12,
-      paddingVertical: 4,
-    },
     mapPreviewWrap: {
       // ExploreMiniMap brings its own horizontal margin in for the hub
       // layout — neutralise that here so it lines up with the detail
       // screen's content padding instead.
       marginHorizontal: -16,
       marginVertical: 4,
-    },
-    specRow: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      gap: 12,
-    },
-    specIconWrap: {
-      width: 28,
-      height: 28,
-      borderRadius: 14,
-      backgroundColor: colors.brandPinkLight,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    specRowMain: {
-      flex: 1,
-      gap: 2,
-    },
-    specLabelRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-    },
-    specLabel: {
-      fontSize: 13,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    specDescription: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      lineHeight: 16,
     },
     description: { fontSize: 14, color: colors.textHeader, lineHeight: 20 },
     attribution: {
