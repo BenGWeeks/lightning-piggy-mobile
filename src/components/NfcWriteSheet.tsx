@@ -14,7 +14,7 @@ import {
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
-import NfcIcon from './icons/NfcIcon';
+import { Nfc, AlertCircle } from 'lucide-react-native';
 import {
   writeNpubToTag,
   writeLnurlToTag,
@@ -162,7 +162,7 @@ const NfcWriteSheet: React.FC<Props> = ({
         {state === 'ready' && (
           <View style={styles.stateContainer}>
             <View style={styles.iconContainer}>
-              <NfcIcon size={64} color={colors.brandPink} />
+              <Nfc size={64} color={colors.brandPink} strokeWidth={2} />
             </View>
             <Text style={styles.instruction}>
               {isPiglet
@@ -228,7 +228,10 @@ const NfcWriteSheet: React.FC<Props> = ({
         {state === 'error' && (
           <View style={styles.stateContainer}>
             <View style={[styles.iconContainer, styles.errorIcon]}>
-              <Text style={styles.errorMark}>!</Text>
+              <Nfc size={64} color={colors.red} strokeWidth={2} />
+              <View style={styles.errorBadge}>
+                <AlertCircle size={26} color={colors.red} strokeWidth={2.5} />
+              </View>
             </View>
             <Text style={styles.instruction}>Write failed</Text>
             <Text style={styles.description}>{errorMessage}</Text>
@@ -310,10 +313,13 @@ const createStyles = (colors: Palette) =>
       color: colors.green,
       fontWeight: '700',
     },
-    errorMark: {
-      fontSize: 48,
-      color: colors.red,
-      fontWeight: '700',
+    errorBadge: {
+      position: 'absolute',
+      bottom: 0,
+      right: 0,
+      backgroundColor: colors.surface,
+      borderRadius: 14,
+      padding: 1,
     },
     instruction: {
       fontSize: 18,

@@ -6,8 +6,7 @@ import {
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
-import { Share2, Send, ExternalLink } from 'lucide-react-native';
-import NfcIcon from './icons/NfcIcon';
+import { Share2, Send, ExternalLink, Nfc } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 
@@ -107,7 +106,11 @@ const ContactActionsSheet: React.FC<Props> = ({
           }
           accessibilityState={{ disabled: !nfcSupported }}
         >
-          <NfcIcon size={22} color={nfcSupported ? colors.brandPink : colors.textSupplementary} />
+          <Nfc
+            size={22}
+            color={nfcSupported ? colors.brandPink : colors.textSupplementary}
+            strokeWidth={2}
+          />
           <Text style={[styles.rowText, !nfcSupported && styles.rowTextDisabled]}>
             Write to NFC tag
           </Text>
