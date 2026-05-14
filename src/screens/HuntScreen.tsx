@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import {
   PiggyBank,
   Search,
   SlidersHorizontal,
+  Zap,
 } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
@@ -402,17 +403,26 @@ const CacheRow: React.FC<{
     accessibilityLabel={cache.name}
   >
     <View testID={`hunt-discover-row-${index}`} pointerEvents="none" />
-    {cache.imageUrl ? (
-      <Image source={{ uri: cache.imageUrl }} style={styles.thumb} resizeMode="cover" />
-    ) : (
-      <View style={[styles.iconWrap, cache.isLpPiggy ? styles.iconLp : styles.iconStandard]}>
-        {cache.isLpPiggy ? (
-          <PiggyBank size={22} color={colors.white} strokeWidth={2} />
-        ) : (
-          <MapPin size={22} color={colors.white} strokeWidth={2} />
-        )}
-      </View>
-    )}
+    <View style={styles.iconContainer}>
+      {cache.imageUrl ? (
+        <Image source={{ uri: cache.imageUrl }} style={styles.thumb} resizeMode="cover" />
+      ) : (
+        <View style={[styles.iconWrap, cache.isLpPiggy ? styles.iconLp : styles.iconStandard]}>
+          {cache.isLpPiggy ? (
+            <PiggyBank size={22} color={colors.white} strokeWidth={2} />
+          ) : (
+            <MapPin size={22} color={colors.white} strokeWidth={2} />
+          )}
+        </View>
+      )}
+      {/* Lightning-zap badge — only when this Piggy actually carries a payout
+          (the LNURL-withdraw is optional metadata). */}
+      {cache.isLpPiggy && cache.payoutSats != null ? (
+        <View style={styles.payoutBadge}>
+          <Zap size={10} color={colors.brandPink} fill={colors.brandPink} strokeWidth={2} />
+        </View>
+      ) : null}
+    </View>
     <View style={styles.rowMain}>
       <Text style={styles.rowTitle} numberOfLines={1}>
         {cache.name}
@@ -553,6 +563,18 @@ const createStyles = (colors: Palette) =>
     },
     iconLp: { backgroundColor: colors.brandPink },
     iconStandard: { backgroundColor: colors.textSupplementary },
+    iconContainer: { position: 'relative' },
+    payoutBadge: {
+      position: 'absolute',
+      top: -2,
+      right: -2,
+      width: 17,
+      height: 17,
+      borderRadius: 8.5,
+      backgroundColor: colors.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     thumb: {
       width: 44,
       height: 44,

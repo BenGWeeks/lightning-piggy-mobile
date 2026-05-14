@@ -18,6 +18,7 @@ import {
   CalendarDays,
   CheckCircle2,
   ChevronLeft,
+  Clock,
   Cloud,
   Eye,
   EyeOff,
@@ -26,6 +27,7 @@ import {
   MapPin,
   Mountain,
   PiggyBank,
+  Repeat,
   Send,
   Sparkles,
   User,
@@ -739,6 +741,51 @@ const CacheSpecPanel: React.FC<{
 
   return (
     <View style={styles.specPanel} testID="hunt-piggy-detail-spec-panel">
+      {cache.payoutSats != null ? (
+        <View style={styles.specRow}>
+          <View style={styles.specIconWrap}>
+            <Zap size={16} color={colors.brandPink} fill={colors.brandPink} strokeWidth={2.5} />
+          </View>
+          <View style={styles.specRowMain}>
+            <Text style={styles.specLabel}>Prize · {cache.payoutSats.toLocaleString()} sats</Text>
+            <Text style={styles.specDescription}>
+              Lightning payout — claim it by tapping the Piggy&apos;s NFC tag.
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
+      {cache.waitSeconds != null ? (
+        <View style={styles.specRow}>
+          <View style={styles.specIconWrap}>
+            <Clock size={16} color={colors.brandPink} strokeWidth={2.5} />
+          </View>
+          <View style={styles.specRowMain}>
+            <Text style={styles.specLabel}>
+              Cooldown ·{' '}
+              {cache.waitSeconds >= 3600
+                ? `${Math.round(cache.waitSeconds / 3600)}h`
+                : `${Math.round(cache.waitSeconds / 60)}m`}
+            </Text>
+            <Text style={styles.specDescription}>Wait time between claims on this Piggy.</Text>
+          </View>
+        </View>
+      ) : null}
+
+      {cache.uses != null ? (
+        <View style={styles.specRow}>
+          <View style={styles.specIconWrap}>
+            <Repeat size={16} color={colors.brandPink} strokeWidth={2.5} />
+          </View>
+          <View style={styles.specRowMain}>
+            <Text style={styles.specLabel}>Total claims · {cache.uses.toLocaleString()}</Text>
+            <Text style={styles.specDescription}>
+              How many times the prize can be claimed in all.
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
       {typeInfo ? (
         <View style={styles.specRow}>
           <View style={styles.specIconWrap}>
