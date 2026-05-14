@@ -392,41 +392,45 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               </View>
             ) : null}
             <CacheSpecPanel cache={cache} colors={colors} styles={styles} />
-            {cache.isLpPiggy ? (
-              <View style={styles.claimSection}>
-                <View style={styles.actionRow}>
-                  <TouchableOpacity
-                    style={styles.actionButtonSecondary}
-                    onPress={openNavigation}
-                    accessibilityLabel="Navigate to this cache"
-                    testID="hunt-piggy-detail-navigate-button"
-                  >
-                    <Navigation size={18} color={colors.brandPink} strokeWidth={2.5} />
-                    <Text style={styles.actionButtonSecondaryText}>Navigate</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.actionButtonPrimary, !hasClaimed && styles.claimButtonDisabled]}
-                    disabled={!hasClaimed}
-                    onPress={() => setComposerOpen(true)}
-                    accessibilityState={{ disabled: !hasClaimed }}
-                    accessibilityLabel={
-                      hasClaimed
-                        ? 'Claim found — log your find'
-                        : 'Claim found — scan the Piglet to unlock'
-                    }
-                    testID="hunt-piggy-detail-claim-button"
-                  >
-                    <CheckCircle2 size={18} color={colors.white} strokeWidth={2.5} />
-                    <Text style={styles.actionButtonPrimaryText}>Claim found</Text>
-                  </TouchableOpacity>
-                </View>
-                <Text style={styles.claimNote}>
-                  {hasClaimed
+            {/* Navigate + Claim found show for every cache — "Claim found"
+                means "I found it", which applies to any geocache. The
+                only difference is the gate: an LP Piggy unlocks it by
+                scanning the tag, a plain NIP-GC cache can log right away. */}
+            <View style={styles.claimSection}>
+              <View style={styles.actionRow}>
+                <TouchableOpacity
+                  style={styles.actionButtonSecondary}
+                  onPress={openNavigation}
+                  accessibilityLabel="Navigate to this cache"
+                  testID="hunt-piggy-detail-navigate-button"
+                >
+                  <Navigation size={18} color={colors.brandPink} strokeWidth={2.5} />
+                  <Text style={styles.actionButtonSecondaryText}>Navigate</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionButtonPrimary, !canLog && styles.claimButtonDisabled]}
+                  disabled={!canLog}
+                  onPress={() => setComposerOpen(true)}
+                  accessibilityState={{ disabled: !canLog }}
+                  accessibilityLabel={
+                    canLog
+                      ? 'Claim found — log your find'
+                      : 'Claim found — scan the Piglet to unlock'
+                  }
+                  testID="hunt-piggy-detail-claim-button"
+                >
+                  <CheckCircle2 size={18} color={colors.white} strokeWidth={2.5} />
+                  <Text style={styles.actionButtonPrimaryText}>Claim found</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.claimNote}>
+                {!cache.isLpPiggy
+                  ? 'Found this cache? Tap Claim found to log it for other hunters.'
+                  : hasClaimed
                     ? 'Sats received! Log your find so other hunters can see it.'
                     : "Scan the Piglet's NFC tag (or its QR) at the cache to unlock Claim found."}
-                </Text>
-              </View>
-            ) : null}
+              </Text>
+            </View>
 
             <Text style={styles.description}>{cache.description}</Text>
             {cache.hint ? (
