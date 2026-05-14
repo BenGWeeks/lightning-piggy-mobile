@@ -51,6 +51,13 @@ export type RootStackParamList = {
     contact: ContactProfileBodyData;
     phoneContactId?: string;
   };
+  // Graceful fallback when a scanned tag / nostr: link resolves to an
+  // entity Lightning Piggy can't display. `entity` is a human-readable
+  // label for the message + warning log; `detail` carries the raw value.
+  UnsupportedEntity: {
+    entity: string;
+    detail?: string;
+  };
 };
 
 // Explore sub-stack — the renamed Learn tab now hosts a hub plus Lessons
