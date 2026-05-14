@@ -373,10 +373,23 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               </TouchableOpacity>
             ) : null}
             {cache.isLpPiggy ? (
-              <View style={styles.tapHintCard}>
-                <Sparkles size={14} color={colors.brandPink} strokeWidth={2.5} />
-                <Text style={styles.tapHintText}>
-                  Tap the physical NFC tag or scan the QR at the cache to claim sats.
+              <View style={styles.claimSection}>
+                <TouchableOpacity
+                  style={[styles.claimButton, styles.claimButtonDisabled]}
+                  disabled
+                  accessibilityState={{ disabled: true }}
+                  accessibilityLabel="Claim prize — tap the Piglet's NFC tag to unlock"
+                  testID="hunt-piggy-detail-claim-button"
+                >
+                  <Zap size={18} color={colors.white} fill={colors.white} strokeWidth={2} />
+                  <Text style={styles.claimButtonText}>
+                    {cache.payoutSats != null
+                      ? `Claim ${cache.payoutSats.toLocaleString()} sats`
+                      : 'Claim prize'}
+                  </Text>
+                </TouchableOpacity>
+                <Text style={styles.claimNote}>
+                  Tap the Piglet&apos;s NFC tag (or scan its QR) at the cache to unlock the claim.
                 </Text>
               </View>
             ) : null}
@@ -1018,17 +1031,24 @@ const createStyles = (colors: Palette) =>
       borderRadius: 10,
     },
     hintText: { color: colors.brandPink, fontSize: 13, fontWeight: '600', flex: 1 },
-    tapHintCard: {
+    claimSection: { gap: 8 },
+    claimButton: {
       flexDirection: 'row',
       alignItems: 'center',
+      justifyContent: 'center',
       gap: 8,
-      backgroundColor: colors.surface,
-      padding: 12,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: colors.brandPinkLight,
+      backgroundColor: colors.brandPink,
+      paddingVertical: 14,
+      borderRadius: 100,
     },
-    tapHintText: { color: colors.textHeader, fontSize: 13, flex: 1, lineHeight: 18 },
+    claimButtonDisabled: { opacity: 0.45 },
+    claimButtonText: { color: colors.white, fontSize: 15, fontWeight: '700' },
+    claimNote: {
+      color: colors.textSupplementary,
+      fontSize: 12,
+      lineHeight: 16,
+      textAlign: 'center',
+    },
     sectionLabel: {
       fontSize: 13,
       fontWeight: '700',
