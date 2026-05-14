@@ -4,20 +4,30 @@
  * commons (see project memory `BTC Map runs the commons (Nathan)`) —
  * we never write back.
  *
+ * Transport: the `/v4/places/search` endpoint with `lat` + `lon` +
+ * `radius_km`. BTC Map's docs explicitly recommend it for
+ * "client apps without cache, which need to fetch the places on demand
+ * for a small region (usually user map viewport) … you can call it
+ * every time user moves the map." A 50 km radius around the user is
+ * ~16 KB / ~0.2 s — versus the ~2 MB / 28k-row worldwide `/v4/places`
+ * dump we used to download, cache to disk, and bbox-filter in memory.
+ *
  * History: this file previously hit `/v3/places?bbox=…` (gone), then
- * pivoted to Overpass when v4 looked broken. Issue #52 in
- * `teambtcmap/btcmap-api` clarified that v4 returns only `{id}` by
- * default and tags must be requested individually with a source
- * prefix (e.g. `osm:payment:lightning`). With the explicit field list
- * below v4 is the right transport: one global fetch, week-long cache,
- * no bbox param (filter client-side). Stable, no rate-limit pain, no
- * Overpass-mirror roulette.
+ * Overpass, then the worldwide `/v4/places` dump + a 7-day file cache +
+ * delta-sync. All of that is replaced by the per-viewport search call.
+ * The last successful result is still persisted (now tiny) so the
+ * offline-cold-start path has something to show. `callers pass a
+ * `Bbox` (their map viewport); we convert it to the centre + a radius
+ * that reaches the far corner, so the circle fully covers the
+ * rectangle (with a little overshoot — extra merchants just outside
+ * the viewport, which is fine).
  *
  * Closes part of #467.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { File, Paths } from 'expo-file-system';
+import { haversineMetres } from '../utils/geohash';
 
 // Base URL for the BTC Map v4 API. Production points at api.btcmap.org,
 // but a developer can swap to a local fork or tunneled endpoint by
@@ -27,6 +37,7 @@ import { File, Paths } from 'expo-file-system';
 const BTC_MAP_API_BASE =
   process.env.EXPO_PUBLIC_BTC_MAP_API_BASE?.replace(/\/$/, '') ?? 'https://api.btcmap.org/v4';
 const BTCMAP_V4_PLACES_URL = `${BTC_MAP_API_BASE}/places`;
+const BTCMAP_V4_SEARCH_URL = `${BTC_MAP_API_BASE}/places/search`;
 
 // Slim field list for the bulk dataset fetch. Pulled fields are
 // strictly what the list / rail / map markers need:
@@ -107,20 +118,13 @@ const V4_FIELDS_RICH = [
   'updated_at',
 ].join(',');
 
-const FETCH_TIMEOUT_MS = 45_000;
-const DATASET_TTL_MS = 7 * 24 * 60 * 60 * 1_000; // 7 days
-// Background delta-sync cadence — if the cached dataset's last sync is
-// older than this when the bbox is queried, fire a fire-and-forget delta
-// merge. Short enough that "the listing I added yesterday is here" feels
-// snappy; long enough that opening Explore twice in a minute doesn't
-// hammer the API.
-const SYNC_STALE_MS = 60 * 60 * 1_000; // 1 hour
-// AsyncStorage key — namespaced so it's grepable + obviously
-// invalidatable from devtools. A single global dataset cache; v4 has
-// no bbox parameter so we fetch the whole world and filter in memory.
-// Bumped to `v4s` (slim) when the bulk fetch was trimmed to list-only
-// fields; legacy v4i caches are ignored on hydrate.
+const FETCH_TIMEOUT_MS = 20_000;
+// Legacy AsyncStorage key for the old worldwide dump — only referenced
+// now to evict any stale multi-MB blob left over from a prior install.
 const DATASET_STORAGE_KEY = '@lp:btcmap-dataset-v4u';
+// Legacy file-cache name for the old worldwide dump — deleted on first
+// run so it stops eating sandbox space.
+const LEGACY_DATASET_FILE = 'btcmap-dataset-v4u.json';
 
 export interface BtcMapPlace {
   id: number;
@@ -217,23 +221,10 @@ export interface BtcMapPlace {
   commentsCount?: number | null;
 }
 
-interface CachedDataset {
-  /** ms — when the full bulk dump was last fetched. Drives the 7-day TTL. */
-  fetchedAt: number;
-  /**
-   * ms — when we last successfully synced (bulk fetch OR delta merge).
-   * Used as the `updated_since` cursor for the next delta call so warm
-   * launches pay only for places that changed since this timestamp.
-   * Always >= fetchedAt.
-   */
-  syncedAt: number;
-  places: BtcMapPlace[];
-}
-
 /**
- * Bounding box in `[minLon, minLat, maxLon, maxLat]` order. Matches the
- * GeoJSON convention. (BTC Map v4 has no bbox parameter — this is used
- * for client-side filtering of the cached dataset.)
+ * Bounding box in `[minLon, minLat, maxLon, maxLat]` order — a caller's
+ * map viewport. Converted to a centre + radius for the `/v4/places/search`
+ * call (see `bboxToSearch`).
  */
 export interface Bbox {
   minLon: number;
@@ -242,12 +233,27 @@ export interface Bbox {
   maxLat: number;
 }
 
-let memoryDataset: CachedDataset | null = null;
+// In-memory cache of the most recent search result. Serves three
+// purposes: (1) `fetchPlaceById` can resolve a tapped place without a
+// network round-trip, (2) an offline / failed fetch falls back to it,
+// (3) it's persisted to disk so an offline cold start still shows the
+// last-seen region. It's small (one viewport, ~tens of places) so none
+// of the old worldwide-dump problems (SQLITE_FULL, 19 s hydrate) apply.
+let lastResult: BtcMapPlace[] = [];
 
-const isFresh = (entry: CachedDataset): boolean => Date.now() - entry.fetchedAt < DATASET_TTL_MS;
-
-const inBbox = (p: BtcMapPlace, b: Bbox): boolean =>
-  p.lon >= b.minLon && p.lon <= b.maxLon && p.lat >= b.minLat && p.lat <= b.maxLat;
+// Convert a viewport bbox into the `lat` / `lon` / `radius_km` the
+// `/v4/places/search` endpoint wants. Centre is the bbox midpoint; the
+// radius reaches the far corner so the search circle fully covers the
+// rectangle (with a little overshoot — extra merchants just outside the
+// viewport, which callers are fine with). Radius is clamped to a sane
+// floor so a pinpoint-zoomed map still returns something.
+const bboxToSearch = (b: Bbox): { lat: number; lon: number; radiusKm: number } => {
+  const lat = (b.minLat + b.maxLat) / 2;
+  const lon = (b.minLon + b.maxLon) / 2;
+  const cornerMetres = haversineMetres({ lat, lon }, { lat: b.maxLat, lon: b.maxLon });
+  const radiusKm = Math.max(1, Math.ceil(cornerMetres / 1000));
+  return { lat, lon, radiusKm };
+};
 
 // v4 returns each tag as `osm:<key>` at the top level. Reshape into the
 // historical `BtcMapPlace.tags` map so downstream code (acceptsLightning,
@@ -262,6 +268,29 @@ const reshape = (raw: Record<string, unknown>): BtcMapPlace | null => {
     if (typeof v !== 'string') continue;
     if (k.startsWith('osm:')) tags[k.slice(4)] = v;
   }
+  // The `/v4/places/search` endpoint returns a *curated* shape — top-level
+  // `name`, `address`, `website`, `phone`, … — and ignores `osm:`-prefixed
+  // field requests entirely. The bulk `/v4/places` + per-id endpoints use
+  // the raw `osm:` tags. Fold the curated top-level fields into `tags` so
+  // everything downstream (rail cards, formatAddress, contact rows) works
+  // regardless of which endpoint produced the record. `osm:` values, when
+  // present, win — they're the raw source of truth.
+  const foldCurated = (curatedKey: string, tagKey: string): void => {
+    const v = raw[curatedKey];
+    if (typeof v === 'string' && v.trim().length > 0 && !tags[tagKey]) {
+      tags[tagKey] = v.trim();
+    }
+  };
+  foldCurated('name', 'name');
+  foldCurated('address', 'addr:full');
+  foldCurated('website', 'contact:website');
+  foldCurated('phone', 'contact:phone');
+  foldCurated('email', 'contact:email');
+  foldCurated('opening_hours', 'opening_hours');
+  foldCurated('facebook', 'contact:facebook');
+  foldCurated('twitter', 'contact:twitter');
+  foldCurated('instagram', 'contact:instagram');
+  foldCurated('telegram', 'contact:telegram');
   const verified_at =
     typeof raw['verified_at'] === 'string' ? (raw['verified_at'] as string) : null;
   // Prefer the curated top-level description; fall back to the raw OSM
@@ -275,7 +304,18 @@ const reshape = (raw: Record<string, unknown>): BtcMapPlace | null => {
         : null;
   const description = rawDesc && rawDesc.trim().length > 0 ? rawDesc.trim() : null;
   const icon = typeof raw['icon'] === 'string' ? (raw['icon'] as string) : null;
-  const osm_url = typeof raw['osm_url'] === 'string' ? (raw['osm_url'] as string) : null;
+  // Bulk / per-id endpoints return `osm_url`; the search endpoint returns
+  // `osm_id` (e.g. `node:12098197068`). Derive the URL from the id when
+  // only the latter is present so the "View on OSM" / verify links work
+  // from search-sourced records too.
+  const osmIdRaw = typeof raw['osm_id'] === 'string' ? (raw['osm_id'] as string) : null;
+  const osmIdMatch = osmIdRaw?.match(/^(node|way|relation):(\d+)$/i);
+  const osm_url =
+    typeof raw['osm_url'] === 'string'
+      ? (raw['osm_url'] as string)
+      : osmIdMatch
+        ? `https://www.openstreetmap.org/${osmIdMatch[1].toLowerCase()}/${osmIdMatch[2]}`
+        : null;
   const categories = Array.isArray(raw['categories'])
     ? (raw['categories'] as unknown[]).filter((x): x is string => typeof x === 'string')
     : null;
@@ -325,207 +365,115 @@ const reshape = (raw: Record<string, unknown>): BtcMapPlace | null => {
   };
 };
 
-// File-system path for the cached dataset. AsyncStorage uses SQLite on
-// Android with a per-row size limit (~2 MB practical, hard fail beyond)
-// — the v4i dataset is ~22 MB so every persist was silently failing
-// with SQLITE_FULL. Writing to the document sandbox via
-// expo-file-system has no such limit and survives app upgrades.
-const datasetFile = () => new File(Paths.document, 'btcmap-dataset-v4u.json');
+// File-system cache of the last successful search result. Lives in the
+// document sandbox (survives app upgrades). Tiny now (~one viewport's
+// worth of places) — the old worldwide-dump file (and its SQLITE_FULL /
+// slow-hydrate problems) is gone; we evict it on first run.
+const lastResultFile = () => new File(Paths.document, 'btcmap-last-result.json');
 
-// One-shot hydration. Runs on first `fetchPlacesInBbox` call, not at
-// module load, because RN evaluates this file early in the bundle and
-// the file-system module may not be ready yet.
+// Drop the legacy worldwide-dump cache (file + AsyncStorage row) so it
+// stops eating sandbox space. Fire-and-forget, runs once.
+let legacyEvicted = false;
+const evictLegacyCache = (): void => {
+  if (legacyEvicted) return;
+  legacyEvicted = true;
+  try {
+    const legacy = new File(Paths.document, LEGACY_DATASET_FILE);
+    if (legacy.exists) legacy.delete();
+  } catch {
+    // best-effort
+  }
+  AsyncStorage.removeItem(DATASET_STORAGE_KEY).catch(() => {});
+};
+
+const persistLastResult = (places: BtcMapPlace[]): void => {
+  try {
+    const f = lastResultFile();
+    if (f.exists) f.delete();
+    f.create();
+    f.write(JSON.stringify(places));
+  } catch {
+    // Persist failures are non-fatal — `lastResult` still serves the
+    // session; next launch just re-fetches.
+  }
+};
+
+// Hydrate `lastResult` from disk. Only used as the offline-cold-start
+// fallback (the offline E2E test relies on this) — the happy path
+// always hits the network. One-shot.
 let hydratePromise: Promise<void> | null = null;
-const hydrateFromStorage = async (): Promise<void> => {
+const hydrateLastResult = async (): Promise<void> => {
   if (hydratePromise) return hydratePromise;
   hydratePromise = (async () => {
     try {
-      const f = datasetFile();
-      if (!f.exists) {
-        // Best-effort migration: if a prior install somehow squeezed
-        // the dataset into AsyncStorage, honour it once then drop the
-        // key so we stop poking SQLite for nothing on subsequent boots.
-        const legacy = await AsyncStorage.getItem(DATASET_STORAGE_KEY).catch(() => null);
-        if (legacy) {
-          const parsed = JSON.parse(legacy) as CachedDataset;
-          if (parsed && Array.isArray(parsed.places) && isFresh(parsed)) memoryDataset = parsed;
-          AsyncStorage.removeItem(DATASET_STORAGE_KEY).catch(() => {});
-        }
-        return;
-      }
-      const raw = await f.text();
-      const parsed = JSON.parse(raw) as Partial<CachedDataset>;
-      // Only populate memoryDataset if it's still empty — a parallel
-      // network fetch may have raced ahead with fresher data. Fill in
-      // `syncedAt` from `fetchedAt` for legacy entries that pre-date
-      // the delta-sync support.
-      if (
-        !memoryDataset &&
-        parsed &&
-        Array.isArray(parsed.places) &&
-        typeof parsed.fetchedAt === 'number' &&
-        isFresh(parsed as CachedDataset)
-      ) {
-        memoryDataset = {
-          fetchedAt: parsed.fetchedAt,
-          syncedAt: typeof parsed.syncedAt === 'number' ? parsed.syncedAt : parsed.fetchedAt,
-          places: parsed.places,
-        };
-      }
+      const f = lastResultFile();
+      if (!f.exists) return;
+      const parsed = JSON.parse(await f.text()) as BtcMapPlace[];
+      if (Array.isArray(parsed) && lastResult.length === 0) lastResult = parsed;
     } catch {
-      // Corrupt or unreadable cache shouldn't break the merchant fetch —
-      // we'll just hit v4 and re-persist on success.
+      // Corrupt cache shouldn't break anything — happy path re-fetches.
     }
   })();
   return hydratePromise;
 };
 
-const persistToStorage = (dataset: CachedDataset): void => {
-  try {
-    const f = datasetFile();
-    if (f.exists) f.delete();
-    f.create();
-    f.write(JSON.stringify(dataset));
-  } catch {
-    // Persist failures are non-fatal — memoryDataset still serves the
-    // rest of the session, next launch will re-fetch over the network.
-  }
-};
-
-// Fetch the full v4 dataset with our explicit field list, reshape into
-// BtcMapPlace, cache. v4 has no bbox param so this pull is global —
-// roughly 28k places, ~3 MB JSON. Fine for a weekly refresh.
-const fetchDataset = async (): Promise<CachedDataset> => {
+/**
+ * Fetch merchants for a viewport. Converts the caller's `bbox` to a
+ * centre + radius and hits BTC Map's `/v4/places/search` endpoint —
+ * the one their docs recommend calling "every time user moves the
+ * map". ~16 KB / ~0.2 s for a 50 km radius.
+ *
+ * The result is cached in memory (`lastResult`) and persisted to disk.
+ * On a network failure we fall back to whatever's cached so the rail
+ * isn't empty offline. Callers should still debounce map-pan / zoom.
+ */
+export const fetchPlacesInBbox = async (bbox: Bbox): Promise<BtcMapPlace[]> => {
+  evictLegacyCache();
+  const { lat, lon, radiusKm } = bboxToSearch(bbox);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const url = `${BTCMAP_V4_PLACES_URL}?fields=${encodeURIComponent(V4_FIELDS)}`;
+    const url =
+      `${BTCMAP_V4_SEARCH_URL}?lat=${lat}&lon=${lon}&radius_km=${radiusKm}` +
+      `&fields=${encodeURIComponent(V4_FIELDS)}`;
     const res = await fetch(url, {
       method: 'GET',
       headers: { Accept: 'application/json' },
       signal: controller.signal,
     });
-    if (!res.ok) throw new Error(`BTC Map v4 ${res.status}`);
-    const startedAt = Date.now();
+    if (!res.ok) throw new Error(`BTC Map v4 search ${res.status}`);
     const json = (await res.json()) as Record<string, unknown>[];
     const places = (Array.isArray(json) ? json : [])
       .map(reshape)
       .filter((p): p is BtcMapPlace => p !== null);
-    const dataset: CachedDataset = { fetchedAt: startedAt, syncedAt: startedAt, places };
-    memoryDataset = dataset;
-    persistToStorage(dataset);
-    return dataset;
+    lastResult = places;
+    persistLastResult(places);
+    return places;
+  } catch {
+    // Offline / timeout / server error — fall back to the last cached
+    // result (in memory, or hydrated from disk on a cold start).
+    if (lastResult.length === 0) await hydrateLastResult();
+    return lastResult;
   } finally {
     clearTimeout(timer);
   }
 };
 
-// Delta-sync. Calls v4 with `updated_since=<lastSync>` so we pull only
-// records changed/deleted since the cached dataset was last synced.
-// Matches btcmap.org's own warm-start strategy (per their AGENTS.md +
-// sync/places.ts) — typical delta is tens of KB rather than several MB.
-//
-// `deleted_at` rows are dropped from memoryDataset; live rows are
-// upserted by id. memoryDataset.syncedAt advances to `startedAt` so the
-// next sync only needs the new tail. Fire-and-forget — failures are
-// non-fatal (we'll retry on the next bbox call).
-let syncInFlight: Promise<void> | null = null;
-const syncDelta = async (since: number): Promise<void> => {
-  if (syncInFlight) return syncInFlight;
-  syncInFlight = (async () => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-    try {
-      const sinceIso = new Date(since).toISOString();
-      const url =
-        `${BTCMAP_V4_PLACES_URL}?fields=${encodeURIComponent(V4_FIELDS)}` +
-        `&updated_since=${encodeURIComponent(sinceIso)}&include_deleted=true`;
-      const startedAt = Date.now();
-      const res = await fetch(url, {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
-        signal: controller.signal,
-      });
-      if (!res.ok) return;
-      const json = (await res.json()) as Record<string, unknown>[];
-      if (!Array.isArray(json) || !memoryDataset) return;
-      const placesById = new Map(memoryDataset.places.map((p) => [p.id, p]));
-      for (const raw of json) {
-        const id = raw['id'];
-        if (typeof id !== 'number') continue;
-        // Deleted rows carry a `deleted_at` string. Strip them.
-        if (typeof raw['deleted_at'] === 'string') {
-          placesById.delete(id);
-          continue;
-        }
-        const reshaped = reshape(raw);
-        if (reshaped) placesById.set(id, reshaped);
-      }
-      memoryDataset = {
-        ...memoryDataset,
-        syncedAt: startedAt,
-        places: Array.from(placesById.values()),
-      };
-      persistToStorage(memoryDataset);
-    } catch {
-      // Sync is best-effort; retry on next bbox call.
-    } finally {
-      clearTimeout(timer);
-      syncInFlight = null;
-    }
-  })();
-  return syncInFlight;
-};
-
 /**
- * Fetch merchants in a bounding box. If a fresh cache exists, returns
- * its bbox-filtered slice immediately and kicks off a fire-and-forget
- * delta-sync to apply server-side changes since `syncedAt`. Otherwise
- * does a full network fetch.
- *
- * Implementation notes:
- *  - We never `await` hydrate inside this call. On Android, reading the
- *    ~5 MB cache file blocks the JS thread for several seconds —
- *    slower than a fresh `fetchDataset` call. `prefetchDataset()`
- *    (called on ExploreHome mount) kicks hydrate off in the background
- *    so by the time the user reaches Places it has usually settled.
- *  - Delta sync only runs when the cached `syncedAt` is older than
- *    `SYNC_STALE_MS` (1h). Within an hour, repeated bbox calls reuse
- *    `memoryDataset` with no network traffic at all.
- *  - The bbox filter is O(n) over the global set (~28k rows); callers
- *    should debounce map-pan / zoom so this doesn't run per frame.
- */
-export const fetchPlacesInBbox = async (bbox: Bbox): Promise<BtcMapPlace[]> => {
-  if (memoryDataset && isFresh(memoryDataset)) {
-    if (Date.now() - memoryDataset.syncedAt > SYNC_STALE_MS) {
-      syncDelta(memoryDataset.syncedAt).catch(() => {});
-    }
-    return memoryDataset.places.filter((p) => inBbox(p, bbox));
-  }
-  const dataset = await fetchDataset();
-  return dataset.places.filter((p) => inBbox(p, bbox));
-};
-
-/**
- * Fast path for screens that already know a `placeId` — checks the
- * in-memory dataset first, then hydrates from AsyncStorage, then
- * (last resort) refetches. Avoids the 28k-row filter+find that
- * PlaceDetailScreen was doing just to look up a single id.
+ * Resolve a place by id. Checks the last search result first (the
+ * tapped place is almost always in the viewport that surfaced it),
+ * then falls back to a per-id `/v4/places/{id}` fetch via
+ * `fetchPlaceRich`.
  */
 export const fetchPlaceById = async (id: number): Promise<BtcMapPlace | null> => {
-  // Hot path — id already in the memory dataset.
-  if (memoryDataset) {
-    const hit = memoryDataset.places.find((p) => p.id === id);
-    if (hit) return hit;
+  const hit = lastResult.find((p) => p.id === id);
+  if (hit) return hit;
+  if (lastResult.length === 0) {
+    await hydrateLastResult();
+    const cached = lastResult.find((p) => p.id === id);
+    if (cached) return cached;
   }
-  await hydrateFromStorage();
-  if (memoryDataset) {
-    const hit = memoryDataset.places.find((p) => p.id === id);
-    if (hit) return hit;
-  }
-  // Cold path — pull the dataset and try once more.
-  const dataset = memoryDataset && isFresh(memoryDataset) ? memoryDataset : await fetchDataset();
-  return dataset.places.find((p) => p.id === id) ?? null;
+  return fetchPlaceRich(id);
 };
 
 /**
@@ -616,6 +564,10 @@ export const acceptsOnchain = (place: BtcMapPlace): boolean =>
  * exposes. Falls back to lat/lon if no address tags are set.
  */
 export const formatAddress = (place: BtcMapPlace): string => {
+  // `addr:full` is the curated single-line address from `/v4/places/search`.
+  // The bulk / per-id endpoints instead expose the raw `addr:*` component
+  // tags — join those. Fall back to coordinates when neither is present.
+  if (place.tags['addr:full']) return place.tags['addr:full'];
   const parts = [place.tags['addr:street'], place.tags['addr:city'], place.tags['addr:postcode']]
     .filter(Boolean)
     .join(', ');
@@ -634,44 +586,45 @@ export const daysSinceVerified = (place: BtcMapPlace): number | null => {
   return Math.floor((Date.now() - ts) / (24 * 60 * 60 * 1_000));
 };
 
-// Warm the in-memory dataset from AsyncStorage without making any
-// network call. Cheap, fire-and-forget — used by ExploreHomeScreen on
-// mount so the hydrate (which includes a multi-MB JSON.parse) runs in
-// parallel with location resolution. By the time `fetchPlacesInBbox`
-// is called for real, the hydrate promise is already settled and the
-// `await` is instant. Without this, the first bbox call serialises
-// AsyncStorage read + parse before returning, which the user sees as
-// "Places loads slowly" even though the cache is in place.
+// Warm the offline-fallback cache from disk and evict the legacy
+// worldwide dump. Cheap, fire-and-forget — called by ExploreHomeScreen
+// on mount so the disk read overlaps location resolution. The happy
+// path always hits the network; this only matters when the first
+// `fetchPlacesInBbox` call fails (offline cold start).
 export const prefetchDataset = (): void => {
-  hydrateFromStorage().catch(() => {});
+  evictLegacyCache();
+  hydrateLastResult().catch(() => {});
 };
 
 /**
- * Test-only escape hatch — the in-memory dataset survives across
- * unit-test invocations otherwise.
+ * Test-only escape hatch — `lastResult` + the hydrate promise survive
+ * across unit-test invocations otherwise.
  */
 export const __resetCacheForTest = (): void => {
-  memoryDataset = null;
+  lastResult = [];
   hydratePromise = null;
-  // Also wipe the persisted copy — otherwise the next test hydrates
-  // from AsyncStorage and never reaches the mocked fetch path.
-  AsyncStorage.removeItem(DATASET_STORAGE_KEY).catch(() => {});
+  legacyEvicted = false;
+  try {
+    const f = lastResultFile();
+    if (f.exists) f.delete();
+  } catch {
+    // best-effort
+  }
 };
 
 /**
- * Public force-refresh — invalidates the in-memory + persisted cache
- * and pulls a fresh dataset from BTC Map v4. Called from the
+ * Public force-refresh — drops the cached result so the next
+ * `fetchPlacesInBbox` re-hits the search endpoint. Called from the
  * pull-to-refresh handler on the Explore hub so newly-boosted listings
- * (or fresh verifications) show up without waiting 7 days for the TTL
- * to expire. Resolves with the new dataset.
+ * (or fresh verifications) show up immediately.
  */
 export const refreshDataset = async (): Promise<void> => {
-  memoryDataset = null;
+  lastResult = [];
   hydratePromise = null;
   try {
-    await AsyncStorage.removeItem(DATASET_STORAGE_KEY);
+    const f = lastResultFile();
+    if (f.exists) f.delete();
   } catch {
-    // Best-effort wipe — even if it fails the next `fetchPlacesInBbox`
-    // sees `memoryDataset === null` and goes to the network.
+    // Best-effort — even if the wipe fails the next fetch overwrites it.
   }
 };

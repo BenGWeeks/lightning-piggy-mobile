@@ -90,7 +90,7 @@ describe('btcMapService helpers', () => {
   });
 });
 
-describe('fetchPlacesInBbox cache', () => {
+describe('fetchPlacesInBbox (search endpoint)', () => {
   beforeEach(() => {
     __resetCacheForTest();
     // jest.fn replaces global fetch per-test so we control responses without
@@ -102,62 +102,93 @@ describe('fetchPlacesInBbox cache', () => {
     delete (global as unknown as { fetch?: unknown }).fetch;
   });
 
-  it('caches the global dataset across calls within TTL and filters by bbox', async () => {
-    const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
-    // BTC Map v4 returns a flat array; each tag comes back as a
-    // prefixed top-level field (`osm:name`, `osm:payment:lightning`,
-    // …). reshape() pulls the `osm:` prefix off and rebuilds the
-    // BtcMapPlace.tags map.
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => [
-        { id: 42, lat: 51.5, lon: -0.1, 'osm:name': 'Cached café' },
-        // Outside bbox — used to confirm client-side filter.
-        { id: 99, lat: 60.0, lon: 30.0, 'osm:name': 'Faraway place' },
-      ],
-    });
-
-    const expected: BtcMapPlace = {
-      id: 42,
-      lat: 51.5,
-      lon: -0.1,
-      tags: { name: 'Cached café' },
-      verified_at: null,
-      description: null,
-      icon: null,
-      osm_url: null,
-      categories: null,
-      phone: null,
-      email: null,
-      opening_hours: null,
-      facebookUrl: null,
-      twitterUrl: null,
-      instagramUrl: null,
-      telegramUrl: null,
-      whatsappUrl: null,
-      createdAt: null,
-      updatedAt: null,
-      boostedUntil: null,
-      commentsCount: null,
-    };
-    const bbox = { minLon: -0.2, minLat: 51.4, maxLon: 0.0, maxLat: 51.6 };
-    const first = await fetchPlacesInBbox(bbox);
-    const second = await fetchPlacesInBbox(bbox);
-
-    expect(first).toEqual([expected]);
-    expect(second).toEqual([expected]);
-    expect(fetchMock).toHaveBeenCalledTimes(1); // second call hit the cache
+  const reshapeExpected = (overrides: Partial<BtcMapPlace>): BtcMapPlace => ({
+    id: 0,
+    lat: 0,
+    lon: 0,
+    tags: {},
+    verified_at: null,
+    description: null,
+    icon: null,
+    osm_url: null,
+    categories: null,
+    phone: null,
+    email: null,
+    opening_hours: null,
+    facebookUrl: null,
+    twitterUrl: null,
+    instagramUrl: null,
+    telegramUrl: null,
+    whatsappUrl: null,
+    createdAt: null,
+    updatedAt: null,
+    boostedUntil: null,
+    commentsCount: null,
+    ...overrides,
   });
 
-  it('throws a useful error when v4 returns non-OK', async () => {
+  it('hits /v4/places/search with a centre + radius derived from the bbox', async () => {
     const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
-    fetchMock.mockResolvedValue({
-      ok: false,
-      status: 503,
-      statusText: 'Service Unavailable',
+    // The search endpoint returns a flat array; each tag comes back as a
+    // prefixed top-level field (`osm:name`, …) which reshape() un-prefixes.
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => [{ id: 42, lat: 51.5, lon: -0.1, 'osm:name': 'Café' }],
     });
 
+    const bbox = { minLon: -0.2, minLat: 51.4, maxLon: 0.0, maxLat: 51.6 };
+    const result = await fetchPlacesInBbox(bbox);
+
+    expect(result).toEqual([
+      reshapeExpected({ id: 42, lat: 51.5, lon: -0.1, tags: { name: 'Café' } }),
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url).toContain('/v4/places/search');
+    // Centre of the bbox = midpoint; radius reaches the far corner.
+    expect(url).toContain('lat=51.5');
+    expect(url).toContain('lon=-0.1');
+    expect(url).toMatch(/radius_km=\d+/);
+  });
+
+  it('re-fetches per viewport — no cross-call caching', async () => {
+    const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
+    fetchMock.mockResolvedValue({ ok: true, json: async () => [] });
+
+    const bbox = { minLon: -0.2, minLat: 51.4, maxLon: 0.0, maxLat: 51.6 };
+    await fetchPlacesInBbox(bbox);
+    await fetchPlacesInBbox(bbox);
+
+    // The search endpoint is cheap + viewport-scoped, so each call hits
+    // the network (callers debounce map-pan / zoom themselves).
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('falls back to the last result when the search endpoint errors', async () => {
+    const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
     const bbox = { minLon: 0, minLat: 0, maxLon: 1, maxLat: 1 };
-    await expect(fetchPlacesInBbox(bbox)).rejects.toThrow(/BTC Map v4 503/);
+
+    // First call succeeds and populates the in-memory cache.
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => [{ id: 7, lat: 0.5, lon: 0.5, 'osm:name': 'Cached' }],
+    });
+    const first = await fetchPlacesInBbox(bbox);
+    expect(first).toEqual([
+      reshapeExpected({ id: 7, lat: 0.5, lon: 0.5, tags: { name: 'Cached' } }),
+    ]);
+
+    // Second call errors — should resolve with the cached result, not throw.
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 503 });
+    const second = await fetchPlacesInBbox(bbox);
+    expect(second).toEqual(first);
+  });
+
+  it('resolves to an empty list when the first-ever fetch fails with no cache', async () => {
+    const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 503 });
+
+    const bbox = { minLon: 0, minLat: 0, maxLon: 1, maxLat: 1 };
+    await expect(fetchPlacesInBbox(bbox)).resolves.toEqual([]);
   });
 });
