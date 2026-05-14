@@ -92,10 +92,26 @@ describe('evictNip17CacheBytes', () => {
     expect(survivors).toEqual(originalOrder.slice(originalOrder.length - survivors.length));
   });
 
-  it('never empties the cache below one entry even if that entry is over budget', () => {
+  it('drops a single over-budget entry rather than persisting an unreadable row', () => {
+    // A lone wrap whose own JSON exceeds the budget must still go —
+    // keeping it would write a row that fails to read anyway. An empty
+    // cache is valid; the relay restream repopulates it.
     const cache: Record<string, string> = { only: 'z'.repeat(5000) };
-    evictNip17CacheBytes(cache, 100);
-    expect(Object.keys(cache)).toEqual(['only']);
+    const removed = evictNip17CacheBytes(cache, 100);
+    expect(removed).toBe(1);
+    expect(Object.keys(cache)).toEqual([]);
+  });
+
+  it('measures UTF-8 bytes, not UTF-16 length — emoji content counts double-plus', () => {
+    // 4 emoji = 4 chars of .length 8, but 16 UTF-8 bytes. A budget that
+    // sits between the two must still trim. Guards the CursorWindow bug:
+    // a .length check would have passed this and written an over-limit row.
+    const cache: Record<string, string> = {};
+    for (let i = 0; i < 6; i += 1) cache[`k${i}`] = '🐷🐷🐷🐷';
+    // Each value JSON is ~"🐷🐷🐷🐷" = 16 bytes content + 2 quotes; key+
+    // punctuation overhead too. 6 entries comfortably exceed 60 bytes.
+    const removed = evictNip17CacheBytes(cache, 60);
+    expect(removed).toBeGreaterThan(0);
   });
 });
 

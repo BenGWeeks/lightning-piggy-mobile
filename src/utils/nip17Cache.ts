@@ -19,6 +19,8 @@
  * users with very active inboxes.
  */
 
+import { utf8ByteSize } from './byteSize';
+
 /**
  * Mark `key` as most-recently-used in `cache` by deleting and
  * re-inserting it. No-op (returns false) if the key isn't present.
@@ -56,20 +58,28 @@ export function evictNip17CacheOverflow<V>(cache: Record<string, V>, cap: number
 
 /**
  * Evict the oldest-inserted entries until the cache's serialised JSON is
- * at most `maxBytes`. Mutates in place; returns the number removed.
+ * at most `maxBytes` (measured in real UTF-8 bytes — see `utf8ByteSize`,
+ * since that's the unit SQLite's CursorWindow row limit applies to).
+ * Mutates in place; returns the number removed.
  *
  * The count cap in `evictNip17CacheOverflow` isn't enough on its own —
  * Android's SQLite CursorWindow caps a row at ~2 MB, and past that the
  * *read* throws `SQLiteBlobTooBigException`. The wrap cache then fails
  * to hydrate, so every cold start falls back to a full relay restream +
  * NIP-17 re-decrypt instead of the fast cache path. Trims in ~10%
- * chunks to keep the `JSON.stringify` re-checks bounded.
+ * chunks to keep the re-checks bounded.
+ *
+ * `keys.length > 0` (not `> 1`): a single wrap whose own JSON exceeds
+ * the budget must still be dropped — keeping it would persist an
+ * unreadable row anyway. An empty cache is valid; the relay restream
+ * repopulates it. `Math.max(1, …)` guarantees forward progress so a
+ * small-but-over-budget cache can't spin forever.
  */
 export function evictNip17CacheBytes<V>(cache: Record<string, V>, maxBytes: number): number {
-  if (JSON.stringify(cache).length <= maxBytes) return 0;
+  if (utf8ByteSize(JSON.stringify(cache)) <= maxBytes) return 0;
   let removed = 0;
   let keys = Object.keys(cache);
-  while (keys.length > 1 && JSON.stringify(cache).length > maxBytes) {
+  while (keys.length > 0 && utf8ByteSize(JSON.stringify(cache)) > maxBytes) {
     const chunk = Math.max(1, Math.ceil(keys.length * 0.1));
     for (let i = 0; i < chunk; i += 1) delete cache[keys[i]];
     removed += chunk;
