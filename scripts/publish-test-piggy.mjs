@@ -17,7 +17,7 @@
 //   node scripts/publish-test-piggy.mjs
 //
 // Override values via env vars: LAT, LON, NAME, MEMO, HINT, PIGGY_ID,
-// DIFFICULTY, TERRAIN, SIZE, CACHE_TYPE.
+// DIFFICULTY, TERRAIN, SIZE, CACHE_TYPE, AMOUNT_SATS, WAIT_SECONDS, USES.
 //
 // Note: there is NO `LNURL` env var. The LNURL is intentionally NOT
 // part of this script's output — see the schema comment below for
@@ -27,6 +27,8 @@ import { generateSecretKey, getPublicKey, finalizeEvent, nip19 } from 'nostr-too
 import { SimplePool } from 'nostr-tools/pool';
 import { useWebSocketImplementation } from 'nostr-tools/relay';
 import WebSocket from 'ws';
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 
 // nostr-tools' API uses a `use*` name but it's a one-shot module-level
 // registration, not a React hook — eslint heuristic needs the suppression.
@@ -36,23 +38,29 @@ useWebSocketImplementation(WebSocket);
 // --- Defaults: Big Piggy's Geo-Cache 1 (Longstanton, Cambridge) -------------
 const LAT = parseFloat(process.env.LAT ?? '52.283602');
 const LON = parseFloat(process.env.LON ?? '0.043889');
-const NAME = process.env.NAME ?? 'Geo-Cache 1';
+const NAME = process.env.NAME ?? 'Longstanton Village Piglet';
 const MEMO =
   process.env.MEMO ??
-  '🐷 Geo-Cache 1 — Longstanton, Cambridge. 21 sats per claim, 3h cooldown, 100 uses.';
+  '🐷 A Lightning Piggy stashed in Longstanton, Cambridge. 21 sats per claim, 3h cooldown, 100 uses.';
 const HINT = process.env.HINT ?? 'Look near the bench by the village sign.';
 const PIGGY_ID = process.env.PIGGY_ID ?? 'big-piggy-geo-cache-1';
 const DIFFICULTY = process.env.DIFFICULTY ?? '1';
 const TERRAIN = process.env.TERRAIN ?? '1';
 const SIZE = process.env.SIZE ?? 'micro';
 const CACHE_TYPE = process.env.CACHE_TYPE ?? 'traditional';
-// Hint photo URL. Defaults to the British telephone-box stock photo
-// committed under docs/test-fixtures/ on the main branch.
-// Override with IMAGE=https://... for a different host; pass IMAGE=
-// (empty) to publish a cache without an `image` tag.
-const IMAGE =
-  process.env.IMAGE ??
-  'https://github.com/BenGWeeks/lightning-piggy-mobile/raw/main/docs/test-fixtures/geo-cache-1-telephone.jpg';
+// LP payout-display hints (display-only; the live LNURL on the tag stays authoritative). Empty env var omits the tag.
+const AMOUNT_SATS = process.env.AMOUNT_SATS ?? '21';
+const WAIT_SECONDS = process.env.WAIT_SECONDS ?? '10800';
+const USES = process.env.USES ?? '100';
+// Hint photo: by default the script uploads the local test fixture to
+// the signer's Blossom server (mirrors the real Hide-a-Piglet flow) and
+// tags the returned blob URL — never a repo-hosted URL. IMAGE=https://…
+// skips the upload + tags a pre-hosted URL; IMAGE= (empty) → no image.
+const IMAGE_FILE = process.env.IMAGE_FILE ?? 'docs/test-fixtures/geo-cache-1-telephone.jpg';
+const BLOSSOM_SERVER = (process.env.BLOSSOM_SERVER ?? 'https://blossom.primal.net').replace(
+  /\/+$/,
+  '',
+);
 // Whether to attach the Lightning Piggy NIP-32 label. Set LP_LABEL=0 to
 // publish a vanilla NIP-GC cache (treasures.to / TapTheSatsMap style)
 // so the in-app feed has something to render with the alternate pin.
@@ -102,6 +110,42 @@ const rot13 = (s) =>
     return String.fromCharCode(((c.charCodeAt(0) - b + 13) % 26) + b);
   });
 
+// Upload a local image to a Blossom server (BUD-02), signed with `sk` so
+// it lands on this user's server — mirrors services/blossomService in the
+// app. Returns the blob URL to tag on the event.
+async function uploadToBlossom(filePath, server, sk) {
+  const bytes = readFileSync(filePath);
+  const hash = createHash('sha256').update(bytes).digest('hex');
+  const nowSec = Math.floor(Date.now() / 1000);
+  const auth = finalizeEvent(
+    {
+      kind: 24242,
+      created_at: nowSec,
+      content: 'Upload image',
+      tags: [
+        ['t', 'upload'],
+        ['x', hash],
+        ['expiration', String(nowSec + 300)],
+      ],
+    },
+    sk,
+  );
+  const res = await fetch(`${server}/upload`, {
+    method: 'PUT',
+    headers: {
+      Authorization: 'Nostr ' + Buffer.from(JSON.stringify(auth)).toString('base64'),
+      'Content-Type': 'image/jpeg',
+    },
+    body: bytes,
+  });
+  if (!res.ok) {
+    throw new Error(`Blossom upload failed: HTTP ${res.status} — ${await res.text()}`);
+  }
+  const blob = await res.json();
+  if (!blob.url) throw new Error('Blossom upload: no `url` in response');
+  return blob.url;
+}
+
 // Multi-precision g tags per the NIP-GC suggestion (3-9 chars).
 const g9 = gh(LAT, LON, 9);
 
@@ -124,6 +168,16 @@ if (nsecInput) {
 }
 const pk = getPublicKey(sk);
 const npub = nip19.npubEncode(pk);
+
+// Resolve the hint-photo URL. Default: upload the local fixture to the
+// signer's Blossom server. IMAGE=… env override skips the upload.
+let IMAGE;
+if (process.env.IMAGE !== undefined) {
+  IMAGE = process.env.IMAGE; // explicit override (empty string → no image tag)
+} else {
+  IMAGE = await uploadToBlossom(IMAGE_FILE, BLOSSOM_SERVER, sk);
+  console.log('Uploaded hint photo to Blossom →', IMAGE);
+}
 
 // NIP-GC kind 37516 listing — required (d, name, g, D, T, S) + optional
 // (t, hint, image, r, verification) + LP's marker label.
@@ -163,6 +217,10 @@ const tags = [
         ['l', 'payout-lnurl-w', 'com.lightningpiggy.app'],
       ]
     : []),
+  // LP payout-display hints — only on labelled Piggies, never the LNURL itself.
+  ...(LP_LABEL && AMOUNT_SATS ? [['amount', AMOUNT_SATS]] : []),
+  ...(LP_LABEL && WAIT_SECONDS ? [['wait', WAIT_SECONDS]] : []),
+  ...(LP_LABEL && USES ? [['uses', USES]] : []),
   ['expiration', String(Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60)], // 30d
 ];
 
