@@ -67,6 +67,11 @@ export const buildCacheListing = (
   // (claim happens on the physical NFC tag / QR, not on this event).
   tags.push(['L', LP_LABEL_NAMESPACE]);
   tags.push(['l', LP_LABEL_VALUE, LP_LABEL_NAMESPACE]);
+  // LP payout-display hints (display-only; the live LNURL on the tag stays authoritative).
+  if (typeof piggy.waitSecondsHint === 'number') tags.push(['wait', String(piggy.waitSecondsHint)]);
+  if (typeof piggy.usesHint === 'number') tags.push(['uses', String(piggy.usesHint)]);
+  if (typeof piggy.maxWithdrawableMsat === 'number')
+    tags.push(['amount', String(Math.floor(piggy.maxWithdrawableMsat / 1000))]);
   // 30-day expiration so abandoned Piggies age out naturally.
   tags.push(['expiration', String(Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60)]);
   return {
@@ -140,6 +145,10 @@ export interface ParsedCache {
   hint: string | null;
   imageUrl: string | null;
   isLpPiggy: boolean;
+  /** LP payout-display hints parsed off the listing — null when absent. */
+  waitSeconds: number | null;
+  uses: number | null;
+  payoutSats: number | null;
   createdAt: number;
   expiresAt: number | null;
 }
@@ -154,6 +163,9 @@ export const parseCache = (event: VerifiedEvent): ParsedCache | null => {
   const D = parseInt(tag('D') ?? '', 10);
   const T = parseInt(tag('T') ?? '', 10);
   const exp = parseInt(tag('expiration') ?? '', 10);
+  const wait = parseInt(tag('wait') ?? '', 10);
+  const uses = parseInt(tag('uses') ?? '', 10);
+  const amount = parseInt(tag('amount') ?? '', 10);
   return {
     coord: `${GC_LISTING_KIND}:${event.pubkey}:${d}`,
     hiderPubkey: event.pubkey,
@@ -168,6 +180,9 @@ export const parseCache = (event: VerifiedEvent): ParsedCache | null => {
     hint: tag('hint') ? rot13(tag('hint') as string) : null,
     imageUrl: tag('image') ?? null,
     isLpPiggy: hasLpLabel(event.tags),
+    waitSeconds: Number.isFinite(wait) ? wait : null,
+    uses: Number.isFinite(uses) ? uses : null,
+    payoutSats: Number.isFinite(amount) ? amount : null,
     createdAt: event.created_at,
     expiresAt: Number.isFinite(exp) ? exp : null,
   };

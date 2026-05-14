@@ -97,6 +97,22 @@ describe('buildCacheListing', () => {
     const name = evt.tags.find((t) => t[0] === 'name')?.[1];
     expect(name).toBe(lnurlDescription.slice(0, 60));
   });
+
+  it('publishes wait / uses / amount display hints when present', () => {
+    const evt = buildCacheListing(
+      makePiggy({ waitSecondsHint: 10800, usesHint: 100, maxWithdrawableMsat: 21000 }),
+    );
+    expect(evt.tags).toContainEqual(['wait', '10800']);
+    expect(evt.tags).toContainEqual(['uses', '100']);
+    expect(evt.tags).toContainEqual(['amount', '21']);
+  });
+
+  it('omits wait / uses / amount tags when the piggy has no such hints', () => {
+    const names = buildCacheListing(makePiggy()).tags.map((t) => t[0]);
+    expect(names).not.toContain('wait');
+    expect(names).not.toContain('uses');
+    expect(names).not.toContain('amount');
+  });
 });
 
 describe('buildFoundLog', () => {
