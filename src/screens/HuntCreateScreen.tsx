@@ -516,6 +516,49 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
                 </View>
               </View>
             )}
+
+            {/* Cooldown + total uses live with the prize — they're
+                attributes of the LNURL-withdraw link, not the publish
+                step. The LNURL-w protocol response (LUD-03) only carries
+                the per-claim amount, so cooldown / uses can't be read
+                back automatically — the hider re-enters them here as
+                soft hints; the wallet still does the actual enforcement. */}
+            <Text style={[styles.subSectionLabel, styles.sectionGap]}>
+              Cooldown &amp; uses (optional)
+            </Text>
+            <View style={styles.hintsRow}>
+              <View style={styles.hintField}>
+                <Text style={styles.hintFieldLabel}>Cooldown (mins)</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="180"
+                  placeholderTextColor={colors.textSupplementary}
+                  keyboardType="number-pad"
+                  value={waitMinutesText}
+                  onChangeText={setWaitMinutesText}
+                  editable={stage.kind === 'validated'}
+                  testID="hunt-piggy-wait-input"
+                />
+              </View>
+              <View style={styles.hintField}>
+                <Text style={styles.hintFieldLabel}>Total uses</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="100"
+                  placeholderTextColor={colors.textSupplementary}
+                  keyboardType="number-pad"
+                  value={usesText}
+                  onChangeText={setUsesText}
+                  editable={stage.kind === 'validated'}
+                  testID="hunt-piggy-uses-input"
+                />
+              </View>
+            </View>
+            <Text style={styles.helper}>
+              These mirror your wallet&apos;s wait_time + uses settings — finders see them as soft
+              hints. The wallet still does the actual enforcement.
+            </Text>
+
             <StepNavRow
               onBack={() => setCurrentStep(1)}
               onNext={() => setCurrentStep(3)}
@@ -698,42 +741,6 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
             <Text style={styles.helper}>
               EXIF data (incl. GPS) is stripped before upload. Pick a clue photo, not a photo taken
               at the cache itself.
-            </Text>
-
-            <Text style={[styles.subSectionLabel, styles.sectionGap]}>
-              Cooldown &amp; uses (optional)
-            </Text>
-            <View style={styles.hintsRow}>
-              <View style={styles.hintField}>
-                <Text style={styles.hintFieldLabel}>Cooldown (mins)</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="180"
-                  placeholderTextColor={colors.textSupplementary}
-                  keyboardType="number-pad"
-                  value={waitMinutesText}
-                  onChangeText={setWaitMinutesText}
-                  editable={stage.kind === 'validated'}
-                  testID="hunt-piggy-wait-input"
-                />
-              </View>
-              <View style={styles.hintField}>
-                <Text style={styles.hintFieldLabel}>Total uses</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="100"
-                  placeholderTextColor={colors.textSupplementary}
-                  keyboardType="number-pad"
-                  value={usesText}
-                  onChangeText={setUsesText}
-                  editable={stage.kind === 'validated'}
-                  testID="hunt-piggy-uses-input"
-                />
-              </View>
-            </View>
-            <Text style={styles.helper}>
-              These mirror your wallet&apos;s wait_time + uses settings — finders see them as soft
-              hints. The wallet still does the actual enforcement.
             </Text>
 
             <Text style={[styles.subSectionLabel, styles.sectionGap]}>Discoverability</Text>
