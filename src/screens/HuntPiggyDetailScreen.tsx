@@ -340,6 +340,27 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 </View>
               )}
             </View>
+            {cache.isLpPiggy ? (
+              <View style={styles.claimSection}>
+                <TouchableOpacity
+                  style={[styles.claimButton, styles.claimButtonDisabled]}
+                  disabled
+                  accessibilityState={{ disabled: true }}
+                  accessibilityLabel="Claim prize — tap the Piglet's NFC tag to unlock"
+                  testID="hunt-piggy-detail-claim-button"
+                >
+                  <Zap size={18} color={colors.white} fill={colors.white} strokeWidth={2} />
+                  <Text style={styles.claimButtonText}>
+                    {cache.payoutSats != null
+                      ? `Claim ${cache.payoutSats.toLocaleString()} sats`
+                      : 'Claim prize'}
+                  </Text>
+                </TouchableOpacity>
+                <Text style={styles.claimNote}>
+                  Tap the Piglet&apos;s NFC tag (or scan its QR) at the cache to unlock the claim.
+                </Text>
+              </View>
+            ) : null}
             <CacheSpecPanel cache={cache} colors={colors} styles={styles} />
             <Text style={styles.description}>{cache.description}</Text>
             {/* Attribution — surface the hider so the finder knows
@@ -371,27 +392,6 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   {hintRevealed ? `Hint: ${cache.hint}` : 'Stuck? Tap to reveal the hint'}
                 </Text>
               </TouchableOpacity>
-            ) : null}
-            {cache.isLpPiggy ? (
-              <View style={styles.claimSection}>
-                <TouchableOpacity
-                  style={[styles.claimButton, styles.claimButtonDisabled]}
-                  disabled
-                  accessibilityState={{ disabled: true }}
-                  accessibilityLabel="Claim prize — tap the Piglet's NFC tag to unlock"
-                  testID="hunt-piggy-detail-claim-button"
-                >
-                  <Zap size={18} color={colors.white} fill={colors.white} strokeWidth={2} />
-                  <Text style={styles.claimButtonText}>
-                    {cache.payoutSats != null
-                      ? `Claim ${cache.payoutSats.toLocaleString()} sats`
-                      : 'Claim prize'}
-                  </Text>
-                </TouchableOpacity>
-                <Text style={styles.claimNote}>
-                  Tap the Piglet&apos;s NFC tag (or scan its QR) at the cache to unlock the claim.
-                </Text>
-              </View>
             ) : null}
 
             {/* Location preview — single-pin map centred on the cache's
