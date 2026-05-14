@@ -37,7 +37,7 @@ export const LP_LABEL_VALUE = 'payout-lnurl-w';
 
 /**
  * Build the unsigned kind 37516 listing event for a HiddenPiggy. Smart
- * defaults applied: D=1, T=1, S=micro, t=traditional, name=memo[:60].
+ * defaults applied: D=1, T=1, S=micro, t=traditional, name=lnurlDescription[:60].
  * Multi-precision g tags from precision 3 to 9.
  *
  * Throws if the piggy has no lat/lon (we refuse to publish a cache
@@ -52,7 +52,7 @@ export const buildCacheListing = (
   const g9 = piggy.geohash ?? encodeGeohash(piggy.lat, piggy.lon, 9);
   const tags: string[][] = [
     ['d', piggy.id],
-    ['name', piggy.name ?? (piggy.memo.slice(0, 60) || 'Hunt Piggy')],
+    ['name', piggy.name ?? piggy.lnurlDescription?.slice(0, 60) ?? 'Hunt Piggy'],
   ];
   // g tags at every precision from 3 to 9 — cheap on event size,
   // dramatically widens the prefix-filter surface.
@@ -73,7 +73,7 @@ export const buildCacheListing = (
     kind: GC_LISTING_KIND,
     created_at: Math.floor(Date.now() / 1000),
     tags,
-    content: piggy.memo,
+    content: piggy.lnurlDescription ?? '',
   };
 };
 

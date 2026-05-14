@@ -34,8 +34,8 @@ export interface HiddenPiggy {
   id: string;
   /** The bech32-encoded LNURL string the user pasted (or scanned). */
   lnurlw: string;
-  /** Hider-supplied note shown on the finder's celebration screen. */
-  memo: string;
+  /** LNURL-withdraw link title (LUD-03 defaultDescription) captured at validation — used as the kind 37516 listing name + content. */
+  lnurlDescription?: string;
   createdAt: number;
   /** When true, the hider has opted into publishing this Piggy as a
    * NIP-GC kind 37516 Nostr event (with the LP `lnurl` extension tag)
@@ -162,7 +162,6 @@ const isValidPiggy = (v: unknown): v is HiddenPiggy => {
   if (
     typeof p.id !== 'string' ||
     typeof p.lnurlw !== 'string' ||
-    typeof p.memo !== 'string' ||
     typeof p.createdAt !== 'number' ||
     typeof p.isPublic !== 'boolean'
   ) {

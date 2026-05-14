@@ -18,7 +18,7 @@ import type { VerifiedEvent } from 'nostr-tools';
 const makePiggy = (overrides: Partial<HiddenPiggy> = {}): HiddenPiggy => ({
   id: 'piggy_xyz',
   lnurlw: 'lightning:LNURL1abc',
-  memo: 'Geo-Cache 1 — 21 sats per claim',
+  lnurlDescription: 'Geo-Cache 1 — 21 sats per claim',
   createdAt: Date.now(),
   isPublic: true,
   lat: 52.283602,
@@ -90,11 +90,12 @@ describe('buildCacheListing', () => {
     );
   });
 
-  it('falls back to memo first 60 chars when no name set', () => {
-    const memo = 'A very long memo that exceeds sixty characters by some margin OK?';
-    const evt = buildCacheListing(makePiggy({ name: undefined, memo }));
+  it('falls back to lnurlDescription first 60 chars when no name set', () => {
+    const lnurlDescription =
+      'A very long link title that exceeds sixty characters by some margin OK?';
+    const evt = buildCacheListing(makePiggy({ name: undefined, lnurlDescription }));
     const name = evt.tags.find((t) => t[0] === 'name')?.[1];
-    expect(name).toBe(memo.slice(0, 60));
+    expect(name).toBe(lnurlDescription.slice(0, 60));
   });
 });
 

@@ -71,7 +71,6 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
   const { signEvent, relays } = useNostr();
 
   const [lnurl, setLnurl] = useState('');
-  const [memo, setMemo] = useState('');
   const [isPublic, setIsPublic] = useState(false);
   const [stage, setStage] = useState<Stage>({ kind: 'idle' });
   // Wizard pagination — 1 to 5. Each step renders its own page; Back
@@ -129,7 +128,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
     const piggy = {
       id: newPiggyId(),
       lnurlw: lnurl.trim(),
-      memo: memo.trim(),
+      lnurlDescription: stage.params.defaultDescription ?? undefined,
       createdAt: Date.now(),
       isPublic,
       maxWithdrawableMsat: stage.params.maxWithdrawable,
@@ -181,18 +180,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
         });
       }
     }
-  }, [
-    stage,
-    lnurl,
-    memo,
-    isPublic,
-    hintPhotoUrl,
-    waitMinutesText,
-    usesText,
-    pin,
-    signEvent,
-    relays,
-  ]);
+  }, [stage, lnurl, isPublic, hintPhotoUrl, waitMinutesText, usesText, pin, signEvent, relays]);
 
   const handlePinHere = useCallback(async () => {
     if (pinning) return;
@@ -695,23 +683,6 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
               styles={styles}
               colors={colors}
             />
-            <Text style={styles.subSectionLabel}>Memo (optional)</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Happy birthday Lily 🎂"
-              placeholderTextColor={colors.textSupplementary}
-              value={memo}
-              onChangeText={setMemo}
-              maxLength={140}
-              editable={stage.kind === 'validated'}
-              testID="hunt-piggy-memo-input"
-            />
-            <Text style={styles.helper}>
-              Shown on the public Discover listing and in your own My Piglets list. To greet the
-              finder when they claim, set that message as the withdraw link&apos;s description in
-              your wallet instead — the tag only carries the LNURL.
-            </Text>
-
             <Text style={[styles.subSectionLabel, styles.sectionGap]}>Hint photo (optional)</Text>
             {hintPhotoUrl ? (
               <View style={styles.hintPreviewWrapper}>
@@ -790,14 +761,30 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
               it leaks.
             </Text>
 
-            {stage.kind === 'validated' && (
+            {(stage.kind === 'validated' ||
+              stage.kind === 'saved' ||
+              stage.kind === 'wrote-nfc') && (
               <TouchableOpacity
-                style={styles.primaryButton}
+                style={[
+                  styles.primaryButton,
+                  (stage.kind === 'saved' || stage.kind === 'wrote-nfc') &&
+                    styles.primaryButtonPublished,
+                ]}
                 onPress={handleSave}
+                disabled={stage.kind === 'saved' || stage.kind === 'wrote-nfc'}
                 testID="hunt-piggy-save-button"
               >
-                <PiggyBank size={18} color={colors.white} strokeWidth={2.5} />
-                <Text style={styles.primaryButtonText}>Publish this Piggy</Text>
+                {stage.kind === 'saved' || stage.kind === 'wrote-nfc' ? (
+                  <>
+                    <Check size={18} color={colors.white} strokeWidth={2.5} />
+                    <Text style={styles.primaryButtonText}>Published</Text>
+                  </>
+                ) : (
+                  <>
+                    <PiggyBank size={18} color={colors.white} strokeWidth={2.5} />
+                    <Text style={styles.primaryButtonText}>Publish this Piggy</Text>
+                  </>
+                )}
               </TouchableOpacity>
             )}
 
@@ -1327,6 +1314,9 @@ const createStyles = (colors: Palette) =>
     },
     primaryButtonDisabled: {
       opacity: 0.4,
+    },
+    primaryButtonPublished: {
+      backgroundColor: colors.green,
     },
     primaryButtonText: {
       color: colors.white,
