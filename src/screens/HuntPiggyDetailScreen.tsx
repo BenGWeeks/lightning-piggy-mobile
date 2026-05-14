@@ -357,6 +357,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   <View style={styles.hero}>
                     <ExploreMiniMap
                       fill
+                      cachePin
                       lat={decodeGeohash(cache.geohash).lat}
                       lon={decodeGeohash(cache.geohash).lng}
                       merchants={[]}
@@ -688,24 +689,17 @@ const LogRow: React.FC<{
           <View />
         )}
         {/* Outline zap pill under the note so a hider can thank any
-            finder; a toast explains when the finder shared no address. */}
+            finder; disabled when the finder shared no Lightning address. */}
         <TouchableOpacity
-          style={styles.logZapButton}
+          style={[styles.logZapButton, !lud16 && styles.logZapButtonDisabled]}
+          disabled={!lud16}
           onPress={() => {
-            if (lud16) {
-              // Open the OS Lightning handler with the finder's LN
-              // address pre-filled. Full in-app zap UX (NIP-57) lands
-              // in a follow-up — for now we hand off to whichever
-              // wallet the user has set as default.
-              Linking.openURL(`lightning:${lud16}`).catch(() => {});
-            } else {
-              Toast.show({
-                type: 'info',
-                text1: 'No Lightning address',
-                text2: `${display} hasn't shared one to zap.`,
-              });
-            }
+            // Open the OS Lightning handler with the finder's LN address
+            // pre-filled. Full in-app zap UX (NIP-57) lands in a follow-up
+            // — for now we hand off to the user's default wallet.
+            if (lud16) Linking.openURL(`lightning:${lud16}`).catch(() => {});
           }}
+          accessibilityState={{ disabled: !lud16 }}
           testID={`hunt-log-${log.id.slice(0, 8)}-zap`}
           accessibilityLabel={`Zap ${display}`}
         >
@@ -1157,6 +1151,7 @@ const createStyles = (colors: Palette) =>
       paddingVertical: 5,
       borderRadius: 999,
     },
+    logZapButtonDisabled: { opacity: 0.4 },
     logZapText: {
       color: colors.brandPink,
       fontSize: 12,
