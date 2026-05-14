@@ -671,11 +671,26 @@ const LogRow: React.FC<{
           </Text>
           <Text style={styles.logAge}>{ageLabel}</Text>
         </View>
-        {/* Always visible so a hider can thank any finder at a glance.
-            When the finder hasn't shared a Lightning address there's
-            nothing to zap — the button dims and explains via a toast. */}
+      </TouchableOpacity>
+      {log.imageUrl ? (
+        <Image source={{ uri: log.imageUrl }} style={styles.logImage} resizeMode="cover" />
+      ) : null}
+      <Text style={styles.logContent}>{log.content}</Text>
+      <View style={styles.logFooter}>
+        {log.amountSats ? (
+          // Self-reported by the finder — the found-log event isn't
+          // verifiable, so the copy says "reported", not "claimed".
+          <View style={styles.logBadge}>
+            <Zap size={12} color={colors.zapYellow} fill={colors.zapYellow} strokeWidth={2.5} />
+            <Text style={styles.logBadgeText}>Reported {log.amountSats.toLocaleString()} sats</Text>
+          </View>
+        ) : (
+          <View />
+        )}
+        {/* Outline zap pill under the note so a hider can thank any
+            finder; a toast explains when the finder shared no address. */}
         <TouchableOpacity
-          style={[styles.logZapButton, !lud16 && styles.logZapButtonDim]}
+          style={styles.logZapButton}
           onPress={() => {
             if (lud16) {
               // Open the OS Lightning handler with the finder's LN
@@ -694,22 +709,10 @@ const LogRow: React.FC<{
           testID={`hunt-log-${log.id.slice(0, 8)}-zap`}
           accessibilityLabel={`Zap ${display}`}
         >
-          <Zap size={14} color={colors.white} strokeWidth={2.5} />
+          <Zap size={14} color={colors.brandPink} strokeWidth={2.5} />
           <Text style={styles.logZapText}>Zap</Text>
         </TouchableOpacity>
-      </TouchableOpacity>
-      {log.imageUrl ? (
-        <Image source={{ uri: log.imageUrl }} style={styles.logImage} resizeMode="cover" />
-      ) : null}
-      <Text style={styles.logContent}>{log.content}</Text>
-      {log.amountSats ? (
-        // Self-reported by the finder — the found-log event isn't verifiable,
-        // so the copy says "reported", not "claimed".
-        <View style={styles.logBadge}>
-          <Zap size={12} color={colors.zapYellow} fill={colors.zapYellow} strokeWidth={2.5} />
-          <Text style={styles.logBadgeText}>Reported {log.amountSats.toLocaleString()} sats</Text>
-        </View>
-      ) : null}
+      </View>
     </View>
   );
 };
@@ -1069,12 +1072,19 @@ const createStyles = (colors: Palette) =>
     chipActive: { backgroundColor: colors.brandPinkLight, borderColor: colors.brandPink },
     chipText: { fontSize: 12, fontWeight: '700', color: colors.textHeader },
     chipTextAccent: { color: colors.white },
+    // Full-bleed band — escapes the body's 16dp padding so the subtle
+    // surface tint runs edge to edge, setting the D/T/S row apart from
+    // the chips above and the action buttons below.
     meterRow: {
       flexDirection: 'row',
       gap: 22,
+      marginHorizontal: -16,
+      // No marginBottom — the body's 12dp gap already sits below, so a
+      // marginBottom here would make the band float lower than its top.
       marginTop: 12,
-      marginBottom: 8,
-      paddingHorizontal: 12,
+      paddingHorizontal: 28,
+      paddingVertical: 16,
+      backgroundColor: colors.surface,
     },
     meter: { flex: 1, gap: 6 },
     meterName: { fontSize: 11, fontWeight: '700', color: colors.textSupplementary },
@@ -1140,14 +1150,15 @@ const createStyles = (colors: Palette) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 4,
-      backgroundColor: colors.brandPink,
-      paddingHorizontal: 10,
+      backgroundColor: 'transparent',
+      borderWidth: 1,
+      borderColor: colors.brandPink,
+      paddingHorizontal: 12,
       paddingVertical: 5,
       borderRadius: 999,
     },
-    logZapButtonDim: { opacity: 0.4 },
     logZapText: {
-      color: colors.white,
+      color: colors.brandPink,
       fontSize: 12,
       fontWeight: '700',
     },
@@ -1293,6 +1304,12 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.divider,
     },
     logContent: { fontSize: 14, color: colors.textHeader, lineHeight: 20 },
+    logFooter: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginTop: 2,
+    },
     logBadge: {
       flexDirection: 'row',
       alignItems: 'center',
