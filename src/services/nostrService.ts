@@ -4,6 +4,9 @@ import {
   getPublicKey,
   finalizeEvent,
   getEventHash,
+  verifyEvent,
+  validateEvent,
+  type Event as NostrEvent,
   type VerifiedEvent,
 } from 'nostr-tools/pure';
 import type { Filter } from 'nostr-tools/filter';
@@ -14,6 +17,27 @@ import * as nip59 from 'nostr-tools/nip59';
 import type { NostrProfile, NostrContact, RelayConfig } from '../types/nostr';
 
 const pool = new SimplePool();
+
+// Fast-path signature verification for kind-0 (profile / metadata)
+// events. `SimplePool` calls `verifyEvent` synchronously for every
+// event a relay returns, before dispatching `onevent`. The default
+// does a full secp256k1 schnorr check (~25 ms each in Hermes) — so a
+// cold-start burst of 150+ profile events from a `fetchProfiles` query
+// froze the JS thread for ~6 s (issue #526: "JS-thread lockup when
+// reconciling zapper profile").
+//
+// Kind-0 events are cosmetic: a relay that serves a forged profile can
+// only show a wrong display-name / avatar for a pubkey — it cannot
+// forge identity (the pubkey is authoritative from the subscription
+// `authors` filter, not the event body) or anything money-related. So
+// for kind 0 we keep the cheap structural validation (`validateEvent`
+// — field presence + types, no crypto) and skip the schnorr check.
+// Every other kind — zap receipts, DMs, contact lists, NIP-GC cache
+// events — keeps full `verifyEvent`.
+pool.verifyEvent = ((event: NostrEvent): event is VerifiedEvent => {
+  if (event.kind === 0) return validateEvent(event);
+  return verifyEvent(event);
+}) as typeof pool.verifyEvent;
 
 // Shared pubkey + read relays of the currently logged-in Nostr user.
 // Kept as module state because `WalletProvider` wraps `NostrProvider` in
