@@ -103,7 +103,7 @@ export interface HiddenPiggy {
   size?: 'micro' | 'small' | 'regular' | 'large' | 'other';
   /** NIP-GC optional `t` field (cache type). Defaults to
    * `traditional`. */
-  cacheType?: 'traditional' | 'multi' | 'mystery';
+  cacheType?: 'traditional' | 'multi' | 'mystery' | 'virtual';
   /** NIP-GC optional `hint` field — short prose clue. Stored
    * plaintext locally; ROT13-encoded on publish per the NIP-GC
    * client guidance to prevent inline spoilers. */
@@ -196,7 +196,7 @@ const isValidPiggy = (v: unknown): v is HiddenPiggy => {
     return false;
   if (
     p.cacheType !== undefined &&
-    !['traditional', 'multi', 'mystery'].includes(p.cacheType as string)
+    !['traditional', 'multi', 'mystery', 'virtual'].includes(p.cacheType as string)
   )
     return false;
   if (p.hint !== undefined && typeof p.hint !== 'string') return false;

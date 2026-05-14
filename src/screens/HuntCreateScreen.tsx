@@ -97,7 +97,9 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
   const [cacheSize, setCacheSize] = useState<'micro' | 'small' | 'regular' | 'large' | 'other'>(
     'micro',
   );
-  const [cacheType, setCacheType] = useState<'traditional' | 'multi' | 'mystery'>('traditional');
+  const [cacheType, setCacheType] = useState<'traditional' | 'multi' | 'mystery' | 'virtual'>(
+    'traditional',
+  );
 
   const handlePaste = useCallback(async () => {
     try {
@@ -830,7 +832,8 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
             <Text style={[styles.subSectionLabel, styles.sectionGap]}>Type</Text>
             <Text style={styles.helper}>
               Traditional (the tag is the cache) · Multi (several waypoints to reach it) · Mystery
-              (solve a puzzle for the coordinates).
+              (solve a puzzle for the coordinates) · Virtual (just head to the spot — nothing to
+              tag).
             </Text>
             <OptionPicker
               value={cacheType}
@@ -838,8 +841,9 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
                 { v: 'traditional', label: 'Traditional' },
                 { v: 'multi', label: 'Multi' },
                 { v: 'mystery', label: 'Mystery' },
+                { v: 'virtual', label: 'Virtual' },
               ]}
-              onChange={(v) => setCacheType(v as 'traditional' | 'multi' | 'mystery')}
+              onChange={(v) => setCacheType(v as 'traditional' | 'multi' | 'mystery' | 'virtual')}
               styles={styles}
             />
 
