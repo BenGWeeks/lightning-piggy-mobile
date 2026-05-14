@@ -51,6 +51,7 @@ import { buildCacheListing } from '../services/nostrPlacesService';
 import { publishCacheEvent } from '../services/nostrPlacesPublisher';
 import NfcWriteSheet from '../components/NfcWriteSheet';
 import LocationPickerSheet from '../components/LocationPickerSheet';
+import { ExploreMiniMap } from '../components/ExploreMiniMap';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -314,11 +315,8 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
       </View>
 
       <StepProgressBar
-        stage={stage}
-        hasPin={!!pin}
         currentStep={currentStep}
         onPipPress={(n) => setCurrentStep(n)}
-        colors={colors}
         styles={styles}
       />
 
@@ -523,7 +521,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
                 <Text style={styles.hintFieldLabel}>Cooldown (mins)</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="180"
+                  placeholder="e.g. 180"
                   placeholderTextColor={colors.textSupplementary}
                   keyboardType="number-pad"
                   value={waitMinutesText}
@@ -536,7 +534,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
                 <Text style={styles.hintFieldLabel}>Total uses</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="100"
+                  placeholder="e.g. 100"
                   placeholderTextColor={colors.textSupplementary}
                   keyboardType="number-pad"
                   value={usesText}
@@ -608,6 +606,16 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
             />
             {pin ? (
               <>
+                <View style={styles.pinMapPreview}>
+                  <ExploreMiniMap
+                    lat={pin.lat}
+                    lon={pin.lon}
+                    merchants={[]}
+                    caches={[]}
+                    events={[]}
+                    onTapMap={() => setLocationPickerVisible(true)}
+                  />
+                </View>
                 <View style={styles.pinRow}>
                   <MapPin size={20} color={colors.brandPink} strokeWidth={2} />
                   <View style={styles.pinTextWrapper}>
@@ -698,7 +706,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
               editable={stage.kind === 'validated'}
               testID="hunt-piggy-memo-input"
             />
-            <Text style={styles.helper}>Shown to the finder on the celebration screen.</Text>
+            <Text style={styles.helper}>
+              Shown on the public Discover listing and in your own My Piglets list. To greet the
+              finder when they claim, set that message as the withdraw link&apos;s description in
+              your wallet instead — the tag only carries the LNURL.
+            </Text>
 
             <Text style={[styles.subSectionLabel, styles.sectionGap]}>Hint photo (optional)</Text>
             {hintPhotoUrl ? (
@@ -888,13 +900,9 @@ const StepHeader: React.FC<{
   </View>
 );
 
-// Top-of-screen horizontal stepper. Renders all 5 numbered pips with
-// short labels so the hider sees the shape of the flow at a glance.
-// Each pip is tinted by status: done = filled pink + check, active =
-// filled pink + number, pending = grey outline + number. Computed
-// outside the component so React.memo would be a clean win later.
-type StepPipStatus = 'done' | 'active' | 'pending';
-
+// Top-of-screen horizontal stepper — 5 numbered pips + short labels.
+// Two states only: pink once reached (the current step or behind), grey
+// ahead. The current pip is scaled up so you can see where you are.
 const STEP_LABELS: { n: number; label: string }[] = [
   { n: 1, label: 'Hardware' },
   { n: 2, label: 'Prize' },
@@ -903,71 +911,40 @@ const STEP_LABELS: { n: number; label: string }[] = [
   { n: 5, label: 'Publish' },
 ];
 
-const stepStatuses = (stage: Stage, hasPin: boolean): Record<1 | 2 | 3 | 4 | 5, StepPipStatus> => {
-  const validated =
-    stage.kind === 'validated' ||
-    stage.kind === 'saved' ||
-    stage.kind === 'writing-nfc' ||
-    stage.kind === 'wrote-nfc';
-  const wroteNfc = stage.kind === 'wrote-nfc';
-  const saved = stage.kind === 'saved' || wroteNfc;
-  return {
-    1: 'done',
-    2: validated ? 'done' : 'active',
-    3: wroteNfc ? 'done' : validated ? 'active' : 'pending',
-    4: hasPin ? 'done' : validated ? 'active' : 'pending',
-    5: saved ? 'done' : validated && hasPin ? 'active' : 'pending',
-  };
-};
-
 const StepProgressBar: React.FC<{
-  stage: Stage;
-  hasPin: boolean;
   currentStep: 1 | 2 | 3 | 4 | 5;
   onPipPress: (n: 1 | 2 | 3 | 4 | 5) => void;
-  colors: Palette;
   styles: ReturnType<typeof createStyles>;
-}> = ({ stage, hasPin, currentStep, onPipPress, colors, styles }) => {
-  const statuses = stepStatuses(stage, hasPin);
+}> = ({ currentStep, onPipPress, styles }) => {
   return (
     <View style={styles.stepperRow} accessibilityRole="progressbar">
       {STEP_LABELS.map(({ n, label }, idx) => {
-        const status = statuses[n as 1 | 2 | 3 | 4 | 5];
-        const isCurrent = currentStep === n;
+        const stepN = n as 1 | 2 | 3 | 4 | 5;
+        const reached = stepN <= currentStep;
+        const isCurrent = currentStep === stepN;
         return (
           <React.Fragment key={n}>
             <TouchableOpacity
               style={styles.stepperPipWrap}
-              onPress={() => onPipPress(n as 1 | 2 | 3 | 4 | 5)}
+              onPress={() => onPipPress(stepN)}
               testID={`hunt-piggy-step-pip-${n}`}
               accessibilityLabel={`Step ${n} of 5: ${label}`}
             >
               <View
                 style={[
                   styles.stepperPip,
-                  status === 'done' && styles.stepperPipDone,
-                  status === 'active' && styles.stepperPipActive,
-                  status === 'pending' && styles.stepperPipPending,
+                  reached ? styles.stepperPipActive : styles.stepperPipPending,
                   isCurrent && styles.stepperPipCurrent,
                 ]}
               >
-                {status === 'done' && !isCurrent ? (
-                  <Check size={12} color={colors.white} strokeWidth={3} />
-                ) : (
-                  <Text
-                    style={[
-                      styles.stepperPipText,
-                      status === 'pending' && styles.stepperPipTextPending,
-                    ]}
-                  >
-                    {n}
-                  </Text>
-                )}
+                <Text style={[styles.stepperPipText, !reached && styles.stepperPipTextPending]}>
+                  {n}
+                </Text>
               </View>
               <Text
                 style={[
                   styles.stepperLabel,
-                  status === 'pending' && styles.stepperLabelPending,
+                  !reached && styles.stepperLabelPending,
                   isCurrent && styles.stepperLabelCurrent,
                 ]}
                 numberOfLines={1}
@@ -979,12 +956,8 @@ const StepProgressBar: React.FC<{
               <View
                 style={[
                   styles.stepperConnector,
-                  // The connector after step N fills in once step N itself
-                  // is done — standard progressive-stepper behaviour. The
-                  // old rule keyed off the *next* step's status, so only
-                  // the 1→2 line ever lit up.
-                  statuses[n as 1 | 2 | 3 | 4 | 5] === 'done'
-                    ? styles.stepperConnectorDone
+                  stepN < currentStep
+                    ? styles.stepperConnectorReached
                     : styles.stepperConnectorPending,
                 ]}
               />
@@ -1253,7 +1226,6 @@ const createStyles = (colors: Palette) =>
       justifyContent: 'center',
       borderWidth: 1.5,
     },
-    stepperPipDone: { backgroundColor: colors.green, borderColor: colors.green },
     stepperPipActive: { backgroundColor: colors.brandPink, borderColor: colors.brandPink },
     stepperPipPending: { backgroundColor: 'transparent', borderColor: colors.textSupplementary },
     stepperPipText: { fontSize: 12, fontWeight: '800', color: colors.white },
@@ -1272,7 +1244,7 @@ const createStyles = (colors: Palette) =>
       marginTop: 13,
       marginHorizontal: -4,
     },
-    stepperConnectorDone: { backgroundColor: colors.green },
+    stepperConnectorReached: { backgroundColor: colors.brandPink },
     stepperConnectorPending: { backgroundColor: colors.divider },
     stepperPipCurrent: {
       backgroundColor: colors.brandPink,
@@ -1554,6 +1526,8 @@ const createStyles = (colors: Palette) =>
       fontWeight: '600',
       marginBottom: 4,
     },
+    // Cancel ExploreMiniMap's built-in 16px hub margin so the preview lines up with step content.
+    pinMapPreview: { marginHorizontal: -16, marginBottom: 4 },
     pinRow: {
       flexDirection: 'row',
       alignItems: 'center',
