@@ -135,6 +135,9 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     [],
   );
   const [hasClaimed, setHasClaimed] = useState(false);
+  // Cache / Finds segmented control — keeps the long detail page from
+  // being one endless scroll.
+  const [segment, setSegment] = useState<'cache' | 'finds'>('cache');
 
   // ----- load listing + subscribe found-logs ------------------------------
 
@@ -361,154 +364,185 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 </Text>
               </View>
             ) : null}
-            <CacheSpecPanel cache={cache} colors={colors} styles={styles} />
-            <Text style={styles.description}>{cache.description}</Text>
-            {/* Attribution — surface the hider so the finder knows
+
+            <View style={styles.segmentRow}>
+              <TouchableOpacity
+                style={[styles.segment, segment === 'cache' && styles.segmentActive]}
+                onPress={() => setSegment('cache')}
+                testID="hunt-piggy-detail-segment-cache"
+              >
+                <Text style={[styles.segmentText, segment === 'cache' && styles.segmentTextActive]}>
+                  Cache
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.segment, segment === 'finds' && styles.segmentActive]}
+                onPress={() => setSegment('finds')}
+                testID="hunt-piggy-detail-segment-finds"
+              >
+                <Text style={[styles.segmentText, segment === 'finds' && styles.segmentTextActive]}>
+                  Finds ({sortedLogs.length})
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {segment === 'cache' ? (
+              <>
+                <CacheSpecPanel cache={cache} colors={colors} styles={styles} />
+                <Text style={styles.description}>{cache.description}</Text>
+                {/* Attribution — surface the hider so the finder knows
                 whose word they're trusting before walking to a
                 coordinate. The npub is shorthand-formatted; full
                 profile UI lands later. The WoT filter would already
                 have hidden this listing from any view if the hider
                 weren't in the user's trust graph (see
                 `trustGraphService` for the threat model). */}
-            <HiderAttribution
-              pubkey={cache.hiderPubkey}
-              colors={colors}
-              styles={styles}
-              onPressProfile={openProfileSheet}
-            />
-            {cache.hint ? (
-              <TouchableOpacity
-                style={styles.hintCard}
-                onPress={() => setHintRevealed((r) => !r)}
-                accessibilityLabel={hintRevealed ? 'Hide hint' : 'Reveal hint'}
-                testID="hunt-piggy-detail-hint"
-              >
-                {hintRevealed ? (
-                  <EyeOff size={14} color={colors.brandPink} strokeWidth={2.5} />
-                ) : (
-                  <Eye size={14} color={colors.brandPink} strokeWidth={2.5} />
-                )}
-                <Text style={styles.hintText}>
-                  {hintRevealed ? `Hint: ${cache.hint}` : 'Stuck? Tap to reveal the hint'}
-                </Text>
-              </TouchableOpacity>
-            ) : null}
+                <HiderAttribution
+                  pubkey={cache.hiderPubkey}
+                  colors={colors}
+                  styles={styles}
+                  onPressProfile={openProfileSheet}
+                />
+                {cache.hint ? (
+                  <TouchableOpacity
+                    style={styles.hintCard}
+                    onPress={() => setHintRevealed((r) => !r)}
+                    accessibilityLabel={hintRevealed ? 'Hide hint' : 'Reveal hint'}
+                    testID="hunt-piggy-detail-hint"
+                  >
+                    {hintRevealed ? (
+                      <EyeOff size={14} color={colors.brandPink} strokeWidth={2.5} />
+                    ) : (
+                      <Eye size={14} color={colors.brandPink} strokeWidth={2.5} />
+                    )}
+                    <Text style={styles.hintText}>
+                      {hintRevealed ? `Hint: ${cache.hint}` : 'Stuck? Tap to reveal the hint'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
 
-            {/* Location preview — single-pin map centred on the cache's
+                {/* Location preview — single-pin map centred on the cache's
                 geohash centroid. Tap → opens the full Map for pan/zoom.
                 NIP-GC publishes geohash precision 9 (≈ 5 m) at the
                 tightest tag, so this is "exact spot" not "rough area"
                 — the hider's choice of hashed precision controls the
                 fidelity, not the client. */}
-            {cache.geohash ? (
-              <View style={styles.mapPreviewWrap}>
-                <ExploreMiniMap
-                  lat={decodeGeohash(cache.geohash).lat}
-                  lon={decodeGeohash(cache.geohash).lng}
-                  merchants={[]}
-                  caches={[cache]}
-                  events={[]}
-                  onTapMap={() => navigation.navigate('Map')}
-                />
-              </View>
-            ) : null}
-
-            <Text style={styles.sectionLabel}>Find log ({sortedLogs.length})</Text>
-            {sortedLogs.length === 0 ? (
-              <Text style={styles.subtle}>
-                No finds logged yet. {hasClaimed ? 'Be the first to drop a log entry!' : ''}
-              </Text>
-            ) : (
-              sortedLogs.map((log) => (
-                <LogRow
-                  key={log.id}
-                  log={log}
-                  colors={colors}
-                  styles={styles}
-                  onPressProfile={openProfileSheet}
-                />
-              ))
-            )}
-
-            {hasClaimed && !composerOpen ? (
-              <TouchableOpacity
-                style={styles.composeCta}
-                onPress={() => setComposerOpen(true)}
-                testID="hunt-piggy-detail-compose-button"
-              >
-                <Sparkles size={16} color={colors.white} strokeWidth={2.5} />
-                <Text style={styles.composeCtaText}>Drop a log entry</Text>
-              </TouchableOpacity>
-            ) : null}
-
-            {composerOpen ? (
-              <View style={styles.composer}>
-                <TextInput
-                  style={styles.composerInput}
-                  placeholder="Found it! Tucked behind the bench, cleverly hidden."
-                  placeholderTextColor={colors.textSupplementary}
-                  value={composerText}
-                  onChangeText={setComposerText}
-                  multiline
-                  testID="hunt-piggy-detail-compose-input"
-                />
-                {composerPhotoUrl ? (
-                  <View style={styles.composerPhotoPreviewWrap}>
-                    <Image
-                      source={{ uri: composerPhotoUrl }}
-                      style={styles.composerPhotoPreview}
-                      resizeMode="cover"
+                {cache.geohash ? (
+                  <View style={styles.mapPreviewWrap}>
+                    <ExploreMiniMap
+                      lat={decodeGeohash(cache.geohash).lat}
+                      lon={decodeGeohash(cache.geohash).lng}
+                      merchants={[]}
+                      caches={[cache]}
+                      events={[]}
+                      onTapMap={() => navigation.navigate('Map')}
                     />
-                    <TouchableOpacity
-                      style={styles.composerPhotoRemove}
-                      onPress={() => setComposerPhotoUrl(null)}
-                      accessibilityLabel="Remove photo"
-                    >
-                      <X size={14} color={colors.white} strokeWidth={2.5} />
-                    </TouchableOpacity>
                   </View>
-                ) : composerUploading ? (
-                  <ActivityIndicator color={colors.brandPink} />
+                ) : null}
+              </>
+            ) : (
+              <>
+                <Text style={styles.sectionLabel}>Find log ({sortedLogs.length})</Text>
+                {sortedLogs.length === 0 ? (
+                  <Text style={styles.subtle}>
+                    No finds logged yet. {hasClaimed ? 'Be the first to drop a log entry!' : ''}
+                  </Text>
                 ) : (
-                  <View style={styles.composerPhotoButtons}>
-                    <TouchableOpacity style={styles.composerPhotoButton} onPress={handleTakePhoto}>
-                      <Camera size={16} color={colors.brandPink} strokeWidth={2} />
-                      <Text style={styles.composerPhotoButtonText}>Camera</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.composerPhotoButton}
-                      onPress={handlePickFromLibrary}
-                    >
-                      <ImagePlus size={16} color={colors.brandPink} strokeWidth={2} />
-                      <Text style={styles.composerPhotoButtonText}>Library</Text>
-                    </TouchableOpacity>
-                  </View>
+                  sortedLogs.map((log) => (
+                    <LogRow
+                      key={log.id}
+                      log={log}
+                      colors={colors}
+                      styles={styles}
+                      onPressProfile={openProfileSheet}
+                    />
+                  ))
                 )}
-                <View style={styles.composerActions}>
+
+                {hasClaimed && !composerOpen ? (
                   <TouchableOpacity
-                    style={styles.composerCancel}
-                    onPress={() => setComposerOpen(false)}
+                    style={styles.composeCta}
+                    onPress={() => setComposerOpen(true)}
+                    testID="hunt-piggy-detail-compose-button"
                   >
-                    <Text style={styles.composerCancelText}>Cancel</Text>
+                    <Sparkles size={16} color={colors.white} strokeWidth={2.5} />
+                    <Text style={styles.composeCtaText}>Drop a log entry</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.composerPost, posting && styles.composerPostDim]}
-                    disabled={posting}
-                    onPress={handlePostLog}
-                    testID="hunt-piggy-detail-post-button"
-                  >
-                    {posting ? (
-                      <ActivityIndicator color={colors.white} />
+                ) : null}
+
+                {composerOpen ? (
+                  <View style={styles.composer}>
+                    <TextInput
+                      style={styles.composerInput}
+                      placeholder="Found it! Tucked behind the bench, cleverly hidden."
+                      placeholderTextColor={colors.textSupplementary}
+                      value={composerText}
+                      onChangeText={setComposerText}
+                      multiline
+                      testID="hunt-piggy-detail-compose-input"
+                    />
+                    {composerPhotoUrl ? (
+                      <View style={styles.composerPhotoPreviewWrap}>
+                        <Image
+                          source={{ uri: composerPhotoUrl }}
+                          style={styles.composerPhotoPreview}
+                          resizeMode="cover"
+                        />
+                        <TouchableOpacity
+                          style={styles.composerPhotoRemove}
+                          onPress={() => setComposerPhotoUrl(null)}
+                          accessibilityLabel="Remove photo"
+                        >
+                          <X size={14} color={colors.white} strokeWidth={2.5} />
+                        </TouchableOpacity>
+                      </View>
+                    ) : composerUploading ? (
+                      <ActivityIndicator color={colors.brandPink} />
                     ) : (
-                      <>
-                        <Send size={16} color={colors.white} strokeWidth={2.5} />
-                        <Text style={styles.composerPostText}>Post log</Text>
-                      </>
+                      <View style={styles.composerPhotoButtons}>
+                        <TouchableOpacity
+                          style={styles.composerPhotoButton}
+                          onPress={handleTakePhoto}
+                        >
+                          <Camera size={16} color={colors.brandPink} strokeWidth={2} />
+                          <Text style={styles.composerPhotoButtonText}>Camera</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.composerPhotoButton}
+                          onPress={handlePickFromLibrary}
+                        >
+                          <ImagePlus size={16} color={colors.brandPink} strokeWidth={2} />
+                          <Text style={styles.composerPhotoButtonText}>Library</Text>
+                        </TouchableOpacity>
+                      </View>
                     )}
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ) : null}
+                    <View style={styles.composerActions}>
+                      <TouchableOpacity
+                        style={styles.composerCancel}
+                        onPress={() => setComposerOpen(false)}
+                      >
+                        <Text style={styles.composerCancelText}>Cancel</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.composerPost, posting && styles.composerPostDim]}
+                        disabled={posting}
+                        onPress={handlePostLog}
+                        testID="hunt-piggy-detail-post-button"
+                      >
+                        {posting ? (
+                          <ActivityIndicator color={colors.white} />
+                        ) : (
+                          <>
+                            <Send size={16} color={colors.white} strokeWidth={2.5} />
+                            <Text style={styles.composerPostText}>Post log</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : null}
+              </>
+            )}
           </>
         ) : null}
       </ScrollView>
@@ -757,7 +791,7 @@ const CacheSpecPanel: React.FC<{
       {cache.payoutSats != null ? (
         <View style={styles.specRow}>
           <View style={styles.specIconWrap}>
-            <Zap size={16} color={colors.brandPink} fill={colors.brandPink} strokeWidth={2.5} />
+            <Zap size={16} color={colors.zapYellow} fill={colors.zapYellow} strokeWidth={2.5} />
           </View>
           <View style={styles.specRowMain}>
             <Text style={styles.specLabel}>Prize · {cache.payoutSats.toLocaleString()} sats</Text>
@@ -1049,6 +1083,22 @@ const createStyles = (colors: Palette) =>
       lineHeight: 16,
       textAlign: 'center',
     },
+    segmentRow: {
+      flexDirection: 'row',
+      backgroundColor: colors.surface,
+      borderRadius: 10,
+      padding: 3,
+      gap: 3,
+    },
+    segment: {
+      flex: 1,
+      alignItems: 'center',
+      paddingVertical: 8,
+      borderRadius: 8,
+    },
+    segmentActive: { backgroundColor: colors.brandPink },
+    segmentText: { fontSize: 13, fontWeight: '700', color: colors.textSupplementary },
+    segmentTextActive: { color: colors.white },
     sectionLabel: {
       fontSize: 13,
       fontWeight: '700',
