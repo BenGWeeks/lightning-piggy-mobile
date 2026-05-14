@@ -239,7 +239,9 @@ const dot=(cls,size)=>L.divIcon({className:'',html:'<div class="'+cls+'"></div>'
 // needs no asset bundle. Used by the cache-detail hero's teardrop pin.
 const PIGGY_SVG='<path d="M11 17h3v2a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-3a3.16 3.16 0 0 0 2-2h1a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1h-1a5 5 0 0 0-2-4V3a4 4 0 0 0-3.2 1.6l-.3.4H11a6 6 0 0 0-6 6v1a5 5 0 0 0 2 4v3a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1z"/><path d="M16 10h.01"/><path d="M2 8v1a2 2 0 0 0 2 2h1"/>';
 const MAPPIN_SVG='<path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/>';
-const pinIcon=(piggy)=>L.divIcon({className:'',iconSize:[36,44],iconAnchor:[18,44],html:'<svg width="36" height="44" viewBox="0 0 36 44" xmlns="http://www.w3.org/2000/svg"><path d="M18 2C9.7 2 3 8.7 3 17c0 10 15 25 15 25s15-15 15-25C33 8.7 26.3 2 18 2z" fill="'+(piggy?'#EC008C':'#6c7b8a')+'" stroke="#fff" stroke-width="2"/><g transform="translate(9 7) scale(0.75)" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'+(piggy?PIGGY_SVG:MAPPIN_SVG)+'</g></svg>'});
+// The piggy glyph sits ~2px lower than the map-pin glyph in its viewBox,
+// so it gets a slightly larger y-offset to stay optically centred.
+const pinIcon=(piggy)=>L.divIcon({className:'',iconSize:[36,44],iconAnchor:[18,44],html:'<svg width="36" height="44" viewBox="0 0 36 44" xmlns="http://www.w3.org/2000/svg"><path d="M18 2C9.7 2 3 8.7 3 17c0 10 15 25 15 25s15-15 15-25C33 8.7 26.3 2 18 2z" fill="'+(piggy?'#EC008C':'#6c7b8a')+'" stroke="#fff" stroke-width="2"/><g transform="translate(9 '+(piggy?9:7)+') scale(0.75)" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'+(piggy?PIGGY_SVG:MAPPIN_SVG)+'</g></svg>'});
 const emitBounds=()=>{const b=map.getBounds();post({type:'bounds',bbox:{minLat:b.getSouth(),maxLat:b.getNorth(),minLon:b.getWest(),maxLon:b.getEast()}});};
 map.on('moveend',emitBounds);
 map.on('zoomend',emitBounds);

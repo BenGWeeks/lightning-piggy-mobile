@@ -392,7 +392,6 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
                   accessibilityLabel="Buy from Robotechy"
                 >
                   <ShoppingBag size={18} color={colors.white} strokeWidth={2.5} />
-                  <Text style={styles.getPiggyButtonText}>Buy from</Text>
                   <Image
                     source={require('../../assets/images/robotechy-logo.png')}
                     style={styles.robotechyLogo}
