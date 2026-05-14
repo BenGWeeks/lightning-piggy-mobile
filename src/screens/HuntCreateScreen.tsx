@@ -760,32 +760,40 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
               it leaks.
             </Text>
 
-            {(stage.kind === 'validated' ||
-              stage.kind === 'saved' ||
-              stage.kind === 'wrote-nfc') && (
-              <TouchableOpacity
-                style={[
-                  styles.primaryButton,
-                  (stage.kind === 'saved' || stage.kind === 'wrote-nfc') &&
-                    styles.primaryButtonPublished,
-                ]}
-                onPress={handleSave}
-                disabled={stage.kind === 'saved' || stage.kind === 'wrote-nfc'}
-                testID="hunt-piggy-save-button"
-              >
-                {stage.kind === 'saved' || stage.kind === 'wrote-nfc' ? (
-                  <>
-                    <Check size={18} color={colors.white} strokeWidth={2.5} />
-                    <Text style={styles.primaryButtonText}>Published</Text>
-                  </>
-                ) : (
-                  <>
-                    <PiggyBank size={18} color={colors.white} strokeWidth={2.5} />
-                    <Text style={styles.primaryButtonText}>Publish this Piggy</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            )}
+            {/* Publish is always shown so the wizard has a clear final
+                action — it's just disabled until a prize is validated
+                on step 2, with a note explaining why. */}
+            <TouchableOpacity
+              style={[
+                styles.primaryButton,
+                stage.kind !== 'validated' &&
+                  stage.kind !== 'saved' &&
+                  stage.kind !== 'wrote-nfc' &&
+                  styles.primaryButtonDisabled,
+                (stage.kind === 'saved' || stage.kind === 'wrote-nfc') &&
+                  styles.primaryButtonPublished,
+              ]}
+              onPress={handleSave}
+              disabled={stage.kind !== 'validated'}
+              testID="hunt-piggy-save-button"
+            >
+              {stage.kind === 'saved' || stage.kind === 'wrote-nfc' ? (
+                <>
+                  <Check size={18} color={colors.white} strokeWidth={2.5} />
+                  <Text style={styles.primaryButtonText}>Published</Text>
+                </>
+              ) : (
+                <>
+                  <PiggyBank size={18} color={colors.white} strokeWidth={2.5} />
+                  <Text style={styles.primaryButtonText}>Publish this Piggy</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            {stage.kind === 'idle' || stage.kind === 'validating' ? (
+              <Text style={styles.helper}>
+                Add and validate a prize on step 2 to enable publishing.
+              </Text>
+            ) : null}
 
             {(stage.kind === 'saved' || stage.kind === 'wrote-nfc') && (
               <TouchableOpacity
