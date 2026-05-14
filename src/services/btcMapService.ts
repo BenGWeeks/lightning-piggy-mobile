@@ -418,6 +418,16 @@ const hydrateLastResult = async (): Promise<void> => {
 };
 
 /**
+ * The last successful search result — in memory, or hydrated from disk
+ * on a cold start. Lets a screen paint instantly (stale-while-
+ * revalidate) before `fetchPlacesInBbox` returns the fresh set.
+ */
+export const getCachedPlaces = async (): Promise<BtcMapPlace[]> => {
+  if (lastResult.length === 0) await hydrateLastResult();
+  return lastResult;
+};
+
+/**
  * Fetch merchants for a viewport. Converts the caller's `bbox` to a
  * centre + radius and hits BTC Map's `/v4/places/search` endpoint —
  * the one their docs recommend calling "every time user moves the

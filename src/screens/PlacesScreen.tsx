@@ -29,6 +29,7 @@ import {
   acceptsLightning,
   acceptsOnchain,
   fetchPlacesInBbox,
+  getCachedPlaces,
   formatAddress,
   isBoosted,
   lightningAddressOf,
@@ -77,6 +78,13 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
     setLoading(true);
     setError(null);
     try {
+      // Stale-while-revalidate: paint the last cached result instantly so
+      // the list isn't a blank spinner while GPS + the live search resolve.
+      getCachedPlaces()
+        .then((cached) => {
+          if (cached.length > 0) setPlaces((prev) => (prev.length > 0 ? prev : cached));
+        })
+        .catch(() => {});
       const pinned = getDevPinnedLocation();
       let lat: number;
       let lon: number;
