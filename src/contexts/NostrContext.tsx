@@ -507,6 +507,13 @@ const DM_CONV_CACHE_PREFIX = 'nostr_dm_conv_v1_';
 const DM_CONV_LAST_SEEN_PREFIX = 'nostr_dm_conv_last_seen_v1_';
 const DM_INBOX_CAP = 1000;
 const DM_CONV_CAP = 500;
+// Hard byte ceiling for a single DM cache row. Android's SQLite
+// CursorWindow caps a row at ~2 MB — past it the *read* throws
+// SQLiteBlobTooBigException, the cache silently fails to hydrate, and
+// every cold start falls back to a full relay restream + NIP-17
+// re-decrypt (a ~70s JS-thread stall). The count caps above aren't
+// enough when messages are long, so the merge fns trim by size too.
+const DM_CACHE_MAX_BYTES = 1_500_000;
 
 function inboxCacheKey(user: string) {
   return DM_INBOX_CACHE_PREFIX + user;
@@ -569,7 +576,13 @@ function mergeInboxEntries(
   for (const e of cached) map.set(dedupKey(e), e);
   for (const e of fresh) map.set(dedupKey(e), e);
   const all = Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
-  return all.slice(0, cap);
+  let result = all.slice(0, cap);
+  // Byte guard (see DM_CACHE_MAX_BYTES). Sorted newest-first, so trim
+  // the tail to drop the oldest entries until the blob fits.
+  while (result.length > 1 && JSON.stringify(result).length > DM_CACHE_MAX_BYTES) {
+    result = result.slice(0, Math.ceil(result.length * 0.8));
+  }
+  return result;
 }
 
 // Window in seconds to match a fresh real-id message against a pending
@@ -610,9 +623,14 @@ function mergeConversationMessages(
     map.set(m.id, m);
   }
   const all = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
-  if (all.length <= cap) return all;
   // Keep the newest DM_CONV_CAP messages; drop oldest.
-  return all.slice(all.length - cap);
+  let result = all.length <= cap ? all : all.slice(all.length - cap);
+  // Byte guard (see DM_CACHE_MAX_BYTES). Sorted oldest-first, so trim
+  // the head to drop the oldest messages until the blob fits.
+  while (result.length > 1 && JSON.stringify(result).length > DM_CACHE_MAX_BYTES) {
+    result = result.slice(Math.floor(result.length * 0.2));
+  }
+  return result;
 }
 
 const NSEC_KEY = 'nostr_nsec';
