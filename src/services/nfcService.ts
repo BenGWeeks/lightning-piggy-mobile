@@ -5,8 +5,24 @@
  * lightning addresses, and Nostr npub identities. Also supports writing
  * npub identities to NFC tags.
  */
-import NfcManager, { NfcTech, Ndef, TagEvent } from 'react-native-nfc-manager';
+import NfcManager, { NfcTech, Ndef, TagEvent, NfcAdapter } from 'react-native-nfc-manager';
 import { Platform, Linking } from 'react-native';
+
+// Reader-mode options for every `requestTechnology` call. On Android this
+// routes the tag through `enableReaderMode` instead of foreground
+// dispatch, so the OS never hands the tag to another app — without it, a
+// tag that already holds a `nostr:` / `lightning:` URI launches whatever
+// app handles that scheme the moment it's detected, hijacking our
+// read/write session. iOS ignores these fields.
+const READER_MODE_OPTS = {
+  isReaderModeEnabled: true,
+  readerModeFlags:
+    NfcAdapter.FLAG_READER_NFC_A |
+    NfcAdapter.FLAG_READER_NFC_B |
+    NfcAdapter.FLAG_READER_NFC_F |
+    NfcAdapter.FLAG_READER_NFC_V |
+    NfcAdapter.FLAG_READER_NO_PLATFORM_SOUNDS,
+};
 
 export type NfcTagContent =
   | { type: 'lnurl'; data: string }
@@ -200,7 +216,7 @@ export async function scanNfcTag(): Promise<NfcTagContent> {
     if (!(await ensureNfcStarted())) {
       throw new Error('NFC unavailable on this device');
     }
-    await NfcManager.requestTechnology(NfcTech.Ndef);
+    await NfcManager.requestTechnology(NfcTech.Ndef, READER_MODE_OPTS);
     const tag = await NfcManager.getTag();
 
     if (!tag) {
@@ -236,7 +252,7 @@ export async function writeNpubToTag(npub: string, onTagDetected?: () => void): 
     if (!(await ensureNfcStarted())) {
       throw new Error('NFC unavailable on this device');
     }
-    await NfcManager.requestTechnology(NfcTech.Ndef);
+    await NfcManager.requestTechnology(NfcTech.Ndef, READER_MODE_OPTS);
 
     const tag = await NfcManager.getTag();
     if (!tag) {
@@ -372,7 +388,7 @@ export async function writeLnurlToTag(
     if (!(await ensureNfcStarted())) {
       throw new Error('NFC unavailable on this device');
     }
-    await NfcManager.requestTechnology(NfcTech.Ndef);
+    await NfcManager.requestTechnology(NfcTech.Ndef, READER_MODE_OPTS);
 
     const tag = await NfcManager.getTag();
     if (!tag) {
