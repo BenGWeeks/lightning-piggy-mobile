@@ -1355,6 +1355,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       }
 
+      // A newer refresh superseded us during the outgoing relay/profile
+      // awaits — bail before the index-based merge + fingerprint commit
+      // below, exactly as the incoming path does after its fetch.
+      if (signal.aborted) {
+        releaseController();
+        return;
+      }
+
       if (incomingPending.length === 0) {
         // Nothing to fetch from relays — commit the outgoing results and bail.
         if (__DEV__ && resultsByIdx.size > 0) {

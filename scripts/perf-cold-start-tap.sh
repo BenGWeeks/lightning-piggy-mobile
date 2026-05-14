@@ -32,7 +32,18 @@ DEVICE=${PIGGY_DEVICE:-emulator-5554}
 APP_ID=${PIGGY_APP_ID:-com.lightningpiggy.app.dev}
 DB_PATH="/data/data/${APP_ID}/databases/RKStorage"
 
-TMP_FLOW=$(mktemp --suffix=.yaml)
+# `date +%s%3N` requires GNU date (Linux); macOS BSD date doesn't expand
+# `%N`. Detect once and fall back to python3 — mirrors scripts/perf-startup.sh.
+if date +%N 2>/dev/null | grep -qE '^[0-9]{9}$'; then
+  now_ms() { date +%s%3N; }
+else
+  now_ms() { python3 -c 'import time; print(int(time.time()*1000))'; }
+fi
+
+# Portable mktemp: BSD/macOS needs a positional template or `-t`; the
+# `-t` form works on both. Clean it up on exit.
+TMP_FLOW=$(mktemp -t perfcoldtap.XXXXXX)
+trap 'rm -f "$TMP_FLOW"' EXIT
 cat > "$TMP_FLOW" <<YAML
 appId: $APP_ID
 ---
@@ -61,10 +72,10 @@ for i in $(seq 1 "$RUNS"); do
   clear_caches
   adb -s "$DEVICE" shell am force-stop "$APP_ID"
   sleep 2
-  t1=$(date +%s%3N)
+  t1=$(now_ms)
   adb -s "$DEVICE" shell am start -n "$APP_ID/.MainActivity" >/dev/null
-  if maestro test "$TMP_FLOW" >/dev/null 2>&1; then
-    t2=$(date +%s%3N)
+  if maestro --device "$DEVICE" test "$TMP_FLOW" >/dev/null 2>&1; then
+    t2=$(now_ms)
     dt=$((t2 - t1))
     totals+=("$dt")
     echo "  run $i: ${dt} ms"

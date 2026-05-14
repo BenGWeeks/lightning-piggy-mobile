@@ -15,25 +15,23 @@ import * as nip04 from 'nostr-tools/nip04';
 import * as nip44 from 'nostr-tools/nip44';
 import * as nip59 from 'nostr-tools/nip59';
 import type { NostrProfile, NostrContact, RelayConfig } from '../types/nostr';
+import { slimDisplayProfile } from '../utils/profileSanitize';
 
 const pool = new SimplePool();
 
-// Fast-path signature verification for kind-0 (profile / metadata)
-// events. `SimplePool` calls `verifyEvent` synchronously for every
-// event a relay returns, before dispatching `onevent`. The default
-// does a full secp256k1 schnorr check (~25 ms each in Hermes) — so a
-// cold-start burst of 150+ profile events from a `fetchProfiles` query
-// froze the JS thread for ~6 s (issue #526: "JS-thread lockup when
-// reconciling zapper profile").
-//
-// Kind-0 events are cosmetic: a relay that serves a forged profile can
-// only show a wrong display-name / avatar for a pubkey — it cannot
-// forge identity (the pubkey is authoritative from the subscription
-// `authors` filter, not the event body) or anything money-related. So
-// for kind 0 we keep the cheap structural validation (`validateEvent`
-// — field presence + types, no crypto) and skip the schnorr check.
-// Every other kind — zap receipts, DMs, contact lists, NIP-GC cache
-// events — keeps full `verifyEvent`.
+// Fast-path verification for kind-0 (profile / metadata) events.
+// `SimplePool` runs `verifyEvent` synchronously for every event before
+// dispatching `onevent` — a full secp256k1 schnorr check (~25 ms each in
+// Hermes), so a cold-start burst of 150+ profile events from a
+// `fetchProfiles` query froze the JS thread for ~6 s (issue #526). For
+// kind 0 we keep only the cheap structural check (`validateEvent`) and
+// skip schnorr. Trade-off: a kind-0 from this path is NOT signature-
+// verified — a malicious relay could forge any field, including the
+// `lud16` lightning address, which would silently redirect a zap. That
+// is safe ONLY because both consumers compensate: `fetchProfiles` (batch)
+// runs every result through `slimDisplayProfile` to strip `lud16`, and
+// `fetchProfile` (single) re-runs full `verifyEvent` itself before its
+// `lud16` can feed a payment. Every other kind keeps full `verifyEvent`.
 pool.verifyEvent = ((event: NostrEvent): event is VerifiedEvent => {
   if (event.kind === 0) return validateEvent(event);
   return verifyEvent(event);
@@ -202,6 +200,12 @@ export async function fetchProfile(pubkey: string, relays: string[]): Promise<No
       authors: [pubkey],
     });
     if (!event) return null;
+    // `pool.verifyEvent` fast-paths kind-0 (skips schnorr) — but this single
+    // fetch feeds payment destinations (`lud16`), so verify it for real here.
+    if (!verifyEvent(event)) {
+      console.warn('Nostr profile failed signature verification, ignoring:', pubkey);
+      return null;
+    }
 
     const parsed = parseProfileContent(event.content);
     return {
@@ -463,11 +467,17 @@ export async function fetchProfiles(
 
   const ingest = (event: { pubkey: string; content: string; created_at: number }): void => {
     const parsed = parseProfileContent(event.content);
-    profiles.set(event.pubkey, {
-      pubkey: event.pubkey,
-      npub: npubEncode(event.pubkey),
-      ...parsed,
-    });
+    // Batch-fetched kind-0 events skip schnorr verification (see the
+    // pool.verifyEvent fast-path) — strip payment-relevant fields so a
+    // forged relay reply can't redirect a zap. Display-only path.
+    profiles.set(
+      event.pubkey,
+      slimDisplayProfile({
+        pubkey: event.pubkey,
+        npub: npubEncode(event.pubkey),
+        ...parsed,
+      }),
+    );
     scheduleEmit();
   };
 
