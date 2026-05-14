@@ -760,51 +760,38 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
               it leaks.
             </Text>
 
-            {/* Publish is always shown so the wizard has a clear final
-                action — it's just disabled until a prize is validated
-                on step 2, with a note explaining why. */}
-            <TouchableOpacity
-              style={[
-                styles.primaryButton,
-                stage.kind !== 'validated' &&
-                  stage.kind !== 'saved' &&
-                  stage.kind !== 'wrote-nfc' &&
-                  styles.primaryButtonDisabled,
-                (stage.kind === 'saved' || stage.kind === 'wrote-nfc') &&
-                  styles.primaryButtonPublished,
-              ]}
-              onPress={handleSave}
-              disabled={stage.kind !== 'validated'}
-              testID="hunt-piggy-save-button"
-            >
-              {stage.kind === 'saved' || stage.kind === 'wrote-nfc' ? (
-                <>
-                  <Check size={18} color={colors.white} strokeWidth={2.5} />
-                  <Text style={styles.primaryButtonText}>Published</Text>
-                </>
-              ) : (
-                <>
-                  <PiggyBank size={18} color={colors.white} strokeWidth={2.5} />
-                  <Text style={styles.primaryButtonText}>Publish this Piggy</Text>
-                </>
-              )}
-            </TouchableOpacity>
+            {/* The publish action lives in the step nav row's "next"
+                slot — same shape as every other step. Its label tracks
+                the public toggle (Publish when public, Save when not)
+                and flips to Done once the Piggy is saved/published. */}
             {stage.kind === 'idle' || stage.kind === 'validating' ? (
               <Text style={styles.helper}>
                 Add and validate a prize on step 2 to enable publishing.
               </Text>
             ) : null}
-
-            {(stage.kind === 'saved' || stage.kind === 'wrote-nfc') && (
-              <TouchableOpacity
-                style={styles.secondaryButton}
-                onPress={handleDone}
-                testID="hunt-piggy-done-button"
-              >
-                <Text style={styles.secondaryButtonText}>Done</Text>
-              </TouchableOpacity>
-            )}
-            <StepNavRow onBack={() => setCurrentStep(4)} styles={styles} colors={colors} />
+            <StepNavRow
+              onBack={() => setCurrentStep(4)}
+              onNext={
+                stage.kind === 'saved' || stage.kind === 'wrote-nfc' ? handleDone : handleSave
+              }
+              nextLabel={
+                stage.kind === 'saved' || stage.kind === 'wrote-nfc'
+                  ? 'Done'
+                  : isPublic
+                    ? 'Publish'
+                    : 'Save'
+              }
+              nextIcon={
+                stage.kind === 'saved' || stage.kind === 'wrote-nfc'
+                  ? Check
+                  : isPublic
+                    ? Globe
+                    : PiggyBank
+              }
+              nextDisabled={stage.kind === 'idle' || stage.kind === 'validating'}
+              styles={styles}
+              colors={colors}
+            />
           </>
         )}
       </ScrollView>
@@ -971,9 +958,12 @@ const StepNavRow: React.FC<{
   onNext?: () => void;
   nextLabel?: string;
   nextDisabled?: boolean;
+  // Optional leading icon for the next button — the final step uses it
+  // for the Publish / Save / Done action so it isn't text-only.
+  nextIcon?: typeof Check;
   styles: ReturnType<typeof createStyles>;
   colors: Palette;
-}> = ({ onBack, onNext, nextLabel = 'Next', nextDisabled, styles, colors }) => (
+}> = ({ onBack, onNext, nextLabel = 'Next', nextDisabled, nextIcon: NextIcon, styles, colors }) => (
   <View style={styles.stepNavRow}>
     {onBack ? (
       <TouchableOpacity
@@ -996,7 +986,8 @@ const StepNavRow: React.FC<{
         testID="hunt-piggy-step-next"
         accessibilityLabel={nextLabel}
       >
-        <Text style={styles.stepNavNextText}>{nextLabel} ›</Text>
+        {NextIcon ? <NextIcon size={16} color={colors.white} strokeWidth={2.5} /> : null}
+        <Text style={styles.stepNavNextText}>{NextIcon ? nextLabel : `${nextLabel} ›`}</Text>
       </TouchableOpacity>
     ) : null}
   </View>
@@ -1272,6 +1263,8 @@ const createStyles = (colors: Palette) =>
     stepNavSpacer: { width: 1 },
     stepNavNextButton: {
       flex: 1,
+      flexDirection: 'row',
+      gap: 6,
       alignItems: 'center',
       justifyContent: 'center',
       paddingVertical: 12,
@@ -1322,22 +1315,9 @@ const createStyles = (colors: Palette) =>
     primaryButtonDisabled: {
       opacity: 0.4,
     },
-    primaryButtonPublished: {
-      backgroundColor: colors.green,
-    },
     primaryButtonText: {
       color: colors.white,
       fontSize: 15,
-      fontWeight: '700',
-    },
-    secondaryButton: {
-      paddingVertical: 14,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    secondaryButtonText: {
-      color: colors.brandPink,
-      fontSize: 14,
       fontWeight: '700',
     },
     validatedCard: {

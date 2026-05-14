@@ -59,9 +59,9 @@ name: Hunt Create — toggle Public publishes to relays after save
 - tapOn:
     id: 'hunt-piggy-public-toggle'
 
-# Save → publish.
+# Save → publish. The publish action is the step nav row's next slot.
 - tapOn:
-    id: 'hunt-piggy-save-button'
+    id: 'hunt-piggy-step-next'
 - waitForAnimationToEnd:
     timeout: 6000
 
@@ -79,9 +79,10 @@ name: Hunt Create — toggle Public publishes to relays after save
       - assertVisible: 'Piggy hidden'
 
 # Bail out — we're in the saved state, NFC write is exercised by
-# test-hunt-write-nfc which doesn't need the publish path.
+# test-hunt-write-nfc which doesn't need the publish path. The next
+# slot now reads "Done" and returns to the Hunt screen.
 - tapOn:
-    id: 'hunt-piggy-done-button'
+    id: 'hunt-piggy-step-next'
 - waitForAnimationToEnd:
     timeout: 1500
 - assertVisible:
