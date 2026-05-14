@@ -45,11 +45,12 @@ import {
   resolveLnurlWithdraw,
 } from '../services/lnurlWithdrawService';
 import { newPiggyId, savePiggy } from '../services/piggyStorageService';
-import { writeLnurlToTag } from '../services/nfcService';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 import { encodeGeohash } from '../utils/geohash';
 import { buildCacheListing } from '../services/nostrPlacesService';
 import { publishCacheEvent } from '../services/nostrPlacesPublisher';
+import NfcWriteSheet from '../components/NfcWriteSheet';
+import LocationPickerSheet from '../components/LocationPickerSheet';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -82,6 +83,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
   const [usesText, setUsesText] = useState('');
   const [pin, setPin] = useState<{ lat: number; lon: number; geohash: string } | null>(null);
   const [pinning, setPinning] = useState(false);
+  // Bottom-sheet visibility for the NFC-write flow (step 3) and the
+  // map-based location picker (step 4).
+  const [nfcSheetVisible, setNfcSheetVisible] = useState(false);
+  const [locationPickerVisible, setLocationPickerVisible] = useState(false);
 
   const handlePaste = useCallback(async () => {
     try {
@@ -267,31 +272,18 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
 
   const handleRemoveHintPhoto = useCallback(() => setHintPhotoUrl(null), []);
 
-  const handleWriteNfc = useCallback(async () => {
-    const value = lnurl.trim();
-    if (!value) return;
-    const previousStage = stage;
-    setStage({ kind: 'writing-nfc' });
-    try {
-      const result = await writeLnurlToTag(value);
-      setStage({ kind: 'wrote-nfc' });
-      Toast.show({
-        type: 'success',
-        text1: result.locked ? 'Tag written and locked 🔒' : 'Tag written',
-        text2: result.locked
-          ? 'This Piglet cannot be overwritten by anyone else.'
-          : 'Tag stays re-writeable — use an NTAG213/215/216 chip to lock it next time.',
-        visibilityTime: 5000,
-      });
-    } catch (e) {
-      // Roll back to whatever stage we came from so we don't get stuck
-      // in writing-nfc. If we came from `validated` (write-before-save
-      // path), preserve the validation params so the user doesn't have
-      // to re-paste + re-validate.
-      setStage(previousStage);
-      Alert.alert('Could not write tag', (e as Error).message, [{ text: 'OK' }]);
-    }
-  }, [stage, lnurl]);
+  // Open the NFC-write bottom sheet (step 3). The sheet owns the
+  // write + locking flow and its own progress / error UI; on success
+  // it calls `onWritten`, which advances the stage so the stepper +
+  // step header flip to "done".
+  const handleOpenNfcSheet = useCallback(() => {
+    if (!lnurl.trim()) return;
+    setNfcSheetVisible(true);
+  }, [lnurl]);
+
+  const handleNfcWritten = useCallback(() => {
+    setStage({ kind: 'wrote-nfc' });
+  }, []);
 
   const handleDone = useCallback(() => navigation.goBack(), [navigation]);
 
@@ -579,30 +571,21 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
               colors={colors}
             />
             <NfcSupportedTagsCard colors={colors} styles={styles} />
+            {!lnurl.trim() ? (
+              <Text style={styles.helper}>
+                Add a prize on step 2 first — the tag needs a link to write.
+              </Text>
+            ) : null}
             <TouchableOpacity
-              style={[
-                styles.primaryButton,
-                (stage.kind === 'idle' ||
-                  stage.kind === 'validating' ||
-                  stage.kind === 'writing-nfc') &&
-                  styles.primaryButtonDisabled,
-              ]}
-              onPress={handleWriteNfc}
-              disabled={
-                stage.kind === 'idle' || stage.kind === 'validating' || stage.kind === 'writing-nfc'
-              }
+              style={[styles.primaryButton, !lnurl.trim() && styles.primaryButtonDisabled]}
+              onPress={handleOpenNfcSheet}
+              disabled={!lnurl.trim()}
               testID="hunt-write-nfc-button"
             >
-              {stage.kind === 'writing-nfc' ? (
-                <ActivityIndicator color={colors.white} />
-              ) : (
-                <>
-                  <Nfc size={18} color={colors.white} strokeWidth={2.5} />
-                  <Text style={styles.primaryButtonText}>
-                    {stage.kind === 'wrote-nfc' ? 'Write another tag' : 'Write to NFC tag'}
-                  </Text>
-                </>
-              )}
+              <Nfc size={18} color={colors.white} strokeWidth={2.5} />
+              <Text style={styles.primaryButtonText}>
+                {stage.kind === 'wrote-nfc' ? 'Write another tag' : 'Write to NFC tag'}
+              </Text>
             </TouchableOpacity>
             <StepNavRow
               onBack={() => setCurrentStep(2)}
@@ -624,43 +607,65 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
               colors={colors}
             />
             {pin ? (
-              <View style={styles.pinRow}>
-                <MapPin size={20} color={colors.brandPink} strokeWidth={2} />
-                <View style={styles.pinTextWrapper}>
-                  <Text style={styles.pinTitle}>
-                    {pin.lat.toFixed(5)}, {pin.lon.toFixed(5)}
-                  </Text>
-                  <Text style={styles.pinSub}>geohash {pin.geohash}</Text>
+              <>
+                <View style={styles.pinRow}>
+                  <MapPin size={20} color={colors.brandPink} strokeWidth={2} />
+                  <View style={styles.pinTextWrapper}>
+                    <Text style={styles.pinTitle}>
+                      {pin.lat.toFixed(5)}, {pin.lon.toFixed(5)}
+                    </Text>
+                    <Text style={styles.pinSub}>geohash {pin.geohash}</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.pinClearButton}
+                    onPress={handleClearPin}
+                    testID="hunt-piggy-clear-pin-button"
+                    accessibilityLabel="Clear pin"
+                  >
+                    <X size={16} color={colors.white} strokeWidth={2.5} />
+                  </TouchableOpacity>
                 </View>
                 <TouchableOpacity
-                  style={styles.pinClearButton}
-                  onPress={handleClearPin}
-                  testID="hunt-piggy-clear-pin-button"
-                  accessibilityLabel="Clear pin"
+                  style={styles.pinButton}
+                  onPress={() => setLocationPickerVisible(true)}
+                  testID="hunt-piggy-adjust-pin-button"
                 >
-                  <X size={16} color={colors.white} strokeWidth={2.5} />
+                  <MapPin size={18} color={colors.brandPink} strokeWidth={2} />
+                  <Text style={styles.pinButtonText}>Adjust on map</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <View style={styles.pinButtonsRow}>
+                <TouchableOpacity
+                  style={[styles.pinButton, styles.pinButtonHalf]}
+                  onPress={handlePinHere}
+                  disabled={pinning}
+                  testID="hunt-piggy-pin-here-button"
+                >
+                  {pinning ? (
+                    <ActivityIndicator color={colors.brandPink} />
+                  ) : (
+                    <>
+                      <MapPin size={18} color={colors.brandPink} strokeWidth={2} />
+                      <Text style={styles.pinButtonText}>Use my location</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.pinButton, styles.pinButtonHalf]}
+                  onPress={() => setLocationPickerVisible(true)}
+                  testID="hunt-piggy-pick-on-map-button"
+                >
+                  <MapPin size={18} color={colors.brandPink} strokeWidth={2} />
+                  <Text style={styles.pinButtonText}>Pick on map</Text>
                 </TouchableOpacity>
               </View>
-            ) : (
-              <TouchableOpacity
-                style={styles.pinButton}
-                onPress={handlePinHere}
-                disabled={pinning}
-                testID="hunt-piggy-pin-here-button"
-              >
-                {pinning ? (
-                  <ActivityIndicator color={colors.brandPink} />
-                ) : (
-                  <>
-                    <MapPin size={18} color={colors.brandPink} strokeWidth={2} />
-                    <Text style={styles.pinButtonText}>Drop pin at my location</Text>
-                  </>
-                )}
-              </TouchableOpacity>
             )}
             <Text style={styles.helper}>
-              Stored locally so you can find your own Piggy later. Only published to Nostr (as the
-              kind 37516 `g` tag) if you toggle Public on step 5. Map-based pin drop coming soon.
+              Stored locally so the Piggy shows in your My Piglets list — you can track who&apos;s
+              found it and find it again yourself. The location is only published to Nostr (as the
+              kind 37516 `g` tag) if you toggle Public on step 5; an unpublished Piggy is a
+              physical-only treasure, discovered by tapping the tag.
             </Text>
             <StepNavRow
               onBack={() => setCurrentStep(3)}
@@ -795,6 +800,25 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
           </>
         )}
       </ScrollView>
+
+      {/* Step 3 — NFC-write bottom sheet. Owns the write + lock flow and
+          its own progress / error UI; advances the stage on success. */}
+      <NfcWriteSheet
+        visible={nfcSheetVisible}
+        onClose={() => setNfcSheetVisible(false)}
+        mode="piglet"
+        lnurl={lnurl.trim()}
+        onWritten={handleNfcWritten}
+      />
+
+      {/* Step 4 — interactive map location picker. */}
+      <LocationPickerSheet
+        visible={locationPickerVisible}
+        onClose={() => setLocationPickerVisible(false)}
+        initialLat={pin?.lat ?? null}
+        initialLon={pin?.lon ?? null}
+        onConfirm={(lat, lon) => setPin({ lat, lon, geohash: encodeGeohash(lat, lon, 7) })}
+      />
     </View>
   );
 };
@@ -1562,10 +1586,19 @@ const createStyles = (colors: Palette) =>
       justifyContent: 'center',
       gap: 8,
       paddingVertical: 12,
+      paddingHorizontal: 12,
       borderRadius: 12,
       backgroundColor: colors.surface,
       borderWidth: 1,
       borderColor: colors.brandPinkLight,
+    },
+    // Side-by-side "Use my location" / "Pick on map" when no pin is set.
+    pinButtonsRow: {
+      flexDirection: 'row',
+      gap: 10,
+    },
+    pinButtonHalf: {
+      flex: 1,
     },
     pinButtonText: {
       color: colors.brandPink,
