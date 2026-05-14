@@ -73,10 +73,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
   const [lnurl, setLnurl] = useState('');
   const [isPublic, setIsPublic] = useState(false);
   const [stage, setStage] = useState<Stage>({ kind: 'idle' });
-  // Wizard pagination — 1 to 5. Each step renders its own page; Back
+  // Wizard pagination — 1 to 6. Each step renders its own page; Back
   // and Next live under each step's content. Top StepProgressBar pips
   // also let the user jump between steps directly.
-  const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4 | 5>(1);
+  const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4 | 5 | 6>(1);
   const [hintPhotoUrl, setHintPhotoUrl] = useState<string | null>(null);
   const [uploadingHint, setUploadingHint] = useState(false);
   const [waitMinutesText, setWaitMinutesText] = useState('');
@@ -87,6 +87,17 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
   // map-based location picker (step 4).
   const [nfcSheetVisible, setNfcSheetVisible] = useState(false);
   const [locationPickerVisible, setLocationPickerVisible] = useState(false);
+  // Geocache-info step (step 5) — finder-facing metadata that becomes
+  // the kind 37516 listing. Everything has a NIP-GC default so the
+  // step can be skipped through.
+  const [cacheName, setCacheName] = useState('');
+  const [cacheDescription, setCacheDescription] = useState('');
+  const [difficulty, setDifficulty] = useState<1 | 2 | 3 | 4 | 5>(1);
+  const [terrain, setTerrain] = useState<1 | 2 | 3 | 4 | 5>(1);
+  const [cacheSize, setCacheSize] = useState<'micro' | 'small' | 'regular' | 'large' | 'other'>(
+    'micro',
+  );
+  const [cacheType, setCacheType] = useState<'traditional' | 'multi' | 'mystery'>('traditional');
 
   const handlePaste = useCallback(async () => {
     try {
@@ -138,6 +149,13 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
       lat: pin?.lat,
       lon: pin?.lon,
       geohash: pin?.geohash,
+      // Geocache-info step — finder-facing metadata.
+      name: cacheName.trim() || undefined,
+      description: cacheDescription.trim() || undefined,
+      difficulty,
+      terrain,
+      size: cacheSize,
+      cacheType,
     };
     await savePiggy(piggy);
     setStage({ kind: 'saved', lnurlw: piggy.lnurlw });
@@ -180,7 +198,23 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
         });
       }
     }
-  }, [stage, lnurl, isPublic, hintPhotoUrl, waitMinutesText, usesText, pin, signEvent, relays]);
+  }, [
+    stage,
+    lnurl,
+    isPublic,
+    hintPhotoUrl,
+    waitMinutesText,
+    usesText,
+    pin,
+    cacheName,
+    cacheDescription,
+    difficulty,
+    terrain,
+    cacheSize,
+    cacheType,
+    signEvent,
+    relays,
+  ]);
 
   const handlePinHere = useCallback(async () => {
     if (pinning) return;
@@ -545,10 +579,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
           </>
         )}
 
-        {currentStep === 3 && (
+        {currentStep === 4 && (
           <>
             <StepHeader
-              n={3}
+              n={4}
               title="Write the tag"
               subtitle="Write the prize link onto a physical NFC tag the finder will tap."
               status={stage.kind === 'wrote-nfc' ? 'done' : 'active'}
@@ -573,18 +607,18 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
               </Text>
             </TouchableOpacity>
             <StepNavRow
-              onBack={() => setCurrentStep(2)}
-              onNext={() => setCurrentStep(4)}
+              onBack={() => setCurrentStep(3)}
+              onNext={() => setCurrentStep(5)}
               styles={styles}
               colors={colors}
             />
           </>
         )}
 
-        {currentStep === 4 && (
+        {currentStep === 3 && (
           <>
             <StepHeader
-              n={4}
+              n={3}
               title="Pick the location"
               subtitle="Stash the Piglet first, then drop a pin where you hid it."
               status={pin ? 'done' : 'active'}
@@ -659,13 +693,13 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
             <Text style={styles.helper}>
               Stored locally so the Piggy shows in your My Piglets list — you can track who&apos;s
               found it and find it again yourself. The location is only published to Nostr (as the
-              kind 37516 `g` tag) if you toggle Public on step 5. Leave it private and the Piggy is
+              kind 37516 `g` tag) if you toggle Public on step 6. Leave it private and the Piggy is
               a physical-only treasure — found only by tapping the tag — ideal for a gift or family
               Piggy you don&apos;t want strangers hunting.
             </Text>
             <StepNavRow
-              onBack={() => setCurrentStep(3)}
-              onNext={() => setCurrentStep(5)}
+              onBack={() => setCurrentStep(2)}
+              onNext={() => setCurrentStep(4)}
               styles={styles}
               colors={colors}
             />
@@ -676,13 +710,14 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
           <>
             <StepHeader
               n={5}
-              title="Publish"
-              subtitle="Write the cache to Nostr — finder-facing message, rules and visibility."
-              status={stage.kind === 'saved' || stage.kind === 'wrote-nfc' ? 'done' : 'active'}
+              title="Geocache info"
+              subtitle="The finder-facing listing — a photo, a name, and how tough it is to reach."
+              status="active"
               styles={styles}
               colors={colors}
             />
-            <Text style={[styles.subSectionLabel, styles.sectionGap]}>Hint photo (optional)</Text>
+
+            <Text style={styles.subSectionLabel}>Photo (optional)</Text>
             {hintPhotoUrl ? (
               <View style={styles.hintPreviewWrapper}>
                 <Image
@@ -693,7 +728,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
                 <TouchableOpacity
                   style={styles.hintRemoveButton}
                   onPress={handleRemoveHintPhoto}
-                  accessibilityLabel="Remove hint photo"
+                  accessibilityLabel="Remove photo"
                   testID="hunt-piggy-remove-hint-button"
                 >
                   <X size={16} color={colors.white} strokeWidth={2.5} />
@@ -709,7 +744,6 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
                 <TouchableOpacity
                   style={styles.hintButton}
                   onPress={handleTakeHintPhoto}
-                  disabled={stage.kind !== 'validated'}
                   testID="hunt-piggy-take-hint-button"
                 >
                   <Camera size={18} color={colors.brandPink} strokeWidth={2} />
@@ -718,7 +752,6 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
                 <TouchableOpacity
                   style={styles.hintButton}
                   onPress={handlePickHintFromLibrary}
-                  disabled={stage.kind !== 'validated'}
                   testID="hunt-piggy-pick-hint-button"
                 >
                   <ImagePlus size={18} color={colors.brandPink} strokeWidth={2} />
@@ -731,6 +764,104 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
               at the cache itself.
             </Text>
 
+            <Text style={[styles.subSectionLabel, styles.sectionGap]}>Title</Text>
+            <View style={styles.inputRow}>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. Longstanton Village Piglet"
+                placeholderTextColor={colors.textSupplementary}
+                value={cacheName}
+                onChangeText={setCacheName}
+                testID="hunt-piggy-name-input"
+              />
+            </View>
+
+            <Text style={[styles.subSectionLabel, styles.sectionGap]}>Description</Text>
+            <View style={styles.inputRow}>
+              <TextInput
+                style={[styles.input, styles.inputMultiline]}
+                placeholder="A line or two for finders — what makes this spot worth the trip."
+                placeholderTextColor={colors.textSupplementary}
+                value={cacheDescription}
+                onChangeText={setCacheDescription}
+                multiline
+                testID="hunt-piggy-description-input"
+              />
+            </View>
+
+            <Text style={[styles.subSectionLabel, styles.sectionGap]}>
+              Difficulty · {difficulty}/5
+            </Text>
+            <Text style={styles.helper}>
+              How tricky the cache is to find — 1 easy, 5 very hard.
+            </Text>
+            <LevelPicker
+              value={difficulty}
+              onChange={(v) => setDifficulty(v as 1 | 2 | 3 | 4 | 5)}
+              styles={styles}
+            />
+
+            <Text style={[styles.subSectionLabel, styles.sectionGap]}>Terrain · {terrain}/5</Text>
+            <Text style={styles.helper}>How rough the journey is — 1 easy walk, 5 needs gear.</Text>
+            <LevelPicker
+              value={terrain}
+              onChange={(v) => setTerrain(v as 1 | 2 | 3 | 4 | 5)}
+              styles={styles}
+            />
+
+            <Text style={[styles.subSectionLabel, styles.sectionGap]}>Size</Text>
+            <Text style={styles.helper}>
+              Micro (matchbox) · Small (sandwich box) · Regular (ammo can) · Large (bucket) · Other
+              (custom container).
+            </Text>
+            <OptionPicker
+              value={cacheSize}
+              options={[
+                { v: 'micro', label: 'Micro' },
+                { v: 'small', label: 'Small' },
+                { v: 'regular', label: 'Regular' },
+                { v: 'large', label: 'Large' },
+                { v: 'other', label: 'Other' },
+              ]}
+              onChange={(v) => setCacheSize(v as 'micro' | 'small' | 'regular' | 'large' | 'other')}
+              styles={styles}
+            />
+
+            <Text style={[styles.subSectionLabel, styles.sectionGap]}>Type</Text>
+            <Text style={styles.helper}>
+              Traditional (the tag is the cache) · Multi (several waypoints to reach it) · Mystery
+              (solve a puzzle for the coordinates).
+            </Text>
+            <OptionPicker
+              value={cacheType}
+              options={[
+                { v: 'traditional', label: 'Traditional' },
+                { v: 'multi', label: 'Multi' },
+                { v: 'mystery', label: 'Mystery' },
+              ]}
+              onChange={(v) => setCacheType(v as 'traditional' | 'multi' | 'mystery')}
+              styles={styles}
+            />
+
+            <StepNavRow
+              onBack={() => setCurrentStep(4)}
+              onNext={() => setCurrentStep(6)}
+              styles={styles}
+              colors={colors}
+            />
+          </>
+        )}
+
+        {currentStep === 6 && (
+          <>
+            <StepHeader
+              n={6}
+              title="Publish"
+              subtitle="Write the cache to Nostr — finder-facing message, rules and visibility."
+              status={stage.kind === 'saved' || stage.kind === 'wrote-nfc' ? 'done' : 'active'}
+              styles={styles}
+              colors={colors}
+            />
             <Text style={[styles.subSectionLabel, styles.sectionGap]}>Discoverability</Text>
             <TouchableOpacity
               style={styles.publicRow}
@@ -770,7 +901,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
               </Text>
             ) : null}
             <StepNavRow
-              onBack={() => setCurrentStep(4)}
+              onBack={() => setCurrentStep(5)}
               onNext={
                 stage.kind === 'saved' || stage.kind === 'wrote-nfc' ? handleDone : handleSave
               }
@@ -887,20 +1018,21 @@ const StepHeader: React.FC<{
 const STEP_LABELS: { n: number; label: string }[] = [
   { n: 1, label: 'Hardware' },
   { n: 2, label: 'Prize' },
-  { n: 3, label: 'Write NFC' },
-  { n: 4, label: 'Location' },
-  { n: 5, label: 'Publish' },
+  { n: 3, label: 'Location' },
+  { n: 4, label: 'Write NFC' },
+  { n: 5, label: 'Details' },
+  { n: 6, label: 'Publish' },
 ];
 
 const StepProgressBar: React.FC<{
-  currentStep: 1 | 2 | 3 | 4 | 5;
-  onPipPress: (n: 1 | 2 | 3 | 4 | 5) => void;
+  currentStep: 1 | 2 | 3 | 4 | 5 | 6;
+  onPipPress: (n: 1 | 2 | 3 | 4 | 5 | 6) => void;
   styles: ReturnType<typeof createStyles>;
 }> = ({ currentStep, onPipPress, styles }) => {
   return (
     <View style={styles.stepperRow} accessibilityRole="progressbar">
       {STEP_LABELS.map(({ n, label }, idx) => {
-        const stepN = n as 1 | 2 | 3 | 4 | 5;
+        const stepN = n as 1 | 2 | 3 | 4 | 5 | 6;
         const reached = stepN <= currentStep;
         const isCurrent = currentStep === stepN;
         return (
@@ -909,7 +1041,7 @@ const StepProgressBar: React.FC<{
               style={styles.stepperPipWrap}
               onPress={() => onPipPress(stepN)}
               testID={`hunt-piggy-step-pip-${n}`}
-              accessibilityLabel={`Step ${n} of 5: ${label}`}
+              accessibilityLabel={`Step ${n} of 6: ${label}`}
             >
               <View
                 style={[
@@ -990,6 +1122,56 @@ const StepNavRow: React.FC<{
         <Text style={styles.stepNavNextText}>{NextIcon ? nextLabel : `${nextLabel} ›`}</Text>
       </TouchableOpacity>
     ) : null}
+  </View>
+);
+
+// 1-5 level picker for difficulty / terrain — colored rectangles that
+// fill up to the chosen value (mirrors the cache-detail SegmentBar),
+// kept visually distinct from the numbered step pips at the top.
+const LevelPicker: React.FC<{
+  value: number;
+  onChange: (v: number) => void;
+  styles: ReturnType<typeof createStyles>;
+}> = ({ value, onChange, styles }) => (
+  <View style={styles.levelPickerRow}>
+    {[1, 2, 3, 4, 5].map((n) => (
+      <TouchableOpacity
+        key={n}
+        style={[styles.levelSegment, n <= value && styles.levelSegmentFilled]}
+        onPress={() => onChange(n)}
+        testID={`hunt-piggy-level-${n}`}
+        accessibilityLabel={`Level ${n}`}
+        accessibilityState={{ selected: n === value }}
+      />
+    ))}
+  </View>
+);
+
+// Single-select pill row for the geocache-info step (size, type).
+// Values are strings — callers cast at the edge.
+const OptionPicker: React.FC<{
+  value: string;
+  options: { v: string; label: string }[];
+  onChange: (v: string) => void;
+  styles: ReturnType<typeof createStyles>;
+}> = ({ value, options, onChange, styles }) => (
+  <View style={styles.optionPickerRow}>
+    {options.map((o) => {
+      const active = o.v === value;
+      return (
+        <TouchableOpacity
+          key={o.v}
+          style={[styles.optionPill, active && styles.optionPillActive]}
+          onPress={() => onChange(o.v)}
+          testID={`hunt-piggy-option-${o.v}`}
+          accessibilityState={{ selected: active }}
+        >
+          <Text style={[styles.optionPillText, active && styles.optionPillTextActive]}>
+            {o.label}
+          </Text>
+        </TouchableOpacity>
+      );
+    })}
   </View>
 );
 
@@ -1294,6 +1476,34 @@ const createStyles = (colors: Palette) =>
       color: colors.textBody,
       minHeight: 44,
     },
+    inputMultiline: { minHeight: 76, textAlignVertical: 'top' },
+    levelPickerRow: { flexDirection: 'row', gap: 4, marginTop: 8 },
+    levelSegment: {
+      flex: 1,
+      height: 30,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: colors.divider,
+      backgroundColor: colors.surface,
+    },
+    levelSegmentFilled: { backgroundColor: colors.brandPink, borderColor: colors.brandPink },
+    optionPickerRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginTop: 8,
+    },
+    optionPill: {
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 100,
+      borderWidth: 1,
+      borderColor: colors.divider,
+      backgroundColor: colors.surface,
+    },
+    optionPillActive: { backgroundColor: colors.brandPink, borderColor: colors.brandPink },
+    optionPillText: { fontSize: 13, fontWeight: '700', color: colors.textHeader },
+    optionPillTextActive: { color: colors.white },
     pasteButton: {
       width: 44,
       height: 44,

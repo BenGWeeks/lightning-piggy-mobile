@@ -78,7 +78,7 @@ export const buildCacheListing = (
     kind: GC_LISTING_KIND,
     created_at: Math.floor(Date.now() / 1000),
     tags,
-    content: piggy.lnurlDescription ?? '',
+    content: piggy.description ?? piggy.lnurlDescription ?? '',
   };
 };
 

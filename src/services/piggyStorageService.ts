@@ -87,6 +87,10 @@ export interface HiddenPiggy {
    * unset at publish time we fall back to the first ~50 chars of
    * memo. */
   name?: string;
+  /** Finder-facing description — becomes the kind 37516 event
+   * content. Falls back to `lnurlDescription` when the hider leaves
+   * it blank in the Hide-a-Piglet wizard. */
+  description?: string;
   /** NIP-GC required `D` field — finding difficulty 1-5. Defaults to
    * 1 (just-find-the-tag). User can override for caches that hide
    * the tag in a tricky place. */
@@ -177,6 +181,7 @@ const isValidPiggy = (v: unknown): v is HiddenPiggy => {
   if (p.lon !== undefined && typeof p.lon !== 'number') return false;
   if (p.geohash !== undefined && typeof p.geohash !== 'string') return false;
   if (p.name !== undefined && typeof p.name !== 'string') return false;
+  if (p.description !== undefined && typeof p.description !== 'string') return false;
   if (
     p.difficulty !== undefined &&
     (typeof p.difficulty !== 'number' || p.difficulty < 1 || p.difficulty > 5)
