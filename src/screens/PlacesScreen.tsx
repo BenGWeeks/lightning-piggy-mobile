@@ -464,6 +464,10 @@ const createStyles = (colors: Palette) =>
       borderBottomColor: colors.divider,
     },
     attributionRow: {
+      // Cancel the `listContent` 16px padding then re-apply 16px so the
+      // chip's right edge lines up with the map's right edge (the map
+      // sits at a true 16dp inset — see `miniMapContainer`).
+      marginHorizontal: -16,
       paddingHorizontal: 16,
       // Negative top margin pulls the chip up into the small gap below
       // the map so it visually sits glued to the map's bottom edge.
@@ -474,8 +478,13 @@ const createStyles = (colors: Palette) =>
       alignItems: 'flex-end',
     },
     miniMapContainer: {
-      // Edge-to-edge to match Hunt + Explore — no horizontal inset so
-      // the three Explore-stack screens read as the same surface.
+      // `listContent` applies `padding: 16`, and `ExploreMiniMap` already
+      // carries its own `marginHorizontal: 16`. Without cancelling the
+      // list padding the map ends up double-inset (~32dp) and visibly
+      // narrower than the Geo-caches map (which only gets the 16dp).
+      // Negative horizontal margin cancels the list padding so the map
+      // lands at a true 16dp inset, consistent across the Explore stack.
+      marginHorizontal: -16,
       paddingTop: 12,
     },
     searchInput: {
