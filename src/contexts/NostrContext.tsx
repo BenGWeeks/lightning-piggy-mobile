@@ -12,7 +12,11 @@ import { InteractionManager } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { LRUCache } from '../utils/lru';
-import { evictNip17CacheOverflow, touchNip17CacheEntry } from '../utils/nip17Cache';
+import {
+  evictNip17CacheBytes,
+  evictNip17CacheOverflow,
+  touchNip17CacheEntry,
+} from '../utils/nip17Cache';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
@@ -319,12 +323,16 @@ async function writeNip17Cache(
   cache: Record<string, Nip17CacheEntry>,
 ): Promise<number> {
   const evicted = evictNip17CacheOverflow(cache, NIP17_CACHE_CAP);
+  // Byte cap on top of the count cap — a row past Android's ~2 MB
+  // SQLite CursorWindow throws on *read*, silently breaking this
+  // fast-path cache and forcing a full cold-start restream.
+  const evictedBytes = evictNip17CacheBytes(cache, DM_CACHE_MAX_BYTES);
   try {
     await AsyncStorage.setItem(storageKey, JSON.stringify(cache));
   } catch (err) {
     console.warn(`[Nostr] NIP-17 cache write failed (${storageKey}):`, err);
   }
-  return evicted;
+  return evicted + evictedBytes;
 }
 
 /** Yield to the JS event loop so UI interactions can tick between

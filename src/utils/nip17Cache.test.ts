@@ -14,7 +14,7 @@
  * production.
  */
 
-import { evictNip17CacheOverflow, touchNip17CacheEntry } from './nip17Cache';
+import { evictNip17CacheBytes, evictNip17CacheOverflow, touchNip17CacheEntry } from './nip17Cache';
 
 describe('touchNip17CacheEntry', () => {
   it('returns false and leaves cache untouched when key is absent', () => {
@@ -68,6 +68,34 @@ describe('evictNip17CacheOverflow', () => {
     const evicted = evictNip17CacheOverflow(cache, 3);
     expect(evicted).toBe(2);
     expect(Object.keys(cache)).toEqual(['c', 'd', 'e']);
+  });
+});
+
+describe('evictNip17CacheBytes', () => {
+  it('returns 0 and leaves the cache untouched when under the byte limit', () => {
+    const cache: Record<string, string> = { a: 'x', b: 'y' };
+    expect(evictNip17CacheBytes(cache, 10_000)).toBe(0);
+    expect(Object.keys(cache)).toEqual(['a', 'b']);
+  });
+
+  it('drops oldest-inserted entries until the serialised blob fits', () => {
+    // Each value is ~1 KB; a 3 KB cap should keep only the newest few.
+    const cache: Record<string, string> = {};
+    for (let i = 0; i < 10; i += 1) cache[`k${i}`] = 'z'.repeat(1000);
+    const removed = evictNip17CacheBytes(cache, 3000);
+    expect(removed).toBeGreaterThan(0);
+    expect(JSON.stringify(cache).length).toBeLessThanOrEqual(3000);
+    // Whatever survives must be the newest-inserted keys (a contiguous
+    // tail of the original insertion order).
+    const survivors = Object.keys(cache);
+    const originalOrder = Array.from({ length: 10 }, (_, i) => `k${i}`);
+    expect(survivors).toEqual(originalOrder.slice(originalOrder.length - survivors.length));
+  });
+
+  it('never empties the cache below one entry even if that entry is over budget', () => {
+    const cache: Record<string, string> = { only: 'z'.repeat(5000) };
+    evictNip17CacheBytes(cache, 100);
+    expect(Object.keys(cache)).toEqual(['only']);
   });
 });
 

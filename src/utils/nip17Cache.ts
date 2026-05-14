@@ -53,3 +53,27 @@ export function evictNip17CacheOverflow<V>(cache: Record<string, V>, cap: number
   for (let i = 0; i < overflow; i++) delete cache[keys[i]];
   return overflow;
 }
+
+/**
+ * Evict the oldest-inserted entries until the cache's serialised JSON is
+ * at most `maxBytes`. Mutates in place; returns the number removed.
+ *
+ * The count cap in `evictNip17CacheOverflow` isn't enough on its own —
+ * Android's SQLite CursorWindow caps a row at ~2 MB, and past that the
+ * *read* throws `SQLiteBlobTooBigException`. The wrap cache then fails
+ * to hydrate, so every cold start falls back to a full relay restream +
+ * NIP-17 re-decrypt instead of the fast cache path. Trims in ~10%
+ * chunks to keep the `JSON.stringify` re-checks bounded.
+ */
+export function evictNip17CacheBytes<V>(cache: Record<string, V>, maxBytes: number): number {
+  if (JSON.stringify(cache).length <= maxBytes) return 0;
+  let removed = 0;
+  let keys = Object.keys(cache);
+  while (keys.length > 1 && JSON.stringify(cache).length > maxBytes) {
+    const chunk = Math.max(1, Math.ceil(keys.length * 0.1));
+    for (let i = 0; i < chunk; i += 1) delete cache[keys[i]];
+    removed += chunk;
+    keys = Object.keys(cache);
+  }
+  return removed;
+}
