@@ -664,8 +664,9 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
             <Text style={styles.helper}>
               Stored locally so the Piggy shows in your My Piglets list — you can track who&apos;s
               found it and find it again yourself. The location is only published to Nostr (as the
-              kind 37516 `g` tag) if you toggle Public on step 5; an unpublished Piggy is a
-              physical-only treasure, discovered by tapping the tag.
+              kind 37516 `g` tag) if you toggle Public on step 5. Leave it private and the Piggy is
+              a physical-only treasure — found only by tapping the tag — ideal for a gift or family
+              Piggy you don&apos;t want strangers hunting.
             </Text>
             <StepNavRow
               onBack={() => setCurrentStep(3)}
@@ -761,8 +762,9 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
               <View style={styles.publicTextWrapper}>
                 <Text style={styles.publicTitle}>Make this Piggy public</Text>
                 <Text style={styles.publicSub}>
-                  Publishes to Nostr (kind 37516) so strangers can hunt for it. You can opt out per
-                  Piggy.
+                  {isPublic
+                    ? 'Published to Nostr relays as a kind 37516 event — anyone can see the location and hunt it. Nostr has no private events, so once it is out, treat it as public.'
+                    : 'Stays on this device only — never sent to a relay. Found purely by physically tapping the tag. Best for a private gift or family Piggy.'}
                 </Text>
               </View>
               <View style={[styles.toggleTrack, isPublic && styles.toggleTrackOn]}>
