@@ -49,6 +49,16 @@ interface GroupsContextType {
   setFollowingOnly: (next: boolean) => void;
   /** Mirrors AsyncStorage `secret_mode`. Controls whether the chip is interactive. */
   secretMode: boolean;
+  /**
+   * Persist + broadcast a new secret-mode value. Writes to AsyncStorage
+   * AND updates the context state so every consumer (AboutScreen,
+   * Messages, Groups, Hunt's WoT picker) sees the change immediately.
+   * Without this setter the triple-tap on About would only update
+   * AboutScreen's local state, leaving consumers stuck on the value
+   * read at GroupsProvider mount — the cause of the "WoT chip stays
+   * disabled even though I just enabled secret mode" bug.
+   */
+  setSecretMode: (next: boolean) => void;
   loading: boolean;
   createGroup: (name: string, memberPubkeys: string[]) => Promise<Group>;
   renameGroup: (groupId: string, newName: string) => Promise<boolean>;
@@ -132,7 +142,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
   const [followingOnly, setFollowingOnlyState] = useState(true);
-  const [secretMode, setSecretMode] = useState(false);
+  const [secretMode, setSecretModeState] = useState(false);
   // Per-group activity rollup (last message + recent senders). Populated
   // on mount from AsyncStorage and kept fresh by the inbound-message
   // listener below + a local hook from GroupConversationScreen sends.
@@ -179,8 +189,20 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // Default ON; only flip OFF if the user explicitly persisted false.
       setFollowingOnlyState(v !== 'false');
     });
-    AsyncStorage.getItem('secret_mode').then((v) => setSecretMode(v === 'true'));
+    AsyncStorage.getItem('secret_mode').then((v) => setSecretModeState(v === 'true'));
   }, [pubkey]);
+
+  // Persist + broadcast a secret-mode toggle. Used by AboutScreen's
+  // triple-tap unlock — keeping the writer in the context means every
+  // subscriber (the WoT picker, Messages, Groups) sees the change in
+  // the same render tick. Before this lived in the context, AboutScreen
+  // had its own local useState which didn't reach the rest of the app,
+  // so e.g. the "All" WoT tier stayed greyed out until a full app
+  // restart re-read AsyncStorage from inside GroupsProvider.
+  const setSecretMode = useCallback((next: boolean) => {
+    setSecretModeState(next);
+    AsyncStorage.setItem('secret_mode', next ? 'true' : 'false').catch(() => {});
+  }, []);
 
   const setFollowingOnly = useCallback(
     (next: boolean) => {
@@ -726,6 +748,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       followingOnly,
       setFollowingOnly,
       secretMode,
+      setSecretMode,
       loading,
       createGroup,
       renameGroup,
@@ -742,6 +765,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       followingOnly,
       setFollowingOnly,
       secretMode,
+      setSecretMode,
       loading,
       createGroup,
       renameGroup,

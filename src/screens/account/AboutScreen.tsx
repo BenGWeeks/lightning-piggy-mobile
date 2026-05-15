@@ -21,6 +21,7 @@ import FeedbackSheet from '../../components/FeedbackSheet';
 import { createDmSender } from '../../utils/nostrDm';
 import { fetchProfile, DEFAULT_RELAYS } from '../../services/nostrService';
 import { useNostr } from '../../contexts/NostrContext';
+import { useGroups } from '../../contexts/GroupsContext';
 import { useThemeColors } from '../../contexts/ThemeContext';
 import type { Palette } from '../../styles/palettes';
 import type { NostrProfile } from '../../types/nostr';
@@ -44,20 +45,22 @@ const AboutScreen: React.FC = () => {
   const [feedbackSheetOpen, setFeedbackSheetOpen] = useState(false);
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
 
-  const [secretMode, setSecretMode] = useState(false);
+  // Secret mode lives on GroupsContext so every consumer (Messages,
+  // Groups, the Hunt WoT picker) sees the toggle in the same render
+  // tick we flip it here. The triple-tap on the version label below
+  // calls setSecretMode, which both updates context state AND
+  // persists to AsyncStorage.
+  const { secretMode, setSecretMode } = useGroups();
   const versionTapCount = useRef(0);
   const versionTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Fold dev into the build-number parenthetical so screen readers don't say "(build 13) (dev)".
+  // Fold the unlocked-mode marker into the build-number parenthetical
+  // so screen readers don't say "(build 13) (secret)" as a separate phrase.
   const displayVersionLabel = secretMode
     ? appVersionLabel.endsWith(')')
-      ? `${appVersionLabel.slice(0, -1)}, dev)`
-      : `${appVersionLabel} (dev)`
+      ? `${appVersionLabel.slice(0, -1)}, secret)`
+      : `${appVersionLabel} (secret)`
     : appVersionLabel;
-
-  useEffect(() => {
-    AsyncStorage.getItem('secret_mode').then((v) => setSecretMode(v === 'true'));
-  }, []);
 
   // Clear the load-failure flag whenever the picture URL changes so a refreshed kind-0 retries.
   useEffect(() => {
@@ -113,14 +116,17 @@ const AboutScreen: React.FC = () => {
     if (versionTapTimer.current) clearTimeout(versionTapTimer.current);
     if (versionTapCount.current >= 3) {
       versionTapCount.current = 0;
-      const newMode = !secretMode;
-      setSecretMode(newMode);
-      AsyncStorage.setItem('secret_mode', newMode ? 'true' : 'false');
+      // setSecretMode lives on GroupsContext (#537 fix) — it persists
+      // to AsyncStorage AND notifies every other consumer in the same
+      // tick, so the WoT picker, Messages tab and Groups tab unlock
+      // their secret-mode surfaces right away rather than waiting for
+      // a full restart.
+      setSecretMode(!secretMode);
       Alert.alert(
-        newMode ? 'Secret Mode Enabled' : 'Secret Mode Disabled',
-        newMode
-          ? 'Dev features unlocked: hot wallet import in Add Wallet, "Following only" toggle on Messages and Groups tabs, and other in-app debug surfaces.'
-          : 'Dev features hidden. Restart the app if any toggle still appears.',
+        !secretMode ? 'Secret Mode Enabled' : 'Secret Mode Disabled',
+        !secretMode
+          ? 'Secret features unlocked: hot wallet import in Add Wallet, "Following only" toggle on Messages and Groups tabs, the Web-of-Trust "All" tier on Hunt / Events filters, and other in-app debug surfaces.'
+          : 'Secret features hidden.',
       );
     } else {
       // Maestro tapOn cadence on Android emulator is ~400ms each, so 3 taps need >1s. Widen window in dev builds only.
