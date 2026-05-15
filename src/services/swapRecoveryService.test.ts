@@ -17,6 +17,22 @@ jest.mock('expo-secure-store', () => ({
   deleteItemAsync: jest.fn().mockResolvedValue(undefined),
 }));
 
+// `swapRecoveryService` transitively pulls in `bitcoinjs-lib` (for the
+// reverse-swap lockup-tx parser), which bundles a vendored `uint8array-tools`
+// that ships only as ESM. Jest can't parse it via the default CJS pipeline,
+// and adding bitcoinjs-lib + uint8array-tools to `transformIgnorePatterns`
+// would broaden the Babel transform set for the whole suite. None of the
+// pure cache helpers under test touch any of these surfaces, so we stub
+// them out at the module boundary — the import resolves and the cache
+// functions run without paying for the heavy dependency at all.
+jest.mock('bitcoinjs-lib', () => ({
+  initEccLib: jest.fn(),
+  Transaction: { fromHex: jest.fn() },
+  address: { toOutputScript: jest.fn() },
+  crypto: { sha256: jest.fn() },
+}));
+jest.mock('@bitcoinerlab/secp256k1', () => ({}));
+
 describe('isBoltzTransaction', () => {
   it('returns false for null/undefined', () => {
     expect(isBoltzTransaction(null)).toBe(false);
