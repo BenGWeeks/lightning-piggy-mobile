@@ -85,14 +85,20 @@ export const useCompassNavigation = (target: { lat: number; lon: number } | null
       if (cancelled) return;
       if (perm.status !== 'granted') return;
       try {
-        // Balanced accuracy is the right trade-off for "where am I roughly
-        // relative to this cache" — high accuracy hammers the GPS radio
-        // and drains the battery without making the bearing visibly truer.
+        // Accuracy.High forces the GPS radio to push fresh fixes
+        // while the cache-detail screen is open — typically 5-15 m
+        // horizontal accuracy on a real device, down from 30-50 m
+        // with Balanced (which falls back to network/cell). The
+        // tighter the fix, the steadier the bearing arrow and the
+        // smaller the accuracy halo when you're close to the cache —
+        // the user-visible payoff is worth the marginal battery cost
+        // since this hook only runs while a single screen is mounted.
+        //
         // Skipped when a dev pin is in effect — that's a deliberate
         // override and live GPS would just argue with it.
         if (!pinned) {
           posSub = await Location.watchPositionAsync(
-            { accuracy: Location.Accuracy.Balanced, distanceInterval: 2 },
+            { accuracy: Location.Accuracy.High, distanceInterval: 2 },
             (loc) => {
               if (cancelled) return;
               setUser({ lat: loc.coords.latitude, lon: loc.coords.longitude });
