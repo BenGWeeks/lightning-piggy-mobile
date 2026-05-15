@@ -14,7 +14,7 @@ import {
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
-import { AlertCircle, Moon, Nfc, PartyPopper } from 'lucide-react-native';
+import { AlertCircle, Moon, Nfc, PartyPopper, PiggyBank } from 'lucide-react-native';
 import {
   readHuntTagPayload,
   cancelNfcOperation,
@@ -54,25 +54,33 @@ type SheetStage =
   | 'sleeping'
   | 'error';
 
-const SLEEPING_PATTERN = /wait[_ ]?time|cooldown|budget|sleeping|exhausted|already used/i;
+// LNbits' withdraw endpoint returns 'Wait N seconds.' verbatim; older
+// versions / other backends use 'wait_time: N' or 'cooldown'. Match
+// any of those forms (and the budget-exhausted variants) — \bwait\b
+// catches the LNbits shape that the previous narrower regex was
+// missing, dropping the user into the red 'Couldn't claim' state
+// instead of the friendlier sleeping countdown.
+const SLEEPING_PATTERN = /\bwait\b|cooldown|budget|sleeping|exhausted|already used/i;
 
-// LNbits-style 'Wait 927 seconds.' / 'wait_time: 240' / 'cooldown 600s'
-// — we don't know who triggered the cooldown (any finder could have
-// just scanned), so the phrasing should be neutral. Returns a tidy
-// 'about 15 minutes' / 'about 2 minutes' / 'a few seconds' string when
-// it can extract a number from the LNURLw's reason, or null when the
-// server's message has no time hint at all.
-const friendlyCooldown = (raw: string): string | null => {
+// Parse the LNURLw's 'Wait N seconds' / 'wait_time: N' / 'cooldown Ns'
+// shape into the integer N — used to drive a live countdown in the
+// sleeping state. Returns null when the server's response doesn't
+// carry a time hint (budget exhausted, generic 'already used', etc.).
+const parseCooldownSeconds = (raw: string): number | null => {
   const m = raw.match(/(\d{1,5})\s*(?:s|sec|seconds?)?/i);
   if (!m) return null;
   const total = Number(m[1]);
   if (!Number.isFinite(total) || total <= 0) return null;
-  if (total < 30) return 'a few seconds';
-  if (total < 90) return 'about a minute';
-  const minutes = Math.round(total / 60);
-  if (minutes < 60) return `about ${minutes} minute${minutes === 1 ? '' : 's'}`;
-  const hours = Math.round(minutes / 60);
-  return `about ${hours} hour${hours === 1 ? '' : 's'}`;
+  return Math.round(total);
+};
+
+// Format a remaining-seconds count as either 'M:SS' (for ≥ 60 s) or
+// just 'Ns' so the countdown reads naturally as time runs down.
+const formatCountdown = (seconds: number): string => {
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
 };
 
 const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
@@ -82,6 +90,10 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
   const [stage, setStage] = useState<SheetStage>('ready');
   const [errorMessage, setErrorMessage] = useState('');
   const [claimedSats, setClaimedSats] = useState<number | null>(null);
+  // Remaining-seconds counter that ticks down each second in the
+  // sleeping state — null when the LNURLw's response doesn't carry a
+  // time hint (budget exhausted, generic 'already used', etc.).
+  const [cooldownRemaining, setCooldownRemaining] = useState<number | null>(null);
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['55%'], []);
   const mountedRef = useRef(true);
@@ -138,9 +150,8 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
         if (!mountedRef.current) return;
         if (params.maxWithdrawable <= 0) {
           setStage('sleeping');
-          setErrorMessage(
-            'This Piggy is sleeping — its cooldown is still running, or its sats budget is used up. Try again later.',
-          );
+          setErrorMessage('');
+          setCooldownRemaining(null);
           return;
         }
         const claim = await claimLnurlWithdraw(params, async (sats, memo) =>
@@ -161,6 +172,7 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
         if (SLEEPING_PATTERN.test(reason)) {
           setStage('sleeping');
           setErrorMessage(reason);
+          setCooldownRemaining(parseCooldownSeconds(reason));
         } else {
           setStage('error');
           setErrorMessage(reason);
@@ -179,6 +191,7 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
       setStage('ready');
       setErrorMessage('');
       setClaimedSats(null);
+      setCooldownRemaining(null);
       sheetRef.current?.present();
       startRead();
     } else {
@@ -187,6 +200,7 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
       setStage('ready');
       setErrorMessage('');
       setClaimedSats(null);
+      setCooldownRemaining(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
@@ -200,6 +214,18 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
     return () => sub.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
+
+  // Tick the countdown each second while sleeping. Stops at 0 — the
+  // Try Again button then re-runs the claim and either succeeds (if
+  // the LNURLw cooldown actually elapsed) or surfaces a fresh
+  // 'Wait N' from the server.
+  useEffect(() => {
+    if (stage !== 'sleeping' || cooldownRemaining === null || cooldownRemaining <= 0) return;
+    const t = setInterval(() => {
+      setCooldownRemaining((n) => (n === null || n <= 0 ? n : n - 1));
+    }, 1000);
+    return () => clearInterval(t);
+  }, [stage, cooldownRemaining]);
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
@@ -290,18 +316,29 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
         {stage === 'sleeping' && (
           <View style={styles.stateContainer}>
             <View style={[styles.iconContainer, styles.sleepingIcon]}>
-              <Moon size={64} color={colors.textSupplementary} strokeWidth={2} />
+              <PiggyBank size={64} color={colors.brandPink} strokeWidth={2} />
+              <View style={styles.zzzBadge}>
+                <Moon size={20} color={colors.textSupplementary} strokeWidth={2.5} />
+              </View>
             </View>
-            <Text style={styles.instruction}>Piggy is sleeping</Text>
-            <Text style={styles.description}>
-              {(() => {
-                const cooldown = friendlyCooldown(errorMessage);
-                if (cooldown) {
-                  return `Another finder claimed recently — try again in ${cooldown}.`;
-                }
-                return 'Cooldown is still running, or the sats budget is used up. Try again later.';
-              })()}
-            </Text>
+            <Text style={styles.instruction}>Shhh… this Piggy is snoozing</Text>
+            {cooldownRemaining !== null && cooldownRemaining > 0 ? (
+              <>
+                <Text style={styles.countdown} testID="nfc-read-sleep-countdown">
+                  {formatCountdown(cooldownRemaining)}
+                </Text>
+                <Text style={styles.description}>
+                  Another finder beat you to the trough. The Piggy wakes back up when the timer hits
+                  zero.
+                </Text>
+              </>
+            ) : cooldownRemaining === 0 ? (
+              <Text style={styles.description}>Piggy is up — tap Try Again!</Text>
+            ) : (
+              <Text style={styles.description}>
+                The trough's empty, or the cooldown is still running. Try again later.
+              </Text>
+            )}
             <View style={styles.errorButtons}>
               <TouchableOpacity
                 style={styles.retryButton}
@@ -398,7 +435,20 @@ const createStyles = (colors: Palette) =>
       marginBottom: 20,
     },
     successIcon: { backgroundColor: colors.greenLight },
-    sleepingIcon: { backgroundColor: colors.surface, borderWidth: 2, borderColor: colors.divider },
+    sleepingIcon: { backgroundColor: colors.brandPinkLight },
+    zzzBadge: {
+      position: 'absolute',
+      top: 4,
+      right: 4,
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      backgroundColor: colors.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1.5,
+      borderColor: colors.divider,
+    },
     errorIcon: { backgroundColor: colors.redLight },
     errorBadge: {
       position: 'absolute',
@@ -422,6 +472,13 @@ const createStyles = (colors: Palette) =>
       lineHeight: 20,
       paddingHorizontal: 16,
       marginBottom: 16,
+    },
+    countdown: {
+      fontSize: 36,
+      fontWeight: '800',
+      color: colors.brandPink,
+      fontVariant: ['tabular-nums'],
+      marginBottom: 12,
     },
     waitingIndicator: { marginBottom: 8 },
     waitingText: {
