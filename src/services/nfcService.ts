@@ -303,13 +303,28 @@ export async function writeNpubToTag(npub: string, onTagDetected?: () => void): 
  *   "android.nfc.tech.MifareUltralight"]`; we infer the family from
  * those plus the `type` heuristic the platform exposes.
  */
-type TagFamily = 'ntag-21x' | 'mifare-ultralight' | 'mifare-classic' | 'unknown';
+type TagFamily =
+  | 'ntag-21x'
+  | 'ntag-424'
+  | 'mifare-ultralight'
+  | 'mifare-classic'
+  | 'unknown';
 
 const inferTagFamily = (tag: { techTypes?: string[]; type?: string } | null): TagFamily => {
   if (!tag) return 'unknown';
   const tech = (tag.techTypes ?? []).map((t) => t.toLowerCase());
   if (tech.includes('android.nfc.tech.mifareclassic')) return 'mifare-classic';
   if (tech.includes('android.nfc.tech.mifareultralight')) return 'mifare-ultralight';
+  // NTAG424 (DNA) exposes IsoDep + Ndef + NfcA. The IsoDep tech is the
+  // marker — NTAG21x doesn't expose it. NTAG424 has 416 B of NDEF user
+  // memory (comfortably fits the multi-record Hunt payload) but uses
+  // AES-key-based file access for write protection rather than the
+  // one-way lock bit `makeReadOnly()` flips on NTAG21x / Ultralight C.
+  // The write succeeds; locking requires a DESFire APDU sequence we
+  // don't yet ship — caller surfaces `locked: false` so the UI warns.
+  if (tech.includes('android.nfc.tech.isodep') && tech.includes('android.nfc.tech.ndef')) {
+    return 'ntag-424';
+  }
   // NTAG21x exposes NfcA + Ndef but no Mifare tech — distinguish from
   // generic NfcA by also requiring Ndef support.
   if (tech.includes('android.nfc.tech.ndef') && tech.includes('android.nfc.tech.nfca')) {
@@ -580,12 +595,12 @@ export async function writeHuntTagToTag(
       : ('unknown' as TagFamily);
     if (isAndroid && family === 'mifare-classic') {
       throw new Error(
-        "Mifare Classic tags can't be permanently locked — use an NTAG213/215/216 or Mifare Ultralight C chip so others can't overwrite this Piglet.",
+        "Mifare Classic tags can't be permanently locked — use an NTAG215 / 216 chip so others can't overwrite this Piglet.",
       );
     }
     if (isAndroid && family === 'unknown') {
       throw new Error(
-        'Unrecognised tag type. Lightning Piggy supports NTAG213/215/216 and Mifare Ultralight C.',
+        'Unrecognised tag type. Lightning Piggy supports NTAG213 / 215 / 216, NTAG424, and Mifare Ultralight C.',
       );
     }
     opts.onTagDetected?.();
@@ -597,7 +612,12 @@ export async function writeHuntTagToTag(
     // equivalent API — we skip and report `locked: false`. Same shape
     // as the pre-existing writeLnurlToTag flow below.
     let locked = false;
-    if (isAndroid) {
+    if (isAndroid && family !== 'ntag-424') {
+      // NTAG21x / Ultralight C share the one-shot `makeReadOnly` lock
+      // bit. NTAG424 doesn't — its locking model is AES-key file
+      // access. Skip the call (it'd throw) and report locked: false
+      // so the UI surfaces the "tag is still re-writeable" warning.
+      // Full NTAG424 lock implementation tracked separately.
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const handler = NfcManager.ndefHandler as any;
@@ -610,6 +630,8 @@ export async function writeHuntTagToTag(
         // `locked: false` so the UI can warn.
         console.warn(`[NFC] makeReadOnly threw: ${(lockErr as Error)?.message ?? lockErr}`);
       }
+    } else if (family === 'ntag-424') {
+      console.log('[NFC] NTAG424 — skipping makeReadOnly (uses key-based file access)');
     }
     console.log(`[NFC] writeHuntTagToTag done — family=${family} locked=${locked}`);
     return { family, locked };

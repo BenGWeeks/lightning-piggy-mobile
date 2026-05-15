@@ -208,6 +208,36 @@ export const subscribeNearbyEvents = (
  * HuntPiggyDetailScreen on mount when the user navigates from a
  * `nostr:naddr` deep-link or a Discover tap.
  */
+/**
+ * Pull every kind 37516 listing authored by `hiderPubkey` from the
+ * given relays. Used by MyPigletsScreen on mount + pull-to-refresh to
+ * surface a hider's own Piggies even when no nearby NIP-GC subscription
+ * has echoed them back — particularly the case after a fresh cold
+ * start, OR for Piggies hidden in geohashes outside the user's current
+ * "nearby" window, OR if the publish happened before this device first
+ * cached the relay-derived ParsedCache (#73 follow-up).
+ */
+export const fetchCachesByAuthor = async (
+  hiderPubkey: string,
+  relays: string[] = DEFAULT_RELAYS,
+): Promise<ParsedCache[]> => {
+  const events = await pool.querySync(relays, {
+    kinds: [GC_LISTING_KIND],
+    authors: [hiderPubkey],
+  });
+  const seen = new Map<string, ParsedCache>();
+  for (const e of events) {
+    const parsed = parseCache(e as VerifiedEvent);
+    if (!parsed) continue;
+    // Replaceable-event semantics: dedupe by coord, latest createdAt wins.
+    const existing = seen.get(parsed.coord);
+    if (!existing || parsed.createdAt > existing.createdAt) {
+      seen.set(parsed.coord, parsed);
+    }
+  }
+  return [...seen.values()];
+};
+
 export const fetchCache = async (
   hiderPubkey: string,
   d: string,
