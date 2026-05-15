@@ -41,7 +41,10 @@ const LocationPickerSheet: React.FC<Props> = ({
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
-  const snapPoints = useMemo(() => ['90%'], []);
+  // 75% leaves the top of the underlying wizard visible so the user keeps
+  // their place; 90% felt like a full-screen takeover for what's really a
+  // picker. Map area still gets ~half the screen — plenty for a pin drop.
+  const snapPoints = useMemo(() => ['75%'], []);
 
   // Fallback centre when the caller has no fix yet — central UK is a
   // reasonable neutral default for this app's user base; the user will
@@ -99,6 +102,13 @@ const LocationPickerSheet: React.FC<Props> = ({
       // background showing through but no tiles. Forcing dynamic sizing
       // off so snapPoints win.
       enableDynamicSizing={false}
+      // Gorhom's content-pan gesture hijacks every drag inside the sheet
+      // — including the WebView — and turns it into a sheet-dismiss
+      // swipe. That made the map un-pannable. Turn it off so map drags
+      // reach Leaflet; the handle bar at the top is still draggable, the
+      // backdrop is still tap-dismissable, and BackHandler covers system
+      // back, so users keep every way to close the sheet.
+      enableContentPanningGesture={false}
       onDismiss={onClose}
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}
