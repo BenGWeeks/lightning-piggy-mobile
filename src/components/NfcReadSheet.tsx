@@ -14,7 +14,7 @@ import {
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
-import { AlertCircle, Moon, Nfc, PartyPopper, PiggyBank } from 'lucide-react-native';
+import { AlertCircle, Nfc, PartyPopper, PiggyBank } from 'lucide-react-native';
 import {
   readHuntTagPayload,
   cancelNfcOperation,
@@ -317,9 +317,7 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
           <View style={styles.stateContainer}>
             <View style={[styles.iconContainer, styles.sleepingIcon]}>
               <PiggyBank size={64} color={colors.brandPink} strokeWidth={2} />
-              <View style={styles.zzzBadge}>
-                <Moon size={20} color={colors.textSupplementary} strokeWidth={2.5} />
-              </View>
+              <Text style={styles.zzzBadge}>Zzz</Text>
             </View>
             <Text style={styles.instruction}>Shhh… this Piggy is snoozing</Text>
             {cooldownRemaining !== null && cooldownRemaining > 0 ? (
@@ -436,18 +434,17 @@ const createStyles = (colors: Palette) =>
     },
     successIcon: { backgroundColor: colors.greenLight },
     sleepingIcon: { backgroundColor: colors.brandPinkLight },
+    // 'Zzz' label sits to the top-right of the sleeping Piggy. Italic +
+    // brand pink reads as a hand-drawn snore rather than a system badge.
     zzzBadge: {
       position: 'absolute',
-      top: 4,
-      right: 4,
-      width: 30,
-      height: 30,
-      borderRadius: 15,
-      backgroundColor: colors.surface,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 1.5,
-      borderColor: colors.divider,
+      top: 6,
+      right: 10,
+      color: colors.brandPink,
+      fontSize: 22,
+      fontWeight: '800',
+      fontStyle: 'italic',
+      letterSpacing: -1,
     },
     errorIcon: { backgroundColor: colors.redLight },
     errorBadge: {
