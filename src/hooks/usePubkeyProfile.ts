@@ -5,7 +5,7 @@ import { useNostr } from '../contexts/NostrContext';
 import type { NostrProfile } from '../types/nostr';
 
 /**
- * Compact pubkey-to-profile lookup, used by anywhere we surface a hex
+ * Compact pubkey-to-profile lookup, used anywhere we surface a hex
  * pubkey we'd like to render as "{display_name} {avatar}". Cache
  * priority:
  *
@@ -16,9 +16,22 @@ import type { NostrProfile } from '../types/nostr';
  *      — relay round-trip, typically a few hundred ms. Result is
  *      written back to the cache so subsequent renders are fast.
  *
- * Components consuming the hook get a `{name, picture, lud16}` triple
- * (null when unknown / pending) — enough to render an avatar + name +
- * a Zap button when applicable.
+ * Components get a `{name, picture, lud16}` triple (null when
+ * unknown / pending) — enough to render an avatar + name + a Zap
+ * button when applicable.
+ *
+ * Performance notes (see #554):
+ *   - **Skip-on-complete-hit**: when the cache has every field the
+ *     hook returns (including lud16), we return early without hitting
+ *     a relay. Previously the hook always fired a relay round-trip
+ *     even on a cache hit, because lud16 wasn't persisted — that gave
+ *     us ~1 relay query per visible avatar across every contact row,
+ *     log entry, and hider chip. Cumulative cost grew quietly with the
+ *     Explore tab's new profile-render surfaces.
+ *   - **In-flight de-dup**: a module-level `inFlight` Map collapses
+ *     concurrent fetches for the same pubkey into one. Without it,
+ *     two screens rendering the same friend (e.g. Friends + an open
+ *     Conversation) fanned out independent WebSocket queries.
  */
 export interface PubkeyProfileSlice {
   name: string | null;
@@ -29,6 +42,30 @@ export interface PubkeyProfileSlice {
 }
 
 const empty: PubkeyProfileSlice = { name: null, picture: null, lud16: null, loading: false };
+
+// In-flight de-duplication: concurrent consumers asking for the same
+// pubkey share one fetch. Cleared when the promise settles so a later
+// remount triggers a fresh fetch if the cache has aged past TTL.
+const inFlight = new Map<string, Promise<NostrProfile | null>>();
+
+function fetchProfileDeduped(
+  pubkey: string,
+  readRelays: string[],
+): Promise<NostrProfile | null> {
+  const existing = inFlight.get(pubkey);
+  if (existing) return existing;
+  const promise = nostrService
+    .fetchProfile(pubkey, readRelays)
+    .catch(() => null)
+    .finally(() => {
+      // Clear only if this is still the in-flight promise — concurrent
+      // identity-equality check, no risk of clobbering a newer fetch
+      // started while this one was settling.
+      if (inFlight.get(pubkey) === promise) inFlight.delete(pubkey);
+    });
+  inFlight.set(pubkey, promise);
+  return promise;
+}
 
 export const usePubkeyProfile = (pubkey: string | null | undefined): PubkeyProfileSlice => {
   const { relays } = useNostr();
@@ -49,28 +86,39 @@ export const usePubkeyProfile = (pubkey: string | null | undefined): PubkeyProfi
       return;
     }
     let cancelled = false;
-    setSlice((prev) => ({ ...prev, loading: true }));
     (async () => {
       // Cache hit — sync-fast, no relay round-trip.
       const cached = await zapSenderProfileStorage.get(pubkey);
       if (cancelled) return;
+      // Complete-hit short-circuit: if the cache carries lud16 (even
+      // explicitly null) we have everything the hook returns. The TTL
+      // filter on `zapSenderProfileStorage.get` already returns null
+      // for entries older than 24 h, so "cache hit" implies "still
+      // fresh". This is the path that closes the fan-out for the
+      // common case (#554).
+      if (cached && cached.lud16 !== undefined) {
+        setSlice({
+          name: cached.displayName ?? cached.name ?? null,
+          picture: cached.picture ?? null,
+          lud16: cached.lud16,
+          loading: false,
+        });
+        return;
+      }
+      // Either no cache entry or a legacy entry without lud16. Show
+      // what we have while we fetch the missing fields.
       if (cached) {
         setSlice({
           name: cached.displayName ?? cached.name ?? null,
           picture: cached.picture ?? null,
-          // zapSenderProfileStorage's narrow shape doesn't carry lud16;
-          // we'll pick it up on the relay fetch below if missing.
           lud16: null,
           loading: true,
         });
+      } else {
+        setSlice((prev) => ({ ...prev, loading: true }));
       }
-      // Always also try the relay (cheap when already known, fills in
-      // lud16 / refreshes a stale name). Use the user's configured read
-      // relays; PROFILE_RELAYS is unioned in `fetchProfile`.
       const readRelays = readRelaysKey.split('|').filter(Boolean);
-      const profile: NostrProfile | null = await nostrService
-        .fetchProfile(pubkey, readRelays)
-        .catch(() => null);
+      const profile = await fetchProfileDeduped(pubkey, readRelays);
       if (cancelled) return;
       if (profile) {
         setSlice({
@@ -79,7 +127,8 @@ export const usePubkeyProfile = (pubkey: string | null | undefined): PubkeyProfi
           lud16: profile.lud16 ?? null,
           loading: false,
         });
-        // Write back to the cache so other surfaces resolve instantly.
+        // Write back to the cache, now WITH lud16, so future mounts
+        // get the complete-hit short-circuit above.
         zapSenderProfileStorage
           .setMany(
             new Map([
@@ -91,6 +140,7 @@ export const usePubkeyProfile = (pubkey: string | null | undefined): PubkeyProfi
                   displayName: profile.displayName,
                   picture: profile.picture,
                   nip05: profile.nip05,
+                  lud16: profile.lud16 ?? null,
                 },
               ],
             ]),
@@ -106,4 +156,10 @@ export const usePubkeyProfile = (pubkey: string | null | undefined): PubkeyProfi
   }, [pubkey, readRelaysKey]);
 
   return slice;
+};
+
+// Test hook: clear the in-flight map between tests so cross-test state
+// can't leak. Not exported as part of the public API.
+export const __resetInFlightForTests = (): void => {
+  inFlight.clear();
 };
