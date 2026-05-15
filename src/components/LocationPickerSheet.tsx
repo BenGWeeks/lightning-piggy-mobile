@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, BackHandler } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, BackHandler, Dimensions } from 'react-native';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
@@ -41,10 +41,12 @@ const LocationPickerSheet: React.FC<Props> = ({
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
-  // 75% leaves the top of the underlying wizard visible so the user keeps
-  // their place; 90% felt like a full-screen takeover for what's really a
-  // picker. Map area still gets ~half the screen — plenty for a pin drop.
-  const snapPoints = useMemo(() => ['75%'], []);
+  // Map gets a fixed slice of the window (50%) so the sheet has a
+  // determinate height for Gorhom's dynamic sizing to measure. Plenty of
+  // pin-placement area, leaves the wizard header peeking behind, scales
+  // with the device. Using window height (not screen) — that excludes
+  // the system UI so the math stays right with a tall handle / nav bar.
+  const mapHeight = useMemo(() => Math.round(Dimensions.get('window').height * 0.5), []);
 
   // Fallback centre when the caller has no fix yet — central UK is a
   // reasonable neutral default for this app's user base; the user will
@@ -94,20 +96,17 @@ const LocationPickerSheet: React.FC<Props> = ({
   return (
     <BottomSheetModal
       ref={sheetRef}
-      snapPoints={snapPoints}
-      // Gorhom defaults to enableDynamicSizing=true which auto-sizes the
-      // sheet to its content. That fights the flex:1 chain below (content
-      // wants to fill the sheet, sheet wants to fit content) and the
-      // Leaflet WebView ends up with 0 height — visible as the grey
-      // background showing through but no tiles. Forcing dynamic sizing
-      // off so snapPoints win.
-      enableDynamicSizing={false}
-      // Gorhom's content-pan gesture hijacks every drag inside the sheet
-      // — including the WebView — and turns it into a sheet-dismiss
-      // swipe. That made the map un-pannable. Turn it off so map drags
-      // reach Leaflet; the handle bar at the top is still draggable, the
-      // backdrop is still tap-dismissable, and BackHandler covers system
-      // back, so users keep every way to close the sheet.
+      // No snapPoints — let Gorhom's dynamic sizing fit the sheet to the
+      // content (title + map + coord + button + padding). For that to
+      // measure cleanly, *nothing* below can use flex:1 to "fill the
+      // sheet" — the map gets an explicit height instead. Otherwise the
+      // sheet sizes to content while the content waits for the sheet to
+      // tell it how tall to be, and the WebView paints into a 0-px box.
+      //
+      // enableContentPanningGesture={false} keeps the map pannable —
+      // Gorhom's content-pan gesture would otherwise hijack map drags
+      // and turn them into sheet-dismiss swipes. Handle bar + backdrop
+      // + BackHandler still cover every dismiss path.
       enableContentPanningGesture={false}
       onDismiss={onClose}
       backdropComponent={renderBackdrop}
@@ -118,7 +117,7 @@ const LocationPickerSheet: React.FC<Props> = ({
         <Text style={styles.title}>Where did you hide it?</Text>
         <Text style={styles.subtitle}>Drag the pin — or tap the map — to mark the exact spot.</Text>
 
-        <View style={styles.mapWrap}>
+        <View style={[styles.mapWrap, { height: mapHeight }]}>
           <WebView
             originWhitelist={['*']}
             source={{ html: makeHtml(startLat, startLon, startZoom) }}
@@ -201,7 +200,9 @@ const createStyles = (colors: Palette) =>
       borderTopRightRadius: 24,
     },
     handleIndicator: { backgroundColor: colors.divider, width: 40 },
-    content: { flex: 1, paddingHorizontal: 16, paddingBottom: 24 },
+    // No flex:1 — dynamic sizing means content drives sheet height, not
+    // the other way round.
+    content: { paddingHorizontal: 16, paddingBottom: 24 },
     title: {
       fontSize: 18,
       fontWeight: '800',
@@ -215,12 +216,8 @@ const createStyles = (colors: Palette) =>
       marginBottom: 12,
     },
     mapWrap: {
-      flex: 1,
-      // Safety net: even if the parent flex chain is briefly indeterminate
-      // (sheet mount → layout pass), the WebView still has enough height
-      // for the first tile load. Without this, a 0-height measurement on
-      // first paint can leave the map invisible until the user resizes.
-      minHeight: 300,
+      // Height is set inline (50% of window) so it scales with the
+      // device; everything else lives here.
       borderRadius: 14,
       overflow: 'hidden',
       backgroundColor: colors.background,
