@@ -10,6 +10,14 @@ import { WebView } from 'react-native-webview';
 import { MapPin, Check } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
+import {
+  LEAFLET_BASE_CSS,
+  LEAFLET_HEAD_TAGS,
+  LEAFLET_MAP_BACKGROUND_CSS,
+  LEAFLET_SCRIPT_TAG,
+  POST_BRIDGE_JS,
+  tileLayerJs,
+} from '../utils/mapWebview/tiles';
 
 interface Props {
   visible: boolean;
@@ -187,22 +195,21 @@ const LocationPickerSheet: React.FC<Props> = ({
 const makeHtml = (lat: number, lon: number, zoom: number): string => `<!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="initial-scale=1.0,maximum-scale=1.0,user-scalable=no" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  ${LEAFLET_HEAD_TAGS}
   <style>
-    html,body,#map{margin:0;padding:0;height:100%;width:100%;background:#eee}
+    ${LEAFLET_BASE_CSS}
+    ${LEAFLET_MAP_BACKGROUND_CSS}
     .lp-drop{width:20px;height:20px;border-radius:10px;background:#EC008C;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.45)}
     .leaflet-control-attribution{font-size:9px}
   </style>
 </head>
 <body>
 <div id="map"></div>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+${LEAFLET_SCRIPT_TAG}
 <script>
-  const post=(m)=>window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify(m));
+  ${POST_BRIDGE_JS}
   const map=L.map('map',{zoomControl:true,minZoom:3,maxZoom:19}).setView([${lat},${lon}],${zoom});
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
+  ${tileLayerJs()}
   const icon=L.divIcon({className:'',html:'<div class="lp-drop"></div>',iconSize:[20,20],iconAnchor:[10,10]});
   const marker=L.marker([${lat},${lon}],{icon:icon,draggable:true}).addTo(map);
   const emit=(userMoved)=>{const p=marker.getLatLng();post({type:'pin',lat:p.lat,lon:p.lng,userMoved:!!userMoved});};
