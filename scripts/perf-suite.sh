@@ -122,8 +122,9 @@ write_flow /tmp/perf-flow-explore-places.yaml "name: explore places rail
     timeout: 30000
 - tapOn:
     id: 'tab-explore'
-- assertVisible:
-    id: 'place-card-.*'
+- extendedWaitUntil:
+    visible:
+      id: 'place-card-.*'
     timeout: 20000"
 
 # Explore → first \`cache-card-*\` rendered. Covers the NIP-GC sub
@@ -136,8 +137,9 @@ write_flow /tmp/perf-flow-explore-caches.yaml "name: explore caches rail
     timeout: 30000
 - tapOn:
     id: 'tab-explore'
-- assertVisible:
-    id: 'cache-card-.*'
+- extendedWaitUntil:
+    visible:
+      id: 'cache-card-.*'
     timeout: 20000"
 
 # Cold-open of the full Hunt / Geo-caches list. Launch → Explore →
@@ -155,8 +157,9 @@ write_flow /tmp/perf-flow-hunt-list-cold.yaml "name: hunt list cold
     id: 'tab-explore'
 - tapOn:
     id: 'explore-card-hunt'
-- assertVisible:
-    id: 'hunt-discover-row-.*'
+- extendedWaitUntil:
+    visible:
+      id: 'hunt-discover-row-.*'
     timeout: 20000"
 
 write_flow /tmp/perf-flow-warmup-friends.yaml "name: warmup friends
