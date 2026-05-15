@@ -124,4 +124,30 @@ describe('claimed-hash cache', () => {
     await recordClaimedPaymentHash('e'.repeat(64), null);
     expect(cb).not.toHaveBeenCalled();
   });
+
+  it('upgrading a null-txid entry to a real txid fires notify', async () => {
+    // Terminal-success poll records `null`; a later synchronous claim
+    // supplements with the real txid. Subscribers must re-render so the
+    // Claim-tx row + Boltz support email can pick up the new txid.
+    const HASH = 'd'.repeat(64);
+    const TXID = '1'.repeat(64);
+    await recordClaimedPaymentHash(HASH, null);
+    const cb = jest.fn();
+    const unsub = subscribeClaimed(cb);
+    await recordClaimedPaymentHash(HASH, TXID);
+    expect(cb).toHaveBeenCalled();
+    expect(getClaimTxId(HASH)).toBe(TXID);
+    unsub();
+  });
+
+  it('re-recording the same (hash, txid) does NOT fire notify (no-op)', async () => {
+    const HASH = '2'.repeat(64);
+    const TXID = '3'.repeat(64);
+    await recordClaimedPaymentHash(HASH, TXID);
+    const cb = jest.fn();
+    const unsub = subscribeClaimed(cb);
+    await recordClaimedPaymentHash(HASH, TXID);
+    expect(cb).not.toHaveBeenCalled();
+    unsub();
+  });
 });

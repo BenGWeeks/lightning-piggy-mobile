@@ -173,7 +173,12 @@ export async function recordClaimedPaymentHash(
   claimTxId: string | null,
 ): Promise<void> {
   await loadClaimedHashes();
+  // Capture the previous value BEFORE we mutate, otherwise the post-mutation
+  // .get() would always equal the value we just .set() and the "txid
+  // changed" branch would be unreachable (so `null → <txid>` upgrades from
+  // a later synchronous claim would silently fail to notify subscribers).
   const wasPresent = claimedPaymentHashes.has(paymentHash);
+  const prev = wasPresent ? claimedPaymentHashes.get(paymentHash) : undefined;
   // delete + set so insertion order reflects recency (LRU semantics).
   claimedPaymentHashes.delete(paymentHash);
   claimedPaymentHashes.set(paymentHash, claimTxId);
@@ -183,9 +188,9 @@ export async function recordClaimedPaymentHash(
     claimedPaymentHashes.delete(oldest);
   }
   // Notify on insertion OR when an existing entry's txid changed
-  // (e.g. terminal-success record gets supplemented by a later claim).
-  const txidChanged = wasPresent && claimedPaymentHashes.get(paymentHash) !== claimTxId;
-  if (!wasPresent || txidChanged) notifyClaimed();
+  // (e.g. terminal-success `null` record gets supplemented by a later
+  // synchronous claim's real txid).
+  if (!wasPresent || prev !== claimTxId) notifyClaimed();
   // Fire-and-forget — the next pass tolerates a slightly stale on-disk
   // snapshot; an in-memory hash that hasn't been persisted yet still
   // shows the green tick this session.
