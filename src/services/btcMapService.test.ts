@@ -6,6 +6,8 @@ import {
   fetchPlacesInBbox,
   formatAddress,
   lightningAddressOf,
+  peekCachedAnchorSync,
+  peekCachedPlacesSync,
   type BtcMapPlace,
 } from './btcMapService';
 
@@ -190,5 +192,27 @@ describe('fetchPlacesInBbox (search endpoint)', () => {
 
     const bbox = { minLon: 0, minLat: 0, maxLon: 1, maxLat: 1 };
     await expect(fetchPlacesInBbox(bbox)).resolves.toEqual([]);
+  });
+
+  it('populates peekCachedPlacesSync + peekCachedAnchorSync after a successful fetch', async () => {
+    const fetchMock = (global as unknown as { fetch: jest.Mock }).fetch;
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => [{ id: 99, lat: 52.0, lon: 0.0, 'osm:name': 'Anchor Café' }],
+    });
+
+    // Pre-fetch, the sync peeks return empty / null — module-import
+    // hydrate has nothing on disk in the test sandbox.
+    expect(peekCachedPlacesSync()).toEqual([]);
+    expect(peekCachedAnchorSync()).toBeNull();
+
+    const bbox = { minLon: -0.1, minLat: 51.9, maxLon: 0.1, maxLat: 52.1 };
+    await fetchPlacesInBbox(bbox);
+
+    // Post-fetch, the in-memory mirror is hot — Explore hub useState
+    // initialisers will see the data without an await on next mount.
+    expect(peekCachedPlacesSync()).toHaveLength(1);
+    expect(peekCachedPlacesSync()[0].id).toBe(99);
+    expect(peekCachedAnchorSync()).toEqual({ lat: 52.0, lon: 0.0 });
   });
 });

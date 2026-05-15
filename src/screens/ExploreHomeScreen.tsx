@@ -34,9 +34,10 @@ import {
   acceptsLightning,
   fetchPlacesInBbox,
   formatAddress,
-  getCachedPlaces,
   isBoosted,
   lightningAddressOf,
+  peekCachedAnchorSync,
+  peekCachedPlacesSync,
   prefetchDataset,
   refreshDataset,
 } from '../services/btcMapService';
@@ -110,8 +111,25 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
   // ----- location ---------------------------------------------------------
 
+  // Seed `pos` from the anchor saved alongside the merchant cache on
+  // the previous successful fetch. Two wins on cold start:
+  //   (1) `sortedMerchants` can run before GPS resolves (the haversine
+  //       sort + maxDistance filter both need a `pos`), so the Places
+  //       rail paints on first render instead of after a multi-hundred
+  //       -ms GPS round-trip.
+  //   (2) The Geo-caches + Events rails get the same head-start since
+  //       they're also gated on `pos`.
+  // The real GPS fix below overwrites this once `getLastKnownPositionAsync`
+  // / `getCurrentPositionAsync` lands; accuracy is null because the
+  // anchor is a historical centroid, not a measurement (suppresses the
+  // user-position halo until a real fix arrives).
   const [pos, setPos] = useState<{ lat: number; lon: number; accuracy: number | null } | null>(
-    null,
+    () => {
+      const dev = getDevPinnedLocation();
+      if (dev) return { ...dev, accuracy: null };
+      const anchor = peekCachedAnchorSync();
+      return anchor ? { ...anchor, accuracy: null } : null;
+    },
   );
   const [locationDenied, setLocationDenied] = useState(false);
   useEffect(() => {
@@ -176,8 +194,18 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
   // ----- BTC Map merchants ------------------------------------------------
 
-  const [merchants, setMerchants] = useState<BtcMapPlace[]>([]);
-  const [merchantsLoading, setMerchantsLoading] = useState(true);
+  // Seed from the in-memory mirror — `btcMapService` kicks hydrate()
+  // at module import, so by first render the cached search result is
+  // typically ready and the rail paints instantly. The live fetch
+  // below replaces it once `pos` lands. Mirrors the same idiom used
+  // for `caches` + `events` immediately below.
+  const [merchants, setMerchants] = useState<BtcMapPlace[]>(() => peekCachedPlacesSync());
+  // If we already have cached merchants on first render there's no
+  // skeleton to show — flip merchantsLoading false so the rail paints
+  // them straight away instead of the loading shimmer.
+  const [merchantsLoading, setMerchantsLoading] = useState(
+    () => peekCachedPlacesSync().length === 0,
+  );
   // Bumped by pull-to-refresh to invalidate the merchant + relay-sub
   // effects without disturbing `pos`. Lets us re-pull BTC Map + tear
   // down/re-open NIP-GC + NIP-52 subscriptions in one gesture.
@@ -188,21 +216,12 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // disables pull-to-refresh) so a vertical pan on the inline map pans
   // Leaflet instead of refreshing the page.
   const [mapTouched, setMapTouched] = useState(false);
-  // Stale-while-revalidate: paint the last-known merchant set from disk
-  // straight away so the "Places near you" rail isn't empty on a cold
-  // start while we wait for a GPS fix + the network round-trip below.
-  // The functional update yields to fresh network data if it lands first.
-  useEffect(() => {
-    let cancelled = false;
-    getCachedPlaces().then((cached) => {
-      if (!cancelled && cached.length > 0) {
-        setMerchants((prev) => (prev.length === 0 ? cached : prev));
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Stale-while-revalidate: `peekCachedPlacesSync()` already seeded
+  // the initial `merchants` state above; the live fetch below replaces
+  // it once `pos` lands. Previously this effect re-paint-from-cache via
+  // the async `getCachedPlaces()` — that fired AFTER the first render,
+  // so the rail flashed empty for the AsyncStorage round-trip on cold
+  // launch even though the data was sitting on disk.
   useEffect(() => {
     if (!pos) return;
     let cancelled = false;
