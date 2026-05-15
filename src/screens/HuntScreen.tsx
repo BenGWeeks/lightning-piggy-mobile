@@ -300,7 +300,14 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
                 lat={pos?.lat ?? null}
                 lon={pos?.lon ?? null}
                 merchants={[]}
-                caches={[...caches.values()]}
+                // The list below filters by WoT + difficulty/terrain/type
+                // + search query (see sortedCaches → filteredCaches). The
+                // map must show the same set so the user's filters apply
+                // visually too — passing the raw `caches` Map would let
+                // untrusted-pubkey pins show through and contradict the
+                // list. Closes the inconsistency where Hunt's mini-map
+                // ignored the WoT chip while the list respected it.
+                caches={filteredCaches.map((c) => c.cache)}
                 events={[]}
                 onTapMap={() => navigation.navigate('Map')}
                 onBoundsChange={setMapBbox}

@@ -163,34 +163,16 @@ export const ExploreMiniMap: React.FC<Props> = ({
 
   // When interactive, drag/zoom gestures need to reach the WebView, so
   // the outer wrapper must NOT be a TouchableOpacity (it'd capture
-  // every touch as a tap). The "Open map" badge becomes its own
-  // tappable button instead. Non-interactive views keep the whole-
-  // map-is-a-tap-target behaviour so the cache-detail hero etc. still
-  // open the full map with one tap.
-  const Wrapper: React.ComponentType<{
-    style: object;
-    children: React.ReactNode;
-    testID: string;
-  }> = interactive
-    ? ({ style, children, testID }) => (
-        <View style={style} testID={testID}>
-          {children}
-        </View>
-      )
-    : ({ style, children, testID }) => (
-        <TouchableOpacity
-          style={style}
-          activeOpacity={0.85}
-          onPress={onTapMap}
-          accessibilityLabel="Open full map"
-          testID={testID}
-        >
-          {children}
-        </TouchableOpacity>
-      );
-
-  return (
-    <Wrapper style={fill ? styles.containerFill : styles.container} testID="explore-minimap">
+  // every touch as a tap). Non-interactive views keep the whole-map-
+  // is-a-tap-target behaviour so the cache-detail hero etc. still
+  // open the full map with one tap. Inlined as two return branches
+  // (not a dynamic Wrapper component) — defining a component inside
+  // render gives it a fresh identity every render, which forces React
+  // to remount the WebView tree and the bridge collapses to a black
+  // screen.
+  const containerStyle = fill ? styles.containerFill : styles.container;
+  const children = (
+    <>
       {lat === null || lon === null ? (
         <View style={styles.fallback}>
           <ActivityIndicator color={colors.brandPink} />
@@ -281,7 +263,26 @@ export const ExploreMiniMap: React.FC<Props> = ({
           <ActivityIndicator color={colors.brandPink} size="small" />
         </View>
       ) : null}
-    </Wrapper>
+    </>
+  );
+
+  if (interactive) {
+    return (
+      <View style={containerStyle} testID="explore-minimap">
+        {children}
+      </View>
+    );
+  }
+  return (
+    <TouchableOpacity
+      style={containerStyle}
+      activeOpacity={0.85}
+      onPress={onTapMap}
+      accessibilityLabel="Open full map"
+      testID="explore-minimap"
+    >
+      {children}
+    </TouchableOpacity>
   );
 };
 
