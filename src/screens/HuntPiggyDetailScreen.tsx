@@ -120,7 +120,7 @@ const parseFoundLog = (e: VerifiedEvent): FoundLog => {
 const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { coord } = route.params;
+  const { coord, openComposer: openComposerParam } = route.params;
   const { signEvent, relays, pubkey } = useNostr();
 
   // Seed from the in-memory cache mirror so the screen paints instantly
@@ -154,7 +154,10 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     },
     [],
   );
-  const [composerOpen, setComposerOpen] = useState(false);
+  // openComposer route param defaults the composer open — HuntFoundScreen
+  // sends `openComposer: true` after a successful claim so the finder
+  // lands on the cache page with the log-entry sheet already up.
+  const [composerOpen, setComposerOpen] = useState(Boolean(openComposerParam));
   const [composerText, setComposerText] = useState('');
   const [composerPhotoUrl, setComposerPhotoUrl] = useState<string | null>(null);
   const [composerUploading, setComposerUploading] = useState(false);

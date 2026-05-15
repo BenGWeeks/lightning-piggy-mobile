@@ -88,7 +88,10 @@ export type ExploreStackParamList = {
   // lastClaimForPiggyId(coord). Omit only on the legacy deep-link
   // entry path where we don't know the coord yet.
   HuntFound: { lnurl: string; coord?: string };
-  HuntPiggyDetail: { coord: string };
+  // `openComposer` (optional) bounces the find-log compose UI open on
+  // mount — used by HuntFoundScreen after a successful claim so the
+  // finder doesn't have to remember to tap the compose button.
+  HuntPiggyDetail: { coord: string; openComposer?: boolean };
   MyPiglets: undefined;
   Events: undefined;
   EventDetail: { coord: string };

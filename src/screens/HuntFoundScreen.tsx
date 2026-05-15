@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
-import { CheckCircle2, ChevronLeft, PiggyBank, Sparkles } from 'lucide-react-native';
+import { ChevronLeft, Gift, PartyPopper, PiggyBank } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useWallet } from '../contexts/WalletContext';
 import type { Palette } from '../styles/palettes';
@@ -163,7 +163,7 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
                 <ActivityIndicator color={colors.white} />
               ) : (
                 <>
-                  <Sparkles size={20} color={colors.white} strokeWidth={2.5} />
+                  <Gift size={20} color={colors.white} strokeWidth={2.5} />
                   <Text style={styles.primaryButtonText}>
                     Claim {Math.floor(stage.params.maxWithdrawable / 1000).toLocaleString()} sats
                   </Text>
@@ -178,15 +178,34 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
 
         {stage.kind === 'claimed' && (
           <>
-            <CheckCircle2 size={88} color={colors.green} strokeWidth={2} />
-            <Text style={styles.title}>Claim sent</Text>
+            <View style={[styles.bigPiggy, { backgroundColor: colors.greenLight }]}>
+              <PartyPopper size={88} color={colors.green} strokeWidth={2} />
+            </View>
+            <Text style={styles.title}>
+              {stage.sats.toLocaleString()} sats inbound!
+            </Text>
             <Text style={styles.memo}>
-              {stage.sats.toLocaleString()} sats incoming. Watch the Home tab for the confetti.
+              Sent to your active wallet — the celebration toast fires the moment they land.
             </Text>
-            <Text style={styles.fineprint}>
-              Photo + comment compose lands in the next commit on this branch — leave a log entry
-              for future hunters.
-            </Text>
+            <TouchableOpacity
+              style={styles.primaryButton}
+              onPress={() => {
+                // Bounce back to the cache detail with the composer pre-
+                // opened so the finder can immediately drop a log entry
+                // for future hunters. coord is required here — set by the
+                // NfcReadSheet caller; the legacy deep-link entry path
+                // omits it (rare) and we fall through to popToTop instead.
+                if (coord) {
+                  navigation.navigate('HuntPiggyDetail', { coord, openComposer: true });
+                } else {
+                  navigation.popToTop();
+                }
+              }}
+              testID="hunt-found-drop-log-button"
+            >
+              <Gift size={20} color={colors.white} strokeWidth={2.5} />
+              <Text style={styles.primaryButtonText}>Drop a find-log</Text>
+            </TouchableOpacity>
             <TouchableOpacity
               style={styles.secondaryButton}
               onPress={() => navigation.popToTop()}
