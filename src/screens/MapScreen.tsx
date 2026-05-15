@@ -454,6 +454,16 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   );
 
   const recenterOnUser = useCallback(async () => {
+    // Dev-pin first — the same override the initial-position effect
+    // honours (see line 200). Without this, the recenter button on the
+    // emulator ignores EXPO_PUBLIC_DEV_LAT/LON and jumps to the
+    // AVD's real fused-location fix (typically Mountain View), which
+    // contradicts every other location surface in the app.
+    const pinned = getDevPinnedLocation();
+    if (pinned) {
+      setViewportInWebView(pinned.lat, pinned.lon, 15);
+      return;
+    }
     if (permission !== 'granted') return;
     try {
       const pos = await Location.getCurrentPositionAsync({
