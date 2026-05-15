@@ -779,6 +779,11 @@ interface NostrContextType {
     recipientPubkey: string,
     amountSats: number,
     comment: string,
+    // Optional kind-1/7516/etc event id to scope the zap to a single
+    // note. When set, the resulting 9735 receipt carries the same `e`
+    // tag — enables per-note aggregation (e.g. zaps-received pill on
+    // find-log rows). Omit for plain zap-the-author flows.
+    zapEventId?: string,
   ) => Promise<string | null>;
   publishProfile: (profileData: {
     name?: string;
@@ -1924,6 +1929,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       recipientPubkey: string,
       amountSats: number,
       comment: string,
+      zapEventId?: string,
     ): Promise<string | null> => {
       if (!pubkey || !isLoggedIn) return null;
 
@@ -1934,6 +1940,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         amountSats * 1000,
         readRelays,
         comment,
+        zapEventId,
       );
 
       if (signerType === 'nsec') {

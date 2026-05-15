@@ -695,16 +695,23 @@ export function createZapRequestEvent(
   amountMsats: number,
   relays: string[],
   content: string,
+  // Optional event id to zap. NIP-57 says the `e` tag MAY appear on a
+  // 9734 to scope the zap to one note; LNURL servers copy it through
+  // to the 9735 receipt's `e` tag so clients can aggregate zaps on
+  // that note (see `findLogZapsService` for the consumer side).
+  zapEventId?: string,
 ): { kind: number; created_at: number; tags: string[][]; content: string; pubkey: string } {
+  const tags: string[][] = [
+    ['p', recipientPubkey],
+    ['amount', amountMsats.toString()],
+    ['relays', ...relays],
+  ];
+  if (zapEventId) tags.push(['e', zapEventId]);
   return {
     kind: 9734,
     created_at: Math.floor(Date.now() / 1000),
     pubkey: senderPubkey,
-    tags: [
-      ['p', recipientPubkey],
-      ['amount', amountMsats.toString()],
-      ['relays', ...relays],
-    ],
+    tags,
     content,
   };
 }

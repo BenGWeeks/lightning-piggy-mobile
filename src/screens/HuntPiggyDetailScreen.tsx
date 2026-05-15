@@ -44,6 +44,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useNostr } from '../contexts/NostrContext';
 import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
 import ContactProfileSheet from '../components/ContactProfileSheet';
+import SendSheet from '../components/SendSheet';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation, ExploreStackParamList } from '../navigation/types';
 import { Alert } from '../components/BrandedAlert';
@@ -127,6 +128,21 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   // from multiple relays only counts once. Sum the inner values for the
   // total displayed on the row.
   const [zapsByLog, setZapsByLog] = useState<Map<string, Map<string, number>>>(new Map());
+  // In-app NIP-57 zap target. `null` keeps the SendSheet closed; an
+  // object opens it pre-targeted at that finder and scoped to that log
+  // (via the 9734 `e` tag → 9735 `e` tag echo).
+  const [zapTarget, setZapTarget] = useState<{
+    lud16: string;
+    pubkey: string;
+    name: string | null;
+    logId: string;
+  } | null>(null);
+  const openZapForLog = useCallback(
+    (log: FoundLog, lud16: string, name: string | null) => {
+      setZapTarget({ lud16, pubkey: log.pubkey, name, logId: log.id });
+    },
+    [],
+  );
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerText, setComposerText] = useState('');
   const [composerPhotoUrl, setComposerPhotoUrl] = useState<string | null>(null);
@@ -618,6 +634,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   styles={styles}
                   onPressProfile={openProfileSheet}
                   zapsReceivedSats={zapTotalsByLog.get(log.id) ?? 0}
+                  onZap={openZapForLog}
                 />
               ))
             )}
@@ -743,6 +760,19 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
             : undefined
         }
       />
+
+      {/* In-app NIP-57 zap on a specific find-log. zapEventId scopes
+          the 9734 to the log so the resulting 9735 receipt's `e` tag
+          feeds back into subscribeFindLogZaps and bumps the row's
+          "N zapped" pill in near-realtime. */}
+      <SendSheet
+        visible={zapTarget !== null}
+        onClose={() => setZapTarget(null)}
+        initialAddress={zapTarget?.lud16}
+        recipientPubkey={zapTarget?.pubkey}
+        recipientName={zapTarget?.name ?? undefined}
+        zapEventId={zapTarget?.logId}
+      />
     </View>
   );
 };
@@ -805,7 +835,12 @@ const LogRow: React.FC<{
   // than the self-reported "Reported" used for the find-log's own
   // amount tag. Zero means none seen yet (no badge).
   zapsReceivedSats: number;
-}> = ({ log, colors, styles, onPressProfile, zapsReceivedSats }) => {
+  // Open the in-app SendSheet pre-targeted at this finder, with the
+  // 9734 zap request scoped to this log so the resulting 9735
+  // receipt counts toward the row's zapped pill (closes the loop
+  // with subscribeFindLogZaps).
+  onZap: (log: FoundLog, lud16: string, name: string | null) => void;
+}> = ({ log, colors, styles, onPressProfile, zapsReceivedSats, onZap }) => {
   const { name, picture, lud16 } = usePubkeyProfile(log.pubkey);
   const display = name ?? shortNpub(log.pubkey);
   const ageMins = Math.floor((Date.now() / 1000 - log.createdAt) / 60);
@@ -869,16 +904,15 @@ const LogRow: React.FC<{
             </View>
           ) : null}
         </View>
-        {/* Outline zap pill under the note so a hider can thank any
-            finder; disabled when the finder shared no Lightning address. */}
+        {/* Outline zap pill under the note — opens the in-app SendSheet
+            scoped to this log via NIP-57 `e` tag so the resulting 9735
+            receipt feeds back into the "Zapped" pill above. Disabled
+            when the finder shared no Lightning address. */}
         <TouchableOpacity
           style={[styles.logZapButton, !lud16 && styles.logZapButtonDisabled]}
           disabled={!lud16}
           onPress={() => {
-            // Open the OS Lightning handler with the finder's LN address
-            // pre-filled. Full in-app zap UX (NIP-57) lands in a follow-up
-            // — for now we hand off to the user's default wallet.
-            if (lud16) Linking.openURL(`lightning:${lud16}`).catch(() => {});
+            if (lud16) onZap(log, lud16, name);
           }}
           accessibilityState={{ disabled: !lud16 }}
           testID={`hunt-log-${log.id.slice(0, 8)}-zap`}
