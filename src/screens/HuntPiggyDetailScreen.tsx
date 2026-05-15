@@ -8,6 +8,8 @@ import {
   ActivityIndicator,
   Image,
   TextInput,
+  KeyboardAvoidingView,
+  Platform,
   Linking,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
@@ -451,7 +453,11 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [cache]);
 
   return (
-    <View style={styles.container} testID="hunt-piggy-detail-screen">
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      testID="hunt-piggy-detail-screen"
+    >
       <View style={styles.header}>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
@@ -674,6 +680,13 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   placeholderTextColor={colors.textSupplementary}
                   value={composerText}
                   onChangeText={setComposerText}
+                  // Scroll the composer into view above the keyboard
+                  // when the user taps the input — KeyboardAvoidingView
+                  // lifts the layout but a long find-log list above
+                  // can still leave the input below the visible area.
+                  onFocus={() => {
+                    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 150);
+                  }}
                   multiline
                   testID="hunt-piggy-detail-compose-input"
                 />
@@ -793,7 +806,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         onClose={() => setReadSheetOpen(false)}
         expectedCoord={coord}
       />
-    </View>
+    </KeyboardAvoidingView>
   );
 };
 
@@ -897,36 +910,22 @@ const LogRow: React.FC<{
       ) : null}
       <Text style={styles.logContent}>{log.content}</Text>
       <View style={styles.logFooter}>
-        <View style={styles.logBadgesRow}>
-          {log.amountSats ? (
-            // Self-reported by the finder — the found-log event isn't
-            // verifiable, so the copy says "reported", not "claimed".
-            <View style={styles.logBadge}>
-              <Zap size={12} color={colors.zapYellow} fill={colors.zapYellow} strokeWidth={2.5} />
-              <Text style={styles.logBadgeText}>
-                Reported {log.amountSats.toLocaleString()} sats
-              </Text>
-            </View>
-          ) : null}
-          {zapsReceivedSats > 0 ? (
-            // Verifiable: aggregated from kind-9735 zap receipts whose
-            // `#e` tag references this find-log. Different colour from
-            // the self-reported pill so the distinction reads at a
-            // glance — pink (brand) for "actually-on-chain-ish proof".
-            <View
-              style={styles.logBadgeZapped}
-              testID={`hunt-log-${log.id.slice(0, 8)}-zaps-received`}
-            >
-              <Zap size={12} color={colors.brandPink} fill={colors.brandPink} strokeWidth={2.5} />
-              <Text style={styles.logBadgeZappedText}>
-                {zapsReceivedSats.toLocaleString()} zapped
-              </Text>
-            </View>
-          ) : null}
-        </View>
-        {/* Outline zap pill under the note — opens the in-app SendSheet
-            scoped to this log via NIP-57 `e` tag so the resulting 9735
-            receipt feeds back into the "Zapped" pill above. Disabled
+        {log.amountSats ? (
+          // Self-reported by the finder — the found-log event isn't
+          // verifiable, so the copy says "reported", not "claimed".
+          <View style={styles.logBadge}>
+            <Zap size={12} color={colors.zapYellow} fill={colors.zapYellow} strokeWidth={2.5} />
+            <Text style={styles.logBadgeText}>
+              Reported {log.amountSats.toLocaleString()} sats
+            </Text>
+          </View>
+        ) : (
+          <View />
+        )}
+        {/* Compact icon-only zap action — Primal-style. Shows the
+            running total of verifiable zaps received next to the icon
+            so a quick glance tells finders both 'this is the zap
+            button' and 'this find has been zapped N sats'. Disabled
             when the finder shared no Lightning address. */}
         <TouchableOpacity
           style={[styles.logZapButton, !lud16 && styles.logZapButtonDisabled]}
@@ -936,10 +935,26 @@ const LogRow: React.FC<{
           }}
           accessibilityState={{ disabled: !lud16 }}
           testID={`hunt-log-${log.id.slice(0, 8)}-zap`}
-          accessibilityLabel={`Zap ${display}`}
+          accessibilityLabel={
+            zapsReceivedSats > 0
+              ? `Zap ${display} — ${zapsReceivedSats.toLocaleString()} sats zapped so far`
+              : `Zap ${display}`
+          }
         >
-          <Zap size={14} color={colors.brandPink} strokeWidth={2.5} />
-          <Text style={styles.logZapText}>Zap</Text>
+          <Zap
+            size={16}
+            color={colors.brandPink}
+            fill={zapsReceivedSats > 0 ? colors.brandPink : 'transparent'}
+            strokeWidth={2.5}
+          />
+          {zapsReceivedSats > 0 ? (
+            <Text
+              style={styles.logZapText}
+              testID={`hunt-log-${log.id.slice(0, 8)}-zaps-received`}
+            >
+              {zapsReceivedSats.toLocaleString()}
+            </Text>
+          ) : null}
         </TouchableOpacity>
       </View>
     </View>

@@ -154,10 +154,9 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   const [selectedTerrains, setSelectedTerrains] = useState<Set<number>>(new Set());
   // Whether the bottom-sheet filter UI is open.
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
-  // Mirrors ExploreMiniMap's onInteractionChange: while a finger is on
-  // the inline map we disable the FlatList's own scrolling so vertical
-  // pans drive Leaflet instead of shifting the list under the user.
-  const [mapTouched, setMapTouched] = useState(false);
+  // Map-touch tracking removed when the map moved out of the
+  // FlatList header (commit eedd82e follow-up). Map and list are now
+  // siblings, so touches on the map don't reach the FlatList at all.
   // Cache type filter — empty set = show every type (default). Built
   // dynamically from whatever types are present in the current caches
   // dataset; selected entries OR together so the list doesn't filter
@@ -347,11 +346,36 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
         <Text style={styles.headerTagline}>Hunt for sats hidden in the wild</Text>
       </View>
 
+      {/* Inline interactive map — lives OUTSIDE the FlatList rather
+          than as ListHeaderComponent so a vertical pan on the map
+          never reaches the FlatList's RefreshControl. The earlier
+          `scrollEnabled={!mapTouched}` toggle had a state-update race
+          that let the FlatList capture the gesture before mapTouched
+          flipped, accidentally firing pull-to-refresh when the user
+          tried to pan the map down. Trade-off: the map no longer
+          scrolls out of view as the user scrolls the list — but that
+          matches the typical map+list pattern (Uber, Citymapper, etc.).
+          The list below filters by WoT + difficulty/terrain/type +
+          search; passing `filteredCaches` so the map matches the list
+          visually (#19). */}
+      <View style={styles.mapWrap}>
+        <ExploreMiniMap
+          lat={pos?.lat ?? null}
+          lon={pos?.lon ?? null}
+          userAccuracyMetres={pos?.accuracy ?? null}
+          merchants={[]}
+          caches={filteredCaches.map((c) => c.cache)}
+          events={[]}
+          onTapMap={() => navigation.navigate('Map')}
+          onBoundsChange={setMapBbox}
+          interactive
+        />
+      </View>
+
       <FlatList
         data={filteredCaches}
         keyExtractor={({ cache }) => cache.coord}
         contentContainerStyle={styles.listContent}
-        scrollEnabled={!mapTouched}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -362,33 +386,6 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
         }
         ListHeaderComponent={
           <View>
-            {/* Inline interactive map — drag, pinch-zoom, recenter on
-                me. The "Open map" button (overlay) is the only path to
-                the full MapScreen; the surrounding card no longer
-                consumes taps. Cache pins only (no merchants / events)
-                so the page stays focused. */}
-            <View style={styles.mapWrap}>
-              <ExploreMiniMap
-                lat={pos?.lat ?? null}
-                lon={pos?.lon ?? null}
-                userAccuracyMetres={pos?.accuracy ?? null}
-                merchants={[]}
-                // The list below filters by WoT + difficulty/terrain/type
-                // + search query (see sortedCaches → filteredCaches). The
-                // map must show the same set so the user's filters apply
-                // visually too — passing the raw `caches` Map would let
-                // untrusted-pubkey pins show through and contradict the
-                // list. Closes the inconsistency where Hunt's mini-map
-                // ignored the WoT chip while the list respected it.
-                caches={filteredCaches.map((c) => c.cache)}
-                events={[]}
-                onTapMap={() => navigation.navigate('Map')}
-                onBoundsChange={setMapBbox}
-                onInteractionChange={setMapTouched}
-                interactive
-              />
-            </View>
-
             <View style={styles.searchRow}>
               <Search size={16} color={colors.textSupplementary} strokeWidth={2.5} />
               <TextInput
