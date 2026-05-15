@@ -408,13 +408,20 @@ export const ExploreMiniMap: React.FC<Props> = ({
     // interacting with the map. TouchableOpacity's typing doesn't
     // expose onTouch* — putting it on the inner View keeps types happy
     // without losing the tap-to-open behaviour.
+    //
+    // The wrapping View takes `containerStyle` too so `fill` mode's
+    // `flex: 1` propagates through; without it the unstyled View
+    // collapses to 0 px in a parent that constrains by height (cache
+    // detail hero), and the WebView paints into a 0×0 box (the empty
+    // grey container Ben saw on the cache-detail screen).
     <View
+      style={containerStyle}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchEnd}
     >
       <TouchableOpacity
-        style={containerStyle}
+        style={styles.tapFillOverlay}
         activeOpacity={0.85}
         onPress={onTapMap}
         accessibilityLabel="Open full map"
@@ -623,6 +630,11 @@ const createStyles = (colors: Palette) =>
       position: 'relative',
     },
     webview: { flex: 1, backgroundColor: 'transparent' },
+    // The non-interactive wrapper's inner TouchableOpacity used to own
+    // containerStyle. We moved that to the outer View so `fill` mode's
+    // flex propagates correctly; the TouchableOpacity now just needs
+    // to fill its parent.
+    tapFillOverlay: { flex: 1 },
     fallback: {
       flex: 1,
       alignItems: 'center',
