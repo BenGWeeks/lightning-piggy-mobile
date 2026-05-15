@@ -36,6 +36,7 @@ import {
 } from '../services/btcMapService';
 import { formatDistance, haversineMetres } from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
+import { btcMapIconComponent } from '../utils/btcMapIcon';
 import BtcMapAttribution from '../components/BtcMapAttribution';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
 import PlacesFilterSheet, { countActiveFilters } from '../components/PlacesFilterSheet';
@@ -378,11 +379,15 @@ const PlaceRow: React.FC<{
       accessibilityLabel={place.tags.name ?? 'Unnamed merchant'}
     >
       <View style={[styles.iconWrap, lightning ? styles.iconLightning : styles.iconOnchain]}>
-        {lightning ? (
-          <Zap size={22} color={colors.white} strokeWidth={2.5} />
-        ) : (
-          <MapPin size={22} color={colors.white} strokeWidth={2.5} />
-        )}
+        {/* Category icon (Coffee / UtensilsCrossed / Hotel / …) tells
+            the user WHAT the place is at a glance. The pink / orange
+            background still distinguishes Lightning vs on-chain
+            payment — same idiom as MerchantDetailSheet, so list rows
+            + the detail sheet read consistently. */}
+        {(() => {
+          const CategoryIcon = btcMapIconComponent(place.icon);
+          return <CategoryIcon size={22} color={colors.white} strokeWidth={2.5} />;
+        })()}
       </View>
       <View style={styles.rowMain}>
         <View style={styles.rowTitleLine}>

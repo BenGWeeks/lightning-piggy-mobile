@@ -643,11 +643,15 @@ const PlaceCard: React.FC<{
       <View
         style={[styles.cardIcon, lightning ? styles.cardIconLightning : styles.cardIconOnchain]}
       >
-        {lightning ? (
-          <Zap size={20} color={colors.white} strokeWidth={2.5} />
-        ) : (
-          <MapPin size={20} color={colors.white} strokeWidth={2.5} />
-        )}
+        {/* Category icon (Coffee / UtensilsCrossed / Hotel / …) gives
+            the user a what-is-this read at a glance. Pink (Lightning)
+            / orange (on-chain) background carries the payment-type
+            signal, matching how MerchantDetailSheet + PlacesScreen
+            row already render. */}
+        {(() => {
+          const CategoryIcon = btcMapIconComponent(place.icon);
+          return <CategoryIcon size={20} color={colors.white} strokeWidth={2.5} />;
+        })()}
       </View>
       <Text style={styles.cardTitle} numberOfLines={2}>
         {place.tags.name ?? 'Unnamed merchant'}

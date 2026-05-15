@@ -55,6 +55,7 @@ import SocialIcon from '../components/SocialIcon';
 import WebOfTrustChip from '../components/WebOfTrustChip';
 import WebOfTrustBottomSheet from '../components/WebOfTrustBottomSheet';
 import LegendSheet from '../components/LegendSheet';
+import { ME_DOT_CSS, ME_DOT_JS } from '../utils/mapMeDot';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -1341,17 +1342,14 @@ const LEAFLET_HTML = `<!DOCTYPE html>
       font-variation-settings: 'FILL' 1, 'wght' 500;
       line-height: 1;
     }
-    .lp-me {
-      width: 14px; height: 14px; border-radius: 7px;
-      background: #2D88FF; border: 2px solid #fff;
-      box-shadow: 0 0 0 6px rgba(45,136,255,0.25);
-    }
+    ${ME_DOT_CSS}
   </style>
 </head>
 <body>
   <div id="map"></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
+    ${ME_DOT_JS}
     const post = (msg) => window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify(msg));
     // Honor a viewport injected via injectedJavaScriptBeforeContentLoaded
     // — that's MapScreen's saved-viewport hydrate. Falls back to a UK

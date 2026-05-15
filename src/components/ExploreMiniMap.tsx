@@ -8,6 +8,7 @@ import type { BtcMapPlace } from '../services/btcMapService';
 import { acceptsLightning } from '../services/btcMapService';
 import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 import LegendSheet from './LegendSheet';
+import { ME_DOT_CSS, ME_DOT_JS } from '../utils/mapMeDot';
 
 export interface MiniMapBbox {
   minLat: number;
@@ -155,6 +156,11 @@ export const ExploreMiniMap: React.FC<Props> = ({
       lat: m.lat,
       lng: m.lon,
       lightning: acceptsLightning(m),
+      // BTC Map's curated category glyph name (storefront / cafe /
+      // restaurant / …). Pass through so the Leaflet renderer can
+      // pick the matching inline lucide SVG. Unknown / null falls
+      // back to a generic Store glyph.
+      category: m.icon ?? null,
     }));
     const cacheLocs = caches
       .filter((c) => c.geohash)
@@ -356,9 +362,7 @@ const makeHtml = (
     /* Pulsating "you" dot: solid blue core + an outward ripple via
        ::after that scales out and fades. Subtle enough not to nag,
        clear enough to spot at a glance. */
-    .lp-me{position:relative;width:14px;height:14px;border-radius:7px;background:#2D88FF;border:2px solid #fff;box-shadow:0 0 0 3px rgba(45,136,255,0.25);z-index:1000}
-    .lp-me::after{content:'';position:absolute;top:50%;left:50%;width:28px;height:28px;margin:-14px 0 0 -14px;border-radius:50%;background:rgba(45,136,255,0.45);animation:lp-pulse 1.8s ease-out infinite;z-index:-1}
-    @keyframes lp-pulse{0%{transform:scale(0.4);opacity:1}100%{transform:scale(2.6);opacity:0}}
+    ${ME_DOT_CSS}
     /* Hide Leaflet's default UI for the preview */
     .leaflet-control-zoom,.leaflet-control-attribution{display:none!important}
   </style>
@@ -367,6 +371,7 @@ const makeHtml = (
 <div id="map"></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
+${ME_DOT_JS}
 const post=(m)=>window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify(m));
 // minZoom 7 caps the bbox at about 400 km wide at UK latitudes — wider
 // than that and the list becomes "everything within a country" rather
@@ -383,18 +388,33 @@ const dot=(cls,size)=>L.divIcon({className:'',html:'<div class="'+cls+'"></div>'
 // needs no asset bundle. Used by the cache-detail hero's teardrop pin.
 const PIGGY_SVG='<path d="M11 17h3v2a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-3a3.16 3.16 0 0 0 2-2h1a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1h-1a5 5 0 0 0-2-4V3a4 4 0 0 0-3.2 1.6l-.3.4H11a6 6 0 0 0-6 6v1a5 5 0 0 0 2 4v3a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1z"/><path d="M16 10h.01"/><path d="M2 8v1a2 2 0 0 0 2 2h1"/>';
 const MAPPIN_SVG='<path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/>';
+// BTC Map category → inline lucide SVG content. Only the most common
+// categories are inlined; everything else falls back to STORE_SVG so
+// the row layout stays stable. Keep keys in sync with btcMapIcon.ts.
+const STORE_SVG='<path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4"/><path d="M2 7h20"/><path d="M22 7v3a2 2 0 0 1-2 2a2.7 2.7 0 0 1-2.4-2a2.5 2.5 0 0 1-5 0A2.7 2.7 0 0 1 10 12a2.7 2.7 0 0 1-2.6-2a2.5 2.5 0 0 1-5 0V7"/>';
+const COFFEE_SVG='<path d="M10 2v2"/><path d="M14 2v2"/><path d="M6 2v2"/><path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M5 8h12v9a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4Z"/>';
+const BEER_SVG='<path d="M17 11h1a3 3 0 0 1 0 6h-1"/><path d="M9 12v6"/><path d="M13 12v6"/><path d="M5 8v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8"/><path d="M5 8a3 3 0 0 1 3-3h7a3 3 0 0 1 3 3"/>';
+const RESTAURANT_SVG='<path d="m16 2-2.3 2.3a3 3 0 0 0 0 4.2l1.8 1.8a3 3 0 0 0 4.2 0L22 8"/><path d="m15 15 6 6"/><path d="m21 15-6 6"/><path d="m2 2 6.4 6.4a3 3 0 0 1 0 4.2L2 19"/><path d="m17 17 5 5"/>';
+const HOTEL_SVG='<path d="M10 22v-6.57"/><path d="M14 15.43V22"/><path d="M15 16a5 5 0 0 0-6 0"/><rect x="4" y="2" width="16" height="20" rx="2"/>';
+const FUEL_SVG='<path d="M14 21V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v16"/><path d="M2 21h13"/><path d="M3 9h11"/><path d="M18 21V11a2 2 0 0 0-2-2h-1"/><path d="M19 11V5"/>';
+const BRIEFCASE_SVG='<path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/><rect width="20" height="14" x="2" y="6" rx="2"/>';
+const BIKE_SVG='<circle cx="18.5" cy="17.5" r="3.5"/><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="15" cy="5" r="1"/><path d="M12 17.5V14l-3-3 4-3 2 3h2"/>';
+const CATEGORY_SVGS={storefront:STORE_SVG,shop:STORE_SVG,shopping_bag:STORE_SVG,cafe:COFFEE_SVG,coffee:COFFEE_SVG,restaurant:RESTAURANT_SVG,fast_food:RESTAURANT_SVG,pizza:RESTAURANT_SVG,bar:BEER_SVG,pub:BEER_SVG,hotel:HOTEL_SVG,lodging:HOTEL_SVG,bed:HOTEL_SVG,office:BRIEFCASE_SVG,fuel:FUEL_SVG,gas_station:FUEL_SVG,bicycle:BIKE_SVG,bike:BIKE_SVG};
+const categorySvg=(cat)=>CATEGORY_SVGS[cat]||STORE_SVG;
 // The piggy glyph sits ~2px lower than the map-pin glyph in its viewBox,
 // so it gets a slightly larger y-offset to stay optically centred.
 const pinIcon=(piggy)=>L.divIcon({className:'',iconSize:[36,44],iconAnchor:[18,44],html:'<svg width="36" height="44" viewBox="0 0 36 44" xmlns="http://www.w3.org/2000/svg"><path d="M18 2C9.7 2 3 8.7 3 17c0 10 15 25 15 25s15-15 15-25C33 8.7 26.3 2 18 2z" fill="'+(piggy?'#EC008C':'#7A5CFF')+'" stroke="#fff" stroke-width="2"/><g transform="translate(9 '+(piggy?9:7)+') scale(0.75)" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'+(piggy?PIGGY_SVG:MAPPIN_SVG)+'</g></svg>'});
-// Small-circle cache marker for inline / hub maps. Mirrors the
-// HuntScreen list-row iconWrap (28-px circle, PiggyBank glyph on
-// pink for Piggies, MapPin glyph on purple for NIP-GC). When the
-// cache is a Piggy a small zap badge sits at the top-right since
-// every LP Piggy carries a payout-lnurl-w by the NIP-32 label
-// definition. Anchored 1/2 width × full height so the bottom of the
-// circle sits on the actual cache lat/lon.
-const ZAP_BADGE='<g transform="translate(20 0)"><circle cx="6" cy="6" r="7" fill="#FFB200" stroke="#fff" stroke-width="1.5"/><path d="M7.2 2.2 L3.5 7.0 L6.0 7.0 L4.8 9.8 L8.5 5.0 L6.0 5.0 Z" fill="#fff"/></g>';
-const cacheCircle=(piggy)=>L.divIcon({className:'',iconSize:[28,28],iconAnchor:[14,14],html:'<svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg"><circle cx="14" cy="14" r="12" fill="'+(piggy?'#EC008C':'#7A5CFF')+'" stroke="#fff" stroke-width="2"/><g transform="translate(7 7) scale(0.583)" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'+(piggy?PIGGY_SVG:MAPPIN_SVG)+'</g>'+(piggy?ZAP_BADGE:'')+'</svg>'});
+// Small-circle marker base. Used for cache pins AND merchant pins so
+// both surfaces read as the same kind-of-thing (a place with an icon
+// telling you what kind). 28-px circle with the supplied SVG glyph
+// inside; iconAnchor is the centre so the dot's middle sits on the
+// real lat/lon. Zap badge sits top-right (nudged 4 px outside the
+// circle border so it doesn't overlap the inner glyph) — used for
+// LP Piggies, which always carry a payout-lnurl-w per NIP-32 label.
+const ZAP_BADGE='<g transform="translate(20 -2)"><circle cx="6" cy="6" r="6" fill="#FFB200" stroke="#fff" stroke-width="1.5"/><path d="M6.8 1.8 L3.2 7.2 L5.8 7.2 L5.2 10.2 L8.8 4.8 L6.2 4.8 Z" fill="#fff"/></g>';
+const placeCircle=(fillColour,innerSvg,withZap)=>L.divIcon({className:'',iconSize:[28,28],iconAnchor:[14,14],html:'<svg width="32" height="32" viewBox="-2 -2 32 32" xmlns="http://www.w3.org/2000/svg"><circle cx="14" cy="14" r="12" fill="'+fillColour+'" stroke="#fff" stroke-width="2"/><g transform="translate(7 7) scale(0.583)" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'+innerSvg+'</g>'+(withZap?ZAP_BADGE:'')+'</svg>'});
+const cacheCircle=(piggy)=>placeCircle(piggy?'#EC008C':'#7A5CFF',piggy?PIGGY_SVG:MAPPIN_SVG,piggy);
+const merchantCircle=(category,lightning)=>placeCircle(lightning?'#EC008C':'#F7931A',categorySvg(category),false);
 const emitBounds=()=>{const b=map.getBounds();post({type:'bounds',bbox:{minLat:b.getSouth(),maxLat:b.getNorth(),minLon:b.getWest(),maxLon:b.getEast()}});};
 map.on('moveend',emitBounds);
 map.on('zoomend',emitBounds);
@@ -420,12 +440,10 @@ window.LP_setHub=function(d){
     // idiom: a faded ring around the dot communicating "we're not
     // sure of your exact spot to within N metres". Drawn BEFORE the
     // dot so the dot sits on top.
-    if(typeof d.me.accuracy==='number'&&d.me.accuracy>0){
-      meAccuracyCircle=L.circle([d.me.lat,d.me.lng],{radius:d.me.accuracy,color:'#2D88FF',weight:1,opacity:0.4,fillColor:'#2D88FF',fillOpacity:0.12,interactive:false}).addTo(map);
-    }
-    meMarker=L.marker([d.me.lat,d.me.lng],{icon:dot('lp-me',12)}).addTo(map);
+    meAccuracyCircle=drawAccuracyCircle(map,[d.me.lat,d.me.lng],d.me.accuracy);
+    meMarker=L.marker([d.me.lat,d.me.lng],{icon:L.divIcon({className:'',html:meIconHtml(),iconSize:[14,14],iconAnchor:[7,7]})}).addTo(map);
   }
-  d.merchants.forEach(m=>L.marker([m.lat,m.lng],{icon:dot('lp-pin'+(m.lightning?'':' onchain'),14)}).addTo(merchantLayer));
+  d.merchants.forEach(m=>L.marker([m.lat,m.lng],{icon:merchantCircle(m.category,m.lightning)}).addTo(merchantLayer));
   d.caches.forEach(c=>L.marker([c.lat,c.lng],{icon:d.cachePin?pinIcon(c.kind==='piggy'):cacheCircle(c.kind==='piggy')}).addTo(cacheLayer));
   d.events.forEach(e=>L.marker([e.lat,e.lng],{icon:dot('lp-event',14)}).addTo(eventLayer));
   // Only re-centre on the very first LP_setHub. After that the user's
