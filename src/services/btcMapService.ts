@@ -408,8 +408,24 @@ const hydrateLastResult = async (): Promise<void> => {
     try {
       const f = lastResultFile();
       if (!f.exists) return;
-      const parsed = JSON.parse(await f.text()) as BtcMapPlace[];
+      // [PerfBlock] hydrating the merchant cache file means a single
+      // synchronous JSON.parse on however much was written last time
+      // (the search result can be 100s of KB for dense urban bboxes).
+      // Suspected contributor to the post-mount JS-thread freeze
+      // tracked in #554 — bracket so we can confirm.
+      const __t0 = performance.now();
+      const raw = await f.text();
+      const __tParse = performance.now();
+      const parsed = JSON.parse(raw) as BtcMapPlace[];
+      const __tDone = performance.now();
       if (Array.isArray(parsed) && lastResult.length === 0) lastResult = parsed;
+      const readMs = Math.round(__tParse - __t0);
+      const parseMs = Math.round(__tDone - __tParse);
+      if (readMs + parseMs > 100) {
+        console.log(
+          `[PerfBlock] hydrateLastResult: ${Array.isArray(parsed) ? parsed.length : 0} places, read ${readMs}ms + parse ${parseMs}ms (raw ${raw.length}B)`,
+        );
+      }
     } catch {
       // Corrupt cache shouldn't break anything — happy path re-fetches.
     }

@@ -158,6 +158,9 @@ export const subscribeComments = (
  *                  (default ['bitcoin','lightning','meetup'])
  * @param onEvent   called per parsed event
  */
+// [PerfBlock] same shape as subscribeNearbyCaches above — bracket
+// the event burst so we can see if NIP-52 floods are contributing
+// to the post-mount freezes. #554.
 export const subscribeNearbyEvents = (
   prefixes: string[],
   onEvent: (parsed: ParsedEvent) => void,
