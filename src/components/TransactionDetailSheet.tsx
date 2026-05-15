@@ -22,11 +22,19 @@ import { createDmSender } from '../utils/nostrDm';
 import { truncateMiddle, formatFriendlyDateTime } from '../utils/format';
 import { getTxCategory } from '../utils/txCategory';
 import { isSupportedImageUrl } from '../utils/imageUrl';
-import TransactionTypeIcon from './TransactionTypeIcon';
+import TransactionTypeIcon, { TransactionIconState } from './TransactionTypeIcon';
 import type { ZapCounterpartyInfo } from '../types/wallet';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { BOLTZ_SUPPORT_NPUB, dmRecipient } from '../constants/npubs';
-import { Copy, Zap, MessageCircle } from 'lucide-react-native';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Copy,
+  Info,
+  MessageCircle,
+  XCircle,
+  Zap,
+} from 'lucide-react-native';
 
 export interface TransactionDetailData {
   type: 'incoming' | 'outgoing' | string;
@@ -75,6 +83,12 @@ interface Props {
   onZapCounterparty?: (contact: CounterpartyContact) => void;
   /** Fired when the user taps the Message icon in the recipient/sender card. */
   onMessageCounterparty?: (contact: CounterpartyContact) => void;
+  /** Mirrors the badge state on the originating row (`TransactionTypeIcon`).
+   *  Decoupled from the live Boltz polling so the header icon stays in
+   *  lockstep with what the user just tapped in the list — and so the
+   *  explanation callout below the status pill matches what the badge
+   *  promised. See issue #519. */
+  iconState?: TransactionIconState;
 }
 
 type BoltzSwapView = {
@@ -94,6 +108,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
   onCounterpartyPress,
   onZapCounterparty,
   onMessageCounterparty,
+  iconState,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createTransactionDetailSheetStyles(colors), [colors]);
@@ -153,18 +168,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
     };
   }, [visible, tx, activeWallet]);
 
-  // Match Boltz-minted invoice memos ("Send to BTC address" /
-  // "Receive from BTC address") — settled swaps don't carry tx.swapId.
-  const isBoltzSwap = useMemo(() => {
-    if (!tx) return false;
-    if (tx.swapId) return true;
-    if (tx.description) {
-      if (/boltz swap/i.test(tx.description)) return true;
-      if (/send to btc|send to bitcoin/i.test(tx.description)) return true;
-      if (/receive from btc|receive from bitcoin/i.test(tx.description)) return true;
-    }
-    return false;
-  }, [tx]);
+  const isBoltzSwap = useMemo(() => swapRecoveryService.isBoltzTransaction(tx), [tx]);
 
   useEffect(() => {
     let cancelled = false;
@@ -269,7 +273,135 @@ const TransactionDetailSheet: React.FC<Props> = ({
     return { style: styles.badgeConfirmed, text: 'Confirmed' };
   }, [tx, swap]);
 
+  /** Plain-English explanation of where this Boltz swap is right now.
+   *  Only set when the row is a Boltz swap — vanilla LN/on-chain rows
+   *  don't need it. Combines the icon-state the row decided on with the
+   *  live `swap` poll, so the copy stays accurate even after the user
+   *  taps in. */
+  const boltzExplanation = useMemo(() => {
+    if (!tx || !isBoltzSwap) return null;
+    const pending = !tx.settled_at && !tx.blockHeight;
+    // Prefer live Boltz poll results (`swap.*`) over `iconState` whenever
+    // they're available: `iconState` is snapshotted from the row tap and
+    // can be stale, whereas the live poll is the latest server-side truth.
+    // Fall through to `iconState`-driven copy only when the live state is
+    // ambiguous or hasn't loaded yet.
+    if (swap?.terminalFailure) {
+      return {
+        tone: 'failure' as const,
+        heading: 'Swap failed',
+        body: `This swap ended at status ${swap.status} and can’t complete. Any locked funds auto-refund through Boltz; if you don’t see the refund, message Boltz support with the swap ID below.`,
+      };
+    }
+    if (swap?.terminalSuccess) {
+      const incoming = tx.type === 'incoming';
+      return {
+        tone: 'success' as const,
+        heading: 'Swap complete',
+        body: incoming
+          ? 'Boltz received your on-chain payment and settled the Lightning side — funds are in your Lightning wallet.'
+          : 'Lightning was paid and Boltz’s on-chain lockup has been claimed to your Bitcoin address.',
+      };
+    }
+    // Live poll says claimable AND the row is flagged for attention: our
+    // claim hasn't broadcast — show the actionable warning callout.
+    if (swap?.claimable && iconState === 'attention') {
+      return {
+        tone: 'warning' as const,
+        heading: 'Needs attention',
+        body: 'Lightning was paid and the Boltz lockup confirmed, but the on-chain claim hasn’t broadcast yet. Your funds are safe — tap Retry claim below if it hasn’t cleared.',
+      };
+    }
+    // Live poll says claimable, but the row isn't (yet) in the attention
+    // set — most likely the claim is mid-broadcast on the happy path.
+    if (swap?.claimable) {
+      return {
+        tone: 'info' as const,
+        heading: 'Claim broadcasting',
+        body: 'Boltz has locked funds on-chain. The claim transaction is broadcasting and usually confirms in a few minutes.',
+      };
+    }
+    // No live swap data yet — trust the row-tap iconState as a fallback.
+    if (iconState === 'attention') {
+      return {
+        tone: 'warning' as const,
+        heading: 'Needs attention',
+        body: 'Lightning was paid and the Boltz lockup confirmed, but the on-chain claim hasn’t broadcast yet. Your funds are safe — tap Retry claim below if it hasn’t cleared.',
+      };
+    }
+    if (iconState === 'done') {
+      const incoming = tx.type === 'incoming';
+      return {
+        tone: 'success' as const,
+        heading: 'Swap complete',
+        body: incoming
+          ? 'Boltz received your on-chain payment and settled the Lightning side — funds are in your Lightning wallet.'
+          : 'Lightning was paid and Boltz’s on-chain lockup has been claimed to your Bitcoin address.',
+      };
+    }
+    if (pending) {
+      if (swap?.status === 'invoice.set' || swap?.status === 'swap.created') {
+        return {
+          tone: 'info' as const,
+          heading: 'Swap in progress',
+          body: 'Waiting for the Lightning leg of this swap to settle…',
+        };
+      }
+      return {
+        tone: 'info' as const,
+        heading: 'Swap in progress',
+        body: swap?.status
+          ? `Current Boltz status: ${swap.status}.`
+          : 'Checking swap status with Boltz…',
+      };
+    }
+    return null;
+  }, [tx, isBoltzSwap, iconState, swap]);
+
+  const calloutTone = boltzExplanation
+    ? (() => {
+        switch (boltzExplanation.tone) {
+          case 'warning':
+            return {
+              bg: colors.zapYellowLight,
+              accent: colors.zapYellow,
+              ink: colors.zapYellowDark,
+              Icon: AlertTriangle,
+            };
+          case 'success':
+            return {
+              bg: colors.greenLight,
+              accent: colors.green,
+              ink: colors.greenDark,
+              Icon: CheckCircle2,
+            };
+          case 'failure':
+            return {
+              bg: colors.redLight,
+              accent: colors.red,
+              ink: colors.red,
+              Icon: XCircle,
+            };
+          case 'info':
+          default:
+            return {
+              bg: colors.brandPinkLight,
+              accent: colors.brandPink,
+              ink: colors.textBody,
+              Icon: Info,
+            };
+        }
+      })()
+    : null;
+
   const effectiveSwapId = tx?.swapId || resolvedSwapId || null;
+
+  // Claim txid (the on-chain tx that swept the lockup to our destination)
+  // for outgoing reverse swaps we performed the claim on. Sourced from
+  // swapRecoveryService's claimed-hash cache — `null` means we know the
+  // swap was claimed but don't have the txid (terminal-success poll), and
+  // `undefined` means the claim isn't recorded at all.
+  const claimTxId = tx?.paymentHash ? swapRecoveryService.getClaimTxId(tx.paymentHash) : undefined;
 
   const boltzInitialMessage = useMemo(() => {
     if (!tx) return '';
@@ -282,6 +414,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
     if (effectiveSwapId) lines.push(`• Swap ID: ${effectiveSwapId}`);
     if (swap?.status) lines.push(`• Swap status: ${swap.status}`);
     if (swap?.lockupTxId) lines.push(`• Lockup tx: ${swap.lockupTxId}`);
+    if (claimTxId) lines.push(`• Claim tx: ${claimTxId}`);
     if (tx.txid) lines.push(`• On-chain tx: ${tx.txid}`);
     if (tx.paymentHash) lines.push(`• Payment hash: ${tx.paymentHash}`);
     lines.push(`• Direction: ${isIncoming ? 'received' : 'sent'}`);
@@ -290,7 +423,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
     lines.push('', 'Details:');
     lines.push('(describe the issue)');
     return lines.join('\n');
-  }, [tx, effectiveSwapId, swap]);
+  }, [tx, effectiveSwapId, swap, claimTxId]);
 
   if (!tx) return null;
 
@@ -340,7 +473,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
         <BottomSheetView style={styles.content}>
           <View style={styles.header}>
             <View style={styles.headerIcon}>
-              <TransactionTypeIcon category={getTxCategory(tx)} size={56} />
+              <TransactionTypeIcon category={getTxCategory(tx)} size={56} state={iconState} />
             </View>
             <Text
               style={[
@@ -358,6 +491,46 @@ const TransactionDetailSheet: React.FC<Props> = ({
                 <Text style={styles.badgeText}>{statusBadge.text}</Text>
               </View>
             ) : null}
+            {boltzExplanation && calloutTone
+              ? (() => {
+                  const CalloutIcon = calloutTone.Icon;
+                  return (
+                    <View
+                      style={[
+                        styles.callout,
+                        { backgroundColor: calloutTone.bg, borderLeftColor: calloutTone.accent },
+                      ]}
+                      // `accessible` is required for the combined
+                      // accessibilityLabel below to be announced as a
+                      // single element to screen readers — without it
+                      // the role/label can be skipped or split across
+                      // the child Text nodes. `accessibilityLiveRegion`
+                      // makes warning/failure callouts announce
+                      // unprompted when they appear, matching the
+                      // BrandedAlert convention used elsewhere in the
+                      // app for actionable callouts.
+                      accessible
+                      accessibilityRole={boltzExplanation.tone === 'warning' ? 'alert' : undefined}
+                      accessibilityLiveRegion={
+                        boltzExplanation.tone === 'warning' || boltzExplanation.tone === 'failure'
+                          ? 'assertive'
+                          : 'polite'
+                      }
+                      accessibilityLabel={`${boltzExplanation.heading}: ${boltzExplanation.body}`}
+                    >
+                      <CalloutIcon size={24} color={calloutTone.ink} strokeWidth={2.5} />
+                      <View style={styles.calloutBody}>
+                        <Text style={[styles.calloutHeading, { color: calloutTone.ink }]}>
+                          {boltzExplanation.heading}
+                        </Text>
+                        <Text style={[styles.calloutText, { color: calloutTone.ink }]}>
+                          {boltzExplanation.body}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })()
+              : null}
           </View>
 
           {zapCounterparty ? (
@@ -471,6 +644,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
           ) : null}
 
           {tx.txid ? <CopyRow label="On-chain tx" value={tx.txid} onCopy={copyValue} /> : null}
+          {claimTxId ? <CopyRow label="Claim tx" value={claimTxId} onCopy={copyValue} /> : null}
 
           {swap?.lockupTxId ? (
             <CopyRow label="Lockup tx" value={swap.lockupTxId} onCopy={copyValue} />

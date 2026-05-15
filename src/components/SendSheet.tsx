@@ -454,10 +454,13 @@ const SendSheet: React.FC<Props> = ({
               onReplyTimeout: handleReplyTimeout,
             });
             const lockup = await boltzService.waitForLockup(swap.id, 120000);
-            await boltzService.claimSwap(swap, lockup, invoiceData);
-            // Success → drop the recovery record.
+            const claimTxId = await boltzService.claimSwap(swap, lockup, invoiceData);
+            // Success → drop the recovery record and record the claim so
+            // TransactionList can badge this row 'done' and the detail
+            // sheet can show the broadcast claim txid.
             await SecureStore.deleteItemAsync(`boltz_swap_${swap.id}`);
             await swapRecoveryService.unregisterPendingSwap(swap.id);
+            await swapRecoveryService.recordClaimedFromPreimage(swap.preimage, claimTxId);
           } catch (e) {
             // Leave the persisted record in place so swapRecoveryService can
             // retry on the next launch. The bare error from claimSwap /
