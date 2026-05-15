@@ -9,8 +9,10 @@ import {
   ActivityIndicator,
   Image,
   Linking,
+  Modal,
   Platform,
 } from 'react-native';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
@@ -28,6 +30,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   Clipboard as ClipboardIcon,
+  QrCode,
   Globe,
   ImagePlus,
   Lock,
@@ -123,6 +126,12 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   // map-based location picker (step 4).
   const [nfcSheetVisible, setNfcSheetVisible] = useState(false);
   const [locationPickerVisible, setLocationPickerVisible] = useState(false);
+  // QR-scan modal for the LNURL input. Opened from the scan icon next
+  // to the paste button on step 2. Permission state is held by
+  // expo-camera's hook — null until first request resolves; we present
+  // a Grant button when the user has denied or not yet asked.
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   // Geocache-info step (step 5) — finder-facing metadata that becomes
   // the kind 37516 listing. Everything has a NIP-GC default so the
   // step can be skipped through.
@@ -242,6 +251,40 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       // Clipboard read can fail silently on cold start; nothing user-actionable.
     }
   }, []);
+
+  // Open the QR scanner — if permission was already granted we skip
+  // straight to the camera; otherwise the modal shows a Grant button
+  // and the user can request access in-context. The scanner self-
+  // closes on the first successful read.
+  const handleOpenScanner = useCallback(async () => {
+    if (!cameraPermission?.granted) {
+      const result = await requestCameraPermission();
+      if (!result.granted) {
+        // User denied — open the modal anyway so they can see the
+        // "Camera access needed" copy + retry the prompt.
+      }
+    }
+    setScannerOpen(true);
+  }, [cameraPermission?.granted, requestCameraPermission]);
+
+  // Camera scanner callback — fires once when the native barcode
+  // detector recognises a QR. We strip an optional "lightning:"
+  // prefix because LNURL QRs in the wild come both ways; the
+  // validation step accepts either, but the input field reads
+  // cleaner without the prefix.
+  const handleBarCodeScanned = useCallback(
+    ({ data }: { data: string }) => {
+      if (!scannerOpen) return;
+      const trimmed = data.trim();
+      const lnurlOnly = /^lightning:/i.test(trimmed)
+        ? trimmed.slice('lightning:'.length).trim()
+        : trimmed;
+      setLnurl(lnurlOnly);
+      if (stage.kind === 'validated') setStage({ kind: 'idle' });
+      setScannerOpen(false);
+    },
+    [scannerOpen, stage.kind],
+  );
 
   const handleValidate = useCallback(async () => {
     if (!lnurl.trim()) {
@@ -695,6 +738,14 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 multiline
                 testID="hunt-piggy-lnurl-input"
               />
+              <TouchableOpacity
+                onPress={handleOpenScanner}
+                style={styles.pasteButton}
+                accessibilityLabel="Scan LNURL QR code"
+                testID="hunt-piggy-scan-button"
+              >
+                <QrCode size={18} color={colors.brandPink} strokeWidth={2} />
+              </TouchableOpacity>
               <TouchableOpacity
                 onPress={handlePaste}
                 style={styles.pasteButton}
@@ -1187,6 +1238,52 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         onWritten={handleNfcWritten}
       />
 
+      {/* Step 2 — QR scanner for the LNURL input. Full-screen modal
+          (`Modal` from react-native, no extra dep) so the camera has
+          unambiguous focus; closes on first scan via handleBarCodeScanned
+          or on the X button. */}
+      <Modal
+        visible={scannerOpen}
+        animationType="slide"
+        onRequestClose={() => setScannerOpen(false)}
+        statusBarTranslucent
+      >
+        <View style={styles.scannerRoot}>
+          {!cameraPermission?.granted ? (
+            <View style={styles.scannerPermission}>
+              <Text style={styles.scannerPermissionText}>
+                Camera access needed to scan a QR code.
+              </Text>
+              <TouchableOpacity
+                style={styles.primaryButton}
+                onPress={requestCameraPermission}
+                testID="hunt-piggy-scan-grant"
+              >
+                <Text style={styles.primaryButtonText}>Grant Permission</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <CameraView
+              style={styles.scannerCamera}
+              facing="back"
+              barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+              onBarcodeScanned={handleBarCodeScanned}
+            />
+          )}
+          <View style={styles.scannerHintBar}>
+            <Text style={styles.scannerHint}>Point at an LNURL QR code</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.scannerCloseButton}
+            onPress={() => setScannerOpen(false)}
+            accessibilityLabel="Close scanner"
+            testID="hunt-piggy-scan-close"
+          >
+            <X size={22} color={colors.white} strokeWidth={2.5} />
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
       {/* Step 4 — interactive map location picker. */}
       <LocationPickerSheet
         visible={locationPickerVisible}
@@ -1586,7 +1683,7 @@ const createStyles = (colors: Palette) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 12,
-      marginTop: 18,
+      marginTop: 4,
       marginBottom: 8,
     },
     stepBadge: {
@@ -1677,7 +1774,7 @@ const createStyles = (colors: Palette) =>
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      marginTop: 16,
+      marginTop: 8,
       marginBottom: 8,
       gap: 12,
     },
@@ -1694,6 +1791,49 @@ const createStyles = (colors: Palette) =>
       fontSize: 14,
       fontWeight: '700',
       color: colors.textHeader,
+    },
+    // ---- QR scanner modal -------------------------------------------------
+    scannerRoot: { flex: 1, backgroundColor: '#000' },
+    scannerCamera: { flex: 1 },
+    scannerPermission: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 32,
+      gap: 16,
+      backgroundColor: '#000',
+    },
+    scannerPermissionText: {
+      color: colors.white,
+      fontSize: 15,
+      textAlign: 'center',
+      lineHeight: 22,
+    },
+    scannerHintBar: {
+      position: 'absolute',
+      bottom: 48,
+      left: 0,
+      right: 0,
+      alignItems: 'center',
+    },
+    scannerHint: {
+      color: colors.white,
+      fontSize: 14,
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      backgroundColor: 'rgba(0,0,0,0.55)',
+      borderRadius: 100,
+    },
+    scannerCloseButton: {
+      position: 'absolute',
+      top: 56,
+      right: 20,
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: 'rgba(0,0,0,0.55)',
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     stepNavNextButton: {
       flex: 1,
