@@ -183,6 +183,11 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // down/re-open NIP-GC + NIP-52 subscriptions in one gesture.
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  // Mirrors finger-on-map state from ExploreMiniMap's onInteractionChange.
+  // While true we disable the outer ScrollView's scroll (which also
+  // disables pull-to-refresh) so a vertical pan on the inline map pans
+  // Leaflet instead of refreshing the page.
+  const [mapTouched, setMapTouched] = useState(false);
   // Stale-while-revalidate: paint the last-known merchant set from disk
   // straight away so the "Places near you" rail isn't empty on a cold
   // start while we wait for a GPS fix + the network round-trip below.
@@ -466,6 +471,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         style={styles.scrollArea}
         contentContainerStyle={localStyles.scrollContent}
         showsVerticalScrollIndicator={false}
+        scrollEnabled={!mapTouched}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -499,6 +505,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
               events={[...events.values()]}
               loading={merchantsLoading && caches.size === 0}
               onTapMap={() => navigation.navigate('Map')}
+              onInteractionChange={setMapTouched}
               interactive
               // Feed the BTC Map category keys present in the current
               // merchant set into the Legend sheet so it can show the

@@ -110,6 +110,10 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   const [selectedTerrains, setSelectedTerrains] = useState<Set<number>>(new Set());
   // Whether the bottom-sheet filter UI is open.
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
+  // Mirrors ExploreMiniMap's onInteractionChange: while a finger is on
+  // the inline map we disable the FlatList's own scrolling so vertical
+  // pans drive Leaflet instead of shifting the list under the user.
+  const [mapTouched, setMapTouched] = useState(false);
   // Cache type filter — empty set = show every type (default). Built
   // dynamically from whatever types are present in the current caches
   // dataset; selected entries OR together so the list doesn't filter
@@ -303,6 +307,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
         data={filteredCaches}
         keyExtractor={({ cache }) => cache.coord}
         contentContainerStyle={styles.listContent}
+        scrollEnabled={!mapTouched}
         ListHeaderComponent={
           <View>
             {/* Inline interactive map — drag, pinch-zoom, recenter on
@@ -327,6 +332,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
                 events={[]}
                 onTapMap={() => navigation.navigate('Map')}
                 onBoundsChange={setMapBbox}
+                onInteractionChange={setMapTouched}
                 interactive
               />
             </View>

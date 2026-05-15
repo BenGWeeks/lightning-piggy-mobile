@@ -163,6 +163,10 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
   // doesn't filter to zero (most listings carry 0-2 categories).
   const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
+  // Mirrors ExploreMiniMap's onInteractionChange. While truthy we
+  // freeze the FlatList's scrolling so vertical taps + drags on the
+  // inline map don't accidentally trigger pull-to-refresh.
+  const [mapTouched, setMapTouched] = useState(false);
   const availableCategories = useMemo(() => {
     const seen = new Set<string>();
     for (const p of places) for (const c of p.categories ?? []) seen.add(c);
@@ -252,6 +256,7 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
         }
         keyExtractor={({ place }) => String(place.id)}
         contentContainerStyle={styles.listContent}
+        scrollEnabled={!mapTouched}
         refreshControl={
           <RefreshControl
             refreshing={loading && places.length > 0}
@@ -272,6 +277,7 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
                 loading={loading && sortedPlaces.length === 0}
                 onTapMap={() => navigation.navigate('Map')}
                 onBoundsChange={setMapBbox}
+                onInteractionChange={setMapTouched}
                 defaultZoom={10}
               />
             </View>

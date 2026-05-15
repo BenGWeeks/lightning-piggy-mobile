@@ -87,6 +87,17 @@ interface Props {
    * the parent omits and the sheet just shows pin-colour idioms.
    */
   legendCategories?: string[];
+  /**
+   * Fires `true` the moment the user starts touching the inline map and
+   * `false` when the touch ends (or is cancelled). Callers wrap the map
+   * in a scrollable parent (ScrollView with RefreshControl, FlatList)
+   * use this to disable scrolling / pull-to-refresh for the duration —
+   * otherwise a vertical pan that starts on the map gets stolen by the
+   * parent and either refreshes the page or scrolls the list under the
+   * user's finger. Notification-only: doesn't claim the gesture, so
+   * Leaflet's own pan/pinch on the interactive map still works.
+   */
+  onInteractionChange?: (active: boolean) => void;
 }
 
 /**
@@ -121,6 +132,7 @@ export const ExploreMiniMap: React.FC<Props> = ({
   userAccuracyMetres = null,
   interactive = false,
   legendCategories,
+  onInteractionChange,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -149,6 +161,15 @@ export const ExploreMiniMap: React.FC<Props> = ({
     const js = `window.LP_recenter && window.LP_recenter(); true;`;
     webviewRef.current.injectJavaScript(js);
   }, [ready]);
+
+  // Notify the parent every time a finger lands on / leaves the map.
+  // The parent uses these to disable its own scroll + pull-to-refresh
+  // for the duration; without that, a vertical pan that starts on an
+  // inline map either pulls the page or scrolls the list under the
+  // user's finger instead of panning Leaflet. onTouch* props don't
+  // claim the gesture, so the WebView still gets its native touches.
+  const handleTouchStart = useCallback(() => onInteractionChange?.(true), [onInteractionChange]);
+  const handleTouchEnd = useCallback(() => onInteractionChange?.(false), [onInteractionChange]);
 
   // Re-emit pins whenever data changes after the bridge is up.
   useEffect(() => {
@@ -305,7 +326,13 @@ export const ExploreMiniMap: React.FC<Props> = ({
 
   if (interactive) {
     return (
-      <View style={containerStyle} testID="explore-minimap">
+      <View
+        style={containerStyle}
+        testID="explore-minimap"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
+      >
         {children}
         {/* LegendSheet only on interactive maps — non-interactive
             previews don't show the Legend button so there'd be no
@@ -320,15 +347,26 @@ export const ExploreMiniMap: React.FC<Props> = ({
     );
   }
   return (
-    <TouchableOpacity
-      style={containerStyle}
-      activeOpacity={0.85}
-      onPress={onTapMap}
-      accessibilityLabel="Open full map"
-      testID="explore-minimap"
+    // Wrapping View captures touch lifecycle (notification-only) so the
+    // parent scroll container can freeze itself while the user is
+    // interacting with the map. TouchableOpacity's typing doesn't
+    // expose onTouch* — putting it on the inner View keeps types happy
+    // without losing the tap-to-open behaviour.
+    <View
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
     >
-      {children}
-    </TouchableOpacity>
+      <TouchableOpacity
+        style={containerStyle}
+        activeOpacity={0.85}
+        onPress={onTapMap}
+        accessibilityLabel="Open full map"
+        testID="explore-minimap"
+      >
+        {children}
+      </TouchableOpacity>
+    </View>
   );
 };
 
