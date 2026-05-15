@@ -51,7 +51,7 @@ type Stage =
 const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { lnurl } = route.params;
+  const { lnurl, coord } = route.params;
   const { activeWalletId, makeInvoice } = useWallet();
 
   const [stage, setStage] = useState<Stage>({ kind: 'resolving' });
@@ -101,7 +101,9 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
       const result = await claimLnurlWithdraw(stage.params, async (sats, memo) =>
         makeInvoice(sats, memo),
       );
-      await recordClaim({ lnurl, sats: result.sats });
+      // Pass `piggyId` so HuntPiggyDetailScreen can match the claim by
+      // coord — the detail screen never sees the bearer LNURL string.
+      await recordClaim({ lnurl, sats: result.sats, piggyId: coord });
       setStage({ kind: 'claimed', params: stage.params, sats: result.sats });
     } catch (e) {
       const reason =
@@ -112,7 +114,7 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
       const sleepy = /wait[_ ]?time|cooldown|budget|sleeping|exhausted|already used/i.test(reason);
       setStage(sleepy ? { kind: 'sleeping', reason } : { kind: 'error', reason });
     }
-  }, [stage, activeWalletId, makeInvoice, lnurl]);
+  }, [stage, activeWalletId, makeInvoice, lnurl, coord]);
 
   // ----- render -----------------------------------------------------------
 

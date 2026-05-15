@@ -677,6 +677,106 @@ export async function writeHuntTagToTag(
 }
 
 /**
+ * Parsed payload of a Hide-a-Piglet NFC tag. Mirror of `HuntTagPayload`
+ * on the writer side: `lightningpiggy://hunt/<coord>`, `nostr:naddr1…`,
+ * and optionally `lightning:lnurl1…`. The reader returns every record it
+ * finds — the caller decides which fields are mandatory for the flow
+ * (e.g. claim flow requires `lnurl`, deep-link routing only needs `lp`).
+ */
+export interface HuntTagReadResult {
+  /** The lightningpiggy://hunt/<coord> deep link (record 1). */
+  lpUrl: string | null;
+  /** Derived `<coord>` portion of the lightningpiggy URL — convenience
+   * for callers that want to verify the tag matches the cache currently
+   * on screen before accepting the claim. */
+  coord: string | null;
+  /** nostr:naddr1… reference (record 2). */
+  nostrUri: string | null;
+  /** lightning:lnurl1… bearer-token URI (record 3, optional). */
+  lightningUri: string | null;
+  /** Bare LNURL (with the `lightning:` scheme stripped). */
+  lnurl: string | null;
+}
+
+interface ReadHuntTagOpts {
+  /** Fires once a tag is in range, before record extraction. */
+  onTagDetected?: () => void;
+}
+
+// Walk every NDEF record on the tag and bucket URIs by their scheme so
+// the caller can ask "what was on this tag?" without re-implementing
+// record decoding. Mirrors `extractNdefText` above but returns ALL URIs
+// rather than the first match.
+function collectNdefUris(tag: TagEvent): string[] {
+  const out: string[] = [];
+  const ndefRecords = tag.ndefMessage;
+  if (!ndefRecords || ndefRecords.length === 0) return out;
+  for (const record of ndefRecords) {
+    const tnf = record.tnf;
+    const payload = record.payload;
+    if (!payload || payload.length === 0) continue;
+    if (tnf === 1) {
+      const typeArr = record.type;
+      const typeStr =
+        typeof typeArr === 'string' ? typeArr : String.fromCharCode(...(typeArr as number[]));
+      if (typeStr === 'U') {
+        const bytes = new Uint8Array(payload as number[]);
+        const decoded = Ndef.uri.decodePayload(bytes as unknown as Uint8Array);
+        if (decoded) out.push(decoded);
+      }
+    } else if (tnf === 3) {
+      // Absolute URI record (less common but spec-allowed).
+      out.push(String.fromCharCode(...payload));
+    }
+  }
+  return out;
+}
+
+/**
+ * Open a foreground NFC reader session and parse the next tag held to
+ * the phone as a Hide-a-Piglet payload. Used by the finder claim flow
+ * (HuntPiggyDetailScreen → NfcReadSheet) to extract the LNURL bearer
+ * token from record 3 of a Piglet tag. The LNURL is never on the public
+ * Nostr listing — it ONLY lives on the tag — so a tap is the only way
+ * to claim.
+ */
+export async function readHuntTagPayload(
+  opts: ReadHuntTagOpts = {},
+): Promise<HuntTagReadResult> {
+  try {
+    if (!(await ensureNfcStarted())) {
+      throw new Error('NFC unavailable on this device');
+    }
+    await NfcManager.requestTechnology(NfcTech.Ndef, READER_MODE_OPTS);
+    const tag = await NfcManager.getTag();
+    if (!tag) throw new Error('No tag detected');
+    opts.onTagDetected?.();
+    const uris = collectNdefUris(tag);
+    console.log(`[NFC] readHuntTagPayload: ${uris.length} URIs on tag`);
+    let lpUrl: string | null = null;
+    let nostrUri: string | null = null;
+    let lightningUri: string | null = null;
+    for (const u of uris) {
+      const lower = u.toLowerCase();
+      if (!lpUrl && lower.startsWith('lightningpiggy://')) lpUrl = u;
+      else if (!nostrUri && lower.startsWith('nostr:')) nostrUri = u;
+      else if (!lightningUri && lower.startsWith('lightning:')) lightningUri = u;
+    }
+    // Derive the bare coord from the LP URL — strips both
+    // `lightningpiggy://hunt/` and any optional query string.
+    let coord: string | null = null;
+    if (lpUrl) {
+      const m = lpUrl.match(/^lightningpiggy:\/\/hunt\/([^?#]+)/i);
+      if (m) coord = decodeURIComponent(m[1]);
+    }
+    const lnurl = lightningUri ? lightningUri.replace(/^lightning:/i, '').trim() : null;
+    return { lpUrl, coord, nostrUri, lightningUri, lnurl };
+  } finally {
+    NfcManager.cancelTechnologyRequest().catch(() => {});
+  }
+}
+
+/**
  * Cancel any ongoing NFC operation.
  */
 export function cancelNfcOperation(): void {

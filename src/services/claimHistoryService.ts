@@ -102,6 +102,19 @@ export const lastClaimFor = async (lnurl: string): Promise<ClaimHistoryEntry | n
   return list.find((e) => e.lnurlHash === target) ?? null;
 };
 
+/**
+ * Returns the most-recent claim against this NIP-GC cache coord, or null.
+ * Used by HuntPiggyDetailScreen to unlock the find-log composer after a
+ * successful claim — keyed by `piggyId` rather than LNURL because the
+ * detail screen never sees the bearer string, only the public coord.
+ */
+export const lastClaimForPiggyId = async (
+  piggyId: string,
+): Promise<ClaimHistoryEntry | null> => {
+  const list = await loadClaimHistory();
+  return list.find((e) => e.piggyId === piggyId) ?? null;
+};
+
 const isValidEntry = (v: unknown): v is ClaimHistoryEntry => {
   if (!v || typeof v !== 'object') return false;
   const e = v as Record<string, unknown>;

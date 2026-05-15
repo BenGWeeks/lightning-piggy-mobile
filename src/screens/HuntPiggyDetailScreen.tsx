@@ -62,7 +62,9 @@ import {
 } from '../services/nostrPlacesPublisher';
 import { subscribeFindLogZaps } from '../services/findLogZapsService';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
-import { lastClaimFor } from '../services/claimHistoryService';
+import { lastClaimForPiggyId } from '../services/claimHistoryService';
+import NfcReadSheet from '../components/NfcReadSheet';
+import type { HuntTagReadResult } from '../services/nfcService';
 
 // Composite nav type — needed so we can `navigate('Conversation', …)`
 // when the hider's profile sheet's Message action is tapped. The
@@ -173,6 +175,19 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     [],
   );
   const [hasClaimed, setHasClaimed] = useState(false);
+  // Finder NFC reader sheet — opens on "Scan the Piglet" tap. The sheet
+  // owns its own foreground reader session; on a successful read we
+  // navigate to HuntFoundScreen with the extracted LNURL, which is what
+  // runs the actual LNURL-withdraw → invoice → callback claim path.
+  const [readSheetOpen, setReadSheetOpen] = useState(false);
+  const handleTagRead = useCallback(
+    (result: HuntTagReadResult) => {
+      setReadSheetOpen(false);
+      if (!result.lnurl) return;
+      navigation.navigate('HuntFound', { lnurl: result.lnurl, coord });
+    },
+    [navigation, coord],
+  );
   // Hero slot toggles between the cache photo and a map; defaults to the
   // photo when one exists, otherwise the render falls back to the map.
   const [heroView, setHeroView] = useState<'photo' | 'map'>('photo');
@@ -275,18 +290,15 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   useEffect(() => {
     if (!cache?.isLpPiggy) return;
     let cancelled = false;
-    // Soft-claim signal: any local claim within the last 24h surfaces
-    // the "Drop a log" CTA. We look up by every g tag's geohash since
-    // we don't store a direct cache↔lnurl mapping locally — but for v1
-    // we just check the local history for ANY claim inside the cache's
-    // 5-char geohash radius. The result is permissive (false positives
-    // are fine, the UX is "you've been near a cache, post a log").
+    // Hard-claim signal: HuntFoundScreen records the claim with the
+    // cache coord as `piggyId`, so we look it up by coord and unlock
+    // the find-log composer when there's a match. The previous
+    // lastClaimFor(coord) call hashed the coord as if it were an LNURL
+    // and never matched anything — that was a soft-claim heuristic
+    // placeholder; we replaced it with the coord lookup now that the
+    // finder NFC flow records the link.
     (async () => {
-      // Simpler heuristic for now: assume the claim was recorded against
-      // the same lnurl we'd see from this cache's physical tag — which we
-      // don't have. Just enable the composer for any user who's claimed
-      // ANY Piggy in the last 24 h. Refine in M8.
-      const recent = await lastClaimFor(coord);
+      const recent = await lastClaimForPiggyId(coord);
       if (!cancelled && recent && Date.now() / 1000 - recent.claimedAt < 24 * 60 * 60) {
         setHasClaimed(true);
       }
@@ -350,7 +362,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     }
     setPosting(true);
     try {
-      const claim = await lastClaimFor(coord);
+      const claim = await lastClaimForPiggyId(coord);
       const unsigned = buildFoundLog(coord, composerText.trim() || 'Found it!', {
         imageUrl: composerPhotoUrl ?? undefined,
         sats: claim?.sats,
@@ -564,19 +576,21 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   ) : null}
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.actionButtonPrimary, !canLog && styles.claimButtonDisabled]}
-                  disabled={!canLog}
-                  onPress={() => setComposerOpen(true)}
-                  accessibilityState={{ disabled: !canLog }}
+                  style={styles.actionButtonPrimary}
+                  onPress={() =>
+                    canLog ? setComposerOpen(true) : setReadSheetOpen(true)
+                  }
                   accessibilityLabel={
                     canLog
                       ? 'Claim found — log your find'
-                      : 'Claim found — scan the Piglet to unlock'
+                      : 'Scan the Piglet to claim the prize'
                   }
                   testID="hunt-piggy-detail-claim-button"
                 >
                   <CheckCircle2 size={18} color={colors.white} strokeWidth={2.5} />
-                  <Text style={styles.actionButtonPrimaryText}>Claim found</Text>
+                  <Text style={styles.actionButtonPrimaryText}>
+                    {canLog ? 'Claim found' : 'Scan the Piglet'}
+                  </Text>
                 </TouchableOpacity>
               </View>
               <Text style={styles.claimNote}>
@@ -772,6 +786,17 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         recipientPubkey={zapTarget?.pubkey}
         recipientName={zapTarget?.name ?? undefined}
         zapEventId={zapTarget?.logId}
+      />
+
+      {/* Finder NFC reader. Opens when an unclaimed LP Piggy's "Scan
+          the Piglet" button is tapped; on a successful tag read the
+          handler navigates to HuntFoundScreen with the bearer LNURL
+          and the cache coord so recordClaim can store the piggyId. */}
+      <NfcReadSheet
+        visible={readSheetOpen}
+        onClose={() => setReadSheetOpen(false)}
+        expectedCoord={coord}
+        onRead={handleTagRead}
       />
     </View>
   );
