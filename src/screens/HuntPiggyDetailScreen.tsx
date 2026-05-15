@@ -60,6 +60,7 @@ import {
   publishCacheEvent,
   subscribeFoundLogs,
 } from '../services/nostrPlacesPublisher';
+import { loadCachedCaches, peekCachedCachesSync } from '../services/nostrPlacesStorage';
 import { subscribeFindLogZaps } from '../services/findLogZapsService';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 import { lastClaimForPiggyId } from '../services/claimHistoryService';
@@ -121,8 +122,15 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const { coord } = route.params;
   const { signEvent, relays, pubkey } = useNostr();
 
-  const [cache, setCache] = useState<ParsedCache | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Seed from the in-memory cache mirror so the screen paints instantly
+  // when the user navigates from Explore / Hunt rails (where the cache
+  // is already in memory). Falls through to fetchCache() below for
+  // cold-tap deep-links where the mirror is empty. Pre-fix the screen
+  // showed a 15-30s loading spinner whenever the JS thread was busy.
+  const [cache, setCache] = useState<ParsedCache | null>(
+    () => peekCachedCachesSync().find((c) => c.coord === coord) ?? null,
+  );
+  const [loading, setLoading] = useState(() => !peekCachedCachesSync().some((c) => c.coord === coord));
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<Map<string, FoundLog>>(new Map());
   // Zap totals per find-log id. Outer key is the kind-7516 log id;
@@ -230,16 +238,36 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
       return;
     }
     (async () => {
+      // Cold-tap deep-link path: peek mirror was empty so check
+      // AsyncStorage explicitly before falling through to the relay
+      // fetch. The disk read is ~10ms while a busy-thread relay round-
+      // trip can be 15s+; painting cached data first hides the freeze.
+      if (!cache) {
+        try {
+          const onDisk = await loadCachedCaches();
+          if (cancelled) return;
+          const local = onDisk.find((c) => c.coord === coord);
+          if (local) {
+            setCache(local);
+            setLoading(false);
+          }
+        } catch {
+          // AsyncStorage hiccups are non-fatal — fall through to relays.
+        }
+      }
       try {
         const c = await fetchCache(parts.pubkey, parts.d);
         if (cancelled) return;
         if (!c) {
-          setError('Cache not found on relays — it may have expired.');
+          // Only surface the "not found" error when we have no cached
+          // data to fall back on; if the screen is already showing the
+          // local snapshot, a transient relay miss shouldn't blank it.
+          if (!cache) setError('Cache not found on relays — it may have expired.');
         } else {
           setCache(c);
         }
       } catch (e) {
-        if (!cancelled) setError((e as Error).message);
+        if (!cancelled && !cache) setError((e as Error).message);
       } finally {
         if (!cancelled) setLoading(false);
       }
