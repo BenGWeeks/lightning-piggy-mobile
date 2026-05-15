@@ -13,7 +13,7 @@ import { Image as ExpoImage } from 'expo-image';
 import TabBackgroundImage from '../components/TabBackgroundImage';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import Svg, { Path } from 'react-native-svg';
-import { Users, Clock, Search, X, Zap } from 'lucide-react-native';
+import { Clock, Search, X, Zap } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, CompositeNavigationProp, useFocusEffect } from '@react-navigation/native';
@@ -22,6 +22,9 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import { useGroups } from '../contexts/GroupsContext';
+import { useTrustGraph } from '../contexts/TrustGraphContext';
+import WebOfTrustChip from '../components/WebOfTrustChip';
+import WebOfTrustBottomSheet from '../components/WebOfTrustBottomSheet';
 import ConversationRow from '../components/ConversationRow';
 import GroupRow from '../components/GroupRow';
 import type { ContactInfo } from '../components/GroupAvatar';
@@ -71,9 +74,23 @@ const MessagesScreen: React.FC = () => {
     armLiveDmSub,
   } = useNostr();
   const { wallets } = useWallet();
-  const { groupSummaries, followingOnly, setFollowingOnly, secretMode } = useGroups();
-  // Production hard-lock: filter is always enforced unless secretMode AND followingOnly=off.
-  const enforceFollowingOnly = followingOnly || !secretMode;
+  const { groupSummaries, effectiveWotTier } = useGroups();
+  // `trustSetForTier` rather than the raw `trustSet` so the screen's
+  // defensive trust filter is computed against `effectiveWotTier`. The
+  // persisted `wotTier` can be 'all' while the hard-lock clamps the
+  // effective tier back to 'friends' (secretMode off) — if we evaluated
+  // against the persisted set, the L2 entries would still be included
+  // and the filter would no-op past the parental-control gate (#547
+  // follow-up).
+  const { trustSetForTier } = useTrustGraph();
+  // WoT bottom-sheet visibility — opened from the chip in the filter row.
+  // Mirrors MapScreen's setWotSheetVisible pattern (#547).
+  const [wotSheetVisible, setWotSheetVisible] = useState(false);
+  // Production hard-lock (#547): the data + UI layers still apply the
+  // trust filter unless the effective tier is 'all'. effectiveWotTier
+  // already collapses 'all' → 'friends' for non-secret-mode users, so a
+  // stale persisted 'all' can't leak past the parental-control gate.
+  const enforceFollowingOnly = effectiveWotTier !== 'all';
   // Tracks last applied value so toggling triggers a data-layer refresh, not just a UI re-filter.
   const lastAppliedEnforceRef = useRef<boolean>(true);
   const [search, setSearch] = useState('');
@@ -258,11 +275,13 @@ const MessagesScreen: React.FC = () => {
     }, [isLoggedIn, contacts]),
   );
 
-  const followPubkeys = useMemo(() => {
-    const set = new Set<string>();
-    for (const c of contacts) set.add(c.pubkey.toLowerCase());
-    return set;
-  }, [contacts]);
+  // Trust gate (#547). For 'friends' tier this is L1 follows + viewer + seeds;
+  // for 'fof' it adds L2 follows-of-follows; for 'all' it's still computed
+  // but the enforceFollowingOnly switch above disables the gate entirely.
+  // Kept named `followPubkeys` so the downstream call-sites stay diff-clean
+  // — the *semantics* widened from "raw follow list" to "tier-aware trust
+  // set" but every existing predicate (Set.has) still applies unchanged.
+  const followPubkeys = trustSetForTier(effectiveWotTier);
 
   // Single pubkey → ContactInfo lookup for the screen, shared by every
   // row + handler. Three previously-separate `contacts.find()` paths
@@ -286,12 +305,14 @@ const MessagesScreen: React.FC = () => {
   const deferredDmInbox = useDeferredValue(dmInbox);
   const deferredContacts = useDeferredValue(contacts);
   // Build the DM summaries first — this is always part of the inbox
-  // regardless of the zap-counterparties toggle. Pass followPubkeys as a
-  // defence-in-depth filter. NostrContext's refreshDmInbox already drops
-  // non-follows at the data layer, but applying it again here guards
-  // against stale dmInbox state from before a follow was revoked. The
-  // "Following only" rule is load-bearing — keep it enforced everywhere
-  // a summary is built. Skip the gate only when secretMode AND followingOnly=off (production hard-lock).
+  // regardless of the zap-counterparties toggle. Pass the tier-aware
+  // trust set (#547) as a defence-in-depth filter. NostrContext's
+  // refreshDmInbox already drops non-trusted senders at the data layer,
+  // but applying it again here guards against stale dmInbox state from
+  // before a follow was revoked or a tier was widened. The trust rule
+  // is load-bearing — keep it enforced everywhere a summary is built.
+  // Skip the gate only when effectiveWotTier === 'all' (which itself is
+  // already secret-mode-gated by GroupsContext's hard-lock).
   const dmSummaries = useMemo(() => {
     return buildDmSummaries(
       deferredDmInbox,
@@ -314,11 +335,11 @@ const MessagesScreen: React.FC = () => {
     return mergeSummaries(zapSummaries, dmSummaries);
   }, [dmSummaries, zapSummaries]);
 
-  // Following-only is always on by design (parental-control requirement);
+  // The trust gate is on by default (parental-control requirement);
   // enforcement lives inside buildDmSummaries + refreshDmInbox. This memo
   // applies the user-selectable time window + search, plus a defensive
-  // follow check for pubkey'd zap rows so non-followed zap counterparties
-  // don't slip in. Groups go through their own follow gate inside
+  // trust check for pubkey'd zap rows so untrusted zap counterparties
+  // don't slip in. Groups go through their own trust gate inside
   // GroupsContext.visibleGroups, so we just merge the result here.
   type InboxRow =
     | { kind: 'dm'; summary: ConversationSummary; sortKey: number }
@@ -331,7 +352,10 @@ const MessagesScreen: React.FC = () => {
     const dmRows: InboxRow[] = conversationSummaries
       .filter((s) => {
         if (s.lastActivityAt < cutoff) return false;
-        // Defence-in-depth follow gate using enforceFollowingOnly = followingOnly || !secretMode.
+        // Defence-in-depth trust gate (#547): apply the tier-aware trust set
+        // unless the effective tier is 'all'. effectiveWotTier already
+        // collapses 'all' → 'friends' for non-secret-mode users, so the
+        // parental-control hard-lock holds even with a stale persisted 'all'.
         if (enforceFollowingOnly && s.pubkey && !followPubkeys.has(s.pubkey.toLowerCase()))
           return false;
         if (!lower) return true;
@@ -555,36 +579,14 @@ const MessagesScreen: React.FC = () => {
       <View style={styles.content}>
         {isLoggedIn && (
           <View style={styles.filterChipRow}>
-            {secretMode ? (
-              <TouchableOpacity
-                style={followingOnly ? styles.filterChip : styles.filterChipOff}
-                onPress={() => setFollowingOnly(!followingOnly)}
-                accessibilityLabel={
-                  followingOnly
-                    ? 'Following-only filter on. Tap to show all conversations (dev mode).'
-                    : 'Following-only filter off. Tap to filter to followed senders only.'
-                }
-                accessibilityRole="button"
-                testID="messages-follows-toggle"
-              >
-                <Users
-                  size={14}
-                  color={followingOnly ? colors.brandPink : colors.textSupplementary}
-                />
-                <Text style={followingOnly ? styles.filterChipText : styles.filterChipTextOff}>
-                  {followingOnly ? 'Following only' : 'All (dev)'}
-                </Text>
-              </TouchableOpacity>
-            ) : (
-              <View
-                style={styles.filterChip}
-                accessibilityLabel="Showing conversations from people you follow only"
-                testID="messages-follows-indicator"
-              >
-                <Users size={14} color={colors.brandPink} />
-                <Text style={styles.filterChipText}>Following only</Text>
-              </View>
-            )}
+            <WebOfTrustChip
+              currentTier={effectiveWotTier}
+              onPress={() => setWotSheetVisible(true)}
+              testID="messages-wot-chip"
+            />
+            {/* Hidden marker for Maestro so flows can assert the active tier without parsing the chip label. Mirrors messages-zaps-toggle-on/off below. */}
+            <View testID={`messages-wot-tier-${effectiveWotTier}`} accessibilityElementsHidden />
+
             <TouchableOpacity
               style={styles.filterChipInteractive}
               onPress={cycleWindowDays}
@@ -704,6 +706,8 @@ const MessagesScreen: React.FC = () => {
           navigation.navigate('ContactProfile', { contact: sheetContact });
         }}
       />
+
+      <WebOfTrustBottomSheet visible={wotSheetVisible} onClose={() => setWotSheetVisible(false)} />
     </View>
   );
 };
