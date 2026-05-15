@@ -441,17 +441,25 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                         denied), fall back to the classic Navigation
                         glyph at its native 45° tilt. That stays the
                         generic "go here / open in Maps" affordance
-                        without implying a measured direction. */}
-                  {arrowRotation !== null ? (
-                    <Navigation2
-                      size={28}
-                      color={colors.brandPink}
-                      strokeWidth={2.5}
-                      style={{ transform: [{ rotate: `${arrowRotation}deg` }] }}
-                    />
-                  ) : (
-                    <Navigation size={28} color={colors.brandPink} strokeWidth={2.5} />
-                  )}
+                        without implying a measured direction.
+                      Transform lives on the View wrapper rather than
+                      the icon's style prop — react-native-svg doesn't
+                      reliably forward `transform: rotate` through, and
+                      the icon was rendering invisibly on Pixel as a
+                      result. View transforms are universal in RN. */}
+                  <View
+                    style={
+                      arrowRotation !== null
+                        ? { transform: [{ rotate: `${arrowRotation}deg` }] }
+                        : undefined
+                    }
+                  >
+                    {arrowRotation !== null ? (
+                      <Navigation2 size={28} color={colors.brandPink} strokeWidth={2.5} />
+                    ) : (
+                      <Navigation size={28} color={colors.brandPink} strokeWidth={2.5} />
+                    )}
+                  </View>
                   {distanceMetres !== null ? (
                     <Text style={styles.actionButtonSecondaryText}>
                       {formatDistance(distanceMetres)}
