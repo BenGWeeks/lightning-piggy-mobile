@@ -14,6 +14,29 @@ import {
 import { recordClaim } from '../services/claimHistoryService';
 import type { RouteProp } from '@react-navigation/native';
 
+// LNbits-style 'Wait 927 seconds.' / 'wait_time: 240' → 'about 15 minutes'.
+// Neutral about who triggered the cooldown — anyone could have just
+// scanned. Falls back to a generic message when the LNURLw doesn't
+// include a time hint.
+const friendlyCooldownReason = (raw: string): string => {
+  const m = raw.match(/(\d{1,5})\s*(?:s|sec|seconds?)?/i);
+  const total = m ? Number(m[1]) : 0;
+  if (!Number.isFinite(total) || total <= 0) {
+    return 'Cooldown is still running, or the sats budget is used up. Try again later.';
+  }
+  let pretty: string;
+  if (total < 30) pretty = 'a few seconds';
+  else if (total < 90) pretty = 'about a minute';
+  else if (total < 3600) {
+    const minutes = Math.round(total / 60);
+    pretty = `about ${minutes} minute${minutes === 1 ? '' : 's'}`;
+  } else {
+    const hours = Math.round(total / 3600);
+    pretty = `about ${hours} hour${hours === 1 ? '' : 's'}`;
+  }
+  return `Another finder claimed recently — try again in ${pretty}.`;
+};
+
 interface Props {
   navigation: ExploreNavigation;
   route: RouteProp<ExploreStackParamList, 'HuntFound'>;
@@ -69,8 +92,7 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
         if (params.maxWithdrawable <= 0) {
           setStage({
             kind: 'sleeping',
-            reason:
-              'This Piggy is sleeping — its cooldown is still running, or its sats budget is used up. Try again later.',
+            reason: friendlyCooldownReason(''),
           });
           return;
         }
@@ -98,7 +120,11 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
           const sleepy = /wait[_ ]?time|cooldown|budget|sleeping|exhausted|already used/i.test(
             reason,
           );
-          setStage(sleepy ? { kind: 'sleeping', reason } : { kind: 'error', reason });
+          setStage(
+            sleepy
+              ? { kind: 'sleeping', reason: friendlyCooldownReason(reason) }
+              : { kind: 'error', reason },
+          );
         }
       } catch (e) {
         if (cancelled) return;

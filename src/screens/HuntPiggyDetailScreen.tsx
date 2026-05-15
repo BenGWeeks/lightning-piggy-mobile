@@ -64,7 +64,6 @@ import { subscribeFindLogZaps } from '../services/findLogZapsService';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 import { lastClaimForPiggyId } from '../services/claimHistoryService';
 import NfcReadSheet from '../components/NfcReadSheet';
-import type { HuntTagReadResult } from '../services/nfcService';
 
 // Composite nav type — needed so we can `navigate('Conversation', …)`
 // when the hider's profile sheet's Message action is tapped. The
@@ -192,19 +191,12 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     },
     [],
   );
-  // Finder NFC reader sheet — opens on "Scan the Piglet" tap. The sheet
-  // owns its own foreground reader session; on a successful read we
-  // navigate to HuntFoundScreen with the extracted LNURL, which is what
-  // runs the actual LNURL-withdraw → invoice → callback claim path.
+  // Finder NFC reader sheet — opens on "Try prize" tap. The sheet
+  // owns the entire flow now (foreground reader → LNURLw resolve →
+  // claim → success / sleeping / error) so no navigation is needed
+  // here. On dismissal the user lands back on this detail screen with
+  // the find-log composer already in view.
   const [readSheetOpen, setReadSheetOpen] = useState(false);
-  const handleTagRead = useCallback(
-    (result: HuntTagReadResult) => {
-      setReadSheetOpen(false);
-      if (!result.lnurl) return;
-      navigation.navigate('HuntFound', { lnurl: result.lnurl, coord });
-    },
-    [navigation, coord],
-  );
   // Hero slot toggles between the cache photo and a map; defaults to the
   // photo when one exists, otherwise the render falls back to the map.
   const [heroView, setHeroView] = useState<'photo' | 'map'>('photo');
@@ -800,7 +792,6 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         visible={readSheetOpen}
         onClose={() => setReadSheetOpen(false)}
         expectedCoord={coord}
-        onRead={handleTagRead}
       />
     </View>
   );
