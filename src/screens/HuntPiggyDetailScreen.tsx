@@ -59,6 +59,7 @@ import {
   publishCacheEvent,
   subscribeFoundLogs,
 } from '../services/nostrPlacesPublisher';
+import { subscribeFindLogZaps } from '../services/findLogZapsService';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 import { lastClaimFor } from '../services/claimHistoryService';
 
@@ -121,6 +122,11 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<Map<string, FoundLog>>(new Map());
+  // Zap totals per find-log id. Outer key is the kind-7516 log id;
+  // inner Map is keyed by kind-9735 receipt id so the same zap arriving
+  // from multiple relays only counts once. Sum the inner values for the
+  // total displayed on the row.
+  const [zapsByLog, setZapsByLog] = useState<Map<string, Map<string, number>>>(new Map());
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerText, setComposerText] = useState('');
   const [composerPhotoUrl, setComposerPhotoUrl] = useState<string | null>(null);
@@ -221,6 +227,32 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
       closer();
     };
   }, [coord]);
+
+  // Re-subscribe to zap receipts referencing the current find-log set
+  // every time a new log lands. The filter uses the kind-7516 ids on
+  // the `#e` tag — any kind-9735 receipt zapping a log surfaces here
+  // and gets aggregated by receipt id (so the same zap arriving from
+  // multiple relays only counts once). Memoised on the join of log ids
+  // so an unchanged set doesn't restart the sub.
+  const logIdsKey = useMemo(() => [...logs.keys()].sort().join(','), [logs]);
+  useEffect(() => {
+    const logIds = logIdsKey ? logIdsKey.split(',') : [];
+    if (logIds.length === 0) return undefined;
+    const closer = subscribeFindLogZaps(logIds, ({ receiptId, logId, sats }) => {
+      setZapsByLog((prev) => {
+        const inner = prev.get(logId);
+        // Skip when this receipt is already counted — guards against
+        // the same event echoing in from a second relay.
+        if (inner && inner.has(receiptId)) return prev;
+        const next = new Map(prev);
+        const nextInner = new Map(inner ?? []);
+        nextInner.set(receiptId, sats);
+        next.set(logId, nextInner);
+        return next;
+      });
+    });
+    return () => closer();
+  }, [logIdsKey]);
 
   // ----- claim-history check (drives the post-find compose CTA) ----------
 
@@ -345,6 +377,18 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     () => [...logs.values()].sort((a, b) => b.createdAt - a.createdAt),
     [logs],
   );
+
+  // Per-log zap totals, flattened from the receipt-keyed inner Maps so
+  // the row can render a single sats number cheaply on each draw.
+  const zapTotalsByLog = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const [logId, receipts] of zapsByLog) {
+      let total = 0;
+      for (const sats of receipts.values()) total += sats;
+      if (total > 0) m.set(logId, total);
+    }
+    return m;
+  }, [zapsByLog]);
 
   // LP Piggies gate find-logging behind a successful claim (proof of
   // presence); plain NIP-GC caches have no claim step, so anyone can log.
@@ -573,6 +617,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   colors={colors}
                   styles={styles}
                   onPressProfile={openProfileSheet}
+                  zapsReceivedSats={zapTotalsByLog.get(log.id) ?? 0}
                 />
               ))
             )}
@@ -755,7 +800,12 @@ const LogRow: React.FC<{
     picture: string | null,
     lud16: string | null,
   ) => void;
-}> = ({ log, colors, styles, onPressProfile }) => {
+  // Aggregate of NIP-57 zap receipts (kind 9735) referencing this
+  // log — verifiable on-relay, so the copy reads "Zapped" rather
+  // than the self-reported "Reported" used for the find-log's own
+  // amount tag. Zero means none seen yet (no badge).
+  zapsReceivedSats: number;
+}> = ({ log, colors, styles, onPressProfile, zapsReceivedSats }) => {
   const { name, picture, lud16 } = usePubkeyProfile(log.pubkey);
   const display = name ?? shortNpub(log.pubkey);
   const ageMins = Math.floor((Date.now() / 1000 - log.createdAt) / 60);
@@ -792,16 +842,33 @@ const LogRow: React.FC<{
       ) : null}
       <Text style={styles.logContent}>{log.content}</Text>
       <View style={styles.logFooter}>
-        {log.amountSats ? (
-          // Self-reported by the finder — the found-log event isn't
-          // verifiable, so the copy says "reported", not "claimed".
-          <View style={styles.logBadge}>
-            <Zap size={12} color={colors.zapYellow} fill={colors.zapYellow} strokeWidth={2.5} />
-            <Text style={styles.logBadgeText}>Reported {log.amountSats.toLocaleString()} sats</Text>
-          </View>
-        ) : (
-          <View />
-        )}
+        <View style={styles.logBadgesRow}>
+          {log.amountSats ? (
+            // Self-reported by the finder — the found-log event isn't
+            // verifiable, so the copy says "reported", not "claimed".
+            <View style={styles.logBadge}>
+              <Zap size={12} color={colors.zapYellow} fill={colors.zapYellow} strokeWidth={2.5} />
+              <Text style={styles.logBadgeText}>
+                Reported {log.amountSats.toLocaleString()} sats
+              </Text>
+            </View>
+          ) : null}
+          {zapsReceivedSats > 0 ? (
+            // Verifiable: aggregated from kind-9735 zap receipts whose
+            // `#e` tag references this find-log. Different colour from
+            // the self-reported pill so the distinction reads at a
+            // glance — pink (brand) for "actually-on-chain-ish proof".
+            <View
+              style={styles.logBadgeZapped}
+              testID={`hunt-log-${log.id.slice(0, 8)}-zaps-received`}
+            >
+              <Zap size={12} color={colors.brandPink} fill={colors.brandPink} strokeWidth={2.5} />
+              <Text style={styles.logBadgeZappedText}>
+                {zapsReceivedSats.toLocaleString()} zapped
+              </Text>
+            </View>
+          ) : null}
+        </View>
         {/* Outline zap pill under the note so a hider can thank any
             finder; disabled when the finder shared no Lightning address. */}
         <TouchableOpacity
@@ -1449,6 +1516,12 @@ const createStyles = (colors: Palette) =>
       justifyContent: 'space-between',
       marginTop: 2,
     },
+    logBadgesRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      flexShrink: 1,
+    },
     logBadge: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -1460,6 +1533,17 @@ const createStyles = (colors: Palette) =>
       borderRadius: 100,
     },
     logBadgeText: { color: colors.brandPink, fontSize: 11, fontWeight: '700' },
+    logBadgeZapped: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      backgroundColor: colors.brandPink,
+      alignSelf: 'flex-start',
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 100,
+    },
+    logBadgeZappedText: { color: colors.white, fontSize: 11, fontWeight: '700' },
   });
 
 export default HuntPiggyDetailScreen;
