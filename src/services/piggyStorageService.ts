@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 
 /**
  * Local registry of LNURL-withdraw "Piggies" the user has hidden. Stored
@@ -28,7 +29,19 @@ import * as SecureStore from 'expo-secure-store';
  * t=traditional — matching an NFC-tag Piggy anyone can find.
  */
 
-const STORAGE_KEY = 'hunt-piggies:v1';
+// SecureStore on Android rejects keys containing characters outside
+// `[A-Za-z0-9._-]` — the previous `'hunt-piggies:v1'` key threw
+// "Invalid key provided to SecureStore" at every savePiggy call on
+// Android. iOS keychain was more lenient and silently accepted the
+// colon, which is why this bug only surfaced once Ben tested the
+// publish flow on the Pixel. Renamed to a dash-delimited form.
+//
+// Migration: the old key never wrote successfully on Android, so
+// Android users have nothing under it. iOS users may have records
+// under the old key — loadPiggies falls back to reading it once on
+// cold start and migrates them over.
+const STORAGE_KEY = 'hunt-piggies-v1';
+const STORAGE_KEY_LEGACY_IOS = 'hunt-piggies:v1';
 
 export interface HiddenPiggy {
   id: string;
@@ -128,7 +141,23 @@ const SECURE_OPTIONS: SecureStore.SecureStoreOptions = {
 
 export const loadPiggies = async (): Promise<HiddenPiggy[]> => {
   try {
-    const raw = await SecureStore.getItemAsync(STORAGE_KEY, SECURE_OPTIONS);
+    let raw = await SecureStore.getItemAsync(STORAGE_KEY, SECURE_OPTIONS);
+    if (!raw && Platform.OS === 'ios') {
+      // iOS-only legacy fallback — see STORAGE_KEY_LEGACY_IOS comment.
+      // Read the old key once; if present, copy forward + clean up so
+      // the rest of the session uses the new key exclusively.
+      try {
+        const legacy = await SecureStore.getItemAsync(STORAGE_KEY_LEGACY_IOS, SECURE_OPTIONS);
+        if (legacy) {
+          await SecureStore.setItemAsync(STORAGE_KEY, legacy, SECURE_OPTIONS);
+          await SecureStore.deleteItemAsync(STORAGE_KEY_LEGACY_IOS);
+          raw = legacy;
+        }
+      } catch {
+        // Legacy read can fail — that's fine, the new key is now empty
+        // and the user re-creates whatever they had.
+      }
+    }
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
