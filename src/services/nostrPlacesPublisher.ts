@@ -278,11 +278,18 @@ export const fetchCache = async (
   d: string,
   relays: string[] = DEFAULT_RELAYS,
 ): Promise<ParsedCache | null> => {
-  const events = await pool.querySync(relays, {
-    kinds: [GC_LISTING_KIND],
-    authors: [hiderPubkey],
-    '#d': [d],
-  });
+  // 5 s maxWait — same Hermes timer-starvation rationale as
+  // fetchCachesByAuthor above. Without it a slow relay leaves
+  // HuntPiggyDetailScreen / EventDetailScreen on a spinner indefinitely.
+  const events = await pool.querySync(
+    relays,
+    {
+      kinds: [GC_LISTING_KIND],
+      authors: [hiderPubkey],
+      '#d': [d],
+    },
+    { maxWait: 5000 },
+  );
   if (events.length === 0) return null;
   // Sort created_at desc — replaceable, latest wins; defensive vs
   // a misbehaving relay returning multiple revisions.
@@ -302,11 +309,16 @@ export const fetchEvent = async (
   d: string,
   relays: string[] = DEFAULT_RELAYS,
 ): Promise<ParsedEvent | null> => {
-  const events = await pool.querySync(relays, {
-    kinds: [NIP52_TIME_BASED_KIND],
-    authors: [organiserPubkey],
-    '#d': [d],
-  });
+  // 5 s maxWait — same rationale as fetchCache above.
+  const events = await pool.querySync(
+    relays,
+    {
+      kinds: [NIP52_TIME_BASED_KIND],
+      authors: [organiserPubkey],
+      '#d': [d],
+    },
+    { maxWait: 5000 },
+  );
   if (events.length === 0) return null;
   events.sort((a: NostrEvent, b: NostrEvent) => b.created_at - a.created_at);
   return parseNip52Event(events[0] as VerifiedEvent);

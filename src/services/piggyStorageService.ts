@@ -236,5 +236,10 @@ const isValidPiggy = (v: unknown): v is HiddenPiggy => {
   )
     return false;
   if (p.hint !== undefined && typeof p.hint !== 'string') return false;
+  // expiresAt — Unix seconds when the published listing's NIP-40
+  // expiration stamps. undefined = 'Never' picker option (no expiration
+  // tag emitted). Pre-fix a corrupted 'soon' string would pass and
+  // produce "expiration", "NaN" on the wire.
+  if (p.expiresAt !== undefined && typeof p.expiresAt !== 'number') return false;
   return true;
 };
