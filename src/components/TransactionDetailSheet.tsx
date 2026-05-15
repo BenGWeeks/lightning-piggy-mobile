@@ -500,7 +500,22 @@ const TransactionDetailSheet: React.FC<Props> = ({
                         styles.callout,
                         { backgroundColor: calloutTone.bg, borderLeftColor: calloutTone.accent },
                       ]}
+                      // `accessible` is required for the combined
+                      // accessibilityLabel below to be announced as a
+                      // single element to screen readers — without it
+                      // the role/label can be skipped or split across
+                      // the child Text nodes. `accessibilityLiveRegion`
+                      // makes warning/failure callouts announce
+                      // unprompted when they appear, matching the
+                      // BrandedAlert convention used elsewhere in the
+                      // app for actionable callouts.
+                      accessible
                       accessibilityRole={boltzExplanation.tone === 'warning' ? 'alert' : undefined}
+                      accessibilityLiveRegion={
+                        boltzExplanation.tone === 'warning' || boltzExplanation.tone === 'failure'
+                          ? 'assertive'
+                          : 'polite'
+                      }
                       accessibilityLabel={`${boltzExplanation.heading}: ${boltzExplanation.body}`}
                     >
                       <CalloutIcon size={24} color={calloutTone.ink} strokeWidth={2.5} />

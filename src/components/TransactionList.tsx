@@ -168,6 +168,14 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
     const bump = () => setSwapStateTick((n) => n + 1);
     const unsubAttention = swapRecoveryService.subscribeAttention(bump);
     const unsubClaimed = swapRecoveryService.subscribeClaimed(bump);
+    // Defensive bump: `loadClaimedHashes()` is kicked off eagerly at module
+    // import, and recovery's `notifyAttention()` can fire before this
+    // effect subscribes. Without an initial sync bump after subscribing,
+    // either of those notifies would be missed and the list would render
+    // with empty state until the *next* change. Bumping once forces a
+    // fresh read through `getAttentionPaymentHashes()` /
+    // `hasClaimedPaymentHash()` on the current values.
+    bump();
     return () => {
       unsubAttention();
       unsubClaimed();

@@ -119,20 +119,26 @@ function notifyClaimed(): void {
 
 async function loadClaimedHashes(): Promise<void> {
   if (claimedHashesLoaded) return;
-  claimedHashesLoaded = true;
   try {
     const raw = await SecureStore.getItemAsync(SWAP_CLAIMED_KEY);
-    if (!raw) return;
-    // Persisted shape: Array<[paymentHash, claimTxId | null]> — oldest first.
-    const arr = JSON.parse(raw) as [string, string | null][];
-    for (const [hash, txid] of arr) claimedPaymentHashes.set(hash, txid);
-    // Defensive trim in case CLAIMED_CAP was lowered in a future release.
-    while (claimedPaymentHashes.size > CLAIMED_CAP) {
-      const oldest = claimedPaymentHashes.keys().next().value;
-      if (oldest === undefined) break;
-      claimedPaymentHashes.delete(oldest);
+    if (raw) {
+      // Persisted shape: Array<[paymentHash, claimTxId | null]> — oldest first.
+      const arr = JSON.parse(raw) as [string, string | null][];
+      for (const [hash, txid] of arr) claimedPaymentHashes.set(hash, txid);
+      // Defensive trim in case CLAIMED_CAP was lowered in a future release.
+      while (claimedPaymentHashes.size > CLAIMED_CAP) {
+        const oldest = claimedPaymentHashes.keys().next().value;
+        if (oldest === undefined) break;
+        claimedPaymentHashes.delete(oldest);
+      }
+      notifyClaimed();
     }
-    notifyClaimed();
+    // Only flip the loaded flag once we've actually completed a successful
+    // read/parse. If SecureStore throws or the JSON is corrupt, leave the
+    // flag false so a later `recordClaimedPaymentHash` call can try again
+    // — otherwise a one-off failure would leave the cache permanently
+    // empty for the rest of the session.
+    claimedHashesLoaded = true;
   } catch (e) {
     console.warn('[SwapRecovery] Failed to load claimed hashes:', e);
   }
