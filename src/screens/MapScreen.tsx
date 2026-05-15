@@ -18,7 +18,7 @@ import {
   Globe,
   Mail,
   MapPin,
-  Navigation as NavigationIcon,
+  LocateFixed,
   Phone,
   PiggyBank,
   ShieldCheck,
@@ -515,7 +515,7 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
           accessibilityLabel="Recenter on me"
           testID="map-recenter-button"
         >
-          <NavigationIcon size={18} color={colors.brandPink} strokeWidth={2.5} />
+          <LocateFixed size={18} color="#2D88FF" strokeWidth={2.5} />
         </TouchableOpacity>
       </View>
 

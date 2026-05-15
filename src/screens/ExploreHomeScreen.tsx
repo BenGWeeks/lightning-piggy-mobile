@@ -22,6 +22,7 @@ import {
 import TabHeader from '../components/TabHeader';
 import { ContentRail } from '../components/ContentRail';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
+import MapLegend from '../components/MapLegend';
 import { courses, type Course } from '../data/learnContent';
 import {
   getProgress,
@@ -476,15 +477,19 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
             </View>
           </View>
         ) : (
-          <ExploreMiniMap
-            lat={pos?.lat ?? null}
-            lon={pos?.lon ?? null}
-            merchants={merchants}
-            caches={[...caches.values()]}
-            events={[...events.values()]}
-            loading={merchantsLoading && caches.size === 0}
-            onTapMap={() => navigation.navigate('Map')}
-          />
+          <>
+            <ExploreMiniMap
+              lat={pos?.lat ?? null}
+              lon={pos?.lon ?? null}
+              merchants={merchants}
+              caches={[...caches.values()]}
+              events={[...events.values()]}
+              loading={merchantsLoading && caches.size === 0}
+              onTapMap={() => navigation.navigate('Map')}
+              interactive
+            />
+            <MapLegend background="card" />
+          </>
         )}
 
         <ContentRail<{ place: BtcMapPlace; distance: number }>

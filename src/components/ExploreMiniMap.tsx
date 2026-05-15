@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, StyleSheet, ActivityIndicator, TouchableOpacity, Text } from 'react-native';
 import { WebView } from 'react-native-webview';
-import { Maximize2, Minus, Plus } from 'lucide-react-native';
+import { LocateFixed, Maximize2, Minus, Plus } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import type { BtcMapPlace } from '../services/btcMapService';
@@ -59,6 +59,15 @@ interface Props {
    */
   userLat?: number | null;
   userLon?: number | null;
+  /**
+   * When set, the embedded map gains real Leaflet interactions —
+   * drag-to-pan, pinch-to-zoom — and a recenter-on-me button. The
+   * outer "tap anywhere to open the full map" affordance becomes an
+   * explicit "Open map" button so panning gestures don't accidentally
+   * navigate away. The Open map button always shows; recenter only
+   * shows once we have a user fix.
+   */
+  interactive?: boolean;
 }
 
 /**
@@ -90,6 +99,7 @@ export const ExploreMiniMap: React.FC<Props> = ({
   cachePin = false,
   userLat = null,
   userLon = null,
+  interactive = false,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -97,9 +107,9 @@ export const ExploreMiniMap: React.FC<Props> = ({
   const [ready, setReady] = useState(false);
 
   // Inject a Leaflet zoom delta into the WebView. The +/− controls are
-  // RN-level siblings of the WebView (which has `pointerEvents="none"`),
-  // so they don't compete with the tap-anywhere-to-open-full-map
-  // affordance and stay independent of Leaflet's own ignored gestures.
+  // RN-level siblings of the WebView so they stay independent of
+  // Leaflet's own gestures (which are disabled on non-interactive
+  // views and enabled on interactive ones).
   const zoomBy = useCallback(
     (delta: number) => () => {
       if (!ready || !webviewRef.current) return;
@@ -108,6 +118,15 @@ export const ExploreMiniMap: React.FC<Props> = ({
     },
     [ready],
   );
+
+  // Recentre on the user — used by the LocateFixed button when the map
+  // is interactive. The HTML defines LP_recenter as setView to whatever
+  // `me` it last received, defaulting to the centre constructor arg.
+  const recenterOnMe = useCallback(() => {
+    if (!ready || !webviewRef.current) return;
+    const js = `window.LP_recenter && window.LP_recenter(); true;`;
+    webviewRef.current.injectJavaScript(js);
+  }, [ready]);
 
   // Re-emit pins whenever data changes after the bridge is up.
   useEffect(() => {
@@ -142,14 +161,36 @@ export const ExploreMiniMap: React.FC<Props> = ({
     webviewRef.current.injectJavaScript(js);
   }, [ready, lat, lon, merchants, caches, events, cachePin, userLat, userLon]);
 
+  // When interactive, drag/zoom gestures need to reach the WebView, so
+  // the outer wrapper must NOT be a TouchableOpacity (it'd capture
+  // every touch as a tap). The "Open map" badge becomes its own
+  // tappable button instead. Non-interactive views keep the whole-
+  // map-is-a-tap-target behaviour so the cache-detail hero etc. still
+  // open the full map with one tap.
+  const Wrapper: React.ComponentType<{
+    style: object;
+    children: React.ReactNode;
+    testID: string;
+  }> = interactive
+    ? ({ style, children, testID }) => (
+        <View style={style} testID={testID}>
+          {children}
+        </View>
+      )
+    : ({ style, children, testID }) => (
+        <TouchableOpacity
+          style={style}
+          activeOpacity={0.85}
+          onPress={onTapMap}
+          accessibilityLabel="Open full map"
+          testID={testID}
+        >
+          {children}
+        </TouchableOpacity>
+      );
+
   return (
-    <TouchableOpacity
-      style={fill ? styles.containerFill : styles.container}
-      activeOpacity={0.85}
-      onPress={onTapMap}
-      accessibilityLabel="Open full map"
-      testID="explore-minimap"
-    >
+    <Wrapper style={fill ? styles.containerFill : styles.container} testID="explore-minimap">
       {lat === null || lon === null ? (
         <View style={styles.fallback}>
           <ActivityIndicator color={colors.brandPink} />
@@ -159,7 +200,7 @@ export const ExploreMiniMap: React.FC<Props> = ({
         <WebView
           ref={webviewRef}
           originWhitelist={['*']}
-          source={{ html: makeHtml(lat, lon, defaultZoom) }}
+          source={{ html: makeHtml(lat, lon, defaultZoom, interactive) }}
           onMessage={(e) => {
             try {
               const msg = JSON.parse(e.nativeEvent.data);
@@ -169,10 +210,11 @@ export const ExploreMiniMap: React.FC<Props> = ({
               }
             } catch {}
           }}
-          // disable user gestures so the parent ScrollView wins; the only
-          // interaction is tap-the-whole-thing → MapScreen.
-          scrollEnabled={false}
-          pointerEvents="none"
+          // Gesture pass-through follows interactivity: non-interactive
+          // views block touches so the parent ScrollView wins; interactive
+          // views let touches through to Leaflet for pan + pinch-zoom.
+          scrollEnabled={interactive}
+          pointerEvents={interactive ? 'auto' : 'none'}
           style={styles.webview}
         />
       )}
@@ -202,22 +244,55 @@ export const ExploreMiniMap: React.FC<Props> = ({
           </TouchableOpacity>
         </View>
       ) : null}
-      <View style={styles.openBadge}>
-        <Maximize2 size={12} color={colors.white} strokeWidth={2.5} />
-        <Text style={styles.openBadgeText}>Open map</Text>
-      </View>
+      {/* Recenter on me — only on interactive maps and only once we
+          have a user fix. Blue to match the legend dot. */}
+      {interactive && lat !== null && lon !== null ? (
+        <TouchableOpacity
+          style={styles.recenterButton}
+          onPress={recenterOnMe}
+          accessibilityLabel="Recenter on my location"
+          testID="explore-minimap-recenter"
+        >
+          <LocateFixed size={18} color="#2D88FF" strokeWidth={2.5} />
+        </TouchableOpacity>
+      ) : null}
+      {/* "Open map" — interactive maps need an explicit button since
+          the whole map no longer is a tap target. Non-interactive maps
+          keep the badge as a visual hint that the whole thing is
+          tappable. Same look either way, only the role differs. */}
+      {interactive ? (
+        <TouchableOpacity
+          style={styles.openBadge}
+          onPress={onTapMap}
+          accessibilityLabel="Open full map"
+          testID="explore-minimap-open-button"
+        >
+          <Maximize2 size={12} color={colors.white} strokeWidth={2.5} />
+          <Text style={styles.openBadgeText}>Open map</Text>
+        </TouchableOpacity>
+      ) : (
+        <View style={styles.openBadge}>
+          <Maximize2 size={12} color={colors.white} strokeWidth={2.5} />
+          <Text style={styles.openBadgeText}>Open map</Text>
+        </View>
+      )}
       {loading ? (
         <View style={styles.loadingPill}>
           <ActivityIndicator color={colors.brandPink} size="small" />
         </View>
       ) : null}
-    </TouchableOpacity>
+    </Wrapper>
   );
 };
 
 // ---- Leaflet HTML (no controls, mirrors the MapScreen pin language) -------
 
-const makeHtml = (lat: number, lon: number, defaultZoom: number): string => `<!DOCTYPE html>
+const makeHtml = (
+  lat: number,
+  lon: number,
+  defaultZoom: number,
+  interactive: boolean,
+): string => `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
@@ -233,7 +308,12 @@ const makeHtml = (lat: number, lon: number, defaultZoom: number): string => `<!D
     .lp-cache{width:14px;height:14px;border-radius:7px;background:#6c7b8a;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.4)}
     .lp-cache.piggy{background:#EC008C}
     .lp-event{width:14px;height:14px;border-radius:3px;background:#5b3aff;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.4)}
-    .lp-me{width:12px;height:12px;border-radius:6px;background:#2D88FF;border:2px solid #fff;box-shadow:0 0 0 5px rgba(45,136,255,0.25)}
+    /* Pulsating "you" dot: solid blue core + an outward ripple via
+       ::after that scales out and fades. Subtle enough not to nag,
+       clear enough to spot at a glance. */
+    .lp-me{position:relative;width:14px;height:14px;border-radius:7px;background:#2D88FF;border:2px solid #fff;box-shadow:0 0 0 3px rgba(45,136,255,0.25);z-index:1000}
+    .lp-me::after{content:'';position:absolute;top:50%;left:50%;width:28px;height:28px;margin:-14px 0 0 -14px;border-radius:50%;background:rgba(45,136,255,0.45);animation:lp-pulse 1.8s ease-out infinite;z-index:-1}
+    @keyframes lp-pulse{0%{transform:scale(0.4);opacity:1}100%{transform:scale(2.6);opacity:0}}
     /* Hide Leaflet's default UI for the preview */
     .leaflet-control-zoom,.leaflet-control-attribution{display:none!important}
   </style>
@@ -249,7 +329,8 @@ const post=(m)=>window.ReactNativeWebView&&window.ReactNativeWebView.postMessage
 // Was 8 before; raised to 7 after user feedback that one more level
 // out felt more natural on the Places list.
 // maxZoom 18 matches OSM tile availability.
-const map=L.map('map',{zoomControl:false,dragging:false,scrollWheelZoom:false,doubleClickZoom:false,touchZoom:false,boxZoom:false,keyboard:false,minZoom:7,maxZoom:18}).setView([${lat},${lon}],${defaultZoom});
+const __interactive=${interactive ? 'true' : 'false'};
+const map=L.map('map',{zoomControl:false,dragging:__interactive,scrollWheelZoom:__interactive,doubleClickZoom:__interactive,touchZoom:__interactive,boxZoom:false,keyboard:false,minZoom:7,maxZoom:18,tap:__interactive}).setView([${lat},${lon}],${defaultZoom});
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
 let merchantLayer=L.layerGroup().addTo(map),cacheLayer=L.layerGroup().addTo(map),eventLayer=L.layerGroup().addTo(map),meMarker=null;
 const dot=(cls,size)=>L.divIcon({className:'',html:'<div class="'+cls+'"></div>',iconSize:[size,size]});
@@ -301,6 +382,17 @@ window.LP_setHub=function(d){
 // is undefined on programmatic setZoom calls).
 const __origZoomBy=window.LP_zoomBy;
 window.LP_zoomBy=function(delta){userHasInteracted=true;__origZoomBy(delta);};
+// Recentre on the most recently posted d.me. Used by the LocateFixed
+// button on interactive maps. If me was never sent we fall back to the
+// HTML's constructor centre so the call is still safe.
+let __lastMe=null;
+const __setHubOrig=window.LP_setHub;
+window.LP_setHub=function(d){__lastMe=d.me||__lastMe;__setHubOrig(d);};
+window.LP_recenter=function(){
+  userHasInteracted=true;
+  const target=__lastMe || {lat:${lat},lng:${lon}};
+  map.setView([target.lat,target.lng],Math.max(map.getZoom(),${defaultZoom}));
+};
 post({type:'ready'});
 // Also emit straight away — covers the case where LP_setHub hasn't
 // been called yet (parent has no data) but the map already shows the
@@ -397,6 +489,25 @@ const createStyles = (colors: Palette) =>
       borderRadius: 100,
     },
     openBadgeText: { color: colors.white, fontSize: 11, fontWeight: '700' },
+    // Recenter-on-me — sits above the Open-map badge in the same
+    // bottom-right column. White surface with a blue glyph so it
+    // reads as "find me" and matches the legend's "You" dot.
+    recenterButton: {
+      position: 'absolute',
+      bottom: 48,
+      right: 10,
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: '#fff',
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOpacity: 0.25,
+      shadowRadius: 4,
+      shadowOffset: { width: 0, height: 1 },
+      elevation: 3,
+    },
     loadingPill: {
       position: 'absolute',
       top: 10,

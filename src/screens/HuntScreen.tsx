@@ -25,6 +25,7 @@ import HuntFilterSheet, { countActiveFilters } from '../components/HuntFilterShe
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
+import MapLegend from '../components/MapLegend';
 import { type ParsedCache } from '../services/nostrPlacesService';
 import { subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
 import { loadCachedCaches, peekCachedCachesSync, saveCaches } from '../services/nostrPlacesStorage';
@@ -289,9 +290,11 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
         contentContainerStyle={styles.listContent}
         ListHeaderComponent={
           <View>
-            {/* Mini-map at the top — same component the hub uses. Tap
-                opens the full Map. Cache pins only (no merchants /
-                events) so the page stays focused. */}
+            {/* Inline interactive map — drag, pinch-zoom, recenter on
+                me. The "Open map" button (overlay) is the only path to
+                the full MapScreen; the surrounding card no longer
+                consumes taps. Cache pins only (no merchants / events)
+                so the page stays focused. */}
             <View style={styles.mapWrap}>
               <ExploreMiniMap
                 lat={pos?.lat ?? null}
@@ -301,8 +304,10 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
                 events={[]}
                 onTapMap={() => navigation.navigate('Map')}
                 onBoundsChange={setMapBbox}
+                interactive
               />
             </View>
+            <MapLegend background="card" />
 
             <View style={styles.searchRow}>
               <Search size={16} color={colors.textSupplementary} strokeWidth={2.5} />
