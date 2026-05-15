@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  RefreshControl,
   SectionList,
   StyleSheet,
   Text,
@@ -100,6 +101,26 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Pull-to-refresh: re-hydrate both the local HiddenPiggy storage
+  // (catches anything published since first mount) AND the relay-
+  // sourced ParsedCache cache (catches kind 37516 echoes that
+  // arrived while the Explore subscription was paused). Both reads
+  // are sub-100 ms on a warm device; the brief refresh spinner is
+  // the user-visible signal that the page is re-syncing.
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const [piggies, caches] = await Promise.all([loadPiggies(), loadCachedCaches()]);
+      const m = new Map<string, HiddenPiggy>();
+      for (const p of piggies) m.set(p.id, p);
+      setPiggiesById(m);
+      if (caches.length > 0) setAllCaches(caches);
+    } finally {
+      setRefreshing(false);
+    }
   }, []);
 
   // Map for finds → cache lookup. Built once per allCaches change.
@@ -303,6 +324,14 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
         }
         contentContainerStyle={styles.listContent}
         stickySectionHeadersEnabled={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.brandPink}
+            colors={[colors.brandPink]}
+          />
+        }
         ListHeaderComponent={
           <TouchableOpacity
             style={styles.hideCta}
