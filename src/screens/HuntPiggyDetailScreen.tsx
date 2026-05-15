@@ -26,6 +26,7 @@ import {
   ImagePlus,
   MapPin,
   Navigation,
+  Navigation2,
   PiggyBank,
   Repeat,
   Send,
@@ -155,11 +156,12 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     [cacheLatLon],
   );
   const { user: userPos, heading, bearing, distanceMetres } = useCompassNavigation(compassTarget);
-  // lucide's Navigation glyph sits at ~45° at rest (the apex points up-
-  // right). Subtract 45° from the desired rotation so the apex ends up
-  // pointing toward the cache. Heading subtracted so the arrow stays
-  // relative to where the phone is facing, not absolute North.
-  const arrowRotation = bearing !== null && heading !== null ? bearing - heading - 45 : null;
+  // lucide's Navigation2 glyph is a symmetric arrowhead pointing
+  // straight up at rest, so rotation = (bearing − heading) puts the
+  // apex on the cache relative to where the phone is facing. (The
+  // older Navigation glyph rests at 45° up-right and would have needed
+  // a −45° offset; Navigation2 is cleaner for compass use.)
+  const arrowRotation = bearing !== null && heading !== null ? bearing - heading : null;
 
   // ----- load listing + subscribe found-logs ------------------------------
 
@@ -431,20 +433,25 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   }
                   testID="hunt-piggy-detail-navigate-button"
                 >
-                  {/* The arrow IS the label — sized up so the rotation
-                      reads clearly on small screens. When we have a
-                      fix the distance sits beside it; when we don't,
-                      the arrow alone reads as "open in Maps". */}
-                  <Navigation
-                    size={28}
-                    color={colors.brandPink}
-                    strokeWidth={2.5}
-                    style={
-                      arrowRotation !== null
-                        ? { transform: [{ rotate: `${arrowRotation}deg` }] }
-                        : undefined
-                    }
-                  />
+                  {/* The arrow IS the label. Two glyphs by design:
+                      - When we have a compass heading, render Navigation2
+                        (symmetric up-pointing arrowhead) rotated to
+                        point at the cache. Reads as a real bearing.
+                      - When we don't (emulator / no magnetometer / perm
+                        denied), fall back to the classic Navigation
+                        glyph at its native 45° tilt. That stays the
+                        generic "go here / open in Maps" affordance
+                        without implying a measured direction. */}
+                  {arrowRotation !== null ? (
+                    <Navigation2
+                      size={28}
+                      color={colors.brandPink}
+                      strokeWidth={2.5}
+                      style={{ transform: [{ rotate: `${arrowRotation}deg` }] }}
+                    />
+                  ) : (
+                    <Navigation size={28} color={colors.brandPink} strokeWidth={2.5} />
+                  )}
                   {distanceMetres !== null ? (
                     <Text style={styles.actionButtonSecondaryText}>
                       {formatDistance(distanceMetres)}

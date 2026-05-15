@@ -20,10 +20,13 @@ interface CompassNav {
 
 /**
  * Live user position + compass heading + bearing/distance to a fixed
- * geo target. Used by the cache-detail Navigate arrow — the icon
- * rotates by `bearing − heading` (− 45° for lucide's `Navigation`,
- * which sits at ~45° at rest) so it always points at the target as
- * the user turns.
+ * geo target. Used by the cache-detail Navigate arrow — when heading
+ * is known the icon rotates by `bearing − heading` so it always
+ * points at the target as the user turns. Callers should pair this
+ * with lucide's `Navigation2` (symmetric arrowhead, straight up at
+ * rest) for the rotated case and fall back to the static `Navigation`
+ * glyph (45° tilt) when `heading` is null — that reads as a generic
+ * "go here" affordance without implying a measured direction.
  *
  * The implementation uses `expo-location` for both feeds — heading is
  * exposed via `watchHeadingAsync`, which lives in `expo-location`, not
