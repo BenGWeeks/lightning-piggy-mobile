@@ -368,6 +368,10 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
           events={[]}
           onTapMap={() => navigation.navigate('Map')}
           onBoundsChange={setMapBbox}
+          // One zoom level wider than ExploreMiniMap's default 13 so
+          // the Geo-caches hub map shows a bigger catchment without
+          // the user having to pinch-zoom out (Ben's feedback).
+          defaultZoom={12}
           interactive
         />
       </View>
