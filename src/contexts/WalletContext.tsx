@@ -1678,7 +1678,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         current.inFlight = true;
         try {
           const [lookupResult] = await Promise.allSettled([
-            nwcService.lookupInvoice(walletId, paymentHash),
+            // Same 2500 ms ceiling as the sibling getBalance call below
+            // — without it, a slow NIP-47 reply blocks the pile-up-
+            // guarded tick for ~10 s and recipients see the payment
+            // land before we mark it paid. See #553.
+            nwcService.lookupInvoice(walletId, paymentHash, { replyTimeoutMs: 2500 }),
             // The balance refresh feeds the generic balance-diff
             // detector as a fallback; run it every tick so a flaky
             // lookup_invoice path still settles detection.
