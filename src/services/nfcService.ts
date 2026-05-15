@@ -511,11 +511,17 @@ export async function writeHuntTagToTag(
   if (!coord || !naddr) {
     throw new Error('Hunt tag payload requires both coord and naddr');
   }
-  // URI-encode the coord because it contains colons; we don't want a
-  // generic URL parser to misinterpret kind:pubkey:d as a port-style
-  // authority. encodeURIComponent escapes ':' (%3A) — recipients
-  // un-escape via the standard URL API.
-  const lpUri = `lightningpiggy://hunt/${encodeURIComponent(coord)}`;
+  // Record 1 is an https URL on our domain, not the custom
+  // `lightningpiggy://` scheme. Reasons:
+  //   - Finders without our app installed still get a clickable URL
+  //     that opens the browser → can show cache info + a download
+  //     link. The custom scheme would just fail with "no app".
+  //   - Android App Links + iOS Universal Links override the browser
+  //     when our app IS installed (manifest already declares the
+  //     `https` scheme + lightningpiggy.com host).
+  //   - URI-encode the coord — colons in `kind:pubkey:d` would
+  //     otherwise be parsed as a port authority.
+  const lpUri = `https://www.lightningpiggy.com/hunt/${encodeURIComponent(coord)}`;
   const nostrUri = naddr.startsWith('nostr:') ? naddr : `nostr:${naddr}`;
   // Bech32 LNURLs are case-insensitive — uppercase is conventional on
   // physical tags + QR for OCR robustness. Pre-existing convention from

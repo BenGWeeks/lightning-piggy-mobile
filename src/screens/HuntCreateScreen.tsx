@@ -726,9 +726,9 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               <View style={styles.getPiggyTagsHint}>
                 <Nfc size={12} color={colors.brandPink} strokeWidth={2.5} />
                 <Text style={styles.getPiggyTagsHintText}>
-                  <Text style={styles.getPiggyTagsHintBold}>Tag chips:</Text> NTAG213 / 215 / 216
-                  (recommended), Mifare Ultralight C also fine. Avoid Mifare Classic — it can't
-                  lock.
+                  <Text style={styles.getPiggyTagsHintBold}>Tag chips:</Text> NTAG215 / 216
+                  recommended (≥504 B fits the full multi-record write). NTAG213 / Mifare Ultralight
+                  C work but only fit a single record. Avoid Mifare Classic — it can't lock.
                 </Text>
               </View>
             </View>
@@ -902,7 +902,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               <View style={styles.payloadPreview}>
                 <Text style={styles.payloadPreviewLabel}>Tag will carry:</Text>
                 <Text style={styles.payloadPreviewLine} numberOfLines={1}>
-                  • lightningpiggy://hunt/{ensurePiggyId().slice(0, 16)}…
+                  • https://www.lightningpiggy.com/hunt/{ensurePiggyId().slice(0, 16)}…
                 </Text>
                 <Text style={styles.payloadPreviewLine} numberOfLines={1}>
                   • nostr:naddr1… ({GC_LISTING_KIND}:{pubkey.slice(0, 8)}…:{ensurePiggyId().slice(0, 12)}…)
@@ -1398,14 +1398,22 @@ const SUPPORTED_TAGS: Array<{
   status: 'recommended' | 'ok' | 'avoid';
 }> = [
   {
-    name: 'NTAG213 / 215 / 216',
-    blurb: 'Locks permanently after write. Common Amazon sticker / keyfob chip.',
-    capacity: '144 / 504 / 888 bytes',
+    name: 'NTAG215 / 216',
+    blurb:
+      'Locks permanently after write. Plenty of room for the full multi-record payload (lightningpiggy URL + nostr reference + LNURL).',
+    capacity: '504 / 888 bytes',
     status: 'recommended',
   },
   {
+    name: 'NTAG213',
+    blurb:
+      'Locks permanently but only ~140 usable bytes — fits a single record (LNURL only) but not the full multi-record write. Pick 215 / 216 if you have the choice.',
+    capacity: '144 bytes',
+    status: 'ok',
+  },
+  {
     name: 'Mifare Ultralight C',
-    blurb: 'Also lockable. Slightly older but works the same in practice.',
+    blurb: 'Lockable, ~140 usable bytes — same caveat as NTAG213 for the multi-record write.',
     capacity: '144 bytes',
     status: 'ok',
   },

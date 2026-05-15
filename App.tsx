@@ -84,21 +84,23 @@ export default function App() {
       const peek = trimmed.length > 96 ? trimmed.slice(0, 60) + '…' + trimmed.slice(-20) : trimmed;
       console.log(`[Link] received: ${peek}`);
 
-      // `lightningpiggy://hunt/<coord>` — our own scheme written as
-      // record 1 of a multi-record Hunt NFC tag (#73). Coord is the
-      // standard `kind:pubkey:d` form; we decode the percent-encoding
-      // (the writer escapes `:` to %3A so generic URL parsers don't
-      // mistake the kind for a port) before handing to navigation.
-      const lpHuntMatch = trimmed.match(/^lightningpiggy:\/\/hunt\/(.+)$/i);
+      // `https://www.lightningpiggy.com/hunt/<coord>` (the canonical
+      // form written as record 1 of an NFC tag) OR the legacy custom
+      // `lightningpiggy://hunt/<coord>` scheme. Both decode the same
+      // way. Coord is `kind:pubkey:d` percent-encoded.
+      const lpHuntMatch = trimmed.match(
+        /^(?:https?:\/\/(?:www\.)?lightningpiggy\.com\/hunt\/(.+)|lightningpiggy:\/\/hunt\/(.+))$/i,
+      );
       if (lpHuntMatch) {
+        const captured = lpHuntMatch[1] ?? lpHuntMatch[2];
         let coord: string;
         try {
-          coord = decodeURIComponent(lpHuntMatch[1]);
+          coord = decodeURIComponent(captured);
         } catch {
-          console.warn(`[Link] lightningpiggy:// coord decode failed: ${lpHuntMatch[1]}`);
+          console.warn(`[Link] hunt-URL coord decode failed: ${captured}`);
           return;
         }
-        console.log(`[Link] → HuntPiggyDetail via lightningpiggy:// coord=${coord}`);
+        console.log(`[Link] → HuntPiggyDetail via ${trimmed.startsWith('https') ? 'https' : 'lightningpiggy://'} coord=${coord}`);
         const tryNav = (attempt: number) => {
           if (navigateToHuntPiggyDetail(coord)) return;
           if (attempt >= 20 || cancelled) return;
