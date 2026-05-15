@@ -189,7 +189,25 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // Default ON; only flip OFF if the user explicitly persisted false.
       setFollowingOnlyState(v !== 'false');
     });
-    AsyncStorage.getItem('secret_mode').then((v) => setSecretModeState(v === 'true'));
+    // Read secret-mode flag with a one-shot migration from the pre-rename
+    // 'dev_mode' key. Without this, anyone who'd already unlocked the
+    // mode before this PR would silently revert to locked on upgrade
+    // (and the legacy key would linger in AsyncStorage forever). Read
+    // both, prefer the new key if present, otherwise migrate the legacy
+    // value forward + delete the old key.
+    (async () => {
+      const secret = await AsyncStorage.getItem('secret_mode');
+      if (secret !== null) {
+        setSecretModeState(secret === 'true');
+        return;
+      }
+      const legacy = await AsyncStorage.getItem('dev_mode');
+      if (legacy !== null) {
+        setSecretModeState(legacy === 'true');
+        await AsyncStorage.setItem('secret_mode', legacy);
+        await AsyncStorage.removeItem('dev_mode');
+      }
+    })();
   }, [pubkey]);
 
   // Persist + broadcast a secret-mode toggle. Used by AboutScreen's

@@ -354,11 +354,11 @@ Hot wallet (mnemonic import) is available behind a **secret mode** toggle:
 
 - **Enable**: Triple-tap the version number at the bottom of Account settings
 - **Stored**: `secret_mode` flag in AsyncStorage (persists across sessions)
-- **Visual**: Version displays "(dev)" suffix when enabled
+- **Visual**: Version displays "(secret)" suffix when enabled
 
 **Mnemonic import flow:**
 
-1. User selects "Import Seed Phrase (Beta)" in Add Wallet wizard (dev mode only)
+1. User selects "Import Seed Phrase (Beta)" in Add Wallet wizard (secret mode only)
 2. Enters 12 or 24 word mnemonic — input normalised: strips numbers, colons, extra whitespace, lowercased
 3. Mnemonic validated via `bip39.validateMnemonic()`
 4. Stored in `expo-secure-store` (encrypted device storage) under `onchain_mnemonic_{walletId}`

@@ -18,9 +18,9 @@ name: Subflow — add an on-chain hot wallet via mnemonic (clipboard-paste)
 # AddWalletWizard NWC paste pattern). The Paste button bypasses that
 # entirely.
 #
-# Mnemonic import is dev-mode only — the `wallet-type-mnemonic` tile is
+# Mnemonic import is secret-mode only — the `wallet-type-mnemonic` tile is
 # gated on the AsyncStorage `secret_mode` flag (set this once via
-# `test-dev-mode.yaml` or directly).
+# `test-secret-mode.yaml` or directly).
 
 - waitForAnimationToEnd: { timeout: 4000 }
 
