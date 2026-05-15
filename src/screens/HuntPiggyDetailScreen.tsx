@@ -205,6 +205,11 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     [],
   );
   const [hasClaimed, setHasClaimed] = useState(false);
+  // Unix-seconds timestamp of the LATEST recorded claim for this cache
+  // by the signed-in user. Drives `alreadyLogged` so the find-log
+  // composer reopens after a re-claim — every claim window gets its
+  // own opportunity to log a fresh observation.
+  const [lastClaimAt, setLastClaimAt] = useState<number | null>(null);
   // Finder NFC reader sheet — opens on "Scan the Piglet" tap. The sheet
   // owns its own foreground reader session; on a successful read we
   // navigate to HuntFoundScreen with the extracted LNURL, which is what
@@ -342,15 +347,25 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     let cancelled = false;
     // Hard-claim signal: HuntFoundScreen records the claim with the
     // cache coord as `piggyId`, so we look it up by coord and unlock
-    // the find-log composer when there's a match. The previous
-    // lastClaimFor(coord) call hashed the coord as if it were an LNURL
-    // and never matched anything — that was a soft-claim heuristic
-    // placeholder; we replaced it with the coord lookup now that the
-    // finder NFC flow records the link.
+    // the find-log composer when there's a match.
+    //
+    // The window after which hasClaimed flips back to false is the
+    // ISSUER'S cooldown (the `wait` tag from the kind 37516 event) —
+    // not a hardcoded 24 h. A Piggy with `20m cooldown / 100 claims`
+    // is explicitly designed to be re-claimed, so the actionRow
+    // primary button should revert to 'Scan the Piglet' once the
+    // cooldown elapses. Falls back to 24 h when the issuer didn't
+    // set a cooldown.
     (async () => {
       const recent = await lastClaimForPiggyId(coord);
-      if (!cancelled && recent && Date.now() / 1000 - recent.claimedAt < 24 * 60 * 60) {
+      if (cancelled || !recent) return;
+      setLastClaimAt(recent.claimedAt);
+      const cooldownSec = cache.waitSeconds ?? 24 * 60 * 60;
+      const elapsedSec = Date.now() / 1000 - recent.claimedAt;
+      if (elapsedSec < cooldownSec) {
         setHasClaimed(true);
+      } else {
+        setHasClaimed(false);
       }
     })();
     return () => {
@@ -478,8 +493,17 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   // button — once a user has logged, the 'Log your find' CTA should
   // not keep nagging them on revisits.
   const alreadyLogged = useMemo(
-    () => (pubkey ? [...logs.values()].some((l) => l.pubkey === pubkey) : false),
-    [logs, pubkey],
+    () => {
+      if (!pubkey) return false;
+      // A log only counts as 'already logged for this claim window' if
+      // it was posted AFTER the most recent claim. Older logs from a
+      // previous claim shouldn't suppress the composer when the user
+      // returns post-cooldown to claim again.
+      return [...logs.values()].some(
+        (l) => l.pubkey === pubkey && (lastClaimAt === null || l.createdAt >= lastClaimAt),
+      );
+    },
+    [logs, pubkey, lastClaimAt],
   );
 
   // Hero shows the photo when the toggle picks it AND a photo exists;
