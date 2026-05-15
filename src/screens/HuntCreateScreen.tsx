@@ -913,7 +913,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
             <StepHeader
               n={6}
               title="Write the tag"
-              subtitle="Write the prize link onto a physical NFC tag the finder will tap."
+              subtitle="Write the prize link onto an NFC tag the finder will tap."
               status={stage.kind === 'wrote-nfc' ? 'done' : 'active'}
               styles={styles}
               colors={colors}
@@ -923,14 +923,9 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 which only exists once the Piggy has been published. In
                 a fresh-hide flow that means step 5 (Publish) has to
                 run first. In edit mode the listing was already
-                published when the user first hid the Piggy, so a
-                stage.kind === 'validated' is fine too — the relay-side
-                event already exists. */}
+                published, so stage.kind === 'validated' is fine too. */}
             {!nfcReady ? (
-              <Text style={styles.helper}>
-                Publish the Piggy first (step 5) — the tag needs the listing on relays so finders
-                can look it up.
-              </Text>
+              <Text style={styles.helper}>Publish the Piggy first (step 5).</Text>
             ) : null}
             {/* What we'll write, plain-text, so the hider can see the
                 three records that go on the tag before the camera /
@@ -1630,24 +1625,19 @@ const NfcSupportedTagsCard: React.FC<{
       <Lock size={14} color={colors.brandPink} strokeWidth={2.5} />
       <Text style={styles.tagsCardHeaderText}>Supported NFC tags</Text>
     </View>
-    {/* Two-paragraph form — collapsed from the previous four-row
-        matrix so the hider can pick a sticker at a glance. */}
+    {/* Tightened two-row form so the "Write to NFC tag" + Next buttons
+        fit on a Pixel without scrolling. Long-form rationale lives in
+        docs/, not in the wizard. */}
     <View style={styles.tagsCardParagraph}>
       <Text style={styles.tagsCardCheck}>✓</Text>
       <Text style={styles.tagsCardParagraphText}>
-        <Text style={styles.tagsCardName}>NTAG215 / 216</Text> — recommended. 504-888 bytes of
-        usable space, plenty of room for the full multi-record payload (lightningpiggy URL +
-        nostr listing reference + LNURL). Locks permanently after write so no passer-by can
-        overwrite the tag.
+        <Text style={styles.tagsCardName}>NTAG215 / 216</Text> — fit the payload + lock permanently.
       </Text>
     </View>
     <View style={styles.tagsCardParagraph}>
       <Text style={styles.tagsCardCross}>✗</Text>
       <Text style={styles.tagsCardParagraphText}>
-        <Text style={styles.tagsCardName}>NTAG213 / Mifare Ultralight C / Mifare Classic</Text> —
-        avoid. NTAG213 + Ultralight C only have ~140 usable bytes, too small for the multi-record
-        write. Mifare Classic has no permanent NDEF lock — anyone with the default sector key can
-        overwrite the cache.
+        <Text style={styles.tagsCardName}>NTAG213 / Ultralight C / Mifare Classic</Text> — too small or can't lock.
       </Text>
     </View>
   </View>

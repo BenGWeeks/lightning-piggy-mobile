@@ -479,6 +479,23 @@ export async function writeLnurlToTag(
 // Larger chips (NTAG215 = 504B usable, NTAG216 = 888B) accept the same
 // payload with headroom.
 const NTAG_213_USABLE_BYTES = 140;
+const NTAG_424_USABLE_BYTES = 416;
+
+// Map a detected tag family to its usable-NDEF capacity (Android only;
+// iOS reports 'unknown' and skips the size check). The 21x family
+// returns null intentionally — react-native-nfc-manager doesn't expose
+// enough metadata to distinguish 213 from 215 from 216 at detect time,
+// so we trust the chip's own size rejection at writeNdefMessage rather
+// than pre-blocking a 215 / 216 user with the 213 ceiling. NTAG424 has
+// a fixed 416-byte usable area so it's safe to pre-check.
+const usableBytesFor = (family: TagFamily): number | null => {
+  switch (family) {
+    case 'ntag-424':
+      return NTAG_424_USABLE_BYTES;
+    default:
+      return null;
+  }
+};
 
 export interface HuntTagPayload {
   /** Cache coord (`kind:pubkey:d`) — used to build the lightningpiggy://
@@ -571,15 +588,11 @@ export async function writeHuntTagToTag(
       (lnurl ? ` lnurl=${(ndefRecords[2] ? lnurl.length : 0)}` : '') +
       ')',
   );
-  if (bytes.length > NTAG_213_USABLE_BYTES) {
-    // Surface chip-family guidance up front. The user can shorten the
-    // cache `d` tag (the only field they control here) or move to a
-    // 215/216 chip; both options are friendlier than a write-time
-    // rejection from the chip itself.
-    throw new Error(
-      `Tag payload is ${bytes.length} bytes — NTAG213 only fits ~140. Use a shorter cache name (the d-tag) or an NTAG215 / NTAG216 sticker.`,
-    );
-  }
+  // Note: the size check is deferred until AFTER tag detection (below)
+  // so a user with a 215 / 216 / 424 isn't pre-blocked by NTAG213's
+  // 140-byte ceiling on a payload their actual chip can fit. Pre-fix
+  // we threw here unconditionally and the user saw "Write failed"
+  // before they'd even tapped the tag (#73 follow-up).
   try {
     if (!(await ensureNfcStarted())) {
       throw new Error('NFC unavailable on this device');
@@ -603,9 +616,32 @@ export async function writeHuntTagToTag(
         'Unrecognised tag type. Lightning Piggy supports NTAG213 / 215 / 216, NTAG424, and Mifare Ultralight C.',
       );
     }
+    // Post-detection capacity check — guards against the chip silently
+    // truncating the write. 213 maxes out at 140 usable bytes; 215/216
+    // / 424 have plenty of headroom for the multi-record payload.
+    const cap = isAndroid ? usableBytesFor(family) : null;
+    if (cap !== null && bytes.length > cap) {
+      throw new Error(
+        `Tag payload is ${bytes.length} bytes — this ${family.toUpperCase()} only fits ${cap}. Use an NTAG215 / 216 sticker (504–888 bytes).`,
+      );
+    }
     opts.onTagDetected?.();
     console.log(`[NFC] tag detected — family=${family} — writing ${bytes.length} bytes…`);
-    await NfcManager.ndefHandler.writeNdefMessage(bytes);
+    try {
+      await NfcManager.ndefHandler.writeNdefMessage(bytes);
+    } catch (writeErr) {
+      // NTAG424's NDEF file is gated by AES-key authentication on
+      // writes — plain `writeNdefMessage` fails with `java.io.IOException`
+      // on a factory-default chip. Full DESFire support is tracked in
+      // GH #558; until then surface a clear "use 215/216" prompt so the
+      // user doesn't think the app is broken.
+      if (family === 'ntag-424') {
+        throw new Error(
+          "NTAG424 needs AES-key authentication which isn't supported yet (GH #558). Use an NTAG215 / 216 sticker for now.",
+        );
+      }
+      throw writeErr;
+    }
     console.log('[NFC] write OK');
     // Lock the NDEF area (Android NTAG21x / Ultralight C) so a passer-by
     // can't overwrite the tag with a phishing payload. iOS has no

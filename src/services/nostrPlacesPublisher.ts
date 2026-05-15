@@ -221,18 +221,22 @@ export const fetchCachesByAuthor = async (
   hiderPubkey: string,
   relays: string[] = DEFAULT_RELAYS,
 ): Promise<ParsedCache[]> => {
-  // Cap the relay query at 5 s so a slow relay doesn't pin pull-to-
-  // refresh in a "still refreshing" state. Whatever the fast relays
-  // returned in that window is fine — the rail is already populated
-  // from local cache and this fetch is purely additive.
+  // Cap the relay query at 5 s via nostr-tools' built-in `maxWait` so a
+  // slow relay doesn't pin pull-to-refresh in a "still refreshing"
+  // state. Pre-fix we used Promise.race + setTimeout — but Hermes
+  // timers can be starved when the JS thread is busy (relay event
+  // bursts on Explore mount), so the timeout fired late and querySync
+  // kept its WebSocket open for the full ~28 s anyway. maxWait closes
+  // the underlying sub from inside the pool, which is timer-independent.
   const __t0 = performance.now();
-  const events = await Promise.race([
-    pool.querySync(relays, {
+  const events = await pool.querySync(
+    relays,
+    {
       kinds: [GC_LISTING_KIND],
       authors: [hiderPubkey],
-    }),
-    new Promise<NostrEvent[]>((resolve) => setTimeout(() => resolve([]), 5000)),
-  ]);
+    },
+    { maxWait: 5000 },
+  );
   console.log(
     `[PerfBlock] fetchCachesByAuthor: ${events.length} events in ${Math.round(performance.now() - __t0)}ms (relays=${relays.length})`,
   );

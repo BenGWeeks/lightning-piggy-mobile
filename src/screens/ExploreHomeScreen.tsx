@@ -260,8 +260,12 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    setCaches(new Map());
-    setEvents(new Map());
+    // Do NOT wipe the caches/events Maps — replaceable-event semantics
+    // mean re-arrivals dedupe via createdAt, so an additive refresh is
+    // strictly safer. Pre-fix the wipe killed the user's own listings
+    // (added by the one-shot by-author fetch) every time they pulled
+    // to refresh, because the nearby `#g` sub doesn't re-echo caches
+    // outside the current geohash prefix on resubscribe.
     setUntrustedCacheCount(0);
     setUntrustedEventCount(0);
     try {
@@ -271,6 +275,10 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     } catch {
       // Refresh is best-effort; keep the existing rails on failure.
     }
+    // Bumping refreshKey also re-runs the by-author fetch effect (see
+    // its dep array below) so a freshly-edited / freshly-published
+    // Piglet by the user surfaces even when it sits outside the nearby
+    // geohash prefix.
     setRefreshKey((n) => n + 1);
     // Two-second floor on the spinner — relay subs trickle in
     // continuously, so there's no clean "done" signal. Long enough to
@@ -338,10 +346,15 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // One-shot per pubkey via `byAuthorFetchedForRef` so re-renders
   // don't refire.
   const { pubkey: signedInPubkey, relays: userRelays } = useNostr();
+  // Track the (pubkey, refreshKey) tuple that last triggered the fetch
+  // so we re-run on pull-to-refresh AND on pubkey change, but never on
+  // unrelated re-renders.
   const byAuthorFetchedForRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!signedInPubkey || byAuthorFetchedForRef.current === signedInPubkey) return;
-    byAuthorFetchedForRef.current = signedInPubkey;
+    if (!signedInPubkey) return;
+    const fetchKey = `${signedInPubkey}:${refreshKey}`;
+    if (byAuthorFetchedForRef.current === fetchKey) return;
+    byAuthorFetchedForRef.current = fetchKey;
     let cancelled = false;
     const readRelays = userRelays.filter((r) => r.read).map((r) => r.url);
     fetchCachesByAuthor(signedInPubkey, readRelays.length > 0 ? readRelays : undefined)
@@ -374,7 +387,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     return () => {
       cancelled = true;
     };
-  }, [signedInPubkey, userRelays]);
+  }, [signedInPubkey, userRelays, refreshKey]);
 
   // Write-through to AsyncStorage whenever the in-memory state grows
   // so the next cold start has fresh content to hydrate from. Debounced
@@ -516,6 +529,24 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         lowerPubkey !== null && cache.hiderPubkey.toLowerCase() === lowerPubkey;
       return { cache, distance, isOwn };
     });
+    // Trace own-listing trajectory so a missing-own-cache regression
+    // can be diagnosed from logcat alone (#73 follow-up).
+    const ownItems = items.filter((c) => c.isOwn);
+    if (ownItems.length > 0) {
+      console.log(
+        `[PerfBlock] sortedCaches own=${ownItems.length} maxDistance=${maxDistanceMetres ?? 'null'}m posSet=${pos !== null} ` +
+          ownItems
+            .map(
+              (c) =>
+                `${c.cache.name ?? c.cache.d}@gh=${c.cache.geohash ?? 'null'} dist=${Number.isFinite(c.distance) ? Math.round(c.distance) + 'm' : 'inf'}`,
+            )
+            .join(' | '),
+      );
+    } else if (caches.size > 0 && signedInPubkey) {
+      console.log(
+        `[PerfBlock] sortedCaches own=0 (caches.size=${caches.size}, signedInPubkey=${signedInPubkey.slice(0, 8)}…) — by-author merge may not have landed yet`,
+      );
+    }
     if (maxDistanceMetres !== null) {
       items = items.filter((c) => c.distance <= maxDistanceMetres);
     }
