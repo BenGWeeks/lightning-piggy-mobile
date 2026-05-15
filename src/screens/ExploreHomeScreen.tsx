@@ -493,20 +493,30 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   }, [merchants, pos, maxDistanceMetres]);
 
   const sortedCaches = useMemo(() => {
+    const lowerPubkey = signedInPubkey?.toLowerCase() ?? null;
     let items = [...caches.values()].map((cache) => {
       const center = cache.geohash ? decodeGeohash(cache.geohash) : null;
       const distance =
         pos && center
           ? haversineMetres({ lat: pos.lat, lon: pos.lon }, { lat: center.lat, lon: center.lng })
           : Number.POSITIVE_INFINITY;
-      return { cache, distance };
+      const isOwn =
+        lowerPubkey !== null && cache.hiderPubkey.toLowerCase() === lowerPubkey;
+      return { cache, distance, isOwn };
     });
     if (maxDistanceMetres !== null) {
-      items = items.filter((c) => c.distance <= maxDistanceMetres);
+      // Always include the signed-in user's own listings regardless of
+      // the nearby-radius setting — a hider expects to see their own
+      // Piggy in this rail even if it's outside their current radius.
+      items = items.filter((c) => c.isOwn || c.distance <= maxDistanceMetres);
     }
-    items.sort((a, b) => a.distance - b.distance);
+    items.sort((a, b) => {
+      // Own listings first, then by distance ascending.
+      if (a.isOwn !== b.isOwn) return a.isOwn ? -1 : 1;
+      return a.distance - b.distance;
+    });
     return items.slice(0, 12);
-  }, [caches, pos, maxDistanceMetres]);
+  }, [caches, pos, maxDistanceMetres, signedInPubkey]);
 
   const sortedEvents = useMemo(() => {
     let items = [...events.values()].map((event) => {

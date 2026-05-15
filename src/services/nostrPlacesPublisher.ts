@@ -221,10 +221,21 @@ export const fetchCachesByAuthor = async (
   hiderPubkey: string,
   relays: string[] = DEFAULT_RELAYS,
 ): Promise<ParsedCache[]> => {
-  const events = await pool.querySync(relays, {
-    kinds: [GC_LISTING_KIND],
-    authors: [hiderPubkey],
-  });
+  // Cap the relay query at 5 s so a slow relay doesn't pin pull-to-
+  // refresh in a "still refreshing" state. Whatever the fast relays
+  // returned in that window is fine — the rail is already populated
+  // from local cache and this fetch is purely additive.
+  const __t0 = performance.now();
+  const events = await Promise.race([
+    pool.querySync(relays, {
+      kinds: [GC_LISTING_KIND],
+      authors: [hiderPubkey],
+    }),
+    new Promise<NostrEvent[]>((resolve) => setTimeout(() => resolve([]), 5000)),
+  ]);
+  console.log(
+    `[PerfBlock] fetchCachesByAuthor: ${events.length} events in ${Math.round(performance.now() - __t0)}ms (relays=${relays.length})`,
+  );
   const seen = new Map<string, ParsedCache>();
   for (const e of events) {
     const parsed = parseCache(e as VerifiedEvent);
