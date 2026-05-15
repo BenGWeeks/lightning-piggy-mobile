@@ -223,19 +223,31 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
   // and the SDK doesn't automatically resume on the next onResume.
   // Without this, swiping away to another app even briefly leaves the
   // sheet stuck on 'Waiting for NFC tag…' with no actual reader active.
+  //
+  // Stash stage + startRead in refs so the effect's dep array stays at
+  // just `visible`. Otherwise startRead's own dep on `makeInvoice`
+  // (which can churn when WalletProvider re-renders) makes this effect
+  // re-subscribe every render — earlier shape triggered React's
+  // 'Maximum update depth exceeded' guard on the Pixel.
+  const stageRef = useRef(stage);
+  const startReadRef = useRef(startRead);
+  useEffect(() => {
+    stageRef.current = stage;
+    startReadRef.current = startRead;
+  }, [stage, startRead]);
   useEffect(() => {
     if (!visible) return;
     let lastState: AppStateStatus = AppState.currentState;
     const sub = AppState.addEventListener('change', (next) => {
       const wasBackground = lastState === 'background' || lastState === 'inactive';
       lastState = next;
-      if (next === 'active' && wasBackground && stage === 'ready') {
+      if (next === 'active' && wasBackground && stageRef.current === 'ready') {
         console.log('[NFC] App resumed during ready state — re-arming reader');
-        startRead();
+        startReadRef.current();
       }
     });
     return () => sub.remove();
-  }, [visible, stage, startRead]);
+  }, [visible]);
 
   // Tick the countdown each second while sleeping. Stops at 0 — the
   // Try Again button then re-runs the claim and either succeeds (if
@@ -456,17 +468,21 @@ const createStyles = (colors: Palette) =>
     },
     successIcon: { backgroundColor: colors.greenLight },
     sleepingIcon: { backgroundColor: colors.brandPinkLight },
-    // 'Zzz' label sits to the top-right of the sleeping Piggy. Italic +
-    // brand pink reads as a hand-drawn snore rather than a system badge.
+    // 'Zzz' label floats outside the top-right of the icon container,
+    // above the Piggy rather than over its body. Negative offsets push
+    // it past the circle's edge — the BottomSheetView clips overflow
+    // gracefully, so the Zzz sits visually atop the corner like a
+    // hand-drawn snore.
     zzzBadge: {
       position: 'absolute',
-      top: 6,
-      right: 10,
+      top: -6,
+      right: -8,
       color: colors.brandPink,
-      fontSize: 22,
+      fontSize: 24,
       fontWeight: '800',
       fontStyle: 'italic',
       letterSpacing: -1,
+      transform: [{ rotate: '-10deg' }],
     },
     errorIcon: { backgroundColor: colors.redLight },
     errorBadge: {
