@@ -56,7 +56,9 @@ interface Props {
 const HuntScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const [pos, setPos] = useState<{ lat: number; lon: number } | null>(null);
+  const [pos, setPos] = useState<{ lat: number; lon: number; accuracy: number | null } | null>(
+    null,
+  );
   const [caches, setCaches] = useState<Map<string, ParsedCache>>(
     () => new Map(peekCachedCachesSync().map((c) => [c.coord, c])),
   );
@@ -120,7 +122,10 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
     (async () => {
       const pinned = getDevPinnedLocation();
       if (pinned) {
-        if (!cancelled) setPos(pinned);
+        // Dev pin is a literal lat/lon — no real accuracy applies, so
+        // null suppresses the halo (drawAccuracyCircle in
+        // src/utils/mapMeDot.ts no-ops on null).
+        if (!cancelled) setPos({ ...pinned, accuracy: null });
         return;
       }
       try {
@@ -132,7 +137,18 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
         const fix = await Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
         });
-        if (!cancelled) setPos({ lat: fix.coords.latitude, lon: fix.coords.longitude });
+        if (!cancelled) {
+          // `coords.accuracy` is 1-σ horizontal accuracy in metres on
+          // expo-location; null on platforms that don't report it.
+          // Threaded through to ExploreMiniMap so the accuracy halo
+          // can render around the "you" dot (shared
+          // drawAccuracyCircle in src/utils/mapMeDot.ts).
+          setPos({
+            lat: fix.coords.latitude,
+            lon: fix.coords.longitude,
+            accuracy: typeof fix.coords.accuracy === 'number' ? fix.coords.accuracy : null,
+          });
+        }
       } catch {
         if (!cancelled) setLoading(false);
       }
@@ -298,6 +314,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
               <ExploreMiniMap
                 lat={pos?.lat ?? null}
                 lon={pos?.lon ?? null}
+                userAccuracyMetres={pos?.accuracy ?? null}
                 merchants={[]}
                 // The list below filters by WoT + difficulty/terrain/type
                 // + search query (see sortedCaches → filteredCaches). The

@@ -110,7 +110,9 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
   // ----- location ---------------------------------------------------------
 
-  const [pos, setPos] = useState<{ lat: number; lon: number } | null>(null);
+  const [pos, setPos] = useState<{ lat: number; lon: number; accuracy: number | null } | null>(
+    null,
+  );
   const [locationDenied, setLocationDenied] = useState(false);
   useEffect(() => {
     let cancelled = false;
@@ -118,7 +120,9 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
       // Dev-only emulator fallback — see `getDevPinnedLocation`.
       const pinned = getDevPinnedLocation();
       if (pinned) {
-        if (!cancelled) setPos(pinned);
+        // Dev pin → null accuracy so the halo is suppressed (the pin
+        // is a literal value, not a measurement).
+        if (!cancelled) setPos({ ...pinned, accuracy: null });
         return;
       }
       const perm = await Location.requestForegroundPermissionsAsync();
@@ -137,7 +141,11 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           maxAge: 10 * 60 * 1000, // ≤ 10 min old is fine for our 5 km tiles
         });
         if (!cancelled && last) {
-          setPos({ lat: last.coords.latitude, lon: last.coords.longitude });
+          setPos({
+            lat: last.coords.latitude,
+            lon: last.coords.longitude,
+            accuracy: typeof last.coords.accuracy === 'number' ? last.coords.accuracy : null,
+          });
         }
       } catch {
         // Non-fatal — fall through to getCurrentPositionAsync.
@@ -147,7 +155,11 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           accuracy: Location.Accuracy.Balanced,
         });
         if (!cancelled) {
-          setPos({ lat: current.coords.latitude, lon: current.coords.longitude });
+          setPos({
+            lat: current.coords.latitude,
+            lon: current.coords.longitude,
+            accuracy: typeof current.coords.accuracy === 'number' ? current.coords.accuracy : null,
+          });
         }
       } catch {
         // If getCurrentPositionAsync rejects AND we never got a
@@ -481,6 +493,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
             <ExploreMiniMap
               lat={pos?.lat ?? null}
               lon={pos?.lon ?? null}
+              userAccuracyMetres={pos?.accuracy ?? null}
               merchants={merchants}
               caches={[...caches.values()]}
               events={[...events.values()]}

@@ -209,9 +209,15 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
       const pinned = getDevPinnedLocation();
       let lat: number;
       let lon: number;
+      let accuracy: number | null = null;
       if (pinned) {
         lat = pinned.lat;
         lon = pinned.lon;
+        // Dev-pinned position is a literal lat/lon — no real-world
+        // accuracy applies. Leaving accuracy null suppresses the
+        // halo (drawAccuracyCircle no-ops on null) so the dev pin
+        // doesn't imply false-precision.
+        accuracy = null;
         setPermission('granted');
       } else {
         const { status } = await Location.requestForegroundPermissionsAsync();
@@ -228,6 +234,7 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
           if (cancelled) return;
           lat = pos.coords.latitude;
           lon = pos.coords.longitude;
+          accuracy = typeof pos.coords.accuracy === 'number' ? pos.coords.accuracy : null;
         } catch (e) {
           if (!cancelled) setError((e as Error).message);
           return;
@@ -258,11 +265,11 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
           setViewportInWebView(v.lat, v.lng, v.zoom);
           // Drop a me-marker at GPS without re-centring.
           if (webviewReady && webviewRef.current) {
-            const js = `window.LP_setMeMarker && window.LP_setMeMarker(${lat}, ${lon}); true;`;
+            const js = `window.LP_setMeMarker && window.LP_setMeMarker(${lat}, ${lon}, ${accuracy ?? 'null'}); true;`;
             webviewRef.current.injectJavaScript(js);
           }
         } else {
-          setViewportInWebView(lat, lon, 10);
+          setViewportInWebView(lat, lon, 10, accuracy);
         }
         await refreshPlaces(initBbox);
 
@@ -304,10 +311,13 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   const pendingViewport = useRef<{ lat: number; lng: number; zoom: number } | null>(null);
 
   const setViewportInWebView = useCallback(
-    (lat: number, lng: number, zoom: number) => {
+    (lat: number, lng: number, zoom: number, accuracyMetres: number | null = null) => {
       pendingViewport.current = { lat, lng, zoom };
       if (!webviewRef.current || !webviewReady) return;
-      const js = `window.LP_setViewport && window.LP_setViewport(${lat}, ${lng}, ${zoom}); true;`;
+      // accuracy is optional — null suppresses the halo (dev pin or
+      // platforms that don't report). The shared drawAccuracyCircle
+      // in src/utils/mapMeDot.ts no-ops on null.
+      const js = `window.LP_setViewport && window.LP_setViewport(${lat}, ${lng}, ${zoom}, ${accuracyMetres ?? 'null'}); true;`;
       webviewRef.current.injectJavaScript(js);
     },
     [webviewReady],
@@ -478,7 +488,12 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
       const pos = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
-      setViewportInWebView(pos.coords.latitude, pos.coords.longitude, 15);
+      setViewportInWebView(
+        pos.coords.latitude,
+        pos.coords.longitude,
+        15,
+        typeof pos.coords.accuracy === 'number' ? pos.coords.accuracy : null,
+      );
     } catch (e) {
       setError((e as Error).message);
     }
@@ -1400,23 +1415,30 @@ const LEAFLET_HTML = `<!DOCTYPE html>
       emitBounds();
     });
 
-    window.LP_setViewport = function(lat, lng, zoom) {
+    // Shared me-marker render — same dot + halo logic both entry
+    // points use. drawAccuracyCircle() comes from the
+    // src/utils/mapMeDot.ts ME_DOT_JS bridge interpolated above.
+    let meAccuracyCircle = null;
+    function placeMe(lat, lng, accuracyMetres){
+      if (meMarker) map.removeLayer(meMarker);
+      if (meAccuracyCircle) { map.removeLayer(meAccuracyCircle); meAccuracyCircle = null; }
+      meMarker = L.marker([lat, lng], {
+        icon: L.divIcon({ className: '', html: meIconHtml(), iconSize: [14,14], iconAnchor: [7,7] }),
+      }).addTo(map);
+      meAccuracyCircle = drawAccuracyCircle(map, [lat, lng], accuracyMetres);
+    }
+
+    window.LP_setViewport = function(lat, lng, zoom, accuracyMetres) {
       __pendingProgrammatic = true;
       map.setView([lat, lng], zoom || map.getZoom());
-      if (meMarker) map.removeLayer(meMarker);
-      meMarker = L.marker([lat, lng], {
-        icon: L.divIcon({ className: '', html: '<div class="lp-me"></div>', iconSize: [14,14] }),
-      }).addTo(map);
+      placeMe(lat, lng, accuracyMetres);
     };
 
     // Drop / move the "you are here" marker without changing the
     // viewport. Used after the user's last-seen viewport is restored
     // so they can still see where they are on someone else's pan.
-    window.LP_setMeMarker = function(lat, lng) {
-      if (meMarker) map.removeLayer(meMarker);
-      meMarker = L.marker([lat, lng], {
-        icon: L.divIcon({ className: '', html: '<div class="lp-me"></div>', iconSize: [14,14] }),
-      }).addTo(map);
+    window.LP_setMeMarker = function(lat, lng, accuracyMetres) {
+      placeMe(lat, lng, accuracyMetres);
     };
 
     // Validate Material Symbols name with a strict regex instead of a
