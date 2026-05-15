@@ -531,6 +531,16 @@ export async function writeHuntTagToTag(
   if (!bytes) {
     throw new Error('Failed to encode NDEF message');
   }
+  // Diagnostic — visible on `adb logcat | grep NFC`. Helps the field
+  // tester (Ben on the Pixel) see record count + encoded size at a
+  // glance so a write failure can be triaged against the NTAG213
+  // ceiling without guesswork.
+  console.log(
+    `[NFC] writeHuntTagToTag: ${ndefRecords.length} records, ${bytes.length} bytes ` +
+      `(records: lp=${lpUri.length} nostr=${nostrUri.length}` +
+      (lnurl ? ` lnurl=${(ndefRecords[2] ? lnurl.length : 0)}` : '') +
+      ')',
+  );
   if (bytes.length > NTAG_213_USABLE_BYTES) {
     // Surface chip-family guidance up front. The user can shorten the
     // cache `d` tag (the only field they control here) or move to a
@@ -564,7 +574,9 @@ export async function writeHuntTagToTag(
       );
     }
     opts.onTagDetected?.();
+    console.log(`[NFC] tag detected — family=${family} — writing ${bytes.length} bytes…`);
     await NfcManager.ndefHandler.writeNdefMessage(bytes);
+    console.log('[NFC] write OK');
     // Lock the NDEF area (Android NTAG21x / Ultralight C) so a passer-by
     // can't overwrite the tag with a phishing payload. iOS has no
     // equivalent API — we skip and report `locked: false`. Same shape
@@ -578,11 +590,13 @@ export async function writeHuntTagToTag(
           const ok = await handler.makeReadOnly();
           locked = ok !== false;
         }
-      } catch {
+      } catch (lockErr) {
         // Lock failure is non-fatal — data is written; surface via
         // `locked: false` so the UI can warn.
+        console.warn(`[NFC] makeReadOnly threw: ${(lockErr as Error)?.message ?? lockErr}`);
       }
     }
+    console.log(`[NFC] writeHuntTagToTag done — family=${family} locked=${locked}`);
     return { family, locked };
   } finally {
     NfcManager.cancelTechnologyRequest().catch(() => {});

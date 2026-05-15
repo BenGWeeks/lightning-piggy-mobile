@@ -79,6 +79,10 @@ export default function App() {
     const route = (raw: string | null | undefined) => {
       if (cancelled || !raw) return;
       const trimmed = raw.trim();
+      // Truncate noisy URIs so the log doesn't blow past logcat's
+      // line limit but keep enough head + tail to identify them.
+      const peek = trimmed.length > 96 ? trimmed.slice(0, 60) + '…' + trimmed.slice(-20) : trimmed;
+      console.log(`[Link] received: ${peek}`);
 
       // `lightningpiggy://hunt/<coord>` — our own scheme written as
       // record 1 of a multi-record Hunt NFC tag (#73). Coord is the
@@ -91,8 +95,10 @@ export default function App() {
         try {
           coord = decodeURIComponent(lpHuntMatch[1]);
         } catch {
+          console.warn(`[Link] lightningpiggy:// coord decode failed: ${lpHuntMatch[1]}`);
           return;
         }
+        console.log(`[Link] → HuntPiggyDetail via lightningpiggy:// coord=${coord}`);
         const tryNav = (attempt: number) => {
           if (navigateToHuntPiggyDetail(coord)) return;
           if (attempt >= 20 || cancelled) return;
@@ -115,6 +121,7 @@ export default function App() {
           if (decoded.type === 'naddr' && decoded.data) {
             const { kind, pubkey: hex, identifier } = decoded.data;
             const coord = `${kind}:${hex}:${identifier}`;
+            console.log(`[Link] → HuntPiggyDetail via nostr:naddr coord=${coord}`);
             const tryNav = (attempt: number) => {
               if (navigateToHuntPiggyDetail(coord)) return;
               if (attempt >= 20 || cancelled) return;
@@ -123,13 +130,18 @@ export default function App() {
             tryNav(0);
             return;
           }
-        } catch {
+          console.warn(`[Link] nostr: URI decoded but not naddr — ignored (type=${decoded.type})`);
+        } catch (err) {
+          console.warn(`[Link] nostr: naddr decode failed: ${(err as Error)?.message ?? err}`);
           // Fall through to the lightning: path if the naddr is
           // garbage; otherwise the URI is ignored.
         }
       }
 
-      if (!/^lightning:/i.test(trimmed)) return;
+      if (!/^lightning:/i.test(trimmed)) {
+        console.log(`[Link] ignored: no handler for scheme`);
+        return;
+      }
       const lnurl = trimmed.slice('lightning:'.length).trim();
       if (!lnurl) return;
       // Only route Hunt-eligible payloads (LNURL-withdraw forms) into
