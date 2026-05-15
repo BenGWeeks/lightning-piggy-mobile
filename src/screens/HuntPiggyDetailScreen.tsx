@@ -598,11 +598,17 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                     bottom of this screen (always rendered), so the two
                     flows don't bundle: a finder can claim sats without
                     logging, or log without claiming. */}
-                {cache.isLpPiggy ? (
+                {/* Try prize shows only when the hider has BOTH labelled
+                    this as a Lightning Piggy AND advertised a non-zero
+                    sats prize (`amount` tag). Without an amount we
+                    can't know whether the tag carries an LNURL at all;
+                    showing the button would offer a scan that's
+                    guaranteed to fail. */}
+                {cache.isLpPiggy && (cache.payoutSats ?? 0) > 0 ? (
                   <TouchableOpacity
                     style={styles.actionButtonPrimary}
                     onPress={() => setReadSheetOpen(true)}
-                    accessibilityLabel="Try the prize — scan the Piglet"
+                    accessibilityLabel={`Try the prize — ${cache.payoutSats} sats`}
                     testID="hunt-piggy-detail-try-prize-button"
                   >
                     <Gift size={18} color={colors.white} strokeWidth={2.5} />
@@ -611,7 +617,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 ) : null}
               </View>
               <Text style={styles.claimNote}>
-                {cache.isLpPiggy
+                {cache.isLpPiggy && (cache.payoutSats ?? 0) > 0
                   ? 'Try the sats prize above, and share your find in the log below — both are optional.'
                   : 'Scroll down to share your find with other hunters.'}
               </Text>
