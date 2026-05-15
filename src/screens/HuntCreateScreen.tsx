@@ -238,7 +238,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const lat = pos.coords.latitude;
       const lon = pos.coords.longitude;
-      setPin({ lat, lon, geohash: encodeGeohash(lat, lon, 7) });
+      setPin({ lat, lon, geohash: encodeGeohash(lat, lon, 9) });
     } catch (e) {
       Alert.alert('Could not get location', (e as Error).message, [{ text: 'OK' }]);
     } finally {
@@ -997,7 +997,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
         onClose={() => setLocationPickerVisible(false)}
         initialLat={pin?.lat ?? null}
         initialLon={pin?.lon ?? null}
-        onConfirm={(lat, lon) => setPin({ lat, lon, geohash: encodeGeohash(lat, lon, 7) })}
+        onConfirm={(lat, lon) => setPin({ lat, lon, geohash: encodeGeohash(lat, lon, 9) })}
       />
     </View>
   );
