@@ -176,15 +176,25 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
   /** Resolves the icon-corner badge for a row:
    *   - 'attention' for any Boltz row whose paymentHash is currently in
    *     swapRecoveryService's attention set;
-   *   - 'done' for settled Boltz rows that aren't in the attention set;
    *   - 'pending' for in-flight Boltz rows (so the lifecycle reads
    *     clock → tick / warning instead of bare → tick);
-   *   - undefined (no badge) for every vanilla Lightning row. */
+   *   - 'done' for settled INCOMING Boltz rows that aren't in the
+   *     attention set — on incoming swaps LN-settled implies the swap
+   *     is complete (Boltz received on-chain before paying our invoice).
+   *     For OUTGOING reverse swaps the LN leg can settle while the
+   *     on-chain claim is still pending or even unbroadcast, so we
+   *     deliberately don't badge those as `done` here — the attention
+   *     set is the source of truth for "needs action" and a positive
+   *     terminal signal for the claim isn't yet tracked client-side
+   *     (#519 follow-up);
+   *   - undefined (no badge) for vanilla Lightning rows and for the
+   *     outgoing-Boltz / settled / not-in-attention case above. */
   const iconStateFor = (tx: WalletTransaction): TransactionIconState | undefined => {
     if (!swapRecoveryService.isBoltzTransaction(tx)) return undefined;
     if (tx.paymentHash && attentionSet.has(tx.paymentHash)) return 'attention';
     const settled = Boolean(tx.settled_at || tx.blockHeight);
-    return settled ? 'done' : 'pending';
+    if (!settled) return 'pending';
+    return tx.type === 'incoming' ? 'done' : undefined;
   };
 
   // Counterparty preview — opened from TransactionDetailSheet → "view

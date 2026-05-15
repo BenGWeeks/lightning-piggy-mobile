@@ -281,6 +281,47 @@ const TransactionDetailSheet: React.FC<Props> = ({
   const boltzExplanation = useMemo(() => {
     if (!tx || !isBoltzSwap) return null;
     const pending = !tx.settled_at && !tx.blockHeight;
+    // Prefer live Boltz poll results (`swap.*`) over `iconState` whenever
+    // they're available: `iconState` is snapshotted from the row tap and
+    // can be stale, whereas the live poll is the latest server-side truth.
+    // Fall through to `iconState`-driven copy only when the live state is
+    // ambiguous or hasn't loaded yet.
+    if (swap?.terminalFailure) {
+      return {
+        tone: 'failure' as const,
+        heading: 'Swap failed',
+        body: `This swap ended at status ${swap.status} and can’t complete. Any locked funds auto-refund through Boltz; if you don’t see the refund, message Boltz support with the swap ID below.`,
+      };
+    }
+    if (swap?.terminalSuccess) {
+      const incoming = tx.type === 'incoming';
+      return {
+        tone: 'success' as const,
+        heading: 'Swap complete',
+        body: incoming
+          ? 'Boltz received your on-chain payment and settled the Lightning side — funds are in your Lightning wallet.'
+          : 'Lightning was paid and Boltz’s on-chain lockup has been claimed to your Bitcoin address.',
+      };
+    }
+    // Live poll says claimable AND the row is flagged for attention: our
+    // claim hasn't broadcast — show the actionable warning callout.
+    if (swap?.claimable && iconState === 'attention') {
+      return {
+        tone: 'warning' as const,
+        heading: 'Needs attention',
+        body: 'Lightning was paid and the Boltz lockup confirmed, but the on-chain claim hasn’t broadcast yet. Your funds are safe — tap Retry claim below if it hasn’t cleared.',
+      };
+    }
+    // Live poll says claimable, but the row isn't (yet) in the attention
+    // set — most likely the claim is mid-broadcast on the happy path.
+    if (swap?.claimable) {
+      return {
+        tone: 'info' as const,
+        heading: 'Claim broadcasting',
+        body: 'Boltz has locked funds on-chain. The claim transaction is broadcasting and usually confirms in a few minutes.',
+      };
+    }
+    // No live swap data yet — trust the row-tap iconState as a fallback.
     if (iconState === 'attention') {
       return {
         tone: 'warning' as const,
@@ -298,21 +339,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
           : 'Lightning was paid and Boltz’s on-chain lockup has been claimed to your Bitcoin address.',
       };
     }
-    if (swap?.terminalFailure) {
-      return {
-        tone: 'failure' as const,
-        heading: 'Swap failed',
-        body: `This swap ended at status ${swap.status} and can’t complete. Any locked funds auto-refund through Boltz; if you don’t see the refund, message Boltz support with the swap ID below.`,
-      };
-    }
     if (pending) {
-      if (swap?.claimable) {
-        return {
-          tone: 'info' as const,
-          heading: 'Claim broadcasting',
-          body: 'Boltz has locked funds on-chain. The claim transaction is broadcasting and usually confirms in a few minutes.',
-        };
-      }
       if (swap?.status === 'invoice.set' || swap?.status === 'swap.created') {
         return {
           tone: 'info' as const,
@@ -462,18 +489,18 @@ const TransactionDetailSheet: React.FC<Props> = ({
                   return (
                     <View
                       style={[
-                        styles.warningCallout,
+                        styles.callout,
                         { backgroundColor: calloutTone.bg, borderLeftColor: calloutTone.accent },
                       ]}
                       accessibilityRole={boltzExplanation.tone === 'warning' ? 'alert' : undefined}
                       accessibilityLabel={`${boltzExplanation.heading}: ${boltzExplanation.body}`}
                     >
                       <CalloutIcon size={24} color={calloutTone.ink} strokeWidth={2.5} />
-                      <View style={styles.warningCalloutBody}>
-                        <Text style={[styles.warningCalloutHeading, { color: calloutTone.ink }]}>
+                      <View style={styles.calloutBody}>
+                        <Text style={[styles.calloutHeading, { color: calloutTone.ink }]}>
                           {boltzExplanation.heading}
                         </Text>
-                        <Text style={[styles.warningCalloutText, { color: calloutTone.ink }]}>
+                        <Text style={[styles.calloutText, { color: calloutTone.ink }]}>
                           {boltzExplanation.body}
                         </Text>
                       </View>

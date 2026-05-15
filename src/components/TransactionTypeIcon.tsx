@@ -82,7 +82,10 @@ const TransactionTypeIcon: React.FC<Props> = ({ category, size = 40, state }) =>
                 : state === 'attention'
                   ? {
                       bg: colors.zapYellow,
-                      ink: colors.textHeader,
+                      // `textHeader` is near-white in dark mode, which fails
+                      // contrast on the bright yellow surface. `zapYellowInk`
+                      // is a dedicated dark-in-both-themes token for this.
+                      ink: colors.zapYellowInk,
                       Icon: AlertTriangle,
                       label: 'Needs attention',
                     }

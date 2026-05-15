@@ -59,10 +59,13 @@ export const createTransactionDetailSheetStyles = (colors: Palette) =>
       fontSize: 12,
       fontWeight: '700',
     },
-    // "Needs attention" callout — shown below the status pill when the
-    // matching prop is true. Bootstrap-style warning alert: warm surface,
-    // amber accent bar, amber ink. Tokens live in `palettes.ts`.
-    warningCallout: {
+    // Tone-agnostic callout — used for warning/success/failure/info tones
+    // shown below the status pill. Layout is shared; the consumer overrides
+    // `backgroundColor`, `borderLeftColor`, and the heading/text `color`
+    // inline based on the active tone. Default tokens here are the warning
+    // (yellow) variant — kept as the default for back-compat with the
+    // Bootstrap-style alert convention. Tokens live in `palettes.ts`.
+    callout: {
       flexDirection: 'row',
       alignItems: 'flex-start',
       marginTop: 12,
@@ -74,13 +77,13 @@ export const createTransactionDetailSheetStyles = (colors: Palette) =>
       gap: 10,
       alignSelf: 'stretch',
     },
-    warningCalloutBody: { flex: 1 },
-    warningCalloutHeading: {
+    calloutBody: { flex: 1 },
+    calloutHeading: {
       color: colors.zapYellowDark,
       fontWeight: '700',
       marginBottom: 4,
     },
-    warningCalloutText: {
+    calloutText: {
       color: colors.zapYellowDark,
       lineHeight: 18,
     },

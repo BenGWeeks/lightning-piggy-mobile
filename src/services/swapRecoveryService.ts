@@ -186,6 +186,14 @@ export async function unregisterPendingSwap(swapId: string): Promise<void> {
  *  - If already claimed or expired, clean up
  */
 export async function recoverPendingSwaps(): Promise<void> {
+  // Wipe the attention set at the start of every pass so it always reflects
+  // the current persisted swap state and not stale entries from prior runs.
+  // Without this, payment hashes for swaps that have since been removed
+  // (terminal cleanup, manual deletion, an empty index, etc.) would keep
+  // badging rows. The pass below re-adds entries for swaps that genuinely
+  // need attention, and the `finally` block fires a single `notifyAttention`
+  // so subscribers see one coherent update per pass.
+  attentionPaymentHashes.clear();
   try {
     const index = await SecureStore.getItemAsync(SWAP_INDEX_KEY);
     if (!index) return;
