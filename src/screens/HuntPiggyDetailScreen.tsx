@@ -431,8 +431,12 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   }
                   testID="hunt-piggy-detail-navigate-button"
                 >
+                  {/* The arrow IS the label — sized up so the rotation
+                      reads clearly on small screens. When we have a
+                      fix the distance sits beside it; when we don't,
+                      the arrow alone reads as "open in Maps". */}
                   <Navigation
-                    size={18}
+                    size={28}
                     color={colors.brandPink}
                     strokeWidth={2.5}
                     style={
@@ -441,11 +445,11 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                         : undefined
                     }
                   />
-                  <Text style={styles.actionButtonSecondaryText}>
-                    {distanceMetres !== null
-                      ? `Navigate · ${formatDistance(distanceMetres)}`
-                      : 'Navigate'}
-                  </Text>
+                  {distanceMetres !== null ? (
+                    <Text style={styles.actionButtonSecondaryText}>
+                      {formatDistance(distanceMetres)}
+                    </Text>
+                  ) : null}
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.actionButtonPrimary, !canLog && styles.claimButtonDisabled]}
