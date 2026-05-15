@@ -233,13 +233,21 @@ export interface Bbox {
   maxLat: number;
 }
 
-// In-memory cache of the most recent search result. Serves three
+// In-memory cache of the most recent search result. Serves four
 // purposes: (1) `fetchPlaceById` can resolve a tapped place without a
 // network round-trip, (2) an offline / failed fetch falls back to it,
 // (3) it's persisted to disk so an offline cold start still shows the
-// last-seen region. It's small (one viewport, ~tens of places) so none
-// of the old worldwide-dump problems (SQLITE_FULL, 19 s hydrate) apply.
+// last-seen region, (4) `peekCachedPlacesSync` lets ExploreHomeScreen
+// paint the rail on the very first render (before any await resolves).
+// It's small (one viewport, ~tens of places) so none of the old
+// worldwide-dump problems (SQLITE_FULL, 19 s hydrate) apply.
 let lastResult: BtcMapPlace[] = [];
+// The user's lat/lon at the time `lastResult` was fetched. Persisted
+// alongside the places so the cold-start path can sort + filter the
+// cached rail before GPS resolves (otherwise `sortedMerchants` is
+// empty until `pos` lands, which on a real device can be 100s of ms
+// to a few seconds — the original symptom that prompted this fix).
+let lastAnchor: { lat: number; lon: number } | null = null;
 
 // Convert a viewport bbox into the `lat` / `lon` / `radius_km` the
 // `/v4/places/search` endpoint wants. Centre is the bbox midpoint; the
@@ -371,6 +379,17 @@ const reshape = (raw: Record<string, unknown>): BtcMapPlace | null => {
 // slow-hydrate problems) is gone; we evict it on first run.
 const lastResultFile = () => new File(Paths.document, 'btcmap-last-result.json');
 
+// Persisted shape of the last successful search result. Wrapping the
+// raw array in an envelope lets us record the user position that
+// anchored the search so the next cold start can paint a sorted rail
+// before GPS resolves. Older blobs were a bare BtcMapPlace[] — when
+// we read one we treat anchor as null and let the live fetch overwrite.
+interface PersistedLastResult {
+  v: 1;
+  anchor: { lat: number; lon: number } | null;
+  places: BtcMapPlace[];
+}
+
 // Drop the legacy worldwide-dump cache (file + AsyncStorage row) so it
 // stops eating sandbox space. Fire-and-forget, runs once.
 let legacyEvicted = false;
@@ -386,21 +405,27 @@ const evictLegacyCache = (): void => {
   AsyncStorage.removeItem(DATASET_STORAGE_KEY).catch(() => {});
 };
 
-const persistLastResult = (places: BtcMapPlace[]): void => {
+const persistLastResult = (places: BtcMapPlace[], anchor: { lat: number; lon: number } | null): void => {
   try {
     const f = lastResultFile();
     if (f.exists) f.delete();
     f.create();
-    f.write(JSON.stringify(places));
+    const envelope: PersistedLastResult = { v: 1, anchor, places };
+    f.write(JSON.stringify(envelope));
   } catch {
     // Persist failures are non-fatal — `lastResult` still serves the
     // session; next launch just re-fetches.
   }
 };
 
-// Hydrate `lastResult` from disk. Only used as the offline-cold-start
-// fallback (the offline E2E test relies on this) — the happy path
-// always hits the network. One-shot.
+// Hydrate `lastResult` + `lastAnchor` from disk. Two paths use it:
+//   1. The offline-cold-start fallback inside `fetchPlacesInBbox` when
+//      the network call fails.
+//   2. The Explore hub's first render — `peekCachedPlacesSync` reads
+//      the synchronous mirror after this resolves, so cold launches
+//      paint cached merchants instantly instead of waiting for GPS +
+//      a network round-trip.
+// One-shot — `hydratePromise` is reused on every subsequent call.
 let hydratePromise: Promise<void> | null = null;
 const hydrateLastResult = async (): Promise<void> => {
   if (hydratePromise) return hydratePromise;
@@ -409,21 +434,32 @@ const hydrateLastResult = async (): Promise<void> => {
       const f = lastResultFile();
       if (!f.exists) return;
       // [PerfBlock] hydrating the merchant cache file means a single
-      // synchronous JSON.parse on however much was written last time
+      // synchronous JSON.parse on whatever was written last time
       // (the search result can be 100s of KB for dense urban bboxes).
       // Suspected contributor to the post-mount JS-thread freeze
       // tracked in #554 — bracket so we can confirm.
       const __t0 = performance.now();
       const raw = await f.text();
       const __tParse = performance.now();
-      const parsed = JSON.parse(raw) as BtcMapPlace[];
+      const parsed = JSON.parse(raw) as PersistedLastResult | BtcMapPlace[];
       const __tDone = performance.now();
-      if (Array.isArray(parsed) && lastResult.length === 0) lastResult = parsed;
+      // v1 envelope shape — anchor + places. Older builds wrote a bare
+      // BtcMapPlace[] (no anchor); treat that as places-only and let
+      // the next fetch backfill the anchor.
+      let placeCount = 0;
+      if (Array.isArray(parsed)) {
+        if (lastResult.length === 0) lastResult = parsed;
+        placeCount = parsed.length;
+      } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.places)) {
+        if (lastResult.length === 0) lastResult = parsed.places;
+        if (!lastAnchor && parsed.anchor) lastAnchor = parsed.anchor;
+        placeCount = parsed.places.length;
+      }
       const readMs = Math.round(__tParse - __t0);
       const parseMs = Math.round(__tDone - __tParse);
       if (readMs + parseMs > 100) {
         console.log(
-          `[PerfBlock] hydrateLastResult: ${Array.isArray(parsed) ? parsed.length : 0} places, read ${readMs}ms + parse ${parseMs}ms (raw ${raw.length}B)`,
+          `[PerfBlock] hydrateLastResult: ${placeCount} places, read ${readMs}ms + parse ${parseMs}ms (raw ${raw.length}B)`,
         );
       }
     } catch {
@@ -432,6 +468,14 @@ const hydrateLastResult = async (): Promise<void> => {
   })();
   return hydratePromise;
 };
+
+// Kick off hydration at module-import time. The Explore hub imports
+// this file at startup; by the time React mounts the screen (one
+// microtask + a render later) the AsyncStorage / file read has
+// usually resolved, so `peekCachedPlacesSync` can return a non-empty
+// array on the very first render. Mirrors the pattern in
+// `nostrPlacesStorage` — fire-and-forget, failures are silent.
+void hydrateLastResult();
 
 /**
  * The last successful search result — in memory, or hydrated from disk
@@ -442,6 +486,20 @@ export const getCachedPlaces = async (): Promise<BtcMapPlace[]> => {
   if (lastResult.length === 0) await hydrateLastResult();
   return lastResult;
 };
+
+// Synchronous peek at the in-memory mirror. Used by `useState`
+// initialisers on the Explore hub so the first render already shows
+// cached merchants — no `useEffect → setState` round-trip. Returns
+// an empty array until module-import hydration finishes; the existing
+// async `getCachedPlaces()` path covers the still-warming-up case.
+export const peekCachedPlacesSync = (): BtcMapPlace[] => lastResult;
+
+// The user position that anchored `peekCachedPlacesSync`. Surfaced so
+// the Explore hub can sort + filter the cached rail by distance from
+// the last known location — before GPS resolves. Returns null when
+// we've never successfully fetched (first-ever launch, no prior
+// persist) or when the cached blob predates the v1 envelope shape.
+export const peekCachedAnchorSync = (): { lat: number; lon: number } | null => lastAnchor;
 
 /**
  * Fetch merchants for a viewport. Converts the caller's `bbox` to a
@@ -473,7 +531,10 @@ export const fetchPlacesInBbox = async (bbox: Bbox): Promise<BtcMapPlace[]> => {
       .map(reshape)
       .filter((p): p is BtcMapPlace => p !== null);
     lastResult = places;
-    persistLastResult(places);
+    // Anchor the cache at the centre of the requested viewport. Next
+    // cold start uses this to sort + filter the rail before GPS lands.
+    lastAnchor = { lat, lon };
+    persistLastResult(places, lastAnchor);
     return places;
   } catch {
     // Offline / timeout / server error — fall back to the last cached
@@ -628,6 +689,7 @@ export const prefetchDataset = (): void => {
  */
 export const __resetCacheForTest = (): void => {
   lastResult = [];
+  lastAnchor = null;
   hydratePromise = null;
   legacyEvicted = false;
   try {
@@ -646,6 +708,7 @@ export const __resetCacheForTest = (): void => {
  */
 export const refreshDataset = async (): Promise<void> => {
   lastResult = [];
+  lastAnchor = null;
   hydratePromise = null;
   try {
     const f = lastResultFile();
