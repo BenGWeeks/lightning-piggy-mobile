@@ -456,6 +456,139 @@ export async function writeLnurlToTag(
   }
 }
 
+// NTAG213 is the cheapest commonly-bought NFC sticker. After NDEF
+// framing overhead the usable user-data area is ~140 bytes. We check
+// the encoded NDEF message length against this floor and surface a
+// friendly error before the write so a hider gets a "switch to NTAG215
+// for more room" prompt rather than a cryptic NfcManager rejection.
+// Larger chips (NTAG215 = 504B usable, NTAG216 = 888B) accept the same
+// payload with headroom.
+const NTAG_213_USABLE_BYTES = 140;
+
+export interface HuntTagPayload {
+  /** Cache coord (`kind:pubkey:d`) — used to build the lightningpiggy://
+   * deep link AND the naddr1 reference. */
+  coord: string;
+  /** Pre-encoded `naddr1...` reference to the kind 37516 listing.
+   * Built by the caller via `nip19.naddrEncode(...)`. */
+  naddr: string;
+  /** Optional LNURL-withdraw bearer. When present, encoded as the
+   * trailing record so a generic LN wallet can still claim by tapping
+   * the tag if our app isn't installed. When absent, finders only
+   * reach the listing — they need to use our app + the in-app claim
+   * flow to actually withdraw. */
+  lnurl?: string;
+}
+
+export interface WriteHuntTagOptions extends HuntTagPayload {
+  onTagDetected?: () => void;
+}
+
+/**
+ * Write a multi-record NDEF message to a Hide-a-Piglet tag, then lock
+ * the NDEF area on Android NTAG21x / Ultralight C chips. Record order:
+ *
+ *   1. `lightningpiggy://hunt/<coord>` — our scheme, registered in the
+ *      AndroidManifest, so a tap on the tag opens this app even when
+ *      multiple NFC-aware apps are installed.
+ *   2. `nostr:naddr1…` — universal reference to the kind 37516 listing.
+ *      Lets generic Nostr clients (Damus, Primal, etc.) at least show
+ *      the cache metadata if our app isn't installed.
+ *   3. (optional) `lightning:LNURL1…` — LNURL-withdraw bearer for
+ *      finders without our app. Omitted when the hider chose
+ *      "Listing-only" in the wizard.
+ *
+ * NTAG213 capacity guard: aborts with a friendly error before write if
+ * the encoded message exceeds the chip's ~140 byte ceiling. Larger
+ * chips (NTAG215 / 216) accept the same payload with headroom.
+ */
+export async function writeHuntTagToTag(
+  opts: WriteHuntTagOptions,
+): Promise<WriteLnurlResult> {
+  const coord = opts.coord.trim();
+  const naddr = opts.naddr.trim();
+  const lnurl = opts.lnurl?.trim();
+  if (!coord || !naddr) {
+    throw new Error('Hunt tag payload requires both coord and naddr');
+  }
+  // URI-encode the coord because it contains colons; we don't want a
+  // generic URL parser to misinterpret kind:pubkey:d as a port-style
+  // authority. encodeURIComponent escapes ':' (%3A) — recipients
+  // un-escape via the standard URL API.
+  const lpUri = `lightningpiggy://hunt/${encodeURIComponent(coord)}`;
+  const nostrUri = naddr.startsWith('nostr:') ? naddr : `nostr:${naddr}`;
+  // Bech32 LNURLs are case-insensitive — uppercase is conventional on
+  // physical tags + QR for OCR robustness. Pre-existing convention from
+  // writeLnurlToTag below; preserved here for the optional LNURL record.
+  const ndefRecords = [Ndef.uriRecord(lpUri), Ndef.uriRecord(nostrUri)];
+  if (lnurl) {
+    const lightningUri = /^lightning:/i.test(lnurl)
+      ? lnurl
+      : `lightning:${/^lnurl1/i.test(lnurl) ? lnurl.toUpperCase() : lnurl}`;
+    ndefRecords.push(Ndef.uriRecord(lightningUri));
+  }
+  const bytes = Ndef.encodeMessage(ndefRecords);
+  if (!bytes) {
+    throw new Error('Failed to encode NDEF message');
+  }
+  if (bytes.length > NTAG_213_USABLE_BYTES) {
+    // Surface chip-family guidance up front. The user can shorten the
+    // cache `d` tag (the only field they control here) or move to a
+    // 215/216 chip; both options are friendlier than a write-time
+    // rejection from the chip itself.
+    throw new Error(
+      `Tag payload is ${bytes.length} bytes — NTAG213 only fits ~140. Use a shorter cache name (the d-tag) or an NTAG215 / NTAG216 sticker.`,
+    );
+  }
+  try {
+    if (!(await ensureNfcStarted())) {
+      throw new Error('NFC unavailable on this device');
+    }
+    await NfcManager.requestTechnology(NfcTech.Ndef, READER_MODE_OPTS);
+    const tag = await NfcManager.getTag();
+    if (!tag) {
+      throw new Error('No tag detected');
+    }
+    const isAndroid = Platform.OS === 'android';
+    const family = isAndroid
+      ? inferTagFamily(tag as { techTypes?: string[]; type?: string })
+      : ('unknown' as TagFamily);
+    if (isAndroid && family === 'mifare-classic') {
+      throw new Error(
+        "Mifare Classic tags can't be permanently locked — use an NTAG213/215/216 or Mifare Ultralight C chip so others can't overwrite this Piglet.",
+      );
+    }
+    if (isAndroid && family === 'unknown') {
+      throw new Error(
+        'Unrecognised tag type. Lightning Piggy supports NTAG213/215/216 and Mifare Ultralight C.',
+      );
+    }
+    opts.onTagDetected?.();
+    await NfcManager.ndefHandler.writeNdefMessage(bytes);
+    // Lock the NDEF area (Android NTAG21x / Ultralight C) so a passer-by
+    // can't overwrite the tag with a phishing payload. iOS has no
+    // equivalent API — we skip and report `locked: false`. Same shape
+    // as the pre-existing writeLnurlToTag flow below.
+    let locked = false;
+    if (isAndroid) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const handler = NfcManager.ndefHandler as any;
+        if (typeof handler.makeReadOnly === 'function') {
+          const ok = await handler.makeReadOnly();
+          locked = ok !== false;
+        }
+      } catch {
+        // Lock failure is non-fatal — data is written; surface via
+        // `locked: false` so the UI can warn.
+      }
+    }
+    return { family, locked };
+  } finally {
+    NfcManager.cancelTechnologyRequest().catch(() => {});
+  }
+}
+
 /**
  * Cancel any ongoing NFC operation.
  */

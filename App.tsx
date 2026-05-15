@@ -13,7 +13,11 @@ import { NostrProvider } from './src/contexts/NostrContext';
 import { TrustGraphProvider } from './src/contexts/TrustGraphContext';
 import { GroupsProvider } from './src/contexts/GroupsContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
-import AppNavigator, { navigateToHuntFound } from './src/navigation/AppNavigator';
+import AppNavigator, {
+  navigateToHuntFound,
+  navigateToHuntPiggyDetail,
+} from './src/navigation/AppNavigator';
+import * as nip19 from 'nostr-tools/nip19';
 import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
 import BootSplash from './src/components/BootSplash';
 import { BrandedAlertHost } from './src/components/BrandedAlert';
@@ -75,6 +79,56 @@ export default function App() {
     const route = (raw: string | null | undefined) => {
       if (cancelled || !raw) return;
       const trimmed = raw.trim();
+
+      // `lightningpiggy://hunt/<coord>` — our own scheme written as
+      // record 1 of a multi-record Hunt NFC tag (#73). Coord is the
+      // standard `kind:pubkey:d` form; we decode the percent-encoding
+      // (the writer escapes `:` to %3A so generic URL parsers don't
+      // mistake the kind for a port) before handing to navigation.
+      const lpHuntMatch = trimmed.match(/^lightningpiggy:\/\/hunt\/(.+)$/i);
+      if (lpHuntMatch) {
+        let coord: string;
+        try {
+          coord = decodeURIComponent(lpHuntMatch[1]);
+        } catch {
+          return;
+        }
+        const tryNav = (attempt: number) => {
+          if (navigateToHuntPiggyDetail(coord)) return;
+          if (attempt >= 20 || cancelled) return;
+          setTimeout(() => tryNav(attempt + 1), 100);
+        };
+        tryNav(0);
+        return;
+      }
+
+      // `nostr:naddr1...` — record 2 of a Hunt tag, or a manual
+      // share from a generic Nostr client. We decode the naddr to
+      // recover { kind, pubkey, identifier } and assemble the same
+      // `kind:pubkey:d` coord HuntPiggyDetail consumes. Non-Hunt
+      // naddrs (other kinds) are ignored — no other screen handles
+      // them yet, so silently dropping is better than hijacking.
+      const nostrMatch = trimmed.match(/^nostr:(naddr1[0-9a-z]+)$/i);
+      if (nostrMatch) {
+        try {
+          const decoded = nip19.decode(nostrMatch[1]);
+          if (decoded.type === 'naddr' && decoded.data) {
+            const { kind, pubkey: hex, identifier } = decoded.data;
+            const coord = `${kind}:${hex}:${identifier}`;
+            const tryNav = (attempt: number) => {
+              if (navigateToHuntPiggyDetail(coord)) return;
+              if (attempt >= 20 || cancelled) return;
+              setTimeout(() => tryNav(attempt + 1), 100);
+            };
+            tryNav(0);
+            return;
+          }
+        } catch {
+          // Fall through to the lightning: path if the naddr is
+          // garbage; otherwise the URI is ignored.
+        }
+      }
+
       if (!/^lightning:/i.test(trimmed)) return;
       const lnurl = trimmed.slice('lightning:'.length).trim();
       if (!lnurl) return;

@@ -18,8 +18,10 @@ import { Nfc, AlertCircle } from 'lucide-react-native';
 import {
   writeNpubToTag,
   writeLnurlToTag,
+  writeHuntTagToTag,
   cancelNfcOperation,
   isNfcEnabled,
+  type HuntTagPayload,
 } from '../services/nfcService';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
@@ -36,8 +38,13 @@ interface Props {
   /** npub mode — the Nostr identity to write + the name shown in copy. */
   npub?: string;
   displayName?: string;
-  /** piglet mode — the LNURL-withdraw link to write to the tag. */
+  /** piglet mode — the LNURL-withdraw link to write to the tag.
+   * Legacy single-record path used when `huntPayload` is absent. */
   lnurl?: string;
+  /** piglet mode (preferred) — multi-record NDEF payload: lightningpiggy://
+   * deep link + nostr:naddr1 listing reference + optional LNURL. When
+   * supplied, takes precedence over `lnurl`. See #73. */
+  huntPayload?: HuntTagPayload;
   /** Fires once the tag write succeeds (before the user dismisses). */
   onWritten?: () => void;
 }
@@ -51,6 +58,7 @@ const NfcWriteSheet: React.FC<Props> = ({
   npub = '',
   displayName = '',
   lnurl = '',
+  huntPayload,
   onWritten,
 }) => {
   const isPiglet = mode === 'piglet';
@@ -120,7 +128,14 @@ const NfcWriteSheet: React.FC<Props> = ({
         if (mountedRef.current) setState('writing');
       };
       if (isPiglet) {
-        await writeLnurlToTag(lnurl, onTagDetected);
+        // New multi-record write when the caller supplies the richer
+        // Hunt payload (#73); legacy single-record LNURL write stays
+        // as the fallback so we don't break any pre-#73 call-site.
+        if (huntPayload) {
+          await writeHuntTagToTag({ ...huntPayload, onTagDetected });
+        } else {
+          await writeLnurlToTag(lnurl, onTagDetected);
+        }
       } else {
         await writeNpubToTag(npub, onTagDetected);
       }

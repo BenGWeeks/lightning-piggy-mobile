@@ -71,6 +71,22 @@ export const navigateToHuntFound = (lnurl: string): boolean => {
   return true;
 };
 
+// Navigate to a specific Piggy listing by coord (`kind:pubkey:d`).
+// Entry-points: the App.tsx Linking listener for
+// `lightningpiggy://hunt/<coord>` AND `nostr:naddr1...` deep links
+// emitted by the multi-record NFC tags (#73).
+export const navigateToHuntPiggyDetail = (coord: string): boolean => {
+  if (!navigationRef.isReady()) return false;
+  navigationRef.navigate('Main', {
+    screen: 'MainTabs',
+    params: {
+      screen: 'Explore',
+      params: { screen: 'HuntPiggyDetail', params: { coord } },
+    },
+  });
+  return true;
+};
+
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 const ExploreStack = createNativeStackNavigator<ExploreStackParamList>();

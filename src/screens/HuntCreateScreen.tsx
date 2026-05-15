@@ -54,7 +54,8 @@ import {
 import { loadPiggies, newPiggyId, savePiggy } from '../services/piggyStorageService';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 import { encodeGeohash } from '../utils/geohash';
-import { buildCacheListing } from '../services/nostrPlacesService';
+import { buildCacheListing, GC_LISTING_KIND } from '../services/nostrPlacesService';
+import * as nip19 from 'nostr-tools/nip19';
 import { publishCacheEvent } from '../services/nostrPlacesPublisher';
 import NfcWriteSheet from '../components/NfcWriteSheet';
 import LocationPickerSheet from '../components/LocationPickerSheet';
@@ -79,7 +80,7 @@ type Stage =
 const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { signEvent, relays } = useNostr();
+  const { signEvent, relays, pubkey } = useNostr();
 
   // Edit-mode identity. When the route carries a `piggyId` we reuse it
   // (and the original createdAt) on save so `savePiggy` overwrites the
@@ -91,6 +92,19 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   // anchor for NIP-40 windows. Captured during the hydration effect
   // below; null until then (and forever when creating fresh).
   const originalCreatedAt = useRef<number | null>(null);
+  // Piggy id is stable across NFC-write (step 4) and Save/publish
+  // (step 6). Holding it in a ref means the kind 37516 `d` tag, the
+  // local HiddenPiggy record, AND the NFC tag's nostr:naddr + LP-URL
+  // records all reference the same identifier. Lazy-init: editing
+  // mode hydrates from the existing id; fresh hides mint on first
+  // access via `ensurePiggyId()` below.
+  const piggyIdRef = useRef<string | null>(null);
+  const ensurePiggyId = useCallback((): string => {
+    if (piggyIdRef.current === null) {
+      piggyIdRef.current = editingId ?? newPiggyId();
+    }
+    return piggyIdRef.current;
+  }, [editingId]);
 
   const [lnurl, setLnurl] = useState('');
   const [isPublic, setIsPublic] = useState(false);
@@ -152,6 +166,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         return;
       }
       originalCreatedAt.current = piggy.createdAt;
+      piggyIdRef.current = piggy.id;
       setLnurl(piggy.lnurlw);
       setIsPublic(piggy.isPublic);
       setStage({
@@ -262,7 +277,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     // stays anchored to the original hide moment so the My Piglets
     // sort order doesn't reshuffle on every edit.
     const piggy = {
-      id: editingId ?? newPiggyId(),
+      id: ensurePiggyId(),
       lnurlw: lnurl.trim(),
       lnurlDescription: stage.params.defaultDescription ?? undefined,
       createdAt: originalCreatedAt.current ?? Date.now(),
@@ -359,7 +374,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     cacheSize,
     cacheType,
     expiryDays,
-    editingId,
+    ensurePiggyId,
     isEditMode,
     navigation,
     signEvent,
@@ -1150,6 +1165,25 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         onClose={() => setNfcSheetVisible(false)}
         mode="piglet"
         lnurl={lnurl.trim()}
+        huntPayload={(() => {
+          // Multi-record payload (#73). Only useful when we have the
+          // hider's pubkey (logged-in user) AND the public toggle is
+          // on — a private Piggy has no kind 37516 listing for the
+          // nostr:naddr to reference, so we fall back to the legacy
+          // single-record LNURL write via `lnurl` above.
+          if (!pubkey || !isPublic) return undefined;
+          const piggyId = ensurePiggyId();
+          const naddr = nip19.naddrEncode({
+            kind: GC_LISTING_KIND,
+            pubkey,
+            identifier: piggyId,
+          });
+          return {
+            coord: `${GC_LISTING_KIND}:${pubkey}:${piggyId}`,
+            naddr,
+            lnurl: lnurl.trim() || undefined,
+          };
+        })()}
         onWritten={handleNfcWritten}
       />
 
