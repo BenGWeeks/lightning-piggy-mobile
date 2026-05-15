@@ -162,6 +162,62 @@ export const ExploreMiniMap: React.FC<Props> = ({
     webviewRef.current.injectJavaScript(js);
   }, [ready]);
 
+  // Snapshot of the pin payload at first WebView mount. Baked straight
+  // into the HTML so pins render alongside Leaflet on the very first
+  // paint — eliminates the React→WebView round-trip that the useEffect
+  // path below incurs (LP_setHub fires only after `ready`, which itself
+  // waits on the Leaflet CDN fetch). Without this, cached merchants
+  // still take a few hundred ms to appear on the map even though they
+  // were already in React state synchronously courtesy of PR #550's
+  // peekCachedPlacesSync seed.
+  //
+  // Stored in a ref so it doesn't change across renders — the HTML is
+  // frozen at first mount; live updates flow through the existing
+  // `useEffect → injectJavaScript → LP_setHub` path below.
+  const initialHubPayloadRef = useRef<string | null>(null);
+  if (initialHubPayloadRef.current === null && lat !== null && lon !== null) {
+    const places = merchants.map((m) => ({
+      lat: m.lat,
+      lng: m.lon,
+      lightning: acceptsLightning(m),
+      category: m.icon ?? null,
+    }));
+    const cacheLocs = caches
+      .filter((c) => c.geohash)
+      .map((c) => ({
+        ...decodeGeohash(c.geohash as string),
+        kind: c.isLpPiggy ? 'piggy' : 'cache',
+      }));
+    const eventLocs = events
+      .filter((e) => e.geohash)
+      .map((e) => decodeGeohash(e.geohash as string));
+    const meLat = cachePin && userLat !== null ? userLat : lat;
+    const meLon = cachePin && userLon !== null ? userLon : lon;
+    const hasMe = cachePin ? userLat !== null && userLon !== null : true;
+    initialHubPayloadRef.current = JSON.stringify({
+      me: hasMe ? { lat: meLat, lng: meLon, accuracy: userAccuracyMetres ?? null } : null,
+      merchants: places,
+      caches: cacheLocs,
+      events: eventLocs,
+      cachePin,
+    });
+  }
+
+  // Memoised HTML — only rebuilt when the map's structural inputs
+  // change (centre / zoom / interactivity). Stable across merchant /
+  // cache updates so we don't remount the WebView on every relay tick.
+  const html = useMemo(
+    () =>
+      makeHtml(
+        lat ?? 0,
+        lon ?? 0,
+        defaultZoom,
+        interactive,
+        initialHubPayloadRef.current ?? '',
+      ),
+    [lat, lon, defaultZoom, interactive],
+  );
+
   // Notify the parent every time a finger lands on / leaves the map.
   // The parent uses these to disable its own scroll + pull-to-refresh
   // for the duration; without that, a vertical pan that starts on an
@@ -230,7 +286,7 @@ export const ExploreMiniMap: React.FC<Props> = ({
         <WebView
           ref={webviewRef}
           originWhitelist={['*']}
-          source={{ html: makeHtml(lat, lon, defaultZoom, interactive) }}
+          source={{ html }}
           onMessage={(e) => {
             try {
               const msg = JSON.parse(e.nativeEvent.data);
@@ -377,6 +433,11 @@ const makeHtml = (
   lon: number,
   defaultZoom: number,
   interactive: boolean,
+  // JSON-encoded LP_setHub payload to render alongside Leaflet on the
+  // very first paint. Empty string skips the inline call (subscriber
+  // updates will land via injectJavaScript when relay data arrives).
+  // See `initialHubPayloadRef` in the component for the bake site.
+  initialHubPayloadJson: string,
 ): string => `<!DOCTYPE html>
 <html>
 <head>
@@ -500,6 +561,11 @@ window.LP_recenter=function(){
   const target=__lastMe || {lat:${lat},lng:${lon}};
   map.setView([target.lat,target.lng],Math.max(map.getZoom(),${defaultZoom}));
 };
+// Render any pins the parent already had cached at mount time —
+// runs synchronously on first paint, no React round-trip required.
+// See initialHubPayloadRef in the component. Empty string skips
+// (parent had nothing to bake).
+${initialHubPayloadJson ? 'try{LP_setHub(' + initialHubPayloadJson + ');}catch(_){}' : ''}
 post({type:'ready'});
 // Also emit straight away — covers the case where LP_setHub hasn't
 // been called yet (parent has no data) but the map already shows the
