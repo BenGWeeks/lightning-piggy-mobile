@@ -61,6 +61,14 @@ interface Props {
   userLat?: number | null;
   userLon?: number | null;
   /**
+   * Reported horizontal accuracy in metres for the user fix. When set
+   * (and userLat/userLon are too), the map draws a translucent blue
+   * halo around the "me" dot sized to this radius — the standard
+   * idiom on Apple Maps / Google Maps for "how well do we know where
+   * you are". Omit on dev-pinned positions where the value is exact.
+   */
+  userAccuracyMetres?: number | null;
+  /**
    * When set, the embedded map gains real Leaflet interactions —
    * drag-to-pan, pinch-to-zoom — and a recenter-on-me button. The
    * outer "tap anywhere to open the full map" affordance becomes an
@@ -108,6 +116,7 @@ export const ExploreMiniMap: React.FC<Props> = ({
   cachePin = false,
   userLat = null,
   userLon = null,
+  userAccuracyMetres = null,
   interactive = false,
   legendCategories,
 }) => {
@@ -163,14 +172,14 @@ export const ExploreMiniMap: React.FC<Props> = ({
     const meLon = cachePin && userLon !== null ? userLon : lon;
     const hasMe = cachePin ? userLat !== null && userLon !== null : true;
     const js = `window.LP_setHub && window.LP_setHub(${JSON.stringify({
-      me: hasMe ? { lat: meLat, lng: meLon } : null,
+      me: hasMe ? { lat: meLat, lng: meLon, accuracy: userAccuracyMetres ?? null } : null,
       merchants: places,
       caches: cacheLocs,
       events: eventLocs,
       cachePin,
     })}); true;`;
     webviewRef.current.injectJavaScript(js);
-  }, [ready, lat, lon, merchants, caches, events, cachePin, userLat, userLon]);
+  }, [ready, lat, lon, merchants, caches, events, cachePin, userLat, userLon, userAccuracyMetres]);
 
   // When interactive, drag/zoom gestures need to reach the WebView, so
   // the outer wrapper must NOT be a TouchableOpacity (it'd capture
@@ -363,7 +372,7 @@ const post=(m)=>window.ReactNativeWebView&&window.ReactNativeWebView.postMessage
 const __interactive=${interactive ? 'true' : 'false'};
 const map=L.map('map',{zoomControl:false,dragging:__interactive,scrollWheelZoom:__interactive,doubleClickZoom:__interactive,touchZoom:__interactive,boxZoom:false,keyboard:false,minZoom:7,maxZoom:18,tap:__interactive}).setView([${lat},${lon}],${defaultZoom});
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
-let merchantLayer=L.layerGroup().addTo(map),cacheLayer=L.layerGroup().addTo(map),eventLayer=L.layerGroup().addTo(map),meMarker=null;
+let merchantLayer=L.layerGroup().addTo(map),cacheLayer=L.layerGroup().addTo(map),eventLayer=L.layerGroup().addTo(map),meMarker=null,meAccuracyCircle=null;
 const dot=(cls,size)=>L.divIcon({className:'',html:'<div class="'+cls+'"></div>',iconSize:[size,size]});
 // lucide PiggyBank / MapPin glyph paths — kept inline so the WebView
 // needs no asset bundle. Used by the cache-detail hero's teardrop pin.
@@ -387,10 +396,21 @@ map.on('zoomstart',function(e){if(e.zoom!==undefined)userHasInteracted=true;});
 window.LP_setHub=function(d){
   merchantLayer.clearLayers();cacheLayer.clearLayers();eventLayer.clearLayers();
   if(meMarker){map.removeLayer(meMarker);meMarker=null;}
+  if(meAccuracyCircle){map.removeLayer(meAccuracyCircle);meAccuracyCircle=null;}
   // Render the blue dot whenever d.me is provided. The cache-detail
   // hero passes me=null unless an explicit user position was supplied
   // via the userLat/userLon props (see Props in ExploreMiniMap.tsx).
-  if(d.me)meMarker=L.marker([d.me.lat,d.me.lng],{icon:dot('lp-me',12)}).addTo(map);
+  if(d.me){
+    // Accuracy halo — a translucent blue circle sized to the reported
+    // 1-σ horizontal accuracy in metres. Apple Maps / Google Maps
+    // idiom: a faded ring around the dot communicating "we're not
+    // sure of your exact spot to within N metres". Drawn BEFORE the
+    // dot so the dot sits on top.
+    if(typeof d.me.accuracy==='number'&&d.me.accuracy>0){
+      meAccuracyCircle=L.circle([d.me.lat,d.me.lng],{radius:d.me.accuracy,color:'#2D88FF',weight:1,opacity:0.4,fillColor:'#2D88FF',fillOpacity:0.12,interactive:false}).addTo(map);
+    }
+    meMarker=L.marker([d.me.lat,d.me.lng],{icon:dot('lp-me',12)}).addTo(map);
+  }
   d.merchants.forEach(m=>L.marker([m.lat,m.lng],{icon:dot('lp-pin'+(m.lightning?'':' onchain'),14)}).addTo(merchantLayer));
   d.caches.forEach(c=>L.marker([c.lat,c.lng],{icon:d.cachePin?pinIcon(c.kind==='piggy'):dot('lp-cache'+(c.kind==='piggy'?' piggy':''),14)}).addTo(cacheLayer));
   d.events.forEach(e=>L.marker([e.lat,e.lng],{icon:dot('lp-event',14)}).addTo(eventLayer));

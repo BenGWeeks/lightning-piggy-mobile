@@ -7,6 +7,11 @@ interface CompassNav {
   /** User's current position from `Location.watchPositionAsync`. `null`
    *  until the first fix lands, or if permission was denied. */
   user: { lat: number; lon: number } | null;
+  /** Reported 1-σ horizontal accuracy in metres from the fix
+   *  (`coords.accuracy`). Drives the translucent accuracy halo on the
+   *  map. `null` until the first fix or when the platform doesn't
+   *  report accuracy (rare). */
+  userAccuracy: number | null;
   /** Device's true-north compass heading in degrees (0 = North). `null`
    *  on emulators / devices with no magnetometer, or while the first
    *  heading event is pending. */
@@ -44,6 +49,7 @@ interface CompassNav {
  */
 export const useCompassNavigation = (target: { lat: number; lon: number } | null): CompassNav => {
   const [user, setUser] = useState<{ lat: number; lon: number } | null>(null);
+  const [userAccuracy, setUserAccuracy] = useState<number | null>(null);
   const [heading, setHeading] = useState<number | null>(null);
   // EMA smoothing for heading: raw magnetometer readings jitter by a few
   // degrees even when the phone is still, and a hard-rotated icon picks
@@ -68,6 +74,11 @@ export const useCompassNavigation = (target: { lat: number; lon: number } | null
       const pinned = getDevPinnedLocation();
       if (pinned) {
         setUser({ lat: pinned.lat, lon: pinned.lon });
+        // Dev-pinned locations are perfect-precision by construction —
+        // the override is a literal lat/lon, not a sensor reading. A
+        // 0-metre halo would still render as a 4-px dot from the
+        // border, so set null instead to suppress the circle entirely.
+        setUserAccuracy(null);
       }
 
       const perm = await Location.requestForegroundPermissionsAsync();
@@ -85,6 +96,11 @@ export const useCompassNavigation = (target: { lat: number; lon: number } | null
             (loc) => {
               if (cancelled) return;
               setUser({ lat: loc.coords.latitude, lon: loc.coords.longitude });
+              // `coords.accuracy` is 1-σ horizontal accuracy in metres
+              // per expo-location docs. Null on platforms that don't
+              // report it; we expose null too so the map can omit the
+              // halo rather than guess.
+              setUserAccuracy(typeof loc.coords.accuracy === 'number' ? loc.coords.accuracy : null);
             },
           );
         }
@@ -135,5 +151,5 @@ export const useCompassNavigation = (target: { lat: number; lon: number } | null
       ? haversineMetres({ lat: user.lat, lon: user.lon }, { lat: target.lat, lon: target.lon })
       : null;
 
-  return { user, heading, bearing, distanceMetres };
+  return { user, userAccuracy, heading, bearing, distanceMetres };
 };

@@ -167,7 +167,13 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     () => (cacheLatLon ? { lat: cacheLatLon.lat, lon: cacheLatLon.lng } : null),
     [cacheLatLon],
   );
-  const { user: userPos, heading, bearing, distanceMetres } = useCompassNavigation(compassTarget);
+  const {
+    user: userPos,
+    userAccuracy,
+    heading,
+    bearing,
+    distanceMetres,
+  } = useCompassNavigation(compassTarget);
   // lucide's Navigation2 glyph is a symmetric arrowhead pointing
   // straight up at rest, so rotation = (bearing − heading) puts the
   // apex on the cache relative to where the phone is facing. (The
@@ -397,6 +403,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                       lon={decodeGeohash(cache.geohash).lng}
                       userLat={userPos?.lat ?? null}
                       userLon={userPos?.lon ?? null}
+                      userAccuracyMetres={userAccuracy}
                       merchants={[]}
                       caches={[cache]}
                       events={[]}
