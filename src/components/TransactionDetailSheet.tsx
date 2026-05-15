@@ -396,6 +396,13 @@ const TransactionDetailSheet: React.FC<Props> = ({
 
   const effectiveSwapId = tx?.swapId || resolvedSwapId || null;
 
+  // Claim txid (the on-chain tx that swept the lockup to our destination)
+  // for outgoing reverse swaps we performed the claim on. Sourced from
+  // swapRecoveryService's claimed-hash cache — `null` means we know the
+  // swap was claimed but don't have the txid (terminal-success poll), and
+  // `undefined` means the claim isn't recorded at all.
+  const claimTxId = tx?.paymentHash ? swapRecoveryService.getClaimTxId(tx.paymentHash) : undefined;
+
   const boltzInitialMessage = useMemo(() => {
     if (!tx) return '';
     const isIncoming = tx.type === 'incoming';
@@ -407,6 +414,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
     if (effectiveSwapId) lines.push(`• Swap ID: ${effectiveSwapId}`);
     if (swap?.status) lines.push(`• Swap status: ${swap.status}`);
     if (swap?.lockupTxId) lines.push(`• Lockup tx: ${swap.lockupTxId}`);
+    if (claimTxId) lines.push(`• Claim tx: ${claimTxId}`);
     if (tx.txid) lines.push(`• On-chain tx: ${tx.txid}`);
     if (tx.paymentHash) lines.push(`• Payment hash: ${tx.paymentHash}`);
     lines.push(`• Direction: ${isIncoming ? 'received' : 'sent'}`);
@@ -415,7 +423,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
     lines.push('', 'Details:');
     lines.push('(describe the issue)');
     return lines.join('\n');
-  }, [tx, effectiveSwapId, swap]);
+  }, [tx, effectiveSwapId, swap, claimTxId]);
 
   if (!tx) return null;
 
@@ -621,6 +629,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
           ) : null}
 
           {tx.txid ? <CopyRow label="On-chain tx" value={tx.txid} onCopy={copyValue} /> : null}
+          {claimTxId ? <CopyRow label="Claim tx" value={claimTxId} onCopy={copyValue} /> : null}
 
           {swap?.lockupTxId ? (
             <CopyRow label="Lockup tx" value={swap.lockupTxId} onCopy={copyValue} />

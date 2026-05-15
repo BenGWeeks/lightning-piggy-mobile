@@ -83,6 +83,127 @@ export function subscribeAttention(cb: () => void): () => void {
   };
 }
 
+// LRU-capped, SecureStore-persisted cache of payment hashes whose on-chain
+// claim has been observed to succeed — either via our own synchronous
+// `boltzService.claimSwap` (SendSheet / TransferSheet / recoverSwap) or via
+// a Boltz API terminal-success status (`invoice.settled` / `transaction.
+// claimed`). Used by TransactionList to synthesise the 'done' green tick
+// on settled OUTGOING reverse-swap rows; incoming swaps don't consult it
+// (LN-settled implies done for incoming).
+//
+// `Map<paymentHash, claimTxId | null>` instead of a Set so we can both
+// (a) answer `has(...)` for the badge predicate and (b) surface the
+// claim txid in TransactionDetailSheet + the Boltz support email. The
+// value is `null` when we know the claim succeeded but didn't perform
+// it ourselves (terminal-success poll), so the txid isn't available.
+//
+// Map preserves insertion order in JS, which is the property we lean on
+// for LRU eviction: when size exceeds `CLAIMED_CAP`, we delete the first
+// key — the least-recently-inserted hash. 500 is comfortably above any
+// realistic LP user's lifetime reverse-swap count.
+const CLAIMED_CAP = 500;
+const SWAP_CLAIMED_KEY = 'boltz_claimed_hashes_v1';
+const claimedPaymentHashes = new Map<string, string | null>();
+let claimedHashesLoaded = false;
+const claimedListeners = new Set<() => void>();
+
+function notifyClaimed(): void {
+  for (const cb of claimedListeners) {
+    try {
+      cb();
+    } catch (e) {
+      console.warn('[SwapRecovery] claimed listener threw:', e);
+    }
+  }
+}
+
+async function loadClaimedHashes(): Promise<void> {
+  if (claimedHashesLoaded) return;
+  claimedHashesLoaded = true;
+  try {
+    const raw = await SecureStore.getItemAsync(SWAP_CLAIMED_KEY);
+    if (!raw) return;
+    // Persisted shape: Array<[paymentHash, claimTxId | null]> — oldest first.
+    const arr = JSON.parse(raw) as [string, string | null][];
+    for (const [hash, txid] of arr) claimedPaymentHashes.set(hash, txid);
+    // Defensive trim in case CLAIMED_CAP was lowered in a future release.
+    while (claimedPaymentHashes.size > CLAIMED_CAP) {
+      const oldest = claimedPaymentHashes.keys().next().value;
+      if (oldest === undefined) break;
+      claimedPaymentHashes.delete(oldest);
+    }
+    notifyClaimed();
+  } catch (e) {
+    console.warn('[SwapRecovery] Failed to load claimed hashes:', e);
+  }
+}
+
+// Eager-load so renders soon after import get accurate badges.
+loadClaimedHashes();
+
+/** Returns true if the on-chain claim for this payment hash has been
+ *  observed to succeed (either via our own claim broadcast or a Boltz
+ *  terminal-success poll). Used to gate the 'done' badge for OUTGOING
+ *  reverse swaps — see TransactionList.iconStateFor. */
+export function hasClaimedPaymentHash(paymentHash: string): boolean {
+  return claimedPaymentHashes.has(paymentHash);
+}
+
+/** Returns the broadcast claim txid for this payment hash, or null when
+ *  the claim succeeded but we don't have the txid (terminal-success poll
+ *  path). Returns undefined when the hash isn't in the cache at all. */
+export function getClaimTxId(paymentHash: string): string | null | undefined {
+  return claimedPaymentHashes.get(paymentHash);
+}
+
+/** Subscribe to changes in the claimed-hash cache. Returns an unsubscribe fn. */
+export function subscribeClaimed(cb: () => void): () => void {
+  claimedListeners.add(cb);
+  return () => {
+    claimedListeners.delete(cb);
+  };
+}
+
+/** Record a successful claim. `claimTxId` is the broadcast txid for
+ *  claims we performed ourselves; pass `null` for terminal-success polls
+ *  where Boltz reports completion but we don't have the txid. Adding an
+ *  existing key bumps its LRU recency. Persists fire-and-forget. */
+export async function recordClaimedPaymentHash(
+  paymentHash: string,
+  claimTxId: string | null,
+): Promise<void> {
+  await loadClaimedHashes();
+  const wasPresent = claimedPaymentHashes.has(paymentHash);
+  // delete + set so insertion order reflects recency (LRU semantics).
+  claimedPaymentHashes.delete(paymentHash);
+  claimedPaymentHashes.set(paymentHash, claimTxId);
+  while (claimedPaymentHashes.size > CLAIMED_CAP) {
+    const oldest = claimedPaymentHashes.keys().next().value;
+    if (oldest === undefined) break;
+    claimedPaymentHashes.delete(oldest);
+  }
+  // Notify on insertion OR when an existing entry's txid changed
+  // (e.g. terminal-success record gets supplemented by a later claim).
+  const txidChanged = wasPresent && claimedPaymentHashes.get(paymentHash) !== claimTxId;
+  if (!wasPresent || txidChanged) notifyClaimed();
+  // Fire-and-forget — the next pass tolerates a slightly stale on-disk
+  // snapshot; an in-memory hash that hasn't been persisted yet still
+  // shows the green tick this session.
+  SecureStore.setItemAsync(
+    SWAP_CLAIMED_KEY,
+    JSON.stringify(Array.from(claimedPaymentHashes.entries())),
+  ).catch((e) => console.warn('[SwapRecovery] Failed to save claimed hashes:', e));
+}
+
+/** Convenience for callers (SendSheet / TransferSheet) that have the
+ *  preimage rather than the derived payment hash. */
+export async function recordClaimedFromPreimage(
+  preimageHex: string,
+  claimTxId: string | null,
+): Promise<void> {
+  return recordClaimedPaymentHash(paymentHashFromPreimage(preimageHex), claimTxId);
+}
+
 /**
  * Boltz v2 /swap/{id} returns only transaction.id + transaction.hex — not
  * vout/onchainAmount. Parse the raw tx to find the output that matches our
@@ -263,6 +384,11 @@ async function recoverSwap(swapId: string): Promise<void> {
     await SecureStore.deleteItemAsync(`boltz_swap_${swapId}`);
     await unregisterPendingSwap(swapId);
     if (paymentHash) attentionPaymentHashes.delete(paymentHash);
+    // Remember the claim succeeded so TransactionList can badge the row
+    // 'done'. We didn't perform the claim ourselves on this path, so the
+    // txid isn't available — pass `null` and the detail-sheet Claim-tx
+    // row simply won't render for this entry.
+    if (paymentHash) recordClaimedPaymentHash(paymentHash, null);
     return;
   }
 
@@ -333,8 +459,13 @@ async function recoverSwap(swapId: string): Promise<void> {
       position: 'top',
       visibilityTime: 8000,
     });
+    let claimTxId: string;
     try {
-      await boltzService.claimSwap(reverseSwap, { txId, vout, amount }, swap.destinationAddress);
+      claimTxId = await boltzService.claimSwap(
+        reverseSwap,
+        { txId, vout, amount },
+        swap.destinationAddress,
+      );
     } catch (e) {
       // Claim broadcast / signing failed. Add to attention so the row badges
       // yellow and the detail sheet's "Retry claim" button gets the user's
@@ -342,7 +473,8 @@ async function recoverSwap(swapId: string): Promise<void> {
       if (paymentHash) attentionPaymentHashes.add(paymentHash);
       throw e;
     }
-    console.log(`[SwapRecovery] Swap ${swapId} claimed successfully`);
+    console.log(`[SwapRecovery] Swap ${swapId} claimed successfully (claim tx ${claimTxId})`);
+    if (paymentHash) recordClaimedPaymentHash(paymentHash, claimTxId);
     Toast.show({
       type: 'success',
       text1: 'Swap recovered',

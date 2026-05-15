@@ -677,6 +677,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             stage = 'cleanup';
             await SecureStore.deleteItemAsync(`boltz_swap_${swap.id}`);
             await swapRecoveryService.unregisterPendingSwap(swap.id);
+            // Record the claim so TransactionList can badge the row 'done'
+            // and the detail sheet can surface the claim txid.
+            await swapRecoveryService.recordClaimedFromPreimage(swap.preimage, claimed);
             stage = 'refresh';
             try {
               const refreshTasks: Promise<unknown>[] = [

@@ -157,20 +157,21 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
   );
   const [zapContact, setZapContact] = useState<CounterpartyContact | null>(null);
 
-  // Subscribe to swapRecoveryService's attention set so rows re-render
-  // when a recovery pass adds/removes a swap. The set is keyed by LN
-  // paymentHash (= sha256(preimage)), which is what WalletTransaction
-  // rows carry, so matching is a direct .has() per row.
-  const [attentionSet, setAttentionSet] = useState<ReadonlySet<string>>(() =>
-    swapRecoveryService.getAttentionPaymentHashes(),
-  );
+  // Subscribe to swapRecoveryService's attention set + claimed-hash cache
+  // so rows re-render when a recovery pass / synchronous claim updates
+  // either. Both are keyed by LN paymentHash (= sha256(preimage)), which
+  // is what WalletTransaction rows carry, so matching is a direct .has()
+  // per row. We bump a single counter on either change to force a render
+  // — the actual lookups go through swapRecoveryService each time.
+  const [, setSwapStateTick] = useState(0);
   useEffect(() => {
-    const unsub = swapRecoveryService.subscribeAttention(() => {
-      // New Set reference forces dependent useMemo / icon props to re-evaluate
-      // even though the underlying object identity may stay the same.
-      setAttentionSet(new Set(swapRecoveryService.getAttentionPaymentHashes()));
-    });
-    return unsub;
+    const bump = () => setSwapStateTick((n) => n + 1);
+    const unsubAttention = swapRecoveryService.subscribeAttention(bump);
+    const unsubClaimed = swapRecoveryService.subscribeClaimed(bump);
+    return () => {
+      unsubAttention();
+      unsubClaimed();
+    };
   }, []);
 
   /** Resolves the icon-corner badge for a row:
@@ -180,21 +181,25 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
    *     clock → tick / warning instead of bare → tick);
    *   - 'done' for settled INCOMING Boltz rows that aren't in the
    *     attention set — on incoming swaps LN-settled implies the swap
-   *     is complete (Boltz received on-chain before paying our invoice).
-   *     For OUTGOING reverse swaps the LN leg can settle while the
-   *     on-chain claim is still pending or even unbroadcast, so we
-   *     deliberately don't badge those as `done` here — the attention
-   *     set is the source of truth for "needs action" and a positive
-   *     terminal signal for the claim isn't yet tracked client-side
-   *     (#519 follow-up);
-   *   - undefined (no badge) for vanilla Lightning rows and for the
-   *     outgoing-Boltz / settled / not-in-attention case above. */
+   *     is complete (Boltz received on-chain before paying our invoice);
+   *   - 'done' for settled OUTGOING Boltz rows whose claim has been
+   *     recorded in swapRecoveryService's claimed-hash cache (i.e. we've
+   *     observed the on-chain claim broadcast / Boltz reported terminal
+   *     success). Settled outgoing rows without a recorded claim stay
+   *     unbadged — the LN leg can settle before the claim broadcasts,
+   *     and a green tick on a stuck swap would be misleading;
+   *   - undefined (no badge) for vanilla Lightning rows and the
+   *     settled-but-claim-not-recorded outgoing case above. */
   const iconStateFor = (tx: WalletTransaction): TransactionIconState | undefined => {
     if (!swapRecoveryService.isBoltzTransaction(tx)) return undefined;
-    if (tx.paymentHash && attentionSet.has(tx.paymentHash)) return 'attention';
+    if (tx.paymentHash && swapRecoveryService.getAttentionPaymentHashes().has(tx.paymentHash))
+      return 'attention';
     const settled = Boolean(tx.settled_at || tx.blockHeight);
     if (!settled) return 'pending';
-    return tx.type === 'incoming' ? 'done' : undefined;
+    if (tx.type === 'incoming') return 'done';
+    return tx.paymentHash && swapRecoveryService.hasClaimedPaymentHash(tx.paymentHash)
+      ? 'done'
+      : undefined;
   };
 
   // Counterparty preview — opened from TransactionDetailSheet → "view
