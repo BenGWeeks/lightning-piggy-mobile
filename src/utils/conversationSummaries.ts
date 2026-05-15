@@ -199,7 +199,7 @@ const DM_PREVIEW_PREFERENCE_WINDOW_SEC = 5 * 60;
 export function buildDmSummaries(
   entries: DmInboxEntry[],
   contacts: NostrContact[],
-  followPubkeys?: Set<string>,
+  followPubkeys?: ReadonlySet<string>,
 ): ConversationSummary[] {
   const contactByPubkey = new Map<string, NostrContact>();
   for (const c of contacts) contactByPubkey.set(c.pubkey.toLowerCase(), c);

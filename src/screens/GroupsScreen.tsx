@@ -30,6 +30,11 @@ const GroupsScreen: React.FC = () => {
   const navigation = useNavigation<GroupsNavigation>();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  // TODO(wot): swap to wotTier + WebOfTrustChip + WebOfTrustBottomSheet when
+  // the GroupsScreen filter row gets its own three-tier picker (#547 only
+  // migrated the Messages chip; GroupsScreen still uses the legacy boolean
+  // shim — `followingOnly` is now derived from `effectiveWotTier !== 'all'`
+  // and `setFollowingOnly` writes back via `setWotTier`).
   const { visibleGroups, deleteGroup, followingOnly, setFollowingOnly, secretMode } = useGroups();
   const { isLoggedIn, refreshDmInbox, contacts, pubkey: myPubkey } = useNostr();
 
