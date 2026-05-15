@@ -145,7 +145,16 @@ const SecretModeCelebration: React.FC<Props> = ({ visible, enabled, onDismiss })
   const themed = useMemo(() => createStyles(colors), [colors]);
   const { width, height } = useWindowDimensions();
 
-  const confettiSpecs = useMemo(() => makeConfettiSpecs(), []);
+  // Regenerate the spec set every time the overlay opens. A useMemo
+  // with [] dependency would freeze a single trajectory set for the
+  // lifetime of the component, so a second unlock in the same session
+  // would replay the identical burst — feels canned. Keying on
+  // `visible && enabled` gives each discovery moment a fresh seed.
+  const confettiSpecs = useMemo(
+    () => makeConfettiSpecs(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [visible && enabled],
+  );
   const armed = useSharedValue(0);
   const cardScale = useSharedValue(0.9);
   const cardOpacity = useSharedValue(0);
