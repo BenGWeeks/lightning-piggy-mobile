@@ -1357,9 +1357,7 @@ const StepNavRow: React.FC<{
         <ChevronLeft size={16} color={colors.textHeader} strokeWidth={2.5} />
         <Text style={styles.stepNavBackText}>Back</Text>
       </TouchableOpacity>
-    ) : (
-      <View style={styles.stepNavSpacer} />
-    )}
+    ) : null}
     {onNext ? (
       <TouchableOpacity
         style={[styles.stepNavNextButton, nextDisabled && styles.stepNavNextButtonDisabled]}
@@ -1669,12 +1667,15 @@ const createStyles = (colors: Palette) =>
       transform: [{ scale: 1.08 }],
     },
     stepperLabelCurrent: { color: colors.brandPink, fontWeight: '800' },
-    // Bottom-of-step Back / Next navigation row.
+    // Bottom-of-step Back / Next navigation row. When there's no Back
+    // button (step 1) the row collapses to just the Next button via
+    // `flex: 1` — symmetric paddingHorizontal on the button gives even
+    // left/right text padding without needing a width-matching spacer.
     stepNavRow: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      marginTop: 24,
+      marginTop: 16,
       marginBottom: 8,
       gap: 12,
     },
@@ -1692,7 +1693,6 @@ const createStyles = (colors: Palette) =>
       fontWeight: '700',
       color: colors.textHeader,
     },
-    stepNavSpacer: { width: 1 },
     stepNavNextButton: {
       flex: 1,
       flexDirection: 'row',
