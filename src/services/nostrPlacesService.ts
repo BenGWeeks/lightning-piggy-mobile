@@ -72,12 +72,20 @@ export const buildCacheListing = (
   if (typeof piggy.usesHint === 'number') tags.push(['uses', String(piggy.usesHint)]);
   if (typeof piggy.maxWithdrawableMsat === 'number')
     tags.push(['amount', String(Math.floor(piggy.maxWithdrawableMsat / 1000))]);
-  // NIP-40 expiration: abandoned Piggies age out instead of cluttering
-  // relays forever. Default is 1 year — long enough not to bite an
-  // active hider who pops away for a few weeks, short enough that a
-  // genuinely abandoned cache eventually disappears. The wizard's
-  // "Expires after" picker (#23) will let the user override this.
-  tags.push(['expiration', String(Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60)]);
+  // NIP-40 expiration: the wizard's "Expires after" picker (#23)
+  // writes the chosen unix-seconds onto the HiddenPiggy record at
+  // save time. We mirror that onto the published event so finders see
+  // the same date and NIP-40-honouring relays drop the listing on
+  // schedule. When the user picked "Never" piggy.expiresAt is null
+  // and we omit the tag entirely so the cache stays up indefinitely.
+  // For pre-#23 records that don't carry the field, default to 1
+  // year from now (the previous hardcoded behaviour) so cold-publishes
+  // of an older Piggy still get an expiry.
+  if (typeof piggy.expiresAt === 'number') {
+    tags.push(['expiration', String(piggy.expiresAt)]);
+  } else if (!('expiresAt' in piggy)) {
+    tags.push(['expiration', String(Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60)]);
+  }
   return {
     kind: GC_LISTING_KIND,
     created_at: Math.floor(Date.now() / 1000),

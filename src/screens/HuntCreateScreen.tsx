@@ -106,6 +106,13 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
   const [cacheType, setCacheType] = useState<'traditional' | 'multi' | 'mystery' | 'virtual'>(
     'traditional',
   );
+  // NIP-40 expiry window (in days) the listing will be stamped with at
+  // publish time. 365d is the default — long enough that an active
+  // hider isn't punished by a 4-week holiday, short enough that
+  // genuinely abandoned caches fade out of relay searches. "Never"
+  // omits the expiration tag entirely (the cache stays on-relay until
+  // someone supersedes it).
+  const [expiryDays, setExpiryDays] = useState<'30' | '90' | '180' | '365' | 'never'>('365');
 
   const handlePaste = useCallback(async () => {
     try {
@@ -166,11 +173,14 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
       cacheType,
       // Mirror the NIP-40 expiry the publisher stamps onto the kind
       // 37516 listing so My Piglets can show "Expires in N days"
-      // without needing a relay round-trip. Keep this in sync with the
-      // expiry default in nostrPlacesService.ts:71 — both currently
-      // 1 year. When #23 adds a wizard expiry picker, route the
-      // chosen window through here.
-      expiresAt: Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60,
+      // without needing a relay round-trip. `null` means "no
+      // expiration tag" — set by the user via the "Never" picker
+      // option. nostrPlacesService.buildCacheListing reads this
+      // (passed through piggy.expiresAt) and omits the tag when null.
+      expiresAt:
+        expiryDays === 'never'
+          ? undefined
+          : Math.floor(Date.now() / 1000) + parseInt(expiryDays, 10) * 24 * 60 * 60,
     };
     await savePiggy(piggy);
     setStage({ kind: 'saved', lnurlw: piggy.lnurlw });
@@ -901,6 +911,26 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
                 { v: 'virtual', label: 'Virtual' },
               ]}
               onChange={(v) => setCacheType(v as 'traditional' | 'multi' | 'mystery' | 'virtual')}
+              styles={styles}
+            />
+
+            <Text style={[styles.subSectionLabel, styles.sectionGap]}>Expires after</Text>
+            <Text style={styles.helper}>
+              Relays drop the listing once it expires — anyone searching for nearby caches
+              won&apos;t see it. You can re-publish at any time to extend the window.
+              &quot;Never&quot; leaves the cache up indefinitely (only use this if you&apos;re
+              actively maintaining the tag).
+            </Text>
+            <OptionPicker
+              value={expiryDays}
+              options={[
+                { v: '30', label: '30 days' },
+                { v: '90', label: '90 days' },
+                { v: '180', label: '6 months' },
+                { v: '365', label: '1 year' },
+                { v: 'never', label: 'Never' },
+              ]}
+              onChange={(v) => setExpiryDays(v as '30' | '90' | '180' | '365' | 'never')}
               styles={styles}
             />
 
