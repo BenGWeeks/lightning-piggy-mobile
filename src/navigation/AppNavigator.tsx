@@ -175,6 +175,24 @@ function HomeTabs() {
             <Compass size={size} color={color} strokeWidth={focused ? 2.5 : 2} />
           ),
         }}
+        listeners={({ navigation }) => ({
+          // Pop the Explore sub-stack back to its root every time the
+          // tab is tapped. Without this, an NFC-tap deep-link pushes
+          // HuntPiggyDetail onto the stack and the next Explore-tap
+          // resumes there instead of showing the Explore home rails.
+          // Ben hit this after claiming a Piggy: tapping Explore took
+          // him straight back to the Busway detail rather than the
+          // hub he was looking for.
+          tabPress: (e) => {
+            const state = navigation.getState();
+            const tabRoute = state?.routes.find((r) => r.name === 'Explore');
+            const subState = tabRoute?.state;
+            if (subState && typeof subState.index === 'number' && subState.index > 0) {
+              e.preventDefault();
+              navigation.navigate('Explore', { screen: 'ExploreHome' });
+            }
+          },
+        })}
       />
       <Tab.Screen
         name="Friends"
