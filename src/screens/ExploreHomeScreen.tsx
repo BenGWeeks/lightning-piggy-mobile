@@ -325,57 +325,71 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const [untrustedCacheCount, setUntrustedCacheCount] = useState(0);
   const [untrustedEventCount, setUntrustedEventCount] = useState(0);
   const subsCloserRef = useRef<(() => void)[]>([]);
-  useEffect(() => {
-    if (!pos) return;
-    const myGh = encodeGeohash(pos.lat, pos.lon, 7);
-    // Caches sit at precision 5 (~5 km) — geocaching is inherently
-    // hyper-local. Events broaden to precision 3 (~150 km) so a rural
-    // user catches the nearest city's Bitcoin meetup; most NIP-52
-    // publishers emit g tags at every precision 3..9.
-    const cachePrefixes = geohashPrefixes(myGh, 5).filter((p) => p.length === 5);
-    const eventPrefixes = geohashPrefixes(myGh, 3).filter((p) => p.length === 3);
+  // NIP-GC + NIP-52 subscriptions are wrapped in useFocusEffect so they
+  // pause on tab blur. Previously the subs stayed open for the rest of
+  // the session once the user visited Explore even once — relay events
+  // kept landing on the JS thread (a Map clone per delivery is small
+  // but not free) while the user was on Home/Messages/Friends, eating
+  // into bridge dispatches for payment-settlement polls + QR-scan
+  // callbacks (#554). Reconnect on re-focus is ~100 ms; foreground
+  // JS-thread responsiveness is the better trade.
+  useFocusEffect(
+    useCallback(() => {
+      // refreshKey is a dep but not referenced in the body — it bumps
+      // on pull-to-refresh and we want that to tear down + re-run the
+      // subscriptions. The explicit `void` keeps exhaustive-deps happy.
+      void refreshKey;
+      if (!pos) return;
+      const myGh = encodeGeohash(pos.lat, pos.lon, 7);
+      // Caches sit at precision 5 (~5 km) — geocaching is inherently
+      // hyper-local. Events broaden to precision 3 (~150 km) so a rural
+      // user catches the nearest city's Bitcoin meetup; most NIP-52
+      // publishers emit g tags at every precision 3..9.
+      const cachePrefixes = geohashPrefixes(myGh, 5).filter((p) => p.length === 5);
+      const eventPrefixes = geohashPrefixes(myGh, 3).filter((p) => p.length === 3);
 
-    subsCloserRef.current.push(
-      subscribeNearbyCaches(cachePrefixes, (c) => {
-        // WoT filter: silently drop caches from pubkeys outside the
-        // trust graph (an unverified cache could be a phishing LNURL
-        // or, worse, a physical lure). Surfaced as a count instead so
-        // users know they exist without being lured into inspecting them.
-        if (!isTrustedRef.current(c.hiderPubkey)) {
-          setUntrustedCacheCount((n) => n + 1);
-          return;
-        }
-        setCaches((prev) => {
-          const existing = prev.get(c.coord);
-          if (existing && existing.createdAt >= c.createdAt) return prev;
-          const next = new Map(prev);
-          next.set(c.coord, c);
-          return next;
-        });
-      }),
-    );
-    subsCloserRef.current.push(
-      subscribeNearbyEvents(eventPrefixes, (e) => {
-        // Skip events that already started > 1h ago.
-        if (e.startsAt && e.startsAt < Math.floor(Date.now() / 1000) - 60 * 60) return;
-        if (!isTrustedRef.current(e.organiserPubkey)) {
-          setUntrustedEventCount((n) => n + 1);
-          return;
-        }
-        setEvents((prev) => {
-          const existing = prev.get(e.coord);
-          if (existing && existing.startsAt === e.startsAt) return prev;
-          const next = new Map(prev);
-          next.set(e.coord, e);
-          return next;
-        });
-      }),
-    );
-    return () => {
-      subsCloserRef.current.forEach((c) => c());
-      subsCloserRef.current = [];
-    };
-  }, [pos, refreshKey]);
+      subsCloserRef.current.push(
+        subscribeNearbyCaches(cachePrefixes, (c) => {
+          // WoT filter: silently drop caches from pubkeys outside the
+          // trust graph (an unverified cache could be a phishing LNURL
+          // or, worse, a physical lure). Surfaced as a count instead so
+          // users know they exist without being lured into inspecting them.
+          if (!isTrustedRef.current(c.hiderPubkey)) {
+            setUntrustedCacheCount((n) => n + 1);
+            return;
+          }
+          setCaches((prev) => {
+            const existing = prev.get(c.coord);
+            if (existing && existing.createdAt >= c.createdAt) return prev;
+            const next = new Map(prev);
+            next.set(c.coord, c);
+            return next;
+          });
+        }),
+      );
+      subsCloserRef.current.push(
+        subscribeNearbyEvents(eventPrefixes, (e) => {
+          // Skip events that already started > 1h ago.
+          if (e.startsAt && e.startsAt < Math.floor(Date.now() / 1000) - 60 * 60) return;
+          if (!isTrustedRef.current(e.organiserPubkey)) {
+            setUntrustedEventCount((n) => n + 1);
+            return;
+          }
+          setEvents((prev) => {
+            const existing = prev.get(e.coord);
+            if (existing && existing.startsAt === e.startsAt) return prev;
+            const next = new Map(prev);
+            next.set(e.coord, e);
+            return next;
+          });
+        }),
+      );
+      return () => {
+        subsCloserRef.current.forEach((c) => c());
+        subsCloserRef.current = [];
+      };
+    }, [pos, refreshKey]),
+  );
 
   // ----- lessons progress (local) -----------------------------------------
 
