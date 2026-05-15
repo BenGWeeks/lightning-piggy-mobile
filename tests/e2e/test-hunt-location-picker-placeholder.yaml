@@ -1,34 +1,44 @@
 appId: com.lightningpiggy.app.dev
-name: Location picker shows "Tap or drag" placeholder before user interacts
+name: Location picker — placeholder before pick, coord + commit after pick
 ---
-# Regression test for #72 follow-up: the Hide-a-Piglet wizard's location
-# picker used to render the UK fallback coords (54.00000, -2.00000) the
-# moment it opened, even though the user hadn't placed a pin. That made
-# a default look like a real choice. Fix shows a placeholder instead and
-# disables the "Use this location" button until the user drags/taps the
-# marker.
+# Regression test for #72 follow-ups: the Hide-a-Piglet wizard's
+# location picker used to render the UK fallback coords (54.00000,
+# -2.00000) the moment it opened, even though the user hadn't placed a
+# pin. That made a default look like a real choice. Fix shows a
+# placeholder instead and disables the "Use this location" button until
+# the user drags/taps the marker; then on confirm the pin commits back
+# to the wizard.
 #
-# This test verifies the *initial* state only — placeholder visible,
-# coord testID absent. Validating the after-tap state would mean tapping
-# inside the Leaflet WebView, which has no React Native testID we can
-# target without coordinates (forbidden by CLAUDE.md). For the after-tap
-# branch, rely on the manual screenshot review captured at PR time.
+# Covers:
+#   1. Initial state — placeholder copy visible, no coord testID,
+#      confirm button rendered (disabled visually).
+#   2. After-tap — tapping the map area surfaces the coord testID.
+#   3. End-to-end — tapping "Use this location" closes the sheet and
+#      the wizard now shows the "Adjust on map" path (proves a pin
+#      reached the parent screen).
+#
+# Coordinate exception: step 2 taps the Leaflet WebView at a fractional
+# point. CLAUDE.md normally forbids `point:` taps, but the map area is
+# a single WebView with no React Native nodes to target — there is no
+# testID to anchor on. With the user's explicit OK this one coordinate
+# is fine; everything else uses ids.
 #
 # Pre-reqs:
-#  - .env contains MAESTRO_NSEC_BIG
+#  - Emulator already has a signed-in session (any Piggy account).
+#    We deliberately don't go via _subflow-login-as.yaml because that
+#    subflow currently references a stale `drawer-row-profile` testID
+#    and fails before the picker even opens. Filed as a follow-up.
 #
 # Run:
-#   source .env && maestro --device emulator-5554 test \
-#     -e MAESTRO_NSEC_BIG=$MAESTRO_NSEC_BIG \
+#   maestro --device emulator-5554 test \
 #     tests/e2e/test-hunt-location-picker-placeholder.yaml
-
-- runFlow: _subflow-login-as.yaml
 
 - tapOn:
     id: 'tab-explore'
 - tapOn:
     id: 'explore-card-hunt'
-- tapOn: 'My piglets'
+- tapOn:
+    id: 'hunt-my-piglets-button'
 - tapOn:
     id: 'my-piglets-hide-cta'
 
@@ -43,11 +53,31 @@ name: Location picker shows "Tap or drag" placeholder before user interacts
 - waitForAnimationToEnd:
     timeout: 3000
 
-# Sheet open. Title is there, placeholder copy is there, no coord
-# readout yet, confirm button is disabled.
+# 1. Initial state — placeholder copy + no coord readout.
 - assertVisible: 'Where did you hide it?'
 - assertVisible: 'Tap or drag the pin to mark a location'
 - assertNotVisible:
     id: 'location-picker-coord'
 - assertVisible:
     id: 'location-picker-confirm'
+
+# 2. Tap the map area. The WebView spans most of the sheet — 50%/45%
+# lands well inside it.
+- tapOn:
+    point: 50%, 45%
+- waitForAnimationToEnd:
+    timeout: 1000
+- assertVisible:
+    id: 'location-picker-coord'
+- assertNotVisible: 'Tap or drag the pin to mark a location'
+
+# 3. Confirm — sheet closes, wizard now shows the "Adjust on map"
+# button (proves a pin reached the wizard's `pin` state).
+- tapOn:
+    id: 'location-picker-confirm'
+- waitForAnimationToEnd:
+    timeout: 2000
+- assertVisible:
+    id: 'hunt-piggy-adjust-pin-button'
+- assertNotVisible:
+    id: 'hunt-piggy-pick-on-map-button'
