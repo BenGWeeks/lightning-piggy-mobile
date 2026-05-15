@@ -345,7 +345,12 @@ const makeHtml = (
     /* Round circles match the list-row iconWrap (pink for Piglet,
        slate for vanilla NIP-GC). Earlier diamond version made the
        map<>list mapping ambiguous at a glance. */
-    .lp-cache{width:14px;height:14px;border-radius:7px;background:#6c7b8a;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.4)}
+    /* Cache pin — small dot kept only as a fallback class; the actual
+       cache markers use the cacheCircle() SVG below so the glyph
+       matches the list-row iconWrap on HuntScreen. Purple is the new
+       NIP-GC colour (was slate; user-visible inconsistency with the
+       list which was already using brand colours). */
+    .lp-cache{width:14px;height:14px;border-radius:7px;background:#7A5CFF;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.4)}
     .lp-cache.piggy{background:#EC008C}
     .lp-event{width:14px;height:14px;border-radius:3px;background:#5b3aff;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.4)}
     /* Pulsating "you" dot: solid blue core + an outward ripple via
@@ -380,7 +385,16 @@ const PIGGY_SVG='<path d="M11 17h3v2a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-3a3.16 3.16 
 const MAPPIN_SVG='<path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/>';
 // The piggy glyph sits ~2px lower than the map-pin glyph in its viewBox,
 // so it gets a slightly larger y-offset to stay optically centred.
-const pinIcon=(piggy)=>L.divIcon({className:'',iconSize:[36,44],iconAnchor:[18,44],html:'<svg width="36" height="44" viewBox="0 0 36 44" xmlns="http://www.w3.org/2000/svg"><path d="M18 2C9.7 2 3 8.7 3 17c0 10 15 25 15 25s15-15 15-25C33 8.7 26.3 2 18 2z" fill="'+(piggy?'#EC008C':'#6c7b8a')+'" stroke="#fff" stroke-width="2"/><g transform="translate(9 '+(piggy?9:7)+') scale(0.75)" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'+(piggy?PIGGY_SVG:MAPPIN_SVG)+'</g></svg>'});
+const pinIcon=(piggy)=>L.divIcon({className:'',iconSize:[36,44],iconAnchor:[18,44],html:'<svg width="36" height="44" viewBox="0 0 36 44" xmlns="http://www.w3.org/2000/svg"><path d="M18 2C9.7 2 3 8.7 3 17c0 10 15 25 15 25s15-15 15-25C33 8.7 26.3 2 18 2z" fill="'+(piggy?'#EC008C':'#7A5CFF')+'" stroke="#fff" stroke-width="2"/><g transform="translate(9 '+(piggy?9:7)+') scale(0.75)" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'+(piggy?PIGGY_SVG:MAPPIN_SVG)+'</g></svg>'});
+// Small-circle cache marker for inline / hub maps. Mirrors the
+// HuntScreen list-row iconWrap (28-px circle, PiggyBank glyph on
+// pink for Piggies, MapPin glyph on purple for NIP-GC). When the
+// cache is a Piggy a small zap badge sits at the top-right since
+// every LP Piggy carries a payout-lnurl-w by the NIP-32 label
+// definition. Anchored 1/2 width × full height so the bottom of the
+// circle sits on the actual cache lat/lon.
+const ZAP_BADGE='<g transform="translate(20 0)"><circle cx="6" cy="6" r="7" fill="#FFB200" stroke="#fff" stroke-width="1.5"/><path d="M7.2 2.2 L3.5 7.0 L6.0 7.0 L4.8 9.8 L8.5 5.0 L6.0 5.0 Z" fill="#fff"/></g>';
+const cacheCircle=(piggy)=>L.divIcon({className:'',iconSize:[28,28],iconAnchor:[14,14],html:'<svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg"><circle cx="14" cy="14" r="12" fill="'+(piggy?'#EC008C':'#7A5CFF')+'" stroke="#fff" stroke-width="2"/><g transform="translate(7 7) scale(0.583)" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'+(piggy?PIGGY_SVG:MAPPIN_SVG)+'</g>'+(piggy?ZAP_BADGE:'')+'</svg>'});
 const emitBounds=()=>{const b=map.getBounds();post({type:'bounds',bbox:{minLat:b.getSouth(),maxLat:b.getNorth(),minLon:b.getWest(),maxLon:b.getEast()}});};
 map.on('moveend',emitBounds);
 map.on('zoomend',emitBounds);
@@ -412,7 +426,7 @@ window.LP_setHub=function(d){
     meMarker=L.marker([d.me.lat,d.me.lng],{icon:dot('lp-me',12)}).addTo(map);
   }
   d.merchants.forEach(m=>L.marker([m.lat,m.lng],{icon:dot('lp-pin'+(m.lightning?'':' onchain'),14)}).addTo(merchantLayer));
-  d.caches.forEach(c=>L.marker([c.lat,c.lng],{icon:d.cachePin?pinIcon(c.kind==='piggy'):dot('lp-cache'+(c.kind==='piggy'?' piggy':''),14)}).addTo(cacheLayer));
+  d.caches.forEach(c=>L.marker([c.lat,c.lng],{icon:d.cachePin?pinIcon(c.kind==='piggy'):cacheCircle(c.kind==='piggy')}).addTo(cacheLayer));
   d.events.forEach(e=>L.marker([e.lat,e.lng],{icon:dot('lp-event',14)}).addTo(eventLayer));
   // Only re-centre on the very first LP_setHub. After that the user's
   // viewport is sacred — late-arriving caches / events would otherwise

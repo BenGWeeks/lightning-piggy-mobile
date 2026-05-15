@@ -115,7 +115,7 @@ export const LegendSheet: React.FC<Props> = ({
             <Item dot color="#EC008C" label="⚡ Lightning merchant" />
             <Item dot color="#F7931A" label="On-chain merchant" />
             <Item diamond color="#EC008C" label="Piglet (Lightning Piggy)" />
-            <Item diamond color="#6c7b8a" label="NIP-GC cache" />
+            <Item diamond color="#7A5CFF" label="NIP-GC cache" />
             <Item dot color="#2D88FF" label="You" />
 
             {categoryRows.length > 0 ? (

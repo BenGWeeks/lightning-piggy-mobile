@@ -1067,7 +1067,7 @@ const CACHE_FILTERS: ReadonlyArray<FilterOption> = [
     key: 'nipgcCache',
     label: 'NIP-GC cache',
     hint: 'Geo-cache (treasures.to et al.)',
-    swatch: '#6c7b8a',
+    swatch: '#7A5CFF',
     diamond: true,
   },
 ];
@@ -1320,7 +1320,7 @@ const LEAFLET_HTML = `<!DOCTYPE html>
        distinguishes it from circular merchant pins on a busy map. */
     .lp-cache {
       width: 22px; height: 22px;
-      background: #6c7b8a; border: 2px solid #fff;
+      background: #7A5CFF; border: 2px solid #fff;
       box-shadow: 0 1px 4px rgba(0,0,0,0.4);
       transform: rotate(45deg);
     }

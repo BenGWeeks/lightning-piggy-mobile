@@ -832,7 +832,7 @@ const createLocalStyles = (colors: Palette) =>
     },
     cardIconLightning: { backgroundColor: colors.brandPink },
     cardIconOnchain: { backgroundColor: '#F5A623' },
-    cardIconStandard: { backgroundColor: '#6c7b8a' },
+    cardIconStandard: { backgroundColor: '#7A5CFF' },
     cardIconEvent: { backgroundColor: '#5b3aff' },
     cardTitle: {
       fontSize: 13,
