@@ -1640,6 +1640,12 @@ const NfcSupportedTagsCard: React.FC<{
         <Text style={styles.tagsCardName}>NTAG213 / Ultralight C / Mifare Classic</Text> — too small or can't lock.
       </Text>
     </View>
+    <View style={styles.tagsCardParagraph}>
+      <Text style={styles.tagsCardCross}>✗</Text>
+      <Text style={styles.tagsCardParagraphText}>
+        <Text style={styles.tagsCardName}>NTAG424</Text> — not supported yet (needs AES auth, GH #558).
+      </Text>
+    </View>
   </View>
 );
 
