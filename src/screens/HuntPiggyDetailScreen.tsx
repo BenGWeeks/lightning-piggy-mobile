@@ -28,6 +28,7 @@ import {
   MapPin,
   Navigation,
   Navigation2,
+  Nfc,
   PiggyBank,
   Repeat,
   Send,
@@ -605,9 +606,16 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.actionButtonPrimary}
-                  onPress={() =>
-                    canLog ? setComposerOpen(true) : setReadSheetOpen(true)
-                  }
+                  onPress={() => {
+                    console.log(
+                      `[NFC] Claim/Scan button tapped — canLog=${canLog} hasClaimed=${hasClaimed} isLpPiggy=${cache?.isLpPiggy}`,
+                    );
+                    if (canLog) {
+                      setComposerOpen(true);
+                    } else {
+                      setReadSheetOpen(true);
+                    }
+                  }}
                   accessibilityLabel={
                     canLog
                       ? 'Claim found — log your find'
@@ -615,7 +623,11 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   }
                   testID="hunt-piggy-detail-claim-button"
                 >
-                  <CheckCircle2 size={18} color={colors.white} strokeWidth={2.5} />
+                  {canLog ? (
+                    <CheckCircle2 size={18} color={colors.white} strokeWidth={2.5} />
+                  ) : (
+                    <Nfc size={18} color={colors.white} strokeWidth={2.5} />
+                  )}
                   <Text style={styles.actionButtonPrimaryText}>
                     {canLog ? 'Claim found' : 'Scan the Piglet'}
                   </Text>

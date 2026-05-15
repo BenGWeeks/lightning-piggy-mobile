@@ -3,6 +3,13 @@ import type { Nip47GetInfoResponse } from '@getalby/sdk';
 
 const providers = new Map<string, NostrWebLNProvider>();
 const nwcUrls = new Map<string, string>();
+// In-flight reconnect promises, keyed by walletId. Dedupes parallel
+// `ensureConnected` callers (getBalance + makeInvoice + ...) so a single
+// dropped WebSocket doesn't spawn N simultaneous `provider.enable()`
+// handshakes, each holding the JS thread on the same slow relay. Pre-fix
+// a NWC blip during HuntPiggyDetailScreen mount could pin the thread for
+// 30 s while four reconnect attempts serialised through the same relay.
+const reconnectsInFlight = new Map<string, Promise<NostrWebLNProvider>>();
 
 // Per-wallet timestamp of the most recent relay-publish failure. Used
 // to fast-fail pay_invoice when the relay is unreachable (see #175).
@@ -377,8 +384,18 @@ async function ensureConnected(walletId: string): Promise<NostrWebLNProvider | n
 
   const client = (provider as any).client;
   if (client && !client.connected && nwcUrls.has(walletId)) {
-    if (__DEV__) console.log('[NWC] Connection lost, reconnecting...');
-    provider = await reconnect(walletId);
+    // Dedupe parallel reconnect attempts — every concurrent ensureConnected
+    // caller awaits the same promise. Promise is cleared once resolved or
+    // rejected so a *later* drop can trigger a fresh reconnect.
+    let pending = reconnectsInFlight.get(walletId);
+    if (!pending) {
+      if (__DEV__) console.log('[NWC] Connection lost, reconnecting...');
+      pending = reconnect(walletId).finally(() => {
+        reconnectsInFlight.delete(walletId);
+      });
+      reconnectsInFlight.set(walletId, pending);
+    }
+    provider = await pending;
   }
   return provider;
 }
