@@ -471,6 +471,16 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   // LP Piggies gate find-logging behind a successful claim (proof of
   // presence); plain NIP-GC caches have no claim step, so anyone can log.
   const canLog = hasClaimed || (cache != null && !cache.isLpPiggy);
+  // Have I already posted a find-log on this cache? Derived from the
+  // live `logs` subscription so it stays in sync if the user posts
+  // and the relay echoes back, OR if a previous-session log was
+  // already there when the screen mounts. Drives the actionRow primary
+  // button — once a user has logged, the 'Log your find' CTA should
+  // not keep nagging them on revisits.
+  const alreadyLogged = useMemo(
+    () => (pubkey ? [...logs.values()].some((l) => l.pubkey === pubkey) : false),
+    [logs, pubkey],
+  );
 
   // Hero shows the photo when the toggle picks it AND a photo exists;
   // otherwise it falls back to the map.
@@ -625,38 +635,49 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                     </Text>
                   ) : null}
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.actionButtonPrimary}
-                  onPress={() => {
-                    if (canLog) {
-                      setComposerOpen(true);
-                    } else {
-                      setReadSheetOpen(true);
+                {/* Three-state primary action:
+                    - alreadyLogged: render the muted 'You've logged this' badge
+                      below — no button, the work is done.
+                    - canLog: 'Log your find' opens the composer.
+                    - else: 'Scan the Piglet' opens the NFC reader.
+                  This stops the post-claim 'Log your find' CTA from
+                  pestering returning visitors who already logged. */}
+                {alreadyLogged ? null : (
+                  <TouchableOpacity
+                    style={styles.actionButtonPrimary}
+                    onPress={() => {
+                      if (canLog) {
+                        setComposerOpen(true);
+                      } else {
+                        setReadSheetOpen(true);
+                      }
+                    }}
+                    accessibilityLabel={
+                      canLog
+                        ? 'Log your find for other hunters'
+                        : 'Scan the Piglet to claim the prize'
                     }
-                  }}
-                  accessibilityLabel={
-                    canLog
-                      ? 'Log your find for other hunters'
-                      : 'Scan the Piglet to claim the prize'
-                  }
-                  testID="hunt-piggy-detail-claim-button"
-                >
-                  {canLog ? (
-                    <Sparkles size={18} color={colors.white} strokeWidth={2.5} />
-                  ) : (
-                    <Nfc size={18} color={colors.white} strokeWidth={2.5} />
-                  )}
-                  <Text style={styles.actionButtonPrimaryText}>
-                    {canLog ? 'Log your find' : 'Scan the Piglet'}
-                  </Text>
-                </TouchableOpacity>
+                    testID="hunt-piggy-detail-claim-button"
+                  >
+                    {canLog ? (
+                      <Sparkles size={18} color={colors.white} strokeWidth={2.5} />
+                    ) : (
+                      <Nfc size={18} color={colors.white} strokeWidth={2.5} />
+                    )}
+                    <Text style={styles.actionButtonPrimaryText}>
+                      {canLog ? 'Log your find' : 'Scan the Piglet'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
               </View>
               <Text style={styles.claimNote}>
-                {!cache.isLpPiggy
-                  ? 'Found this cache? Tap Claim found to log it for other hunters.'
-                  : hasClaimed
-                    ? 'Sats received! Log your find so other hunters can see it.'
-                    : "Scan the Piglet's NFC tag (or its QR) at the cache to unlock Claim found."}
+                {alreadyLogged
+                  ? "You've logged this find — thanks for sharing it with other hunters."
+                  : !cache.isLpPiggy
+                    ? 'Found this cache? Tap Log your find to share it with other hunters.'
+                    : hasClaimed
+                      ? 'Sats received! Tap Log your find above to share it with other hunters.'
+                      : "Scan the Piglet's NFC tag (or its QR) at the cache to claim the prize."}
               </Text>
             </View>
 
@@ -711,7 +732,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               ))
             )}
 
-            {canLog && !composerOpen ? (
+            {canLog && !composerOpen && !alreadyLogged ? (
               <TouchableOpacity
                 style={styles.composeCta}
                 onPress={() => setComposerOpen(true)}
