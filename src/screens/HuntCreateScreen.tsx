@@ -902,7 +902,8 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               <View style={styles.payloadPreview}>
                 <Text style={styles.payloadPreviewLabel}>Tag will carry:</Text>
                 <Text style={styles.payloadPreviewLine} numberOfLines={1}>
-                  • https://www.lightningpiggy.com/hunt/{ensurePiggyId().slice(0, 16)}…
+                  • {process.env.EXPO_PUBLIC_HUNT_TAG_BASE_URL ?? 'lightningpiggy://hunt/'}
+                  {ensurePiggyId().slice(0, 16)}…
                 </Text>
                 <Text style={styles.payloadPreviewLine} numberOfLines={1}>
                   • nostr:naddr1… ({GC_LISTING_KIND}:{pubkey.slice(0, 8)}…:{ensurePiggyId().slice(0, 12)}…)
@@ -1391,39 +1392,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
 // (see `writeLnurlToTag` in `nfcService.ts` for the threat model).
 // -----------------------------------------------------------------------------
 
-const SUPPORTED_TAGS: Array<{
-  name: string;
-  blurb: string;
-  capacity: string;
-  status: 'recommended' | 'ok' | 'avoid';
-}> = [
-  {
-    name: 'NTAG215 / 216',
-    blurb:
-      'Locks permanently after write. Plenty of room for the full multi-record payload (lightningpiggy URL + nostr reference + LNURL).',
-    capacity: '504 / 888 bytes',
-    status: 'recommended',
-  },
-  {
-    name: 'NTAG213',
-    blurb:
-      'Locks permanently but only ~140 usable bytes — fits a single record (LNURL only) but not the full multi-record write. Pick 215 / 216 if you have the choice.',
-    capacity: '144 bytes',
-    status: 'ok',
-  },
-  {
-    name: 'Mifare Ultralight C',
-    blurb: 'Lockable, ~140 usable bytes — same caveat as NTAG213 for the multi-record write.',
-    capacity: '144 bytes',
-    status: 'ok',
-  },
-  {
-    name: 'Mifare Classic 1K / 4K',
-    blurb: 'No permanent NDEF lock — anyone with the default sector key can overwrite.',
-    capacity: '768 / 3.4 KB',
-    status: 'avoid',
-  },
-];
+// Tag-chip recommendations collapsed to a tick / cross pair — the
+// previous four-row matrix gave more detail than the hider needs at
+// write time. Reasons baked into each blurb so the user can pick a
+// sticker without reading a separate doc.
 
 // Numbered step header for the Hide-a-Piglet flow. The screen used to
 // be a flat list of section labels; now each stage gets a visible

@@ -511,17 +511,26 @@ export async function writeHuntTagToTag(
   if (!coord || !naddr) {
     throw new Error('Hunt tag payload requires both coord and naddr');
   }
-  // Record 1 is an https URL on our domain, not the custom
-  // `lightningpiggy://` scheme. Reasons:
-  //   - Finders without our app installed still get a clickable URL
-  //     that opens the browser → can show cache info + a download
-  //     link. The custom scheme would just fail with "no app".
-  //   - Android App Links + iOS Universal Links override the browser
-  //     when our app IS installed (manifest already declares the
-  //     `https` scheme + lightningpiggy.com host).
-  //   - URI-encode the coord — colons in `kind:pubkey:d` would
-  //     otherwise be parsed as a port authority.
-  const lpUri = `https://www.lightningpiggy.com/hunt/${encodeURIComponent(coord)}`;
+  // Record 1's base URL. Defaults to the custom-scheme form because
+  // that's what the AndroidManifest's intent-filter actually claims
+  // today — `lightningpiggy://hunt/<coord>` opens our app on tap.
+  // `https://www.lightningpiggy.com/hunt/<coord>` is the better
+  // long-term default (works in a browser too, friendlier when our
+  // app isn't installed) BUT needs three pieces of infra first:
+  //   1. The `/hunt/<coord>` route on the website (cache info +
+  //      download link)
+  //   2. An https intent-filter + `autoVerify` in the manifest
+  //   3. `/.well-known/assetlinks.json` on the domain so Android
+  //      App Links verify and bypass the OS chooser
+  // Once those land, flip `EXPO_PUBLIC_HUNT_TAG_BASE_URL` in `.env`
+  // to `https://www.lightningpiggy.com/hunt/` (with trailing slash).
+  // The App.tsx Linking handler already recognises both forms.
+  //
+  // URI-encode the coord — colons in `kind:pubkey:d` would otherwise
+  // be parsed as a port authority.
+  const HUNT_TAG_BASE =
+    (process.env.EXPO_PUBLIC_HUNT_TAG_BASE_URL ?? 'lightningpiggy://hunt/');
+  const lpUri = `${HUNT_TAG_BASE}${encodeURIComponent(coord)}`;
   const nostrUri = naddr.startsWith('nostr:') ? naddr : `nostr:${naddr}`;
   // Bech32 LNURLs are case-insensitive — uppercase is conventional on
   // physical tags + QR for OCR robustness. Pre-existing convention from
