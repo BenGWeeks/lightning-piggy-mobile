@@ -8,6 +8,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Image,
+  KeyboardAvoidingView,
   Linking,
   Modal,
   Platform,
@@ -611,6 +612,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   })();
 
   return (
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      testID="hunt-create-screen-root"
+    >
     <View style={styles.container} testID="hunt-create-screen">
       <View style={styles.header}>
         <TouchableOpacity
@@ -735,7 +741,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 }}
                 autoCapitalize="none"
                 autoCorrect={false}
-                multiline
+                // Single line — LNURLs are long but truncating visually
+                // is fine. Multi-line was wrapping the LNURL across 3-4
+                // lines on a Pixel, pushing the cooldown / uses inputs
+                // below the fold + behind the on-screen keyboard.
+                numberOfLines={1}
                 testID="hunt-piggy-lnurl-input"
               />
               <TouchableOpacity
@@ -1293,6 +1303,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         onConfirm={(lat, lon) => setPin({ lat, lon, geohash: encodeGeohash(lat, lon, 9) })}
       />
     </View>
+    </KeyboardAvoidingView>
   );
 };
 
