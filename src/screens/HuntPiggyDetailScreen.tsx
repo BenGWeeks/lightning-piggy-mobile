@@ -16,7 +16,6 @@ import {
   Box,
   Camera,
   CalendarDays,
-  CheckCircle2,
   ChevronLeft,
   Pencil,
   Clock,
@@ -629,9 +628,6 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 <TouchableOpacity
                   style={styles.actionButtonPrimary}
                   onPress={() => {
-                    console.log(
-                      `[NFC] Claim/Scan button tapped — canLog=${canLog} hasClaimed=${hasClaimed} isLpPiggy=${cache?.isLpPiggy}`,
-                    );
                     if (canLog) {
                       setComposerOpen(true);
                     } else {
@@ -640,18 +636,18 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   }}
                   accessibilityLabel={
                     canLog
-                      ? 'Claim found — log your find'
+                      ? 'Log your find for other hunters'
                       : 'Scan the Piglet to claim the prize'
                   }
                   testID="hunt-piggy-detail-claim-button"
                 >
                   {canLog ? (
-                    <CheckCircle2 size={18} color={colors.white} strokeWidth={2.5} />
+                    <Sparkles size={18} color={colors.white} strokeWidth={2.5} />
                   ) : (
                     <Nfc size={18} color={colors.white} strokeWidth={2.5} />
                   )}
                   <Text style={styles.actionButtonPrimaryText}>
-                    {canLog ? 'Claim found' : 'Scan the Piglet'}
+                    {canLog ? 'Log your find' : 'Scan the Piglet'}
                   </Text>
                 </TouchableOpacity>
               </View>
