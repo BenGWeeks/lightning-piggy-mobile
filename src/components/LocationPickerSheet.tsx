@@ -92,6 +92,13 @@ const LocationPickerSheet: React.FC<Props> = ({
     <BottomSheetModal
       ref={sheetRef}
       snapPoints={snapPoints}
+      // Gorhom defaults to enableDynamicSizing=true which auto-sizes the
+      // sheet to its content. That fights the flex:1 chain below (content
+      // wants to fill the sheet, sheet wants to fit content) and the
+      // Leaflet WebView ends up with 0 height — visible as the grey
+      // background showing through but no tiles. Forcing dynamic sizing
+      // off so snapPoints win.
+      enableDynamicSizing={false}
       onDismiss={onClose}
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}
@@ -199,6 +206,11 @@ const createStyles = (colors: Palette) =>
     },
     mapWrap: {
       flex: 1,
+      // Safety net: even if the parent flex chain is briefly indeterminate
+      // (sheet mount → layout pass), the WebView still has enough height
+      // for the first tile load. Without this, a 0-height measurement on
+      // first paint can leave the map invisible until the user resizes.
+      minHeight: 300,
       borderRadius: 14,
       overflow: 'hidden',
       backgroundColor: colors.background,
