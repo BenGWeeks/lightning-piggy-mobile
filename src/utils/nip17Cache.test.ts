@@ -14,7 +14,7 @@
  * production.
  */
 
-import { evictNip17CacheOverflow, touchNip17CacheEntry } from './nip17Cache';
+import { evictNip17CacheBytes, evictNip17CacheOverflow, touchNip17CacheEntry } from './nip17Cache';
 
 describe('touchNip17CacheEntry', () => {
   it('returns false and leaves cache untouched when key is absent', () => {
@@ -68,6 +68,50 @@ describe('evictNip17CacheOverflow', () => {
     const evicted = evictNip17CacheOverflow(cache, 3);
     expect(evicted).toBe(2);
     expect(Object.keys(cache)).toEqual(['c', 'd', 'e']);
+  });
+});
+
+describe('evictNip17CacheBytes', () => {
+  it('returns 0 and leaves the cache untouched when under the byte limit', () => {
+    const cache: Record<string, string> = { a: 'x', b: 'y' };
+    expect(evictNip17CacheBytes(cache, 10_000)).toBe(0);
+    expect(Object.keys(cache)).toEqual(['a', 'b']);
+  });
+
+  it('drops oldest-inserted entries until the serialised blob fits', () => {
+    // Each value is ~1 KB; a 3 KB cap should keep only the newest few.
+    const cache: Record<string, string> = {};
+    for (let i = 0; i < 10; i += 1) cache[`k${i}`] = 'z'.repeat(1000);
+    const removed = evictNip17CacheBytes(cache, 3000);
+    expect(removed).toBeGreaterThan(0);
+    expect(JSON.stringify(cache).length).toBeLessThanOrEqual(3000);
+    // Whatever survives must be the newest-inserted keys (a contiguous
+    // tail of the original insertion order).
+    const survivors = Object.keys(cache);
+    const originalOrder = Array.from({ length: 10 }, (_, i) => `k${i}`);
+    expect(survivors).toEqual(originalOrder.slice(originalOrder.length - survivors.length));
+  });
+
+  it('drops a single over-budget entry rather than persisting an unreadable row', () => {
+    // A lone wrap whose own JSON exceeds the budget must still go —
+    // keeping it would write a row that fails to read anyway. An empty
+    // cache is valid; the relay restream repopulates it.
+    const cache: Record<string, string> = { only: 'z'.repeat(5000) };
+    const removed = evictNip17CacheBytes(cache, 100);
+    expect(removed).toBe(1);
+    expect(Object.keys(cache)).toEqual([]);
+  });
+
+  it('measures UTF-8 bytes, not UTF-16 length — emoji content counts double-plus', () => {
+    // 4 emoji = 4 chars of .length 8, but 16 UTF-8 bytes. A budget that
+    // sits between the two must still trim. Guards the CursorWindow bug:
+    // a .length check would have passed this and written an over-limit row.
+    const cache: Record<string, string> = {};
+    for (let i = 0; i < 6; i += 1) cache[`k${i}`] = '🐷🐷🐷🐷';
+    // Each value JSON is ~"🐷🐷🐷🐷" = 16 bytes content + 2 quotes; key+
+    // punctuation overhead too. 6 entries comfortably exceed 60 bytes.
+    const removed = evictNip17CacheBytes(cache, 60);
+    expect(removed).toBeGreaterThan(0);
   });
 });
 
