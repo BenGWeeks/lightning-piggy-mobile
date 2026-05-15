@@ -27,6 +27,7 @@ import {
   Zap,
 } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { useTrustGraph } from '../contexts/TrustGraphContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
 import {
@@ -82,6 +83,14 @@ interface BridgeMessage {
  */
 const MapScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
+  // Tier-aware predicate from the Web-of-Trust context. `isTrusted`
+  // already encodes the current wotTier (Friends / FoF / All), so
+  // flipping the tier in the filter sheet re-runs the effect that
+  // pushes cache pins to the WebView and the unwanted authors drop
+  // off the map immediately. Mirrors the same fix HuntScreen got in
+  // 306270c — the full map was the last surface still showing every
+  // cache regardless of trust.
+  const { isTrusted } = useTrustGraph();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const webviewRef = useRef<WebView>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -369,11 +378,18 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
 
   useEffect(() => {
     if (!webviewReady) return;
-    const filtered = [...caches.values()].filter((c) =>
-      c.isLpPiggy ? filters.piglet : filters.nipgcCache,
+    const filtered = [...caches.values()].filter(
+      (c) =>
+        // Type chip — Piglet vs vanilla NIP-GC.
+        (c.isLpPiggy ? filters.piglet : filters.nipgcCache) &&
+        // Web-of-Trust gate — same rule the Hunt list applies. An
+        // untrusted-publisher pin only shows when the user explicitly
+        // sets WoT to "All" (the predicate returns true unconditionally
+        // in that tier).
+        isTrusted(c.hiderPubkey),
     );
     sendCaches(filtered);
-  }, [caches, webviewReady, filters.piglet, filters.nipgcCache, sendCaches]);
+  }, [caches, webviewReady, filters.piglet, filters.nipgcCache, sendCaches, isTrusted]);
 
   const refreshPlaces = useCallback(async (bbox: Bbox) => {
     try {
