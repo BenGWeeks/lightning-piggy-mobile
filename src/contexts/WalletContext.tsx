@@ -1669,6 +1669,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // interface above.
       stopExpectedPayment();
 
+      let __balanceTickCounter = 0;
       const tick = async () => {
         const current = expectedPaymentRef.current;
         // Pile-up guard: if the previous tick is still in flight (slow
@@ -1676,22 +1677,25 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // rather than stacking N concurrent requests.
         if (!current || current.inFlight) return;
         current.inFlight = true;
+        // Run getBalance on every 5th tick (≈ 5 s) rather than every
+        // 1 s. With a flaky NWC relay each getBalance can block 1-3.5 s
+        // (visible as the [PerfBlock] NWC.getBalance markers) and each
+        // settle triggers a render of HomeScreen + WalletCarousel +
+        // TransactionList. Per-second balance polls were the dominant
+        // source of the 20-45 s JS-thread freezes Ben hit on the Pixel
+        // (#560). lookupInvoice stays on the 1 s tick so detection
+        // latency for the expected payment is unchanged.
+        const runBalance = (__balanceTickCounter % 5) === 0;
+        __balanceTickCounter += 1;
         try {
           const [lookupResult] = await Promise.allSettled([
             nwcService.lookupInvoice(walletId, paymentHash),
-            // The balance refresh feeds the generic balance-diff
-            // detector as a fallback; run it every tick so a flaky
-            // lookup_invoice path still settles detection.
-            //
-            // Tighter timeout than the SDK default (10 s): the poll
-            // tick is 1 s, so a 2.5 s ceiling means at most ~2 ticks
-            // are waiting on any single getBalance reply. Without it,
-            // a single stalled relay reply can blow ~10 s of latency
-            // into payment-detection vs WoS (#133).
-            (async () => {
-              const b = await nwcService.getBalance(walletId, { replyTimeoutMs: 2500 });
-              if (b !== null) updateWalletInState(walletId, { balance: b });
-            })(),
+            runBalance
+              ? (async () => {
+                  const b = await nwcService.getBalance(walletId, { replyTimeoutMs: 2500 });
+                  if (b !== null) updateWalletInState(walletId, { balance: b });
+                })()
+              : Promise.resolve(),
           ]);
           if (
             lookupResult.status === 'fulfilled' &&
