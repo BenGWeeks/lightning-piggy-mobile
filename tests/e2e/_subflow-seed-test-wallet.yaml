@@ -35,9 +35,9 @@ name: Internal — seed a test wallet via the AddWalletWizard
 # is reachable. It does NOT clear existing wallets — see
 # `_subflow-clear-wallets.yaml` (issue #291 follow-up) for that.
 #
-# IMPORTANT: the mnemonic branch only works when the app is in dev
-# mode (the "Import Seed Phrase" type tile is gated on the `dev_mode`
-# AsyncStorage flag — see `AddWalletWizard.tsx`). Run `test-dev-mode.yaml`
+# IMPORTANT: the mnemonic branch only works when the app is in secret
+# mode (the "Import Seed Phrase" type tile is gated on the `secret_mode`
+# AsyncStorage flag — see `AddWalletWizard.tsx`). Run `test-secret-mode.yaml`
 # once before invoking this subflow with MAESTRO_TEST_MNEMONIC, or the
 # `wallet-type-mnemonic` tap will time out.
 

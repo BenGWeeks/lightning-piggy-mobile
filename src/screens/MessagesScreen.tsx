@@ -71,9 +71,9 @@ const MessagesScreen: React.FC = () => {
     armLiveDmSub,
   } = useNostr();
   const { wallets } = useWallet();
-  const { groupSummaries, followingOnly, setFollowingOnly, devMode } = useGroups();
-  // Production hard-lock: filter is always enforced unless devMode AND followingOnly=off.
-  const enforceFollowingOnly = followingOnly || !devMode;
+  const { groupSummaries, followingOnly, setFollowingOnly, secretMode } = useGroups();
+  // Production hard-lock: filter is always enforced unless secretMode AND followingOnly=off.
+  const enforceFollowingOnly = followingOnly || !secretMode;
   // Tracks last applied value so toggling triggers a data-layer refresh, not just a UI re-filter.
   const lastAppliedEnforceRef = useRef<boolean>(true);
   const [search, setSearch] = useState('');
@@ -291,7 +291,7 @@ const MessagesScreen: React.FC = () => {
   // non-follows at the data layer, but applying it again here guards
   // against stale dmInbox state from before a follow was revoked. The
   // "Following only" rule is load-bearing — keep it enforced everywhere
-  // a summary is built. Skip the gate only when devMode AND followingOnly=off (production hard-lock).
+  // a summary is built. Skip the gate only when secretMode AND followingOnly=off (production hard-lock).
   const dmSummaries = useMemo(() => {
     return buildDmSummaries(
       deferredDmInbox,
@@ -331,7 +331,7 @@ const MessagesScreen: React.FC = () => {
     const dmRows: InboxRow[] = conversationSummaries
       .filter((s) => {
         if (s.lastActivityAt < cutoff) return false;
-        // Defence-in-depth follow gate using enforceFollowingOnly = followingOnly || !devMode.
+        // Defence-in-depth follow gate using enforceFollowingOnly = followingOnly || !secretMode.
         if (enforceFollowingOnly && s.pubkey && !followPubkeys.has(s.pubkey.toLowerCase()))
           return false;
         if (!lower) return true;
@@ -555,7 +555,7 @@ const MessagesScreen: React.FC = () => {
       <View style={styles.content}>
         {isLoggedIn && (
           <View style={styles.filterChipRow}>
-            {devMode ? (
+            {secretMode ? (
               <TouchableOpacity
                 style={followingOnly ? styles.filterChip : styles.filterChipOff}
                 onPress={() => setFollowingOnly(!followingOnly)}

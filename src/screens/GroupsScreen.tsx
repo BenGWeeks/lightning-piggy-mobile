@@ -30,7 +30,7 @@ const GroupsScreen: React.FC = () => {
   const navigation = useNavigation<GroupsNavigation>();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { visibleGroups, deleteGroup, followingOnly, setFollowingOnly, devMode } = useGroups();
+  const { visibleGroups, deleteGroup, followingOnly, setFollowingOnly, secretMode } = useGroups();
   const { isLoggedIn, refreshDmInbox, contacts, pubkey: myPubkey } = useNostr();
 
   // Built once per render and shared by every row's GroupAvatar so we
@@ -63,7 +63,7 @@ const GroupsScreen: React.FC = () => {
     return map;
   }, [visibleGroups, myPubkey]);
 
-  const enforceFollowingOnly = followingOnly || !devMode;
+  const enforceFollowingOnly = followingOnly || !secretMode;
   const [createVisible, setCreateVisible] = useState(false);
 
   // On focus, refresh the DM inbox so any new kind-1059 wraps get pulled
@@ -180,7 +180,7 @@ const GroupsScreen: React.FC = () => {
 
       <View style={styles.content}>
         <View style={styles.filterChipRow}>
-          {devMode ? (
+          {secretMode ? (
             <TouchableOpacity
               style={followingOnly ? styles.filterChip : styles.filterChipOff}
               onPress={() => setFollowingOnly(!followingOnly)}
