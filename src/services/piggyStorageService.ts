@@ -104,6 +104,13 @@ export interface HiddenPiggy {
   /** NIP-GC optional `t` field (cache type). Defaults to
    * `traditional`. */
   cacheType?: 'traditional' | 'multi' | 'mystery' | 'virtual';
+  /** NIP-40 expiration timestamp (seconds) — mirrors the `expiration`
+   * tag persisted on the published kind 37516 listing. Recorded locally
+   * so the My Piglets list can show "Expires in N days" / "Expired"
+   * without needing a relay round-trip. Optional because pre-#21
+   * Piggies didn't carry this; renderers should fall back to
+   * `createdAt + 365 days` (the current default expiry) when missing. */
+  expiresAt?: number;
   /** NIP-GC optional `hint` field — short prose clue. Stored
    * plaintext locally; ROT13-encoded on publish per the NIP-GC
    * client guidance to prevent inline spoilers. */

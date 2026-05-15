@@ -164,6 +164,13 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
       terrain,
       size: cacheSize,
       cacheType,
+      // Mirror the NIP-40 expiry the publisher stamps onto the kind
+      // 37516 listing so My Piglets can show "Expires in N days"
+      // without needing a relay round-trip. Keep this in sync with the
+      // expiry default in nostrPlacesService.ts:71 — both currently
+      // 1 year. When #23 adds a wizard expiry picker, route the
+      // chosen window through here.
+      expiresAt: Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60,
     };
     await savePiggy(piggy);
     setStage({ kind: 'saved', lnurlw: piggy.lnurlw });

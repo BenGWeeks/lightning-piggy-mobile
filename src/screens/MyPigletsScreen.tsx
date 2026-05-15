@@ -310,9 +310,17 @@ const Row: React.FC<RowProps> = ({ cache, meta, colors, styles, onPress, testID 
       </View>
     )}
     <View style={styles.rowMain}>
-      <Text style={styles.rowTitle} numberOfLines={1}>
-        {cache?.name ?? 'Cache no longer on relays'}
-      </Text>
+      <View style={styles.rowTitleRow}>
+        <Text style={styles.rowTitle} numberOfLines={1}>
+          {cache?.name ?? 'Cache no longer on relays'}
+        </Text>
+        {/* Expiry badge — NIP-40-aware. Red pill for past-expiry caches
+            so the hider knows their listing won't appear in finder
+            searches anymore; subtle "N d" caption while still active. */}
+        {cache?.expiresAt != null ? (
+          <ExpiryBadge expiresAt={cache.expiresAt} styles={styles} />
+        ) : null}
+      </View>
       <Text style={styles.rowMeta} numberOfLines={1}>
         {meta}
       </Text>
@@ -320,6 +328,30 @@ const Row: React.FC<RowProps> = ({ cache, meta, colors, styles, onPress, testID 
     <ChevronRight size={20} color={colors.textSupplementary} />
   </TouchableOpacity>
 );
+
+// Small pill rendered next to the cache name. Three states:
+//   • already expired → red "Expired"
+//   • < 14 days left  → amber "Ends Nd" (warn the hider it'll vanish soon)
+//   • > 14 days left  → no badge (clean row)
+// Used on hidden-cache rows to flag listings that have aged out of NIP-40
+// relay retention. Republishing the cache (via the wizard's edit flow,
+// #22) resets the expiry — surfacing here is the prompt to do so.
+const ExpiryBadge: React.FC<{
+  expiresAt: number;
+  styles: ReturnType<typeof createStyles>;
+}> = ({ expiresAt, styles }) => {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const daysLeft = Math.round((expiresAt - nowSec) / 86400);
+  if (daysLeft >= 14) return null;
+  const isExpired = daysLeft < 0;
+  return (
+    <View
+      style={[styles.expiryBadge, isExpired ? styles.expiryBadgeExpired : styles.expiryBadgeWarn]}
+    >
+      <Text style={styles.expiryBadgeText}>{isExpired ? 'Expired' : `Ends ${daysLeft}d`}</Text>
+    </View>
+  );
+};
 
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
@@ -405,8 +437,22 @@ const createStyles = (colors: Palette) =>
     iconStandard: { backgroundColor: colors.textSupplementary },
     thumb: { width: 44, height: 44, borderRadius: 8, backgroundColor: colors.divider },
     rowMain: { flex: 1 },
-    rowTitle: { fontSize: 15, fontWeight: '700', color: colors.textHeader },
+    rowTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    rowTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: colors.textHeader },
     rowMeta: { fontSize: 12, color: colors.textSupplementary, marginTop: 2 },
+    expiryBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 6,
+    },
+    expiryBadgeExpired: { backgroundColor: colors.red },
+    expiryBadgeWarn: { backgroundColor: colors.zapYellow },
+    expiryBadgeText: {
+      color: colors.white,
+      fontSize: 10,
+      fontWeight: '800',
+      letterSpacing: 0.2,
+    },
     center: { alignItems: 'center', justifyContent: 'center', padding: 32 },
   });
 
