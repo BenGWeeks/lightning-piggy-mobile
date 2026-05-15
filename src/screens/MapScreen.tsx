@@ -48,7 +48,7 @@ import {
 } from '../services/btcMapService';
 import type { ParsedCache } from '../services/nostrPlacesService';
 import { subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
-import { encodeGeohash, geohashPrefixes } from '../utils/geohash';
+import { decodeGeohash, encodeGeohash, geohashPrefixes } from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import SocialIcon from '../components/SocialIcon';
@@ -56,6 +56,13 @@ import WebOfTrustChip from '../components/WebOfTrustChip';
 import WebOfTrustBottomSheet from '../components/WebOfTrustBottomSheet';
 import LegendSheet from '../components/LegendSheet';
 import { ME_DOT_CSS, ME_DOT_JS } from '../utils/mapMeDot';
+import {
+  LEAFLET_BASE_CSS,
+  LEAFLET_HEAD_TAGS,
+  LEAFLET_SCRIPT_TAG,
+  POST_BRIDGE_JS,
+  tileLayerJs,
+} from '../utils/mapWebview/tiles';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -1251,36 +1258,6 @@ const bboxAround = (lat: number, lng: number, halfDegrees: number): Bbox => ({
   maxLat: lat + halfDegrees,
 });
 
-// Geohash → centroid (lat, lng) — inverse of utils/geohash.ts encoder.
-// Used here because cache events publish only the geohash string, not
-// raw lat/lon (NIP-GC convention).
-const GEOHASH_BASE32 = '0123456789bcdefghjkmnpqrstuvwxyz';
-const decodeGeohash = (gh: string): { lat: number; lng: number } => {
-  let latLo = -90;
-  let latHi = 90;
-  let lonLo = -180;
-  let lonHi = 180;
-  let evenBit = true;
-  for (let i = 0; i < gh.length; i += 1) {
-    const idx = GEOHASH_BASE32.indexOf(gh[i].toLowerCase());
-    if (idx < 0) continue;
-    for (let bit = 4; bit >= 0; bit -= 1) {
-      const set = (idx >> bit) & 1;
-      if (evenBit) {
-        const mid = (lonLo + lonHi) / 2;
-        if (set) lonLo = mid;
-        else lonHi = mid;
-      } else {
-        const mid = (latLo + latHi) / 2;
-        if (set) latLo = mid;
-        else latHi = mid;
-      }
-      evenBit = !evenBit;
-    }
-  }
-  return { lat: (latLo + latHi) / 2, lng: (lonLo + lonHi) / 2 };
-};
-
 // -----------------------------------------------------------------------------
 // Leaflet HTML — kept inline so the bundle has no runtime CDN dependency
 // for the loader, while tile imagery itself still streams from OSM at use
@@ -1292,16 +1269,14 @@ const decodeGeohash = (gh: string): { lat: number; lng: number } => {
 const LEAFLET_HTML = `<!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="initial-scale=1.0,maximum-scale=1.0,user-scalable=no" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  ${LEAFLET_HEAD_TAGS}
   <!-- Material Symbols Outlined — same icon family BTC Map ships, so
        every BtcMapPlace.icon name resolves to a recognisable glyph
        (storefront, chalet, cafe, pub, bicycle, …). Self-hosted from
        Google Fonts CDN; no JS, just a single CSS+woff2 fetch. -->
   <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Symbols+Outlined" />
   <style>
-    html, body, #map { margin: 0; padding: 0; height: 100%; width: 100%; }
+    ${LEAFLET_BASE_CSS}
     /* Leaflet's default zoom buttons are small + tucked top-left.
        Bump size + contrast so they land at thumb-tappable size and
        are obvious to users who don't realise they can pinch. */
@@ -1362,10 +1337,10 @@ const LEAFLET_HTML = `<!DOCTYPE html>
 </head>
 <body>
   <div id="map"></div>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  ${LEAFLET_SCRIPT_TAG}
   <script>
     ${ME_DOT_JS}
-    const post = (msg) => window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify(msg));
+    ${POST_BRIDGE_JS}
     // Honor a viewport injected via injectedJavaScriptBeforeContentLoaded
     // — that's MapScreen's saved-viewport hydrate. Falls back to a UK
     // central default only when there's truly nothing better.
@@ -1373,10 +1348,7 @@ const LEAFLET_HTML = `<!DOCTYPE html>
       ? window.LP_initialViewport
       : { lat: 51.5074, lng: -0.1278, zoom: 12 };
     const map = L.map('map', { zoomControl: true }).setView([__iv.lat, __iv.lng], __iv.zoom);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '© OpenStreetMap contributors',
-    }).addTo(map);
+    ${tileLayerJs("attribution:'© OpenStreetMap contributors'")}
 
     // meMarker / meAccuracyCircle live in __lpMeState inside ME_DOT_JS
     // — no need to track them here.

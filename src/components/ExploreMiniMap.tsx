@@ -10,6 +10,15 @@ import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 import LegendSheet from './LegendSheet';
 import { ME_DOT_CSS, ME_DOT_JS } from '../utils/mapMeDot';
 import { MAP_PIN_SVG_PALETTE_JS } from '../utils/mapPinSvgs';
+import { decodeGeohash } from '../utils/geohash';
+import {
+  LEAFLET_BASE_CSS,
+  LEAFLET_HEAD_TAGS,
+  LEAFLET_MAP_BACKGROUND_CSS,
+  LEAFLET_SCRIPT_TAG,
+  POST_BRIDGE_JS,
+  tileLayerJs,
+} from '../utils/mapWebview/tiles';
 
 export interface MiniMapBbox {
   minLat: number;
@@ -454,11 +463,10 @@ const makeHtml = (
 ): string => `<!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="initial-scale=1.0,maximum-scale=1.0,user-scalable=no" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  ${LEAFLET_HEAD_TAGS}
   <style>
-    html,body,#map{margin:0;padding:0;height:100%;width:100%;background:#eee}
+    ${LEAFLET_BASE_CSS}
+    ${LEAFLET_MAP_BACKGROUND_CSS}
     .lp-pin{width:14px;height:14px;border-radius:7px;background:#EC008C;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.4)}
     .lp-pin.onchain{background:#F5A623}
     /* Round circles match the list-row iconWrap (pink for Piglet,
@@ -482,10 +490,10 @@ const makeHtml = (
 </head>
 <body>
 <div id="map"></div>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+${LEAFLET_SCRIPT_TAG}
 <script>
 ${ME_DOT_JS}
-const post=(m)=>window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify(m));
+${POST_BRIDGE_JS}
 // minZoom 7 caps the bbox at about 400 km wide at UK latitudes — wider
 // than that and the list becomes "everything within a country" rather
 // than "nearby", which is the wrong product for an Explore-hub mini-map.
@@ -494,7 +502,7 @@ const post=(m)=>window.ReactNativeWebView&&window.ReactNativeWebView.postMessage
 // maxZoom 18 matches OSM tile availability.
 const __interactive=${interactive ? 'true' : 'false'};
 const map=L.map('map',{zoomControl:false,dragging:__interactive,scrollWheelZoom:__interactive,doubleClickZoom:__interactive,touchZoom:__interactive,boxZoom:false,keyboard:false,minZoom:7,maxZoom:18,tap:__interactive}).setView([${lat},${lon}],${defaultZoom});
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
+${tileLayerJs()}
 let merchantLayer=L.layerGroup().addTo(map),cacheLayer=L.layerGroup().addTo(map),eventLayer=L.layerGroup().addTo(map);
 const dot=(cls,size)=>L.divIcon({className:'',html:'<div class="'+cls+'"></div>',iconSize:[size,size]});
 // SVG palette + categorySvg() helper — sourced from
@@ -586,35 +594,6 @@ post({type:'ready'});
 emitBounds();
 </script>
 </body></html>`;
-
-// Inline geohash decoder — same algorithm as MapScreen (kept duplicated
-// rather than extracted because both files want zero-overhead inline use).
-const GEOHASH_BASE32 = '0123456789bcdefghjkmnpqrstuvwxyz';
-const decodeGeohash = (gh: string): { lat: number; lng: number } => {
-  let latLo = -90,
-    latHi = 90,
-    lonLo = -180,
-    lonHi = 180,
-    even = true;
-  for (let i = 0; i < gh.length; i += 1) {
-    const idx = GEOHASH_BASE32.indexOf(gh[i].toLowerCase());
-    if (idx < 0) continue;
-    for (let bit = 4; bit >= 0; bit -= 1) {
-      const set = (idx >> bit) & 1;
-      if (even) {
-        const m = (lonLo + lonHi) / 2;
-        if (set) lonLo = m;
-        else lonHi = m;
-      } else {
-        const m = (latLo + latHi) / 2;
-        if (set) latLo = m;
-        else latHi = m;
-      }
-      even = !even;
-    }
-  }
-  return { lat: (latLo + latHi) / 2, lng: (lonLo + lonHi) / 2 };
-};
 
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
