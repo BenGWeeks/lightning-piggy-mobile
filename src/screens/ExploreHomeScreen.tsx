@@ -43,7 +43,12 @@ import {
 } from '../services/btcMapService';
 import { useNearbyRadius } from '../hooks/useNearbyRadius';
 import { type ParsedCache, type ParsedEvent } from '../services/nostrPlacesService';
-import { subscribeNearbyCaches, subscribeNearbyEvents } from '../services/nostrPlacesPublisher';
+import {
+  fetchCachesByAuthor,
+  subscribeNearbyCaches,
+  subscribeNearbyEvents,
+} from '../services/nostrPlacesPublisher';
+import { useNostr } from '../contexts/NostrContext';
 import {
   loadCachedCaches,
   loadCachedEvents,
@@ -324,6 +329,40 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
       cancelled = true;
     };
   }, []);
+
+  // Surface the signed-in user's own published Piggies in the rail
+  // even when no nearby `#g` subscription has echoed them back. The
+  // nearby sub filters by geohash prefix, which excludes the user's
+  // own listing if they hid it outside their current viewport OR if
+  // the sub was paused (#557) at the moment the relay echoed back.
+  // One-shot per pubkey via `byAuthorFetchedForRef` so re-renders
+  // don't refire.
+  const { pubkey: signedInPubkey, relays: userRelays } = useNostr();
+  const byAuthorFetchedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!signedInPubkey || byAuthorFetchedForRef.current === signedInPubkey) return;
+    byAuthorFetchedForRef.current = signedInPubkey;
+    let cancelled = false;
+    const readRelays = userRelays.filter((r) => r.read).map((r) => r.url);
+    fetchCachesByAuthor(signedInPubkey, readRelays.length > 0 ? readRelays : undefined)
+      .then((mine) => {
+        if (cancelled || mine.length === 0) return;
+        setCaches((prev) => {
+          const next = new Map(prev);
+          for (const c of mine) {
+            const existing = next.get(c.coord);
+            if (!existing || c.createdAt > existing.createdAt) next.set(c.coord, c);
+          }
+          return next;
+        });
+      })
+      .catch(() => {
+        // Non-fatal — the nearby sub + local cache still drive the rail.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [signedInPubkey, userRelays]);
 
   // Write-through to AsyncStorage whenever the in-memory state grows
   // so the next cold start has fresh content to hydrate from. Debounced

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   FlatList,
   Image,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import * as Location from 'expo-location';
 import {
@@ -26,7 +27,8 @@ import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
 import { type ParsedCache } from '../services/nostrPlacesService';
-import { subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
+import { fetchCachesByAuthor, subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
+import { useNostr } from '../contexts/NostrContext';
 import { loadCachedCaches, peekCachedCachesSync, saveCaches } from '../services/nostrPlacesStorage';
 import {
   decodeGeohash,
@@ -56,12 +58,46 @@ interface Props {
 const HuntScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const { pubkey, relays } = useNostr();
   const [pos, setPos] = useState<{ lat: number; lon: number; accuracy: number | null } | null>(
     null,
   );
   const [caches, setCaches] = useState<Map<string, ParsedCache>>(
     () => new Map(peekCachedCachesSync().map((c) => [c.coord, c])),
   );
+  // Pull-to-refresh: re-load the on-disk cache AND query relays for
+  // every kind 37516 listing by the signed-in user, so the rail
+  // includes the user's own historical Piggies even if the nearby
+  // subscription never echoed them back (same gap MyPiglets covers).
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const readRelays = relays.filter((r) => r.read).map((r) => r.url);
+      const [cached, mine] = await Promise.all([
+        loadCachedCaches(),
+        pubkey
+          ? fetchCachesByAuthor(pubkey, readRelays.length > 0 ? readRelays : undefined).catch(
+              () => [] as ParsedCache[],
+            )
+          : Promise.resolve([] as ParsedCache[]),
+      ]);
+      setCaches((prev) => {
+        const next = new Map(prev);
+        for (const c of cached) {
+          const existing = next.get(c.coord);
+          if (!existing || c.createdAt > existing.createdAt) next.set(c.coord, c);
+        }
+        for (const c of mine) {
+          const existing = next.get(c.coord);
+          if (!existing || c.createdAt > existing.createdAt) next.set(c.coord, c);
+        }
+        return next;
+      });
+    } finally {
+      setRefreshing(false);
+    }
+  }, [pubkey, relays]);
 
   // Hydrate from AsyncStorage so the list paints instantly on cold
   // start while the live relay sub backfills.
@@ -308,6 +344,14 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
         keyExtractor={({ cache }) => cache.coord}
         contentContainerStyle={styles.listContent}
         scrollEnabled={!mapTouched}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.brandPink}
+            colors={[colors.brandPink]}
+          />
+        }
         ListHeaderComponent={
           <View>
             {/* Inline interactive map — drag, pinch-zoom, recenter on

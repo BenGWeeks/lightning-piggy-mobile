@@ -86,6 +86,13 @@ const NfcWriteSheet: React.FC<Props> = ({
     } else {
       sheetRef.current?.dismiss();
       cancelNfcOperation();
+      // Reset on close too — the BottomSheet keeps the component mounted,
+      // so a previous error / success state would persist into the next
+      // open without this. Pre-fix the user reopened the sheet after a
+      // capacity-error and still saw the old "Tag payload is N bytes"
+      // copy (#73 follow-up).
+      setState('ready');
+      setErrorMessage('');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
