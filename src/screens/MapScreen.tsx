@@ -967,15 +967,24 @@ type PinFilters = {
   nipgcCache: boolean;
 };
 
-const FILTER_OPTIONS: ReadonlyArray<{
+interface FilterOption {
   key: keyof PinFilters;
   label: string;
   hint: string;
   swatch: string;
   diamond?: boolean;
-}> = [
+}
+
+// Filter rows grouped by intent so the user can scan "places" vs
+// "geo-caches" without parsing the colour-swatch idiom. Each row is
+// still an independent toggle — there's no master "Show all places"
+// switch (unticking the two beneath it gives the same result).
+const PLACES_FILTERS: ReadonlyArray<FilterOption> = [
   { key: 'lightning', label: 'Lightning', hint: 'Pays in sats over Lightning', swatch: '#EC008C' },
   { key: 'onchain', label: 'On-chain', hint: 'Accepts bitcoin on-chain', swatch: '#F7931A' },
+];
+
+const CACHE_FILTERS: ReadonlyArray<FilterOption> = [
   {
     key: 'piglet',
     label: 'Piglet',
@@ -1018,6 +1027,36 @@ const FilterSheet: React.FC<{
   styles,
 }) => {
   const toggle = (k: keyof PinFilters) => onChange({ ...filters, [k]: !filters[k] });
+  // Render one filter row — extracted so the Places and Geo-caches
+  // sections can share the same swatch + toggle layout without
+  // duplicating ~20 lines of JSX. Closes over `filters` + `styles` +
+  // `toggle` from the FilterSheet scope.
+  const renderFilterRow = (opt: FilterOption) => {
+    const on = filters[opt.key];
+    return (
+      <TouchableOpacity
+        key={opt.key}
+        style={styles.filterRow}
+        onPress={() => toggle(opt.key)}
+        testID={`map-filter-${opt.key}`}
+        accessibilityLabel={`${opt.label} pins ${on ? 'on' : 'off'}`}
+      >
+        <View
+          style={[
+            opt.diamond ? styles.filterSwatchDiamond : styles.filterSwatchDot,
+            { backgroundColor: opt.swatch },
+          ]}
+        />
+        <View style={styles.filterTextWrap}>
+          <Text style={styles.filterLabel}>{opt.label}</Text>
+          <Text style={styles.filterHint}>{opt.hint}</Text>
+        </View>
+        <View style={[styles.filterToggle, on && styles.filterToggleOn]}>
+          <View style={[styles.filterToggleThumb, on && styles.filterToggleThumbOn]} />
+        </View>
+      </TouchableOpacity>
+    );
+  };
   const toggleCategory = (cat: string) => {
     const next = new Set(categoryFilter);
     if (next.has(cat)) next.delete(cat);
@@ -1053,36 +1092,13 @@ const FilterSheet: React.FC<{
             widen the tier.
           </Text>
 
-          <Text style={styles.sheetTitle}>Show on map</Text>
-          <Text style={styles.sheetSubtitle}>Tap a row to toggle that pin type.</Text>
-          <View style={{ marginTop: 8 }}>
-            {FILTER_OPTIONS.map((opt) => {
-              const on = filters[opt.key];
-              return (
-                <TouchableOpacity
-                  key={opt.key}
-                  style={styles.filterRow}
-                  onPress={() => toggle(opt.key)}
-                  testID={`map-filter-${opt.key}`}
-                  accessibilityLabel={`${opt.label} pins ${on ? 'on' : 'off'}`}
-                >
-                  <View
-                    style={[
-                      opt.diamond ? styles.filterSwatchDiamond : styles.filterSwatchDot,
-                      { backgroundColor: opt.swatch },
-                    ]}
-                  />
-                  <View style={styles.filterTextWrap}>
-                    <Text style={styles.filterLabel}>{opt.label}</Text>
-                    <Text style={styles.filterHint}>{opt.hint}</Text>
-                  </View>
-                  <View style={[styles.filterToggle, on && styles.filterToggleOn]}>
-                    <View style={[styles.filterToggleThumb, on && styles.filterToggleThumbOn]} />
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+          <Text style={styles.sheetTitle}>Places</Text>
+          <Text style={styles.sheetSubtitle}>Bitcoin-accepting merchants from BTC Map.</Text>
+          <View style={{ marginTop: 8 }}>{PLACES_FILTERS.map(renderFilterRow)}</View>
+
+          <Text style={[styles.sheetTitle, { marginTop: 20 }]}>Geo-caches</Text>
+          <Text style={styles.sheetSubtitle}>Piglets and standard NIP-GC stashes.</Text>
+          <View style={{ marginTop: 8 }}>{CACHE_FILTERS.map(renderFilterRow)}</View>
 
           {availableCategories.length > 0 ? (
             <View style={{ marginTop: 16, paddingBottom: 24 }}>
