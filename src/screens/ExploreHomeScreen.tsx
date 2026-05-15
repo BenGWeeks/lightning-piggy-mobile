@@ -486,6 +486,12 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
               loading={merchantsLoading && caches.size === 0}
               onTapMap={() => navigation.navigate('Map')}
               interactive
+              // Feed the BTC Map category keys present in the current
+              // merchant set into the Legend sheet so it can show the
+              // category iconography below the pin-type rows.
+              legendCategories={[
+                ...new Set(merchants.flatMap((m) => m.categories ?? []).filter(Boolean)),
+              ]}
             />
           </>
         )}

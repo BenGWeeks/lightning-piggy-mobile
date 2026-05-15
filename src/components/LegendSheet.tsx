@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { MapPin, PiggyBank, Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
@@ -114,8 +115,24 @@ export const LegendSheet: React.FC<Props> = ({
             <Text style={styles.sectionTitle}>Pin types</Text>
             <Item dot color="#EC008C" label="⚡ Lightning merchant" />
             <Item dot color="#F7931A" label="On-chain merchant" />
-            <Item diamond color="#EC008C" label="Piglet (Lightning Piggy)" />
-            <Item diamond color="#7A5CFF" label="NIP-GC cache" />
+            {/* Cache rows render the same 28-px circle-with-glyph as
+                the map pins so the legend matches what's on screen.
+                Flat diamonds were the previous shorthand. */}
+            <View style={styles.row}>
+              <View style={[styles.cacheCircle, { backgroundColor: '#EC008C' }]}>
+                <PiggyBank size={14} color="#fff" strokeWidth={2.5} />
+                <View style={styles.cacheZapBadge}>
+                  <Zap size={8} color="#fff" fill="#fff" strokeWidth={2.5} />
+                </View>
+              </View>
+              <Text style={styles.rowLabel}>Piglet (Lightning Piggy)</Text>
+            </View>
+            <View style={styles.row}>
+              <View style={[styles.cacheCircle, { backgroundColor: '#7A5CFF' }]}>
+                <MapPin size={14} color="#fff" strokeWidth={2.5} />
+              </View>
+              <Text style={styles.rowLabel}>NIP-GC cache</Text>
+            </View>
             <Item dot color="#2D88FF" label="You" />
 
             {categoryRows.length > 0 ? (
@@ -193,6 +210,28 @@ const createStyles = (colors: Palette) =>
       borderRadius: 7,
       borderWidth: 1.5,
       borderColor: '#fff',
+    },
+    cacheCircle: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      borderWidth: 2,
+      borderColor: '#fff',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    cacheZapBadge: {
+      position: 'absolute',
+      top: -2,
+      right: -2,
+      width: 14,
+      height: 14,
+      borderRadius: 7,
+      backgroundColor: '#FFB200',
+      borderWidth: 1.5,
+      borderColor: '#fff',
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     swatchDiamond: {
       width: 12,
