@@ -32,6 +32,19 @@ jest.mock('bitcoinjs-lib', () => ({
   crypto: { sha256: jest.fn() },
 }));
 jest.mock('@bitcoinerlab/secp256k1', () => ({}));
+// `swapRecoveryService` also imports `boltzService` for `claimSwap`, and
+// `boltzService` pulls in `bip32` → `uint8array-tools` (ESM-only) — same
+// transform-pattern problem as bitcoinjs-lib. The cache helpers don't
+// invoke any boltzService surface, so stubbing the module is safe.
+jest.mock('./boltzService', () => ({
+  claimSwap: jest.fn(),
+}));
+// `BrandedToast` is RN-component code that the cache helpers never reach;
+// stub to avoid hauling in @gorhom / Reanimated transitively.
+jest.mock('../components/BrandedToast', () => ({
+  __esModule: true,
+  default: { show: jest.fn() },
+}));
 
 describe('isBoltzTransaction', () => {
   it('returns false for null/undefined', () => {
