@@ -660,6 +660,16 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       : `${min.toLocaleString()}–${max.toLocaleString()} sats per claim`;
   })();
 
+  // True when the NFC step's primary button should be enabled. Step 5
+  // (Publish) sets stage='saved' or 'wrote-nfc' in the fresh-hide
+  // flow. In edit mode the listing was already published in a prior
+  // session, so an existing local HiddenPiggy + validated LNURL is
+  // enough — the relay-side event exists.
+  const nfcReady =
+    stage.kind === 'saved' ||
+    stage.kind === 'wrote-nfc' ||
+    (isEditMode && stage.kind === 'validated');
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -910,10 +920,13 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
             />
             <NfcSupportedTagsCard colors={colors} styles={styles} />
             {/* Gate: NFC writes the kind 37516 listing's nostr:naddr,
-                which only exists once the Piggy has been published in
-                step 5. Tagging before publish would hand finders a
-                naddr that resolves to nothing. */}
-            {stage.kind !== 'saved' && stage.kind !== 'wrote-nfc' ? (
+                which only exists once the Piggy has been published. In
+                a fresh-hide flow that means step 5 (Publish) has to
+                run first. In edit mode the listing was already
+                published when the user first hid the Piggy, so a
+                stage.kind === 'validated' is fine too — the relay-side
+                event already exists. */}
+            {!nfcReady ? (
               <Text style={styles.helper}>
                 Publish the Piggy first (step 5) — the tag needs the listing on relays so finders
                 can look it up.
@@ -922,7 +935,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
             {/* What we'll write, plain-text, so the hider can see the
                 three records that go on the tag before the camera /
                 NFC interaction starts (Ben's request). */}
-            {(stage.kind === 'saved' || stage.kind === 'wrote-nfc') && pubkey ? (
+            {nfcReady && pubkey ? (
               <View style={styles.payloadPreview}>
                 <Text style={styles.payloadPreviewLabel}>Tag will carry:</Text>
                 <Text style={styles.payloadPreviewLine} numberOfLines={1}>
@@ -940,12 +953,9 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               </View>
             ) : null}
             <TouchableOpacity
-              style={[
-                styles.primaryButton,
-                stage.kind !== 'saved' && stage.kind !== 'wrote-nfc' && styles.primaryButtonDisabled,
-              ]}
+              style={[styles.primaryButton, !nfcReady && styles.primaryButtonDisabled]}
               onPress={handleOpenNfcSheet}
-              disabled={stage.kind !== 'saved' && stage.kind !== 'wrote-nfc'}
+              disabled={!nfcReady}
               testID="hunt-write-nfc-button"
             >
               <Nfc size={18} color={colors.white} strokeWidth={2.5} />
