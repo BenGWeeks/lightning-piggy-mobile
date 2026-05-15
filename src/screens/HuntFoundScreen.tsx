@@ -1,11 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { ChevronLeft, Gift, PartyPopper, PiggyBank } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useWallet } from '../contexts/WalletContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation, ExploreStackParamList } from '../navigation/types';
-import { Alert } from '../components/BrandedAlert';
 import {
   LnurlWithdrawError,
   LnurlWithdrawParams,
@@ -56,7 +55,11 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const [stage, setStage] = useState<Stage>({ kind: 'resolving' });
 
-  // Resolve metadata on mount.
+  // Auto-claim on mount — the user already opted in by scanning the
+  // NFC tag (or following the deep-link), so a 'Claim N sats' tap-to-
+  // confirm step would just add friction. Pre-fix this screen showed
+  // the 'ready' state with a Claim button; now it goes
+  // resolving → (claimed | sleeping | error) directly.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -69,8 +72,33 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
             reason:
               'This Piggy is sleeping — its cooldown is still running, or its sats budget is used up. Try again later.',
           });
-        } else {
-          setStage({ kind: 'ready', params });
+          return;
+        }
+        if (!activeWalletId) {
+          setStage({
+            kind: 'error',
+            reason: 'No wallet connected — add a Lightning wallet (NWC) first, then try again.',
+          });
+          return;
+        }
+        setStage({ kind: 'claiming', params });
+        try {
+          const result = await claimLnurlWithdraw(params, async (sats, memo) =>
+            makeInvoice(sats, memo),
+          );
+          if (cancelled) return;
+          // Pass `piggyId` so HuntPiggyDetailScreen can match the claim
+          // by coord — it never sees the bearer LNURL string.
+          await recordClaim({ lnurl, sats: result.sats, piggyId: coord });
+          setStage({ kind: 'claimed', params, sats: result.sats });
+        } catch (e) {
+          if (cancelled) return;
+          const reason =
+            e instanceof LnurlWithdrawError ? e.message : ((e as Error).message ?? 'Unknown error');
+          const sleepy = /wait[_ ]?time|cooldown|budget|sleeping|exhausted|already used/i.test(
+            reason,
+          );
+          setStage(sleepy ? { kind: 'sleeping', reason } : { kind: 'error', reason });
         }
       } catch (e) {
         if (cancelled) return;
@@ -84,37 +112,8 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
     return () => {
       cancelled = true;
     };
-  }, [lnurl]);
-
-  const handleClaim = useCallback(async () => {
-    if (stage.kind !== 'ready') return;
-    if (!activeWalletId) {
-      Alert.alert(
-        'No wallet connected',
-        'Connect a Lightning wallet (NWC) before claiming the Piggy.',
-        [{ text: 'OK' }],
-      );
-      return;
-    }
-    setStage({ kind: 'claiming', params: stage.params });
-    try {
-      const result = await claimLnurlWithdraw(stage.params, async (sats, memo) =>
-        makeInvoice(sats, memo),
-      );
-      // Pass `piggyId` so HuntPiggyDetailScreen can match the claim by
-      // coord — the detail screen never sees the bearer LNURL string.
-      await recordClaim({ lnurl, sats: result.sats, piggyId: coord });
-      setStage({ kind: 'claimed', params: stage.params, sats: result.sats });
-    } catch (e) {
-      const reason =
-        e instanceof LnurlWithdrawError ? e.message : ((e as Error).message ?? 'Unknown error');
-      // The issuer-said-no path uses the friendly "sleeping" copy when
-      // the reason mentions wait_time / cooldown / budget; everything
-      // else falls into the generic error branch.
-      const sleepy = /wait[_ ]?time|cooldown|budget|sleeping|exhausted|already used/i.test(reason);
-      setStage(sleepy ? { kind: 'sleeping', reason } : { kind: 'error', reason });
-    }
-  }, [stage, activeWalletId, makeInvoice, lnurl, coord]);
+    // intentional: handleClaim merged into mount effect, no separate dep tracking
+  }, [lnurl, coord, activeWalletId, makeInvoice]);
 
   // ----- render -----------------------------------------------------------
 
@@ -134,14 +133,7 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
       </View>
 
       <View style={styles.body}>
-        {stage.kind === 'resolving' && (
-          <>
-            <ActivityIndicator size="large" color={colors.brandPink} />
-            <Text style={styles.subtitle}>Looking up this Piggy…</Text>
-          </>
-        )}
-
-        {(stage.kind === 'ready' || stage.kind === 'claiming') && (
+        {(stage.kind === 'resolving' || stage.kind === 'claiming') && (
           <>
             <View style={styles.bigPiggy}>
               <PiggyBank size={88} color={colors.brandPink} strokeWidth={2} />
@@ -149,29 +141,12 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
             <Text style={styles.title} testID="piggy-found-celebration-screen">
               You found a Piggy!
             </Text>
-            {stage.params.defaultDescription ? (
+            {stage.kind === 'claiming' && stage.params.defaultDescription ? (
               <Text style={styles.memo}>&ldquo;{stage.params.defaultDescription}&rdquo;</Text>
             ) : null}
-            <TouchableOpacity
-              style={[styles.primaryButton, stage.kind === 'claiming' && styles.primaryButtonDim]}
-              disabled={stage.kind === 'claiming'}
-              onPress={handleClaim}
-              testID="piggy-claim-button"
-              accessibilityLabel={`Claim ${Math.floor(stage.params.maxWithdrawable / 1000)} sats`}
-            >
-              {stage.kind === 'claiming' ? (
-                <ActivityIndicator color={colors.white} />
-              ) : (
-                <>
-                  <Gift size={20} color={colors.white} strokeWidth={2.5} />
-                  <Text style={styles.primaryButtonText}>
-                    Claim {Math.floor(stage.params.maxWithdrawable / 1000).toLocaleString()} sats
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
+            <ActivityIndicator size="large" color={colors.brandPink} style={{ marginTop: 8 }} />
             <Text style={styles.fineprint}>
-              Sent to your active wallet. The celebration fires when the sats land.
+              {stage.kind === 'resolving' ? 'Looking up this Piggy…' : 'Claiming sats…'}
             </Text>
           </>
         )}
