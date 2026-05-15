@@ -309,7 +309,13 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [lnurl]);
 
   const handleSave = useCallback(async () => {
-    if (stage.kind !== 'validated') return;
+    console.log(
+      `[Publish] handleSave called — stage=${stage.kind} isPublic=${isPublic} pubkey=${pubkey ? pubkey.slice(0, 8) + '…' : 'null'}`,
+    );
+    if (stage.kind !== 'validated') {
+      console.log(`[Publish] aborted: stage !== validated (was ${stage.kind})`);
+      return;
+    }
     const waitMinutes = parseInt(waitMinutesText.trim(), 10);
     const waitSecondsHint =
       Number.isFinite(waitMinutes) && waitMinutes > 0 ? waitMinutes * 60 : undefined;
@@ -351,7 +357,19 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
           ? undefined
           : Math.floor(Date.now() / 1000) + parseInt(expiryDays, 10) * 24 * 60 * 60,
     };
-    await savePiggy(piggy);
+    console.log(`[Publish] savePiggy starting (id=${piggy.id})`);
+    try {
+      await savePiggy(piggy);
+    } catch (e) {
+      console.log(`[Publish] savePiggy threw: ${(e as Error)?.message ?? e}`);
+      Toast.show({
+        type: 'error',
+        text1: 'Could not save Piggy',
+        text2: (e as Error).message,
+      });
+      return;
+    }
+    console.log(`[Publish] savePiggy ok`);
     setStage({ kind: 'saved', lnurlw: piggy.lnurlw });
     Toast.show({ type: 'success', text1: isEditMode ? 'Piggy updated 🐷' : 'Piggy hidden 🐷' });
 
@@ -364,6 +382,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     if (piggy.isPublic) {
       try {
         if (typeof piggy.lat !== 'number' || typeof piggy.lon !== 'number') {
+          console.log(`[Publish] aborted: no location pin`);
           Toast.show({
             type: 'info',
             text1: 'Saved locally — drop a pin to publish',
@@ -371,8 +390,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
           });
           return;
         }
+        console.log(`[Publish] buildCacheListing`);
         const unsigned = buildCacheListing(piggy);
+        console.log(`[Publish] signEvent calling — signer pubkey known? ${pubkey ? 'yes' : 'NO'}`);
         const signed = await signEvent(unsigned);
+        console.log(`[Publish] signEvent returned: ${signed ? 'signed' : 'null'}`);
         if (!signed) {
           Toast.show({
             type: 'error',
@@ -382,13 +404,16 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
           return;
         }
         const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+        console.log(`[Publish] publishCacheEvent → ${writeRelays.length || 'default'} relays`);
         await publishCacheEvent(signed, writeRelays.length > 0 ? writeRelays : undefined);
+        console.log(`[Publish] publishCacheEvent ok`);
         Toast.show({
           type: 'success',
           text1: isEditMode ? 'Piggy republished 🐷' : 'Piggy published 🐷',
           text2: isEditMode ? 'Updated listing live on relays.' : 'Visible on Discover.',
         });
       } catch (e) {
+        console.log(`[Publish] publish path threw: ${(e as Error)?.message ?? e}`);
         Toast.show({
           type: 'error',
           text1: 'Could not publish to relays',
@@ -1212,40 +1237,57 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               it leaks.
             </Text>
 
-            {/* The publish action lives in the step nav row's "next"
-                slot — same shape as every other step. Its label tracks
-                the public toggle (Publish when public, Save when not)
-                and flips to Done once the Piggy is saved/published. */}
             {stage.kind === 'idle' || stage.kind === 'validating' ? (
               <Text style={styles.helper}>
                 Add and validate a prize on step 2 to enable publishing.
               </Text>
             ) : null}
+            {/* Publish / Save is the step's primary action — own
+                button above the nav row so it reads as the *thing
+                that publishes*, not a navigation step. Once the
+                Piggy is saved the button flips to a green
+                "Published" confirmation strip; the StepNavRow's
+                Next then becomes the way forward to the NFC step. */}
+            {stage.kind === 'saved' || stage.kind === 'wrote-nfc' ? (
+              <View style={styles.publishedStrip} testID="hunt-piggy-published-strip">
+                <Check size={18} color={colors.green} strokeWidth={2.5} />
+                <Text style={styles.publishedText}>
+                  {isPublic ? 'Published to relays' : 'Saved locally'}
+                </Text>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={[
+                  styles.primaryButton,
+                  (stage.kind === 'idle' || stage.kind === 'validating' || !pubkey) &&
+                    styles.primaryButtonDisabled,
+                ]}
+                onPress={handleSave}
+                // Defensive — block tap while pubkey hasn't hydrated.
+                // Without this guard a tap mid-cold-start can fire
+                // SecureStore lookups with an empty per-account
+                // suffix and crash with "Invalid key" (#554-adjacent).
+                disabled={
+                  stage.kind === 'idle' || stage.kind === 'validating' || !pubkey
+                }
+                testID="hunt-piggy-publish-button"
+                accessibilityLabel={isPublic ? 'Publish Piggy' : 'Save Piggy'}
+              >
+                {isPublic ? (
+                  <Globe size={18} color={colors.white} strokeWidth={2.5} />
+                ) : (
+                  <PiggyBank size={18} color={colors.white} strokeWidth={2.5} />
+                )}
+                <Text style={styles.primaryButtonText}>{isPublic ? 'Publish' : 'Save'}</Text>
+              </TouchableOpacity>
+            )}
             <StepNavRow
               onBack={() => setCurrentStep(4)}
-              onNext={
-                // After a successful Save/Publish, advance to the NFC
-                // step (step 6) — the kind 37516 listing is now on
-                // relays so the NFC tag's nostr:naddr will resolve.
-                stage.kind === 'saved' || stage.kind === 'wrote-nfc'
-                  ? () => setCurrentStep(6)
-                  : handleSave
-              }
-              nextLabel={
-                stage.kind === 'saved' || stage.kind === 'wrote-nfc'
-                  ? 'Next'
-                  : isPublic
-                    ? 'Publish'
-                    : 'Save'
-              }
-              nextIcon={
-                stage.kind === 'saved' || stage.kind === 'wrote-nfc'
-                  ? undefined
-                  : isPublic
-                    ? Globe
-                    : PiggyBank
-              }
-              nextDisabled={stage.kind === 'idle' || stage.kind === 'validating'}
+              // Next only moves forward — it doesn't carry the publish
+              // action any more. Gated on stage.kind so the user can't
+              // skip publish.
+              onNext={() => setCurrentStep(6)}
+              nextDisabled={stage.kind !== 'saved' && stage.kind !== 'wrote-nfc'}
               styles={styles}
               colors={colors}
             />
@@ -1836,6 +1878,22 @@ const createStyles = (colors: Palette) =>
       fontSize: 14,
       fontWeight: '700',
       color: colors.textHeader,
+    },
+    // ---- Publish step "Published" confirmation strip ----------------------
+    publishedStrip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: colors.greenLight,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      borderRadius: 10,
+      marginTop: 8,
+    },
+    publishedText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.green,
     },
     // ---- NFC payload preview card (step 6) -------------------------------
     payloadPreview: {
