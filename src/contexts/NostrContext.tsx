@@ -2915,6 +2915,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setDmInbox([]);
         return;
       }
+      // [PerfBlock] timing bracket — surfaces the wall-clock cost of
+      // a full inbox refresh including NIP-17 decrypt loops. Look for
+      // matched `refreshDmInbox: …ms` pairs in logcat to isolate
+      // multi-second freezes that coincide with this call. #554.
+      const __perfBlockStart = performance.now();
       const signal = opts?.signal;
       // Dev-only "Following only=off" bypass — read once at the top so
       // the closure captures a stable value across the async work below.
@@ -3396,6 +3401,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         dmInboxLastRefreshAt.current = performance.now();
       } finally {
         dmInboxInFlight.current = null;
+        const __perfBlockMs = Math.round(performance.now() - __perfBlockStart);
+        // Only surface costly refreshes — sub-200 ms ones aren't
+        // contributors to the multi-second freezes we're hunting.
+        if (__perfBlockMs > 200) {
+          console.log(`[PerfBlock] refreshDmInbox: ${__perfBlockMs}ms`);
+        }
       }
     },
     [

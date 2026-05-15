@@ -59,13 +59,45 @@ export const subscribeNearbyCaches = (
     '#g': prefixes,
     ...filterExtras,
   };
+  // [PerfBlock] event-burst accounting — relay onevent fires
+  // synchronously per arriving event; a burst of 50+ on screen mount
+  // can pin the JS thread for seconds while each parseCache + the
+  // caller's setCaches map-clone run back-to-back. We aggregate
+  // cumulative wall-clock and log every 10 events so logcat shows
+  // both the *count* and *cost* of the burst, then a final summary
+  // 250 ms after the last event arrives (idle window). #554.
+  let __burstCount = 0;
+  let __burstMs = 0;
+  let __burstFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  const __flushBurst = (): void => {
+    if (__burstCount === 0) return;
+    console.log(
+      `[PerfBlock] subscribeNearbyCaches burst: ${__burstCount} events in ${Math.round(__burstMs)}ms`,
+    );
+    __burstCount = 0;
+    __burstMs = 0;
+    __burstFlushTimer = null;
+  };
   const sub = pool.subscribeMany(relays, filter, {
     onevent: (e: NostrEvent) => {
+      const __t0 = performance.now();
       const parsed = parseCache(e as VerifiedEvent);
       if (parsed) onEvent(parsed);
+      __burstMs += performance.now() - __t0;
+      __burstCount += 1;
+      if (__burstCount % 10 === 0) {
+        console.log(
+          `[PerfBlock] subscribeNearbyCaches: ${__burstCount} events, ${Math.round(__burstMs)}ms cumulative`,
+        );
+      }
+      if (__burstFlushTimer) clearTimeout(__burstFlushTimer);
+      __burstFlushTimer = setTimeout(__flushBurst, 250);
     },
   });
-  return () => sub.close();
+  return () => {
+    if (__burstFlushTimer) clearTimeout(__burstFlushTimer);
+    sub.close();
+  };
 };
 
 export const subscribeFoundLogs = (
