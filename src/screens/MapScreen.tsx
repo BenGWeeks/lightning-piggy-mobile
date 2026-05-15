@@ -1378,7 +1378,8 @@ const LEAFLET_HTML = `<!DOCTYPE html>
       attribution: '© OpenStreetMap contributors',
     }).addTo(map);
 
-    let meMarker = null;
+    // meMarker / meAccuracyCircle live in __lpMeState inside ME_DOT_JS
+    // — no need to track them here.
     let markerLayer = L.layerGroup().addTo(map);
     let cacheLayer = L.layerGroup().addTo(map);
 
@@ -1415,30 +1416,21 @@ const LEAFLET_HTML = `<!DOCTYPE html>
       emitBounds();
     });
 
-    // Shared me-marker render — same dot + halo logic both entry
-    // points use. drawAccuracyCircle() comes from the
-    // src/utils/mapMeDot.ts ME_DOT_JS bridge interpolated above.
-    let meAccuracyCircle = null;
-    function placeMe(lat, lng, accuracyMetres){
-      if (meMarker) map.removeLayer(meMarker);
-      if (meAccuracyCircle) { map.removeLayer(meAccuracyCircle); meAccuracyCircle = null; }
-      meMarker = L.marker([lat, lng], {
-        icon: L.divIcon({ className: '', html: meIconHtml(), iconSize: [14,14], iconAnchor: [7,7] }),
-      }).addTo(map);
-      meAccuracyCircle = drawAccuracyCircle(map, [lat, lng], accuracyMetres);
-    }
-
+    // placeOrUpdateMe + removeMe come from src/utils/mapMeDot.ts
+    // (interpolated via ${ME_DOT_JS} above). Reusing the helper means
+    // the dot + halo + CSS pulse behave byte-identically with the
+    // mini-maps on Hunt / Explore.
     window.LP_setViewport = function(lat, lng, zoom, accuracyMetres) {
       __pendingProgrammatic = true;
       map.setView([lat, lng], zoom || map.getZoom());
-      placeMe(lat, lng, accuracyMetres);
+      placeOrUpdateMe(map, [lat, lng], accuracyMetres);
     };
 
     // Drop / move the "you are here" marker without changing the
     // viewport. Used after the user's last-seen viewport is restored
     // so they can still see where they are on someone else's pan.
     window.LP_setMeMarker = function(lat, lng, accuracyMetres) {
-      placeMe(lat, lng, accuracyMetres);
+      placeOrUpdateMe(map, [lat, lng], accuracyMetres);
     };
 
     // Validate Material Symbols name with a strict regex instead of a

@@ -32,21 +32,53 @@ export const ME_DOT_CSS = `
 
 /**
  * JavaScript snippet (string) to embed inside the Leaflet `<script>`
- * block. Defines `meIconHtml()` returning the inner HTML for an
- * L.divIcon plus the inline draw helper `drawAccuracyCircle()` for
- * the translucent halo. Both maps call these so the dot is byte-
- * identical between them.
+ * block. Defines:
  *
- * Usage in the calling WebView:
- *   ${ME_DOT_JS}
- *   // ... later ...
- *   meMarker = L.marker([lat,lng], { icon: L.divIcon({ className:'', html: meIconHtml(), iconSize:[14,14] }) }).addTo(map);
- *   meAccuracyCircle = drawAccuracyCircle(map, [lat,lng], accuracy);
+ *   • `meIconHtml()` — inner HTML for the divIcon
+ *   • `drawAccuracyCircle(map, latlng, m)` — translucent halo
+ *   • `__lpMeState` — module-level holder for { marker, accuracyCircle }
+ *   • `placeOrUpdateMe(map, latlng, m)` — the function both maps should
+ *     call when they have a new fix. Reuses the existing marker via
+ *     `setLatLng()` rather than rebuilding the DOM each call — REUSING
+ *     keeps the CSS pulse animation playing continuously. Rebuilding
+ *     restarts the animation from frame 0 every time, which made the
+ *     inline mini-map (where setHub re-fires on every relay event)
+ *     visibly stutter vs the full map's smooth single-shot pulse.
+ *
+ * Both maps now route through `placeOrUpdateMe` so the dot looks
+ * byte-identical AND animates continuously regardless of how often
+ * the parent re-emits.
  */
 export const ME_DOT_JS = `
 function meIconHtml(){return '<div class="lp-me"></div>';}
 function drawAccuracyCircle(map, latlng, accuracyMetres){
   if(typeof accuracyMetres!=='number'||accuracyMetres<=0)return null;
   return L.circle(latlng,{radius:accuracyMetres,color:'#2D88FF',weight:1,opacity:0.4,fillColor:'#2D88FF',fillOpacity:0.12,interactive:false}).addTo(map);
+}
+var __lpMeState = { marker: null, accuracyCircle: null };
+function placeOrUpdateMe(map, latlng, accuracyMetres){
+  if (__lpMeState.marker) {
+    __lpMeState.marker.setLatLng(latlng);
+  } else {
+    __lpMeState.marker = L.marker(latlng, {
+      icon: L.divIcon({ className: '', html: meIconHtml(), iconSize: [14,14], iconAnchor: [7,7] }),
+    }).addTo(map);
+  }
+  var hasAccuracy = typeof accuracyMetres === 'number' && accuracyMetres > 0;
+  if (__lpMeState.accuracyCircle) {
+    if (hasAccuracy) {
+      __lpMeState.accuracyCircle.setLatLng(latlng);
+      __lpMeState.accuracyCircle.setRadius(accuracyMetres);
+    } else {
+      map.removeLayer(__lpMeState.accuracyCircle);
+      __lpMeState.accuracyCircle = null;
+    }
+  } else if (hasAccuracy) {
+    __lpMeState.accuracyCircle = drawAccuracyCircle(map, latlng, accuracyMetres);
+  }
+}
+function removeMe(map){
+  if (__lpMeState.marker) { map.removeLayer(__lpMeState.marker); __lpMeState.marker = null; }
+  if (__lpMeState.accuracyCircle) { map.removeLayer(__lpMeState.accuracyCircle); __lpMeState.accuracyCircle = null; }
 }
 `.trim();

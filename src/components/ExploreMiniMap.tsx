@@ -383,7 +383,7 @@ const post=(m)=>window.ReactNativeWebView&&window.ReactNativeWebView.postMessage
 const __interactive=${interactive ? 'true' : 'false'};
 const map=L.map('map',{zoomControl:false,dragging:__interactive,scrollWheelZoom:__interactive,doubleClickZoom:__interactive,touchZoom:__interactive,boxZoom:false,keyboard:false,minZoom:7,maxZoom:18,tap:__interactive}).setView([${lat},${lon}],${defaultZoom});
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
-let merchantLayer=L.layerGroup().addTo(map),cacheLayer=L.layerGroup().addTo(map),eventLayer=L.layerGroup().addTo(map),meMarker=null,meAccuracyCircle=null;
+let merchantLayer=L.layerGroup().addTo(map),cacheLayer=L.layerGroup().addTo(map),eventLayer=L.layerGroup().addTo(map);
 const dot=(cls,size)=>L.divIcon({className:'',html:'<div class="'+cls+'"></div>',iconSize:[size,size]});
 // SVG palette + categorySvg() helper — sourced from
 // src/utils/mapPinSvgs/. The WebView can't import TS modules
@@ -419,19 +419,15 @@ let userHasInteracted=false;
 map.on('zoomstart',function(e){if(e.zoom!==undefined)userHasInteracted=true;});
 window.LP_setHub=function(d){
   merchantLayer.clearLayers();cacheLayer.clearLayers();eventLayer.clearLayers();
-  if(meMarker){map.removeLayer(meMarker);meMarker=null;}
-  if(meAccuracyCircle){map.removeLayer(meAccuracyCircle);meAccuracyCircle=null;}
-  // Render the blue dot whenever d.me is provided. The cache-detail
-  // hero passes me=null unless an explicit user position was supplied
-  // via the userLat/userLon props (see Props in ExploreMiniMap.tsx).
+  // placeOrUpdateMe (from src/utils/mapMeDot.ts) reuses the existing
+  // marker via setLatLng() when one's already on the map — that keeps
+  // the .lp-me CSS pulse continuous instead of restarting on every
+  // setHub call. Same helper used by the full MapScreen so the dot
+  // animation is byte-identical across surfaces.
   if(d.me){
-    // Accuracy halo — a translucent blue circle sized to the reported
-    // 1-σ horizontal accuracy in metres. Apple Maps / Google Maps
-    // idiom: a faded ring around the dot communicating "we're not
-    // sure of your exact spot to within N metres". Drawn BEFORE the
-    // dot so the dot sits on top.
-    meAccuracyCircle=drawAccuracyCircle(map,[d.me.lat,d.me.lng],d.me.accuracy);
-    meMarker=L.marker([d.me.lat,d.me.lng],{icon:L.divIcon({className:'',html:meIconHtml(),iconSize:[14,14],iconAnchor:[7,7]})}).addTo(map);
+    placeOrUpdateMe(map,[d.me.lat,d.me.lng],d.me.accuracy);
+  } else {
+    removeMe(map);
   }
   d.merchants.forEach(m=>L.marker([m.lat,m.lng],{icon:merchantCircle(m.category,m.lightning)}).addTo(merchantLayer));
   d.caches.forEach(c=>L.marker([c.lat,c.lng],{icon:d.cachePin?pinIcon(c.kind==='piggy'):cacheCircle(c.kind==='piggy')}).addTo(cacheLayer));
