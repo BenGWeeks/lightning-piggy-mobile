@@ -35,7 +35,9 @@ import {
   X,
   Zap,
 } from 'lucide-react-native';
-import type { RouteProp } from '@react-navigation/native';
+import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../navigation/types';
 import type { VerifiedEvent } from 'nostr-tools';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useNostr } from '../contexts/NostrContext';
@@ -58,8 +60,17 @@ import {
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 import { lastClaimFor } from '../services/claimHistoryService';
 
+// Composite nav type — needed so we can `navigate('Conversation', …)`
+// when the hider's profile sheet's Message action is tapped. The
+// Conversation route lives on the root stack, not the Explore stack;
+// composite props expose both navigators in one type.
+type HuntPiggyDetailNavigation = CompositeNavigationProp<
+  ExploreNavigation,
+  NativeStackNavigationProp<RootStackParamList>
+>;
+
 interface Props {
-  navigation: ExploreNavigation;
+  navigation: HuntPiggyDetailNavigation;
   route: RouteProp<ExploreStackParamList, 'HuntPiggyDetail'>;
 }
 
@@ -637,6 +648,20 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               }
             : null
         }
+        onMessage={
+          profileSheet
+            ? () => {
+                const target = profileSheet;
+                setProfileSheet(null);
+                navigation.navigate('Conversation', {
+                  pubkey: target.pubkey,
+                  name: target.name,
+                  picture: target.picture,
+                  lightningAddress: target.lightningAddress,
+                });
+              }
+            : undefined
+        }
         onZap={
           profileSheet?.lightningAddress
             ? () => {
@@ -998,6 +1023,36 @@ const CacheSpecPanel: React.FC<{
         description: v.description,
         isCurrent: k === sizeKey,
       })),
+    });
+  }
+
+  // Expiry — surfaced as a chip so the finder knows when the listing
+  // will drop off relays. NIP-40 says relays SHOULD honour the
+  // expiration tag; in practice every default relay we use does. An
+  // already-expired listing reads as "Expired Nd ago" so a hunter who
+  // hit a stale link knows it's not coming back without a republish.
+  if (cache.expiresAt != null) {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const daysLeft = Math.round((cache.expiresAt - nowSec) / 86400);
+    const dateStr = new Date(cache.expiresAt * 1000).toLocaleDateString(undefined, {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
+    const isExpired = daysLeft < 0;
+    chips.push({
+      key: 'expires',
+      label: isExpired
+        ? `Expired ${Math.abs(daysLeft)}d ago`
+        : daysLeft < 60
+          ? `Expires in ${daysLeft}d`
+          : `Expires ${dateStr}`,
+      title: isExpired ? 'Expired' : 'Listing expiry',
+      body: isExpired
+        ? `This listing was set to expire on ${dateStr}. Relays may have dropped it already, and the hider will need to republish to bring it back.`
+        : `The hider set this listing to expire on ${dateStr} (NIP-40). After that, relays drop the event and the cache stops appearing in searches unless someone republishes it.`,
+      Icon: Clock,
+      iconColor: isExpired ? colors.red : undefined,
     });
   }
 

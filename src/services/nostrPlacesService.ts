@@ -72,8 +72,12 @@ export const buildCacheListing = (
   if (typeof piggy.usesHint === 'number') tags.push(['uses', String(piggy.usesHint)]);
   if (typeof piggy.maxWithdrawableMsat === 'number')
     tags.push(['amount', String(Math.floor(piggy.maxWithdrawableMsat / 1000))]);
-  // 30-day expiration so abandoned Piggies age out naturally.
-  tags.push(['expiration', String(Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60)]);
+  // NIP-40 expiration: abandoned Piggies age out instead of cluttering
+  // relays forever. Default is 1 year — long enough not to bite an
+  // active hider who pops away for a few weeks, short enough that a
+  // genuinely abandoned cache eventually disappears. The wizard's
+  // "Expires after" picker (#23) will let the user override this.
+  tags.push(['expiration', String(Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60)]);
   return {
     kind: GC_LISTING_KIND,
     created_at: Math.floor(Date.now() / 1000),
