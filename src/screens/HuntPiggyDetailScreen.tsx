@@ -205,11 +205,6 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     [],
   );
   const [hasClaimed, setHasClaimed] = useState(false);
-  // Unix-seconds timestamp of the LATEST recorded claim for this cache
-  // by the signed-in user. Drives `alreadyLogged` so the find-log
-  // composer reopens after a re-claim — every claim window gets its
-  // own opportunity to log a fresh observation.
-  const [lastClaimAt, setLastClaimAt] = useState<number | null>(null);
   // Finder NFC reader sheet — opens on "Scan the Piglet" tap. The sheet
   // owns its own foreground reader session; on a successful read we
   // navigate to HuntFoundScreen with the extracted LNURL, which is what
@@ -345,28 +340,15 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   useEffect(() => {
     if (!cache?.isLpPiggy) return;
     let cancelled = false;
-    // Hard-claim signal: HuntFoundScreen records the claim with the
-    // cache coord as `piggyId`, so we look it up by coord and unlock
-    // the find-log composer when there's a match.
-    //
-    // The window after which hasClaimed flips back to false is the
-    // ISSUER'S cooldown (the `wait` tag from the kind 37516 event) —
-    // not a hardcoded 24 h. A Piggy with `20m cooldown / 100 claims`
-    // is explicitly designed to be re-claimed, so the actionRow
-    // primary button should revert to 'Scan the Piglet' once the
-    // cooldown elapses. Falls back to 24 h when the issuer didn't
-    // set a cooldown.
+    // hasClaimed is a sticky proof-of-presence signal: once the user
+    // has successfully claimed this Piggy at least once, the find-log
+    // composer stays unlocked forever — they can post as many logs as
+    // they like on subsequent visits without re-scanning. The
+    // LNURLw issuer enforces its own per-claim cooldown / max-uses
+    // server-side, so the app doesn't double-gate.
     (async () => {
       const recent = await lastClaimForPiggyId(coord);
-      if (cancelled || !recent) return;
-      setLastClaimAt(recent.claimedAt);
-      const cooldownSec = cache.waitSeconds ?? 24 * 60 * 60;
-      const elapsedSec = Date.now() / 1000 - recent.claimedAt;
-      if (elapsedSec < cooldownSec) {
-        setHasClaimed(true);
-      } else {
-        setHasClaimed(false);
-      }
+      if (!cancelled && recent) setHasClaimed(true);
     })();
     return () => {
       cancelled = true;
@@ -486,25 +468,6 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   // LP Piggies gate find-logging behind a successful claim (proof of
   // presence); plain NIP-GC caches have no claim step, so anyone can log.
   const canLog = hasClaimed || (cache != null && !cache.isLpPiggy);
-  // Have I already posted a find-log on this cache? Derived from the
-  // live `logs` subscription so it stays in sync if the user posts
-  // and the relay echoes back, OR if a previous-session log was
-  // already there when the screen mounts. Drives the actionRow primary
-  // button — once a user has logged, the 'Log your find' CTA should
-  // not keep nagging them on revisits.
-  const alreadyLogged = useMemo(
-    () => {
-      if (!pubkey) return false;
-      // A log only counts as 'already logged for this claim window' if
-      // it was posted AFTER the most recent claim. Older logs from a
-      // previous claim shouldn't suppress the composer when the user
-      // returns post-cooldown to claim again.
-      return [...logs.values()].some(
-        (l) => l.pubkey === pubkey && (lastClaimAt === null || l.createdAt >= lastClaimAt),
-      );
-    },
-    [logs, pubkey, lastClaimAt],
-  );
 
   // Hero shows the photo when the toggle picks it AND a photo exists;
   // otherwise it falls back to the map.
@@ -659,50 +622,61 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                     </Text>
                   ) : null}
                 </TouchableOpacity>
-                {/* Three-state primary action:
-                    - alreadyLogged: render the muted 'You've logged this' badge
-                      below — no button, the work is done.
-                    - canLog: 'Log your find' opens the composer.
-                    - else: 'Scan the Piglet' opens the NFC reader.
-                  This stops the post-claim 'Log your find' CTA from
-                  pestering returning visitors who already logged. */}
-                {alreadyLogged ? null : (
-                  <TouchableOpacity
-                    style={styles.actionButtonPrimary}
-                    onPress={() => {
-                      if (canLog) {
-                        setComposerOpen(true);
-                      } else {
-                        setReadSheetOpen(true);
-                      }
-                    }}
-                    accessibilityLabel={
-                      canLog
-                        ? 'Log your find for other hunters'
-                        : 'Scan the Piglet to claim the prize'
+                {/* Primary action toggles by claim state:
+                    pre-claim  → 'Scan the Piglet' opens the NFC reader.
+                    post-claim → 'Log your find' opens the composer.
+                  Issuer cooldown / max-uses are enforced by the LNURLw
+                  itself; tapping 'Scan the Piglet' again post-cooldown
+                  re-runs the claim. Find-logs are unlimited per cache. */}
+                <TouchableOpacity
+                  style={styles.actionButtonPrimary}
+                  onPress={() => {
+                    if (canLog) {
+                      setComposerOpen(true);
+                    } else {
+                      setReadSheetOpen(true);
                     }
-                    testID="hunt-piggy-detail-claim-button"
-                  >
-                    {canLog ? (
-                      <Sparkles size={18} color={colors.white} strokeWidth={2.5} />
-                    ) : (
-                      <Nfc size={18} color={colors.white} strokeWidth={2.5} />
-                    )}
-                    <Text style={styles.actionButtonPrimaryText}>
-                      {canLog ? 'Log your find' : 'Scan the Piglet'}
-                    </Text>
-                  </TouchableOpacity>
-                )}
+                  }}
+                  accessibilityLabel={
+                    canLog
+                      ? 'Log your find for other hunters'
+                      : 'Scan the Piglet to claim the prize'
+                  }
+                  testID="hunt-piggy-detail-claim-button"
+                >
+                  {canLog ? (
+                    <Sparkles size={18} color={colors.white} strokeWidth={2.5} />
+                  ) : (
+                    <Nfc size={18} color={colors.white} strokeWidth={2.5} />
+                  )}
+                  <Text style={styles.actionButtonPrimaryText}>
+                    {canLog ? 'Log your find' : 'Scan the Piglet'}
+                  </Text>
+                </TouchableOpacity>
               </View>
-              <Text style={styles.claimNote}>
-                {alreadyLogged
-                  ? "You've logged this find — thanks for sharing it with other hunters."
-                  : !cache.isLpPiggy
-                    ? 'Found this cache? Tap Log your find to share it with other hunters.'
-                    : hasClaimed
-                      ? 'Sats received! Tap Log your find above to share it with other hunters.'
-                      : "Scan the Piglet's NFC tag (or its QR) at the cache to claim the prize."}
-              </Text>
+              {!cache.isLpPiggy ? (
+                <Text style={styles.claimNote}>
+                  Found this cache? Tap Log your find to share it with other hunters.
+                </Text>
+              ) : hasClaimed ? (
+                <Text style={styles.claimNote}>
+                  Tap Log your find to share it.{' '}
+                  <Text
+                    style={styles.claimNoteLink}
+                    onPress={() => setReadSheetOpen(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Scan the Piglet again to claim more sats"
+                    testID="hunt-piggy-detail-scan-again-link"
+                  >
+                    Scan again
+                  </Text>{' '}
+                  to claim more sats once the cooldown elapses.
+                </Text>
+              ) : (
+                <Text style={styles.claimNote}>
+                  Scan the Piglet&apos;s NFC tag (or its QR) at the cache to claim the prize.
+                </Text>
+              )}
             </View>
 
             <Text style={styles.description}>{cache.description}</Text>
@@ -756,7 +730,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               ))
             )}
 
-            {canLog && !composerOpen && !alreadyLogged ? (
+            {canLog && !composerOpen ? (
               <TouchableOpacity
                 style={styles.composeCta}
                 onPress={() => setComposerOpen(true)}
@@ -1571,6 +1545,10 @@ const createStyles = (colors: Palette) =>
       fontSize: 12,
       lineHeight: 16,
       textAlign: 'center',
+    },
+    claimNoteLink: {
+      color: colors.brandPink,
+      fontWeight: '700',
     },
     sectionLabel: {
       fontSize: 13,
