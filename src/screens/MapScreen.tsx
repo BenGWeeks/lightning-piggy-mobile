@@ -49,6 +49,8 @@ import { encodeGeohash, geohashPrefixes } from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import SocialIcon from '../components/SocialIcon';
+import WebOfTrustChip from '../components/WebOfTrustChip';
+import WebOfTrustBottomSheet from '../components/WebOfTrustBottomSheet';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -90,7 +92,10 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   // off the map immediately. Mirrors the same fix HuntScreen got in
   // 306270c — the full map was the last surface still showing every
   // cache regardless of trust.
-  const { isTrusted } = useTrustGraph();
+  const { isTrusted, wotTier } = useTrustGraph();
+  // WoT bottom-sheet visibility — opened from the chip inside the
+  // FilterSheet so the user can change tier without leaving the map.
+  const [wotSheetVisible, setWotSheetVisible] = useState(false);
   const styles = useMemo(() => createStyles(colors), [colors]);
   const webviewRef = useRef<WebView>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -612,10 +617,22 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
           categoryFilter={categoryFilter}
           onChangeCategoryFilter={setCategoryFilter}
           onClose={() => setFiltersOpen(false)}
+          wotTier={wotTier}
+          untrustedCacheCount={
+            // Caches that would render if the WoT filter were "All".
+            // Computed each render; cheap because `caches` is small.
+            [...caches.values()].filter(
+              (c) =>
+                (c.isLpPiggy ? filters.piglet : filters.nipgcCache) && !isTrusted(c.hiderPubkey),
+            ).length
+          }
+          onOpenWotPicker={() => setWotSheetVisible(true)}
           colors={colors}
           styles={styles}
         />
       )}
+
+      <WebOfTrustBottomSheet visible={wotSheetVisible} onClose={() => setWotSheetVisible(false)} />
 
       {!webviewReady && (
         <View style={styles.loadingOverlay} pointerEvents="none">
@@ -982,6 +999,9 @@ const FilterSheet: React.FC<{
   categoryFilter: Set<string>;
   onChangeCategoryFilter: (next: Set<string>) => void;
   onClose: () => void;
+  wotTier: 'friends' | 'fof' | 'all';
+  untrustedCacheCount: number;
+  onOpenWotPicker: () => void;
   colors: Palette;
   styles: ReturnType<typeof createStyles>;
 }> = ({
@@ -991,6 +1011,9 @@ const FilterSheet: React.FC<{
   categoryFilter,
   onChangeCategoryFilter,
   onClose,
+  wotTier,
+  untrustedCacheCount,
+  onOpenWotPicker,
   colors,
   styles,
 }) => {
@@ -1008,6 +1031,28 @@ const FilterSheet: React.FC<{
       <View style={styles.sheet}>
         <View style={styles.sheetHandle} />
         <ScrollView showsVerticalScrollIndicator={false}>
+          {/* Web-of-Trust — chip + tap-to-open-sheet. Mirrors the same
+              affordance on the Hunt filter so the user can change tier
+              without leaving the map. The "N hidden" caption explains
+              when the current tier is hiding pins they might expect to
+              see (the cause of the "where did all the geo-caches go?"
+              moment that prompted #19 to grow this filter UI). */}
+          <Text style={styles.sheetTitle}>Web of Trust</Text>
+          <View style={styles.wotRow}>
+            <WebOfTrustChip
+              currentTier={wotTier}
+              onPress={onOpenWotPicker}
+              testID="map-filter-wot-chip"
+            />
+            {untrustedCacheCount > 0 ? (
+              <Text style={styles.wotHiddenCount}>{untrustedCacheCount} hidden</Text>
+            ) : null}
+          </View>
+          <Text style={[styles.sheetSubtitle, { marginBottom: 16 }]}>
+            Only caches from hiders you trust at the current tier appear on the map. Tap the chip to
+            widen the tier.
+          </Text>
+
           <Text style={styles.sheetTitle}>Show on map</Text>
           <Text style={styles.sheetSubtitle}>Tap a row to toggle that pin type.</Text>
           <View style={{ marginTop: 8 }}>
@@ -1505,6 +1550,16 @@ const createStyles = (colors: Palette) =>
     },
     sheetSubtitle: {
       fontSize: 13,
+      color: colors.textSupplementary,
+    },
+    wotRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      marginTop: 8,
+    },
+    wotHiddenCount: {
+      fontSize: 12,
       color: colors.textSupplementary,
     },
     sheetChipRow: {
