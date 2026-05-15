@@ -622,4 +622,38 @@ walk away. +
 true` + Settings → "Don't lock when on this network" disabled (default), and
 the phone won't auto-lock for the duration of the build (~20 min) and the
 follow-on perf-suite (~3 min).
+
+| Receive sheet slow to mark invoice as paid — fast `lookupInvoice` poll
+never fires settlement, only the slow balance-diff fallback eventually
+catches it (~30 s – 3 min lag, see #553)
+| The `expectPayment` poll calls `nwcService.lookupInvoice` every 1 s and
+checks the returned `paid` flag. Two non-obvious gotchas around the result
+shape: +
+**(1) WebLN vs NIP-47.** We use `NostrWebLNProvider` from `@getalby/sdk`,
+whose `lookupInvoice` translates the underlying NIP-47 `Nip47Transaction`
+response into the **WebLN** `LookupInvoiceResponse` shape. So *even though
+LNbits' nwcprovider correctly emits the spec-compliant
+`{type, invoice, settled_at, payment_hash, …}`*, what we receive is
+`{preimage, paymentRequest, paid}`. A predicate that only checks
+`result.settled_at` or `result.state` is dead code on this path and will
+never fire — every tick returns `false`, and settlement only catches via
+the slow balance-diff fallback. Fix: check `result.paid === true`. +
+**(2) Field rename.** WebLN names the bolt11 field `paymentRequest`, not
+`invoice`. Returning `result.invoice` to consumers gives them `undefined`
+forever. `nwcService.lookupInvoice` maps `paymentRequest → invoice` once
+inside the function, so callers can keep using `.invoice`. +
+**Where the layer-confusion bites:** the Alby SDK's *type declaration*
+for `NWCClient.lookupInvoice` returns `Nip47Transaction` (with
+`settled_at`/`state`), but we don't call that — we call
+`NostrWebLNProvider.lookupInvoice`, which returns the WebLN shape. The
+type cast on the result must reflect the WebLN shape, not the NIP-47
+spec. If you ever refactor to the raw `NWCClient`, flip both the field
+names AND the settlement predicate. +
+**Diagnostic recipe** if this regresses: temporarily add
+`console.warn('keys:', Object.keys(result), 'raw:', JSON.stringify(result));`
+inside `nwcService.lookupInvoice` after the call resolves, then issue a
+small test invoice and watch `adb logcat | grep '\[NWC lookupInvoice\]'`
+— the wire shape will tell you immediately whether you're on the WebLN
+or NIP-47 path. Cross-reference: PR #555 (`fix(nwc): cap lookupInvoice
+reply timeout`).
 |===

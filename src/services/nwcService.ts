@@ -799,19 +799,29 @@ export async function lookupInvoice(
   const provider = await ensureConnected(walletId);
   if (!provider) return null;
   try {
+    // We use `NostrWebLNProvider` from @getalby/sdk, whose `lookupInvoice`
+    // returns the **WebLN** `LookupInvoiceResponse` shape — *not* the raw
+    // NIP-47 `Nip47Transaction` shape. So the SDK translates LNbits'
+    // spec-compliant `{type, invoice, settled_at, ...}` into WebLN's
+    // `{preimage, paymentRequest, paid}` for us. Don't reach for `settled_at`
+    // or `state` here — they're never populated on this path. If we ever
+    // switch to the raw `NWCClient` we'd need to flip both the field names
+    // and the settlement predicate; see docs/TROUBLESHOOTING.adoc → "Receive
+    // sheet slow to show paid (NIP-47 settlement detection)" for context.
     const call = provider.lookupInvoice({ paymentHash });
     const result = (await (options.replyTimeoutMs !== undefined
       ? withTimeout(call, options.replyTimeoutMs, `lookupInvoice(${walletId})`)
       : call)) as {
       preimage?: string;
-      invoice?: string;
-      settled_at?: number;
+      paymentRequest?: string;
+      paid?: boolean;
     };
-    const paid = Boolean(result?.settled_at && result.settled_at > 0);
     return {
       preimage: result?.preimage,
-      invoice: result?.invoice,
-      paid,
+      // WebLN names the bolt11 field `paymentRequest`; our caller contract
+      // exposes it as `invoice` so consumers stay decoupled from the SDK.
+      invoice: result?.paymentRequest,
+      paid: result?.paid === true,
     };
   } catch (error) {
     if (isTerminalLookupError(error)) {
