@@ -5,13 +5,16 @@
 // fixture demonstrates the rendering once they do.
 //
 //   node scripts/publish-test-event.mjs
+//   node scripts/publish-test-event.mjs --piggy=MIDDLE
 //
-// Override via env vars: NSEC (else disposable key), TITLE, IMAGE,
-// LAT, LON, START_OFFSET_SECONDS, DURATION_SECONDS, LOCATION.
-import { generateSecretKey, getPublicKey, finalizeEvent, nip19 } from 'nostr-tools';
+// Signs as the BIG Piggy fixture by default; override with --piggy=ROLE
+// or PIGGY_ROLE env. Other overrides: TITLE, IMAGE, LAT, LON,
+// START_OFFSET_SECONDS, DURATION_SECONDS, LOCATION.
+import { finalizeEvent, nip19 } from 'nostr-tools';
 import { SimplePool } from 'nostr-tools/pool';
 import { useWebSocketImplementation } from 'nostr-tools/relay';
 import WebSocket from 'ws';
+import { pickRole, resolvePiggy } from './_piggyFixtures.mjs';
 
 // eslint-disable-next-line react-hooks/rules-of-hooks
 useWebSocketImplementation(WebSocket);
@@ -75,18 +78,9 @@ const g9 = gh(LAT, LON, 9);
 const start = Math.floor(Date.now() / 1000) + START_OFFSET_SECONDS;
 const end = start + DURATION_SECONDS;
 
-const nsecInput = process.env.NSEC;
-let sk;
-if (nsecInput) {
-  const decoded = nip19.decode(nsecInput.trim());
-  if (decoded.type !== 'nsec') throw new Error(`Expected nsec1…, got "${decoded.type}"`);
-  sk = decoded.data;
-  console.log('Signing with provided nsec — event will be replaceable by this npub.');
-} else {
-  sk = generateSecretKey();
-  console.log('No NSEC env var → using disposable key.');
-}
-const pk = getPublicKey(sk);
+const ROLE = pickRole({ defaultRole: 'BIG' });
+const { sk, pk } = resolvePiggy(ROLE);
+console.log(`Signing as ${ROLE} Piggy — event replaceable by this npub.`);
 const npub = nip19.npubEncode(pk);
 
 const tags = [

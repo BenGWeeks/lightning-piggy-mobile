@@ -5,25 +5,32 @@
 // kind 5 still sees the listing as effectively retracted (NIP-01
 // replaceable: newest per (author, kind, d) wins).
 //
-// The nsec is read from the env var PIGGY_NSEC — never pass keys on the
-// command line. The author of the targeted event must match the nsec.
+// The signing key is one of the named Piggy fixtures (see
+// scripts/_piggyFixtures.mjs). Default is BIG; pass --piggy=ROLE or
+// set PIGGY_ROLE to delete a Piglet hidden by a different fixture.
+// The author of the targeted event must match the chosen Piggy.
 //
 // Usage:
 //   PIGGY_NSEC=nsec1… node scripts/delete-piglet.mjs <eventId> <dTag>
 //
 // Example:
-//   PIGGY_NSEC=nsec1… node scripts/delete-piglet.mjs \
+//   node scripts/delete-piglet.mjs \
 //     39aee785fd4d4733fbb914c8d2c425e297ced101dffc044786a3b52d51bcb195 \
 //     big-piggy-geo-cache-1
+//
+//   node scripts/delete-piglet.mjs --piggy=MIDDLE <eventId> <dTag>
 
 import WebSocket from 'ws';
-import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
-import * as nip19 from 'nostr-tools/nip19';
+import { finalizeEvent } from 'nostr-tools/pure';
+import { pickRole, resolvePiggy } from './_piggyFixtures.mjs';
 
-const [, , eventId, dTag] = process.argv;
-const nsec = process.env.PIGGY_NSEC;
-if (!nsec || !eventId || !dTag) {
-  console.error('Usage: PIGGY_NSEC=nsec1… node scripts/delete-piglet.mjs <eventId> <dTag>');
+// Filter out the --piggy=ROLE flag before binding positional args so it
+// doesn't get interpreted as <eventId> or <dTag>. pickRole reads it
+// out of process.argv directly.
+const positional = process.argv.slice(2).filter((a) => !a.startsWith('--piggy='));
+const [eventId, dTag] = positional;
+if (!eventId || !dTag) {
+  console.error('Usage: node scripts/delete-piglet.mjs [--piggy=ROLE] <eventId> <dTag>');
   process.exit(2);
 }
 if (!/^[0-9a-f]{64}$/.test(eventId)) {
@@ -31,13 +38,9 @@ if (!/^[0-9a-f]{64}$/.test(eventId)) {
   process.exit(2);
 }
 
-const decoded = nip19.decode(nsec);
-if (decoded.type !== 'nsec') {
-  console.error('PIGGY_NSEC must be a valid nsec1…');
-  process.exit(2);
-}
-const sk = decoded.data;
-const pk = getPublicKey(sk);
+const ROLE = pickRole({ defaultRole: 'BIG' });
+const { sk, pk } = resolvePiggy(ROLE);
+console.log(`Deleting as ${ROLE} Piggy.`);
 
 const RELAYS = [
   'wss://relay.damus.io',

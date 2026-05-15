@@ -10,10 +10,11 @@
 //     have material to work with
 //
 //   NSEC=nsec1... node scripts/publish-test-event-batch.mjs
-import { generateSecretKey, getPublicKey, finalizeEvent, nip19 } from 'nostr-tools';
+import { finalizeEvent, nip19 } from 'nostr-tools';
 import { SimplePool } from 'nostr-tools/pool';
 import { useWebSocketImplementation } from 'nostr-tools/relay';
 import WebSocket from 'ws';
+import { pickRole, resolvePiggy } from './_piggyFixtures.mjs';
 
 // eslint-disable-next-line react-hooks/rules-of-hooks
 useWebSocketImplementation(WebSocket);
@@ -136,18 +137,9 @@ function gh(lat, lon, p = 9) {
   return out;
 }
 
-const nsecInput = process.env.NSEC;
-if (!nsecInput) {
-  console.error('NSEC env var required (use Big Piggy nsec or any LP-seeded npub)');
-  process.exit(1);
-}
-const decoded = nip19.decode(nsecInput.trim());
-if (decoded.type !== 'nsec') {
-  console.error(`Expected nsec1…, got "${decoded.type}"`);
-  process.exit(1);
-}
-const sk = decoded.data;
-const pk = getPublicKey(sk);
+const ROLE = pickRole({ defaultRole: 'BIG' });
+const { sk, pk } = resolvePiggy(ROLE);
+console.log(`Signing as ${ROLE} Piggy.`);
 console.log(`Publishing ${FIXTURES.length} events as ${nip19.npubEncode(pk)}\n`);
 
 const RELAYS = [

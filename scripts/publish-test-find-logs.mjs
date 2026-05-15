@@ -13,7 +13,8 @@
 //
 // Override the cache via CACHE_COORD env var (default = the Big Piggy
 // Geo-Cache 1 coord baked into publish-test-piggy.mjs).
-import { getPublicKey, finalizeEvent, nip19 } from 'nostr-tools';
+import { finalizeEvent, nip19 } from 'nostr-tools';
+import { resolvePiggy } from './_piggyFixtures.mjs';
 import { SimplePool } from 'nostr-tools/pool';
 import { useWebSocketImplementation } from 'nostr-tools/relay';
 import WebSocket from 'ws';
@@ -34,17 +35,6 @@ const RELAYS = [
   'wss://relay.primal.net',
 ];
 
-// Resolve nsec env vars to raw secret keys so each find signs as the
-// Piggy fixture it's meant to come from (real kind-0 profile = real
-// avatar + display name in the app's find log).
-const resolveNsec = (envVar) => {
-  const v = process.env[envVar];
-  if (!v) throw new Error(`Missing env var: ${envVar}`);
-  const decoded = nip19.decode(v.trim());
-  if (decoded.type !== 'nsec') throw new Error(`${envVar}: expected nsec, got ${decoded.type}`);
-  return decoded.data;
-};
-
 // Three realistic-looking finds — different tones (terse / chatty /
 // pictures-or-it-didn't-happen) + different sats amounts. Each is
 // signed by a different Piggy fixture so the find log shows three
@@ -52,20 +42,20 @@ const resolveNsec = (envVar) => {
 // of upload deps; the parser falls back gracefully.
 const FINDS = [
   {
-    nsecEnv: 'MAESTRO_NSEC_MIDDLE',
+    role: 'MIDDLE',
     age_seconds: 6 * 60 * 60, // 6 h ago
     sats: 21,
     content:
       'Quick lunchtime find! Nailed in seconds — telephone box was a dead giveaway. Cheers for the sats 🐷',
   },
   {
-    nsecEnv: 'MAESTRO_NSEC_LITTLE',
+    role: 'LITTLE',
     age_seconds: 2 * 24 * 60 * 60, // 2 d ago
     sats: 21,
     content: 'Spotted it on the way through Longstanton. Beautiful spot — added to my saved list.',
   },
   {
-    nsecEnv: 'MAESTRO_NSEC_EVIL',
+    role: 'EVIL',
     age_seconds: 5 * 24 * 60 * 60, // 5 d ago
     sats: 21,
     content:
@@ -77,8 +67,7 @@ const pool = new SimplePool();
 const now = Math.floor(Date.now() / 1000);
 const results = [];
 for (const find of FINDS) {
-  const sk = resolveNsec(find.nsecEnv);
-  const pk = getPublicKey(sk);
+  const { sk, pk } = resolvePiggy(find.role);
   const evt = finalizeEvent(
     {
       kind: 7516,

@@ -1,6 +1,7 @@
 // Publishes a NIP-GC kind 37516 "geocache listing" event signed by a
-// fresh disposable key (or `BIG_PIGGY_NSEC` env var). Used for
-// end-to-end testing of the M6 publish/subscribe shape.
+// named Piggy fixture (BIG by default — override with --piggy=ROLE or
+// PIGGY_ROLE env). Used for end-to-end testing of the M6
+// publish/subscribe shape.
 //
 // We adopt treasures.to's NIP-GC draft (kind 37516 listings, kind 7516
 // found-logs, kind 1111 comments per NIP-22) and mark Lightning-payout
@@ -23,7 +24,8 @@
 // part of this script's output — see the schema comment below for
 // why. The LNURL belongs on the physical NFC tag / QR sticker the
 // hider stashes, not on a relay-broadcast event.
-import { generateSecretKey, getPublicKey, finalizeEvent, nip19 } from 'nostr-tools';
+import { finalizeEvent, nip19 } from 'nostr-tools';
+import { pickRole, resolvePiggy } from './_piggyFixtures.mjs';
 import { SimplePool } from 'nostr-tools/pool';
 import { useWebSocketImplementation } from 'nostr-tools/relay';
 import WebSocket from 'ws';
@@ -149,24 +151,13 @@ async function uploadToBlossom(filePath, server, sk) {
 // Multi-precision g tags per the NIP-GC suggestion (3-9 chars).
 const g9 = gh(LAT, LON, 9);
 
-// Signing key — pass `BIG_PIGGY_NSEC=nsec1...` (or NSEC=nsec1...) to publish
-// from a real identity (events become replaceable by that pubkey later).
-// Falls back to a fresh disposable key, useful for one-shot test events
-// that nobody can edit afterwards.
-const nsecInput = process.env.BIG_PIGGY_NSEC ?? process.env.NSEC;
-let sk;
-if (nsecInput) {
-  const decoded = nip19.decode(nsecInput.trim());
-  if (decoded.type !== 'nsec') {
-    throw new Error(`Expected nsec1… in BIG_PIGGY_NSEC, got "${decoded.type}"`);
-  }
-  sk = decoded.data;
-  console.log('Signing with provided nsec — event will be replaceable by this npub.');
-} else {
-  sk = generateSecretKey();
-  console.log('No NSEC env var → using disposable key (event will be unreplaceable).');
-}
-const pk = getPublicKey(sk);
+// Signing key — sourced from one of the named MAESTRO_NSEC_* fixtures
+// (see scripts/_piggyFixtures.mjs). Defaults to BIG; override with
+// --piggy=MIDDLE|LITTLE|EVIL or PIGGY_ROLE env. No random-key fallback:
+// disposable keys leave orphan pubkeys littering relays on every run.
+const ROLE = pickRole({ defaultRole: 'BIG' });
+const { sk, pk } = resolvePiggy(ROLE);
+console.log(`Signing as ${ROLE} Piggy — event replaceable by this npub.`);
 const npub = nip19.npubEncode(pk);
 
 // Resolve the hint-photo URL. Default: upload the local fixture to the
