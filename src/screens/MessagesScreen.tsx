@@ -13,10 +13,7 @@ import { Image as ExpoImage } from 'expo-image';
 import TabBackgroundImage from '../components/TabBackgroundImage';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import Svg, { Path } from 'react-native-svg';
-import { Clock, Search, X, Zap } from 'lucide-react-native';
-import WebOfTrustChip from '../components/WebOfTrustChip';
-import WebOfTrustBottomSheet from '../components/WebOfTrustBottomSheet';
-import { useTrustGraph } from '../contexts/TrustGraphContext';
+import { Users, Clock, Search, X, Zap } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, CompositeNavigationProp, useFocusEffect } from '@react-navigation/native';
@@ -77,18 +74,6 @@ const MessagesScreen: React.FC = () => {
   const { groupSummaries, followingOnly, setFollowingOnly, secretMode } = useGroups();
   // Production hard-lock: filter is always enforced unless secretMode AND followingOnly=off.
   const enforceFollowingOnly = followingOnly || !secretMode;
-  // WoT tier (#535) — replaces the legacy "Following only" chip on this
-  // screen. We keep `followingOnly` in GroupsContext for back-compat with
-  // GroupsScreen + group routing, but mirror it from `wotTier === 'friends'`
-  // so the chip + sheet are the single source of truth at the UI layer.
-  const { wotTier } = useTrustGraph();
-  const [wotSheetVisible, setWotSheetVisible] = useState(false);
-  // Sync followingOnly ⇔ wotTier whenever the tier changes. 'friends' is
-  // the only tier that enforces the follow gate; 'fof' and 'all' relax it.
-  useEffect(() => {
-    const desired = wotTier === 'friends';
-    if (desired !== followingOnly) setFollowingOnly(desired);
-  }, [wotTier, followingOnly, setFollowingOnly]);
   // Tracks last applied value so toggling triggers a data-layer refresh, not just a UI re-filter.
   const lastAppliedEnforceRef = useRef<boolean>(true);
   const [search, setSearch] = useState('');
@@ -570,18 +555,36 @@ const MessagesScreen: React.FC = () => {
       <View style={styles.content}>
         {isLoggedIn && (
           <View style={styles.filterChipRow}>
-            {/* Web-of-Trust chip (#535) — single shared component across
-                Messages / Hunt / Events. Tapping opens the bottom-sheet
-                tier picker; the legacy "Following only" boolean is now
-                derived from `wotTier === 'friends'` via the sync effect
-                above. The chip itself is always interactive (tap to read
-                the explainer); secret-mode gates the *wider* tiers
-                inside the sheet, not access to the sheet. */}
-            <WebOfTrustChip
-              currentTier={wotTier}
-              onPress={() => setWotSheetVisible(true)}
-              testID="messages-wot-chip"
-            />
+            {secretMode ? (
+              <TouchableOpacity
+                style={followingOnly ? styles.filterChip : styles.filterChipOff}
+                onPress={() => setFollowingOnly(!followingOnly)}
+                accessibilityLabel={
+                  followingOnly
+                    ? 'Following-only filter on. Tap to show all conversations (dev mode).'
+                    : 'Following-only filter off. Tap to filter to followed senders only.'
+                }
+                accessibilityRole="button"
+                testID="messages-follows-toggle"
+              >
+                <Users
+                  size={14}
+                  color={followingOnly ? colors.brandPink : colors.textSupplementary}
+                />
+                <Text style={followingOnly ? styles.filterChipText : styles.filterChipTextOff}>
+                  {followingOnly ? 'Following only' : 'All (dev)'}
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <View
+                style={styles.filterChip}
+                accessibilityLabel="Showing conversations from people you follow only"
+                testID="messages-follows-indicator"
+              >
+                <Users size={14} color={colors.brandPink} />
+                <Text style={styles.filterChipText}>Following only</Text>
+              </View>
+            )}
             <TouchableOpacity
               style={styles.filterChipInteractive}
               onPress={cycleWindowDays}
@@ -701,8 +704,6 @@ const MessagesScreen: React.FC = () => {
           navigation.navigate('ContactProfile', { contact: sheetContact });
         }}
       />
-
-      <WebOfTrustBottomSheet visible={wotSheetVisible} onClose={() => setWotSheetVisible(false)} />
     </View>
   );
 };
