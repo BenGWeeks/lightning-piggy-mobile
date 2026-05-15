@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as Location from 'expo-location';
 import { bearingDegrees, haversineMetres } from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
@@ -45,6 +45,13 @@ interface CompassNav {
 export const useCompassNavigation = (target: { lat: number; lon: number } | null): CompassNav => {
   const [user, setUser] = useState<{ lat: number; lon: number } | null>(null);
   const [heading, setHeading] = useState<number | null>(null);
+  // EMA smoothing for heading: raw magnetometer readings jitter by a few
+  // degrees even when the phone is still, and a hard-rotated icon picks
+  // every wobble up. ALPHA=0.25 means new readings get 25% weight —
+  // smooths the visible arrow without making it sluggish. Lives in a
+  // ref so the smoothing state persists across heading callbacks
+  // without forcing extra renders.
+  const smoothedHeadingRef = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -93,7 +100,19 @@ export const useCompassNavigation = (target: { lat: number; lon: number } | null
           // navigation — declination is < 10° across most of the
           // populated world).
           const v = h.trueHeading >= 0 ? h.trueHeading : h.magHeading;
-          if (Number.isFinite(v)) setHeading(((v % 360) + 360) % 360);
+          if (!Number.isFinite(v)) return;
+          const raw = ((v % 360) + 360) % 360;
+          // EMA with shortest-angle delta so values straddling the
+          // 0°/360° wrap (e.g. 355 → 5) smooth toward 0 not toward
+          // 180. (`(delta + 540) % 360) − 180` maps any difference
+          // into (−180, 180].
+          const prev = smoothedHeadingRef.current;
+          const next =
+            prev === null
+              ? raw
+              : (((prev + 0.25 * (((raw - prev + 540) % 360) - 180)) % 360) + 360) % 360;
+          smoothedHeadingRef.current = next;
+          setHeading(next);
         });
       } catch {
         // Emulator / device with no magnetometer → heading stays null.
