@@ -18,6 +18,7 @@ import {
   CalendarDays,
   CheckCircle2,
   ChevronLeft,
+  Pencil,
   Clock,
   Cloud,
   Eye,
@@ -114,7 +115,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { coord } = route.params;
-  const { signEvent, relays } = useNostr();
+  const { signEvent, relays, pubkey } = useNostr();
 
   const [cache, setCache] = useState<ParsedCache | null>(null);
   const [loading, setLoading] = useState(true);
@@ -380,7 +381,24 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         <Text style={styles.headerTitle} numberOfLines={1}>
           {cache?.name ?? 'Hunt cache'}
         </Text>
-        <View style={{ width: 24 }} />
+        {/* Edit affordance — only visible when the signed-in user
+            authored this listing. Lower-cases both sides because some
+            relays normalise pubkeys differently than the local cache. */}
+        {cache &&
+        pubkey &&
+        cache.hiderPubkey.toLowerCase() === pubkey.toLowerCase() &&
+        cache.isLpPiggy ? (
+          <TouchableOpacity
+            onPress={() => navigation.navigate('HuntCreate', { piggyId: cache.d })}
+            accessibilityLabel="Edit this Piglet"
+            testID="hunt-piggy-detail-edit-button"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Pencil size={20} color={colors.white} strokeWidth={2.5} />
+          </TouchableOpacity>
+        ) : (
+          <View style={{ width: 24 }} />
+        )}
       </View>
 
       <ScrollView contentContainerStyle={styles.body}>

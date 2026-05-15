@@ -77,7 +77,11 @@ export type ExploreStackParamList = {
   Places: undefined;
   PlaceDetail: { placeId: number };
   Hunt: undefined;
-  HuntCreate: undefined;
+  // `piggyId` opens the wizard in edit mode for an existing HiddenPiggy —
+  // reuses the same screen, pre-fills every field, and on save replaces
+  // the local record + re-emits the kind 37516 listing under the same
+  // `d` tag. Omit to create a new Piggy.
+  HuntCreate: { piggyId?: string } | undefined;
   HuntFound: { lnurl: string };
   HuntPiggyDetail: { coord: string };
   MyPiglets: undefined;

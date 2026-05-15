@@ -23,8 +23,13 @@ const DEFAULT_WINDOW_SECONDS = 365 * 24 * 60 * 60;
  * unit-test independently of the publish pipeline.
  */
 export const computeNextExpiresAt = (piggy: HiddenPiggy, nowSec: number): number => {
-  if (typeof piggy.expiresAt === 'number' && piggy.expiresAt > piggy.createdAt) {
-    const window = piggy.expiresAt - piggy.createdAt;
+  // HiddenPiggy.createdAt is in milliseconds (Date.now()); expiresAt is
+  // in unix-seconds (NIP-40 contract). Normalise both to seconds before
+  // computing the window — otherwise the subtraction silently produces
+  // a near-billion-second negative and we always fall back to 1 year.
+  const createdAtSec = Math.floor(piggy.createdAt / 1000);
+  if (typeof piggy.expiresAt === 'number' && piggy.expiresAt > createdAtSec) {
+    const window = piggy.expiresAt - createdAtSec;
     return nowSec + window;
   }
   return nowSec + DEFAULT_WINDOW_SECONDS;

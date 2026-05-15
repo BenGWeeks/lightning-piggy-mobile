@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -41,7 +41,8 @@ import {
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useNostr } from '../contexts/NostrContext';
 import type { Palette } from '../styles/palettes';
-import { ExploreNavigation } from '../navigation/types';
+import type { RouteProp } from '@react-navigation/native';
+import { ExploreNavigation, ExploreStackParamList } from '../navigation/types';
 import { Alert } from '../components/BrandedAlert';
 import Toast from '../components/BrandedToast';
 import {
@@ -50,7 +51,7 @@ import {
   msatToSats,
   resolveLnurlWithdraw,
 } from '../services/lnurlWithdrawService';
-import { newPiggyId, savePiggy } from '../services/piggyStorageService';
+import { loadPiggies, newPiggyId, savePiggy } from '../services/piggyStorageService';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 import { encodeGeohash } from '../utils/geohash';
 import { buildCacheListing } from '../services/nostrPlacesService';
@@ -61,6 +62,10 @@ import { ExploreMiniMap } from '../components/ExploreMiniMap';
 
 interface Props {
   navigation: ExploreNavigation;
+  // Optional — when present, the wizard opens in edit mode for the
+  // matching local HiddenPiggy. Same screen, pre-filled state, re-emits
+  // the kind 37516 listing under the same `d` tag on save.
+  route?: RouteProp<ExploreStackParamList, 'HuntCreate'>;
 }
 
 type Stage =
@@ -71,10 +76,21 @@ type Stage =
   | { kind: 'writing-nfc' }
   | { kind: 'wrote-nfc' };
 
-const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
+const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { signEvent, relays } = useNostr();
+
+  // Edit-mode identity. When the route carries a `piggyId` we reuse it
+  // (and the original createdAt) on save so `savePiggy` overwrites the
+  // existing record AND the kind 37516 listing republished under the
+  // same `d` tag replaces the previous one on relays via NIP-33.
+  const editingId = route?.params?.piggyId ?? null;
+  const isEditMode = editingId !== null;
+  // Original createdAt is preserved across edits — the unix-seconds
+  // anchor for NIP-40 windows. Captured during the hydration effect
+  // below; null until then (and forever when creating fresh).
+  const originalCreatedAt = useRef<number | null>(null);
 
   const [lnurl, setLnurl] = useState('');
   const [isPublic, setIsPublic] = useState(false);
@@ -114,6 +130,95 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
   // someone supersedes it).
   const [expiryDays, setExpiryDays] = useState<'30' | '90' | '180' | '365' | 'never'>('365');
 
+  // Edit-mode hydration: load the matching HiddenPiggy on mount and
+  // seed every wizard field. We synthesise a `validated` Stage too so
+  // the LNURL step renders its "looks good" affordance straight away —
+  // editors don't need to re-paste the link they already vetted. The
+  // expiryDays picker is reverse-engineered from the saved window so
+  // the chip selection lines up with what the user originally picked.
+  useEffect(() => {
+    if (!editingId) return;
+    let cancelled = false;
+    loadPiggies().then((all) => {
+      if (cancelled) return;
+      const piggy = all.find((p) => p.id === editingId);
+      if (!piggy) {
+        Toast.show({
+          type: 'error',
+          text1: "Can't edit this Piglet",
+          text2: 'Local record missing — it may have been removed from this device.',
+        });
+        navigation.goBack();
+        return;
+      }
+      originalCreatedAt.current = piggy.createdAt;
+      setLnurl(piggy.lnurlw);
+      setIsPublic(piggy.isPublic);
+      setStage({
+        kind: 'validated',
+        params: {
+          // Synthesise the minimum LnurlWithdrawParams shape — only the
+          // two fields read by the save handler are required, and the
+          // editor isn't re-validating the LNURL unless they paste a
+          // new one (which resets stage back through `handleValidate`).
+          defaultDescription: piggy.lnurlDescription ?? '',
+          maxWithdrawable: piggy.maxWithdrawableMsat ?? 0,
+          minWithdrawable: 0,
+          callback: '',
+          k1: '',
+        },
+      });
+      setHintPhotoUrl(piggy.hintPhotoUrl ?? null);
+      setWaitMinutesText(
+        typeof piggy.waitSecondsHint === 'number'
+          ? String(Math.round(piggy.waitSecondsHint / 60))
+          : '',
+      );
+      setUsesText(typeof piggy.usesHint === 'number' ? String(piggy.usesHint) : '');
+      if (
+        typeof piggy.lat === 'number' &&
+        typeof piggy.lon === 'number' &&
+        typeof piggy.geohash === 'string'
+      ) {
+        setPin({ lat: piggy.lat, lon: piggy.lon, geohash: piggy.geohash });
+      }
+      setCacheName(piggy.name ?? '');
+      setCacheDescription(piggy.description ?? '');
+      setDifficulty(piggy.difficulty ?? 1);
+      setTerrain(piggy.terrain ?? 1);
+      setCacheSize(piggy.size ?? 'micro');
+      setCacheType(piggy.cacheType ?? 'traditional');
+      // Reverse-map expiresAt back to one of the picker chips. Falls
+      // back to 365d when the saved window doesn't match a preset.
+      if (typeof piggy.expiresAt !== 'number') {
+        // Pre-#21 records didn't persist expiresAt locally, but the
+        // publisher still stamped a 1y NIP-40 tag on the wire. Default
+        // the picker to 365d so re-save preserves the original
+        // intent; the user can flip to Never if they want to drop it.
+        setExpiryDays('365');
+      } else {
+        // Normalise units: createdAt is ms (Date.now()), expiresAt is
+        // unix-seconds. Same unit-mismatch trap as in republishPiggyService.
+        const window = piggy.expiresAt - Math.floor(piggy.createdAt / 1000);
+        const day = 24 * 60 * 60;
+        const closest =
+          [
+            { key: '30' as const, sec: 30 * day },
+            { key: '90' as const, sec: 90 * day },
+            { key: '180' as const, sec: 180 * day },
+            { key: '365' as const, sec: 365 * day },
+          ].reduce(
+            (best, opt) =>
+              Math.abs(opt.sec - window) < Math.abs(best.sec - window) ? opt : best,
+          ).key;
+        setExpiryDays(closest);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [editingId, navigation]);
+
   const handlePaste = useCallback(async () => {
     try {
       const v = await Clipboard.getStringAsync();
@@ -151,11 +256,16 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
       Number.isFinite(waitMinutes) && waitMinutes > 0 ? waitMinutes * 60 : undefined;
     const usesParsed = parseInt(usesText.trim(), 10);
     const usesHint = Number.isFinite(usesParsed) && usesParsed > 0 ? usesParsed : undefined;
+    // Preserve identity across an edit so `savePiggy` overwrites the
+    // existing record AND the relay-side kind 37516 listing replaces
+    // itself under the same `d` tag (NIP-33 addressable). createdAt
+    // stays anchored to the original hide moment so the My Piglets
+    // sort order doesn't reshuffle on every edit.
     const piggy = {
-      id: newPiggyId(),
+      id: editingId ?? newPiggyId(),
       lnurlw: lnurl.trim(),
       lnurlDescription: stage.params.defaultDescription ?? undefined,
-      createdAt: Date.now(),
+      createdAt: originalCreatedAt.current ?? Date.now(),
       isPublic,
       maxWithdrawableMsat: stage.params.maxWithdrawable,
       hintPhotoUrl: hintPhotoUrl ?? undefined,
@@ -184,7 +294,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
     };
     await savePiggy(piggy);
     setStage({ kind: 'saved', lnurlw: piggy.lnurlw });
-    Toast.show({ type: 'success', text1: 'Piggy hidden 🐷' });
+    Toast.show({ type: 'success', text1: isEditMode ? 'Piggy updated 🐷' : 'Piggy hidden 🐷' });
 
     // If the hider opted into Public, build + sign + publish the kind
     // 37516 NIP-GC listing with the com.lightningpiggy.app label. The LNURL itself
@@ -214,7 +324,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
         }
         const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
         await publishCacheEvent(signed, writeRelays.length > 0 ? writeRelays : undefined);
-        Toast.show({ type: 'success', text1: 'Piggy published 🐷', text2: 'Visible on Discover.' });
+        Toast.show({
+          type: 'success',
+          text1: isEditMode ? 'Piggy republished 🐷' : 'Piggy published 🐷',
+          text2: isEditMode ? 'Updated listing live on relays.' : 'Visible on Discover.',
+        });
       } catch (e) {
         Toast.show({
           type: 'error',
@@ -222,6 +336,13 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
           text2: (e as Error).message,
         });
       }
+    }
+    // After a successful edit we send the user back to where they came
+    // from (typically the Piggy detail screen). For fresh hides we
+    // stay on the saved-stage UI so the print/NFC steps remain
+    // reachable — those don't apply on re-edit.
+    if (isEditMode) {
+      navigation.goBack();
     }
   }, [
     stage,
@@ -237,6 +358,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
     terrain,
     cacheSize,
     cacheType,
+    expiryDays,
+    editingId,
+    isEditMode,
+    navigation,
     signEvent,
     relays,
   ]);
@@ -438,7 +563,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
         >
           <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Hide a Piglet</Text>
+        <Text style={styles.headerTitle}>{isEditMode ? 'Edit Piglet' : 'Hide a Piglet'}</Text>
         <View style={styles.headerRightSpacer} />
       </View>
 
