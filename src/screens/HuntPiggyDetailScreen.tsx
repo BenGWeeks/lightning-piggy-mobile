@@ -154,29 +154,18 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     },
     [],
   );
-  // openComposer route param defaults the composer open — HuntFoundScreen
-  // sends `openComposer: true` after a successful claim so the finder
-  // lands on the cache page with the log-entry sheet already up.
-  const [composerOpen, setComposerOpen] = useState(Boolean(openComposerParam));
-  // Honour the param on re-entry too — React Navigation may reuse the
-  // existing HuntPiggyDetailScreen instance when navigating back from
-  // HuntFoundScreen with new params, so useState's initial value isn't
-  // re-evaluated. This effect bridges the gap.
-  useEffect(() => {
-    if (openComposerParam) setComposerOpen(true);
-  }, [openComposerParam]);
-  // Scroll-to-composer on open — the composer sits below the find-log
-  // list, so on a tall cache the user would tap "Claim found" and see
-  // no visible change without scrolling. scrollToEnd is good enough
-  // since the composer is the last block in the ScrollView body.
+  // Composer is always rendered (no toggle) — sharing a find is
+  // independent of trying the LP prize. The route-param + scroll
+  // effect just nudges the page to the composer when navigation
+  // bounces back from HuntFoundScreen after a successful claim, so
+  // the finder lands on the input ready to type rather than at the
+  // top of a long cache page.
   const scrollRef = useRef<ScrollView>(null);
   useEffect(() => {
-    if (composerOpen) {
-      // Brief delay so the new composer block lays out before we scroll.
-      const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
-      return () => clearTimeout(t);
-    }
-  }, [composerOpen]);
+    if (!openComposerParam) return;
+    const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
+    return () => clearTimeout(t);
+  }, [openComposerParam]);
   const [composerText, setComposerText] = useState('');
   const [composerPhotoUrl, setComposerPhotoUrl] = useState<string | null>(null);
   const [composerUploading, setComposerUploading] = useState(false);
@@ -437,7 +426,8 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         return next;
       });
       Toast.show({ type: 'success', text1: 'Log posted ⚡' });
-      setComposerOpen(false);
+      // Composer stays mounted — just clear so the user could post
+      // another observation later in the same session.
       setComposerText('');
       setComposerPhotoUrl(null);
     } catch (e) {
@@ -627,31 +617,34 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                     </Text>
                   ) : null}
                 </TouchableOpacity>
-                {/* Primary action: opens the find-log composer. The
-                    composer itself offers a 'Try for the prize' button
-                    for LP Piggies (which runs the NFC scan + LNURLw
-                    claim), so a finder can both share their note AND
-                    take a shot at the sats from the same place. The
-                    NFC icon on LP Piggies signals that this cache has
-                    a Lightning prize attached. */}
-                <TouchableOpacity
-                  style={styles.actionButtonPrimary}
-                  onPress={() => setComposerOpen(true)}
-                  accessibilityLabel="Log your find for other hunters"
-                  testID="hunt-piggy-detail-claim-button"
-                >
-                  {cache.isLpPiggy ? (
-                    <Nfc size={18} color={colors.white} strokeWidth={2.5} />
-                  ) : (
-                    <Sparkles size={18} color={colors.white} strokeWidth={2.5} />
-                  )}
-                  <Text style={styles.actionButtonPrimaryText}>Log your find</Text>
-                </TouchableOpacity>
+                {/* Primary action shows for LP Piggies only — opens the
+                    NfcReadSheet to try the Lightning prize. The
+                    find-log composer is independently available at the
+                    bottom of this screen (always rendered), so the two
+                    flows don't bundle: a finder can claim sats without
+                    logging, or log without claiming. */}
+                {cache.isLpPiggy ? (
+                  <TouchableOpacity
+                    style={styles.actionButtonPrimary}
+                    onPress={() => setReadSheetOpen(true)}
+                    accessibilityLabel={
+                      hasClaimed
+                        ? 'Try the prize again — scan the Piglet'
+                        : 'Try the prize — scan the Piglet'
+                    }
+                    testID="hunt-piggy-detail-try-prize-button"
+                  >
+                    <Gift size={18} color={colors.white} strokeWidth={2.5} />
+                    <Text style={styles.actionButtonPrimaryText}>
+                      {hasClaimed ? 'Try again' : 'Try prize'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
               </View>
               <Text style={styles.claimNote}>
                 {cache.isLpPiggy
-                  ? 'Tap Log your find to share your find — and try for the sats prize while you compose.'
-                  : 'Tap Log your find to share your find with other hunters.'}
+                  ? 'Try the sats prize above, and share your find in the log below — both are optional.'
+                  : 'Scroll down to share your find with other hunters.'}
               </Text>
             </View>
 
@@ -706,19 +699,12 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               ))
             )}
 
-            {canLog && !composerOpen ? (
-              <TouchableOpacity
-                style={styles.composeCta}
-                onPress={() => setComposerOpen(true)}
-                testID="hunt-piggy-detail-compose-button"
-              >
-                <Sparkles size={16} color={colors.white} strokeWidth={2.5} />
-                <Text style={styles.composeCtaText}>Drop a log entry</Text>
-              </TouchableOpacity>
-            ) : null}
-
-            {composerOpen ? (
+            {/* Always-visible find-log composer at the bottom of the
+                screen — no toggle, no Cancel button. Sharing a find is
+                an independent action from claiming the LP prize. */}
+            {canLog ? (
               <View style={styles.composer}>
+                <Text style={styles.composerHeader}>Share your find</Text>
                 <TextInput
                   style={styles.composerInput}
                   placeholder="Found it! Tucked behind the bench, cleverly hidden."
@@ -760,35 +746,9 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                     </TouchableOpacity>
                   </View>
                 )}
-                {/* For LP Piggies, surface the prize-claim affordance
-                    inside the composer — composing a find-log and
-                    trying the LNURLw are independent acts that can
-                    happen in the same session. The button text shifts
-                    once they've already claimed within local history,
-                    so a returning finder sees 'Try again' rather than
-                    a stale 'Try for the prize'. The actual cooldown /
-                    max-uses are enforced by the LNURLw server-side. */}
-                {cache.isLpPiggy ? (
-                  <TouchableOpacity
-                    style={styles.composerPrizeButton}
-                    onPress={() => setReadSheetOpen(true)}
-                    testID="hunt-piggy-detail-try-prize-button"
-                  >
-                    <Gift size={16} color={colors.brandPink} strokeWidth={2.5} />
-                    <Text style={styles.composerPrizeButtonText}>
-                      {hasClaimed ? 'Try for the prize again' : 'Try for the prize'}
-                    </Text>
-                  </TouchableOpacity>
-                ) : null}
                 <View style={styles.composerActions}>
                   <TouchableOpacity
-                    style={styles.composerCancel}
-                    onPress={() => setComposerOpen(false)}
-                  >
-                    <Text style={styles.composerCancelText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.composerPost, posting && styles.composerPostDim]}
+                    style={[styles.composerPost, styles.composerPostFull, posting && styles.composerPostDim]}
                     disabled={posting}
                     onPress={handlePostLog}
                     testID="hunt-piggy-detail-post-button"
@@ -1549,17 +1509,6 @@ const createStyles = (colors: Palette) =>
       letterSpacing: 0.5,
       marginTop: 12,
     },
-    composeCta: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-      backgroundColor: colors.brandPink,
-      paddingVertical: 14,
-      borderRadius: 100,
-      marginTop: 12,
-    },
-    composeCtaText: { color: colors.white, fontSize: 14, fontWeight: '700' },
     composer: {
       backgroundColor: colors.surface,
       borderRadius: 12,
@@ -1605,31 +1554,13 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.brandPinkLight,
     },
     composerPhotoButtonText: { color: colors.brandPink, fontSize: 13, fontWeight: '700' },
-    composerActions: { flexDirection: 'row', gap: 8 },
-    composerPrizeButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-      paddingVertical: 10,
-      paddingHorizontal: 14,
-      borderRadius: 10,
-      borderWidth: 1.5,
-      borderColor: colors.brandPink,
-      backgroundColor: colors.brandPinkLight,
-    },
-    composerPrizeButtonText: {
-      color: colors.brandPink,
-      fontSize: 14,
+    composerHeader: {
+      fontSize: 13,
       fontWeight: '700',
+      color: colors.textSupplementary,
+      marginBottom: 6,
     },
-    composerCancel: {
-      paddingHorizontal: 16,
-      paddingVertical: 10,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    composerCancelText: { color: colors.textSupplementary, fontSize: 14, fontWeight: '700' },
+    composerActions: { flexDirection: 'row', gap: 8 },
     composerPost: {
       flex: 1,
       flexDirection: 'row',
@@ -1640,6 +1571,9 @@ const createStyles = (colors: Palette) =>
       paddingVertical: 12,
       borderRadius: 100,
     },
+    // Always-on composer no longer has a Cancel button alongside Post,
+    // so Post takes the full width of the actions row.
+    composerPostFull: { flex: 1 },
     composerPostDim: { opacity: 0.6 },
     composerPostText: { color: colors.white, fontSize: 14, fontWeight: '700' },
     logRow: {
