@@ -485,7 +485,15 @@ export async function payInvoice(
       const paymentHash = extractPaymentHash(bolt11);
       if (paymentHash) {
         try {
-          const lookup = await provider.lookupInvoice({ paymentHash });
+          // 2500 ms ceiling — this is a pre-flight check before a
+          // retry. A slow relay shouldn't block the retry; if the
+          // wallet really has paid, the duplicate-payment guard in
+          // the wallet itself catches it on the second attempt.
+          const lookup = await withTimeout(
+            provider.lookupInvoice({ paymentHash }),
+            2500,
+            `lookupInvoice(${walletId})`,
+          );
           if (lookup?.preimage) {
             console.log('[NWC] Invoice already paid — returning existing preimage');
             return { preimage: lookup.preimage };
@@ -527,8 +535,18 @@ export async function payInvoice(
           // `abortable` lets Cancel win the race even while the SDK is
           // blocked inside lookupInvoice's own NIP-47 round-trip; the
           // underlying promise completes in the background and its
-          // result is discarded.
-          const lookup = await abortable(provider.lookupInvoice({ paymentHash }), signal);
+          // result is discarded. 5000 ms cap on the SDK call itself so
+          // a slow relay doesn't pin the 5 s sleep + ~10 s SDK default
+          // into a 15 s effective tick — recipients had been seeing
+          // payments land before our app marked them paid (#553).
+          const lookup = await abortable(
+            withTimeout(
+              provider.lookupInvoice({ paymentHash }),
+              5000,
+              `lookupInvoice(${walletId})`,
+            ),
+            signal,
+          );
           if (lookup?.preimage) {
             console.log('[NWC] Payment completed after timeout:', paymentHash);
             return { preimage: lookup.preimage };
@@ -556,7 +574,14 @@ export async function payInvoice(
       const paymentHash = extractPaymentHash(bolt11);
       if (paymentHash) {
         try {
-          const lookup = await provider.lookupInvoice({ paymentHash });
+          // 2500 ms cap — this is a one-shot disambiguation, not a
+          // poll loop, but a stalled relay reply here delays surfacing
+          // the real error to the user. Mirror the receive-side ceiling.
+          const lookup = await withTimeout(
+            provider.lookupInvoice({ paymentHash }),
+            2500,
+            `lookupInvoice(${walletId})`,
+          );
           if (lookup?.paid && lookup.preimage) {
             // `warn` (not `log`) so this survives the production
             // `transform-remove-console` strip — without it field logs
@@ -746,16 +771,38 @@ function isTerminalLookupError(error: unknown): boolean {
 // `paid` relies on `settled_at` (a non-zero timestamp when the invoice
 // was paid). `preimage` alone isn't a safe signal — some backends
 // pre-populate it or return a placeholder while unsettled.
+export interface LookupInvoiceOptions {
+  /**
+   * Per-call ceiling for the underlying NIP-47 round trip. When unset,
+   * defers to the SDK's own ~10 s `replyTimeout`. When set, a timed-out
+   * call fails fast so the caller's next poll tick can race a fresh
+   * request rather than waiting on a slow reply.
+   *
+   * Passed by both settlement-detection callers: the receive-side
+   * `expectPayment` poll in `WalletContext` (1 s ticks, 2500 ms cap
+   * mirrors the sibling `getBalance` ceiling) and the send-side
+   * post-reply-timeout poll here in `nwcService.payInvoice` (5 s
+   * ticks, 5000 ms cap). Without this, a slow relay reply blocked
+   * the pile-up-guarded tick for the SDK's full default — recipients
+   * saw the payment land before our app marked it paid (#553).
+   */
+  replyTimeoutMs?: number;
+}
+
 export async function lookupInvoice(
   walletId: string,
   paymentHash: string,
+  options: LookupInvoiceOptions = {},
 ): Promise<{ preimage?: string; invoice?: string; paid: boolean } | null> {
   if (!isValidPaymentHash(paymentHash)) return null;
   if (hasFailedLookup(walletId, paymentHash)) return null;
   const provider = await ensureConnected(walletId);
   if (!provider) return null;
   try {
-    const result = (await provider.lookupInvoice({ paymentHash })) as {
+    const call = provider.lookupInvoice({ paymentHash });
+    const result = (await (options.replyTimeoutMs !== undefined
+      ? withTimeout(call, options.replyTimeoutMs, `lookupInvoice(${walletId})`)
+      : call)) as {
       preimage?: string;
       invoice?: string;
       settled_at?: number;
