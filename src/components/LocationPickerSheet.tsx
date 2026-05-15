@@ -56,15 +56,23 @@ const LocationPickerSheet: React.FC<Props> = ({
   const startZoom = initialLat !== null ? 16 : 5;
 
   // Live pin position reported by the WebView. Seeded with the start
-  // coordinate so "Use this location" works even before the first drag.
+  // coordinate so the marker has somewhere to sit; whether the user has
+  // actually *chosen* it is tracked separately below.
   const [picked, setPicked] = useState<{ lat: number; lon: number }>({
     lat: startLat,
     lon: startLon,
   });
+  // `picked` always has a value (the marker has to render somewhere), so
+  // we need a second flag to know whether the user has affirmed it. When
+  // the caller passed a real initialLat/Lon (i.e. we're editing an
+  // existing pin), treat that as already-chosen.
+  const hasInitialPin = initialLat !== null && initialLon !== null;
+  const [userMoved, setUserMoved] = useState<boolean>(hasInitialPin);
 
   useEffect(() => {
     if (visible) {
       setPicked({ lat: startLat, lon: startLon });
+      setUserMoved(hasInitialPin);
       sheetRef.current?.present();
     } else {
       sheetRef.current?.dismiss();
@@ -130,6 +138,10 @@ const LocationPickerSheet: React.FC<Props> = ({
                   typeof msg.lon === 'number'
                 ) {
                   setPicked({ lat: msg.lat, lon: msg.lon });
+                  // Only count drag-end / tap as user intent — the
+                  // map's initial emit on load is just reporting the
+                  // marker's default seat, not a choice.
+                  if (msg.userMoved) setUserMoved(true);
                 }
               } catch {
                 // Ignore malformed bridge messages.
@@ -141,16 +153,22 @@ const LocationPickerSheet: React.FC<Props> = ({
 
         <View style={styles.coordRow}>
           <MapPin size={16} color={colors.brandPink} strokeWidth={2.5} />
-          <Text style={styles.coordText} testID="location-picker-coord">
-            {picked.lat.toFixed(5)}, {picked.lon.toFixed(5)}
-          </Text>
+          {userMoved ? (
+            <Text style={styles.coordText} testID="location-picker-coord">
+              {picked.lat.toFixed(5)}, {picked.lon.toFixed(5)}
+            </Text>
+          ) : (
+            <Text style={styles.coordPlaceholder}>Tap or drag the pin to mark a location</Text>
+          )}
         </View>
 
         <TouchableOpacity
-          style={styles.confirmButton}
+          style={[styles.confirmButton, !userMoved && styles.confirmButtonDisabled]}
           onPress={handleConfirm}
+          disabled={!userMoved}
           testID="location-picker-confirm"
           accessibilityLabel="Use this location"
+          accessibilityState={{ disabled: !userMoved }}
         >
           <Check size={18} color={colors.white} strokeWidth={2.5} />
           <Text style={styles.confirmButtonText}>Use this location</Text>
@@ -160,9 +178,12 @@ const LocationPickerSheet: React.FC<Props> = ({
   );
 };
 
-// Leaflet HTML with a single draggable marker. Posts `{type:'pin',lat,lon}`
-// on drag-end and on map tap (tap moves the marker). Mirrors the pin
-// language of ExploreMiniMap / MapScreen.
+// Leaflet HTML with a single draggable marker. Posts `{type:'pin',lat,
+// lon,userMoved}` on every change. `userMoved` is false on the initial
+// post (just reporting the marker's default seat) and true after the
+// user drags it or taps the map — RN uses that to decide whether to
+// show "Tap or drag…" or the coords. Mirrors the pin language of
+// ExploreMiniMap / MapScreen.
 const makeHtml = (lat: number, lon: number, zoom: number): string => `<!DOCTYPE html>
 <html>
 <head>
@@ -184,11 +205,11 @@ const makeHtml = (lat: number, lon: number, zoom: number): string => `<!DOCTYPE 
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
   const icon=L.divIcon({className:'',html:'<div class="lp-drop"></div>',iconSize:[20,20],iconAnchor:[10,10]});
   const marker=L.marker([${lat},${lon}],{icon:icon,draggable:true}).addTo(map);
-  const emit=()=>{const p=marker.getLatLng();post({type:'pin',lat:p.lat,lon:p.lng});};
-  marker.on('dragend',emit);
-  map.on('click',(e)=>{marker.setLatLng(e.latlng);emit();});
+  const emit=(userMoved)=>{const p=marker.getLatLng();post({type:'pin',lat:p.lat,lon:p.lng,userMoved:!!userMoved});};
+  marker.on('dragend',()=>emit(true));
+  map.on('click',(e)=>{marker.setLatLng(e.latlng);emit(true);});
   post({type:'ready'});
-  emit();
+  emit(false);
 </script>
 </body></html>`;
 
@@ -235,6 +256,11 @@ const createStyles = (colors: Palette) =>
       fontWeight: '600',
       color: colors.textHeader,
     },
+    coordPlaceholder: {
+      fontSize: 13,
+      fontStyle: 'italic',
+      color: colors.textSupplementary,
+    },
     confirmButton: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -244,6 +270,7 @@ const createStyles = (colors: Palette) =>
       borderRadius: 100,
       paddingVertical: 14,
     },
+    confirmButtonDisabled: { opacity: 0.4 },
     confirmButtonText: { color: colors.white, fontSize: 15, fontWeight: '800' },
   });
 

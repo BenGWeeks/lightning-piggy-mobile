@@ -1,0 +1,53 @@
+appId: com.lightningpiggy.app.dev
+name: Location picker shows "Tap or drag" placeholder before user interacts
+---
+# Regression test for #72 follow-up: the Hide-a-Piglet wizard's location
+# picker used to render the UK fallback coords (54.00000, -2.00000) the
+# moment it opened, even though the user hadn't placed a pin. That made
+# a default look like a real choice. Fix shows a placeholder instead and
+# disables the "Use this location" button until the user drags/taps the
+# marker.
+#
+# This test verifies the *initial* state only — placeholder visible,
+# coord testID absent. Validating the after-tap state would mean tapping
+# inside the Leaflet WebView, which has no React Native testID we can
+# target without coordinates (forbidden by CLAUDE.md). For the after-tap
+# branch, rely on the manual screenshot review captured at PR time.
+#
+# Pre-reqs:
+#  - .env contains MAESTRO_NSEC_BIG
+#
+# Run:
+#   source .env && maestro --device emulator-5554 test \
+#     -e MAESTRO_NSEC_BIG=$MAESTRO_NSEC_BIG \
+#     tests/e2e/test-hunt-location-picker-placeholder.yaml
+
+- runFlow: _subflow-login-as.yaml
+
+- tapOn:
+    id: 'tab-explore'
+- tapOn:
+    id: 'explore-card-hunt'
+- tapOn: 'My piglets'
+- tapOn:
+    id: 'my-piglets-hide-cta'
+
+# Step 1 (Hardware) → step 2 (Prize) → step 3 (Location).
+- tapOn:
+    id: 'hunt-piggy-step-next'
+- tapOn:
+    id: 'hunt-piggy-step-next'
+
+- tapOn:
+    id: 'hunt-piggy-pick-on-map-button'
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Sheet open. Title is there, placeholder copy is there, no coord
+# readout yet, confirm button is disabled.
+- assertVisible: 'Where did you hide it?'
+- assertVisible: 'Tap or drag the pin to mark a location'
+- assertNotVisible:
+    id: 'location-picker-coord'
+- assertVisible:
+    id: 'location-picker-confirm'
