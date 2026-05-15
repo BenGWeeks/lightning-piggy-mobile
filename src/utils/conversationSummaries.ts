@@ -183,11 +183,19 @@ const DM_PREVIEW_PREFERENCE_WINDOW_SEC = 5 * 60;
 
 /**
  * Bucket DM entries by partner pubkey and reduce to one ConversationSummary
- * per partner. The caller passes the viewer's followed pubkeys (lowercase)
- * as a safety net: even though refreshDmInbox already filters at the data
- * layer, rebuilding the list after a contact is un-followed should also
- * drop them here — the "Following only" rule is a render-time invariant,
- * not just a fetch-time one.
+ * per partner. `trustedPubkeys` (formerly `followPubkeys`, kept on the
+ * parameter name for diff churn but the semantics have widened) is the
+ * lowercase-hex trust set the caller wants to enforce here as a render-
+ * time safety net: even though `refreshDmInbox` already filters at the
+ * data layer, rebuilding the list after a contact leaves the tier should
+ * also drop them here.
+ *
+ * Since #547 callers pass a **tier-aware trust set** (friends / fof /
+ * all), not just the L1 follow list it used to be. So `trustedPubkeys`
+ * may legitimately include friends-of-follows / seeds / the viewer
+ * themself depending on the current `wotTier`. The contract is the
+ * same — pubkeys present in the set pass the filter — but don't
+ * assume the contents are limited to direct follows.
  *
  * When a partner has both a NIP-04 and a NIP-17 message within
  * DUAL_PUBLISH_WINDOW_SEC we always pick the NIP-17 copy regardless of

@@ -6,7 +6,7 @@
 // Mapping rules (per the issue's "AsyncStorage migration" acceptance):
 //   followingOnly=true                       → 'friends'  (current default)
 //   followingOnly=false && secretMode=true   → 'all'      (existing dev escape hatch)
-//   anything else (incl. null / undefined)   → 'friends'  (safe default)
+//   anything else (incl. null)               → 'friends'  (safe default)
 
 import type { WotTier } from '../services/wotSettingsService';
 

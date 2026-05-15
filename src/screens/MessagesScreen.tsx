@@ -75,7 +75,14 @@ const MessagesScreen: React.FC = () => {
   } = useNostr();
   const { wallets } = useWallet();
   const { groupSummaries, effectiveWotTier } = useGroups();
-  const { trustSet } = useTrustGraph();
+  // `trustSetForTier` rather than the raw `trustSet` so the screen's
+  // defensive trust filter is computed against `effectiveWotTier`. The
+  // persisted `wotTier` can be 'all' while the hard-lock clamps the
+  // effective tier back to 'friends' (secretMode off) — if we evaluated
+  // against the persisted set, the L2 entries would still be included
+  // and the filter would no-op past the parental-control gate (#547
+  // follow-up).
+  const { trustSetForTier } = useTrustGraph();
   // WoT bottom-sheet visibility — opened from the chip in the filter row.
   // Mirrors MapScreen's setWotSheetVisible pattern (#547).
   const [wotSheetVisible, setWotSheetVisible] = useState(false);
@@ -274,7 +281,7 @@ const MessagesScreen: React.FC = () => {
   // Kept named `followPubkeys` so the downstream call-sites stay diff-clean
   // — the *semantics* widened from "raw follow list" to "tier-aware trust
   // set" but every existing predicate (Set.has) still applies unchanged.
-  const followPubkeys = trustSet;
+  const followPubkeys = trustSetForTier(effectiveWotTier);
 
   // Single pubkey → ContactInfo lookup for the screen, shared by every
   // row + handler. Three previously-separate `contacts.find()` paths
@@ -578,10 +585,7 @@ const MessagesScreen: React.FC = () => {
               testID="messages-wot-chip"
             />
             {/* Hidden marker for Maestro so flows can assert the active tier without parsing the chip label. Mirrors messages-zaps-toggle-on/off below. */}
-            <View
-              testID={`messages-wot-tier-${effectiveWotTier}`}
-              accessibilityElementsHidden
-            />
+            <View testID={`messages-wot-tier-${effectiveWotTier}`} accessibilityElementsHidden />
 
             <TouchableOpacity
               style={styles.filterChipInteractive}
@@ -703,10 +707,7 @@ const MessagesScreen: React.FC = () => {
         }}
       />
 
-      <WebOfTrustBottomSheet
-        visible={wotSheetVisible}
-        onClose={() => setWotSheetVisible(false)}
-      />
+      <WebOfTrustBottomSheet visible={wotSheetVisible} onClose={() => setWotSheetVisible(false)} />
     </View>
   );
 };

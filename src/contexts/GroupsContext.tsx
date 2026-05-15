@@ -49,15 +49,19 @@ interface GroupsContextType {
    * default — see `followingOnly` / `setFollowingOnly`.
    */
   visibleGroups: Group[];
-  // @deprecated Since #547 the messages + groups filter is driven by the
-  // three-tier `wotTier` in TrustGraphContext, not this boolean. Kept
-  // exposed for the migration window so any external consumer doesn't
-  // crash — derived from `effectiveWotTier !== 'all'`. New code should
-  // read `effectiveWotTier` (or `useTrustGraph().wotTier`) directly.
+  /**
+   * @deprecated Since #547 the messages + groups filter is driven by the
+   * three-tier `wotTier` in TrustGraphContext, not this boolean. Kept
+   * exposed for the migration window so any external consumer doesn't
+   * crash — derived from `effectiveWotTier !== 'all'`. New code should
+   * read `effectiveWotTier` (or `useTrustGraph().wotTier`) directly.
+   */
   followingOnly: boolean;
-  // @deprecated See `followingOnly`. Setting this maps onto `setWotTier`:
-  // true → 'friends', false → 'all' (clamped to 'friends' when not in
-  // secret mode, matching the production hard-lock).
+  /**
+   * @deprecated See `followingOnly`. Setting this maps onto `setWotTier`:
+   * true → 'friends', false → 'all' (clamped to 'friends' when not in
+   * secret mode, matching the production hard-lock).
+   */
   setFollowingOnly: (next: boolean) => void;
   // Effective WoT tier after the production hard-lock has been applied.
   // Mirrors the persisted `wotTier` from TrustGraphContext except that
@@ -165,7 +169,12 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Tier source-of-truth lives in TrustGraphContext (#547). We read it here
   // so visibleGroups can apply the same trust filter the Map / Hunt / Events
   // surfaces use — keeping the three-tier model unified across the app.
-  const { wotTier, setWotTier, isTrusted } = useTrustGraph();
+  // `isTrustedAtTier` (not `isTrusted`) so the `visibleGroups` filter
+  // evaluates against `effectiveWotTier`. Otherwise a persisted 'all'
+  // would short-circuit `isTrusted` even when the hard-lock clamps to
+  // 'friends' (secretMode off), letting hidden groups leak past the
+  // parental-control gate (#547 follow-up).
+  const { wotTier, setWotTier, isTrustedAtTier } = useTrustGraph();
   // Per-group activity rollup (last message + recent senders). Populated
   // on mount from AsyncStorage and kept fresh by the inbound-message
   // listener below + a local hook from GroupConversationScreen sends.
@@ -237,6 +246,16 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Map-side preference isn't stomped). Mirrors the dev_mode → secret_mode
   // migration pattern just above.
   useEffect(() => {
+    // The migration reads a *per-account-scoped* key
+    // (`perAccountKey(FOLLOWING_ONLY_KEY_BASE, pubkey)`). When the
+    // provider mounts before identity hydration `pubkey` is still
+    // null/undefined and `perAccountKey` would fall back to the un-
+    // namespaced base key, potentially missing the real legacy value
+    // and persisting `WOT_MIGRATION_DONE_KEY=true` before the actual
+    // per-account legacy slot is reachable — permanently locking the
+    // user into the safe default. Wait for hydration first; the effect
+    // re-runs when `pubkey` lands.
+    if (!pubkey) return;
     (async () => {
       const done = await AsyncStorage.getItem(WOT_MIGRATION_DONE_KEY);
       if (done === 'true') return;
@@ -411,8 +430,10 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // in-depth rule the 1:1 DM gate uses inside MessagesScreen.
   const visibleGroups = useMemo(() => {
     if (effectiveWotTier === 'all') return groups;
-    return groups.filter((g) => g.memberPubkeys.some((pk) => isTrusted(pk)));
-  }, [groups, effectiveWotTier, isTrusted]);
+    return groups.filter((g) =>
+      g.memberPubkeys.some((pk) => isTrustedAtTier(effectiveWotTier, pk)),
+    );
+  }, [groups, effectiveWotTier, isTrustedAtTier]);
 
   // Synchronous mirror of the `groups` state used as the read source
   // for `persist` so concurrent mutators serialise correctly without
