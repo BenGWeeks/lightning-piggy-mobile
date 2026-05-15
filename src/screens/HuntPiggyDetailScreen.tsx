@@ -27,12 +27,10 @@ import {
   MapPin,
   Navigation,
   Navigation2,
-  Nfc,
   PiggyBank,
   Repeat,
   Send,
   Gift,
-  Sparkles,
   User,
   X,
   Zap,
@@ -194,7 +192,6 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     },
     [],
   );
-  const [hasClaimed, setHasClaimed] = useState(false);
   // Finder NFC reader sheet — opens on "Scan the Piglet" tap. The sheet
   // owns its own foreground reader session; on a successful read we
   // navigate to HuntFoundScreen with the extracted LNURL, which is what
@@ -324,26 +321,6 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     });
     return () => closer();
   }, [logIdsKey]);
-
-  // ----- claim-history check (drives the post-find compose CTA) ----------
-
-  useEffect(() => {
-    if (!cache?.isLpPiggy) return;
-    let cancelled = false;
-    // hasClaimed is a sticky proof-of-presence signal: once the user
-    // has successfully claimed this Piggy at least once, the find-log
-    // composer stays unlocked forever — they can post as many logs as
-    // they like on subsequent visits without re-scanning. The
-    // LNURLw issuer enforces its own per-claim cooldown / max-uses
-    // server-side, so the app doesn't double-gate.
-    (async () => {
-      const recent = await lastClaimForPiggyId(coord);
-      if (!cancelled && recent) setHasClaimed(true);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [cache, coord]);
 
   // ----- composer image picker -------------------------------------------
 
@@ -627,17 +604,11 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   <TouchableOpacity
                     style={styles.actionButtonPrimary}
                     onPress={() => setReadSheetOpen(true)}
-                    accessibilityLabel={
-                      hasClaimed
-                        ? 'Try the prize again — scan the Piglet'
-                        : 'Try the prize — scan the Piglet'
-                    }
+                    accessibilityLabel="Try the prize — scan the Piglet"
                     testID="hunt-piggy-detail-try-prize-button"
                   >
                     <Gift size={18} color={colors.white} strokeWidth={2.5} />
-                    <Text style={styles.actionButtonPrimaryText}>
-                      {hasClaimed ? 'Try again' : 'Try prize'}
-                    </Text>
+                    <Text style={styles.actionButtonPrimaryText}>Try prize</Text>
                   </TouchableOpacity>
                 ) : null}
               </View>
