@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -158,6 +158,25 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   // sends `openComposer: true` after a successful claim so the finder
   // lands on the cache page with the log-entry sheet already up.
   const [composerOpen, setComposerOpen] = useState(Boolean(openComposerParam));
+  // Honour the param on re-entry too — React Navigation may reuse the
+  // existing HuntPiggyDetailScreen instance when navigating back from
+  // HuntFoundScreen with new params, so useState's initial value isn't
+  // re-evaluated. This effect bridges the gap.
+  useEffect(() => {
+    if (openComposerParam) setComposerOpen(true);
+  }, [openComposerParam]);
+  // Scroll-to-composer on open — the composer sits below the find-log
+  // list, so on a tall cache the user would tap "Claim found" and see
+  // no visible change without scrolling. scrollToEnd is good enough
+  // since the composer is the last block in the ScrollView body.
+  const scrollRef = useRef<ScrollView>(null);
+  useEffect(() => {
+    if (composerOpen) {
+      // Brief delay so the new composer block lays out before we scroll.
+      const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
+      return () => clearTimeout(t);
+    }
+  }, [composerOpen]);
   const [composerText, setComposerText] = useState('');
   const [composerPhotoUrl, setComposerPhotoUrl] = useState<string | null>(null);
   const [composerUploading, setComposerUploading] = useState(false);
@@ -505,7 +524,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         )}
       </View>
 
-      <ScrollView contentContainerStyle={styles.body}>
+      <ScrollView ref={scrollRef} contentContainerStyle={styles.body}>
         {loading ? (
           <ActivityIndicator color={colors.brandPink} />
         ) : error ? (
