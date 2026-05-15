@@ -48,12 +48,17 @@ const RELAYS = [
 
 const now = Math.floor(Date.now() / 1000);
 
-// Kind 5 deletion request (NIP-09).
+// Kind 5 deletion request (NIP-09). For parameterized-replaceable
+// events (NIP-33 / kind 30000-39999, which includes 37516), the spec
+// asks for an `a` tag at the addressable coord — that retracts every
+// version of the listing, not just one event id. We include `e` too
+// for relays that only honour event-id deletions.
 const deletion = finalizeEvent(
   {
     kind: 5,
     created_at: now,
     tags: [
+      ['a', `37516:${pk}:${dTag}`],
       ['e', eventId],
       ['k', '37516'],
     ],
