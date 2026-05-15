@@ -575,7 +575,10 @@ const createStyles = (colors: Palette) =>
       justifyContent: 'center',
     },
     iconLp: { backgroundColor: colors.brandPink },
-    iconStandard: { backgroundColor: colors.textSupplementary },
+    // Brand violet for NIP-GC caches — matches the new map pin (and
+    // every other surface). Was textSupplementary (slate) which read
+    // as "muted/disabled" and clashed with the now-coloured map pin.
+    iconStandard: { backgroundColor: '#7A5CFF' },
     iconContainer: { position: 'relative' },
     payoutBadge: {
       position: 'absolute',
