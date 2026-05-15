@@ -12,7 +12,12 @@ import { InteractionManager } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { LRUCache } from '../utils/lru';
-import { evictNip17CacheOverflow, touchNip17CacheEntry } from '../utils/nip17Cache';
+import {
+  evictNip17CacheBytes,
+  evictNip17CacheOverflow,
+  touchNip17CacheEntry,
+} from '../utils/nip17Cache';
+import { utf8ByteSize } from '../utils/byteSize';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
@@ -319,12 +324,16 @@ async function writeNip17Cache(
   cache: Record<string, Nip17CacheEntry>,
 ): Promise<number> {
   const evicted = evictNip17CacheOverflow(cache, NIP17_CACHE_CAP);
+  // Byte cap on top of the count cap — a row past Android's ~2 MB
+  // SQLite CursorWindow throws on *read*, silently breaking this
+  // fast-path cache and forcing a full cold-start restream.
+  const evictedBytes = evictNip17CacheBytes(cache, DM_CACHE_MAX_BYTES);
   try {
     await AsyncStorage.setItem(storageKey, JSON.stringify(cache));
   } catch (err) {
     console.warn(`[Nostr] NIP-17 cache write failed (${storageKey}):`, err);
   }
-  return evicted;
+  return evicted + evictedBytes;
 }
 
 /** Yield to the JS event loop so UI interactions can tick between
@@ -507,6 +516,13 @@ const DM_CONV_CACHE_PREFIX = 'nostr_dm_conv_v1_';
 const DM_CONV_LAST_SEEN_PREFIX = 'nostr_dm_conv_last_seen_v1_';
 const DM_INBOX_CAP = 1000;
 const DM_CONV_CAP = 500;
+// Hard byte ceiling for a single DM cache row. Android's SQLite
+// CursorWindow caps a row at ~2 MB — past it the *read* throws
+// SQLiteBlobTooBigException, the cache silently fails to hydrate, and
+// every cold start falls back to a full relay restream + NIP-17
+// re-decrypt (a ~70s JS-thread stall). The count caps above aren't
+// enough when messages are long, so the merge fns trim by size too.
+const DM_CACHE_MAX_BYTES = 1_500_000;
 
 function inboxCacheKey(user: string) {
   return DM_INBOX_CACHE_PREFIX + user;
@@ -519,6 +535,25 @@ function convCacheKey(user: string, peer: string) {
 }
 function convLastSeenKey(user: string, peer: string) {
   return DM_CONV_LAST_SEEN_PREFIX + user + '_' + peer;
+}
+
+/**
+ * Read a DM-cache row, treating an unreadable row as empty. Android's
+ * SQLite CursorWindow caps a row at ~2 MB; a row past that throws
+ * `SQLiteBlobTooBigException` on read. Without this guard the throw
+ * aborts the whole refresh/fetch before the write-side byte cap can
+ * rewrite a smaller row — so an already-oversized row would never
+ * self-heal. Catching it (and dropping the poisoned key) lets the next
+ * relay restream repopulate a byte-capped row.
+ */
+async function safeGetDmCacheItem(key: string): Promise<string | null> {
+  try {
+    return await AsyncStorage.getItem(key);
+  } catch (err) {
+    console.warn(`[Nostr] DM cache row unreadable — dropping ${key}:`, err);
+    AsyncStorage.removeItem(key).catch(() => {});
+    return null;
+  }
 }
 
 /** Read the persisted DM inbox for a user. Used during session restore /
@@ -534,7 +569,7 @@ function convLastSeenKey(user: string, peer: string) {
  * more than the brief render window before that re-filter happens. */
 async function loadDmInboxFromCache(pubkey: string): Promise<DmInboxEntry[]> {
   try {
-    const raw = await AsyncStorage.getItem(inboxCacheKey(pubkey));
+    const raw = await safeGetDmCacheItem(inboxCacheKey(pubkey));
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
@@ -569,7 +604,17 @@ function mergeInboxEntries(
   for (const e of cached) map.set(dedupKey(e), e);
   for (const e of fresh) map.set(dedupKey(e), e);
   const all = Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
-  return all.slice(0, cap);
+  let result = all.slice(0, cap);
+  // Byte guard (see DM_CACHE_MAX_BYTES) — sorted newest-first, so drop
+  // from the tail (oldest). `> 0` not `> 1` so a single over-budget
+  // entry still goes rather than persisting an unreadable row;
+  // `Math.max(1, …)` guarantees forward progress (a 0.1 factor rounds
+  // to 0 for tiny arrays, which would spin forever).
+  while (result.length > 0 && utf8ByteSize(JSON.stringify(result)) > DM_CACHE_MAX_BYTES) {
+    const drop = Math.max(1, Math.floor(result.length * 0.1));
+    result = result.slice(0, result.length - drop);
+  }
+  return result;
 }
 
 // Window in seconds to match a fresh real-id message against a pending
@@ -610,9 +655,16 @@ function mergeConversationMessages(
     map.set(m.id, m);
   }
   const all = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
-  if (all.length <= cap) return all;
   // Keep the newest DM_CONV_CAP messages; drop oldest.
-  return all.slice(all.length - cap);
+  let result = all.length <= cap ? all : all.slice(all.length - cap);
+  // Byte guard (see DM_CACHE_MAX_BYTES) — sorted oldest-first, so drop
+  // from the head (oldest). `> 0` not `> 1` so a single over-budget
+  // message still goes; `Math.max(1, …)` guarantees forward progress.
+  while (result.length > 0 && utf8ByteSize(JSON.stringify(result)) > DM_CACHE_MAX_BYTES) {
+    const drop = Math.max(1, Math.floor(result.length * 0.1));
+    result = result.slice(drop);
+  }
+  return result;
 }
 
 const NSEC_KEY = 'nostr_nsec';
@@ -2440,7 +2492,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const normalized = otherPubkey.trim().toLowerCase();
       if (!/^[0-9a-f]{64}$/.test(normalized)) return [];
       try {
-        const raw = await AsyncStorage.getItem(convCacheKey(pubkey, normalized));
+        const raw = await safeGetDmCacheItem(convCacheKey(pubkey, normalized));
         if (!raw) return [];
         const parsed = JSON.parse(raw);
         return Array.isArray(parsed) ? parsed : [];
@@ -2527,7 +2579,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // open so we only ever re-decrypt the (typically 0-few) events
       // that arrived since last open.
       const [convRaw, convLastSeen] = await Promise.all([
-        AsyncStorage.getItem(convCacheKey(pubkey, normalized)),
+        safeGetDmCacheItem(convCacheKey(pubkey, normalized)),
         loadLastSeen(convLastSeenKey(pubkey, normalized)),
       ]);
       const cachedConv: ConversationMessage[] = convRaw
@@ -2647,9 +2699,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           : signerType === 'amber'
             ? perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, pubkey)
             : null;
-      const wrapCacheRaw = signerWrapCacheKey
-        ? await AsyncStorage.getItem(signerWrapCacheKey)
-        : null;
+      const wrapCacheRaw = signerWrapCacheKey ? await safeGetDmCacheItem(signerWrapCacheKey) : null;
       const wrapCache = safeParseRecord<Nip17CacheEntry>(wrapCacheRaw);
       const cachedWrapEntries = Object.values(wrapCache);
       let skippedInboxFetch = false;
@@ -2699,7 +2749,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             // next thread open across ANY conversation can short-circuit
             // without waiting for the next inbox refresh.
             const nsecCacheKey = perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, pubkey);
-            const raw = await AsyncStorage.getItem(nsecCacheKey);
+            const raw = await safeGetDmCacheItem(nsecCacheKey);
             const cache = safeParseRecord<Nip17CacheEntry>(raw);
             const newlyCached: Nip17CacheEntry[] = [];
             let nip17Decrypted = 0;
@@ -2762,7 +2812,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
         } else if (signerType === 'amber') {
           const amberCacheKey = perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, pubkey);
-          const raw = await AsyncStorage.getItem(amberCacheKey);
+          const raw = await safeGetDmCacheItem(amberCacheKey);
           const cache = safeParseRecord<Nip17CacheEntry>(raw);
           let threadTouched = 0;
           for (const wrap of kind1059) {
@@ -2926,7 +2976,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           // cached entries before the relay round-trip finishes and
           // (b) only fetch events newer than the last one we saw.
           const [cachedInboxRaw, lastSeen] = await Promise.all([
-            AsyncStorage.getItem(inboxCacheKey(refreshForPubkey)),
+            safeGetDmCacheItem(inboxCacheKey(refreshForPubkey)),
             loadLastSeen(inboxLastSeenKey(refreshForPubkey)),
           ]);
           const cachedInbox: DmInboxEntry[] = cachedInboxRaw
@@ -3051,7 +3101,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               // filter gate below. This is the fix for #176. Per-account
               // namespaced (#288).
               const nsecCacheKey = perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, refreshForPubkey);
-              const raw = await AsyncStorage.getItem(nsecCacheKey);
+              const raw = await safeGetDmCacheItem(nsecCacheKey);
               const cache = safeParseRecord<Nip17CacheEntry>(raw);
               const newlyCached: Nip17CacheEntry[] = [];
               let unfollowedPurged = 0;
@@ -3162,7 +3212,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             // Always run the unwrap loop — Amber's silent content-resolver path returns PERMISSION_NOT_GRANTED on the first wrap if the user hasn't granted nip44_decrypt yet, which we surface via setAmberNip44Permission('denied') so NostrScreen can show the one-shot "Grant permission in Amber" button. Closes #404.
             // Persistent cache keyed by wrap id. Only ever contains rumors from *followed* senders — see the filter gate below. Per-account namespaced (#288).
             const amberCacheKey = perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, refreshForPubkey);
-            const raw = await AsyncStorage.getItem(amberCacheKey);
+            const raw = await safeGetDmCacheItem(amberCacheKey);
             const cache = safeParseRecord<Nip17CacheEntry>(raw);
             const newlyCached: Nip17CacheEntry[] = [];
             let permissionDenied = false;
@@ -3583,7 +3633,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         writeChain = writeChain
           .then(async () => {
             if (cancelled) return;
-            const inboxRaw = await AsyncStorage.getItem(inboxCacheKey(viewerPubkey));
+            const inboxRaw = await safeGetDmCacheItem(inboxCacheKey(viewerPubkey));
             const cachedInbox: DmInboxEntry[] = inboxRaw
               ? (() => {
                   try {
@@ -3768,7 +3818,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           await writeNip17Cache(cacheKey, wrapCache);
           knownWrapIds?.add(wrap.id);
 
-          const inboxRaw = await AsyncStorage.getItem(inboxCacheKey(viewerPubkey));
+          const inboxRaw = await safeGetDmCacheItem(inboxCacheKey(viewerPubkey));
           const cachedInbox: DmInboxEntry[] = inboxRaw
             ? (() => {
                 try {
