@@ -11,82 +11,70 @@ name: Internal — login as the nsec passed via MAESTRO_NSEC_BIG
 #    `drawer-row-profile`) that navigated to ProfileScreen, where a
 #    "Connect Nostr" button opened the login sheet. The drawer was
 #    refactored to expose a direct "Sign In / Create Account" button
-#    (testID `drawer-sign-in`) — no Profile detour. That testID is
-#    now gone, so the old subflow hung.
+#    (testID `drawer-sign-in`) — no Profile detour.
 #
 # 2. The multi-account UI moved `drawer-sign-out` below the drawer
 #    fold, so the previous "tap drawer-sign-out (optional)" silently
-#    no-op'd whenever a session was already active. The next steps
-#    then tried to use the signed-out drawer-sign-in button — which
-#    isn't there when signed in.
+#    no-op'd whenever a session was already active.
 #
-# Fix: `clearState` at the start guarantees we always start signed
-# out, so the sign-out branch is gone and the flow is simply
-# drawer → sign-in → nsec input → login.
+# `clearState: true` at launch sidesteps both — the app always boots
+# signed-out, so the flow is just drawer → sign-in → nsec → login.
+#
+# Wait strategy: prefer `extendedWaitUntil` keyed on the *specific*
+# next testID over `waitForAnimationToEnd`. Both have a timeout
+# ceiling, but `extendedWaitUntil` returns the instant the target is
+# visible — `waitForAnimationToEnd` waits for *every* animation on
+# screen to settle, which can be slower when something background is
+# still ticking (relay reconnects, etc.).
 
 - launchApp:
     appId: com.lightningpiggy.app.dev
     clearState: true
-- waitForAnimationToEnd:
-    timeout: 10000
+# Cold-launch ceiling — bundle load + JS init can be slow on a fresh
+# install. The instant tab-home is visible we move on.
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 20000
 
-# After clearState the app boots into the welcome / onboarding screen.
-# Tapping past the intro lands us on tab-home in a signed-out state.
-# The home tab's profile-icon opens the drawer; signed-out drawer
-# shows a single "Sign In / Create Account" button.
-- tapOn:
-    id: 'tab-home'
-    optional: true
-- waitForAnimationToEnd:
-    timeout: 3000
 - tapOn:
     id: 'profile-icon'
-- waitForAnimationToEnd:
-    timeout: 3000
+- extendedWaitUntil:
+    visible:
+      id: 'drawer-sign-in'
+    timeout: 5000
 
 - tapOn:
     id: 'drawer-sign-in'
-- waitForAnimationToEnd:
+- extendedWaitUntil:
+    visible:
+      id: 'nsec-input'
     timeout: 5000
 
-# drawer-sign-in closes the drawer and opens NostrLoginSheet directly
-# — no Profile-screen detour. The sheet's `nsec-input` and
-# `login-button` testIDs are unchanged.
-#
 # inputText works on this BottomSheetTextInput (verified with a 63-char
 # nsec). TROUBLESHOOTING.adoc's note about needing the paste pattern is
 # specific to AddWalletWizard's NWC URL field. Do NOT add `hideKeyboard`
-# here — it can hang inside the bottom sheet's keyboard capture. The
+# — it can hang inside the bottom sheet's keyboard capture. The
 # login-button tap dismisses the IME on its own.
 - tapOn:
     id: 'nsec-input'
 - inputText: ${MAESTRO_NSEC_BIG}
-- waitForAnimationToEnd:
-    timeout: 1500
-
 - tapOn:
     id: 'login-button'
-- waitForAnimationToEnd:
-    timeout: 10000
 
+# Optional OS-level dialogs that can pop up post-login.
 - tapOn:
     text: 'UPDATE'
     optional: true
-- waitForAnimationToEnd:
-    timeout: 3000
+- tapOn:
+    text: 'Allow'
+    optional: true
 
-# Verify we're logged in. After a successful login the sheet
-# dismisses, the drawer is already closed, and the user is on
-# MainTabs. tab-home is the most reliable signed-in signal — the
-# drawer no longer routes through ProfileScreen, so the pre-refactor
-# "Edit Profile" text check doesn't apply.
+# Final signed-in signal. The drawer auto-closes and we're back on
+# MainTabs — tab-home re-appearing is the most reliable indicator.
+# Generous ceiling because the relay handshake + initial NIP-04/17
+# decrypt can take a few seconds.
 - extendedWaitUntil:
     visible:
       id: 'tab-home'
     timeout: 15000
-
-- tapOn:
-    text: 'Allow'
-    optional: true
-- waitForAnimationToEnd:
-    timeout: 2000
