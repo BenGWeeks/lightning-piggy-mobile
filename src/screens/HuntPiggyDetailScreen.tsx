@@ -52,6 +52,7 @@ import { ExploreMiniMap } from '../components/ExploreMiniMap';
 import CacheSpecSheet from '../components/CacheSpecSheet';
 import { decodeGeohash, formatDistance } from '../utils/geohash';
 import { useCompassNavigation } from '../hooks/useCompassNavigation';
+import { shortNpub } from '../utils/shortNpub';
 import {
   fetchCache,
   publishCacheEvent,
@@ -141,7 +142,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     (pubkey: string, name: string | null, picture: string | null, lud16: string | null) => {
       setProfileSheet({
         pubkey,
-        name: name ?? `${pubkey.slice(0, 8)}…${pubkey.slice(-4)}`,
+        name: name ?? shortNpub(pubkey),
         picture,
         lightningAddress: lud16,
       });
@@ -694,7 +695,7 @@ const HiderAttribution: React.FC<{
   ) => void;
 }> = ({ pubkey, colors, styles, onPressProfile }) => {
   const { name, picture, lud16 } = usePubkeyProfile(pubkey);
-  const display = name ?? `${pubkey.slice(0, 8)}…${pubkey.slice(-4)}`;
+  const display = name ?? shortNpub(pubkey);
   return (
     <TouchableOpacity
       style={styles.hiderRow}
@@ -731,7 +732,7 @@ const LogRow: React.FC<{
   ) => void;
 }> = ({ log, colors, styles, onPressProfile }) => {
   const { name, picture, lud16 } = usePubkeyProfile(log.pubkey);
-  const display = name ?? `${log.pubkey.slice(0, 8)}…${log.pubkey.slice(-4)}`;
+  const display = name ?? shortNpub(log.pubkey);
   const ageMins = Math.floor((Date.now() / 1000 - log.createdAt) / 60);
   const ageLabel =
     ageMins < 60
