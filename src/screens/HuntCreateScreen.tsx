@@ -9,10 +9,16 @@ import {
   ActivityIndicator,
   Image,
   Linking,
+  Platform,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
+// SAF + base64 helpers live on the legacy expo-file-system module. The
+// new class API (File/Paths) doesn't expose StorageAccessFramework yet,
+// so we mix the two: class API for the cache copy, legacy for the SAF
+// "save to Files" flow on Android.
+import { StorageAccessFramework as SAF, readAsStringAsync } from 'expo-file-system/legacy';
 import { Asset } from 'expo-asset';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
@@ -242,6 +248,87 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
 
   const handleClearPin = useCallback(() => setPin(null), []);
 
+  // ----- "Save STL" — share + save-to-Files --------------------------------
+  // The 3D-printable Piggy Bag Charm ships bundled in /assets/3d. On iOS the
+  // OS share sheet already includes "Save to Files" when the UTI is set, so
+  // the existing shareAsync path is fine. On Android the share sheet only
+  // lists apps that handle the MIME type — "Files" rarely appears — so we
+  // surface an explicit "Save to Files" path via the Storage Access
+  // Framework (SAF) alongside the share-to-app fallback. One button, prompt
+  // on tap, no extra UI bloat.
+
+  const stageStlInCache = useCallback(async (): Promise<File> => {
+    // Materialise the bundled asset to a real file URI, then copy into the
+    // cache dir with a friendly name so OS pickers don't show the
+    // require()-mangled asset filename.
+    const asset = Asset.fromModule(
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../assets/3d/piggy-bag-charm.stl'),
+    );
+    await asset.downloadAsync();
+    if (!asset.localUri) throw new Error('STL asset has no localUri after download');
+    const target = new File(Paths.cache, 'piggy-bag-charm.stl');
+    if (target.exists) target.delete();
+    const source = new File(asset.localUri);
+    source.copy(target);
+    return target;
+  }, []);
+
+  const shareStl = useCallback(async () => {
+    const target = await stageStlInCache();
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(target.uri, {
+        mimeType: 'model/stl',
+        dialogTitle: 'Save Piggy Bag Charm STL',
+        UTI: 'public.standard-tesselated-geometry-format',
+      });
+    }
+  }, [stageStlInCache]);
+
+  const saveStlToFiles = useCallback(async () => {
+    // SAF flow: prompt the user to pick a directory, create the STL inside
+    // it, then base64-copy the bytes across. Two SAF round-trips because
+    // there's no "copy a file:// into a SAF URI" primitive — we have to
+    // read+write through JS. The STL is small (a few hundred KB) so the
+    // base64 round-trip is fine; for larger files we'd chunk it.
+    const target = await stageStlInCache();
+    const perm = await SAF.requestDirectoryPermissionsAsync();
+    if (!perm.granted) return;
+    const destUri = await SAF.createFileAsync(
+      perm.directoryUri,
+      'piggy-bag-charm.stl',
+      // application/octet-stream is the broadly-recognised fallback. The
+      // .stl extension still drives most apps' handling on the read side.
+      'application/octet-stream',
+    );
+    const base64 = await readAsStringAsync(target.uri, { encoding: 'base64' });
+    await SAF.writeAsStringAsync(destUri, base64, { encoding: 'base64' });
+    Toast.show({ type: 'success', text1: 'Saved piggy-bag-charm.stl' });
+  }, [stageStlInCache]);
+
+  const handleSaveStl = useCallback(async () => {
+    try {
+      if (Platform.OS === 'android') {
+        // Two-option prompt — "Save to Files" first (recommended, matches
+        // what most users want), "Share…" preserves the original flow.
+        Alert.alert('Save Piggy Bag Charm STL', 'Pick where to save the 3D-print file.', [
+          { text: 'Save to Files', onPress: () => void saveStlToFiles() },
+          { text: 'Share…', onPress: () => void shareStl() },
+          { text: 'Cancel', style: 'cancel' },
+        ]);
+        return;
+      }
+      // iOS — share sheet already includes "Save to Files" via the UTI.
+      await shareStl();
+    } catch (e) {
+      Toast.show({
+        type: 'info',
+        text1: 'Couldn’t save the STL',
+        text2: (e as Error).message,
+      });
+    }
+  }, [saveStlToFiles, shareStl]);
+
   // ----- hint photo capture / library --------------------------------------
 
   const uploadHintPhoto = useCallback(
@@ -370,44 +457,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation }) => {
               <View style={styles.getPiggyButtonsRow}>
                 <TouchableOpacity
                   style={[styles.getPiggyButton, styles.getPiggyButtonPrint]}
-                  onPress={async () => {
-                    try {
-                      // Resolve the bundled STL to a local file URI, then
-                      // copy into the cache dir with a friendly filename
-                      // before handing off to the OS share sheet (Android
-                      // file pickers won't preserve the require()-id
-                      // filename otherwise).
-                      const asset = Asset.fromModule(
-                        // eslint-disable-next-line @typescript-eslint/no-require-imports
-                        require('../../assets/3d/piggy-bag-charm.stl'),
-                      );
-                      await asset.downloadAsync();
-                      if (!asset.localUri)
-                        throw new Error('STL asset has no localUri after download');
-                      // expo-file-system SDK 55 ships a new class-based API
-                      // (Paths.cache, new File(...).copy()). Copying into the
-                      // cache dir under a friendly filename so the OS share
-                      // sheet shows "piggy-bag-charm.stl" instead of the
-                      // require-mangled asset name.
-                      const target = new File(Paths.cache, 'piggy-bag-charm.stl');
-                      if (target.exists) target.delete();
-                      const source = new File(asset.localUri);
-                      source.copy(target);
-                      if (await Sharing.isAvailableAsync()) {
-                        await Sharing.shareAsync(target.uri, {
-                          mimeType: 'model/stl',
-                          dialogTitle: 'Save Piggy Bag Charm STL',
-                          UTI: 'public.standard-tesselated-geometry-format',
-                        });
-                      }
-                    } catch (e) {
-                      Toast.show({
-                        type: 'info',
-                        text1: 'Couldn’t share the STL',
-                        text2: (e as Error).message,
-                      });
-                    }
-                  }}
+                  onPress={handleSaveStl}
                   testID="get-a-piggy-print-button"
                   accessibilityLabel="Save Piggy Bag Charm STL"
                 >
