@@ -1486,7 +1486,9 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.surface,
       borderRadius: 14,
       padding: 14,
-      marginBottom: 12,
+      // No marginBottom — StepNavRow's own marginTop (16) is the only
+      // inter-section gap. Avoids the previous 12 + 16 stack that
+      // dropped a 28 px hole between the card and the Next button.
       gap: 10,
     },
     getPiggyTitle: {
