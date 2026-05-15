@@ -4,113 +4,77 @@ name: Internal — login as the nsec passed via MAESTRO_NSEC_BIG
 # Like test-login-dev.yaml but with no hardcoded "Ben" post-login
 # assertion (Big/Middle/Little Piggy share the same login flow but
 # render different display names). Used by the 3-way group-chat suite.
+#
+# Two reasons this had rotted (closes #544):
+#
+# 1. The pre-refactor drawer had a "Profile" row (testID
+#    `drawer-row-profile`) that navigated to ProfileScreen, where a
+#    "Connect Nostr" button opened the login sheet. The drawer was
+#    refactored to expose a direct "Sign In / Create Account" button
+#    (testID `drawer-sign-in`) — no Profile detour.
+#
+# 2. The multi-account UI moved `drawer-sign-out` below the drawer
+#    fold, so the previous "tap drawer-sign-out (optional)" silently
+#    no-op'd whenever a session was already active.
+#
+# `clearState: true` at launch sidesteps both — the app always boots
+# signed-out, so the flow is just drawer → sign-in → nsec → login.
+#
+# Wait strategy: prefer `extendedWaitUntil` keyed on the *specific*
+# next testID over `waitForAnimationToEnd`. Both have a timeout
+# ceiling, but `extendedWaitUntil` returns the instant the target is
+# visible — `waitForAnimationToEnd` waits for *every* animation on
+# screen to settle, which can be slower when something background is
+# still ticking (relay reconnects, etc.).
 
-# Force-stop+launch ensures a clean nav stack between phases (no system
-# pickers / sub-screens left over from the previous phase). This is the
-# only reliable way to recover from system-level activities Maestro can't
-# tap to dismiss.
 - launchApp:
     appId: com.lightningpiggy.app.dev
-    stopApp: true
-- waitForAnimationToEnd:
-    timeout: 10000
-
-- tapOn:
-    id: 'tab-home'
-    optional: true
-- waitForAnimationToEnd:
-    timeout: 3000
-- tapOn:
-    id: 'profile-icon'
-- waitForAnimationToEnd:
-    timeout: 5000
-
-# Sign out if a previous session is still active
-- tapOn:
-    id: 'drawer-sign-out'
-    optional: true
-- waitForAnimationToEnd:
-    timeout: 2000
-# The Sign-Out confirmation is now a BrandedAlert (PR #234), not the
-# native Android Alert. Tap its CONFIRM button by full testID rather
-# than `text: 'Sign Out'`, which also matched the still-visible
-# drawer-sign-out menu row underneath and caused the alert to re-open
-# (drawer-row-profile then never appeared because the alert was modal).
-# branded-alert-button-1 is the confirm button (index 1 = destructive
-# action; index 0 is Cancel).
-- tapOn:
-    id: 'branded-alert-button-1'
-    optional: true
-- waitForAnimationToEnd:
-    timeout: 3000
-
-# Re-open drawer → Profile
-- tapOn:
-    id: 'profile-icon'
-    optional: true
-- waitForAnimationToEnd:
-    timeout: 3000
-- tapOn:
-    id: 'drawer-row-profile'
-- waitForAnimationToEnd:
-    timeout: 3000
-
-# Connect Nostr
-- tapOn:
-    id: 'connect-nostr'
-- waitForAnimationToEnd:
-    timeout: 5000
-
-# `inputText` works on this BottomSheetTextInput (verified with the
-# 63-char nsec). The TROUBLESHOOTING.adoc note about needing the paste
-# pattern is specific to AddWalletWizard's NWC URL field; the Connect
-# Nostr nsec field handles inputText fine. Important: do NOT add
-# `hideKeyboard` here — it can hang inside the bottom sheet's keyboard
-# capture. The login-button tap dismisses the IME on its own.
-- tapOn:
-    id: 'nsec-input'
-- inputText: ${MAESTRO_NSEC_BIG}
-- waitForAnimationToEnd:
-    timeout: 1500
-
-- tapOn:
-    id: 'login-button'
-- waitForAnimationToEnd:
-    timeout: 10000
-
-- tapOn:
-    text: 'UPDATE'
-    optional: true
-- waitForAnimationToEnd:
-    timeout: 3000
-
-# Verify we're logged in. After a successful Connect Nostr the sheet
-# dismisses and ProfileScreen swaps the "Connect Nostr" CTA for the
-# "Edit Profile" button (signed-in code path). Non-optional so a broken
-# login fails the sub-flow loudly instead of letting a phase that
-# follows act on a logged-out state.
-- extendedWaitUntil:
-    visible:
-      text: 'Edit Profile'
-    timeout: 15000
-
-- tapOn:
-    text: 'Allow'
-    optional: true
-- waitForAnimationToEnd:
-    timeout: 2000
-
-# After Connect Nostr, the app remains on the AccountProfile screen
-# inside the AccountDrawer. The system `back` keyevent doesn't reliably
-# pop out of the drawer stack here (it goes to the navigator's
-# beforeRemove handler with no current popable screen), so tap the
-# in-app back affordance — the "<" button in the Profile header
-# carries accessibilityLabel="Back". Then assert the MainTabs bottom
-# bar is back so the calling flow can rely on it.
-- tapOn: 'Back'
-- waitForAnimationToEnd:
-    timeout: 1500
+    clearState: true
+# Cold-launch ceiling — bundle load + JS init can be slow on a fresh
+# install. The instant tab-home is visible we move on.
 - extendedWaitUntil:
     visible:
       id: 'tab-home'
-    timeout: 8000
+    timeout: 20000
+
+- tapOn:
+    id: 'profile-icon'
+- extendedWaitUntil:
+    visible:
+      id: 'drawer-sign-in'
+    timeout: 5000
+
+- tapOn:
+    id: 'drawer-sign-in'
+- extendedWaitUntil:
+    visible:
+      id: 'nsec-input'
+    timeout: 5000
+
+# inputText works on this BottomSheetTextInput (verified with a 63-char
+# nsec). TROUBLESHOOTING.adoc's note about needing the paste pattern is
+# specific to AddWalletWizard's NWC URL field. Do NOT add `hideKeyboard`
+# — it can hang inside the bottom sheet's keyboard capture. The
+# login-button tap dismisses the IME on its own.
+- tapOn:
+    id: 'nsec-input'
+- inputText: ${MAESTRO_NSEC_BIG}
+- tapOn:
+    id: 'login-button'
+
+# Optional OS-level dialogs that can pop up post-login.
+- tapOn:
+    text: 'UPDATE'
+    optional: true
+- tapOn:
+    text: 'Allow'
+    optional: true
+
+# Final signed-in signal. The drawer auto-closes and we're back on
+# MainTabs — tab-home re-appearing is the most reliable indicator.
+# Generous ceiling because the relay handshake + initial NIP-04/17
+# decrypt can take a few seconds.
+- extendedWaitUntil:
+    visible:
+      id: 'tab-home'
+    timeout: 15000
