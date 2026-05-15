@@ -7,6 +7,8 @@ import {
   ActivityIndicator,
   Linking,
   ScrollView,
+  Animated,
+  PanResponder,
 } from 'react-native';
 import { WebView, WebViewMessageEvent } from 'react-native-webview';
 import * as Location from 'expo-location';
@@ -686,6 +688,55 @@ const Header: React.FC<{
   );
 };
 
+// Swipe-down dismiss for the three custom bottom-sheets on this screen
+// (Merchant / Cache / Filter). They use a hand-rolled sheet pattern
+// rather than Gorhom's BottomSheetModal — so we wire a PanResponder
+// here rather than getting it for free. Same gesture rules across all
+// three so they behave consistently:
+//   • Drag down past 100 px OR release with vy > 0.5 → dismiss
+//   • Otherwise spring back to 0
+//   • Upward drag clamped so the sheet doesn't fly up past its anchor
+// Returns the translateY value + PanResponder handlers; callers wrap
+// the sheet body in Animated.View and spread the handlers on the
+// drag-affordance (the handle bar).
+function useDismissibleSheet(onClose: () => void): {
+  translateY: Animated.Value;
+  panHandlers: ReturnType<typeof PanResponder.create>['panHandlers'];
+} {
+  const translateY = useRef(new Animated.Value(0)).current;
+  const responder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 4,
+      onPanResponderMove: (_e, g) => {
+        // Clamp upward drag — the sheet shouldn't rise past its
+        // anchor since there's nowhere meaningful for it to go.
+        translateY.setValue(Math.max(0, g.dy));
+      },
+      onPanResponderRelease: (_e, g) => {
+        const dismiss = g.dy > 100 || g.vy > 0.5;
+        if (dismiss) {
+          Animated.timing(translateY, {
+            toValue: 600,
+            duration: 180,
+            useNativeDriver: true,
+          }).start(() => {
+            translateY.setValue(0);
+            onClose();
+          });
+        } else {
+          Animated.spring(translateY, {
+            toValue: 0,
+            useNativeDriver: true,
+            friction: 8,
+            tension: 80,
+          }).start();
+        }
+      },
+    }),
+  ).current;
+  return { translateY, panHandlers: responder.panHandlers };
+}
+
 const MerchantDetailSheet: React.FC<{
   place: BtcMapPlace;
   onClose: () => void;
@@ -693,6 +744,7 @@ const MerchantDetailSheet: React.FC<{
   colors: Palette;
   styles: ReturnType<typeof createStyles>;
 }> = ({ place, onClose, onViewDetails, colors, styles }) => {
+  const { translateY, panHandlers } = useDismissibleSheet(onClose);
   const days = daysSinceVerified(place);
   const lud16 = lightningAddressOf(place);
   const verifyText =
@@ -707,8 +759,14 @@ const MerchantDetailSheet: React.FC<{
   return (
     <View style={styles.sheetBackdrop} testID="merchant-detail-screen">
       <TouchableOpacity style={styles.sheetTapAway} onPress={onClose} activeOpacity={1} />
-      <View style={styles.sheet}>
-        <View style={styles.sheetHandle} />
+      <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>
+        {/* PanResponder lives on the handle bar so vertical drags from
+            the rest of the sheet body don't fight inner ScrollViews
+            (the Categories list etc.). Drag the handle down to
+            dismiss; spring back if released early. */}
+        <View {...panHandlers} style={styles.sheetHandleGrabber} testID="merchant-detail-grabber">
+          <View style={styles.sheetHandle} />
+        </View>
         <View style={styles.sheetTitleRow}>
           {(() => {
             const CategoryIcon = btcMapIconComponent(place.icon);
@@ -859,7 +917,12 @@ const MerchantDetailSheet: React.FC<{
             accessibilityLabel={lud16 ? `Pay ${lud16}` : 'No Lightning Address available'}
           >
             <Zap size={16} color={colors.white} strokeWidth={2.5} />
-            <Text style={styles.sheetButtonText}>{lud16 ? 'Pay' : 'No Lightning address'}</Text>
+            {/* Keep the label "Pay" in both states — the disabled
+                surface treatment already communicates non-availability,
+                and the long "No Lightning address" string wraps awkwardly
+                on small screens. Screen readers still get the
+                disambiguating context via accessibilityLabel above. */}
+            <Text style={styles.sheetButtonText}>Pay</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.sheetButtonSecondary}
@@ -895,7 +958,7 @@ const MerchantDetailSheet: React.FC<{
             ) : null}
           </View>
         ) : null}
-      </View>
+      </Animated.View>
     </View>
   );
 };
@@ -907,6 +970,7 @@ const CacheDetailSheet: React.FC<{
   colors: Palette;
   styles: ReturnType<typeof createStyles>;
 }> = ({ cache, onClose, onViewDetails, colors, styles }) => {
+  const { translateY, panHandlers } = useDismissibleSheet(onClose);
   const kindLabel = cache.isLpPiggy ? 'Piglet' : 'NIP-GC cache';
   const specBits = [
     cache.cacheType,
@@ -917,8 +981,10 @@ const CacheDetailSheet: React.FC<{
   return (
     <View style={styles.sheetBackdrop} testID="cache-detail-sheet">
       <TouchableOpacity style={styles.sheetTapAway} onPress={onClose} activeOpacity={1} />
-      <View style={styles.sheet}>
-        <View style={styles.sheetHandle} />
+      <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>
+        <View {...panHandlers} style={styles.sheetHandleGrabber} testID="cache-detail-grabber">
+          <View style={styles.sheetHandle} />
+        </View>
         <View style={styles.sheetTitleRow}>
           <View
             style={[
@@ -965,7 +1031,7 @@ const CacheDetailSheet: React.FC<{
             <Text style={styles.sheetButtonText}>View details</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </Animated.View>
     </View>
   );
 };
@@ -1074,11 +1140,14 @@ const FilterSheet: React.FC<{
     onChangeCategoryFilter(next);
   };
   const clearCategories = () => onChangeCategoryFilter(new Set());
+  const { translateY, panHandlers } = useDismissibleSheet(onClose);
   return (
     <View style={styles.sheetBackdrop} testID="map-filter-sheet">
       <TouchableOpacity style={styles.sheetTapAway} onPress={onClose} activeOpacity={1} />
-      <View style={styles.sheet}>
-        <View style={styles.sheetHandle} />
+      <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>
+        <View {...panHandlers} style={styles.sheetHandleGrabber} testID="map-filter-grabber">
+          <View style={styles.sheetHandle} />
+        </View>
         <ScrollView showsVerticalScrollIndicator={false}>
           {/* Web-of-Trust — chip + tap-to-open-sheet. Mirrors the same
               affordance on the Hunt filter so the user can change tier
@@ -1155,7 +1224,7 @@ const FilterSheet: React.FC<{
             </View>
           ) : null}
         </ScrollView>
-      </View>
+      </Animated.View>
     </View>
   );
 };
@@ -1560,6 +1629,15 @@ const createStyles = (colors: Palette) =>
       // Cap so the FilterSheet's category list can scroll instead of
       // pushing the sheet off the top of the screen.
       maxHeight: '80%',
+    },
+    // Touch target around the visible handle bar — bigger than the
+    // 4px-tall pill itself so a swipe from anywhere in the top of the
+    // sheet actually reaches the PanResponder. Without this you'd
+    // need pixel-precise drag aim.
+    sheetHandleGrabber: {
+      width: '100%',
+      paddingVertical: 12,
+      alignItems: 'center',
     },
     sheetHandle: {
       alignSelf: 'center',
