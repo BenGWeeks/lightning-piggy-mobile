@@ -22,11 +22,19 @@ import { createDmSender } from '../utils/nostrDm';
 import { truncateMiddle, formatFriendlyDateTime } from '../utils/format';
 import { getTxCategory } from '../utils/txCategory';
 import { isSupportedImageUrl } from '../utils/imageUrl';
-import TransactionTypeIcon from './TransactionTypeIcon';
+import TransactionTypeIcon, { TransactionIconState } from './TransactionTypeIcon';
 import type { ZapCounterpartyInfo } from '../types/wallet';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { BOLTZ_SUPPORT_NPUB, dmRecipient } from '../constants/npubs';
-import { AlertTriangle, Copy, Zap, MessageCircle } from 'lucide-react-native';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Copy,
+  Info,
+  MessageCircle,
+  XCircle,
+  Zap,
+} from 'lucide-react-native';
 
 export interface TransactionDetailData {
   type: 'incoming' | 'outgoing' | string;
@@ -75,10 +83,12 @@ interface Props {
   onZapCounterparty?: (contact: CounterpartyContact) => void;
   /** Fired when the user taps the Message icon in the recipient/sender card. */
   onMessageCounterparty?: (contact: CounterpartyContact) => void;
-  /** Mirrors the same-named prop on TransactionTypeIcon. When true the
-   *  sheet shows a yellow callout explaining the warning — without this
-   *  the badge in the row would be orphaned from any explanation. See #519. */
-  needsAttention?: boolean;
+  /** Mirrors the badge state on the originating row (`TransactionTypeIcon`).
+   *  Decoupled from the live Boltz polling so the header icon stays in
+   *  lockstep with what the user just tapped in the list — and so the
+   *  explanation callout below the status pill matches what the badge
+   *  promised. See issue #519. */
+  iconState?: TransactionIconState;
 }
 
 type BoltzSwapView = {
@@ -98,7 +108,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
   onCounterpartyPress,
   onZapCounterparty,
   onMessageCounterparty,
-  needsAttention = false,
+  iconState,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createTransactionDetailSheetStyles(colors), [colors]);
@@ -158,18 +168,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
     };
   }, [visible, tx, activeWallet]);
 
-  // Match Boltz-minted invoice memos ("Send to BTC address" /
-  // "Receive from BTC address") — settled swaps don't carry tx.swapId.
-  const isBoltzSwap = useMemo(() => {
-    if (!tx) return false;
-    if (tx.swapId) return true;
-    if (tx.description) {
-      if (/boltz swap/i.test(tx.description)) return true;
-      if (/send to btc|send to bitcoin/i.test(tx.description)) return true;
-      if (/receive from btc|receive from bitcoin/i.test(tx.description)) return true;
-    }
-    return false;
-  }, [tx]);
+  const isBoltzSwap = useMemo(() => swapRecoveryService.isBoltzTransaction(tx), [tx]);
 
   useEffect(() => {
     let cancelled = false;
@@ -274,6 +273,100 @@ const TransactionDetailSheet: React.FC<Props> = ({
     return { style: styles.badgeConfirmed, text: 'Confirmed' };
   }, [tx, swap]);
 
+  /** Plain-English explanation of where this Boltz swap is right now.
+   *  Only set when the row is a Boltz swap — vanilla LN/on-chain rows
+   *  don't need it. Combines the icon-state the row decided on with the
+   *  live `swap` poll, so the copy stays accurate even after the user
+   *  taps in. */
+  const boltzExplanation = useMemo(() => {
+    if (!tx || !isBoltzSwap) return null;
+    const pending = !tx.settled_at && !tx.blockHeight;
+    if (iconState === 'attention') {
+      return {
+        tone: 'warning' as const,
+        heading: 'Needs attention',
+        body: 'Lightning was paid and the Boltz lockup confirmed, but the on-chain claim hasn’t broadcast yet. Your funds are safe — tap Retry claim below if it hasn’t cleared.',
+      };
+    }
+    if (iconState === 'done') {
+      const incoming = tx.type === 'incoming';
+      return {
+        tone: 'success' as const,
+        heading: 'Swap complete',
+        body: incoming
+          ? 'Boltz received your on-chain payment and settled the Lightning side — funds are in your Lightning wallet.'
+          : 'Lightning was paid and Boltz’s on-chain lockup has been claimed to your Bitcoin address.',
+      };
+    }
+    if (swap?.terminalFailure) {
+      return {
+        tone: 'failure' as const,
+        heading: 'Swap failed',
+        body: `This swap ended at status ${swap.status} and can’t complete. Any locked funds auto-refund through Boltz; if you don’t see the refund, message Boltz support with the swap ID below.`,
+      };
+    }
+    if (pending) {
+      if (swap?.claimable) {
+        return {
+          tone: 'info' as const,
+          heading: 'Claim broadcasting',
+          body: 'Boltz has locked funds on-chain. The claim transaction is broadcasting and usually confirms in a few minutes.',
+        };
+      }
+      if (swap?.status === 'invoice.set' || swap?.status === 'swap.created') {
+        return {
+          tone: 'info' as const,
+          heading: 'Swap in progress',
+          body: 'Waiting for the Lightning leg of this swap to settle…',
+        };
+      }
+      return {
+        tone: 'info' as const,
+        heading: 'Swap in progress',
+        body: swap?.status
+          ? `Current Boltz status: ${swap.status}.`
+          : 'Checking swap status with Boltz…',
+      };
+    }
+    return null;
+  }, [tx, isBoltzSwap, iconState, swap]);
+
+  const calloutTone = boltzExplanation
+    ? (() => {
+        switch (boltzExplanation.tone) {
+          case 'warning':
+            return {
+              bg: colors.zapYellowLight,
+              accent: colors.zapYellow,
+              ink: colors.zapYellowDark,
+              Icon: AlertTriangle,
+            };
+          case 'success':
+            return {
+              bg: colors.greenLight,
+              accent: colors.green,
+              ink: colors.greenDark,
+              Icon: CheckCircle2,
+            };
+          case 'failure':
+            return {
+              bg: colors.redLight,
+              accent: colors.red,
+              ink: colors.red,
+              Icon: XCircle,
+            };
+          case 'info':
+          default:
+            return {
+              bg: colors.brandPinkLight,
+              accent: colors.brandPink,
+              ink: colors.textBody,
+              Icon: Info,
+            };
+        }
+      })()
+    : null;
+
   const effectiveSwapId = tx?.swapId || resolvedSwapId || null;
 
   const boltzInitialMessage = useMemo(() => {
@@ -345,11 +438,7 @@ const TransactionDetailSheet: React.FC<Props> = ({
         <BottomSheetView style={styles.content}>
           <View style={styles.header}>
             <View style={styles.headerIcon}>
-              <TransactionTypeIcon
-                category={getTxCategory(tx)}
-                size={56}
-                needsAttention={needsAttention}
-              />
+              <TransactionTypeIcon category={getTxCategory(tx)} size={56} state={iconState} />
             </View>
             <Text
               style={[
@@ -367,24 +456,31 @@ const TransactionDetailSheet: React.FC<Props> = ({
                 <Text style={styles.badgeText}>{statusBadge.text}</Text>
               </View>
             ) : null}
-            {needsAttention ? (
-              <View
-                style={styles.warningCallout}
-                accessibilityRole="alert"
-                accessibilityLabel="Needs attention: on-chain claim not yet broadcast"
-              >
-                <AlertTriangle size={24} color={colors.zapYellowDark} strokeWidth={2.5} />
-                <View style={styles.warningCalloutBody}>
-                  <Text style={styles.warningCalloutHeading}>Needs attention</Text>
-                  <Text style={styles.warningCalloutText}>
-                    Lightning was paid and the Boltz lockup confirmed, but the on-chain claim hasn
-                    {'’'}t broadcast yet. Your funds are safe — tap{' '}
-                    <Text style={{ fontWeight: '700' }}>Retry claim</Text> below if it hasn{'’'}t
-                    cleared.
-                  </Text>
-                </View>
-              </View>
-            ) : null}
+            {boltzExplanation && calloutTone
+              ? (() => {
+                  const CalloutIcon = calloutTone.Icon;
+                  return (
+                    <View
+                      style={[
+                        styles.warningCallout,
+                        { backgroundColor: calloutTone.bg, borderLeftColor: calloutTone.accent },
+                      ]}
+                      accessibilityRole={boltzExplanation.tone === 'warning' ? 'alert' : undefined}
+                      accessibilityLabel={`${boltzExplanation.heading}: ${boltzExplanation.body}`}
+                    >
+                      <CalloutIcon size={24} color={calloutTone.ink} strokeWidth={2.5} />
+                      <View style={styles.warningCalloutBody}>
+                        <Text style={[styles.warningCalloutHeading, { color: calloutTone.ink }]}>
+                          {boltzExplanation.heading}
+                        </Text>
+                        <Text style={[styles.warningCalloutText, { color: calloutTone.ink }]}>
+                          {boltzExplanation.body}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })()
+              : null}
           </View>
 
           {zapCounterparty ? (

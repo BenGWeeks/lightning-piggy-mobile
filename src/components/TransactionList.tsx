@@ -15,8 +15,9 @@ import TransactionDetailSheet, {
   CounterpartyContact,
 } from './TransactionDetailSheet';
 import SendSheet from './SendSheet';
-import TransactionTypeIcon from './TransactionTypeIcon';
+import TransactionTypeIcon, { TransactionIconState } from './TransactionTypeIcon';
 import { getTxCategory } from '../utils/txCategory';
+import * as swapRecoveryService from '../services/swapRecoveryService';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import type { WalletTransaction, ZapCounterpartyInfo } from '../types/wallet';
 import { perfLog } from '../utils/perfLog';
@@ -151,8 +152,41 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
   };
   const [showAll, setShowAll] = useState(false);
   const [detail, setDetail] = useState<TransactionDetailData | null>(null);
-  const [detailNeedsAttention, setDetailNeedsAttention] = useState(false);
+  const [detailIconState, setDetailIconState] = useState<TransactionIconState | undefined>(
+    undefined,
+  );
   const [zapContact, setZapContact] = useState<CounterpartyContact | null>(null);
+
+  // Subscribe to swapRecoveryService's attention set so rows re-render
+  // when a recovery pass adds/removes a swap. The set is keyed by LN
+  // paymentHash (= sha256(preimage)), which is what WalletTransaction
+  // rows carry, so matching is a direct .has() per row.
+  const [attentionSet, setAttentionSet] = useState<ReadonlySet<string>>(() =>
+    swapRecoveryService.getAttentionPaymentHashes(),
+  );
+  useEffect(() => {
+    const unsub = swapRecoveryService.subscribeAttention(() => {
+      // New Set reference forces dependent useMemo / icon props to re-evaluate
+      // even though the underlying object identity may stay the same.
+      setAttentionSet(new Set(swapRecoveryService.getAttentionPaymentHashes()));
+    });
+    return unsub;
+  }, []);
+
+  /** Resolves the icon-corner badge for a row:
+   *   - 'attention' for any Boltz row whose paymentHash is currently in
+   *     swapRecoveryService's attention set;
+   *   - 'done' for settled Boltz rows that aren't in the attention set;
+   *   - 'pending' for in-flight Boltz rows (so the lifecycle reads
+   *     clock → tick / warning instead of bare → tick);
+   *   - undefined (no badge) for every vanilla Lightning row. */
+  const iconStateFor = (tx: WalletTransaction): TransactionIconState | undefined => {
+    if (!swapRecoveryService.isBoltzTransaction(tx)) return undefined;
+    if (tx.paymentHash && attentionSet.has(tx.paymentHash)) return 'attention';
+    const settled = Boolean(tx.settled_at || tx.blockHeight);
+    return settled ? 'done' : 'pending';
+  };
+
   // Counterparty preview — opened from TransactionDetailSheet → "view
   // profile". A quick-peek bottom sheet first; "View full profile"
   // inside drills into the ContactProfile route.
@@ -273,16 +307,15 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
           zapCp?.profile?.picture ?? descriptionContact?.profile?.picture ?? null;
         const fiatStr = satsToFiatString(amountSats, btcPrice, currency);
 
+        const rowIconState = iconStateFor(item);
+
         return (
           <TouchableOpacity
             key={row.key}
             style={[styles.item, isPending && styles.itemPending]}
             onPress={() => {
               setDetail(item as TransactionDetailData);
-              // TODO(#519): set this from the same `claimable` predicate
-              // the row badge will use once swapRecoveryService is wired,
-              // so the sheet callout and the row badge stay in lockstep.
-              setDetailNeedsAttention(false);
+              setDetailIconState(rowIconState);
             }}
             accessibilityLabel={`Open details for ${primary}`}
           >
@@ -300,10 +333,7 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
                 <TransactionTypeIcon
                   category={getTxCategory(item)}
                   size={AVATAR_SIZE}
-                  // TODO(#519): wire to swapRecoveryService — show the badge
-                  // when this tx's swap is `claimable` (LN paid + lockup
-                  // confirmed but on-chain claim not yet broadcast). The
-                  // visual is in place; the data hookup is the follow-up.
+                  state={rowIconState}
                 />
               )}
             </View>
@@ -356,7 +386,7 @@ const TransactionList: React.FC<Props> = ({ transactions }) => {
       <TransactionDetailSheet
         visible={detail !== null}
         tx={detail}
-        needsAttention={detailNeedsAttention}
+        iconState={detailIconState}
         onClose={() => setDetail(null)}
         onCounterpartyPress={(contact) => {
           setDetail(null);

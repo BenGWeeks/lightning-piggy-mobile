@@ -1,26 +1,42 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
-import { AlertTriangle, Link2, Zap } from 'lucide-react-native';
+import { AlertTriangle, Check, Clock, Link2, Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { TxCategory } from '../utils/txCategory';
+
+/** Badge state shown in the top-right corner of the disc.
+ *
+ *  Only Boltz-swap rows ever set a state — regular Lightning rows stay
+ *  unbadged. The three values are mutually exclusive:
+ *
+ *  - `pending` (grey `Clock`): the swap is in-flight — LN paying, Boltz
+ *    locking, or claim broadcasting. Conveys "something is happening,
+ *    nothing for you to do" so the badge lifecycle is legible (clock →
+ *    tick or warning) instead of bare → tick.
+ *  - `attention` (yellow `AlertTriangle`): Boltz locked funds on-chain
+ *    but our claim either failed to broadcast or can't be attempted.
+ *    User action: tap into the row → "Retry claim".
+ *  - `done` (green `Check`): the swap is fully settled (LN paid AND
+ *    on-chain claim confirmed). Marks completed Boltz rows so the user
+ *    can tell at a glance which "Send to BTC address" rows are done vs
+ *    still mid-flight, since vanilla LN rows don't carry this state.
+ *
+ *  See issue #519. */
+export type TransactionIconState = 'pending' | 'attention' | 'done';
 
 interface Props {
   category: TxCategory;
   size?: number;
-  /** Renders a small yellow warning chip in the top-right corner. Used
-   *  to flag Boltz swaps whose on-chain claim hasn't yet broadcast
-   *  successfully — so users notice it in the transaction list without
-   *  having to tap into TransactionDetailSheet. See issue #519. */
-  needsAttention?: boolean;
+  state?: TransactionIconState;
 }
 
-const TransactionTypeIcon: React.FC<Props> = ({ category, size = 40, needsAttention = false }) => {
+const TransactionTypeIcon: React.FC<Props> = ({ category, size = 40, state }) => {
   const colors = useThemeColors();
   const radius = size / 2;
   const glyphSize = Math.round(size * 0.5);
-  // Badge is ~45 % of the icon — large enough that the AlertTriangle
-  // glyph survives the pixel budget (was 35 % → 9 px glyph rendered as
-  // a blob). Anchored top-right so it doesn't overlap the row text.
+  // Badge is ~45 % of the icon — large enough that the glyph survives
+  // the pixel budget (was 35 % → 9 px glyph rendered as a blob).
+  // Anchored top-right so it doesn't overlap the row text.
   const badgeSize = Math.round(size * 0.45);
   const badgeGlyph = Math.round(badgeSize * 0.7);
   // Badge overhangs the disc's top-right corner via negative top/right
@@ -52,33 +68,58 @@ const TransactionTypeIcon: React.FC<Props> = ({ category, size = 40, needsAttent
           <Zap size={glyphSize} color={fg} fill={fg} strokeWidth={2} />
         )}
       </View>
-      {needsAttention ? (
-        // Sibling of the disc, positioned with negative top/right so it
-        // visually overhangs into the outer wrapper's overflow:visible
-        // padding. The visual "attached to corner" effect comes from the
-        // overhang, not from clipping — the disc has overflow:hidden
-        // (implied by borderRadius on Android) but the badge isn't a
-        // descendant so it's never clipped by it.
-        <View
-          style={[
-            styles.badge,
-            {
-              width: badgeSize,
-              height: badgeSize,
-              borderRadius: badgeSize / 2,
-              top: -badgeOverhang,
-              right: -badgeOverhang,
-              backgroundColor: colors.zapYellow,
-              borderColor: colors.white,
-            },
-          ]}
-          accessible
-          accessibilityRole="image"
-          accessibilityLabel="Needs attention"
-        >
-          <AlertTriangle size={badgeGlyph} color={colors.textHeader} strokeWidth={2.5} />
-        </View>
-      ) : null}
+      {state
+        ? (() => {
+            // Sibling of the disc, positioned with negative top/right so it
+            // visually overhangs into the outer wrapper's overflow:visible
+            // padding. The visual "attached to corner" effect comes from the
+            // overhang, not from clipping — the disc has overflow:hidden
+            // (implied by borderRadius on Android) but the badge isn't a
+            // descendant so it's never clipped by it.
+            const variant =
+              state === 'done'
+                ? { bg: colors.green, ink: colors.white, Icon: Check, label: 'Swap complete' }
+                : state === 'attention'
+                  ? {
+                      bg: colors.zapYellow,
+                      ink: colors.textHeader,
+                      Icon: AlertTriangle,
+                      label: 'Needs attention',
+                    }
+                  : {
+                      bg: colors.textSupplementary,
+                      ink: colors.white,
+                      Icon: Clock,
+                      label: 'Swap in progress',
+                    };
+            const BadgeIcon = variant.Icon;
+            return (
+              <View
+                style={[
+                  styles.badge,
+                  {
+                    width: badgeSize,
+                    height: badgeSize,
+                    borderRadius: badgeSize / 2,
+                    top: -badgeOverhang,
+                    right: -badgeOverhang,
+                    backgroundColor: variant.bg,
+                    borderColor: colors.white,
+                  },
+                ]}
+                accessible
+                accessibilityRole="image"
+                accessibilityLabel={variant.label}
+              >
+                <BadgeIcon
+                  size={badgeGlyph}
+                  color={variant.ink}
+                  strokeWidth={state === 'done' ? 3 : 2.5}
+                />
+              </View>
+            );
+          })()
+        : null}
     </View>
   );
 };

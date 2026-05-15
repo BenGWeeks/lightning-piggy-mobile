@@ -10,6 +10,8 @@
 import * as SecureStore from 'expo-secure-store';
 import * as bitcoin from 'bitcoinjs-lib';
 import * as ecc from '@bitcoinerlab/secp256k1';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import Toast from '../components/BrandedToast';
 import * as boltzService from './boltzService';
 
@@ -17,6 +19,69 @@ import * as boltzService from './boltzService';
 // addresses — lockup addresses are taproot, so without this toOutputScript
 // throws "No ECC Library provided".
 bitcoin.initEccLib(ecc);
+
+/** Shape of the transaction-row data this module needs to classify a row as
+ *  a Boltz swap. Kept structural (not importing WalletTransaction) so the
+ *  service stays free of UI-layer types. */
+export interface BoltzTransactionLike {
+  swapId?: string;
+  description?: string;
+  paymentHash?: string;
+}
+
+/** Returns true when a transaction row originated from a Boltz reverse or
+ *  submarine swap. Used by TransactionList and TransactionDetailSheet to
+ *  decide whether to show Boltz-specific badges (yellow attention / green
+ *  done) and the swap explanation block. Settled swaps drop `swapId` in
+ *  some wallet backends, so we also match Boltz-minted invoice memos. */
+export function isBoltzTransaction(tx: BoltzTransactionLike | null | undefined): boolean {
+  if (!tx) return false;
+  if (tx.swapId) return true;
+  if (tx.description) {
+    if (/boltz swap/i.test(tx.description)) return true;
+    if (/send to btc|send to bitcoin/i.test(tx.description)) return true;
+    if (/receive from btc|receive from bitcoin/i.test(tx.description)) return true;
+  }
+  return false;
+}
+
+function paymentHashFromPreimage(preimageHex: string): string {
+  return bytesToHex(sha256(hexToBytes(preimageHex)));
+}
+
+// In-memory set of payment hashes for swaps that `recoverPendingSwaps` found
+// in a "claimable but not yet successfully claimed" state — i.e. Boltz has
+// locked funds on-chain but our claim either failed or can't be attempted.
+// TransactionList subscribes via `subscribeAttention` and badges the matching
+// row yellow. Cleared when a subsequent recovery run succeeds or the swap
+// reaches a terminal state.
+const attentionPaymentHashes = new Set<string>();
+const attentionListeners = new Set<() => void>();
+
+function notifyAttention(): void {
+  for (const cb of attentionListeners) {
+    try {
+      cb();
+    } catch (e) {
+      console.warn('[SwapRecovery] attention listener threw:', e);
+    }
+  }
+}
+
+/** Snapshot of payment hashes whose swap needs user attention right now.
+ *  Returned as a plain Set so consumers can call `.has(tx.paymentHash)` per
+ *  row without copying. Mutating this set externally is not supported. */
+export function getAttentionPaymentHashes(): ReadonlySet<string> {
+  return attentionPaymentHashes;
+}
+
+/** Subscribe to changes in the attention set. Returns an unsubscribe fn. */
+export function subscribeAttention(cb: () => void): () => void {
+  attentionListeners.add(cb);
+  return () => {
+    attentionListeners.delete(cb);
+  };
+}
 
 /**
  * Boltz v2 /swap/{id} returns only transaction.id + transaction.hex — not
@@ -152,6 +217,10 @@ export async function recoverPendingSwaps(): Promise<void> {
     }
   } catch (e) {
     console.warn('[SwapRecovery] Failed to load swap index:', e);
+  } finally {
+    // Single notify after the batch so subscribers (TransactionList) re-render
+    // once per recovery pass instead of once per swap.
+    notifyAttention();
   }
 }
 
@@ -164,6 +233,7 @@ async function recoverSwap(swapId: string): Promise<void> {
   }
 
   const swap = JSON.parse(raw) as PersistedReverseSwap;
+  const paymentHash = swap.preimage ? paymentHashFromPreimage(swap.preimage) : null;
 
   // Query Boltz status
   const res = await fetch(`${BOLTZ_API}/swap/${swapId}`);
@@ -172,6 +242,7 @@ async function recoverSwap(swapId: string): Promise<void> {
     if (res.status === 404) {
       await SecureStore.deleteItemAsync(`boltz_swap_${swapId}`);
       await unregisterPendingSwap(swapId);
+      if (paymentHash) attentionPaymentHashes.delete(paymentHash);
     }
     return;
   }
@@ -183,6 +254,7 @@ async function recoverSwap(swapId: string): Promise<void> {
     console.log(`[SwapRecovery] Swap ${swapId} already complete, cleaning up`);
     await SecureStore.deleteItemAsync(`boltz_swap_${swapId}`);
     await unregisterPendingSwap(swapId);
+    if (paymentHash) attentionPaymentHashes.delete(paymentHash);
     return;
   }
 
@@ -196,6 +268,7 @@ async function recoverSwap(swapId: string): Promise<void> {
     console.warn(`[SwapRecovery] Swap ${swapId} failed: ${data.status}`);
     await SecureStore.deleteItemAsync(`boltz_swap_${swapId}`);
     await unregisterPendingSwap(swapId);
+    if (paymentHash) attentionPaymentHashes.delete(paymentHash);
     return;
   }
 
@@ -209,6 +282,7 @@ async function recoverSwap(swapId: string): Promise<void> {
         `[SwapRecovery] Swap ${swapId} missing swapTree/refundPublicKey — cannot auto-claim. ` +
           `Funds will auto-refund to Boltz at timeout. Contact Boltz support with swap ID if needed.`,
       );
+      if (paymentHash) attentionPaymentHashes.add(paymentHash);
       return;
     }
 
@@ -216,6 +290,7 @@ async function recoverSwap(swapId: string): Promise<void> {
     const txHex = data.transaction?.hex;
     if (!txId || !txHex) {
       console.warn(`[SwapRecovery] Swap ${swapId} missing lockup tx id/hex`);
+      if (paymentHash) attentionPaymentHashes.add(paymentHash);
       return;
     }
     // v2 API doesn't include vout/onchainAmount in /swap/{id}. Derive them
@@ -225,6 +300,7 @@ async function recoverSwap(swapId: string): Promise<void> {
       console.warn(
         `[SwapRecovery] Swap ${swapId} — could not find lockup output matching ${swap.lockupAddress}`,
       );
+      if (paymentHash) attentionPaymentHashes.add(paymentHash);
       return;
     }
     const { vout, amount } = lockup;
@@ -249,7 +325,15 @@ async function recoverSwap(swapId: string): Promise<void> {
       position: 'top',
       visibilityTime: 8000,
     });
-    await boltzService.claimSwap(reverseSwap, { txId, vout, amount }, swap.destinationAddress);
+    try {
+      await boltzService.claimSwap(reverseSwap, { txId, vout, amount }, swap.destinationAddress);
+    } catch (e) {
+      // Claim broadcast / signing failed. Add to attention so the row badges
+      // yellow and the detail sheet's "Retry claim" button gets the user's
+      // attention; re-throw so recoverPendingSwaps' outer toast still fires.
+      if (paymentHash) attentionPaymentHashes.add(paymentHash);
+      throw e;
+    }
     console.log(`[SwapRecovery] Swap ${swapId} claimed successfully`);
     Toast.show({
       type: 'success',
@@ -261,6 +345,7 @@ async function recoverSwap(swapId: string): Promise<void> {
 
     await SecureStore.deleteItemAsync(`boltz_swap_${swapId}`);
     await unregisterPendingSwap(swapId);
+    if (paymentHash) attentionPaymentHashes.delete(paymentHash);
   }
 
   // Still pending (swap.created, invoice.set, etc.) — leave for next check
