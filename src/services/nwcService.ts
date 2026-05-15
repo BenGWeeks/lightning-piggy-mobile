@@ -768,9 +768,10 @@ function isTerminalLookupError(error: unknown): boolean {
 
 // LNbits (and some other NWC backends) omit preimage/invoice from
 // list_transactions; this fills them in. Returns null on failure.
-// `paid` relies on `settled_at` (a non-zero timestamp when the invoice
-// was paid). `preimage` alone isn't a safe signal — some backends
-// pre-populate it or return a placeholder while unsettled.
+// `paid` reflects the WebLN-shape `paid` boolean returned by
+// `NostrWebLNProvider.lookupInvoice` — see the block comment inside
+// the function for why the NIP-47 `settled_at` / `state` fields aren't
+// what we read here.
 export interface LookupInvoiceOptions {
   /**
    * Per-call ceiling for the underlying NIP-47 round trip. When unset,
@@ -806,8 +807,8 @@ export async function lookupInvoice(
     // `{preimage, paymentRequest, paid}` for us. Don't reach for `settled_at`
     // or `state` here — they're never populated on this path. If we ever
     // switch to the raw `NWCClient` we'd need to flip both the field names
-    // and the settlement predicate; see docs/TROUBLESHOOTING.adoc → "Receive
-    // sheet slow to show paid (NIP-47 settlement detection)" for context.
+    // and the settlement predicate; see docs/TROUBLESHOOTING.adoc →
+    // "Receive sheet slow to mark invoice as paid" for context.
     const call = provider.lookupInvoice({ paymentHash });
     const result = (await (options.replyTimeoutMs !== undefined
       ? withTimeout(call, options.replyTimeoutMs, `lookupInvoice(${walletId})`)
