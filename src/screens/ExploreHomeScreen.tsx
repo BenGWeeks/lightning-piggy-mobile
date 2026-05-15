@@ -444,8 +444,19 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           setCaches((prev) => {
             const existing = prev.get(c.coord);
             if (existing && existing.createdAt >= c.createdAt) return prev;
+            // The Map clone is O(N); cache it for the SLOW-path log so
+            // an unusually large mirror surfaces in logcat. Pre-fix the
+            // reducer ran silently for every relay event, even when
+            // doing a 1000-entry clone per push during a backfill burst.
+            const __t0 = performance.now();
             const next = new Map(prev);
             next.set(c.coord, c);
+            const __dt = performance.now() - __t0;
+            if (__dt > 30) {
+              console.log(
+                `[PerfBlock] Explore setCaches clone: ${Math.round(__dt)}ms size=${prev.size}→${next.size}`,
+              );
+            }
             return next;
           });
         }),
@@ -461,8 +472,15 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           setEvents((prev) => {
             const existing = prev.get(e.coord);
             if (existing && existing.startsAt === e.startsAt) return prev;
+            const __t0 = performance.now();
             const next = new Map(prev);
             next.set(e.coord, e);
+            const __dt = performance.now() - __t0;
+            if (__dt > 30) {
+              console.log(
+                `[PerfBlock] Explore setEvents clone: ${Math.round(__dt)}ms size=${prev.size}→${next.size}`,
+              );
+            }
             return next;
           });
         }),

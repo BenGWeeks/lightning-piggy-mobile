@@ -206,17 +206,23 @@ export const ExploreMiniMap: React.FC<Props> = ({
   // Memoised HTML — only rebuilt when the map's structural inputs
   // change (centre / zoom / interactivity). Stable across merchant /
   // cache updates so we don't remount the WebView on every relay tick.
-  const html = useMemo(
-    () =>
-      makeHtml(
-        lat ?? 0,
-        lon ?? 0,
-        defaultZoom,
-        interactive,
-        initialHubPayloadRef.current ?? '',
-      ),
-    [lat, lon, defaultZoom, interactive],
-  );
+  const html = useMemo(() => {
+    const __t0 = performance.now();
+    const out = makeHtml(
+      lat ?? 0,
+      lon ?? 0,
+      defaultZoom,
+      interactive,
+      initialHubPayloadRef.current ?? '',
+    );
+    const __dt = performance.now() - __t0;
+    if (__dt > 50) {
+      console.log(
+        `[PerfBlock] ExploreMiniMap makeHtml: ${Math.round(__dt)}ms (${out.length} chars)`,
+      );
+    }
+    return out;
+  }, [lat, lon, defaultZoom, interactive]);
 
   // Notify the parent every time a finger lands on / leaves the map.
   // The parent uses these to disable its own scroll + pull-to-refresh

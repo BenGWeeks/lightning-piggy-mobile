@@ -274,6 +274,7 @@ export async function getBalance(
   walletId: string,
   options: GetBalanceOptions = {},
 ): Promise<number | null> {
+  const __t0 = performance.now();
   const provider = await ensureConnected(walletId);
   if (!provider) return null;
   try {
@@ -291,8 +292,14 @@ export async function getBalance(
         delayMs: 1500,
       },
     );
+    const __dt = performance.now() - __t0;
+    if (__dt > 500) {
+      console.log(`[PerfBlock] NWC.getBalance: ${Math.round(__dt)}ms (walletId=${walletId.slice(0, 8)}…)`);
+    }
     return b.balance;
   } catch (error) {
+    const __dt = performance.now() - __t0;
+    console.log(`[PerfBlock] NWC.getBalance FAILED after ${Math.round(__dt)}ms (walletId=${walletId.slice(0, 8)}…)`);
     console.warn(`getBalance error for ${walletId}:`, error);
     return null;
   }

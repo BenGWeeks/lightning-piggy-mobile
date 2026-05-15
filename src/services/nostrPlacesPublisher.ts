@@ -83,8 +83,18 @@ export const subscribeNearbyCaches = (
       const __t0 = performance.now();
       const parsed = parseCache(e as VerifiedEvent);
       if (parsed) onEvent(parsed);
-      __burstMs += performance.now() - __t0;
+      const __dt = performance.now() - __t0;
+      __burstMs += __dt;
       __burstCount += 1;
+      // Log individual SLOW events synchronously — the setTimeout-based
+      // summary below is useless when the JS thread is blocked (timers
+      // queue but don't fire). >50 ms in a single onevent likely means
+      // the setCaches reducer + downstream render is the hot path.
+      if (__dt > 50) {
+        console.log(
+          `[PerfBlock] subscribeNearbyCaches SLOW event: ${Math.round(__dt)}ms (kind=${e.kind} d=${parsed?.d ?? '?'})`,
+        );
+      }
       if (__burstCount % 10 === 0) {
         console.log(
           `[PerfBlock] subscribeNearbyCaches: ${__burstCount} events, ${Math.round(__burstMs)}ms cumulative`,
@@ -174,8 +184,13 @@ export const subscribeNearbyEvents = (
     const geoFilter: Filter = { kinds: [NIP52_TIME_BASED_KIND], '#g': prefixes };
     const geoSub = pool.subscribeMany(relays, geoFilter, {
       onevent: (e: NostrEvent) => {
+        const __t0 = performance.now();
         const parsed = parseNip52Event(e as VerifiedEvent);
         if (parsed) onEvent(parsed);
+        const __dt = performance.now() - __t0;
+        if (__dt > 50) {
+          console.log(`[PerfBlock] subscribeNearbyEvents geo SLOW: ${Math.round(__dt)}ms`);
+        }
       },
     });
     closers.push(() => geoSub.close());
@@ -193,8 +208,13 @@ export const subscribeNearbyEvents = (
     };
     const tagSub = pool.subscribeMany(relays, tagFilter, {
       onevent: (e: NostrEvent) => {
+        const __t0 = performance.now();
         const parsed = parseNip52Event(e as VerifiedEvent);
         if (parsed) onEvent(parsed);
+        const __dt = performance.now() - __t0;
+        if (__dt > 50) {
+          console.log(`[PerfBlock] subscribeNearbyEvents tag SLOW: ${Math.round(__dt)}ms`);
+        }
       },
     });
     closers.push(() => tagSub.close());
