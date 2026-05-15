@@ -6,6 +6,8 @@ import {
   StyleSheet,
   BackHandler,
   ActivityIndicator,
+  AppState,
+  type AppStateStatus,
   Platform,
 } from 'react-native';
 import {
@@ -214,6 +216,26 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
     return () => sub.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
+
+  // Re-arm the foreground NFC reader when the user returns from
+  // background. Android pauses the reader session on app onPause
+  // (visible in logcat as 'ReactNativeNfcManager: disableReaderMode'),
+  // and the SDK doesn't automatically resume on the next onResume.
+  // Without this, swiping away to another app even briefly leaves the
+  // sheet stuck on 'Waiting for NFC tag…' with no actual reader active.
+  useEffect(() => {
+    if (!visible) return;
+    let lastState: AppStateStatus = AppState.currentState;
+    const sub = AppState.addEventListener('change', (next) => {
+      const wasBackground = lastState === 'background' || lastState === 'inactive';
+      lastState = next;
+      if (next === 'active' && wasBackground && stage === 'ready') {
+        console.log('[NFC] App resumed during ready state — re-arming reader');
+        startRead();
+      }
+    });
+    return () => sub.remove();
+  }, [visible, stage, startRead]);
 
   // Tick the countdown each second while sleeping. Stops at 0 — the
   // Try Again button then re-runs the claim and either succeeds (if
