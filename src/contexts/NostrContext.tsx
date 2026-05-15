@@ -1525,14 +1525,31 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             }
 
             const t0 = Date.now();
+            // [PerfBlock] per-loader timing — `parallel refresh` shows
+            // total wall-clock but masks which of the three loaders is
+            // the bottleneck. These per-loader markers let us see
+            // (a) which finishes last (slowest relay path) and (b)
+            // which one's resolution kicks off the heavy setState
+            // chain that follows. #554.
+            const __tR = Date.now();
+            const __tP = Date.now();
+            const __tC = Date.now();
             Promise.all([
-              loadRelays(pk!).catch((e) => console.warn('[Nostr] relay refresh failed:', e)),
-              loadProfile(pk!, workingRelays).catch((e) =>
-                console.warn('[Nostr] profile refresh failed:', e),
-              ),
-              loadContacts(pk!, workingRelays).catch((e) =>
-                console.warn('[Nostr] contact refresh failed:', e),
-              ),
+              loadRelays(pk!)
+                .catch((e) => console.warn('[Nostr] relay refresh failed:', e))
+                .finally(() =>
+                  console.log(`[PerfBlock] loadRelays: ${Date.now() - __tR}ms`),
+                ),
+              loadProfile(pk!, workingRelays)
+                .catch((e) => console.warn('[Nostr] profile refresh failed:', e))
+                .finally(() =>
+                  console.log(`[PerfBlock] loadProfile: ${Date.now() - __tP}ms`),
+                ),
+              loadContacts(pk!, workingRelays)
+                .catch((e) => console.warn('[Nostr] contact refresh failed:', e))
+                .finally(() =>
+                  console.log(`[PerfBlock] loadContacts: ${Date.now() - __tC}ms`),
+                ),
             ]).then(() => {
               if (__DEV__) console.log(`[Nostr] parallel refresh complete in ${Date.now() - t0}ms`);
             });
