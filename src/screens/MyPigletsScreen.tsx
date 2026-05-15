@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -8,14 +8,18 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { ChevronLeft, ChevronRight, MapPin, PiggyBank, Plus } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, MapPin, PiggyBank, Plus, RotateCw } from 'lucide-react-native';
 import type { VerifiedEvent } from 'nostr-tools';
+import { Alert } from '../components/BrandedAlert';
+import { Toast } from '../components/BrandedToast';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useNostr } from '../contexts/NostrContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { type ParsedCache, parseCacheCoord } from '../services/nostrPlacesService';
 import { subscribeFoundLogsByAuthors } from '../services/nostrPlacesPublisher';
 import { loadCachedCaches, peekCachedCachesSync } from '../services/nostrPlacesStorage';
+import { loadPiggies, type HiddenPiggy } from '../services/piggyStorageService';
+import { republishPiggy } from '../services/republishPiggyService';
 import { ExploreNavigation } from '../navigation/types';
 import type { Palette } from '../styles/palettes';
 
@@ -60,8 +64,31 @@ type SectionRow =
 const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { pubkey } = useNostr();
+  const { pubkey, signEvent, relays } = useNostr();
   const { trustSet } = useTrustGraph();
+
+  // Local-only `HiddenPiggy` records (LNURL bearer + original expiry
+  // window). Needed by the Republish action — relays don't carry the
+  // LNURL so we can't reconstruct it from a ParsedCache. Keyed by
+  // `piggy.id` which equals the cache's `d` tag at publish time.
+  const [piggiesById, setPiggiesById] = useState<Map<string, HiddenPiggy>>(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    loadPiggies().then((list) => {
+      if (cancelled) return;
+      const m = new Map<string, HiddenPiggy>();
+      for (const p of list) m.set(p.id, p);
+      setPiggiesById(m);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Tracks which row is currently mid-republish so we can render a
+  // spinner in place of the badge and ignore double-taps. Keyed by
+  // cache coord.
+  const [republishingCoord, setRepublishingCoord] = useState<string | null>(null);
 
   // Local NIP-GC cache — paint instantly, then refresh from AsyncStorage.
   const [allCaches, setAllCaches] = useState<ParsedCache[]>(() => peekCachedCachesSync());
@@ -180,6 +207,69 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
     navigation.navigate('HuntPiggyDetail', { coord });
   };
 
+  // Republish an expired Piglet — refresh the NIP-40 expiration tag
+  // and re-emit the kind 37516 listing under the same `d` (NIP-33
+  // addressable replacement). The LNURL bearer is reconstructed from
+  // the local `HiddenPiggy` record only — never sourced from the
+  // relay-side ParsedCache, which never carried it in the first place.
+  const handleRepublish = useCallback(
+    (cache: ParsedCache) => {
+      const piggy = piggiesById.get(cache.d);
+      if (!piggy) {
+        Toast.show({
+          type: 'error',
+          text1: "Can't republish",
+          text2: 'Original LNURL not on this device — re-add the Piglet to republish.',
+        });
+        return;
+      }
+      Alert.alert(
+        'Republish this Piglet?',
+        'Re-emits the listing to relays with a fresh expiration. Your secret LNURL stays on-device.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Republish',
+            onPress: async () => {
+              if (republishingCoord) return;
+              setRepublishingCoord(cache.coord);
+              try {
+                const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+                const { newExpiresAt } = await republishPiggy(piggy, signEvent, writeRelays);
+                // Optimistic local patch so the badge clears before
+                // the relay round-trip lands. The kind 37516 we just
+                // emitted will overwrite this entry naturally next
+                // time the subscription tick refreshes.
+                setAllCaches((prev) =>
+                  prev.map((c) =>
+                    c.coord === cache.coord
+                      ? { ...c, expiresAt: newExpiresAt, createdAt: Math.floor(Date.now() / 1000) }
+                      : c,
+                  ),
+                );
+                setPiggiesById((prev) => {
+                  const next = new Map(prev);
+                  next.set(piggy.id, { ...piggy, expiresAt: newExpiresAt });
+                  return next;
+                });
+                Toast.show({ type: 'success', text1: 'Piggy republished 🐷' });
+              } catch (e) {
+                Toast.show({
+                  type: 'error',
+                  text1: 'Republish failed',
+                  text2: (e as Error).message,
+                });
+              } finally {
+                setRepublishingCoord(null);
+              }
+            },
+          },
+        ],
+      );
+    },
+    [piggiesById, relays, republishingCoord, signEvent],
+  );
+
   return (
     <View style={styles.container} testID="my-piglets-screen">
       <View style={styles.header}>
@@ -242,6 +332,8 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
                 styles={styles}
                 onPress={() => openCacheByCoord(item.cache.coord)}
                 testID={`my-piglets-hidden-${item.cache.d}`}
+                onRepublish={() => handleRepublish(item.cache)}
+                republishing={republishingCoord === item.cache.coord}
               />
             );
           }
@@ -287,9 +379,22 @@ interface RowProps {
   styles: ReturnType<typeof createStyles>;
   onPress: () => void;
   testID: string;
+  // Hidden-cache rows only — wires the ExpiryBadge's "Expired" state
+  // to a tap-to-republish handler. Friend / find rows omit it.
+  onRepublish?: () => void;
+  republishing?: boolean;
 }
 
-const Row: React.FC<RowProps> = ({ cache, meta, colors, styles, onPress, testID }) => (
+const Row: React.FC<RowProps> = ({
+  cache,
+  meta,
+  colors,
+  styles,
+  onPress,
+  testID,
+  onRepublish,
+  republishing,
+}) => (
   <TouchableOpacity
     style={styles.row}
     onPress={onPress}
@@ -316,9 +421,17 @@ const Row: React.FC<RowProps> = ({ cache, meta, colors, styles, onPress, testID 
         </Text>
         {/* Expiry badge — NIP-40-aware. Red pill for past-expiry caches
             so the hider knows their listing won't appear in finder
-            searches anymore; subtle "N d" caption while still active. */}
+            searches anymore; subtle "N d" caption while still active.
+            When `onRepublish` is supplied the Expired state becomes
+            tappable and re-emits the listing with a fresh window. */}
         {cache?.expiresAt != null ? (
-          <ExpiryBadge expiresAt={cache.expiresAt} styles={styles} />
+          <ExpiryBadge
+            expiresAt={cache.expiresAt}
+            styles={styles}
+            colors={colors}
+            onRepublish={onRepublish}
+            republishing={!!republishing}
+          />
         ) : null}
       </View>
       <Text style={styles.rowMeta} numberOfLines={1}>
@@ -330,27 +443,60 @@ const Row: React.FC<RowProps> = ({ cache, meta, colors, styles, onPress, testID 
 );
 
 // Small pill rendered next to the cache name. Three states:
-//   • already expired → red "Expired"
+//   • already expired → red "Expired" — tappable on hidden-cache rows
+//     to republish the listing with a fresh NIP-40 expiration tag
 //   • < 14 days left  → amber "Ends Nd" (warn the hider it'll vanish soon)
 //   • > 14 days left  → no badge (clean row)
-// Used on hidden-cache rows to flag listings that have aged out of NIP-40
-// relay retention. Republishing the cache (via the wizard's edit flow,
-// #22) resets the expiry — surfacing here is the prompt to do so.
+// Used on hidden-cache rows to flag listings that have aged out of
+// NIP-40 relay retention. Republishing (via this badge or the edit
+// flow #22) resets the expiry.
 const ExpiryBadge: React.FC<{
   expiresAt: number;
   styles: ReturnType<typeof createStyles>;
-}> = ({ expiresAt, styles }) => {
+  colors: Palette;
+  onRepublish?: () => void;
+  republishing?: boolean;
+}> = ({ expiresAt, styles, colors, onRepublish, republishing }) => {
   const nowSec = Math.floor(Date.now() / 1000);
   const daysLeft = Math.round((expiresAt - nowSec) / 86400);
   if (daysLeft >= 14) return null;
   const isExpired = daysLeft < 0;
-  return (
-    <View
-      style={[styles.expiryBadge, isExpired ? styles.expiryBadgeExpired : styles.expiryBadgeWarn]}
-    >
-      <Text style={styles.expiryBadgeText}>{isExpired ? 'Expired' : `Ends ${daysLeft}d`}</Text>
-    </View>
+  const canRepublish = isExpired && !!onRepublish;
+  const label = republishing
+    ? 'Republishing…'
+    : isExpired
+      ? canRepublish
+        ? 'Republish'
+        : 'Expired'
+      : `Ends ${daysLeft}d`;
+  const badgeStyle = [
+    styles.expiryBadge,
+    isExpired ? styles.expiryBadgeExpired : styles.expiryBadgeWarn,
+  ];
+  const content = (
+    <>
+      {canRepublish && !republishing ? (
+        <RotateCw size={11} color={colors.white} strokeWidth={2.5} />
+      ) : null}
+      {republishing ? <ActivityIndicator size="small" color={colors.white} /> : null}
+      <Text style={styles.expiryBadgeText}>{label}</Text>
+    </>
   );
+  if (canRepublish) {
+    return (
+      <TouchableOpacity
+        style={badgeStyle}
+        onPress={onRepublish}
+        disabled={republishing}
+        accessibilityLabel="Republish expired Piglet"
+        testID="my-piglets-republish"
+        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+      >
+        {content}
+      </TouchableOpacity>
+    );
+  }
+  return <View style={badgeStyle}>{content}</View>;
 };
 
 const createStyles = (colors: Palette) =>
@@ -441,8 +587,11 @@ const createStyles = (colors: Palette) =>
     rowTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: colors.textHeader },
     rowMeta: { fontSize: 12, color: colors.textSupplementary, marginTop: 2 },
     expiryBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
       paddingHorizontal: 8,
-      paddingVertical: 2,
+      paddingVertical: 3,
       borderRadius: 6,
     },
     expiryBadgeExpired: { backgroundColor: colors.red },
