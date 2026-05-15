@@ -47,7 +47,8 @@ import Toast from '../components/BrandedToast';
 import { buildFoundLog, parseCacheCoord, type ParsedCache } from '../services/nostrPlacesService';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
 import CacheSpecSheet from '../components/CacheSpecSheet';
-import { decodeGeohash } from '../utils/geohash';
+import { decodeGeohash, formatDistance } from '../utils/geohash';
+import { useCompassNavigation } from '../hooks/useCompassNavigation';
 import {
   fetchCache,
   publishCacheEvent,
@@ -139,6 +140,26 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   // Hero slot toggles between the cache photo and a map; defaults to the
   // photo when one exists, otherwise the render falls back to the map.
   const [heroView, setHeroView] = useState<'photo' | 'map'>('photo');
+
+  // Compass-navigation feed — live user position, device heading, and
+  // bearing/distance to the cache. Drives the rotating Navigate arrow,
+  // the distance label, and the blue user-dot on the map hero. Returns
+  // all-null until permission is granted and a fix lands; UI degrades
+  // gracefully (no rotation, no distance) in that case.
+  const cacheLatLon = useMemo(
+    () => (cache?.geohash ? decodeGeohash(cache.geohash) : null),
+    [cache?.geohash],
+  );
+  const compassTarget = useMemo(
+    () => (cacheLatLon ? { lat: cacheLatLon.lat, lon: cacheLatLon.lng } : null),
+    [cacheLatLon],
+  );
+  const { user: userPos, heading, bearing, distanceMetres } = useCompassNavigation(compassTarget);
+  // lucide's Navigation glyph sits at ~45° at rest (the apex points up-
+  // right). Subtract 45° from the desired rotation so the apex ends up
+  // pointing toward the cache. Heading subtracted so the arrow stays
+  // relative to where the phone is facing, not absolute North.
+  const arrowRotation = bearing !== null && heading !== null ? bearing - heading - 45 : null;
 
   // ----- load listing + subscribe found-logs ------------------------------
 
@@ -360,6 +381,8 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                       cachePin
                       lat={decodeGeohash(cache.geohash).lat}
                       lon={decodeGeohash(cache.geohash).lng}
+                      userLat={userPos?.lat ?? null}
+                      userLon={userPos?.lon ?? null}
                       merchants={[]}
                       caches={[cache]}
                       events={[]}
@@ -401,11 +424,28 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 <TouchableOpacity
                   style={styles.actionButtonSecondary}
                   onPress={openNavigation}
-                  accessibilityLabel="Navigate to this cache"
+                  accessibilityLabel={
+                    distanceMetres !== null
+                      ? `Navigate to this cache — ${formatDistance(distanceMetres)} away`
+                      : 'Navigate to this cache'
+                  }
                   testID="hunt-piggy-detail-navigate-button"
                 >
-                  <Navigation size={18} color={colors.brandPink} strokeWidth={2.5} />
-                  <Text style={styles.actionButtonSecondaryText}>Navigate</Text>
+                  <Navigation
+                    size={18}
+                    color={colors.brandPink}
+                    strokeWidth={2.5}
+                    style={
+                      arrowRotation !== null
+                        ? { transform: [{ rotate: `${arrowRotation}deg` }] }
+                        : undefined
+                    }
+                  />
+                  <Text style={styles.actionButtonSecondaryText}>
+                    {distanceMetres !== null
+                      ? `Navigate · ${formatDistance(distanceMetres)}`
+                      : 'Navigate'}
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.actionButtonPrimary, !canLog && styles.claimButtonDisabled]}

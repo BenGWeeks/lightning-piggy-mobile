@@ -1,4 +1,5 @@
 import {
+  bearingDegrees,
   decodeGeohash,
   encodeGeohash,
   formatDistance,
@@ -71,6 +72,45 @@ describe('haversineMetres', () => {
     const a = { lat: 51.5, lon: -0.1 };
     const b = { lat: 52.0, lon: 0.5 };
     expect(haversineMetres(a, b)).toBeCloseTo(haversineMetres(b, a), 6);
+  });
+});
+
+describe('bearingDegrees', () => {
+  it('is 0 for identical points (avoids platform-dependent atan2(0,0))', () => {
+    expect(bearingDegrees({ lat: 51.5, lon: -0.1 }, { lat: 51.5, lon: -0.1 })).toBe(0);
+  });
+
+  it('returns ~0 for due-north travel', () => {
+    // London → Cambridge is roughly north-north-east; pure north is at
+    // a point directly above London.
+    const b = bearingDegrees({ lat: 51.5, lon: -0.1 }, { lat: 52.5, lon: -0.1 });
+    expect(b).toBeCloseTo(0, 0);
+  });
+
+  it('returns ~90 for due-east travel', () => {
+    const b = bearingDegrees({ lat: 51.5, lon: -0.1 }, { lat: 51.5, lon: 0.9 });
+    expect(b).toBeGreaterThan(89);
+    expect(b).toBeLessThan(91);
+  });
+
+  it('returns ~180 for due-south travel', () => {
+    const b = bearingDegrees({ lat: 51.5, lon: -0.1 }, { lat: 50.5, lon: -0.1 });
+    expect(b).toBeCloseTo(180, 0);
+  });
+
+  it('returns ~270 for due-west travel', () => {
+    const b = bearingDegrees({ lat: 51.5, lon: -0.1 }, { lat: 51.5, lon: -1.1 });
+    expect(b).toBeGreaterThan(269);
+    expect(b).toBeLessThan(271);
+  });
+
+  it('always returns a value in [0, 360)', () => {
+    // Spot-check: south-west neighbour should be in (180, 270).
+    const b = bearingDegrees({ lat: 51.5, lon: -0.1 }, { lat: 51.0, lon: -0.6 });
+    expect(b).toBeGreaterThan(180);
+    expect(b).toBeLessThan(270);
+    expect(b).toBeGreaterThanOrEqual(0);
+    expect(b).toBeLessThan(360);
   });
 });
 

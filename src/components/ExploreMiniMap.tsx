@@ -45,10 +45,20 @@ interface Props {
   /**
    * When set, caches render as a centred teardrop map-pin (pink + piggy
    * glyph for a Piglet, slate + map-pin glyph otherwise) instead of the
-   * small dot used on the hub map. Used by the cache-detail hero, and
-   * also suppresses the "me" dot since that view is about the cache.
+   * small dot used on the hub map. Used by the cache-detail hero. The
+   * "me" dot is suppressed in this mode UNLESS `userLat`/`userLon` are
+   * passed explicitly (then it represents the user's separate location
+   * relative to the cache).
    */
   cachePin?: boolean;
+  /**
+   * Explicit user position. When set, drives the "me" dot independently
+   * of `lat`/`lon` (which on cachePin views are the cache centre, not
+   * the user). Used by the compass-navigation feature on cache-detail
+   * so the user can see their position relative to the target.
+   */
+  userLat?: number | null;
+  userLon?: number | null;
 }
 
 /**
@@ -78,6 +88,8 @@ export const ExploreMiniMap: React.FC<Props> = ({
   defaultZoom = 13,
   fill = false,
   cachePin = false,
+  userLat = null,
+  userLon = null,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -114,15 +126,21 @@ export const ExploreMiniMap: React.FC<Props> = ({
     const eventLocs = events
       .filter((e) => e.geohash)
       .map((e) => decodeGeohash(e.geohash as string));
+    // On cachePin views, `me` carries the user's *separate* location
+    // (when known) so the blue dot can be drawn next to the cache pin.
+    // On hub views, lat/lon ARE the user — `me` and the centre coincide.
+    const meLat = cachePin && userLat !== null ? userLat : lat;
+    const meLon = cachePin && userLon !== null ? userLon : lon;
+    const hasMe = cachePin ? userLat !== null && userLon !== null : true;
     const js = `window.LP_setHub && window.LP_setHub(${JSON.stringify({
-      me: { lat, lng: lon },
+      me: hasMe ? { lat: meLat, lng: meLon } : null,
       merchants: places,
       caches: cacheLocs,
       events: eventLocs,
       cachePin,
     })}); true;`;
     webviewRef.current.injectJavaScript(js);
-  }, [ready, lat, lon, merchants, caches, events, cachePin]);
+  }, [ready, lat, lon, merchants, caches, events, cachePin, userLat, userLon]);
 
   return (
     <TouchableOpacity
@@ -257,15 +275,22 @@ map.on('zoomstart',function(e){if(e.zoom!==undefined)userHasInteracted=true;});
 window.LP_setHub=function(d){
   merchantLayer.clearLayers();cacheLayer.clearLayers();eventLayer.clearLayers();
   if(meMarker){map.removeLayer(meMarker);meMarker=null;}
-  // The cache-detail hero is about the cache, not the user — skip the "me" dot there.
-  if(!d.cachePin)meMarker=L.marker([d.me.lat,d.me.lng],{icon:dot('lp-me',12)}).addTo(map);
+  // Render the blue dot whenever d.me is provided. The cache-detail
+  // hero passes me=null unless an explicit user position was supplied
+  // via the userLat/userLon props (see Props in ExploreMiniMap.tsx).
+  if(d.me)meMarker=L.marker([d.me.lat,d.me.lng],{icon:dot('lp-me',12)}).addTo(map);
   d.merchants.forEach(m=>L.marker([m.lat,m.lng],{icon:dot('lp-pin'+(m.lightning?'':' onchain'),14)}).addTo(merchantLayer));
   d.caches.forEach(c=>L.marker([c.lat,c.lng],{icon:d.cachePin?pinIcon(c.kind==='piggy'):dot('lp-cache'+(c.kind==='piggy'?' piggy':''),14)}).addTo(cacheLayer));
   d.events.forEach(e=>L.marker([e.lat,e.lng],{icon:dot('lp-event',14)}).addTo(eventLayer));
   // Only re-centre on the very first LP_setHub. After that the user's
   // viewport is sacred — late-arriving caches / events would otherwise
   // snap the map back and undo any zoom out.
-  if(!userHasInteracted && !window.__lpDidCentre){
+  //
+  // Skipped on cachePin views: those want to stay locked on the cache
+  // (the constructor's initial setView already did that), even when a
+  // user dot arrives later — otherwise the dot's location would yank
+  // the map away from the target, which is the wrong product.
+  if(!d.cachePin && d.me && !userHasInteracted && !window.__lpDidCentre){
     map.setView([d.me.lat,d.me.lng],${defaultZoom});
     window.__lpDidCentre=true;
   }

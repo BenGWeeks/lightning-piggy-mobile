@@ -117,6 +117,32 @@ export const haversineMetres = (
 };
 
 /**
+ * Initial great-circle bearing in degrees (0 = North, 90 = East, …, 360
+ * excluded) from point `a` to point `b`. Used by the cache-detail
+ * Navigate arrow — rotating the icon by `bearing − deviceHeading`
+ * keeps it pointing at the cache as the user turns. "Initial" means
+ * the bearing you'd set off on; for short walking distances (the only
+ * case this app cares about) it's effectively constant en-route.
+ *
+ * Returns 0 if the two points are identical (atan2 would otherwise
+ * return whatever atan2(0,0) yields on the platform).
+ */
+export const bearingDegrees = (
+  a: { lat: number; lon: number },
+  b: { lat: number; lon: number },
+): number => {
+  if (a.lat === b.lat && a.lon === b.lon) return 0;
+  const toRad = (deg: number): number => (deg * Math.PI) / 180;
+  const toDeg = (rad: number): number => (rad * 180) / Math.PI;
+  const φ1 = toRad(a.lat);
+  const φ2 = toRad(b.lat);
+  const Δλ = toRad(b.lon - a.lon);
+  const y = Math.sin(Δλ) * Math.cos(φ2);
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+};
+
+/**
  * Human-readable distance string. Used as the "X away" badge on
  * Hub / Discover / Events rows.
  *   < 950 m  → "210 m" (rounded to nearest 10 m)
