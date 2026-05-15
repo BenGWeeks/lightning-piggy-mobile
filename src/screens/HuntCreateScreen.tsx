@@ -58,7 +58,8 @@ import {
 import { loadPiggies, newPiggyId, savePiggy } from '../services/piggyStorageService';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 import { encodeGeohash } from '../utils/geohash';
-import { buildCacheListing, GC_LISTING_KIND } from '../services/nostrPlacesService';
+import { buildCacheListing, GC_LISTING_KIND, parseCache } from '../services/nostrPlacesService';
+import { peekCachedCachesSync, saveCaches } from '../services/nostrPlacesStorage';
 import * as nip19 from 'nostr-tools/nip19';
 import { publishCacheEvent } from '../services/nostrPlacesPublisher';
 import NfcWriteSheet from '../components/NfcWriteSheet';
@@ -407,6 +408,29 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         console.log(`[Publish] publishCacheEvent → ${writeRelays.length || 'default'} relays`);
         await publishCacheEvent(signed, writeRelays.length > 0 ? writeRelays : undefined);
         console.log(`[Publish] publishCacheEvent ok`);
+        // Mirror the just-published event into the local ParsedCache
+        // cache that MyPiglets reads from. Otherwise the listing only
+        // appears after the user's NIP-GC subscription echoes it back
+        // — and that subscription is paused while the user is on this
+        // wizard (per #557's tab-blur pause), so the event lands at
+        // a dead subscriber. Parsing locally + writing to the same
+        // store the subscriber would have written to bridges the gap.
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const parsedFromSigned = parseCache(signed as any);
+          if (parsedFromSigned) {
+            const current = peekCachedCachesSync();
+            const existingIdx = current.findIndex((c) => c.coord === parsedFromSigned.coord);
+            const next =
+              existingIdx >= 0
+                ? current.map((c, i) => (i === existingIdx ? parsedFromSigned : c))
+                : [parsedFromSigned, ...current];
+            saveCaches(next);
+            console.log(`[Publish] mirrored to local cache (coord=${parsedFromSigned.coord})`);
+          }
+        } catch (mirrorErr) {
+          console.warn(`[Publish] local-cache mirror failed: ${(mirrorErr as Error).message}`);
+        }
         Toast.show({
           type: 'success',
           text1: isEditMode ? 'Piggy republished 🐷' : 'Piggy published 🐷',
@@ -1596,33 +1620,26 @@ const NfcSupportedTagsCard: React.FC<{
       <Lock size={14} color={colors.brandPink} strokeWidth={2.5} />
       <Text style={styles.tagsCardHeaderText}>Supported NFC tags</Text>
     </View>
-    <Text style={styles.tagsCardIntro}>
-      The Piglet is locked after writing so no one else can overwrite it. Two chip families support
-      that — one to avoid.
-    </Text>
-    {SUPPORTED_TAGS.map((tag) => (
-      <View key={tag.name} style={styles.tagsCardRow}>
-        <View
-          style={[
-            styles.tagsCardDot,
-            tag.status === 'recommended'
-              ? { backgroundColor: colors.brandPink }
-              : tag.status === 'ok'
-                ? { backgroundColor: '#F5A623' }
-                : { backgroundColor: colors.textSupplementary },
-          ]}
-        />
-        <View style={{ flex: 1 }}>
-          <Text style={styles.tagsCardName}>
-            {tag.name}
-            {tag.status === 'recommended' ? ' · Recommended' : ''}
-            {tag.status === 'avoid' ? ' · Avoid' : ''}
-          </Text>
-          <Text style={styles.tagsCardBlurb}>{tag.blurb}</Text>
-          <Text style={styles.tagsCardCapacity}>Capacity: {tag.capacity}</Text>
-        </View>
-      </View>
-    ))}
+    {/* Two-paragraph form — collapsed from the previous four-row
+        matrix so the hider can pick a sticker at a glance. */}
+    <View style={styles.tagsCardParagraph}>
+      <Text style={styles.tagsCardCheck}>✓</Text>
+      <Text style={styles.tagsCardParagraphText}>
+        <Text style={styles.tagsCardName}>NTAG215 / 216</Text> — recommended. 504-888 bytes of
+        usable space, plenty of room for the full multi-record payload (lightningpiggy URL +
+        nostr listing reference + LNURL). Locks permanently after write so no passer-by can
+        overwrite the tag.
+      </Text>
+    </View>
+    <View style={styles.tagsCardParagraph}>
+      <Text style={styles.tagsCardCross}>✗</Text>
+      <Text style={styles.tagsCardParagraphText}>
+        <Text style={styles.tagsCardName}>NTAG213 / Mifare Ultralight C / Mifare Classic</Text> —
+        avoid. NTAG213 + Ultralight C only have ~140 usable bytes, too small for the multi-record
+        write. Mifare Classic has no permanent NDEF lock — anyone with the default sector key can
+        overwrite the cache.
+      </Text>
+    </View>
   </View>
 );
 
@@ -2131,6 +2148,29 @@ const createStyles = (colors: Palette) =>
       fontSize: 13,
       fontWeight: '700',
       color: colors.textHeader,
+    },
+    tagsCardParagraph: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 10,
+    },
+    tagsCardCheck: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: colors.green,
+      lineHeight: 18,
+    },
+    tagsCardCross: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: colors.red,
+      lineHeight: 18,
+    },
+    tagsCardParagraphText: {
+      flex: 1,
+      fontSize: 12,
+      lineHeight: 17,
+      color: colors.textBody,
     },
     tagsCardBlurb: {
       fontSize: 12,
