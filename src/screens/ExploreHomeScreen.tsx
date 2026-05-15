@@ -346,18 +346,30 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     const readRelays = userRelays.filter((r) => r.read).map((r) => r.url);
     fetchCachesByAuthor(signedInPubkey, readRelays.length > 0 ? readRelays : undefined)
       .then((mine) => {
-        if (cancelled || mine.length === 0) return;
+        if (cancelled) return;
+        console.log(
+          `[PerfBlock] ExploreHome by-author merge: fetched=${mine.length} ` +
+            mine
+              .map((c) => `${c.name ?? c.d}@${c.geohash?.slice(0, 5) ?? '??'}`)
+              .join(', '),
+        );
+        if (mine.length === 0) return;
         setCaches((prev) => {
           const next = new Map(prev);
+          let added = 0;
           for (const c of mine) {
             const existing = next.get(c.coord);
-            if (!existing || c.createdAt > existing.createdAt) next.set(c.coord, c);
+            if (!existing || c.createdAt > existing.createdAt) {
+              next.set(c.coord, c);
+              added++;
+            }
           }
+          console.log(`[PerfBlock] ExploreHome by-author merge: ${added} new/updated in caches Map`);
           return next;
         });
       })
-      .catch(() => {
-        // Non-fatal — the nearby sub + local cache still drive the rail.
+      .catch((e) => {
+        console.warn(`[PerfBlock] ExploreHome by-author fetch threw: ${(e as Error).message}`);
       });
     return () => {
       cancelled = true;
@@ -505,17 +517,20 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
       return { cache, distance, isOwn };
     });
     if (maxDistanceMetres !== null) {
-      // Always include the signed-in user's own listings regardless of
-      // the nearby-radius setting — a hider expects to see their own
-      // Piggy in this rail even if it's outside their current radius.
-      items = items.filter((c) => c.isOwn || c.distance <= maxDistanceMetres);
+      items = items.filter((c) => c.distance <= maxDistanceMetres);
     }
+    // Own listings still sort to the front WITHIN the radius — the user
+    // wants their own work visible first when it's nearby, but a cache
+    // they hid 100 km away shouldn't crowd the "nearby" rail.
     items.sort((a, b) => {
-      // Own listings first, then by distance ascending.
       if (a.isOwn !== b.isOwn) return a.isOwn ? -1 : 1;
       return a.distance - b.distance;
     });
-    return items.slice(0, 12);
+    // Cap at 50 — the hub rail is a horizontal-scroll teaser and 50 is
+    // enough for any practical density without making the rail
+    // disproportionately heavy. The "See all → Geo-caches" page
+    // (HuntScreen) has no cap for the full list.
+    return items.slice(0, 50);
   }, [caches, pos, maxDistanceMetres, signedInPubkey]);
 
   const sortedEvents = useMemo(() => {
@@ -531,7 +546,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
       items = items.filter((e) => e.distance <= maxDistanceMetres);
     }
     items.sort((a, b) => a.distance - b.distance);
-    return items.slice(0, 12);
+    return items.slice(0, 50);
   }, [events, pos, maxDistanceMetres]);
 
   return (
