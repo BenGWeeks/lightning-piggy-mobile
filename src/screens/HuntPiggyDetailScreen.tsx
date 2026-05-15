@@ -31,6 +31,7 @@ import {
   PiggyBank,
   Repeat,
   Send,
+  Gift,
   Sparkles,
   User,
   X,
@@ -465,9 +466,13 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     return m;
   }, [zapsByLog]);
 
-  // LP Piggies gate find-logging behind a successful claim (proof of
-  // presence); plain NIP-GC caches have no claim step, so anyone can log.
-  const canLog = hasClaimed || (cache != null && !cache.isLpPiggy);
+  // Anyone can post a find-log on any cache (LP or vanilla NIP-GC).
+  // Ben's framing: find-logs are unlimited and not gated on claim —
+  // the LNURLw is a separate optional prize, surfaced inside the
+  // composer as a 'Try for the prize' button so the finder gets a
+  // shot at the sats without making it a precondition for sharing
+  // their find.
+  const canLog = cache != null;
 
   // Hero shows the photo when the toggle picks it AND a photo exists;
   // otherwise it falls back to the map.
@@ -622,34 +627,17 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                     </Text>
                   ) : null}
                 </TouchableOpacity>
-                {/* Unified primary action: 'Log your find' for every cache.
-                    Tap behaviour varies by cache type:
-                    - LP Piggy: opens NfcReadSheet → scan → claim LNURLw
-                      → bounce back with composer open. The find-log
-                      and the claim are the same act (Ben's framing);
-                      the NFC icon reflects that LP Piggies are NFC-
-                      gated. Issuer cooldown / max-uses are enforced
-                      by the LNURLw; if the cooldown hasn't elapsed
-                      the 'sleeping' state surfaces on HuntFoundScreen.
-                    - Non-LP cache: opens the composer directly — there's
-                      no LNURLw to claim, so no NFC step.
-                    For a quick add-another-log without re-claiming on
-                    a Piggy you've already claimed, use the 'Drop a log
-                    entry' CTA below the find-log list. */}
+                {/* Primary action: opens the find-log composer. The
+                    composer itself offers a 'Try for the prize' button
+                    for LP Piggies (which runs the NFC scan + LNURLw
+                    claim), so a finder can both share their note AND
+                    take a shot at the sats from the same place. The
+                    NFC icon on LP Piggies signals that this cache has
+                    a Lightning prize attached. */}
                 <TouchableOpacity
                   style={styles.actionButtonPrimary}
-                  onPress={() => {
-                    if (cache.isLpPiggy) {
-                      setReadSheetOpen(true);
-                    } else {
-                      setComposerOpen(true);
-                    }
-                  }}
-                  accessibilityLabel={
-                    cache.isLpPiggy
-                      ? 'Scan the Piglet to claim and log your find'
-                      : 'Log your find for other hunters'
-                  }
+                  onPress={() => setComposerOpen(true)}
+                  accessibilityLabel="Log your find for other hunters"
                   testID="hunt-piggy-detail-claim-button"
                 >
                   {cache.isLpPiggy ? (
@@ -661,11 +649,9 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 </TouchableOpacity>
               </View>
               <Text style={styles.claimNote}>
-                {!cache.isLpPiggy
-                  ? 'Tap Log your find to share your find with other hunters.'
-                  : hasClaimed
-                    ? 'Tap Log your find to scan the Piglet and claim more sats — cooldown permitting.'
-                    : "Tap Log your find and hold the Piglet's NFC tag to your phone to claim the prize."}
+                {cache.isLpPiggy
+                  ? 'Tap Log your find to share your find — and try for the sats prize while you compose.'
+                  : 'Tap Log your find to share your find with other hunters.'}
               </Text>
             </View>
 
@@ -774,6 +760,26 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                     </TouchableOpacity>
                   </View>
                 )}
+                {/* For LP Piggies, surface the prize-claim affordance
+                    inside the composer — composing a find-log and
+                    trying the LNURLw are independent acts that can
+                    happen in the same session. The button text shifts
+                    once they've already claimed within local history,
+                    so a returning finder sees 'Try again' rather than
+                    a stale 'Try for the prize'. The actual cooldown /
+                    max-uses are enforced by the LNURLw server-side. */}
+                {cache.isLpPiggy ? (
+                  <TouchableOpacity
+                    style={styles.composerPrizeButton}
+                    onPress={() => setReadSheetOpen(true)}
+                    testID="hunt-piggy-detail-try-prize-button"
+                  >
+                    <Gift size={16} color={colors.brandPink} strokeWidth={2.5} />
+                    <Text style={styles.composerPrizeButtonText}>
+                      {hasClaimed ? 'Try for the prize again' : 'Try for the prize'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
                 <View style={styles.composerActions}>
                   <TouchableOpacity
                     style={styles.composerCancel}
@@ -1600,6 +1606,23 @@ const createStyles = (colors: Palette) =>
     },
     composerPhotoButtonText: { color: colors.brandPink, fontSize: 13, fontWeight: '700' },
     composerActions: { flexDirection: 'row', gap: 8 },
+    composerPrizeButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      borderWidth: 1.5,
+      borderColor: colors.brandPink,
+      backgroundColor: colors.brandPinkLight,
+    },
+    composerPrizeButtonText: {
+      color: colors.brandPink,
+      fontSize: 14,
+      fontWeight: '700',
+    },
     composerCancel: {
       paddingHorizontal: 16,
       paddingVertical: 10,
