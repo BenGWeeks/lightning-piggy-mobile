@@ -22,7 +22,6 @@ import {
 import TabHeader from '../components/TabHeader';
 import { ContentRail } from '../components/ContentRail';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
-import MapLegend from '../components/MapLegend';
 import { courses, type Course } from '../data/learnContent';
 import {
   getProgress,
@@ -488,7 +487,6 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
               onTapMap={() => navigation.navigate('Map')}
               interactive
             />
-            <MapLegend background="card" />
           </>
         )}
 

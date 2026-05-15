@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, StyleSheet, ActivityIndicator, TouchableOpacity, Text } from 'react-native';
 import { WebView } from 'react-native-webview';
-import { LocateFixed, Maximize2, Minus, Plus } from 'lucide-react-native';
+import { Info, LocateFixed, Maximize2, Minus, Plus } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import type { BtcMapPlace } from '../services/btcMapService';
 import { acceptsLightning } from '../services/btcMapService';
 import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
+import LegendSheet from './LegendSheet';
 
 export interface MiniMapBbox {
   minLat: number;
@@ -68,6 +69,14 @@ interface Props {
    * shows once we have a user fix.
    */
   interactive?: boolean;
+  /**
+   * BTC Map category keys present in the current view — surfaced in
+   * the legend sheet (opened from the Legend button at bottom-left)
+   * so the user can correlate the glyph on a Places pin with its
+   * category name. Optional; on caches-only views (e.g. HuntScreen)
+   * the parent omits and the sheet just shows pin-colour idioms.
+   */
+  legendCategories?: string[];
 }
 
 /**
@@ -100,11 +109,13 @@ export const ExploreMiniMap: React.FC<Props> = ({
   userLat = null,
   userLon = null,
   interactive = false,
+  legendCategories,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const webviewRef = useRef<WebView>(null);
   const [ready, setReady] = useState(false);
+  const [legendVisible, setLegendVisible] = useState(false);
 
   // Inject a Leaflet zoom delta into the WebView. The +/− controls are
   // RN-level siblings of the WebView so they stay independent of
@@ -229,14 +240,24 @@ export const ExploreMiniMap: React.FC<Props> = ({
       {/* Recenter on me — only on interactive maps and only once we
           have a user fix. Blue to match the legend dot. */}
       {interactive && lat !== null && lon !== null ? (
-        <TouchableOpacity
-          style={styles.recenterButton}
-          onPress={recenterOnMe}
-          accessibilityLabel="Recenter on my location"
-          testID="explore-minimap-recenter"
-        >
-          <LocateFixed size={18} color="#2D88FF" strokeWidth={2.5} />
-        </TouchableOpacity>
+        <>
+          <TouchableOpacity
+            style={styles.recenterButton}
+            onPress={recenterOnMe}
+            accessibilityLabel="Recenter on my location"
+            testID="explore-minimap-recenter"
+          >
+            <LocateFixed size={18} color="#2D88FF" strokeWidth={2.5} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.legendButton}
+            onPress={() => setLegendVisible(true)}
+            accessibilityLabel="Show map legend"
+            testID="explore-minimap-legend"
+          >
+            <Info size={18} color={colors.brandPink} strokeWidth={2.5} />
+          </TouchableOpacity>
+        </>
       ) : null}
       {/* "Open map" — interactive maps need an explicit button since
           the whole map no longer is a tap target. Non-interactive maps
@@ -270,6 +291,15 @@ export const ExploreMiniMap: React.FC<Props> = ({
     return (
       <View style={containerStyle} testID="explore-minimap">
         {children}
+        {/* LegendSheet only on interactive maps — non-interactive
+            previews don't show the Legend button so there'd be no
+            way to open it. */}
+        <LegendSheet
+          visible={legendVisible}
+          onClose={() => setLegendVisible(false)}
+          placesVisible={merchants.length > 0}
+          availableCategories={legendCategories ?? []}
+        />
       </View>
     );
   }
@@ -490,13 +520,29 @@ const createStyles = (colors: Palette) =>
       borderRadius: 100,
     },
     openBadgeText: { color: colors.white, fontSize: 11, fontWeight: '700' },
-    // Recenter-on-me — sits above the Open-map badge in the same
-    // bottom-right column. White surface with a blue glyph so it
-    // reads as "find me" and matches the legend's "You" dot.
+    // Recenter + Legend — clustered bottom-LEFT so they don't fight
+    // the Open-map badge at bottom-right. White surface with the same
+    // shadow so they read as a pair.
     recenterButton: {
       position: 'absolute',
-      bottom: 48,
-      right: 10,
+      bottom: 10,
+      left: 10,
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: '#fff',
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOpacity: 0.25,
+      shadowRadius: 4,
+      shadowOffset: { width: 0, height: 1 },
+      elevation: 3,
+    },
+    legendButton: {
+      position: 'absolute',
+      bottom: 52,
+      left: 10,
       width: 36,
       height: 36,
       borderRadius: 18,

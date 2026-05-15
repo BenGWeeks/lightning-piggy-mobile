@@ -25,7 +25,6 @@ import HuntFilterSheet, { countActiveFilters } from '../components/HuntFilterShe
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
-import MapLegend from '../components/MapLegend';
 import { type ParsedCache } from '../services/nostrPlacesService';
 import { subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
 import { loadCachedCaches, peekCachedCachesSync, saveCaches } from '../services/nostrPlacesStorage';
@@ -314,7 +313,6 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
                 interactive
               />
             </View>
-            <MapLegend background="card" />
 
             <View style={styles.searchRow}>
               <Search size={16} color={colors.textSupplementary} strokeWidth={2.5} />

@@ -20,6 +20,7 @@ import {
   Globe,
   Mail,
   MapPin,
+  Info,
   LocateFixed,
   Phone,
   PiggyBank,
@@ -53,6 +54,7 @@ import { btcMapIconComponent } from '../utils/btcMapIcon';
 import SocialIcon from '../components/SocialIcon';
 import WebOfTrustChip from '../components/WebOfTrustChip';
 import WebOfTrustBottomSheet from '../components/WebOfTrustBottomSheet';
+import LegendSheet from '../components/LegendSheet';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -98,6 +100,10 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   // WoT bottom-sheet visibility — opened from the chip inside the
   // FilterSheet so the user can change tier without leaving the map.
   const [wotSheetVisible, setWotSheetVisible] = useState(false);
+  // Legend bottom-sheet — opened from the new Legend button next to
+  // Recenter at the map's bottom-left. Replaces the inline legend
+  // strip that used to sit under the map and ate vertical space.
+  const [legendVisible, setLegendVisible] = useState(false);
   const styles = useMemo(() => createStyles(colors), [colors]);
   const webviewRef = useRef<WebView>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -550,32 +556,14 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         >
           <LocateFixed size={18} color="#2D88FF" strokeWidth={2.5} />
         </TouchableOpacity>
-      </View>
-
-      {/* Pin legend — three rows aligned with the Leaflet glyphs the
-          map uses (see LEAFLET_HTML CSS). Helps a first-time user
-          decode what each colour/shape means. */}
-      <View style={styles.legend} testID="map-legend">
-        <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: '#EC008C' }]} />
-          <Text style={styles.legendText}>⚡ Lightning</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: '#F7931A' }]} />
-          <Text style={styles.legendText}>On-chain</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendDiamond, { backgroundColor: '#EC008C' }]} />
-          <Text style={styles.legendText}>Piglet</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendDiamond, { backgroundColor: '#6c7b8a' }]} />
-          <Text style={styles.legendText}>NIP-GC cache</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: '#2D88FF' }]} />
-          <Text style={styles.legendText}>You</Text>
-        </View>
+        <TouchableOpacity
+          style={styles.legendButton}
+          onPress={() => setLegendVisible(true)}
+          accessibilityLabel="Show map legend"
+          testID="map-legend-button"
+        >
+          <Info size={18} color={colors.brandPink} strokeWidth={2.5} />
+        </TouchableOpacity>
       </View>
 
       <View style={styles.footer}>
@@ -645,6 +633,13 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
       )}
 
       <WebOfTrustBottomSheet visible={wotSheetVisible} onClose={() => setWotSheetVisible(false)} />
+
+      <LegendSheet
+        visible={legendVisible}
+        onClose={() => setLegendVisible(false)}
+        placesVisible={filters.lightning || filters.onchain}
+        availableCategories={availableCategories}
+      />
 
       {!webviewReady && (
         <View style={styles.loadingOverlay} pointerEvents="none">
@@ -1505,8 +1500,27 @@ const createStyles = (colors: Palette) =>
     },
     recenterButton: {
       position: 'absolute',
-      right: 14,
+      left: 14,
       bottom: 14,
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: colors.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOpacity: 0.25,
+      shadowRadius: 4,
+      shadowOffset: { width: 0, height: 1 },
+      elevation: 3,
+    },
+    // Legend button — sits just above the recenter at bottom-left so
+    // the two map utilities cluster visually. Same surface treatment
+    // as recenterButton (white circle + shadow) so they read as a pair.
+    legendButton: {
+      position: 'absolute',
+      left: 14,
+      bottom: 62,
       width: 40,
       height: 40,
       borderRadius: 20,
