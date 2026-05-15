@@ -19,7 +19,7 @@ name: Subflow — add an on-chain hot wallet via mnemonic (clipboard-paste)
 # entirely.
 #
 # Mnemonic import is dev-mode only — the `wallet-type-mnemonic` tile is
-# gated on the AsyncStorage `dev_mode` flag (set this once via
+# gated on the AsyncStorage `secret_mode` flag (set this once via
 # `test-dev-mode.yaml` or directly).
 
 - waitForAnimationToEnd: { timeout: 4000 }

@@ -42,13 +42,13 @@ interface GroupsContextType {
   visibleGroups: Group[];
   /**
    * If true, only groups that include at least one OTHER member from the
-   * current user's follow list are shown. Default true; in dev_mode the
+   * current user's follow list are shown. Default true; in secret_mode the
    * user can toggle it off via the chip on GroupsScreen.
    */
   followingOnly: boolean;
   setFollowingOnly: (next: boolean) => void;
-  /** Mirrors AsyncStorage `dev_mode`. Controls whether the chip is interactive. */
-  devMode: boolean;
+  /** Mirrors AsyncStorage `secret_mode`. Controls whether the chip is interactive. */
+  secretMode: boolean;
   loading: boolean;
   createGroup: (name: string, memberPubkeys: string[]) => Promise<Group>;
   renameGroup: (groupId: string, newName: string) => Promise<boolean>;
@@ -132,7 +132,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
   const [followingOnly, setFollowingOnlyState] = useState(true);
-  const [devMode, setDevMode] = useState(false);
+  const [secretMode, setSecretMode] = useState(false);
   // Per-group activity rollup (last message + recent senders). Populated
   // on mount from AsyncStorage and kept fresh by the inbound-message
   // listener below + a local hook from GroupConversationScreen sends.
@@ -170,7 +170,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [pubkey]);
 
   // Load persisted user preferences for the chip + dev-mode escape hatch.
-  // dev_mode is shared with AboutScreen's hidden-tap unlock so the same
+  // secret_mode is shared with AboutScreen's hidden-tap unlock so the same
   // override surfaces across the app. The "following only" toggle is
   // per-account (Primal/Damus convention: filter prefs travel with the
   // identity, not the device).
@@ -179,7 +179,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // Default ON; only flip OFF if the user explicitly persisted false.
       setFollowingOnlyState(v !== 'false');
     });
-    AsyncStorage.getItem('dev_mode').then((v) => setDevMode(v === 'true'));
+    AsyncStorage.getItem('secret_mode').then((v) => setSecretMode(v === 'true'));
   }, [pubkey]);
 
   const setFollowingOnly = useCallback(
@@ -291,13 +291,13 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Anti-spam: a group is visible only if at least one OTHER member is
   // in the viewer's follow list. Mirrors the 1:1 "Following only" rule
-  // at MessagesScreen.tsx:128-143. Locked-on outside dev_mode; in
-  // dev_mode the user can flip it via the chip on GroupsScreen.
+  // at MessagesScreen.tsx:128-143. Locked-on outside secret_mode; in
+  // secret_mode the user can flip it via the chip on GroupsScreen.
   const visibleGroups = useMemo(() => {
-    const enforce = followingOnly || !devMode;
+    const enforce = followingOnly || !secretMode;
     if (!enforce) return groups;
     return groups.filter((g) => g.memberPubkeys.some((pk) => followPubkeys.has(pk.toLowerCase())));
-  }, [groups, followPubkeys, followingOnly, devMode]);
+  }, [groups, followPubkeys, followingOnly, secretMode]);
 
   // Synchronous mirror of the `groups` state used as the read source
   // for `persist` so concurrent mutators serialise correctly without
@@ -725,7 +725,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       visibleGroups,
       followingOnly,
       setFollowingOnly,
-      devMode,
+      secretMode,
       loading,
       createGroup,
       renameGroup,
@@ -741,7 +741,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       visibleGroups,
       followingOnly,
       setFollowingOnly,
-      devMode,
+      secretMode,
       loading,
       createGroup,
       renameGroup,

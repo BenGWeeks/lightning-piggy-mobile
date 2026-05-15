@@ -46,7 +46,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   const [xpub, setXpub] = useState('');
   const [mnemonicInput, setMnemonicInput] = useState('');
   const [alias, setAlias] = useState('');
-  const [devMode, setDevMode] = useState(false);
+  const [secretMode, setSecretMode] = useState(false);
   const [selectedTheme, setSelectedTheme] = useState<CardTheme>('lightning-piggy');
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +58,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   // No explicit snapPoints — content-height only, not user-draggable.
 
   useEffect(() => {
-    AsyncStorage.getItem('dev_mode').then((v) => setDevMode(v === 'true'));
+    AsyncStorage.getItem('secret_mode').then((v) => setSecretMode(v === 'true'));
   }, [visible]);
 
   const reset = useCallback(() => {
@@ -321,7 +321,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                 </Text>
               </View>
             </TouchableOpacity>
-            {devMode && (
+            {secretMode && (
               <TouchableOpacity
                 style={styles.typeCard}
                 onPress={handleMnemonicSelect}

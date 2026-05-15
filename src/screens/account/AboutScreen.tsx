@@ -44,19 +44,19 @@ const AboutScreen: React.FC = () => {
   const [feedbackSheetOpen, setFeedbackSheetOpen] = useState(false);
   const [loginSheetOpen, setLoginSheetOpen] = useState(false);
 
-  const [devMode, setDevMode] = useState(false);
+  const [secretMode, setSecretMode] = useState(false);
   const versionTapCount = useRef(0);
   const versionTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fold dev into the build-number parenthetical so screen readers don't say "(build 13) (dev)".
-  const displayVersionLabel = devMode
+  const displayVersionLabel = secretMode
     ? appVersionLabel.endsWith(')')
       ? `${appVersionLabel.slice(0, -1)}, dev)`
       : `${appVersionLabel} (dev)`
     : appVersionLabel;
 
   useEffect(() => {
-    AsyncStorage.getItem('dev_mode').then((v) => setDevMode(v === 'true'));
+    AsyncStorage.getItem('secret_mode').then((v) => setSecretMode(v === 'true'));
   }, []);
 
   // Clear the load-failure flag whenever the picture URL changes so a refreshed kind-0 retries.
@@ -113,11 +113,11 @@ const AboutScreen: React.FC = () => {
     if (versionTapTimer.current) clearTimeout(versionTapTimer.current);
     if (versionTapCount.current >= 3) {
       versionTapCount.current = 0;
-      const newMode = !devMode;
-      setDevMode(newMode);
-      AsyncStorage.setItem('dev_mode', newMode ? 'true' : 'false');
+      const newMode = !secretMode;
+      setSecretMode(newMode);
+      AsyncStorage.setItem('secret_mode', newMode ? 'true' : 'false');
       Alert.alert(
-        newMode ? 'Developer Mode Enabled' : 'Developer Mode Disabled',
+        newMode ? 'Secret Mode Enabled' : 'Secret Mode Disabled',
         newMode
           ? 'Dev features unlocked: hot wallet import in Add Wallet, "Following only" toggle on Messages and Groups tabs, and other in-app debug surfaces.'
           : 'Dev features hidden. Restart the app if any toggle still appears.',

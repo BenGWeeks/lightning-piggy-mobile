@@ -54,7 +54,7 @@ export const PER_ACCOUNT_STORAGE_BASES: readonly string[] = [
 // them):
 //   - electrum_server, blossom_server  -> device-level config
 //   - app_theme_preference             -> UI preference
-//   - dev_mode                         -> debug toggle
+//   - secret_mode                         -> debug toggle
 //   - learn_progress                   -> user-level (not identity-level)
 //   - messages_window_days             -> UI preference
 //   - messages_show_zap_counterparties -> UI preference

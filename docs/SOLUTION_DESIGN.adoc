@@ -348,12 +348,12 @@ Distinguishes three reply outcomes:
 | NWC reply success | Green tick + bubble green
 |===
 
-=== Hot Wallet Support (Developer Mode)
+=== Hot Wallet Support (Secret Mode)
 
-Hot wallet (mnemonic import) is available behind a **developer mode** toggle:
+Hot wallet (mnemonic import) is available behind a **secret mode** toggle:
 
 - **Enable**: Triple-tap the version number at the bottom of Account settings
-- **Stored**: `dev_mode` flag in AsyncStorage (persists across sessions)
+- **Stored**: `secret_mode` flag in AsyncStorage (persists across sessions)
 - **Visual**: Version displays "(dev)" suffix when enabled
 
 **Mnemonic import flow:**
