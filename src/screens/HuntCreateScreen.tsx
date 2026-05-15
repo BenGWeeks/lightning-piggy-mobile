@@ -849,10 +849,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
           </>
         )}
 
-        {currentStep === 4 && (
+        {currentStep === 6 && (
           <>
             <StepHeader
-              n={4}
+              n={6}
               title="Write the tag"
               subtitle="Write the prize link onto a physical NFC tag the finder will tap."
               status={stage.kind === 'wrote-nfc' ? 'done' : 'active'}
@@ -860,15 +860,42 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               colors={colors}
             />
             <NfcSupportedTagsCard colors={colors} styles={styles} />
-            {!lnurl.trim() ? (
+            {/* Gate: NFC writes the kind 37516 listing's nostr:naddr,
+                which only exists once the Piggy has been published in
+                step 5. Tagging before publish would hand finders a
+                naddr that resolves to nothing. */}
+            {stage.kind !== 'saved' && stage.kind !== 'wrote-nfc' ? (
               <Text style={styles.helper}>
-                Add a prize on step 2 first — the tag needs a link to write.
+                Publish the Piggy first (step 5) — the tag needs the listing on relays so finders
+                can look it up.
               </Text>
             ) : null}
+            {/* What we'll write, plain-text, so the hider can see the
+                three records that go on the tag before the camera /
+                NFC interaction starts (Ben's request). */}
+            {(stage.kind === 'saved' || stage.kind === 'wrote-nfc') && pubkey ? (
+              <View style={styles.payloadPreview}>
+                <Text style={styles.payloadPreviewLabel}>Tag will carry:</Text>
+                <Text style={styles.payloadPreviewLine} numberOfLines={1}>
+                  • lightningpiggy://hunt/{ensurePiggyId().slice(0, 16)}…
+                </Text>
+                <Text style={styles.payloadPreviewLine} numberOfLines={1}>
+                  • nostr:naddr1… ({GC_LISTING_KIND}:{pubkey.slice(0, 8)}…:{ensurePiggyId().slice(0, 12)}…)
+                </Text>
+                {lnurl.trim() ? (
+                  <Text style={styles.payloadPreviewLine} numberOfLines={1}>
+                    • lightning:{lnurl.trim().slice(0, 12).toUpperCase()}…
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
             <TouchableOpacity
-              style={[styles.primaryButton, !lnurl.trim() && styles.primaryButtonDisabled]}
+              style={[
+                styles.primaryButton,
+                stage.kind !== 'saved' && stage.kind !== 'wrote-nfc' && styles.primaryButtonDisabled,
+              ]}
               onPress={handleOpenNfcSheet}
-              disabled={!lnurl.trim()}
+              disabled={stage.kind !== 'saved' && stage.kind !== 'wrote-nfc'}
               testID="hunt-write-nfc-button"
             >
               <Nfc size={18} color={colors.white} strokeWidth={2.5} />
@@ -877,8 +904,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               </Text>
             </TouchableOpacity>
             <StepNavRow
-              onBack={() => setCurrentStep(3)}
-              onNext={() => setCurrentStep(5)}
+              onBack={() => setCurrentStep(5)}
+              onNext={handleDone}
+              nextLabel="Done"
+              nextIcon={Check}
               styles={styles}
               colors={colors}
             />
@@ -976,10 +1005,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
           </>
         )}
 
-        {currentStep === 5 && (
+        {currentStep === 4 && (
           <>
             <StepHeader
-              n={5}
+              n={4}
               title="Geocache info"
               subtitle="The finder-facing listing — a photo, a name, and how tough it is to reach."
               status="active"
@@ -1136,18 +1165,18 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
             />
 
             <StepNavRow
-              onBack={() => setCurrentStep(4)}
-              onNext={() => setCurrentStep(6)}
+              onBack={() => setCurrentStep(3)}
+              onNext={() => setCurrentStep(5)}
               styles={styles}
               colors={colors}
             />
           </>
         )}
 
-        {currentStep === 6 && (
+        {currentStep === 5 && (
           <>
             <StepHeader
-              n={6}
+              n={5}
               title="Publish"
               subtitle="Write the cache to Nostr — finder-facing message, rules and visibility."
               status={stage.kind === 'saved' || stage.kind === 'wrote-nfc' ? 'done' : 'active'}
@@ -1193,20 +1222,25 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               </Text>
             ) : null}
             <StepNavRow
-              onBack={() => setCurrentStep(5)}
+              onBack={() => setCurrentStep(4)}
               onNext={
-                stage.kind === 'saved' || stage.kind === 'wrote-nfc' ? handleDone : handleSave
+                // After a successful Save/Publish, advance to the NFC
+                // step (step 6) — the kind 37516 listing is now on
+                // relays so the NFC tag's nostr:naddr will resolve.
+                stage.kind === 'saved' || stage.kind === 'wrote-nfc'
+                  ? () => setCurrentStep(6)
+                  : handleSave
               }
               nextLabel={
                 stage.kind === 'saved' || stage.kind === 'wrote-nfc'
-                  ? 'Done'
+                  ? 'Next'
                   : isPublic
                     ? 'Publish'
                     : 'Save'
               }
               nextIcon={
                 stage.kind === 'saved' || stage.kind === 'wrote-nfc'
-                  ? Check
+                  ? undefined
                   : isPublic
                     ? Globe
                     : PiggyBank
@@ -1377,9 +1411,9 @@ const STEP_LABELS: { n: number; label: string }[] = [
   { n: 1, label: 'Hardware' },
   { n: 2, label: 'Prize' },
   { n: 3, label: 'Location' },
-  { n: 4, label: 'Write NFC' },
-  { n: 5, label: 'Details' },
-  { n: 6, label: 'Publish' },
+  { n: 4, label: 'Details' },
+  { n: 5, label: 'Publish' },
+  { n: 6, label: 'Write NFC' },
 ];
 
 const StepProgressBar: React.FC<{
@@ -1802,6 +1836,27 @@ const createStyles = (colors: Palette) =>
       fontSize: 14,
       fontWeight: '700',
       color: colors.textHeader,
+    },
+    // ---- NFC payload preview card (step 6) -------------------------------
+    payloadPreview: {
+      backgroundColor: colors.surface,
+      borderRadius: 10,
+      padding: 12,
+      marginTop: 8,
+      gap: 4,
+    },
+    payloadPreviewLabel: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: colors.textSupplementary,
+      letterSpacing: 0.4,
+      textTransform: 'uppercase',
+      marginBottom: 2,
+    },
+    payloadPreviewLine: {
+      fontSize: 12,
+      color: colors.textBody,
+      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     },
     // ---- QR scanner modal -------------------------------------------------
     scannerRoot: { flex: 1, backgroundColor: '#000' },
