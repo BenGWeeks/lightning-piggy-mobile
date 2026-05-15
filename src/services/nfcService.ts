@@ -732,6 +732,26 @@ function collectNdefUris(tag: TagEvent): string[] {
   return out;
 }
 
+// Coords just read by the foreground reader, keyed to a wall-clock
+// timestamp. Used by App.tsx's Linking handler to swallow the
+// delayed system NDEF dispatch that fires ~600ms after the foreground
+// reader closes when the tag stays near the antenna. Without this the
+// finder is yanked from HuntFoundScreen back to HuntPiggyDetail mid-
+// claim.
+const recentTagReads = new Map<string, number>();
+const TAG_DEDUPE_WINDOW_MS = 3_000;
+
+/** Predicate consumed by App.tsx — true if `coord` was just read by
+ * our in-app NFC reader and the resulting deep-link dispatch should
+ * be ignored to avoid double-handling the same tap. */
+export function wasRecentlyRead(coord: string): boolean {
+  const at = recentTagReads.get(coord);
+  if (at === undefined) return false;
+  const stillFresh = Date.now() - at < TAG_DEDUPE_WINDOW_MS;
+  if (!stillFresh) recentTagReads.delete(coord);
+  return stillFresh;
+}
+
 /**
  * Open a foreground NFC reader session and parse the next tag held to
  * the phone as a Hide-a-Piglet payload. Used by the finder claim flow
@@ -770,6 +790,10 @@ export async function readHuntTagPayload(
       if (m) coord = decodeURIComponent(m[1]);
     }
     const lnurl = lightningUri ? lightningUri.replace(/^lightning:/i, '').trim() : null;
+    // Mark this coord as 'recently read' so App.tsx's Linking handler
+    // ignores the system NDEF dispatch that fires shortly after our
+    // reader closes when the tag is still held near the antenna.
+    if (coord) recentTagReads.set(coord, Date.now());
     return { lpUrl, coord, nostrUri, lightningUri, lnurl };
   } finally {
     NfcManager.cancelTechnologyRequest().catch(() => {});

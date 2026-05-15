@@ -18,6 +18,7 @@ import AppNavigator, {
   navigateToHuntPiggyDetail,
 } from './src/navigation/AppNavigator';
 import * as nip19 from 'nostr-tools/nip19';
+import { wasRecentlyRead } from './src/services/nfcService';
 import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
 import BootSplash from './src/components/BootSplash';
 import { BrandedAlertHost } from './src/components/BrandedAlert';
@@ -98,6 +99,14 @@ export default function App() {
           coord = decodeURIComponent(captured);
         } catch {
           console.warn(`[Link] hunt-URL coord decode failed: ${captured}`);
+          return;
+        }
+        // Suppress the delayed system NDEF dispatch that fires ~600ms
+        // after our in-app NfcReadSheet closes when the tag stays near
+        // the antenna. Without this, the user gets yanked out of
+        // HuntFoundScreen mid-claim back to HuntPiggyDetail.
+        if (wasRecentlyRead(coord)) {
+          console.log(`[Link] skipped — coord just read by foreground NFC: ${coord}`);
           return;
         }
         console.log(`[Link] → HuntPiggyDetail via ${trimmed.startsWith('https') ? 'https' : 'lightningpiggy://'} coord=${coord}`);
