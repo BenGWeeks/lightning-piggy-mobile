@@ -72,6 +72,13 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
+    // Hard 8 s ceiling — even if fetchCachesByAuthor / loadCachedCaches
+    // hang somehow, the spinner clears so the user isn't blocked from
+    // tapping elsewhere on the page. fetchCachesByAuthor already has a
+    // 5 s maxWait but disk IO / device sleep can still stretch the
+    // wall-clock. Pre-fix Ben hit a state where pull-to-refresh
+    // appeared to block navigation entirely.
+    const safetyTimer = setTimeout(() => setRefreshing(false), 8000);
     try {
       const readRelays = relays.filter((r) => r.read).map((r) => r.url);
       const [cached, mine] = await Promise.all([
@@ -95,6 +102,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
         return next;
       });
     } finally {
+      clearTimeout(safetyTimer);
       setRefreshing(false);
     }
   }, [pubkey, relays]);
