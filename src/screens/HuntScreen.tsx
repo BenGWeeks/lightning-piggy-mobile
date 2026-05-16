@@ -585,14 +585,17 @@ const createStyles = (colors: Palette) =>
       // `scrollContent.paddingTop` and PlacesScreen's `listContent`
       // top padding so the three Explore-stack screens match.
       marginTop: 16,
-      marginBottom: 8,
+      // 10 dp below the map = same gap between search and rows below =
+      // same gap between rows. Three identical vertical rhythms so the
+      // page reads as a tidy stack rather than three different spacings.
+      marginBottom: 10,
     },
     searchRow: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
       marginHorizontal: 16,
-      marginBottom: 8,
+      marginBottom: 10,
       backgroundColor: colors.surface,
       borderRadius: 100,
       paddingHorizontal: 14,
