@@ -39,6 +39,8 @@ import { getDevPinnedLocation } from '../utils/devLocation';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import BtcMapAttribution from '../components/BtcMapAttribution';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
+import { LibreMiniMap } from '../components/LibreMiniMap';
+const USE_LIBRE_MAP = process.env.EXPO_PUBLIC_USE_LIBRE_MAP === '1';
 import PlacesFilterSheet, { countActiveFilters } from '../components/PlacesFilterSheet';
 
 interface Props {
@@ -268,18 +270,32 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
         ListHeaderComponent={
           <>
             <View style={styles.miniMapContainer}>
-              <ExploreMiniMap
-                lat={pos?.lat ?? null}
-                lon={pos?.lon ?? null}
-                merchants={sortedPlaces.map((p) => p.place)}
-                caches={[]}
-                events={[]}
-                loading={loading && sortedPlaces.length === 0}
-                onTapMap={() => navigation.navigate('Map')}
-                onBoundsChange={setMapBbox}
-                onInteractionChange={setMapTouched}
-                defaultZoom={10}
-              />
+              {USE_LIBRE_MAP ? (
+                <LibreMiniMap
+                  lat={pos?.lat ?? null}
+                  lon={pos?.lon ?? null}
+                  userAccuracyMetres={null}
+                  merchants={sortedPlaces.map((p) => p.place)}
+                  caches={[]}
+                  events={[]}
+                  onTapMap={() => navigation.navigate('Map')}
+                  onBoundsChange={setMapBbox}
+                  defaultZoom={10}
+                />
+              ) : (
+                <ExploreMiniMap
+                  lat={pos?.lat ?? null}
+                  lon={pos?.lon ?? null}
+                  merchants={sortedPlaces.map((p) => p.place)}
+                  caches={[]}
+                  events={[]}
+                  loading={loading && sortedPlaces.length === 0}
+                  onTapMap={() => navigation.navigate('Map')}
+                  onBoundsChange={setMapBbox}
+                  onInteractionChange={setMapTouched}
+                  defaultZoom={10}
+                />
+              )}
             </View>
             <View style={styles.attributionRow}>
               <BtcMapAttribution testID="places-btcmap-attribution" />
