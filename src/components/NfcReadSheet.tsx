@@ -16,6 +16,7 @@ import {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import { AlertCircle, Nfc, PartyPopper, PiggyBank } from 'lucide-react-native';
+import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { readHuntTagPayload, cancelNfcOperation } from '../services/nfcService';
 import {
   LnurlWithdrawError,
@@ -74,10 +75,27 @@ const formatCountdown = (seconds: number): string => {
   return `${m}:${String(s).padStart(2, '0')}`;
 };
 
+// Pull the payment_hash off a bolt11 so we can hand it to
+// WalletContext.expectPayment for fast settlement detection. Mirrors
+// the helper in ReceiveSheet — light-bolt11-decoder exposes the hash
+// under `sections[].value` keyed by `name === 'payment_hash'`.
+function paymentHashFromBolt11(bolt11: string): string | null {
+  try {
+    const decoded = bolt11Decode(bolt11);
+    const section = decoded.sections?.find((s: { name: string }) => s.name === 'payment_hash') as
+      | { value?: string }
+      | undefined;
+    return section?.value ?? null;
+  } catch (error) {
+    if (__DEV__) console.warn('[NfcReadSheet] bolt11 decode failed:', error);
+    return null;
+  }
+}
+
 const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { activeWalletId, makeInvoice, lastIncomingPayment } = useWallet();
+  const { activeWalletId, makeInvoice, lastIncomingPayment, expectPayment } = useWallet();
   const [stage, setStage] = useState<SheetStage>('ready');
   const [errorMessage, setErrorMessage] = useState('');
   const [claimedSats, setClaimedSats] = useState<number | null>(null);
@@ -192,6 +210,19 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
         // the user tapped Try prize must not close the sheet.
         claimedAtRef.current = Date.now();
         setStage('claimed');
+        // Kick off 1 s aggressive polling for THIS bolt11 in the
+        // wallet context, so `lastIncomingPayment` fires within ~1 s
+        // of LNbits actually paying our invoice. Without it, the
+        // baseline 30 s balance poll is the only signal, which means
+        // the sheet sits on "X sats inbound!" for up to half a
+        // minute and the user manually taps Done before the auto-
+        // dismiss + confetti can fire (#579 follow-up).
+        if (activeWalletId) {
+          const paymentHash = paymentHashFromBolt11(claim.bolt11);
+          if (paymentHash) {
+            expectPayment(activeWalletId, paymentHash, claim.sats);
+          }
+        }
       } catch (e) {
         if (!mountedRef.current) return;
         const reason =
@@ -211,7 +242,7 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
         setErrorMessage(err instanceof Error ? err.message : 'Failed to read NFC tag');
       }
     }
-  }, [expectedCoord, activeWalletId, makeInvoice]);
+  }, [expectedCoord, activeWalletId, makeInvoice, expectPayment]);
 
   useEffect(() => {
     if (visible) {
