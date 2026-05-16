@@ -251,7 +251,13 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     if (!pos) return;
     let cancelled = false;
     (async () => {
-      setMerchantsLoading(true);
+      // Only show the loading shimmer when there's literally nothing to
+      // paint. On cold start we already seed `merchants` from the
+      // in-memory mirror; flipping to loading anyway means the user
+      // stares at a shimmer for up to FETCH_TIMEOUT_MS even though the
+      // rail could be showing the previous result. SWR painting beats
+      // a perfect refresh every time on a slow network (#566).
+      if (merchants.length === 0) setMerchantsLoading(true);
       try {
         const __t0 = performance.now();
         // ~50 km half-side around the user. Rural users (Longstanton,
