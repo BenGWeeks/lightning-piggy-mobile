@@ -20,14 +20,6 @@ import { LibreMiniMap } from './LibreMiniMap';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { getDevPinnedLocation } from '../utils/devLocation';
-import {
-  LEAFLET_BASE_CSS,
-  LEAFLET_HEAD_TAGS,
-  LEAFLET_MAP_BACKGROUND_CSS,
-  LEAFLET_SCRIPT_TAG,
-  POST_BRIDGE_JS,
-  tileLayerJs,
-} from '../utils/mapWebview/tiles';
 
 interface Props {
   visible: boolean;
@@ -251,39 +243,6 @@ const LocationPickerSheet: React.FC<Props> = ({
   );
 };
 
-// Leaflet HTML with a single draggable marker. Posts `{type:'pin',lat,
-// lon,userMoved}` on every change. `userMoved` is false on the initial
-// post (just reporting the marker's default seat) and true after the
-// user drags it or taps the map — RN uses that to decide whether to
-// show "Tap or drag…" or the coords. Mirrors the pin language of
-// ExploreMiniMap / MapScreen.
-const makeHtml = (lat: number, lon: number, zoom: number): string => `<!DOCTYPE html>
-<html>
-<head>
-  ${LEAFLET_HEAD_TAGS}
-  <style>
-    ${LEAFLET_BASE_CSS}
-    ${LEAFLET_MAP_BACKGROUND_CSS}
-    .lp-drop{width:20px;height:20px;border-radius:10px;background:#EC008C;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.45)}
-    .leaflet-control-attribution{font-size:9px}
-  </style>
-</head>
-<body>
-<div id="map"></div>
-${LEAFLET_SCRIPT_TAG}
-<script>
-  ${POST_BRIDGE_JS}
-  const map=L.map('map',{zoomControl:true,minZoom:3,maxZoom:19}).setView([${lat},${lon}],${zoom});
-  ${tileLayerJs()}
-  const icon=L.divIcon({className:'',html:'<div class="lp-drop"></div>',iconSize:[20,20],iconAnchor:[10,10]});
-  const marker=L.marker([${lat},${lon}],{icon:icon,draggable:true}).addTo(map);
-  const emit=(userMoved)=>{const p=marker.getLatLng();post({type:'pin',lat:p.lat,lon:p.lng,userMoved:!!userMoved});};
-  marker.on('dragend',()=>emit(true));
-  map.on('click',(e)=>{marker.setLatLng(e.latlng);emit(true);});
-  post({type:'ready'});
-  emit(false);
-</script>
-</body></html>`;
 
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
@@ -315,7 +274,6 @@ const createStyles = (colors: Palette) =>
       overflow: 'hidden',
       backgroundColor: colors.background,
     },
-    webview: { flex: 1, backgroundColor: 'transparent' },
     mapLoading: {
       flex: 1,
       alignItems: 'center',
