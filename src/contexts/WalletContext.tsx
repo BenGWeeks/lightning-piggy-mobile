@@ -192,6 +192,21 @@ interface WalletContextType {
     durationMs?: number,
   ) => void;
 
+  /**
+   * Demand-counted gate on the 30 s background `getBalance` poll. The
+   * poll runs only while at least one caller has an outstanding request
+   * — typical pattern is a balance-displaying screen calling
+   * `requestBalancePoll()` inside `useFocusEffect` and using the
+   * returned unsubscribe in the cleanup. When the demand count drops to
+   * zero the interval is torn down, saving the ~700-1300 ms NWC round
+   * trip + the cascading WalletCarousel/TransactionList re-render that
+   * fires on every poll. See #569 + #560 for the perf rationale. The
+   * `expectPayment` 1 s tick is independent and unaffected — it's a
+   * separate per-invoice poller. Returns an unsubscribe fn; safe to
+   * call the unsubscribe multiple times (idempotent past zero).
+   */
+  requestBalancePoll: () => () => void;
+
   // Legacy compatibility
   isConnected: boolean;
   balance: number | null;
@@ -1868,8 +1883,32 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const activeWalletConnected =
     activeWallet?.walletType !== 'onchain' && activeWallet?.isConnected === true;
 
+  // Demand-counter for the 30 s balance poll. Incremented by
+  // `requestBalancePoll()` callers (typically balance-displaying screens
+  // inside `useFocusEffect`) and decremented by their returned cleanup.
+  // The poll effect below gates on `balancePollDemand > 0` so we only
+  // pay the NWC round-trip + downstream render cost when at least one
+  // surface is actively showing the balance. See #569.
+  const [balancePollDemand, setBalancePollDemand] = useState(0);
+
+  const requestBalancePoll = useCallback<WalletContextType['requestBalancePoll']>(() => {
+    setBalancePollDemand((d) => d + 1);
+    let released = false;
+    return () => {
+      // Idempotent on repeat-release so a defensive double-cleanup in
+      // an unmount path can't drag the counter below zero.
+      if (released) return;
+      released = true;
+      setBalancePollDemand((d) => Math.max(0, d - 1));
+    };
+  }, []);
+
   useEffect(() => {
     if (!activeWalletId || !activeWalletConnected) return;
+    // No focused surface needs the balance right now — skip the
+    // interval setup entirely. Re-runs when demand transitions 0 → 1
+    // (focus event in a balance-displaying screen).
+    if (balancePollDemand <= 0) return;
 
     const refreshOnce = () => {
       // Bail if the wallet has since disconnected — we read through
@@ -1912,7 +1951,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       stopPoll();
       sub.remove();
     };
-  }, [activeWalletId, activeWalletConnected, updateWalletInState]);
+  }, [activeWalletId, activeWalletConnected, updateWalletInState, balancePollDemand]);
 
   // Stable context value — without `useMemo` here the inline `{{...}}`
   // literal produced a fresh object identity on every render of
@@ -1953,6 +1992,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       lastIncomingPayment,
       clearLastIncomingPayment,
       expectPayment,
+      requestBalancePoll,
       isConnected,
       balance,
       walletAlias,
@@ -1991,6 +2031,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       lastIncomingPayment,
       clearLastIncomingPayment,
       expectPayment,
+      requestBalancePoll,
     ],
   );
 
