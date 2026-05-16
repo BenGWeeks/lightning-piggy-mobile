@@ -294,7 +294,20 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         } else {
           setViewportInWebView(lat, lon, 10, accuracy);
         }
-        await refreshPlaces(initBbox);
+        // Skip the initial fetch on the LibreMiniMap path. LibreMiniMap
+        // fires onRegionDidChange shortly after mount with its actual
+        // viewport (zoom 13 by default, much tighter than the 0.3° init
+        // bbox used here). Calling refreshPlaces here would surface the
+        // wider set (~22 merchants) for ~500 ms before the LibreMiniMap
+        // bounds debounce replaces it with the actual viewport's set
+        // (~2 merchants) — visible as the count briefly jumping then
+        // falling back. The bounds-driven fetch is authoritative.
+        // WebView path keeps the initial fetch because Leaflet's first
+        // `bounds` event coincides with `ready` rather than firing
+        // separately.
+        if (!USE_LIBRE_MAP) {
+          await refreshPlaces(initBbox);
+        }
 
         // Subscribe to NIP-GC kind 37516 caches in the user's coarse
         // geohash neighbourhood. Renders Lightning Piggies (com.lightningpiggy.app
