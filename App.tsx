@@ -3,7 +3,6 @@ import './src/polyfills';
 
 import React, { useEffect, useState } from 'react';
 import { Linking, StyleSheet } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
@@ -78,77 +77,33 @@ export default function App() {
   // mount, so we retry briefly until `navigationRef.isReady()`.
   useEffect(() => {
     let cancelled = false;
-    // De-dupe NFC-tag launch URLs across JS restarts. Android keeps
-    // the NDEF_DISCOVERED intent attached to the activity's
-    // `baseIntent`. Every time the OS resurrects the task (recents
-    // switcher, low-memory restart, fresh process spawn) the
-    // activity relaunches with that same intent, the JS bundle
-    // starts fresh, and `Linking.getInitialURL()` returns the SAME
-    // `lightningpiggy://hunt/<coord>` URL. Pre-fix that re-pushed
-    // HuntPiggyDetail onto the Explore stack on every wake — the
-    // user's "Explore tab keeps taking me back" symptom.
-    //
-    // In-memory dedupe alone doesn't work because the JS module
-    // re-evaluates on each fresh process — `lastRouted` is reset to
-    // null and we navigate again. The fix has to be persistent
-    // across process boundaries → AsyncStorage. Window is 5 min:
-    // generous enough to cover recents/wake within a session, short
-    // enough that a genuine re-scan tomorrow still routes.
-    const ROUTE_DEDUPE_MS = 5 * 60 * 1000;
-    const DEDUPE_KEY = '@lp:last-routed-link-v1';
+    // Very short in-memory dedupe to absorb the cold-start race where
+    // both `getInitialURL()` and `addEventListener('url')` deliver the
+    // SAME URL within a few hundred ms of JS init. Tens of seconds
+    // would be safer, but persistent dedupe (across JS restarts via
+    // AsyncStorage) turned out to over-fire when the user re-scans
+    // the same tag in the same hour — stale storage swallowed
+    // genuine fresh taps. The "Explore tab takes you to the cached
+    // detail" bug was actually a different problem (deep-link
+    // navigator didn't seed ExploreHome / Hunt below HuntPiggyDetail,
+    // see `navigateToHuntPiggyDetail`); now that's fixed, 2 seconds
+    // is plenty to catch the cold-start double-fire without
+    // mis-blocking deliberate re-scans.
+    const ROUTE_DEDUPE_MS = 2_000;
     let lastRouted: { url: string; at: number } | null = null;
-    // Warm the in-memory copy from disk. The async read can lose the
-    // race against `getInitialURL().then(route)` below — that's why
-    // `route()` does its own disk check too, not just the memory
-    // copy. Memory is the fast path; disk is the source of truth.
-    AsyncStorage.getItem(DEDUPE_KEY)
-      .then((raw) => {
-        if (cancelled || !raw) return;
-        try {
-          lastRouted = JSON.parse(raw) as { url: string; at: number };
-        } catch {
-          // Bad value — drop it. Next route() write replaces it.
-        }
-      })
-      .catch(() => {
-        // Non-fatal — fall through to in-memory only.
-      });
-    const persistRouted = (entry: { url: string; at: number }) => {
-      AsyncStorage.setItem(DEDUPE_KEY, JSON.stringify(entry)).catch(() => {
-        // Non-fatal — next launch will route again, no worse than today.
-      });
-    };
-    const isDuplicate = async (url: string): Promise<boolean> => {
-      if (lastRouted && lastRouted.url === url && Date.now() - lastRouted.at < ROUTE_DEDUPE_MS) {
-        return true;
-      }
-      // Disk fallback for the race where getInitialURL fires before
-      // the async load completes.
-      try {
-        const raw = await AsyncStorage.getItem(DEDUPE_KEY);
-        if (!raw) return false;
-        const stored = JSON.parse(raw) as { url: string; at: number };
-        return stored.url === url && Date.now() - stored.at < ROUTE_DEDUPE_MS;
-      } catch {
-        return false;
-      }
-    };
     const route = (raw: string | null | undefined) => {
       if (cancelled || !raw) return;
       const trimmed = raw.trim();
-      void isDuplicate(trimmed).then((dup) => {
-        if (cancelled) return;
-        if (dup) {
-          console.log(
-            `[Link] de-duped Android-resurrected NDEF intent within ${ROUTE_DEDUPE_MS}ms`,
-          );
-          return;
-        }
-        const entry = { url: trimmed, at: Date.now() };
-        lastRouted = entry;
-        persistRouted(entry);
-        routeFresh(trimmed);
-      });
+      if (
+        lastRouted &&
+        lastRouted.url === trimmed &&
+        Date.now() - lastRouted.at < ROUTE_DEDUPE_MS
+      ) {
+        console.log(`[Link] de-duped cold-start double-fire within ${ROUTE_DEDUPE_MS}ms`);
+        return;
+      }
+      lastRouted = { url: trimmed, at: Date.now() };
+      routeFresh(trimmed);
     };
     const routeFresh = (trimmed: string) => {
       // Truncate noisy URIs so the log doesn't blow past logcat's
