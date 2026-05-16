@@ -1018,6 +1018,12 @@ End-to-end guard that the cache layers above actually paint without network:
 
 Pre-req: the app must have been opened at least once on the device with network, so BTC Map + NIP-GC + NIP-52 caches are on disk. Run nightly on the AVD; spot-checked on the Pixel before each prod release.
 
+=== NTAG21x tag locking (Hide-a-Piglet)
+
+Written tags carry a reversible PWD/PACK lock so a passer-by with an NFC writer can't repoint the prize link. The wizard's step 6 "Lock the tag" toggle (default on) runs the Android write path under `NfcTech.MifareUltralight` so we can chain (a) NDEF user-data pages, (b) PWD/PACK page writes, (c) ACCESS + AUTH0=0x04 in one tap. Configuration / PWD / PACK page addresses are chip-specific (NTAG215 lives at 0x83-0x86, NTAG216 at 0xE3-0xE6, NTAG213 at 0x29-0x2C and rejected at runtime for being too small for the payload); a GET_VERSION-based dispatcher picks the right `NtagPages` config before any write. The 4-byte PWD surfaces as an 8-hex-char PIN on step 6 (post-write reveal-on-tap) and gets persisted onto the matching `HiddenPiggy.nfcLock` in SecureStore so Edit-this-Piglet re-hydrates the same PIN.
+
+Re-writes are smart: when the wizard has stored secrets for the Piglet, the write path sends PWD_AUTH first, writes the new NDEF, and re-applies ACCESS + AUTH0 idempotently — the same PIN keeps working post-rewrite without the hider tracking a fresh one, even on a chip whose AUTH0 had been reset to 0xFF while PWD/PACK stayed in place. The Unlock-tag button on the PIN card opens `NfcUnlockSheet`, which authenticates then flips AUTH0=0xFF to disable protection. Pure-logic byte builders + 33 unit tests live in `src/utils/nfc/ntag21xLock.ts`; the device-bound transceive (including the GET_VERSION family dispatcher, the capacity guard, and the post-failure lock-state diagnostic) lives in `src/services/nfcService.ts → writeNdefBytesAndLockAndroid + unlockHuntTag`. The single-record private-Piglet writer (`writeLnurlToTag`) routes through the same helper when the toggle is on. iOS keeps the unlocked Ndef path (no CoreNFC lock primitive in the lib today). Issue #567.
+
 == Known limitations / future work
 
 * **Mini-map zoom controls** — native overlay buttons (`libre-minimap-zoom-in` / `-zoom-out`) replaced the cramped WebView default; tracked as ✅ delivered.

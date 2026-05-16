@@ -128,6 +128,37 @@ export interface HiddenPiggy {
    * plaintext locally; ROT13-encoded on publish per the NIP-GC
    * client guidance to prevent inline spoilers. */
   hint?: string;
+  /** Reversible NTAG21x PWD/PACK lock secrets, captured at write time
+   * when the Hide-a-Piglet wizard's "Lock tag" toggle is on (default).
+   * The 8-hex-char PWD becomes the hider-visible PIN on **step 6 of
+   * the Hide-a-Piglet wizard** (the screen that owns the NFC write +
+   * Edit re-entry), which is where the PIN card lives end-to-end. An
+   * earlier design surfaced the PIN from My Piglets → Piglet detail;
+   * that was dropped on user feedback ("doesn't need to be on the
+   * actual Geocache page") and re-routed entirely through the wizard,
+   * so the hider re-opens this record via the Edit affordance.
+   *
+   * Verification fields: `tagUid` is checked before any PWD_AUTH on
+   * unlock so we never talk to a tag we didn't lock; `packHex` gates
+   * the AUTH0=0xFF disable write so a PWD collision against an
+   * unrelated tag can't silently open it. See `unlockHuntTag` for the
+   * runtime checks. Issue #567. */
+  nfcLock?: {
+    /** Tag UID this lock was set on, hex-encoded as Android reports it. */
+    tagUid: string;
+    /** 8 uppercase hex chars — the NTAG215 4-byte PWD. Surfaced as the
+     * hider's PIN. */
+    pwdHex: string;
+    /** 4 uppercase hex chars — the 2-byte PACK the chip returns on
+     * PWD_AUTH. Used by the unlock flow to verify we're talking to the
+     * right tag before disabling protection. */
+    packHex: string;
+    /** Wall-clock unix-seconds the tag was locked. Reserved for a
+     * future "Locked on …" caption on the PIN card — the current UI
+     * shows only the PIN + helper copy. Kept on the record so when
+     * we do surface it, no migration is needed. */
+    lockedAt: number;
+  };
 }
 
 // `AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY` mirrors `identitiesStore` and
@@ -241,5 +272,31 @@ const isValidPiggy = (v: unknown): v is HiddenPiggy => {
   // tag emitted). Pre-fix a corrupted 'soon' string would pass and
   // produce "expiration", "NaN" on the wire.
   if (p.expiresAt !== undefined && typeof p.expiresAt !== 'number') return false;
+  // nfcLock — added in #567. Optional, but if present every field is
+  // required (a half-written lock record would mean we can't authenticate
+  // the unlock and the tag is effectively bricked from this app's POV).
+  if (p.nfcLock !== undefined) {
+    const lock = p.nfcLock as Record<string, unknown> | null;
+    if (
+      !lock ||
+      typeof lock !== 'object' ||
+      typeof lock.tagUid !== 'string' ||
+      // Non-empty hex required — pre-fix any string (including empty)
+      // passed the type check, but unlockHuntTag skips the UID guard
+      // when expectedUid is falsy, so an empty UID would silently
+      // disable wrong-tag protection for that record (Copilot #572
+      // r4 catch). NTAG21x UIDs are 7 bytes = 14 hex chars; Android
+      // typically lowercases them but case-insensitive comparison
+      // happens at unlock time.
+      !/^[0-9A-Fa-f]+$/.test(lock.tagUid) ||
+      typeof lock.pwdHex !== 'string' ||
+      !/^[0-9A-Fa-f]{8}$/.test(lock.pwdHex) ||
+      typeof lock.packHex !== 'string' ||
+      !/^[0-9A-Fa-f]{4}$/.test(lock.packHex) ||
+      typeof lock.lockedAt !== 'number'
+    ) {
+      return false;
+    }
+  }
   return true;
 };

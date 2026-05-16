@@ -189,22 +189,32 @@ function HomeTabs() {
         }}
         listeners={({ navigation }) => ({
           // Pop the Explore sub-stack back to its root every time the
-          // tab is tapped. Without this, an NFC-tap deep-link pushes
-          // HuntPiggyDetail onto the stack and the next Explore-tap
-          // resumes there instead of showing the Explore home rails.
+          // tab is tapped — whether Explore is already focused (a
+          // double-tap on the active tab) OR being switched into from
+          // another tab. Pre-fix this only fired when already focused,
+          // so an NFC-tap deep-link or wizard navigation that left
+          // HuntPiggyDetail / HuntCreate on the stack would resume on
+          // that screen the next time the user hit the Explore tab
+          // from elsewhere — even though their mental model is "tap
+          // the tab to go to Explore".
           //
           // The earlier version used navigation.navigate('Explore',
           // { screen: 'ExploreHome' }) which RN treats as a no-op when
           // Explore is already focused. Dispatching StackActions.popToTop
-          // hits the inner Explore stack navigator directly, regardless
-          // of focus, and pops every screen above ExploreHome.
+          // hits the inner Explore stack navigator directly and pops
+          // every screen above ExploreHome regardless of current focus.
           tabPress: (e) => {
             perfTabTap('Explore');
             const state = navigation.getState();
             const tabRoute = state?.routes.find((r) => r.name === 'Explore');
             const subState = tabRoute?.state;
             if (subState && typeof subState.index === 'number' && subState.index > 0) {
-              e.preventDefault();
+              // When Explore isn't yet focused, let RN's default
+              // tab-switch run too (so focus actually shifts) — only
+              // preventDefault when Explore IS focused, since then
+              // tapping again is a no-op without our intervention.
+              const exploreIsFocused = state.routes[state.index]?.name === 'Explore';
+              if (exploreIsFocused) e.preventDefault();
               navigation.dispatch({
                 ...StackActions.popToTop(),
                 target: subState.key,

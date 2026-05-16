@@ -34,9 +34,13 @@ import {
   QrCode,
   Globe,
   ImagePlus,
+  Copy,
+  Eye,
+  EyeOff,
   Lock,
   MapPin,
   Nfc,
+  Unlock,
   PiggyBank,
   Printer,
   ShoppingBag,
@@ -63,6 +67,7 @@ import { peekCachedCachesSync, saveCaches } from '../services/nostrPlacesStorage
 import * as nip19 from 'nostr-tools/nip19';
 import { publishCacheEvent } from '../services/nostrPlacesPublisher';
 import NfcWriteSheet from '../components/NfcWriteSheet';
+import NfcUnlockSheet from '../components/NfcUnlockSheet';
 import LocationPickerSheet from '../components/LocationPickerSheet';
 import { LibreMiniMap } from '../components/LibreMiniMap';
 
@@ -127,6 +132,36 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   // Bottom-sheet visibility for the NFC-write flow (step 3) and the
   // map-based location picker (step 4).
   const [nfcSheetVisible, setNfcSheetVisible] = useState(false);
+  // Whether to write a reversible PWD/PACK lock onto the tag alongside
+  // the NDEF data (Android only). Default ON — issue #567 makes this
+  // the recommended hider posture so a passer-by can't repoint the tag.
+  // Toggle sits on step 6 next to the Write button.
+  const [lockTag, setLockTag] = useState<boolean>(true);
+  // Captured from `writeHuntTagToTag`'s return value on a successful
+  // locked-write. Surfaces as the post-write PIN row on step 6 + drives
+  // the Unlock-tag affordance. Persisted in parallel onto the
+  // HiddenPiggy via `handleNfcWritten` so editing the Piglet later
+  // re-hydrates the same value — and the in-memory copy is
+  // deliberately kept across reopens of the write sheet so a rewrite
+  // can PWD_AUTH with the existing PIN and the hider doesn't have to
+  // track a fresh one. Only `handleNfcWritten` and the unlock-success
+  // path update it.
+  const [lastWrittenLock, setLastWrittenLock] = useState<{
+    pwdHex: string;
+    packHex: string;
+    pin: string;
+    tagUid: string;
+  } | null>(null);
+  const [pinRevealed, setPinRevealed] = useState(false);
+  const [unlockSheetOpen, setUnlockSheetOpen] = useState(false);
+  // Tracks whether the most recent unlock sheet open actually completed
+  // the unlock. The sheet's success state can only render while
+  // `lastWrittenLock` is truthy (the sheet is rendered conditionally on
+  // it), so we delay clearing the in-memory PIN until the sheet has
+  // closed — and only then if `onUnlocked` fired. Avoids the "Tag
+  // unlocked" success state being unmounted before the hider sees it
+  // (Copilot #572 review).
+  const unlockSucceededRef = useRef(false);
   const [locationPickerVisible, setLocationPickerVisible] = useState(false);
   // QR-scan modal for the LNURL input. Opened from the scan icon next
   // to the paste button on step 2. Permission state is held by
@@ -237,6 +272,18 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         ).key;
         setExpiryDays(closest);
       }
+      // Re-hydrate the post-write PIN row so the hider returning via
+      // Edit can recover the PIN they wrote earlier without leaving the
+      // wizard. We map back to the same `lastWrittenLock` shape the
+      // fresh-write path emits so the render branch is symmetric.
+      if (piggy.nfcLock) {
+        setLastWrittenLock({
+          pwdHex: piggy.nfcLock.pwdHex,
+          packHex: piggy.nfcLock.packHex,
+          pin: piggy.nfcLock.pwdHex.toUpperCase(),
+          tagUid: piggy.nfcLock.tagUid,
+        });
+      }
     });
     return () => {
       cancelled = true;
@@ -325,7 +372,15 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     // itself under the same `d` tag (NIP-33 addressable). createdAt
     // stays anchored to the original hide moment so the My Piglets
     // sort order doesn't reshuffle on every edit.
+    //
+    // Pre-load the existing record so we can carry forward fields the
+    // wizard doesn't surface — currently `nfcLock` (set by the NFC
+    // write path, never reconstructed from wizard state). Without this
+    // an edit-save wiped the stored PIN and the hider could no longer
+    // unlock the tag (Copilot #572 review).
+    const existing = editingId ? (await loadPiggies()).find((p) => p.id === editingId) : undefined;
     const piggy = {
+      ...(existing ?? {}),
       id: ensurePiggyId(),
       lnurlw: lnurl.trim(),
       lnurlDescription: stage.params.defaultDescription ?? undefined,
@@ -466,8 +521,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     cacheType,
     expiryDays,
     ensurePiggyId,
+    editingId,
     isEditMode,
     navigation,
+    pubkey,
     signEvent,
     relays,
   ]);
@@ -638,12 +695,125 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   // step header flip to "done".
   const handleOpenNfcSheet = useCallback(() => {
     if (!lnurl.trim()) return;
+    // We deliberately keep `lastWrittenLock` populated when reopening
+    // the sheet so a rewrite of the same Piglet PWD_AUTHs the chip
+    // with the previously-stored PIN and the hider doesn't have to
+    // track a fresh one (#567). Only the post-write success path
+    // updates this state — a failed rewrite leaves the original lock
+    // intact on both the chip and in storage, so the PIN card keeps
+    // showing the right secret.
+    setPinRevealed(false);
     setNfcSheetVisible(true);
   }, [lnurl]);
 
-  const handleNfcWritten = useCallback(() => {
-    setStage({ kind: 'wrote-nfc' });
+  const handleOpenUnlockSheet = useCallback(() => {
+    unlockSucceededRef.current = false;
+    setUnlockSheetOpen(true);
   }, []);
+
+  const handleUnlockSheetClose = useCallback(() => {
+    setUnlockSheetOpen(false);
+    // Only clear the in-memory PIN if the unlock actually completed —
+    // otherwise the hider's cancel/error should leave the PIN card in
+    // place so they can retry without losing the PIN. The sheet's own
+    // success state has already played by this point (we render the
+    // sheet conditional on `lastWrittenLock` being truthy, so it stays
+    // mounted through the success animation up until this close).
+    if (unlockSucceededRef.current) {
+      setLastWrittenLock(null);
+      setPinRevealed(false);
+      Toast.show({ type: 'success', text1: 'Tag unlocked' });
+    }
+    unlockSucceededRef.current = false;
+  }, []);
+
+  const handleUnlocked = useCallback(async () => {
+    unlockSucceededRef.current = true;
+    // Clear the on-disk lock immediately so a crash before the sheet
+    // closes still leaves the storage in the right shape. The wizard
+    // keeps showing the PIN card until the sheet calls onClose.
+    const id = ensurePiggyId();
+    try {
+      const all = await loadPiggies();
+      const existing = all.find((p) => p.id === id);
+      if (existing && existing.nfcLock) {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { nfcLock, ...rest } = existing;
+        await savePiggy(rest);
+      }
+    } catch (e) {
+      console.warn(`[HuntCreate] clear nfcLock after unlock failed: ${(e as Error)?.message ?? e}`);
+    }
+  }, [ensurePiggyId]);
+
+  const handleNfcWritten = useCallback(
+    async (result?: {
+      locked: boolean;
+      lock?: { pwdHex: string; packHex: string; pin: string; tagUid: string };
+    }) => {
+      // Persist the freshly-set NTAG21x PWD/PACK against the matching
+      // HiddenPiggy so the My-Piglets PIN row + unlock flow can pick it
+      // up later. The write sheet returns the secrets only when the
+      // Android locked-write path ran; iOS / `lockTag=false` give us
+      // `result.lock === undefined` and we leave the record alone.
+      // Issue #567.
+      if (result?.lock) {
+        // Surface the PIN immediately on step 6 so the hider can copy /
+        // photograph it before the screen rotates away. Persistence
+        // below is the durable copy that survives wizard exit.
+        setLastWrittenLock(result.lock);
+        setPinRevealed(false);
+        // Persist the secrets onto the matching HiddenPiggy. The
+        // hider's tag is now physically locked with `result.lock.pwd`
+        // — if we lose this record they can read the LNURL but never
+        // unlock or rewrite the chip. Treat persist failure as a
+        // top-level alert (Copilot #572 review) so the hider can copy
+        // the PIN manually from the on-screen card before dismissing.
+        try {
+          const id = ensurePiggyId();
+          const all = await loadPiggies();
+          const existing = all.find((p) => p.id === id);
+          if (existing) {
+            const next = {
+              ...existing,
+              nfcLock: {
+                tagUid: result.lock.tagUid,
+                pwdHex: result.lock.pwdHex,
+                packHex: result.lock.packHex,
+                lockedAt: Math.floor(Date.now() / 1000),
+              },
+            };
+            await savePiggy(next);
+            console.log(`[HuntCreate] persisted nfcLock for piggy=${id} uid=${result.lock.tagUid}`);
+          } else {
+            // The local HiddenPiggy hasn't been written yet (locked
+            // write happened before Publish on step 5). Surface a
+            // visible warning — the PIN is only on screen, not on
+            // disk yet — and instruct the hider to copy it before
+            // tapping Done.
+            Alert.alert(
+              'Save the PIN now',
+              "The tag is locked, but we couldn't find the Piglet record to save its PIN onto. Copy the PIN from the card below before you leave this screen.",
+            );
+          }
+        } catch (e) {
+          console.warn(`[HuntCreate] persist nfcLock failed: ${(e as Error)?.message ?? e}`);
+          Alert.alert(
+            'PIN not saved to this device',
+            `The tag is locked, but we couldn't write the PIN to local storage (${(e as Error).message}). Copy the PIN from the card below before you leave this screen — otherwise you'll need an external NFC writer to recover the tag.`,
+          );
+        }
+      } else {
+        // No lock result returned — either lockTag was off (iOS / hider
+        // chose unlocked) or the writer is a non-Piglet flow. Either
+        // way, don't clobber any pre-existing `lastWrittenLock` from
+        // edit mode: the previous PIN may still be valid on a tag
+        // we didn't actually touch this round.
+      }
+      setStage({ kind: 'wrote-nfc' });
+    },
+    [ensurePiggyId],
+  );
 
   const handleDone = useCallback(() => navigation.goBack(), [navigation]);
 
@@ -934,20 +1104,61 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               {nfcReady && pubkey ? (
                 <View style={styles.payloadPreview}>
                   <Text style={styles.payloadPreviewLabel}>Tag will carry:</Text>
-                  <Text style={styles.payloadPreviewLine} numberOfLines={1}>
-                    • {process.env.EXPO_PUBLIC_HUNT_TAG_BASE_URL ?? 'lightningpiggy://hunt/'}
-                    {ensurePiggyId().slice(0, 16)}…
-                  </Text>
-                  <Text style={styles.payloadPreviewLine} numberOfLines={1}>
-                    • nostr:naddr1… ({GC_LISTING_KIND}:{pubkey.slice(0, 8)}…:
-                    {ensurePiggyId().slice(0, 12)}…)
-                  </Text>
+                  {/* Public hides emit three records (LP deep link +
+                      Nostr naddr + LNURL bearer); private hides emit
+                      only the LNURL because the cache isn't on relays
+                      and the LP deep-link would route to a missing
+                      kind 37516. The runtime matches via
+                      writeHuntTagToTag (public) vs writeLnurlToTag
+                      (private) below. */}
+                  {isPublic ? (
+                    <>
+                      <Text style={styles.payloadPreviewLine} numberOfLines={1}>
+                        • {process.env.EXPO_PUBLIC_HUNT_TAG_BASE_URL ?? 'lightningpiggy://hunt/'}
+                        {ensurePiggyId().slice(0, 16)}…
+                      </Text>
+                      <Text style={styles.payloadPreviewLine} numberOfLines={1}>
+                        • nostr:naddr1… ({GC_LISTING_KIND}:{pubkey.slice(0, 8)}…:
+                        {ensurePiggyId().slice(0, 12)}…)
+                      </Text>
+                    </>
+                  ) : null}
                   {lnurl.trim() ? (
                     <Text style={styles.payloadPreviewLine} numberOfLines={1}>
                       • lightning:{lnurl.trim().slice(0, 12).toUpperCase()}…
                     </Text>
                   ) : null}
                 </View>
+              ) : null}
+              {/* Lock toggle — default ON. When on, the Android write
+                  path also burns a random PWD/PACK into the tag so a
+                  passer-by can't repoint it. iOS ignores this (no
+                  CoreNFC lock API in the lib today). The toggle stays
+                  visible on iOS too so the hider knows the chip is
+                  going out unlocked. Issue #567. */}
+              {nfcReady ? (
+                <TouchableOpacity
+                  style={styles.lockToggleRow}
+                  onPress={() => setLockTag((v) => !v)}
+                  accessibilityRole="switch"
+                  accessibilityState={{ checked: lockTag }}
+                  accessibilityLabel={lockTag ? 'Lock tag — on' : 'Lock tag — off'}
+                  testID="hunt-write-lock-toggle"
+                >
+                  <View style={styles.lockToggleMain}>
+                    <Text style={styles.lockToggleTitle}>Lock the tag</Text>
+                    <Text style={styles.lockToggleHelper}>
+                      {Platform.OS !== 'android'
+                        ? "iOS doesn't yet support the chip-level lock — your tag will go out unlocked regardless of this toggle. Lock from an Android phone or NFC Tools to protect it."
+                        : lockTag
+                          ? "Generates a random PIN and writes it to the tag so others can't overwrite the prize link. The PIN appears below after the write."
+                          : "Leaves the tag open — anyone with an NFC writer can replace the contents. Only turn this off if you'll re-lock manually."}
+                    </Text>
+                  </View>
+                  <View style={[styles.lockToggleSwitch, lockTag && styles.lockToggleSwitchOn]}>
+                    <View style={[styles.lockToggleKnob, lockTag && styles.lockToggleKnobOn]} />
+                  </View>
+                </TouchableOpacity>
               ) : null}
               <TouchableOpacity
                 style={[styles.primaryButton, !nfcReady && styles.primaryButtonDisabled]}
@@ -960,6 +1171,61 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                   {stage.kind === 'wrote-nfc' ? 'Write another tag' : 'Write to NFC tag'}
                 </Text>
               </TouchableOpacity>
+              {/* Post-write PIN row — visible whenever we have lock
+                  secrets in hand, either fresh from this session's
+                  write or rehydrated from the saved HiddenPiggy in
+                  edit mode. Dot-masked until the hider taps Reveal.
+                  Issue #567. */}
+              {lastWrittenLock ? (
+                <View style={styles.pinCard} testID="hunt-write-pin-card">
+                  <View style={styles.pinHeader}>
+                    <Lock size={14} color={colors.brandPink} strokeWidth={2.5} />
+                    <Text style={styles.pinHeaderText}>Tag locked — your PIN</Text>
+                  </View>
+                  <Text style={styles.pinHelper}>
+                    Keep this safe. You&apos;ll need it to unlock the tag (e.g. to repoint it to a
+                    different Piggy). If you lose it, the tag stays locked forever.
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.pinValueRow}
+                    onPress={() => setPinRevealed((v) => !v)}
+                    accessibilityLabel={pinRevealed ? 'Hide PIN' : 'Reveal PIN'}
+                    testID="hunt-write-pin-reveal"
+                  >
+                    <Text style={styles.pinValueText}>
+                      {pinRevealed ? lastWrittenLock.pin : '••••••••'}
+                    </Text>
+                    {pinRevealed ? (
+                      <EyeOff size={18} color={colors.textSupplementary} strokeWidth={2} />
+                    ) : (
+                      <Eye size={18} color={colors.textSupplementary} strokeWidth={2} />
+                    )}
+                  </TouchableOpacity>
+                  <View style={styles.pinActionsRow}>
+                    <TouchableOpacity
+                      style={styles.pinActionSecondary}
+                      onPress={async () => {
+                        await Clipboard.setStringAsync(lastWrittenLock.pin);
+                        Toast.show({ type: 'success', text1: 'PIN copied' });
+                      }}
+                      accessibilityLabel="Copy PIN"
+                      testID="hunt-write-pin-copy"
+                    >
+                      <Copy size={16} color={colors.brandPink} strokeWidth={2.5} />
+                      <Text style={styles.pinActionSecondaryText}>Copy</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.pinActionSecondary}
+                      onPress={handleOpenUnlockSheet}
+                      accessibilityLabel="Unlock tag"
+                      testID="hunt-write-pin-unlock"
+                    >
+                      <Unlock size={16} color={colors.brandPink} strokeWidth={2.5} />
+                      <Text style={styles.pinActionSecondaryText}>Unlock tag</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : null}
               <StepNavRow
                 onBack={() => setCurrentStep(5)}
                 onNext={handleDone}
@@ -1318,10 +1584,35 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               <StepNavRow
                 onBack={() => setCurrentStep(4)}
                 // Next only moves forward — it doesn't carry the publish
-                // action any more. Gated on stage.kind so the user can't
-                // skip publish.
-                onNext={() => setCurrentStep(6)}
-                nextDisabled={stage.kind !== 'saved' && stage.kind !== 'wrote-nfc'}
+                // action any more. Gated on stage.kind so the user
+                // can't skip publish for a fresh hide; in edit mode the
+                // listing is already on relays from the prior session,
+                // so a validated LNURL is enough to advance and rewrite
+                // the NFC tag (no need to re-publish just to reach
+                // step 6).
+                onNext={async () => {
+                  // In edit mode with a still-validated stage the user
+                  // may have changed fields in steps 1-5 (LNURL, name,
+                  // expiry, …) but not yet tapped the Publish button.
+                  // Auto-save before advancing so those edits actually
+                  // hit storage / relays — otherwise the NFC write on
+                  // step 6 emits the new payload while the persisted
+                  // record stays stale (Copilot #572 r4 catch).
+                  // `handleSave` is the same handler the Publish
+                  // button calls; it bails out cleanly on its own if
+                  // the stage isn't validated.
+                  if (isEditMode && stage.kind === 'validated') {
+                    await handleSave();
+                  }
+                  setCurrentStep(6);
+                }}
+                nextDisabled={
+                  isEditMode
+                    ? stage.kind !== 'validated' &&
+                      stage.kind !== 'saved' &&
+                      stage.kind !== 'wrote-nfc'
+                    : stage.kind !== 'saved' && stage.kind !== 'wrote-nfc'
+                }
                 styles={styles}
                 colors={colors}
               />
@@ -1335,6 +1626,12 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
           visible={nfcSheetVisible}
           onClose={() => setNfcSheetVisible(false)}
           mode="piglet"
+          lockTag={lockTag}
+          existingLock={
+            lastWrittenLock
+              ? { pwdHex: lastWrittenLock.pwdHex, packHex: lastWrittenLock.packHex }
+              : undefined
+          }
           lnurl={lnurl.trim()}
           huntPayload={(() => {
             // Multi-record payload (#73). Only useful when we have the
@@ -1357,6 +1654,24 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
           })()}
           onWritten={handleNfcWritten}
         />
+
+        {/* Reversible-lock unlock sheet — opens from the PIN card's
+          "Unlock tag" button above. On success, the sheet plays its
+          own "Tag unlocked" state until the hider dismisses; only
+          then do we clear `lastWrittenLock` and hide the wizard's PIN
+          card. Pre-fix the clear ran inside `onUnlocked` and
+          immediately unmounted the sheet, hiding the success state
+          (Copilot #572 review). Issue #567. */}
+        {lastWrittenLock ? (
+          <NfcUnlockSheet
+            visible={unlockSheetOpen}
+            tagUid={lastWrittenLock.tagUid}
+            pwdHex={lastWrittenLock.pwdHex}
+            packHex={lastWrittenLock.packHex}
+            onUnlocked={handleUnlocked}
+            onClose={handleUnlockSheetClose}
+          />
+        ) : null}
 
         {/* Step 2 — QR scanner for the LNURL input. Full-screen modal
           (`Modal` from react-native, no extra dep) so the camera has
@@ -1635,14 +1950,22 @@ const NfcSupportedTagsCard: React.FC<{
     <View style={styles.tagsCardParagraph}>
       <Text style={styles.tagsCardCheck}>✓</Text>
       <Text style={styles.tagsCardParagraphText}>
-        <Text style={styles.tagsCardName}>NTAG215 / 216</Text> — fit the payload + lock permanently.
+        <Text style={styles.tagsCardName}>NTAG215 / 216</Text> — fit the multi-record payload + the
+        reversible PWD/PACK lock.
       </Text>
     </View>
     <View style={styles.tagsCardParagraph}>
       <Text style={styles.tagsCardCross}>✗</Text>
       <Text style={styles.tagsCardParagraphText}>
-        <Text style={styles.tagsCardName}>NTAG213 / Ultralight C / Mifare Classic</Text> — too small
-        or can't lock.
+        <Text style={styles.tagsCardName}>NTAG213</Text> — only 144 bytes of user memory, too small
+        for the Hide-a-Piglet payload.
+      </Text>
+    </View>
+    <View style={styles.tagsCardParagraph}>
+      <Text style={styles.tagsCardCross}>✗</Text>
+      <Text style={styles.tagsCardParagraphText}>
+        <Text style={styles.tagsCardName}>Ultralight C / Mifare Classic</Text> — too small or can't
+        lock.
       </Text>
     </View>
     <View style={styles.tagsCardParagraph}>
@@ -1925,6 +2248,96 @@ const createStyles = (colors: Palette) =>
       color: colors.textBody,
       fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     },
+    // ---- Lock-tag toggle (step 6, #567) ----------------------------------
+    lockToggleRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 12,
+      padding: 12,
+      marginTop: 8,
+      marginBottom: 12,
+      borderRadius: 12,
+      backgroundColor: colors.background,
+      borderWidth: 1,
+      borderColor: colors.divider,
+    },
+    lockToggleMain: { flex: 1 },
+    lockToggleTitle: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.textHeader,
+      marginBottom: 2,
+    },
+    lockToggleHelper: { fontSize: 12, color: colors.textSupplementary, lineHeight: 16 },
+    lockToggleSwitch: {
+      width: 40,
+      height: 24,
+      borderRadius: 12,
+      backgroundColor: colors.divider,
+      justifyContent: 'center',
+      paddingHorizontal: 2,
+      marginTop: 2,
+    },
+    lockToggleSwitchOn: { backgroundColor: colors.brandPink },
+    lockToggleKnob: {
+      width: 20,
+      height: 20,
+      borderRadius: 10,
+      backgroundColor: colors.white,
+      alignSelf: 'flex-start',
+    },
+    lockToggleKnobOn: { alignSelf: 'flex-end' },
+    // ---- Post-write PIN card (step 6, #567) ------------------------------
+    pinCard: {
+      marginTop: 16,
+      padding: 14,
+      borderRadius: 12,
+      backgroundColor: colors.brandPinkLight,
+      borderWidth: 1,
+      borderColor: colors.brandPink,
+      gap: 10,
+    },
+    pinHeader: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    pinHeaderText: {
+      fontSize: 13,
+      fontWeight: '800',
+      color: colors.brandPink,
+      letterSpacing: 0.3,
+      textTransform: 'uppercase',
+    },
+    pinHelper: { fontSize: 12, color: colors.textBody, lineHeight: 17 },
+    pinValueRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+      borderRadius: 10,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.divider,
+    },
+    pinValueText: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: colors.textHeader,
+      letterSpacing: 2,
+      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    },
+    pinActionsRow: { flexDirection: 'row', gap: 10 },
+    pinActionSecondary: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      paddingVertical: 10,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.brandPink,
+      backgroundColor: colors.surface,
+    },
+    pinActionSecondaryText: { fontSize: 13, fontWeight: '700', color: colors.brandPink },
     // ---- QR scanner modal -------------------------------------------------
     scannerRoot: { flex: 1, backgroundColor: '#000' },
     scannerCamera: { flex: 1 },
