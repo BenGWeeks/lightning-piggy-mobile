@@ -28,20 +28,33 @@ interface Props {
   navigation: ExploreNavigation;
 }
 
-// Parsed kind 7516 found-log keyed by the cache it refers to, kept
-// flat so the SectionList renderer can render a single row regardless
-// of which section it came from. coord is the `<kind>:<pubkey>:<d>`
-// of the cache being claimed; finderPubkey is the author of the 7516.
+// Parsed kind 7516 found-log, flat shape so the SectionList renderer
+// can render a single row regardless of which section it came from.
+// `coord` is the `<kind>:<pubkey>:<d>` of the cache being claimed;
+// `finderPubkey` is the author of the 7516. The Maps that hold these
+// entries are keyed differently per section: `myFinds` keys by coord
+// (most-recent claim per cache), `friendFinds` keys by event id (so
+// multiple friends finding the same cache each get a social-feed
+// row). See the comments on those two state hooks below.
+//
+// Deliberately does NOT embed the matching ParsedCache — the render
+// path looks that up on demand via `cacheByCoord`. Earlier the entry
+// carried `cache: ParsedCache | null`, which forced both the my-finds
+// and friends'-finds subscribe effects to depend on `cacheByCoord`.
+// Every `allCaches` refresh (relay echo, fetchCachesByAuthor result,
+// mergeCaches tick) rebuilt that Map, restarted the sub, and the
+// `setFriendFinds(new Map())` reset at the top of the effect blanked
+// the section before it re-populated — a visible flicker. Keep the
+// event data pure and let the render layer enrich it.
 type FoundEntry = {
   id: string;
   coord: string;
   finderPubkey: string;
   createdAt: number;
   amountSats: number | null;
-  cache: ParsedCache | null;
 };
 
-const parseFoundEvent = (e: VerifiedEvent, cacheLookup: Map<string, ParsedCache>): FoundEntry => {
+const parseFoundEvent = (e: VerifiedEvent): FoundEntry => {
   const coordTag = e.tags.find((t) => t[0] === 'a')?.[1] ?? '';
   const amount = e.tags.find((t) => t[0] === 'amount')?.[1];
   const amountSats = amount ? Math.round(Number(amount) / 1000) || null : null;
@@ -51,7 +64,6 @@ const parseFoundEvent = (e: VerifiedEvent, cacheLookup: Map<string, ParsedCache>
     finderPubkey: e.pubkey,
     createdAt: e.created_at,
     amountSats,
-    cache: cacheLookup.get(coordTag) ?? null,
   };
 };
 
@@ -189,13 +201,18 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
       .sort((a, b) => b.createdAt - a.createdAt);
   }, [allCaches, pubkey]);
 
-  // Found by me — kind 7516 authored by me.
+  // Found by me — kind 7516 authored by me. Sub deps are author-only;
+  // cache enrichment happens at render via `cacheByCoord`. Anything
+  // that rebuilds `cacheByCoord` (relay echo, by-author refresh, pull-
+  // to-refresh) used to restart this sub and `new Map()`-wipe the
+  // section between renders — visible as a "Found" row that flashed
+  // off and back on. See the FoundEntry comment above.
   const [myFinds, setMyFinds] = useState<Map<string, FoundEntry>>(new Map());
   useEffect(() => {
     if (!pubkey) return undefined;
     setMyFinds(new Map());
     const close = subscribeFoundLogsByAuthors([pubkey], (e) => {
-      const entry = parseFoundEvent(e, cacheByCoord);
+      const entry = parseFoundEvent(e);
       setMyFinds((prev) => {
         const next = new Map(prev);
         const existing = next.get(entry.coord);
@@ -206,7 +223,7 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
       });
     });
     return () => close();
-  }, [pubkey, cacheByCoord]);
+  }, [pubkey]);
 
   // Friends' finds — kind 7516 authored by anyone in the trust set,
   // excluding me. `trustSet` includes the user per TrustGraphContext
@@ -222,7 +239,7 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
     setFriendFinds(new Map());
     if (trustedAuthors.length === 0) return undefined;
     const close = subscribeFoundLogsByAuthors(trustedAuthors, (e) => {
-      const entry = parseFoundEvent(e, cacheByCoord);
+      const entry = parseFoundEvent(e);
       setFriendFinds((prev) => {
         // Key on event id — multiple friends finding the same cache
         // should each get a row. (My-finds dedupes per-cache; here we
@@ -234,23 +251,26 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
       });
     });
     return () => close();
-  }, [trustedAuthors, cacheByCoord]);
+  }, [trustedAuthors]);
 
   const foundList = useMemo(
     () => [...myFinds.values()].sort((a, b) => b.createdAt - a.createdAt),
     [myFinds],
   );
+  // Drop find-logs whose cache event hasn't reached local storage —
+  // showing "Cache no longer on relays" for every one looks broken to
+  // the user even though it's a real state. They'll surface once the
+  // cache subscription backfills. The filter recomputes when
+  // `cacheByCoord` grows, so an entry that the relay sub hadn't
+  // resolved yet appears once the matching kind 37516 lands — without
+  // having to restart the find-log subscription.
   const friendList = useMemo(
     () =>
       [...friendFinds.values()]
-        // Drop find-logs whose cache event hasn't reached local storage —
-        // showing "Cache no longer on relays" for every one looks broken
-        // to the user even though it's a real state. They'll surface once
-        // the cache subscription backfills.
-        .filter((e) => e.cache !== null)
+        .filter((e) => cacheByCoord.has(e.coord))
         .sort((a, b) => b.createdAt - a.createdAt)
         .slice(0, 50),
-    [friendFinds],
+    [friendFinds, cacheByCoord],
   );
 
   const sections: { title: string; data: SectionRow[] }[] = useMemo(
@@ -368,6 +388,14 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
 
       <SectionList
         sections={sections}
+        // SectionList's default render-bail otherwise skips renderItem
+        // when `sections` reference-equals — but a kind 37516 echo that
+        // only mutates `cacheByCoord` can land *without* my-finds /
+        // friends'-finds list arrays changing, leaving the cached row
+        // showing "Cache no longer on relays" until the next prop
+        // change. Wiring the lookup map into `extraData` forces the
+        // re-render the renderItem comment promises (#574 follow-up).
+        extraData={cacheByCoord}
         keyExtractor={(item) =>
           item.kind === 'hidden' ? `h:${item.cache.coord}` : `${item.kind}:${item.entry.id}`
         }
@@ -416,12 +444,20 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
             );
           }
           const entry = item.entry;
+          // Cache resolution moved from the find-log subscribe callback
+          // to this render path — see the FoundEntry comment. The lookup
+          // is O(1) and we wire `cacheByCoord` into the SectionList via
+          // `extraData` above so a late-arriving kind 37516 always
+          // re-runs `renderItem` and the row's name re-paints, even on
+          // the my-finds path (whose `foundList` useMemo doesn't itself
+          // depend on the cache mirror).
+          const matchingCache = cacheByCoord.get(entry.coord) ?? null;
           const meta =
             (entry.amountSats ? `⚡ ${entry.amountSats} sats` : 'Found') +
-            (entry.cache?.name ? ` · ${entry.cache.name}` : '');
+            (matchingCache?.name ? ` · ${matchingCache.name}` : '');
           return (
             <Row
-              cache={entry.cache}
+              cache={matchingCache}
               meta={meta}
               colors={colors}
               styles={styles}
