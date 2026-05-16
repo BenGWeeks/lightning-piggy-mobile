@@ -8,7 +8,6 @@ import {
   ActivityIndicator,
   AppState,
   type AppStateStatus,
-  Platform,
 } from 'react-native';
 import {
   BottomSheetModal,
@@ -17,7 +16,8 @@ import {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import { AlertCircle, Nfc, PartyPopper, PiggyBank } from 'lucide-react-native';
-import { readHuntTagPayload, cancelNfcOperation, isNfcEnabled } from '../services/nfcService';
+import { readHuntTagPayload, cancelNfcOperation } from '../services/nfcService';
+import { paymentHashFromBolt11 } from '../utils/bolt11';
 import {
   LnurlWithdrawError,
   claimLnurlWithdraw,
@@ -78,7 +78,7 @@ const formatCountdown = (seconds: number): string => {
 const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { activeWalletId, makeInvoice } = useWallet();
+  const { activeWalletId, makeInvoice, lastIncomingPayment, expectPayment } = useWallet();
   const [stage, setStage] = useState<SheetStage>('ready');
   const [errorMessage, setErrorMessage] = useState('');
   const [claimedSats, setClaimedSats] = useState<number | null>(null);
@@ -89,6 +89,19 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['55%'], []);
   const mountedRef = useRef(true);
+  // Stamped at the moment we enter `claimed` (LNURL-w issuer accepted
+  // our invoice). The auto-dismiss effect below uses both this AND
+  // the expected payment hash to scope which `lastIncomingPayment`
+  // events are "our" settlement — otherwise an unrelated incoming
+  // payment to a different wallet (or even the same wallet, e.g.
+  // someone Zapping you mid-claim) would close the sheet prematurely.
+  const claimedAtRef = useRef<number | null>(null);
+  // Payment hash extracted from our claim's bolt11. The wallet
+  // context fills `IncomingPayment.paymentHash` whenever detection
+  // came through expectPayment's hash-keyed path (vs the
+  // balance-diff fallback). When it matches, we know THIS settlement
+  // is ours — not some coincidental wallet credit.
+  const expectedPaymentHashRef = useRef<string | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -97,21 +110,62 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
     };
   }, []);
 
+  // Auto-dismiss the sheet when the actual bolt11 settlement lands
+  // for our claim. The app-root `GlobalIncomingPaymentOverlay`
+  // already pops the confetti celebration on every
+  // `lastIncomingPayment` event — but its native Modal layer sits
+  // BELOW the bottom-sheet's portal while we're open, so the user
+  // can't see the celebration until they dismiss. Closing the sheet
+  // automatically reveals the overlay on HuntPiggyDetail with the
+  // exact same animation Home shows, no duplicated celebration
+  // code. The 250 ms timeout lets the success state's "X sats
+  // inbound!" copy register first before the sheet animates away.
+  useEffect(() => {
+    if (
+      stage !== 'claimed' ||
+      !lastIncomingPayment ||
+      !claimedAtRef.current ||
+      lastIncomingPayment.at < claimedAtRef.current
+    ) {
+      return;
+    }
+    // Tightened scope per Copilot #580 r1: the bare timestamp gate
+    // would dismiss the sheet on ANY incoming payment that happens
+    // to land after the claim moment (different wallet, unrelated
+    // zap, balance-poll detecting an unrelated credit, …). Match on
+    // walletId AND, when the wallet detected via the expectPayment
+    // hash-keyed path, also match the payment hash to be sure this
+    // settlement is the one we just kicked off. If detection came
+    // via balance-diff (paymentHash === null), we fall back to
+    // walletId + the post-claim timestamp window — the best we can
+    // do without an invoice hash.
+    if (lastIncomingPayment.walletId !== activeWalletId) return;
+    if (
+      expectedPaymentHashRef.current &&
+      lastIncomingPayment.paymentHash &&
+      lastIncomingPayment.paymentHash !== expectedPaymentHashRef.current
+    ) {
+      return;
+    }
+    const t = setTimeout(() => {
+      if (mountedRef.current) onClose();
+    }, 250);
+    return () => clearTimeout(t);
+  }, [lastIncomingPayment, stage, onClose, activeWalletId]);
+
   const startRead = useCallback(async () => {
     setErrorMessage('');
     setClaimedSats(null);
-    const enabled = await isNfcEnabled();
-    if (!enabled) {
-      if (mountedRef.current) {
-        setStage('error');
-        setErrorMessage(
-          Platform.OS === 'android'
-            ? 'NFC is turned off. Please enable NFC in your device settings.'
-            : 'NFC is turned off. Go to Settings to enable NFC.',
-        );
-      }
-      return;
-    }
+    // Skip the synchronous `isNfcEnabled()` pre-flight here so we
+    // can call requestTechnology (which is what activates Android
+    // reader-mode and stops the OS NDEF dispatcher from showing
+    // "Open with…") as quickly as possible after the sheet opens.
+    // Each native round-trip on Android costs ~100 ms; the previous
+    // pre-flight gave a fast hider enough time to bring the tag to
+    // the phone BEFORE reader-mode came up, so the OS chooser
+    // intercepted. If NFC is actually disabled, readHuntTagPayload's
+    // `ensureNfcStarted()` returns false and surfaces the same error
+    // message below.
     setStage('ready');
     try {
       const result = await readHuntTagPayload({
@@ -158,7 +212,29 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
           piggyId: expectedCoord,
         });
         setClaimedSats(claim.sats);
+        // Stamp the claim moment so the auto-dismiss effect above
+        // only reacts to bolt11 settlements that land AFTER this
+        // point — unrelated wallet activity that happened before
+        // the user tapped Try prize must not close the sheet.
+        claimedAtRef.current = Date.now();
         setStage('claimed');
+        // Kick off 1 s aggressive polling for THIS bolt11 in the
+        // wallet context, so `lastIncomingPayment` fires within ~1 s
+        // of LNbits actually paying our invoice. Without it, the
+        // baseline 30 s balance poll is the only signal, which means
+        // the sheet sits on "X sats inbound!" for up to half a
+        // minute and the user manually taps Done before the auto-
+        // dismiss + confetti can fire (#579 follow-up).
+        if (activeWalletId) {
+          const paymentHash = paymentHashFromBolt11(claim.bolt11);
+          if (paymentHash) {
+            // Stash so the auto-dismiss effect can match against
+            // `lastIncomingPayment.paymentHash` — defends against
+            // unrelated incoming payments triggering close.
+            expectedPaymentHashRef.current = paymentHash;
+            expectPayment(activeWalletId, paymentHash, claim.sats);
+          }
+        }
       } catch (e) {
         if (!mountedRef.current) return;
         const reason =
@@ -175,10 +251,21 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
     } catch (err) {
       if (mountedRef.current) {
         setStage('error');
-        setErrorMessage(err instanceof Error ? err.message : 'Failed to read NFC tag');
+        const raw = err instanceof Error ? err.message : 'Failed to read NFC tag';
+        // Map nfcService's `NFC unavailable on this device` (raised by
+        // ensureNfcStarted when NfcManager.start() rejected, which is
+        // the disabled-NFC path on Android) to the same friendlier
+        // "NFC is turned off" copy the write / unlock sheets show.
+        // Pre-fix (Copilot #580 r1) dropping isNfcEnabled() left the
+        // user with a bare "NFC unavailable" message inconsistent with
+        // the other sheets in the family.
+        const isDisabled = /NFC unavailable on this device/i.test(raw);
+        setErrorMessage(
+          isDisabled ? 'NFC is turned off. Please enable NFC in your device settings.' : raw,
+        );
       }
     }
-  }, [expectedCoord, activeWalletId, makeInvoice]);
+  }, [expectedCoord, activeWalletId, makeInvoice, expectPayment]);
 
   useEffect(() => {
     if (visible) {
@@ -186,6 +273,8 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
       setErrorMessage('');
       setClaimedSats(null);
       setCooldownRemaining(null);
+      claimedAtRef.current = null;
+      expectedPaymentHashRef.current = null;
       sheetRef.current?.present();
       startRead();
     } else {
@@ -195,6 +284,8 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
       setErrorMessage('');
       setClaimedSats(null);
       setCooldownRemaining(null);
+      claimedAtRef.current = null;
+      expectedPaymentHashRef.current = null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);

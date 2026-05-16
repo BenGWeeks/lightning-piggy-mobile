@@ -20,8 +20,8 @@ import * as Clipboard from 'expo-clipboard';
 import Toast from './BrandedToast';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { buildBip21 } from '../utils/bip21';
+import { paymentHashFromBolt11 } from '../utils/bolt11';
 import { useWallet } from '../contexts/WalletContext';
 import { useNostr } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -31,22 +31,6 @@ import { satsToFiat, formatFiat } from '../services/fiatService';
 import AmountEntryScreen from './AmountEntryScreen';
 import FriendPickerSheet, { PickedFriend } from './FriendPickerSheet';
 import type { RootStackParamList } from '../navigation/types';
-
-function paymentHashFromBolt11(bolt11: string): string | null {
-  try {
-    const decoded = bolt11Decode(bolt11);
-    const section = decoded.sections?.find((s: { name: string }) => s.name === 'payment_hash') as
-      | { value?: string }
-      | undefined;
-    return section?.value ?? null;
-  } catch (error) {
-    // Silent null returns would mask broken invoice generation; at
-    // least surface it in dev logs so the fallback-to-balance-poll is
-    // traceable.
-    if (__DEV__) console.warn('[Receive] bolt11 decode failed:', error);
-    return null;
-  }
-}
 
 // On-chain address fetching is done via WalletContext.getReceiveAddress
 

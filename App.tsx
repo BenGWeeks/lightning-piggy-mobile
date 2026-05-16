@@ -18,7 +18,7 @@ import AppNavigator, {
   navigateToHuntPiggyDetail,
 } from './src/navigation/AppNavigator';
 import * as nip19 from 'nostr-tools/nip19';
-import { wasRecentlyRead } from './src/services/nfcService';
+import { wasRecentlyRead, initNfc } from './src/services/nfcService';
 import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
 import BootSplash from './src/components/BootSplash';
 import { BrandedAlertHost } from './src/components/BrandedAlert';
@@ -63,6 +63,19 @@ export default function App() {
   useEffect(() => {
     const t = setTimeout(() => setBootDone(true), 600);
     return () => clearTimeout(t);
+  }, []);
+
+  // Pre-warm NfcManager.start() at app mount so the first NfcReadSheet
+  // / NfcWriteSheet open can call requestTechnology immediately
+  // (reader-mode active within ms) instead of waiting on the native
+  // bridge. Without this warm-up there's a ~150–300 ms window after
+  // tapping "Try prize" where reader-mode hasn't activated yet — fast
+  // hiders bring the tag to the phone in that window and the OS
+  // dispatches a "Open with…" chooser instead of routing through our
+  // in-app reader. Fire-and-forget; failure is non-fatal (each sheet
+  // re-tries via `ensureNfcStarted` on its own).
+  useEffect(() => {
+    void initNfc();
   }, []);
 
   // `lightning:` deep-link listener (Hunt finder flow, #468). LP registers
