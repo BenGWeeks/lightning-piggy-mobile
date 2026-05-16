@@ -103,7 +103,7 @@ interface Props {
   testID?: string;
 }
 
-// Map style — OpenFreeMap's "Liberty" vector style. Donation-funded
+// Map style — OpenFreeMap's "Bright" vector style. Donation-funded
 // community mirror of OSM rendering, built specifically for app use,
 // no API key, no per-call billing. We deliberately avoid
 // `tile.openstreetmap.org` directly: the OpenStreetMap Foundation's
@@ -112,10 +112,11 @@ interface Props {
 // arguably qualifies as. OpenFreeMap is what btcmap.org itself uses —
 // keeping Lightning Piggy aligned with the Bitcoin community's stack.
 //
-// Vector tiles (not raster) — sharper at every zoom, smaller wire
-// payload, and renders properly into device-pixel ratios. The full
-// MapLibre style JSON lives at the URL; the bundle just references it.
-const MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
+// `bright` over `liberty` because the user's hands-on feedback was that
+// liberty rendered too sparsely (fewer place-name labels at typical
+// city / town zoom levels). Bright shows more text + landmarks
+// without the heavier styling of fully-3D variants.
+const MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/bright';
 
 const LibreMiniMapInner: React.FC<Props> = ({
   lat,
