@@ -1,5 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, BackHandler, Dimensions } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  BackHandler,
+  Dimensions,
+  ActivityIndicator,
+} from 'react-native';
+import * as Location from 'expo-location';
 import {
   BottomSheetModal,
   BottomSheetBackdrop,
@@ -7,9 +16,18 @@ import {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import { WebView } from 'react-native-webview';
-import { MapPin, Check } from 'lucide-react-native';
+import { MapPin, Check, X } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
+import { getDevPinnedLocation } from '../utils/devLocation';
+import {
+  LEAFLET_BASE_CSS,
+  LEAFLET_HEAD_TAGS,
+  LEAFLET_MAP_BACKGROUND_CSS,
+  LEAFLET_SCRIPT_TAG,
+  POST_BRIDGE_JS,
+  tileLayerJs,
+} from '../utils/mapWebview/tiles';
 
 interface Props {
   visible: boolean;
@@ -48,37 +66,70 @@ const LocationPickerSheet: React.FC<Props> = ({
   // the system UI so the math stays right with a tall handle / nav bar.
   const mapHeight = useMemo(() => Math.round(Dimensions.get('window').height * 0.5), []);
 
-  // Fallback centre when the caller has no fix yet — central UK is a
-  // reasonable neutral default for this app's user base; the user will
-  // pan to wherever they actually are.
-  const startLat = initialLat ?? 54.0;
-  const startLon = initialLon ?? -2.0;
-  const startZoom = initialLat !== null ? 16 : 5;
-
-  // Live pin position reported by the WebView. Seeded with the start
-  // coordinate so the marker has somewhere to sit; whether the user has
-  // actually *chosen* it is tracked separately below.
-  const [picked, setPicked] = useState<{ lat: number; lon: number }>({
-    lat: startLat,
-    lon: startLon,
-  });
+  // Where the map first centres. `null` until resolved — we wait for
+  // the GPS lookup (or the UK fallback timer) before rendering the
+  // WebView, so the map never has to remount + re-fetch Leaflet when
+  // the location lands a few hundred ms after the sheet opens. Order
+  // of preference:
+  //   1. caller-supplied `initialLat`/`Lon` (edit-mode + already-pinned)
+  //   2. dev-pinned location (emulator parity — see useCompassNavigation)
+  //   3. `Location.getLastKnownPositionAsync` (instant, returns cached fix)
+  //   4. UK fallback (54.0, -2.0) at low zoom
+  const [resolvedStart, setResolvedStart] = useState<{
+    lat: number;
+    lon: number;
+    zoom: number;
+  } | null>(null);
+  const hasInitialPin = initialLat !== null && initialLon !== null;
+  const [picked, setPicked] = useState<{ lat: number; lon: number }>({ lat: 0, lon: 0 });
   // `picked` always has a value (the marker has to render somewhere), so
   // we need a second flag to know whether the user has affirmed it. When
   // the caller passed a real initialLat/Lon (i.e. we're editing an
   // existing pin), treat that as already-chosen.
-  const hasInitialPin = initialLat !== null && initialLon !== null;
   const [userMoved, setUserMoved] = useState<boolean>(hasInitialPin);
 
   useEffect(() => {
-    if (visible) {
-      setPicked({ lat: startLat, lon: startLon });
-      setUserMoved(hasInitialPin);
-      sheetRef.current?.present();
-    } else {
+    if (!visible) {
       sheetRef.current?.dismiss();
+      setResolvedStart(null);
+      return;
     }
+    sheetRef.current?.present();
+    let cancelled = false;
+    const seed = (lat: number, lon: number, zoom: number) => {
+      if (cancelled) return;
+      setResolvedStart({ lat, lon, zoom });
+      setPicked({ lat, lon });
+      setUserMoved(hasInitialPin);
+    };
+    if (hasInitialPin) {
+      seed(initialLat as number, initialLon as number, 16);
+      return () => {
+        cancelled = true;
+      };
+    }
+    // Emulator override — same source the rest of the app uses so dev
+    // pins agree across screens.
+    const pinned = getDevPinnedLocation();
+    if (pinned) {
+      seed(pinned.lat, pinned.lon, 16);
+      return () => {
+        cancelled = true;
+      };
+    }
+    // Last-known is nearly-instant (returns the OS's cached fix) so
+    // the sheet doesn't feel laggy. If null / denied, fall back to UK.
+    Location.getLastKnownPositionAsync({ maxAge: 10 * 60 * 1000 })
+      .then((known) => {
+        if (known) seed(known.coords.latitude, known.coords.longitude, 16);
+        else seed(54.0, -2.0, 5);
+      })
+      .catch(() => seed(54.0, -2.0, 5));
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible]);
+  }, [visible, initialLat, initialLon]);
 
   useEffect(() => {
     if (!visible) return undefined;
@@ -122,13 +173,32 @@ const LocationPickerSheet: React.FC<Props> = ({
       handleIndicatorStyle={styles.handleIndicator}
     >
       <BottomSheetView style={styles.content}>
+        {/* Close button — `enableContentPanningGesture={false}` means
+            swipe-to-dismiss only works on the handle bar at the top of
+            the sheet (otherwise the map's own pan gesture would fight
+            it). A discoverable X button covers the dismiss path users
+            actually reach for. */}
+        <TouchableOpacity
+          style={styles.closeButton}
+          onPress={onClose}
+          accessibilityLabel="Close location picker"
+          testID="location-picker-close"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <X size={20} color={colors.textSupplementary} strokeWidth={2.5} />
+        </TouchableOpacity>
         <Text style={styles.title}>Where did you hide it?</Text>
         <Text style={styles.subtitle}>Drag the pin — or tap the map — to mark the exact spot.</Text>
 
         <View style={[styles.mapWrap, { height: mapHeight }]}>
+          {resolvedStart === null ? (
+            <View style={styles.mapLoading}>
+              <ActivityIndicator color={colors.brandPink} />
+            </View>
+          ) : (
           <WebView
             originWhitelist={['*']}
-            source={{ html: makeHtml(startLat, startLon, startZoom) }}
+            source={{ html: makeHtml(resolvedStart.lat, resolvedStart.lon, resolvedStart.zoom) }}
             onMessage={(e) => {
               try {
                 const msg = JSON.parse(e.nativeEvent.data);
@@ -149,6 +219,7 @@ const LocationPickerSheet: React.FC<Props> = ({
             }}
             style={styles.webview}
           />
+          )}
         </View>
 
         <View style={styles.coordRow}>
@@ -187,22 +258,21 @@ const LocationPickerSheet: React.FC<Props> = ({
 const makeHtml = (lat: number, lon: number, zoom: number): string => `<!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="initial-scale=1.0,maximum-scale=1.0,user-scalable=no" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  ${LEAFLET_HEAD_TAGS}
   <style>
-    html,body,#map{margin:0;padding:0;height:100%;width:100%;background:#eee}
+    ${LEAFLET_BASE_CSS}
+    ${LEAFLET_MAP_BACKGROUND_CSS}
     .lp-drop{width:20px;height:20px;border-radius:10px;background:#EC008C;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.45)}
     .leaflet-control-attribution{font-size:9px}
   </style>
 </head>
 <body>
 <div id="map"></div>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+${LEAFLET_SCRIPT_TAG}
 <script>
-  const post=(m)=>window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify(m));
+  ${POST_BRIDGE_JS}
   const map=L.map('map',{zoomControl:true,minZoom:3,maxZoom:19}).setView([${lat},${lon}],${zoom});
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
+  ${tileLayerJs()}
   const icon=L.divIcon({className:'',html:'<div class="lp-drop"></div>',iconSize:[20,20],iconAnchor:[10,10]});
   const marker=L.marker([${lat},${lon}],{icon:icon,draggable:true}).addTo(map);
   const emit=(userMoved)=>{const p=marker.getLatLng();post({type:'pin',lat:p.lat,lon:p.lng,userMoved:!!userMoved});};
@@ -244,6 +314,23 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.background,
     },
     webview: { flex: 1, backgroundColor: 'transparent' },
+    mapLoading: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    closeButton: {
+      position: 'absolute',
+      top: 8,
+      right: 16,
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: colors.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 10,
+    },
     coordRow: {
       flexDirection: 'row',
       alignItems: 'center',

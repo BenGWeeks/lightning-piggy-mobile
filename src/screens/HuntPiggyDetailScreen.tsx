@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,8 @@ import {
   ActivityIndicator,
   Image,
   TextInput,
+  KeyboardAvoidingView,
+  Platform,
   Linking,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
@@ -16,7 +18,6 @@ import {
   Box,
   Camera,
   CalendarDays,
-  CheckCircle2,
   ChevronLeft,
   Pencil,
   Clock,
@@ -31,7 +32,7 @@ import {
   PiggyBank,
   Repeat,
   Send,
-  Sparkles,
+  Gift,
   User,
   X,
   Zap,
@@ -60,9 +61,11 @@ import {
   publishCacheEvent,
   subscribeFoundLogs,
 } from '../services/nostrPlacesPublisher';
+import { loadCachedCaches, peekCachedCachesSync } from '../services/nostrPlacesStorage';
 import { subscribeFindLogZaps } from '../services/findLogZapsService';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
-import { lastClaimFor } from '../services/claimHistoryService';
+import { lastClaimForPiggyId } from '../services/claimHistoryService';
+import NfcReadSheet from '../components/NfcReadSheet';
 
 // Composite nav type — needed so we can `navigate('Conversation', …)`
 // when the hider's profile sheet's Message action is tapped. The
@@ -116,11 +119,18 @@ const parseFoundLog = (e: VerifiedEvent): FoundLog => {
 const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { coord } = route.params;
+  const { coord, openComposer: openComposerParam } = route.params;
   const { signEvent, relays, pubkey } = useNostr();
 
-  const [cache, setCache] = useState<ParsedCache | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Seed from the in-memory cache mirror so the screen paints instantly
+  // when the user navigates from Explore / Hunt rails (where the cache
+  // is already in memory). Falls through to fetchCache() below for
+  // cold-tap deep-links where the mirror is empty. Pre-fix the screen
+  // showed a 15-30s loading spinner whenever the JS thread was busy.
+  const [cache, setCache] = useState<ParsedCache | null>(
+    () => peekCachedCachesSync().find((c) => c.coord === coord) ?? null,
+  );
+  const [loading, setLoading] = useState(() => !peekCachedCachesSync().some((c) => c.coord === coord));
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<Map<string, FoundLog>>(new Map());
   // Zap totals per find-log id. Outer key is the kind-7516 log id;
@@ -143,7 +153,18 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     },
     [],
   );
-  const [composerOpen, setComposerOpen] = useState(false);
+  // Composer is always rendered (no toggle) — sharing a find is
+  // independent of trying the LP prize. The route-param + scroll
+  // effect just nudges the page to the composer when navigation
+  // bounces back from HuntFoundScreen after a successful claim, so
+  // the finder lands on the input ready to type rather than at the
+  // top of a long cache page.
+  const scrollRef = useRef<ScrollView>(null);
+  useEffect(() => {
+    if (!openComposerParam) return;
+    const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
+    return () => clearTimeout(t);
+  }, [openComposerParam]);
   const [composerText, setComposerText] = useState('');
   const [composerPhotoUrl, setComposerPhotoUrl] = useState<string | null>(null);
   const [composerUploading, setComposerUploading] = useState(false);
@@ -172,7 +193,12 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     },
     [],
   );
-  const [hasClaimed, setHasClaimed] = useState(false);
+  // Finder NFC reader sheet — opens on "Try prize" tap. The sheet
+  // owns the entire flow now (foreground reader → LNURLw resolve →
+  // claim → success / sleeping / error) so no navigation is needed
+  // here. On dismissal the user lands back on this detail screen with
+  // the find-log composer already in view.
+  const [readSheetOpen, setReadSheetOpen] = useState(false);
   // Hero slot toggles between the cache photo and a map; defaults to the
   // photo when one exists, otherwise the render falls back to the map.
   const [heroView, setHeroView] = useState<'photo' | 'map'>('photo');
@@ -215,16 +241,36 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
       return;
     }
     (async () => {
+      // Cold-tap deep-link path: peek mirror was empty so check
+      // AsyncStorage explicitly before falling through to the relay
+      // fetch. The disk read is ~10ms while a busy-thread relay round-
+      // trip can be 15s+; painting cached data first hides the freeze.
+      if (!cache) {
+        try {
+          const onDisk = await loadCachedCaches();
+          if (cancelled) return;
+          const local = onDisk.find((c) => c.coord === coord);
+          if (local) {
+            setCache(local);
+            setLoading(false);
+          }
+        } catch {
+          // AsyncStorage hiccups are non-fatal — fall through to relays.
+        }
+      }
       try {
         const c = await fetchCache(parts.pubkey, parts.d);
         if (cancelled) return;
         if (!c) {
-          setError('Cache not found on relays — it may have expired.');
+          // Only surface the "not found" error when we have no cached
+          // data to fall back on; if the screen is already showing the
+          // local snapshot, a transient relay miss shouldn't blank it.
+          if (!cache) setError('Cache not found on relays — it may have expired.');
         } else {
           setCache(c);
         }
       } catch (e) {
-        if (!cancelled) setError((e as Error).message);
+        if (!cancelled && !cache) setError((e as Error).message);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -269,32 +315,6 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     });
     return () => closer();
   }, [logIdsKey]);
-
-  // ----- claim-history check (drives the post-find compose CTA) ----------
-
-  useEffect(() => {
-    if (!cache?.isLpPiggy) return;
-    let cancelled = false;
-    // Soft-claim signal: any local claim within the last 24h surfaces
-    // the "Drop a log" CTA. We look up by every g tag's geohash since
-    // we don't store a direct cache↔lnurl mapping locally — but for v1
-    // we just check the local history for ANY claim inside the cache's
-    // 5-char geohash radius. The result is permissive (false positives
-    // are fine, the UX is "you've been near a cache, post a log").
-    (async () => {
-      // Simpler heuristic for now: assume the claim was recorded against
-      // the same lnurl we'd see from this cache's physical tag — which we
-      // don't have. Just enable the composer for any user who's claimed
-      // ANY Piggy in the last 24 h. Refine in M8.
-      const recent = await lastClaimFor(coord);
-      if (!cancelled && recent && Date.now() / 1000 - recent.claimedAt < 24 * 60 * 60) {
-        setHasClaimed(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [cache, coord]);
 
   // ----- composer image picker -------------------------------------------
 
@@ -350,7 +370,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     }
     setPosting(true);
     try {
-      const claim = await lastClaimFor(coord);
+      const claim = await lastClaimForPiggyId(coord);
       const unsigned = buildFoundLog(coord, composerText.trim() || 'Found it!', {
         imageUrl: composerPhotoUrl ?? undefined,
         sats: claim?.sats,
@@ -377,7 +397,8 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         return next;
       });
       Toast.show({ type: 'success', text1: 'Log posted ⚡' });
-      setComposerOpen(false);
+      // Composer stays mounted — just clear so the user could post
+      // another observation later in the same session.
       setComposerText('');
       setComposerPhotoUrl(null);
     } catch (e) {
@@ -406,9 +427,13 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     return m;
   }, [zapsByLog]);
 
-  // LP Piggies gate find-logging behind a successful claim (proof of
-  // presence); plain NIP-GC caches have no claim step, so anyone can log.
-  const canLog = hasClaimed || (cache != null && !cache.isLpPiggy);
+  // Anyone can post a find-log on any cache (LP or vanilla NIP-GC).
+  // Ben's framing: find-logs are unlimited and not gated on claim —
+  // the LNURLw is a separate optional prize, surfaced inside the
+  // composer as a 'Try for the prize' button so the finder gets a
+  // shot at the sats without making it a precondition for sharing
+  // their find.
+  const canLog = cache != null;
 
   // Hero shows the photo when the toggle picks it AND a photo exists;
   // otherwise it falls back to the map.
@@ -428,7 +453,11 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [cache]);
 
   return (
-    <View style={styles.container} testID="hunt-piggy-detail-screen">
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      testID="hunt-piggy-detail-screen"
+    >
       <View style={styles.header}>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
@@ -461,7 +490,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         )}
       </View>
 
-      <ScrollView contentContainerStyle={styles.body}>
+      <ScrollView ref={scrollRef} contentContainerStyle={styles.body}>
         {loading ? (
           <ActivityIndicator color={colors.brandPink} />
         ) : error ? (
@@ -563,28 +592,34 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                     </Text>
                   ) : null}
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.actionButtonPrimary, !canLog && styles.claimButtonDisabled]}
-                  disabled={!canLog}
-                  onPress={() => setComposerOpen(true)}
-                  accessibilityState={{ disabled: !canLog }}
-                  accessibilityLabel={
-                    canLog
-                      ? 'Claim found — log your find'
-                      : 'Claim found — scan the Piglet to unlock'
-                  }
-                  testID="hunt-piggy-detail-claim-button"
-                >
-                  <CheckCircle2 size={18} color={colors.white} strokeWidth={2.5} />
-                  <Text style={styles.actionButtonPrimaryText}>Claim found</Text>
-                </TouchableOpacity>
+                {/* Primary action shows for LP Piggies only — opens the
+                    NfcReadSheet to try the Lightning prize. The
+                    find-log composer is independently available at the
+                    bottom of this screen (always rendered), so the two
+                    flows don't bundle: a finder can claim sats without
+                    logging, or log without claiming. */}
+                {/* Try prize shows only when the hider has BOTH labelled
+                    this as a Lightning Piggy AND advertised a non-zero
+                    sats prize (`amount` tag). Without an amount we
+                    can't know whether the tag carries an LNURL at all;
+                    showing the button would offer a scan that's
+                    guaranteed to fail. */}
+                {cache.isLpPiggy && (cache.payoutSats ?? 0) > 0 ? (
+                  <TouchableOpacity
+                    style={styles.actionButtonPrimary}
+                    onPress={() => setReadSheetOpen(true)}
+                    accessibilityLabel={`Try the prize — ${cache.payoutSats} sats`}
+                    testID="hunt-piggy-detail-try-prize-button"
+                  >
+                    <Gift size={18} color={colors.white} strokeWidth={2.5} />
+                    <Text style={styles.actionButtonPrimaryText}>Try prize</Text>
+                  </TouchableOpacity>
+                ) : null}
               </View>
               <Text style={styles.claimNote}>
-                {!cache.isLpPiggy
-                  ? 'Found this cache? Tap Claim found to log it for other hunters.'
-                  : hasClaimed
-                    ? 'Sats received! Log your find so other hunters can see it.'
-                    : "Scan the Piglet's NFC tag (or its QR) at the cache to unlock Claim found."}
+                {cache.isLpPiggy && (cache.payoutSats ?? 0) > 0
+                  ? 'Try the sats prize above, and share your find in the log below — both are optional.'
+                  : 'Scroll down to share your find with other hunters.'}
               </Text>
             </View>
 
@@ -639,25 +674,25 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               ))
             )}
 
-            {canLog && !composerOpen ? (
-              <TouchableOpacity
-                style={styles.composeCta}
-                onPress={() => setComposerOpen(true)}
-                testID="hunt-piggy-detail-compose-button"
-              >
-                <Sparkles size={16} color={colors.white} strokeWidth={2.5} />
-                <Text style={styles.composeCtaText}>Drop a log entry</Text>
-              </TouchableOpacity>
-            ) : null}
-
-            {composerOpen ? (
+            {/* Always-visible find-log composer at the bottom of the
+                screen — no toggle, no Cancel button. Sharing a find is
+                an independent action from claiming the LP prize. */}
+            {canLog ? (
               <View style={styles.composer}>
+                <Text style={styles.composerHeader}>Share your find</Text>
                 <TextInput
                   style={styles.composerInput}
                   placeholder="Found it! Tucked behind the bench, cleverly hidden."
                   placeholderTextColor={colors.textSupplementary}
                   value={composerText}
                   onChangeText={setComposerText}
+                  // Scroll the composer into view above the keyboard
+                  // when the user taps the input — KeyboardAvoidingView
+                  // lifts the layout but a long find-log list above
+                  // can still leave the input below the visible area.
+                  onFocus={() => {
+                    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 150);
+                  }}
                   multiline
                   testID="hunt-piggy-detail-compose-input"
                 />
@@ -695,13 +730,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 )}
                 <View style={styles.composerActions}>
                   <TouchableOpacity
-                    style={styles.composerCancel}
-                    onPress={() => setComposerOpen(false)}
-                  >
-                    <Text style={styles.composerCancelText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.composerPost, posting && styles.composerPostDim]}
+                    style={[styles.composerPost, styles.composerPostFull, posting && styles.composerPostDim]}
                     disabled={posting}
                     onPress={handlePostLog}
                     testID="hunt-piggy-detail-post-button"
@@ -773,7 +802,17 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         recipientName={zapTarget?.name ?? undefined}
         zapEventId={zapTarget?.logId}
       />
-    </View>
+
+      {/* Finder NFC reader. Opens when an unclaimed LP Piggy's "Scan
+          the Piglet" button is tapped; on a successful tag read the
+          handler navigates to HuntFoundScreen with the bearer LNURL
+          and the cache coord so recordClaim can store the piggyId. */}
+      <NfcReadSheet
+        visible={readSheetOpen}
+        onClose={() => setReadSheetOpen(false)}
+        expectedCoord={coord}
+      />
+    </KeyboardAvoidingView>
   );
 };
 
@@ -877,36 +916,22 @@ const LogRow: React.FC<{
       ) : null}
       <Text style={styles.logContent}>{log.content}</Text>
       <View style={styles.logFooter}>
-        <View style={styles.logBadgesRow}>
-          {log.amountSats ? (
-            // Self-reported by the finder — the found-log event isn't
-            // verifiable, so the copy says "reported", not "claimed".
-            <View style={styles.logBadge}>
-              <Zap size={12} color={colors.zapYellow} fill={colors.zapYellow} strokeWidth={2.5} />
-              <Text style={styles.logBadgeText}>
-                Reported {log.amountSats.toLocaleString()} sats
-              </Text>
-            </View>
-          ) : null}
-          {zapsReceivedSats > 0 ? (
-            // Verifiable: aggregated from kind-9735 zap receipts whose
-            // `#e` tag references this find-log. Different colour from
-            // the self-reported pill so the distinction reads at a
-            // glance — pink (brand) for "actually-on-chain-ish proof".
-            <View
-              style={styles.logBadgeZapped}
-              testID={`hunt-log-${log.id.slice(0, 8)}-zaps-received`}
-            >
-              <Zap size={12} color={colors.brandPink} fill={colors.brandPink} strokeWidth={2.5} />
-              <Text style={styles.logBadgeZappedText}>
-                {zapsReceivedSats.toLocaleString()} zapped
-              </Text>
-            </View>
-          ) : null}
-        </View>
-        {/* Outline zap pill under the note — opens the in-app SendSheet
-            scoped to this log via NIP-57 `e` tag so the resulting 9735
-            receipt feeds back into the "Zapped" pill above. Disabled
+        {log.amountSats ? (
+          // Self-reported by the finder — the found-log event isn't
+          // verifiable, so the copy says "reported", not "claimed".
+          <View style={styles.logBadge}>
+            <Zap size={12} color={colors.zapYellow} fill={colors.zapYellow} strokeWidth={2.5} />
+            <Text style={styles.logBadgeText}>
+              Reported {log.amountSats.toLocaleString()} sats
+            </Text>
+          </View>
+        ) : (
+          <View />
+        )}
+        {/* Compact icon-only zap action — Primal-style. Shows the
+            running total of verifiable zaps received next to the icon
+            so a quick glance tells finders both 'this is the zap
+            button' and 'this find has been zapped N sats'. Disabled
             when the finder shared no Lightning address. */}
         <TouchableOpacity
           style={[styles.logZapButton, !lud16 && styles.logZapButtonDisabled]}
@@ -916,10 +941,26 @@ const LogRow: React.FC<{
           }}
           accessibilityState={{ disabled: !lud16 }}
           testID={`hunt-log-${log.id.slice(0, 8)}-zap`}
-          accessibilityLabel={`Zap ${display}`}
+          accessibilityLabel={
+            zapsReceivedSats > 0
+              ? `Zap ${display} — ${zapsReceivedSats.toLocaleString()} sats zapped so far`
+              : `Zap ${display}`
+          }
         >
-          <Zap size={14} color={colors.brandPink} strokeWidth={2.5} />
-          <Text style={styles.logZapText}>Zap</Text>
+          <Zap
+            size={16}
+            color={colors.brandPink}
+            fill={zapsReceivedSats > 0 ? colors.brandPink : 'transparent'}
+            strokeWidth={2.5}
+          />
+          {zapsReceivedSats > 0 ? (
+            <Text
+              style={styles.logZapText}
+              testID={`hunt-log-${log.id.slice(0, 8)}-zaps-received`}
+            >
+              {zapsReceivedSats.toLocaleString()}
+            </Text>
+          ) : null}
         </TouchableOpacity>
       </View>
     </View>
@@ -1451,17 +1492,6 @@ const createStyles = (colors: Palette) =>
       letterSpacing: 0.5,
       marginTop: 12,
     },
-    composeCta: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-      backgroundColor: colors.brandPink,
-      paddingVertical: 14,
-      borderRadius: 100,
-      marginTop: 12,
-    },
-    composeCtaText: { color: colors.white, fontSize: 14, fontWeight: '700' },
     composer: {
       backgroundColor: colors.surface,
       borderRadius: 12,
@@ -1507,14 +1537,13 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.brandPinkLight,
     },
     composerPhotoButtonText: { color: colors.brandPink, fontSize: 13, fontWeight: '700' },
-    composerActions: { flexDirection: 'row', gap: 8 },
-    composerCancel: {
-      paddingHorizontal: 16,
-      paddingVertical: 10,
-      alignItems: 'center',
-      justifyContent: 'center',
+    composerHeader: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.textSupplementary,
+      marginBottom: 6,
     },
-    composerCancelText: { color: colors.textSupplementary, fontSize: 14, fontWeight: '700' },
+    composerActions: { flexDirection: 'row', gap: 8 },
     composerPost: {
       flex: 1,
       flexDirection: 'row',
@@ -1525,6 +1554,9 @@ const createStyles = (colors: Palette) =>
       paddingVertical: 12,
       borderRadius: 100,
     },
+    // Always-on composer no longer has a Cancel button alongside Post,
+    // so Post takes the full width of the actions row.
+    composerPostFull: { flex: 1 },
     composerPostDim: { opacity: 0.6 },
     composerPostText: { color: colors.white, fontSize: 14, fontWeight: '700' },
     logRow: {

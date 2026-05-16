@@ -34,15 +34,21 @@ import {
   acceptsLightning,
   fetchPlacesInBbox,
   formatAddress,
-  getCachedPlaces,
   isBoosted,
   lightningAddressOf,
+  peekCachedAnchorSync,
+  peekCachedPlacesSync,
   prefetchDataset,
   refreshDataset,
 } from '../services/btcMapService';
 import { useNearbyRadius } from '../hooks/useNearbyRadius';
 import { type ParsedCache, type ParsedEvent } from '../services/nostrPlacesService';
-import { subscribeNearbyCaches, subscribeNearbyEvents } from '../services/nostrPlacesPublisher';
+import {
+  fetchCachesByAuthor,
+  subscribeNearbyCaches,
+  subscribeNearbyEvents,
+} from '../services/nostrPlacesPublisher';
+import { useNostr } from '../contexts/NostrContext';
 import {
   loadCachedCaches,
   loadCachedEvents,
@@ -105,13 +111,43 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // and Home-tab users pay nothing — the prefetch only fires when the
   // Explore tab is first visited.
   useEffect(() => {
-    prefetchDataset();
+    // Defer off the synchronous mount path. prefetchDataset reads a file
+    // and parses 100s of KB of merchant JSON on the JS thread; calling it
+    // inline meant cold-mount paid that cost before paint. setTimeout(0)
+    // yields once so the first render lands first; the prefetch then runs
+    // before any pos-gated fetch needs the cache, so the user still sees
+    // the merchant rail seeded from memory.
+    const handle = setTimeout(() => {
+      const __t0 = performance.now();
+      prefetchDataset();
+      console.log(
+        `[PerfBlock] ExploreHome prefetchDataset kicked: +${Math.round(performance.now() - __t0)}ms`,
+      );
+    }, 0);
+    return () => clearTimeout(handle);
   }, []);
 
   // ----- location ---------------------------------------------------------
 
+  // Seed `pos` from the anchor saved alongside the merchant cache on
+  // the previous successful fetch. Two wins on cold start:
+  //   (1) `sortedMerchants` can run before GPS resolves (the haversine
+  //       sort + maxDistance filter both need a `pos`), so the Places
+  //       rail paints on first render instead of after a multi-hundred
+  //       -ms GPS round-trip.
+  //   (2) The Geo-caches + Events rails get the same head-start since
+  //       they're also gated on `pos`.
+  // The real GPS fix below overwrites this once `getLastKnownPositionAsync`
+  // / `getCurrentPositionAsync` lands; accuracy is null because the
+  // anchor is a historical centroid, not a measurement (suppresses the
+  // user-position halo until a real fix arrives).
   const [pos, setPos] = useState<{ lat: number; lon: number; accuracy: number | null } | null>(
-    null,
+    () => {
+      const dev = getDevPinnedLocation();
+      if (dev) return { ...dev, accuracy: null };
+      const anchor = peekCachedAnchorSync();
+      return anchor ? { ...anchor, accuracy: null } : null;
+    },
   );
   const [locationDenied, setLocationDenied] = useState(false);
   useEffect(() => {
@@ -176,8 +212,18 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
   // ----- BTC Map merchants ------------------------------------------------
 
-  const [merchants, setMerchants] = useState<BtcMapPlace[]>([]);
-  const [merchantsLoading, setMerchantsLoading] = useState(true);
+  // Seed from the in-memory mirror — `btcMapService` kicks hydrate()
+  // at module import, so by first render the cached search result is
+  // typically ready and the rail paints instantly. The live fetch
+  // below replaces it once `pos` lands. Mirrors the same idiom used
+  // for `caches` + `events` immediately below.
+  const [merchants, setMerchants] = useState<BtcMapPlace[]>(() => peekCachedPlacesSync());
+  // If we already have cached merchants on first render there's no
+  // skeleton to show — flip merchantsLoading false so the rail paints
+  // them straight away instead of the loading shimmer.
+  const [merchantsLoading, setMerchantsLoading] = useState(
+    () => peekCachedPlacesSync().length === 0,
+  );
   // Bumped by pull-to-refresh to invalidate the merchant + relay-sub
   // effects without disturbing `pos`. Lets us re-pull BTC Map + tear
   // down/re-open NIP-GC + NIP-52 subscriptions in one gesture.
@@ -188,27 +234,25 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // disables pull-to-refresh) so a vertical pan on the inline map pans
   // Leaflet instead of refreshing the page.
   const [mapTouched, setMapTouched] = useState(false);
-  // Stale-while-revalidate: paint the last-known merchant set from disk
-  // straight away so the "Places near you" rail isn't empty on a cold
-  // start while we wait for a GPS fix + the network round-trip below.
-  // The functional update yields to fresh network data if it lands first.
-  useEffect(() => {
-    let cancelled = false;
-    getCachedPlaces().then((cached) => {
-      if (!cancelled && cached.length > 0) {
-        setMerchants((prev) => (prev.length === 0 ? cached : prev));
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Stale-while-revalidate: `peekCachedPlacesSync()` already seeded
+  // the initial `merchants` state above; the live fetch below replaces
+  // it once `pos` lands. Previously this effect re-paint-from-cache via
+  // the async `getCachedPlaces()` — that fired AFTER the first render,
+  // so the rail flashed empty for the AsyncStorage round-trip on cold
+  // launch even though the data was sitting on disk.
   useEffect(() => {
     if (!pos) return;
     let cancelled = false;
     (async () => {
-      setMerchantsLoading(true);
+      // Only show the loading shimmer when there's literally nothing to
+      // paint. On cold start we already seed `merchants` from the
+      // in-memory mirror; flipping to loading anyway means the user
+      // stares at a shimmer for up to FETCH_TIMEOUT_MS even though the
+      // rail could be showing the previous result. SWR painting beats
+      // a perfect refresh every time on a slow network (#566).
+      if (merchants.length === 0) setMerchantsLoading(true);
       try {
+        const __t0 = performance.now();
         // ~50 km half-side around the user. Rural users (Longstanton,
         // Highlands, mid-Wales) sit in 0-merchant 5 km tiles; widening
         // to ~50 km surfaces the closest drive-away merchants on the
@@ -222,6 +266,10 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           maxLon: pos.lon + 2,
           maxLat: pos.lat + 2,
         });
+        const __ms = Math.round(performance.now() - __t0);
+        if (__ms > 200) {
+          console.log(`[PerfBlock] ExploreHome fetchPlacesInBbox: ${__ms}ms places=${places.length}`);
+        }
         if (!cancelled) setMerchants(places);
       } catch {
         // BTC Map outage shouldn't break the whole hub — empty rail.
@@ -236,8 +284,12 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    setCaches(new Map());
-    setEvents(new Map());
+    // Do NOT wipe the caches/events Maps — replaceable-event semantics
+    // mean re-arrivals dedupe via createdAt, so an additive refresh is
+    // strictly safer. Pre-fix the wipe killed the user's own listings
+    // (added by the one-shot by-author fetch) every time they pulled
+    // to refresh, because the nearby `#g` sub doesn't re-echo caches
+    // outside the current geohash prefix on resubscribe.
     setUntrustedCacheCount(0);
     setUntrustedEventCount(0);
     try {
@@ -247,6 +299,10 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     } catch {
       // Refresh is best-effort; keep the existing rails on failure.
     }
+    // Bumping refreshKey also re-runs the by-author fetch effect (see
+    // its dep array below) so a freshly-edited / freshly-published
+    // Piglet by the user surfaces even when it sits outside the nearby
+    // geohash prefix.
     setRefreshKey((n) => n + 1);
     // Two-second floor on the spinner — relay subs trickle in
     // continuously, so there's no clean "done" signal. Long enough to
@@ -282,8 +338,15 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // render instantly on cold start while the live relay subs backfill.
   useEffect(() => {
     let cancelled = false;
+    const __t0 = performance.now();
     Promise.all([loadCachedCaches(), loadCachedEvents()]).then(([cs, es]) => {
       if (cancelled) return;
+      const __ms = Math.round(performance.now() - __t0);
+      if (__ms > 200) {
+        console.log(
+          `[PerfBlock] ExploreHome loadCachedCaches+Events: ${__ms}ms caches=${cs.length} events=${es.length}`,
+        );
+      }
       if (cs.length > 0) {
         setCaches((prev) => {
           if (prev.size > 0) return prev; // live sub already filled in
@@ -306,6 +369,57 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     };
   }, []);
 
+  // Surface the signed-in user's own published Piggies in the rail
+  // even when no nearby `#g` subscription has echoed them back. The
+  // nearby sub filters by geohash prefix, which excludes the user's
+  // own listing if they hid it outside their current viewport OR if
+  // the sub was paused (#557) at the moment the relay echoed back.
+  // One-shot per pubkey via `byAuthorFetchedForRef` so re-renders
+  // don't refire.
+  const { pubkey: signedInPubkey, relays: userRelays } = useNostr();
+  // Track the (pubkey, refreshKey) tuple that last triggered the fetch
+  // so we re-run on pull-to-refresh AND on pubkey change, but never on
+  // unrelated re-renders.
+  const byAuthorFetchedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!signedInPubkey) return;
+    const fetchKey = `${signedInPubkey}:${refreshKey}`;
+    if (byAuthorFetchedForRef.current === fetchKey) return;
+    byAuthorFetchedForRef.current = fetchKey;
+    let cancelled = false;
+    const readRelays = userRelays.filter((r) => r.read).map((r) => r.url);
+    fetchCachesByAuthor(signedInPubkey, readRelays.length > 0 ? readRelays : undefined)
+      .then((mine) => {
+        if (cancelled) return;
+        console.log(
+          `[PerfBlock] ExploreHome by-author merge: fetched=${mine.length} ` +
+            mine
+              .map((c) => `${c.name ?? c.d}@${c.geohash?.slice(0, 5) ?? '??'}`)
+              .join(', '),
+        );
+        if (mine.length === 0) return;
+        setCaches((prev) => {
+          const next = new Map(prev);
+          let added = 0;
+          for (const c of mine) {
+            const existing = next.get(c.coord);
+            if (!existing || c.createdAt > existing.createdAt) {
+              next.set(c.coord, c);
+              added++;
+            }
+          }
+          console.log(`[PerfBlock] ExploreHome by-author merge: ${added} new/updated in caches Map`);
+          return next;
+        });
+      })
+      .catch((e) => {
+        console.warn(`[PerfBlock] ExploreHome by-author fetch threw: ${(e as Error).message}`);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [signedInPubkey, userRelays, refreshKey]);
+
   // Write-through to AsyncStorage whenever the in-memory state grows
   // so the next cold start has fresh content to hydrate from. Debounced
   // via a slow useEffect — we don't need to persist on every event.
@@ -325,57 +439,89 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const [untrustedCacheCount, setUntrustedCacheCount] = useState(0);
   const [untrustedEventCount, setUntrustedEventCount] = useState(0);
   const subsCloserRef = useRef<(() => void)[]>([]);
-  useEffect(() => {
-    if (!pos) return;
-    const myGh = encodeGeohash(pos.lat, pos.lon, 7);
-    // Caches sit at precision 5 (~5 km) — geocaching is inherently
-    // hyper-local. Events broaden to precision 3 (~150 km) so a rural
-    // user catches the nearest city's Bitcoin meetup; most NIP-52
-    // publishers emit g tags at every precision 3..9.
-    const cachePrefixes = geohashPrefixes(myGh, 5).filter((p) => p.length === 5);
-    const eventPrefixes = geohashPrefixes(myGh, 3).filter((p) => p.length === 3);
+  // NIP-GC + NIP-52 subscriptions are wrapped in useFocusEffect so they
+  // pause on tab blur. Previously the subs stayed open for the rest of
+  // the session once the user visited Explore even once — relay events
+  // kept landing on the JS thread (a Map clone per delivery is small
+  // but not free) while the user was on Home/Messages/Friends, eating
+  // into bridge dispatches for payment-settlement polls + QR-scan
+  // callbacks (#554). Reconnect on re-focus is ~100 ms; foreground
+  // JS-thread responsiveness is the better trade.
+  useFocusEffect(
+    useCallback(() => {
+      // refreshKey is a dep but not referenced in the body — it bumps
+      // on pull-to-refresh and we want that to tear down + re-run the
+      // subscriptions. The explicit `void` keeps exhaustive-deps happy.
+      void refreshKey;
+      if (!pos) return;
+      const myGh = encodeGeohash(pos.lat, pos.lon, 7);
+      // Caches sit at precision 5 (~5 km) — geocaching is inherently
+      // hyper-local. Events broaden to precision 3 (~150 km) so a rural
+      // user catches the nearest city's Bitcoin meetup; most NIP-52
+      // publishers emit g tags at every precision 3..9.
+      const cachePrefixes = geohashPrefixes(myGh, 5).filter((p) => p.length === 5);
+      const eventPrefixes = geohashPrefixes(myGh, 3).filter((p) => p.length === 3);
 
-    subsCloserRef.current.push(
-      subscribeNearbyCaches(cachePrefixes, (c) => {
-        // WoT filter: silently drop caches from pubkeys outside the
-        // trust graph (an unverified cache could be a phishing LNURL
-        // or, worse, a physical lure). Surfaced as a count instead so
-        // users know they exist without being lured into inspecting them.
-        if (!isTrustedRef.current(c.hiderPubkey)) {
-          setUntrustedCacheCount((n) => n + 1);
-          return;
-        }
-        setCaches((prev) => {
-          const existing = prev.get(c.coord);
-          if (existing && existing.createdAt >= c.createdAt) return prev;
-          const next = new Map(prev);
-          next.set(c.coord, c);
-          return next;
-        });
-      }),
-    );
-    subsCloserRef.current.push(
-      subscribeNearbyEvents(eventPrefixes, (e) => {
-        // Skip events that already started > 1h ago.
-        if (e.startsAt && e.startsAt < Math.floor(Date.now() / 1000) - 60 * 60) return;
-        if (!isTrustedRef.current(e.organiserPubkey)) {
-          setUntrustedEventCount((n) => n + 1);
-          return;
-        }
-        setEvents((prev) => {
-          const existing = prev.get(e.coord);
-          if (existing && existing.startsAt === e.startsAt) return prev;
-          const next = new Map(prev);
-          next.set(e.coord, e);
-          return next;
-        });
-      }),
-    );
-    return () => {
-      subsCloserRef.current.forEach((c) => c());
-      subsCloserRef.current = [];
-    };
-  }, [pos, refreshKey]);
+      subsCloserRef.current.push(
+        subscribeNearbyCaches(cachePrefixes, (c) => {
+          // WoT filter: silently drop caches from pubkeys outside the
+          // trust graph (an unverified cache could be a phishing LNURL
+          // or, worse, a physical lure). Surfaced as a count instead so
+          // users know they exist without being lured into inspecting them.
+          if (!isTrustedRef.current(c.hiderPubkey)) {
+            setUntrustedCacheCount((n) => n + 1);
+            return;
+          }
+          setCaches((prev) => {
+            const existing = prev.get(c.coord);
+            if (existing && existing.createdAt >= c.createdAt) return prev;
+            // The Map clone is O(N); cache it for the SLOW-path log so
+            // an unusually large mirror surfaces in logcat. Pre-fix the
+            // reducer ran silently for every relay event, even when
+            // doing a 1000-entry clone per push during a backfill burst.
+            const __t0 = performance.now();
+            const next = new Map(prev);
+            next.set(c.coord, c);
+            const __dt = performance.now() - __t0;
+            if (__dt > 30) {
+              console.log(
+                `[PerfBlock] Explore setCaches clone: ${Math.round(__dt)}ms size=${prev.size}→${next.size}`,
+              );
+            }
+            return next;
+          });
+        }),
+      );
+      subsCloserRef.current.push(
+        subscribeNearbyEvents(eventPrefixes, (e) => {
+          // Skip events that already started > 1h ago.
+          if (e.startsAt && e.startsAt < Math.floor(Date.now() / 1000) - 60 * 60) return;
+          if (!isTrustedRef.current(e.organiserPubkey)) {
+            setUntrustedEventCount((n) => n + 1);
+            return;
+          }
+          setEvents((prev) => {
+            const existing = prev.get(e.coord);
+            if (existing && existing.startsAt === e.startsAt) return prev;
+            const __t0 = performance.now();
+            const next = new Map(prev);
+            next.set(e.coord, e);
+            const __dt = performance.now() - __t0;
+            if (__dt > 30) {
+              console.log(
+                `[PerfBlock] Explore setEvents clone: ${Math.round(__dt)}ms size=${prev.size}→${next.size}`,
+              );
+            }
+            return next;
+          });
+        }),
+      );
+      return () => {
+        subsCloserRef.current.forEach((c) => c());
+        subsCloserRef.current = [];
+      };
+    }, [pos, refreshKey]),
+  );
 
   // ----- lessons progress (local) -----------------------------------------
 
@@ -421,20 +567,51 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   }, [merchants, pos, maxDistanceMetres]);
 
   const sortedCaches = useMemo(() => {
+    const lowerPubkey = signedInPubkey?.toLowerCase() ?? null;
     let items = [...caches.values()].map((cache) => {
       const center = cache.geohash ? decodeGeohash(cache.geohash) : null;
       const distance =
         pos && center
           ? haversineMetres({ lat: pos.lat, lon: pos.lon }, { lat: center.lat, lon: center.lng })
           : Number.POSITIVE_INFINITY;
-      return { cache, distance };
+      const isOwn =
+        lowerPubkey !== null && cache.hiderPubkey.toLowerCase() === lowerPubkey;
+      return { cache, distance, isOwn };
     });
+    // Trace own-listing trajectory so a missing-own-cache regression
+    // can be diagnosed from logcat alone (#73 follow-up).
+    const ownItems = items.filter((c) => c.isOwn);
+    if (ownItems.length > 0) {
+      console.log(
+        `[PerfBlock] sortedCaches own=${ownItems.length} maxDistance=${maxDistanceMetres ?? 'null'}m posSet=${pos !== null} ` +
+          ownItems
+            .map(
+              (c) =>
+                `${c.cache.name ?? c.cache.d}@gh=${c.cache.geohash ?? 'null'} dist=${Number.isFinite(c.distance) ? Math.round(c.distance) + 'm' : 'inf'}`,
+            )
+            .join(' | '),
+      );
+    } else if (caches.size > 0 && signedInPubkey) {
+      console.log(
+        `[PerfBlock] sortedCaches own=0 (caches.size=${caches.size}, signedInPubkey=${signedInPubkey.slice(0, 8)}…) — by-author merge may not have landed yet`,
+      );
+    }
     if (maxDistanceMetres !== null) {
       items = items.filter((c) => c.distance <= maxDistanceMetres);
     }
-    items.sort((a, b) => a.distance - b.distance);
-    return items.slice(0, 12);
-  }, [caches, pos, maxDistanceMetres]);
+    // Own listings still sort to the front WITHIN the radius — the user
+    // wants their own work visible first when it's nearby, but a cache
+    // they hid 100 km away shouldn't crowd the "nearby" rail.
+    items.sort((a, b) => {
+      if (a.isOwn !== b.isOwn) return a.isOwn ? -1 : 1;
+      return a.distance - b.distance;
+    });
+    // Cap at 50 — the hub rail is a horizontal-scroll teaser and 50 is
+    // enough for any practical density without making the rail
+    // disproportionately heavy. The "See all → Geo-caches" page
+    // (HuntScreen) has no cap for the full list.
+    return items.slice(0, 50);
+  }, [caches, pos, maxDistanceMetres, signedInPubkey]);
 
   const sortedEvents = useMemo(() => {
     let items = [...events.values()].map((event) => {
@@ -449,7 +626,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
       items = items.filter((e) => e.distance <= maxDistanceMetres);
     }
     items.sort((a, b) => a.distance - b.distance);
-    return items.slice(0, 12);
+    return items.slice(0, 50);
   }, [events, pos, maxDistanceMetres]);
 
   return (
@@ -907,4 +1084,24 @@ const createLocalStyles = (colors: Palette) =>
     },
   });
 
-export default ExploreHomeScreen;
+// React.Profiler wrapper — see HomeScreen for the rationale (#560).
+// Explore is the screen Ben saw the 24-57 s freezes on; this surfaces
+// the render-commit cost so we can finally see whether the freezes are
+// React work (Profiler fires) or something else (silent).
+const ProfiledExploreHomeScreen: React.FC<Props> = (props) => (
+  <React.Profiler
+    id="ExploreHomeScreen"
+    onRender={(id, phase, actualDuration) => {
+      if (actualDuration > 100) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[PerfBlock] render:${id} ${phase}=${Math.round(actualDuration)}ms`,
+        );
+      }
+    }}
+  >
+    <ExploreHomeScreen {...props} />
+  </React.Profiler>
+);
+
+export default ProfiledExploreHomeScreen;

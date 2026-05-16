@@ -5,7 +5,7 @@
 // First-time selection of FoF kicks off the FoF compute (kind-3 batch
 // fetch + heuristics in `friendsOfFriendsService`) with a progress modal.
 
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef } from 'react';
 import {
   Modal,
   Pressable,
@@ -17,7 +17,6 @@ import {
 } from 'react-native';
 import { ShieldCheck, ShieldOff, ShieldQuestion, X } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useGroups } from '../contexts/GroupsContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import type { Palette } from '../styles/palettes';
 import type { WotTier } from '../services/wotSettingsService';
@@ -75,29 +74,22 @@ const TierRow: React.FC<TierRowProps> = ({ tier, title, subtitle, active, disabl
 const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { secretMode } = useGroups();
-  const { wotTier, setWotTier, l2Loading, l2Size } = useTrustGraph();
+  const { wotTier, setWotTier } = useTrustGraph();
 
-  // First-FoF compute progress state. The actual FoF compute is owned
-  // by TrustGraphContext (L2 set), but the sheet surfaces the progress
-  // so the user understands why the picker briefly shows "computing".
-  // We track a local mirror so we can drive a small banner without
-  // re-rendering siblings whenever l2Loading flips.
-  const [computeState] = useState<'idle' | 'computing' | 'ready' | 'error'>('idle');
-  // Reserved for the explicit "Compute now" affordance — wire-up lives
-  // in the host context to keep this component dependency-light.
+  // `lastTierRef` is retained for the future FoF re-enable so the
+  // "compute now" affordance can compare incoming vs persisted tier
+  // without re-reading state.
   const lastTierRef = useRef<WotTier>(wotTier);
 
   const handleSelect = (next: WotTier): void => {
-    if (!secretMode && (next === 'fof' || next === 'all')) return;
+    // Only `friends` is currently selectable — fof + all are disabled
+    // until #565 lands the foreground compute dialog. Defensive guard
+    // so any future regression on the TierRow disabled prop doesn't
+    // silently switch tier under us.
+    if (next !== 'friends') return;
     lastTierRef.current = next;
     setWotTier(next);
   };
-
-  // Compose the "computing" banner state. When the user picks FoF and
-  // the L2 cache is cold, TrustGraphContext kicks off a relay fetch;
-  // l2Loading flips true until it resolves. We surface that here.
-  const showComputingBanner = wotTier === 'fof' && l2Loading;
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -134,49 +126,29 @@ const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose }) => {
           <TierRow
             tier="fof"
             title="Friends of friends"
-            subtitle="People your follows follow (one hop). Some bot leakage possible."
-            active={wotTier === 'fof'}
-            disabled={!secretMode}
-            onSelect={() => handleSelect('fof')}
+            subtitle="Not yet implemented — coming soon. We're working out how to download and cache the extended graph without freezing the app."
+            active={false}
+            disabled
+            onSelect={() => {}}
           />
           <TierRow
             tier="all"
             title="All"
-            subtitle="Filter disabled — every publisher is shown."
-            active={wotTier === 'all'}
-            disabled={!secretMode}
-            onSelect={() => handleSelect('all')}
+            subtitle="Not yet implemented — coming soon. Will let you opt out of the trust filter entirely once the foreground compute flow lands."
+            active={false}
+            disabled
+            onSelect={() => {}}
           />
 
-          {!secretMode ? (
-            <Text style={styles.gateHint} testID="wot-sheet-gate-hint">
-              Wider trust tiers are unlocked under specific conditions — stick to Friends for the
-              safest feed.
-            </Text>
-          ) : null}
+          <Text style={styles.gateHint} testID="wot-sheet-gate-hint">
+            The wider tiers are temporarily disabled while we rework the trust-graph compute (#565).
+            Stick to Friends for now — it's the safest feed regardless.
+          </Text>
 
-          {showComputingBanner ? (
-            <View style={styles.computeBanner} testID="wot-sheet-computing">
-              <Text style={styles.computeBannerText}>
-                Computing your extended trust graph… fetching follow lists from relays. This is a
-                one-off; we'll cache the result for 24 h.
-              </Text>
-            </View>
-          ) : null}
-
-          {wotTier === 'fof' && !l2Loading && l2Size > 0 ? (
-            <Text style={styles.metaText} testID="wot-sheet-fof-meta">
-              {l2Size.toLocaleString()} pubkeys in your friends-of-friends set.
-            </Text>
-          ) : null}
-
-          {/* Reserved meta — high-fanout exclusion count surfaces here once
-              the FoF service is wired through TrustGraphContext. */}
-          {computeState === 'error' ? (
-            <Text style={styles.errorText}>
-              Couldn't reach enough relays to compute the FoF set. Try again later.
-            </Text>
-          ) : null}
+          {/* The computing banner + fof meta row + error row hang off L2 state
+              that's currently stubbed to empty / non-loading. They render as
+              no-ops while L2 is disabled and will come back when GH #565 lands
+              the foreground compute dialog. */}
         </ScrollView>
 
         <TouchableOpacity

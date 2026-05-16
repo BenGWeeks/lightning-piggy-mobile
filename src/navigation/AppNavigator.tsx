@@ -1,6 +1,10 @@
 import React, { useMemo } from 'react';
 import { StyleSheet, ActivityIndicator, View, Platform, useWindowDimensions } from 'react-native';
-import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
+import {
+  NavigationContainer,
+  StackActions,
+  createNavigationContainerRef,
+} from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createDrawerNavigator } from '@react-navigation/drawer';
@@ -46,7 +50,7 @@ import NearbyScreen from '../screens/account/NearbyScreen';
 import SecurityScreen from '../screens/account/SecurityScreen';
 import AboutScreen from '../screens/account/AboutScreen';
 import AccountDrawerContent from '../components/AccountDrawerContent';
-import { perfLog } from '../utils/perfLog';
+import { perfLog, perfTabTap, perfTabRendered } from '../utils/perfLog';
 
 let __appNavigatorFirstRenderLogged = false;
 
@@ -66,6 +70,22 @@ export const navigateToHuntFound = (lnurl: string): boolean => {
     params: {
       screen: 'Explore',
       params: { screen: 'HuntFound', params: { lnurl } },
+    },
+  });
+  return true;
+};
+
+// Navigate to a specific Piggy listing by coord (`kind:pubkey:d`).
+// Entry-points: the App.tsx Linking listener for
+// `lightningpiggy://hunt/<coord>` AND `nostr:naddr1...` deep links
+// emitted by the multi-record NFC tags (#73).
+export const navigateToHuntPiggyDetail = (coord: string): boolean => {
+  if (!navigationRef.isReady()) return false;
+  navigationRef.navigate('Main', {
+    screen: 'MainTabs',
+    params: {
+      screen: 'Explore',
+      params: { screen: 'HuntPiggyDetail', params: { coord } },
     },
   });
   return true;
@@ -137,6 +157,10 @@ function HomeTabs() {
             <Home size={size} color={color} strokeWidth={focused ? 2.5 : 2} />
           ),
         }}
+        listeners={{
+          tabPress: () => perfTabTap('Home'),
+          focus: () => perfTabRendered('Home'),
+        }}
       />
       <Tab.Screen
         name="Messages"
@@ -147,6 +171,10 @@ function HomeTabs() {
           tabBarIcon: ({ focused, color, size }) => (
             <MessageCircle size={size} color={color} strokeWidth={focused ? 2.5 : 2} />
           ),
+        }}
+        listeners={{
+          tabPress: () => perfTabTap('Messages'),
+          focus: () => perfTabRendered('Messages'),
         }}
       />
       <Tab.Screen
@@ -159,6 +187,32 @@ function HomeTabs() {
             <Compass size={size} color={color} strokeWidth={focused ? 2.5 : 2} />
           ),
         }}
+        listeners={({ navigation }) => ({
+          // Pop the Explore sub-stack back to its root every time the
+          // tab is tapped. Without this, an NFC-tap deep-link pushes
+          // HuntPiggyDetail onto the stack and the next Explore-tap
+          // resumes there instead of showing the Explore home rails.
+          //
+          // The earlier version used navigation.navigate('Explore',
+          // { screen: 'ExploreHome' }) which RN treats as a no-op when
+          // Explore is already focused. Dispatching StackActions.popToTop
+          // hits the inner Explore stack navigator directly, regardless
+          // of focus, and pops every screen above ExploreHome.
+          tabPress: (e) => {
+            perfTabTap('Explore');
+            const state = navigation.getState();
+            const tabRoute = state?.routes.find((r) => r.name === 'Explore');
+            const subState = tabRoute?.state;
+            if (subState && typeof subState.index === 'number' && subState.index > 0) {
+              e.preventDefault();
+              navigation.dispatch({
+                ...StackActions.popToTop(),
+                target: subState.key,
+              });
+            }
+          },
+          focus: () => perfTabRendered('Explore'),
+        })}
       />
       <Tab.Screen
         name="Friends"
@@ -169,6 +223,10 @@ function HomeTabs() {
           tabBarIcon: ({ focused, color, size }) => (
             <Users size={size} color={color} strokeWidth={focused ? 2.5 : 2} />
           ),
+        }}
+        listeners={{
+          tabPress: () => perfTabTap('Friends'),
+          focus: () => perfTabRendered('Friends'),
         }}
       />
     </Tab.Navigator>

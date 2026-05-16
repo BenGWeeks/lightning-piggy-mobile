@@ -1,11 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
-import { CheckCircle2, ChevronLeft, PiggyBank, Sparkles } from 'lucide-react-native';
+import { ChevronLeft, Gift, PartyPopper, PiggyBank } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useWallet } from '../contexts/WalletContext';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation, ExploreStackParamList } from '../navigation/types';
-import { Alert } from '../components/BrandedAlert';
 import {
   LnurlWithdrawError,
   LnurlWithdrawParams,
@@ -14,6 +13,29 @@ import {
 } from '../services/lnurlWithdrawService';
 import { recordClaim } from '../services/claimHistoryService';
 import type { RouteProp } from '@react-navigation/native';
+
+// LNbits-style 'Wait 927 seconds.' / 'wait_time: 240' → 'about 15 minutes'.
+// Neutral about who triggered the cooldown — anyone could have just
+// scanned. Falls back to a generic message when the LNURLw doesn't
+// include a time hint.
+const friendlyCooldownReason = (raw: string): string => {
+  const m = raw.match(/(\d{1,5})\s*(?:s|sec|seconds?)?/i);
+  const total = m ? Number(m[1]) : 0;
+  if (!Number.isFinite(total) || total <= 0) {
+    return 'Cooldown is still running, or the sats budget is used up. Try again later.';
+  }
+  let pretty: string;
+  if (total < 30) pretty = 'a few seconds';
+  else if (total < 90) pretty = 'about a minute';
+  else if (total < 3600) {
+    const minutes = Math.round(total / 60);
+    pretty = `about ${minutes} minute${minutes === 1 ? '' : 's'}`;
+  } else {
+    const hours = Math.round(total / 3600);
+    pretty = `about ${hours} hour${hours === 1 ? '' : 's'}`;
+  }
+  return `Another finder claimed recently — try again in ${pretty}.`;
+};
 
 interface Props {
   navigation: ExploreNavigation;
@@ -51,12 +73,16 @@ type Stage =
 const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { lnurl } = route.params;
+  const { lnurl, coord } = route.params;
   const { activeWalletId, makeInvoice } = useWallet();
 
   const [stage, setStage] = useState<Stage>({ kind: 'resolving' });
 
-  // Resolve metadata on mount.
+  // Auto-claim on mount — the user already opted in by scanning the
+  // NFC tag (or following the deep-link), so a 'Claim N sats' tap-to-
+  // confirm step would just add friction. Pre-fix this screen showed
+  // the 'ready' state with a Claim button; now it goes
+  // resolving → (claimed | sleeping | error) directly.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -66,11 +92,39 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
         if (params.maxWithdrawable <= 0) {
           setStage({
             kind: 'sleeping',
-            reason:
-              'This Piggy is sleeping — its cooldown is still running, or its sats budget is used up. Try again later.',
+            reason: friendlyCooldownReason(''),
           });
-        } else {
-          setStage({ kind: 'ready', params });
+          return;
+        }
+        if (!activeWalletId) {
+          setStage({
+            kind: 'error',
+            reason: 'No wallet connected — add a Lightning wallet (NWC) first, then try again.',
+          });
+          return;
+        }
+        setStage({ kind: 'claiming', params });
+        try {
+          const result = await claimLnurlWithdraw(params, async (sats, memo) =>
+            makeInvoice(sats, memo),
+          );
+          if (cancelled) return;
+          // Pass `piggyId` so HuntPiggyDetailScreen can match the claim
+          // by coord — it never sees the bearer LNURL string.
+          await recordClaim({ lnurl, sats: result.sats, piggyId: coord });
+          setStage({ kind: 'claimed', params, sats: result.sats });
+        } catch (e) {
+          if (cancelled) return;
+          const reason =
+            e instanceof LnurlWithdrawError ? e.message : ((e as Error).message ?? 'Unknown error');
+          const sleepy = /wait[_ ]?time|cooldown|budget|sleeping|exhausted|already used/i.test(
+            reason,
+          );
+          setStage(
+            sleepy
+              ? { kind: 'sleeping', reason: friendlyCooldownReason(reason) }
+              : { kind: 'error', reason },
+          );
         }
       } catch (e) {
         if (cancelled) return;
@@ -84,35 +138,8 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
     return () => {
       cancelled = true;
     };
-  }, [lnurl]);
-
-  const handleClaim = useCallback(async () => {
-    if (stage.kind !== 'ready') return;
-    if (!activeWalletId) {
-      Alert.alert(
-        'No wallet connected',
-        'Connect a Lightning wallet (NWC) before claiming the Piggy.',
-        [{ text: 'OK' }],
-      );
-      return;
-    }
-    setStage({ kind: 'claiming', params: stage.params });
-    try {
-      const result = await claimLnurlWithdraw(stage.params, async (sats, memo) =>
-        makeInvoice(sats, memo),
-      );
-      await recordClaim({ lnurl, sats: result.sats });
-      setStage({ kind: 'claimed', params: stage.params, sats: result.sats });
-    } catch (e) {
-      const reason =
-        e instanceof LnurlWithdrawError ? e.message : ((e as Error).message ?? 'Unknown error');
-      // The issuer-said-no path uses the friendly "sleeping" copy when
-      // the reason mentions wait_time / cooldown / budget; everything
-      // else falls into the generic error branch.
-      const sleepy = /wait[_ ]?time|cooldown|budget|sleeping|exhausted|already used/i.test(reason);
-      setStage(sleepy ? { kind: 'sleeping', reason } : { kind: 'error', reason });
-    }
-  }, [stage, activeWalletId, makeInvoice, lnurl]);
+    // intentional: handleClaim merged into mount effect, no separate dep tracking
+  }, [lnurl, coord, activeWalletId, makeInvoice]);
 
   // ----- render -----------------------------------------------------------
 
@@ -132,14 +159,7 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
       </View>
 
       <View style={styles.body}>
-        {stage.kind === 'resolving' && (
-          <>
-            <ActivityIndicator size="large" color={colors.brandPink} />
-            <Text style={styles.subtitle}>Looking up this Piggy…</Text>
-          </>
-        )}
-
-        {(stage.kind === 'ready' || stage.kind === 'claiming') && (
+        {(stage.kind === 'resolving' || stage.kind === 'claiming') && (
           <>
             <View style={styles.bigPiggy}>
               <PiggyBank size={88} color={colors.brandPink} strokeWidth={2} />
@@ -147,44 +167,46 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
             <Text style={styles.title} testID="piggy-found-celebration-screen">
               You found a Piggy!
             </Text>
-            {stage.params.defaultDescription ? (
+            {stage.kind === 'claiming' && stage.params.defaultDescription ? (
               <Text style={styles.memo}>&ldquo;{stage.params.defaultDescription}&rdquo;</Text>
             ) : null}
-            <TouchableOpacity
-              style={[styles.primaryButton, stage.kind === 'claiming' && styles.primaryButtonDim]}
-              disabled={stage.kind === 'claiming'}
-              onPress={handleClaim}
-              testID="piggy-claim-button"
-              accessibilityLabel={`Claim ${Math.floor(stage.params.maxWithdrawable / 1000)} sats`}
-            >
-              {stage.kind === 'claiming' ? (
-                <ActivityIndicator color={colors.white} />
-              ) : (
-                <>
-                  <Sparkles size={20} color={colors.white} strokeWidth={2.5} />
-                  <Text style={styles.primaryButtonText}>
-                    Claim {Math.floor(stage.params.maxWithdrawable / 1000).toLocaleString()} sats
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
+            <ActivityIndicator size="large" color={colors.brandPink} style={{ marginTop: 8 }} />
             <Text style={styles.fineprint}>
-              Sent to your active wallet. The celebration fires when the sats land.
+              {stage.kind === 'resolving' ? 'Looking up this Piggy…' : 'Claiming sats…'}
             </Text>
           </>
         )}
 
         {stage.kind === 'claimed' && (
           <>
-            <CheckCircle2 size={88} color={colors.green} strokeWidth={2} />
-            <Text style={styles.title}>Claim sent</Text>
+            <View style={[styles.bigPiggy, { backgroundColor: colors.greenLight }]}>
+              <PartyPopper size={88} color={colors.green} strokeWidth={2} />
+            </View>
+            <Text style={styles.title}>
+              {stage.sats.toLocaleString()} sats inbound!
+            </Text>
             <Text style={styles.memo}>
-              {stage.sats.toLocaleString()} sats incoming. Watch the Home tab for the confetti.
+              Sent to your active wallet — the celebration toast fires the moment they land.
             </Text>
-            <Text style={styles.fineprint}>
-              Photo + comment compose lands in the next commit on this branch — leave a log entry
-              for future hunters.
-            </Text>
+            <TouchableOpacity
+              style={styles.primaryButton}
+              onPress={() => {
+                // Bounce back to the cache detail with the composer pre-
+                // opened so the finder can immediately drop a log entry
+                // for future hunters. coord is required here — set by the
+                // NfcReadSheet caller; the legacy deep-link entry path
+                // omits it (rare) and we fall through to popToTop instead.
+                if (coord) {
+                  navigation.navigate('HuntPiggyDetail', { coord, openComposer: true });
+                } else {
+                  navigation.popToTop();
+                }
+              }}
+              testID="hunt-found-drop-log-button"
+            >
+              <Gift size={20} color={colors.white} strokeWidth={2.5} />
+              <Text style={styles.primaryButtonText}>Drop a find-log</Text>
+            </TouchableOpacity>
             <TouchableOpacity
               style={styles.secondaryButton}
               onPress={() => navigation.popToTop()}

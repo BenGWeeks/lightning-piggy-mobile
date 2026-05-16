@@ -71,6 +71,14 @@ A glossary of key terms used throughout this document.
 
 | **Jank**
 | A user-visible stutter or freeze caused by a frame missing its render budget (16.6 ms at 60 fps). Android's `OpenGLRenderer` emits a `Davey!` warning to logcat when a frame takes >700 ms — the kernel's "severe jank" alarm, named after Dave Burke (Android engineering lead at the time). Common causes in RN: heavy synchronous work on the JS thread blocking the bridge, image decoding on the UI thread, or React reconciliation cascades from rapid `setState` calls.
++
+The repo's perf suite (`scripts/perf-suite.sh`) parses `dumpsys gfxinfo` and surfaces these columns, each measuring a distinct flavour of jank:
++
+* **Modern jank %** — frames the user perceptibly saw drop (Android Q+ `Janky frames` rubric, accounts for the variable refresh-rate budget). Under 5 % is excellent, under 10 % acceptable, the metric to optimise against.
+* **Legacy jank %** — the older 16.6 ms-fixed counter (`Janky frames (legacy)`). Always larger than Modern because it flags any frame > 16.6 ms regardless of whether the user noticed. Useful as a coarse trend signal but not as a goal.
+* **99th frame ms** — the worst 1 % of frame durations over the sample window. Under 33 ms = no perceptible single-frame stutters; over 100 ms = visible hitches; over 700 ms is a Davey-grade freeze.
+* **4950 ms hits** — count of frames that took ~5 seconds (the gfxinfo upper bin). Each hit is a multi-second freeze rather than a stutter — the kind of lockup users describe as "the app went away for a moment." Zero is the only acceptable count for production.
+* **GPU 99th ms** — the worst 1 % of GPU-side frame durations. AVD emulators report a sticky 4950 ms floor here from cold Skia / RenderThread init that's not a real device-level signal; on hardware it tracks render-thread health.
 
 | **Key-path Spend**
 | Spending a Taproot output using a single Schnorr signature against the tweaked output key. No script is revealed on-chain, maximising privacy. For Boltz swaps this requires cooperative MuSig2 between user and Boltz.

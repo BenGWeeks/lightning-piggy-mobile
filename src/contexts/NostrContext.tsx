@@ -484,8 +484,15 @@ const DECRYPT_YIELD_EVERY = 15;
  * breathing room for gorhom-bottom-sheet's open animation to schedule
  * frames. Halving this doubles yield frequency, drops the per-burst
  * blocking from ~8 ms to ~4 ms, and lets bottom-sheet opens stay
- * smooth during inbox drain. */
-const NIP17_LOOP_YIELD_EVERY = 4;
+ * smooth during inbox drain.
+ *
+ * Lowered again 2026-05-16 from 4 → 2: tonight's instrumented Pixel
+ * logs (issue #560) showed refreshDmInbox running for 8.6 s wall-clock
+ * with 3 s heartbeat gaps stacking during the decrypt loop. Yielding
+ * every 2 wraps cuts each per-burst block back to ~2 ms; the
+ * setImmediate cost is amortised across the still-significant
+ * per-wrap decrypt work so the overhead is < 5%. */
+const NIP17_LOOP_YIELD_EVERY = 2;
 
 /**
  * Minimum gap between `refreshDmInbox` calls fired by
@@ -1525,14 +1532,31 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             }
 
             const t0 = Date.now();
+            // [PerfBlock] per-loader timing — `parallel refresh` shows
+            // total wall-clock but masks which of the three loaders is
+            // the bottleneck. These per-loader markers let us see
+            // (a) which finishes last (slowest relay path) and (b)
+            // which one's resolution kicks off the heavy setState
+            // chain that follows. #554.
+            const __tR = Date.now();
+            const __tP = Date.now();
+            const __tC = Date.now();
             Promise.all([
-              loadRelays(pk!).catch((e) => console.warn('[Nostr] relay refresh failed:', e)),
-              loadProfile(pk!, workingRelays).catch((e) =>
-                console.warn('[Nostr] profile refresh failed:', e),
-              ),
-              loadContacts(pk!, workingRelays).catch((e) =>
-                console.warn('[Nostr] contact refresh failed:', e),
-              ),
+              loadRelays(pk!)
+                .catch((e) => console.warn('[Nostr] relay refresh failed:', e))
+                .finally(() =>
+                  console.log(`[PerfBlock] loadRelays: ${Date.now() - __tR}ms`),
+                ),
+              loadProfile(pk!, workingRelays)
+                .catch((e) => console.warn('[Nostr] profile refresh failed:', e))
+                .finally(() =>
+                  console.log(`[PerfBlock] loadProfile: ${Date.now() - __tP}ms`),
+                ),
+              loadContacts(pk!, workingRelays)
+                .catch((e) => console.warn('[Nostr] contact refresh failed:', e))
+                .finally(() =>
+                  console.log(`[PerfBlock] loadContacts: ${Date.now() - __tC}ms`),
+                ),
             ]).then(() => {
               if (__DEV__) console.log(`[Nostr] parallel refresh complete in ${Date.now() - t0}ms`);
             });
@@ -2915,6 +2939,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setDmInbox([]);
         return;
       }
+      // [PerfBlock] timing bracket — surfaces the wall-clock cost of
+      // a full inbox refresh including NIP-17 decrypt loops. Look for
+      // matched `refreshDmInbox: …ms` pairs in logcat to isolate
+      // multi-second freezes that coincide with this call. #554.
+      const __perfBlockStart = performance.now();
       const signal = opts?.signal;
       // Dev-only "Following only=off" bypass — read once at the top so
       // the closure captures a stable value across the async work below.
@@ -3396,6 +3425,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         dmInboxLastRefreshAt.current = performance.now();
       } finally {
         dmInboxInFlight.current = null;
+        const __perfBlockMs = Math.round(performance.now() - __perfBlockStart);
+        // Only surface costly refreshes — sub-200 ms ones aren't
+        // contributors to the multi-second freezes we're hunting.
+        if (__perfBlockMs > 200) {
+          console.log(`[PerfBlock] refreshDmInbox: ${__perfBlockMs}ms`);
+        }
       }
     },
     [

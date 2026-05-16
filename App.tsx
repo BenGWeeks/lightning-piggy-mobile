@@ -13,7 +13,12 @@ import { NostrProvider } from './src/contexts/NostrContext';
 import { TrustGraphProvider } from './src/contexts/TrustGraphContext';
 import { GroupsProvider } from './src/contexts/GroupsContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
-import AppNavigator, { navigateToHuntFound } from './src/navigation/AppNavigator';
+import AppNavigator, {
+  navigateToHuntFound,
+  navigateToHuntPiggyDetail,
+} from './src/navigation/AppNavigator';
+import * as nip19 from 'nostr-tools/nip19';
+import { wasRecentlyRead } from './src/services/nfcService';
 import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
 import BootSplash from './src/components/BootSplash';
 import { BrandedAlertHost } from './src/components/BrandedAlert';
@@ -75,7 +80,79 @@ export default function App() {
     const route = (raw: string | null | undefined) => {
       if (cancelled || !raw) return;
       const trimmed = raw.trim();
-      if (!/^lightning:/i.test(trimmed)) return;
+      // Truncate noisy URIs so the log doesn't blow past logcat's
+      // line limit but keep enough head + tail to identify them.
+      const peek = trimmed.length > 96 ? trimmed.slice(0, 60) + '…' + trimmed.slice(-20) : trimmed;
+      console.log(`[Link] received: ${peek}`);
+
+      // `https://www.lightningpiggy.com/hunt/<coord>` (the canonical
+      // form written as record 1 of an NFC tag) OR the legacy custom
+      // `lightningpiggy://hunt/<coord>` scheme. Both decode the same
+      // way. Coord is `kind:pubkey:d` percent-encoded.
+      const lpHuntMatch = trimmed.match(
+        /^(?:https?:\/\/(?:www\.)?lightningpiggy\.com\/hunt\/(.+)|lightningpiggy:\/\/hunt\/(.+))$/i,
+      );
+      if (lpHuntMatch) {
+        const captured = lpHuntMatch[1] ?? lpHuntMatch[2];
+        let coord: string;
+        try {
+          coord = decodeURIComponent(captured);
+        } catch {
+          console.warn(`[Link] hunt-URL coord decode failed: ${captured}`);
+          return;
+        }
+        // Suppress the delayed system NDEF dispatch that fires ~600ms
+        // after our in-app NfcReadSheet closes when the tag stays near
+        // the antenna. Without this, the user gets yanked out of
+        // HuntFoundScreen mid-claim back to HuntPiggyDetail.
+        if (wasRecentlyRead(coord)) {
+          console.log(`[Link] skipped — coord just read by foreground NFC: ${coord}`);
+          return;
+        }
+        console.log(`[Link] → HuntPiggyDetail via ${trimmed.startsWith('https') ? 'https' : 'lightningpiggy://'} coord=${coord}`);
+        const tryNav = (attempt: number) => {
+          if (navigateToHuntPiggyDetail(coord)) return;
+          if (attempt >= 20 || cancelled) return;
+          setTimeout(() => tryNav(attempt + 1), 100);
+        };
+        tryNav(0);
+        return;
+      }
+
+      // `nostr:naddr1...` — record 2 of a Hunt tag, or a manual
+      // share from a generic Nostr client. We decode the naddr to
+      // recover { kind, pubkey, identifier } and assemble the same
+      // `kind:pubkey:d` coord HuntPiggyDetail consumes. Non-Hunt
+      // naddrs (other kinds) are ignored — no other screen handles
+      // them yet, so silently dropping is better than hijacking.
+      const nostrMatch = trimmed.match(/^nostr:(naddr1[0-9a-z]+)$/i);
+      if (nostrMatch) {
+        try {
+          const decoded = nip19.decode(nostrMatch[1]);
+          if (decoded.type === 'naddr' && decoded.data) {
+            const { kind, pubkey: hex, identifier } = decoded.data;
+            const coord = `${kind}:${hex}:${identifier}`;
+            console.log(`[Link] → HuntPiggyDetail via nostr:naddr coord=${coord}`);
+            const tryNav = (attempt: number) => {
+              if (navigateToHuntPiggyDetail(coord)) return;
+              if (attempt >= 20 || cancelled) return;
+              setTimeout(() => tryNav(attempt + 1), 100);
+            };
+            tryNav(0);
+            return;
+          }
+          console.warn(`[Link] nostr: URI decoded but not naddr — ignored (type=${decoded.type})`);
+        } catch (err) {
+          console.warn(`[Link] nostr: naddr decode failed: ${(err as Error)?.message ?? err}`);
+          // Fall through to the lightning: path if the naddr is
+          // garbage; otherwise the URI is ignored.
+        }
+      }
+
+      if (!/^lightning:/i.test(trimmed)) {
+        console.log(`[Link] ignored: no handler for scheme`);
+        return;
+      }
       const lnurl = trimmed.slice('lightning:'.length).trim();
       if (!lnurl) return;
       // Only route Hunt-eligible payloads (LNURL-withdraw forms) into

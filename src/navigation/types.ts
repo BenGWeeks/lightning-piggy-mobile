@@ -82,8 +82,16 @@ export type ExploreStackParamList = {
   // the local record + re-emits the kind 37516 listing under the same
   // `d` tag. Omit to create a new Piggy.
   HuntCreate: { piggyId?: string } | undefined;
-  HuntFound: { lnurl: string };
-  HuntPiggyDetail: { coord: string };
+  // `coord` (optional) is the kind 37516 cache coord the finder is
+  // claiming against. When supplied, recordClaim stores it as piggyId
+  // so HuntPiggyDetailScreen can unlock the find-log composer via
+  // lastClaimForPiggyId(coord). Omit only on the legacy deep-link
+  // entry path where we don't know the coord yet.
+  HuntFound: { lnurl: string; coord?: string };
+  // `openComposer` (optional) bounces the find-log compose UI open on
+  // mount — used by HuntFoundScreen after a successful claim so the
+  // finder doesn't have to remember to tap the compose button.
+  HuntPiggyDetail: { coord: string; openComposer?: boolean };
   MyPiglets: undefined;
   Events: undefined;
   EventDetail: { coord: string };
