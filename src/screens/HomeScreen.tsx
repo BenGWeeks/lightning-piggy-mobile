@@ -51,6 +51,7 @@ const HomeScreen: React.FC = () => {
     setActiveWallet,
     btcPrice,
     currency,
+    requestBalancePoll,
   } = useWallet();
   const { isLoggedIn, profile, refreshProfile } = useNostr();
   const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList, 'Home'>>();
@@ -85,6 +86,20 @@ const HomeScreen: React.FC = () => {
       const handle = InteractionManager.runAfterInteractions(() => refreshProfile());
       return () => handle.cancel();
     }, [isLoggedIn, refreshProfile]),
+  );
+
+  // Drive the 30 s NWC balance poll only while Home is focused — see
+  // #569. The poll lives in WalletContext but is now demand-gated: this
+  // screen signals "the balance is on screen, keep refreshing it" on
+  // focus, and the cleanup signals "I no longer need it" on blur. The
+  // initial in-effect `refreshOnce()` inside WalletContext means the
+  // balance refreshes immediately on return to Home rather than waiting
+  // up to 30 s for the next tick.
+  useFocusEffect(
+    useCallback(() => {
+      const release = requestBalancePoll();
+      return release;
+    }, [requestBalancePoll]),
   );
 
   // Handle sendToAddress from navigation params (e.g., from Friends tab zap)
