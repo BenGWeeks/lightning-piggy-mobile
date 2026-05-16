@@ -644,4 +644,38 @@ done &
 3. **Mock-location app** like _Lockito_ on the emulator. Heavier but works for journey simulation as well as static fixes. +
 *Symptom in our app:* `ExploreHomeScreen` mini-map shows "Locating you…" indefinitely, the "Places near you" rail shows "Grant location to discover Bitcoin-accepting shops near you" even after the OS-level permission was granted, and `MapScreen` opens but stays at the world view (no recentre). +
 *History note:* during the Explore-tab PR's screenshot pass we hit this on a Medium_Phone API 36.1 AVD with `emu geo fix` returning OK but no fix ever reaching the app. The Maestro screenshot tour (`tests/e2e/screenshots-explore-tour.yaml`) reproduces it. The seed coords `0.04039, 52.28897` (Ladywalk, Longstanton, Cambridge CB24 3ED) were chosen to match the live test event published earlier in the PR (kind 37516, geohash u1212vz).
+
+| Receive sheet slow to mark invoice as paid — fast `lookupInvoice` poll
+never fires settlement, only the slow balance-diff fallback eventually
+catches it (~30 s – 3 min lag, see #553)
+| The `expectPayment` poll calls `nwcService.lookupInvoice` every 1 s and
+checks the returned `paid` flag. Two non-obvious gotchas around the result
+shape: +
+**(1) WebLN vs NIP-47.** We use `NostrWebLNProvider` from `@getalby/sdk`,
+whose `lookupInvoice` translates the underlying NIP-47 `Nip47Transaction`
+response into the **WebLN** `LookupInvoiceResponse` shape. So *even though
+LNbits' nwcprovider correctly emits the spec-compliant
+`{type, invoice, settled_at, payment_hash, …}`*, what we receive is
+`{preimage, paymentRequest, paid}`. A predicate that only checks
+`result.settled_at` or `result.state` is dead code on this path and will
+never fire — every tick returns `false`, and settlement only catches via
+the slow balance-diff fallback. Fix: check `result.paid === true`. +
+**(2) Field rename.** WebLN names the bolt11 field `paymentRequest`, not
+`invoice`. Returning `result.invoice` to consumers gives them `undefined`
+forever. `nwcService.lookupInvoice` maps `paymentRequest → invoice` once
+inside the function, so callers can keep using `.invoice`. +
+**Where the layer-confusion bites:** the Alby SDK's *type declaration*
+for `NWCClient.lookupInvoice` returns `Nip47Transaction` (with
+`settled_at`/`state`), but we don't call that — we call
+`NostrWebLNProvider.lookupInvoice`, which returns the WebLN shape. The
+type cast on the result must reflect the WebLN shape, not the NIP-47
+spec. If you ever refactor to the raw `NWCClient`, flip both the field
+names AND the settlement predicate. +
+**Diagnostic recipe** if this regresses: temporarily add
+`console.warn('keys:', Object.keys(result), 'raw:', JSON.stringify(result));`
+inside `nwcService.lookupInvoice` after the call resolves, then issue a
+small test invoice and watch `adb logcat | grep '\[NWC lookupInvoice\]'`
+— the wire shape will tell you immediately whether you're on the WebLN
+or NIP-47 path. Cross-reference: PR #555 (`fix(nwc): cap lookupInvoice
+reply timeout`).
 |===
