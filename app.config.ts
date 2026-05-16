@@ -95,6 +95,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     './plugins/withAdjustResize',
     './plugins/withAmberQueries',
     './plugins/withLargeHeap',
+    // MapLibre Native — replaces the Leaflet-in-WebView map stack.
+    // The library auto-links on iOS via CocoaPods and on Android via
+    // Gradle; the Expo plugin (shipped with the package) wires the
+    // required native dependencies into the prebuild output. See GH
+    // #552 for migration rationale + memory `reference_map_stack_future_maplibre`.
+    '@maplibre/maplibre-react-native',
     './plugins/withNfc',
     'expo-secure-store',
     [
