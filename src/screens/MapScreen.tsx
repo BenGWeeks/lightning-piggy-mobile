@@ -56,10 +56,6 @@ import WebOfTrustChip from '../components/WebOfTrustChip';
 import WebOfTrustBottomSheet from '../components/WebOfTrustBottomSheet';
 import LegendSheet from '../components/LegendSheet';
 import { LibreMiniMap } from '../components/LibreMiniMap';
-// A/B flag — when set, the full-screen Map uses native MapLibre instead
-// of the WebView Leaflet path. Same flag wires LibreMiniMap on Explore
-// + Hunt. Keeps the WebView fallback alive while the swap is verified.
-const USE_LIBRE_MAP = process.env.EXPO_PUBLIC_USE_LIBRE_MAP === '1';
 import { ME_DOT_CSS, ME_DOT_JS } from '../utils/mapMeDot';
 import {
   LEAFLET_BASE_CSS,
@@ -294,20 +290,13 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         } else {
           setViewportInWebView(lat, lon, 10, accuracy);
         }
-        // Skip the initial fetch on the LibreMiniMap path. LibreMiniMap
-        // fires onRegionDidChange shortly after mount with its actual
-        // viewport (zoom 13 by default, much tighter than the 0.3° init
-        // bbox used here). Calling refreshPlaces here would surface the
-        // wider set (~22 merchants) for ~500 ms before the LibreMiniMap
-        // bounds debounce replaces it with the actual viewport's set
-        // (~2 merchants) — visible as the count briefly jumping then
-        // falling back. The bounds-driven fetch is authoritative.
-        // WebView path keeps the initial fetch because Leaflet's first
-        // `bounds` event coincides with `ready` rather than firing
-        // separately.
-        if (!USE_LIBRE_MAP) {
-          await refreshPlaces(initBbox);
-        }
+        // LibreMiniMap fires onRegionDidChange shortly after mount with
+        // its actual viewport — that bounds-driven fetch is now the
+        // single source of truth for the visible-merchants set. (The
+        // previous WebView path used to fetch the wider init bbox here
+        // because Leaflet's first `bounds` message coincided with
+        // `ready`; with native MapLibre the bounds event fires
+        // separately so we just let it lead.)
 
         // Subscribe to NIP-GC kind 37516 caches in the user's coarse
         // geohash neighbourhood. Renders Lightning Piggies (com.lightningpiggy.app
@@ -626,73 +615,20 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         colors={colors}
       />
       <View style={styles.webviewWrapper}>
-        {USE_LIBRE_MAP ? (
-          <LibreMiniMap
-            lat={pos?.lat ?? null}
-            lon={pos?.lon ?? null}
-            userAccuracyMetres={pos?.accuracy ?? null}
-            merchants={visibleMerchants}
-            caches={visibleCaches}
-            events={[]}
-            interactive
-            fill
-            onBoundsChange={onLibreBounds}
-            onSelectMerchant={(m) => setSelected(m)}
-            onSelectCache={(c) => setSelectedCache(c)}
-            onOpenLegend={() => setLegendVisible(true)}
-          />
-        ) : viewportHydrated ? (
-          <WebView
-            ref={webviewRef}
-            originWhitelist={['*']}
-            source={{ html: LEAFLET_HTML }}
-            onMessage={onMessage}
-            // Seed `window.LP_initialViewport` before Leaflet's first
-            // `setView` call so the map opens at the user's last centre
-            // instead of flashing London. Gated on `viewportHydrated`
-            // above — without that gate the WebView mounts before the
-            // AsyncStorage hydrate completes and falls through to the
-            // London default every time MapScreen remounts (e.g. after
-            // a navigation pop from PlaceDetail).
-            injectedJavaScriptBeforeContentLoaded={
-              lastViewport.current
-                ? `window.LP_initialViewport = ${JSON.stringify(lastViewport.current)}; true;`
-                : 'true;'
-            }
-            style={styles.webview}
-            javaScriptEnabled
-            domStorageEnabled
-            allowFileAccess={false}
-            mixedContentMode="never"
-            testID="map-webview"
-          />
-        ) : (
-          <View style={styles.webview} />
-        )}
-        {/* WebView path needs RN-overlay buttons because Leaflet's own
-            controls don't match the app's idiom. LibreMiniMap path owns
-            equivalent buttons internally (recenter + legend) so we hide
-            the manual ones to avoid duplicates. */}
-        {USE_LIBRE_MAP ? null : (
-          <>
-            <TouchableOpacity
-              style={styles.recenterButton}
-              onPress={recenterOnUser}
-              accessibilityLabel="Recenter on me"
-              testID="map-recenter-button"
-            >
-              <LocateFixed size={18} color="#2D88FF" strokeWidth={2.5} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.legendButton}
-              onPress={() => setLegendVisible(true)}
-              accessibilityLabel="Show map legend"
-              testID="map-legend-button"
-            >
-              <Info size={18} color={colors.brandPink} strokeWidth={2.5} />
-            </TouchableOpacity>
-          </>
-        )}
+        <LibreMiniMap
+          lat={pos?.lat ?? null}
+          lon={pos?.lon ?? null}
+          userAccuracyMetres={pos?.accuracy ?? null}
+          merchants={visibleMerchants}
+          caches={visibleCaches}
+          events={[]}
+          interactive
+          fill
+          onBoundsChange={onLibreBounds}
+          onSelectMerchant={(m) => setSelected(m)}
+          onSelectCache={(c) => setSelectedCache(c)}
+          onOpenLegend={() => setLegendVisible(true)}
+        />
       </View>
 
       <View style={styles.footer}>
@@ -770,16 +706,6 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         availableCategories={availableCategories}
       />
 
-      {/* Spinner only applies to the WebView path — LibreMiniMap paints
-          synchronously so there's no "waiting for the bridge ready"
-          window to cover. Without this guard the spinner sat forever
-          in the LibreMiniMap branch because the WebView 'ready'
-          message that flips webviewReady never fires. */}
-      {!USE_LIBRE_MAP && !webviewReady && (
-        <View style={styles.loadingOverlay} pointerEvents="none">
-          <ActivityIndicator size="large" color={colors.brandPink} />
-        </View>
-      )}
     </View>
   );
 };

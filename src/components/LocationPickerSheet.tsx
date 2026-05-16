@@ -15,10 +15,8 @@ import {
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
-import { WebView } from 'react-native-webview';
 import { MapPin, Check, X } from 'lucide-react-native';
 import { LibreMiniMap } from './LibreMiniMap';
-const USE_LIBRE_MAP = process.env.EXPO_PUBLIC_USE_LIBRE_MAP === '1';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { getDevPinnedLocation } from '../utils/devLocation';
@@ -197,10 +195,10 @@ const LocationPickerSheet: React.FC<Props> = ({
             <View style={styles.mapLoading}>
               <ActivityIndicator color={colors.brandPink} />
             </View>
-          ) : USE_LIBRE_MAP ? (
+          ) : (
             // LibreMiniMap with the crosshair overlay + onBoundsChange
-            // gives us the same pick-by-pan UX as the Leaflet draggable
-            // marker, but with the native renderer. We treat every
+            // gives a pick-by-pan UX: user pans the map so the centred
+            // crosshair lands on the chosen spot. We treat every
             // post-mount region change as user intent (the initial
             // mount fires once at the resolved-start coords; everything
             // after is the user panning to a new spot).
@@ -223,30 +221,6 @@ const LocationPickerSheet: React.FC<Props> = ({
                 setUserMoved(true);
               }}
             />
-          ) : (
-          <WebView
-            originWhitelist={['*']}
-            source={{ html: makeHtml(resolvedStart.lat, resolvedStart.lon, resolvedStart.zoom) }}
-            onMessage={(e) => {
-              try {
-                const msg = JSON.parse(e.nativeEvent.data);
-                if (
-                  msg.type === 'pin' &&
-                  typeof msg.lat === 'number' &&
-                  typeof msg.lon === 'number'
-                ) {
-                  setPicked({ lat: msg.lat, lon: msg.lon });
-                  // Only count drag-end / tap as user intent — the
-                  // map's initial emit on load is just reporting the
-                  // marker's default seat, not a choice.
-                  if (msg.userMoved) setUserMoved(true);
-                }
-              } catch {
-                // Ignore malformed bridge messages.
-              }
-            }}
-            style={styles.webview}
-          />
           )}
         </View>
 

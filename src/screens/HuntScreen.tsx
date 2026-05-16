@@ -25,9 +25,7 @@ import { useTrustGraph } from '../contexts/TrustGraphContext';
 import HuntFilterSheet, { countActiveFilters } from '../components/HuntFilterSheet';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
-import { ExploreMiniMap } from '../components/ExploreMiniMap';
 import { LibreMiniMap } from '../components/LibreMiniMap';
-const USE_LIBRE_MAP = process.env.EXPO_PUBLIC_USE_LIBRE_MAP === '1';
 import { type ParsedCache } from '../services/nostrPlacesService';
 import { fetchCachesByAuthor, subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
 import { useNostr } from '../contexts/NostrContext';
@@ -361,33 +359,19 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
           search; passing `filteredCaches` so the map matches the list
           visually (#19). */}
       <View style={styles.mapWrap}>
-        {USE_LIBRE_MAP ? (
-          <LibreMiniMap
-            lat={pos?.lat ?? null}
-            lon={pos?.lon ?? null}
-            merchants={[]}
-            caches={filteredCaches.map((c) => c.cache)}
-            events={[]}
-            onTapMap={() => navigation.navigate('Map')}
-            // One zoom level wider than ExploreMiniMap's default 13 so
-            // the Geo-caches hub map shows a bigger catchment without
-            // the user having to pinch-zoom out.
-            defaultZoom={12}
-          />
-        ) : (
-          <ExploreMiniMap
-            lat={pos?.lat ?? null}
-            lon={pos?.lon ?? null}
-            userAccuracyMetres={pos?.accuracy ?? null}
-            merchants={[]}
-            caches={filteredCaches.map((c) => c.cache)}
-            events={[]}
-            onTapMap={() => navigation.navigate('Map')}
-            onBoundsChange={setMapBbox}
-            defaultZoom={12}
-            interactive
-          />
-        )}
+        <LibreMiniMap
+          lat={pos?.lat ?? null}
+          lon={pos?.lon ?? null}
+          userAccuracyMetres={pos?.accuracy ?? null}
+          merchants={[]}
+          caches={filteredCaches.map((c) => c.cache)}
+          events={[]}
+          onTapMap={() => navigation.navigate('Map')}
+          // One zoom level wider than the default 13 so the Geo-caches
+          // hub map shows a bigger catchment without the user having to
+          // pinch-zoom out.
+          defaultZoom={12}
+        />
       </View>
 
       <FlatList
