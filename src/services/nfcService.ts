@@ -885,11 +885,20 @@ async function writeNdefBytesAndLockAndroid(
     }
   }
   console.log('[NFC] NDEF user-data write OK');
-  // Phase 2a — re-write path keeps existing PWD/PACK/AUTH0 in place. We
-  // already PWD_AUTH'd above, and the chip remains locked with the
-  // same secrets after the session ends. Caller surfaces the SAME PIN
-  // back into the wizard.
+  // Phase 2a — rewrite path. We already PWD_AUTH'd above, so the chip
+  // accepted the user-page writes. PWD/PACK don't need re-writing
+  // (they're still on the chip), but we DO re-apply ACCESS + AUTH0
+  // idempotently. Pre-#572-review-r2 this branch assumed "the chip is
+  // still locked because PWD_AUTH succeeded" — that's not strictly
+  // true: AUTH0 can be 0xFF (unlocked) while PWD/PACK remain stored,
+  // in which case PWD_AUTH still returns the matching PACK but the
+  // tag is wide open. Re-writing CFG_0/CFG_1 here makes the rewrite
+  // path idempotently locked regardless of the chip's prior AUTH0
+  // state. The same PIN keeps working because we never touched
+  // PWD/PACK.
   if (reusedExistingLock) {
+    await sendTransceive(buildSetAccessFrame(pages), 'WRITE ACCESS (rewrite)');
+    await sendTransceive(buildEnableAuthFrame(pages), 'WRITE AUTH0 (rewrite)');
     return {
       family: techFamily,
       locked: true,

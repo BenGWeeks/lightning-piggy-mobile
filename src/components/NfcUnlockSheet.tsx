@@ -21,10 +21,14 @@ import { hexToBytes } from '../utils/nfc/ntag21xLock';
 import type { Palette } from '../styles/palettes';
 
 // Bottom-sheet companion to NfcWriteSheet that drives the reversible-
-// lock unlock flow. The hider opens this from My Piglets → Piglet
-// detail → "Unlock this tag", taps the locked tag against the back of
-// the phone, and we send PWD_AUTH + flip AUTH0 back to 0xFF so anyone
-// can rewrite the chip again. Issue #567.
+// lock unlock flow. The hider opens this from the PIN card on step 6
+// of the Hide-a-Piglet wizard (either fresh post-write, or after
+// re-entering via Edit), taps the locked tag against the back of the
+// phone, and we send PWD_AUTH + flip AUTH0 back to 0xFF so anyone can
+// rewrite the chip again. An earlier design placed this affordance on
+// My Piglets → Piglet detail; that surface was explicitly dropped on
+// user feedback ("doesn't need to be on the actual Geocache page").
+// Issue #567.
 
 interface Props {
   visible: boolean;

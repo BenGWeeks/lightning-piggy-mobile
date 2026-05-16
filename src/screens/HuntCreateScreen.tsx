@@ -139,11 +139,13 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   const [lockTag, setLockTag] = useState<boolean>(true);
   // Captured from `writeHuntTagToTag`'s return value on a successful
   // locked-write. Surfaces as the post-write PIN row on step 6 + drives
-  // the Unlock-tag affordance. Cleared the moment the wizard re-opens
-  // the write sheet (a fresh write or rewrite invalidates the PIN).
-  // Persisted in parallel onto the HiddenPiggy via `handleNfcWritten`
-  // so editing the Piglet later re-hydrates the same value — but for
-  // the active session we also hold it in state for instant render.
+  // the Unlock-tag affordance. Persisted in parallel onto the
+  // HiddenPiggy via `handleNfcWritten` so editing the Piglet later
+  // re-hydrates the same value — and the in-memory copy is
+  // deliberately kept across reopens of the write sheet so a rewrite
+  // can PWD_AUTH with the existing PIN and the hider doesn't have to
+  // track a fresh one. Only `handleNfcWritten` and the unlock-success
+  // path update it.
   const [lastWrittenLock, setLastWrittenLock] = useState<{
     pwdHex: string;
     packHex: string;
@@ -1146,9 +1148,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                   <View style={styles.lockToggleMain}>
                     <Text style={styles.lockToggleTitle}>Lock the tag</Text>
                     <Text style={styles.lockToggleHelper}>
-                      {lockTag
-                        ? "Generates a random PIN and writes it to the tag so others can't overwrite the prize link. You'll find the PIN in My Piglets."
-                        : "Leaves the tag open — anyone with an NFC writer can replace the contents. Only turn this off if you'll re-lock manually."}
+                      {Platform.OS !== 'android'
+                        ? "iOS doesn't yet support the chip-level lock — your tag will go out unlocked regardless of this toggle. Lock from an Android phone or NFC Tools to protect it."
+                        : lockTag
+                          ? "Generates a random PIN and writes it to the tag so others can't overwrite the prize link. The PIN appears below after the write."
+                          : "Leaves the tag open — anyone with an NFC writer can replace the contents. Only turn this off if you'll re-lock manually."}
                     </Text>
                   </View>
                   <View style={[styles.lockToggleSwitch, lockTag && styles.lockToggleSwitchOn]}>

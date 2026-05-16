@@ -142,10 +142,35 @@ describe('PWD random-byte generator', () => {
     }
   });
 
-  it('does not repeat across calls (sanity check on RNG plumbing)', () => {
-    const a = generateLockSecrets();
-    const b = generateLockSecrets();
-    expect([...a.pwd, ...a.pack]).not.toEqual([...b.pwd, ...b.pack]);
+  it('consumes 6 bytes of crypto.getRandomValues, mapping 0..3 → pwd and 4..5 → pack', () => {
+    // Deterministic spy on the polyfilled crypto so the test asserts
+    // the byte-routing without depending on RNG output (Copilot #572
+    // review caught the previous probabilistic check). Restores after
+    // the call so other tests keep the real generator.
+    const original = crypto.getRandomValues.bind(crypto);
+    const spy = jest
+      .spyOn(crypto, 'getRandomValues')
+      .mockImplementation((arr: ArrayBufferView | null) => {
+        if (arr instanceof Uint8Array) {
+          // Fill with a recognisable, non-symmetric sequence so a
+          // wrong slice (e.g. pwd from bytes 2..5) would change the
+          // expected output below.
+          for (let i = 0; i < arr.length; i++) arr[i] = (i + 1) * 0x11;
+        }
+        return arr as unknown as ReturnType<typeof crypto.getRandomValues>;
+      });
+    try {
+      const { pwd, pack } = generateLockSecrets();
+      expect(pwd).toEqual([0x11, 0x22, 0x33, 0x44]);
+      expect(pack).toEqual([0x55, 0x66]);
+      expect(spy).toHaveBeenCalledWith(expect.any(Uint8Array));
+      const arg = spy.mock.calls[0][0] as Uint8Array;
+      expect(arg.length).toBe(6);
+    } finally {
+      spy.mockRestore();
+      // Sanity-restore in case mockRestore couldn't (older jest variants).
+      Object.defineProperty(crypto, 'getRandomValues', { value: original, configurable: true });
+    }
   });
 });
 
