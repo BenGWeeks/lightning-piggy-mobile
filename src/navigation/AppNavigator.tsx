@@ -50,7 +50,7 @@ import NearbyScreen from '../screens/account/NearbyScreen';
 import SecurityScreen from '../screens/account/SecurityScreen';
 import AboutScreen from '../screens/account/AboutScreen';
 import AccountDrawerContent from '../components/AccountDrawerContent';
-import { perfLog } from '../utils/perfLog';
+import { perfLog, perfTabTap, perfTabRendered } from '../utils/perfLog';
 
 let __appNavigatorFirstRenderLogged = false;
 
@@ -157,6 +157,10 @@ function HomeTabs() {
             <Home size={size} color={color} strokeWidth={focused ? 2.5 : 2} />
           ),
         }}
+        listeners={{
+          tabPress: () => perfTabTap('Home'),
+          focus: () => perfTabRendered('Home'),
+        }}
       />
       <Tab.Screen
         name="Messages"
@@ -167,6 +171,10 @@ function HomeTabs() {
           tabBarIcon: ({ focused, color, size }) => (
             <MessageCircle size={size} color={color} strokeWidth={focused ? 2.5 : 2} />
           ),
+        }}
+        listeners={{
+          tabPress: () => perfTabTap('Messages'),
+          focus: () => perfTabRendered('Messages'),
         }}
       />
       <Tab.Screen
@@ -191,6 +199,7 @@ function HomeTabs() {
           // hits the inner Explore stack navigator directly, regardless
           // of focus, and pops every screen above ExploreHome.
           tabPress: (e) => {
+            perfTabTap('Explore');
             const state = navigation.getState();
             const tabRoute = state?.routes.find((r) => r.name === 'Explore');
             const subState = tabRoute?.state;
@@ -202,6 +211,7 @@ function HomeTabs() {
               });
             }
           },
+          focus: () => perfTabRendered('Explore'),
         })}
       />
       <Tab.Screen
@@ -213,6 +223,10 @@ function HomeTabs() {
           tabBarIcon: ({ focused, color, size }) => (
             <Users size={size} color={color} strokeWidth={focused ? 2.5 : 2} />
           ),
+        }}
+        listeners={{
+          tabPress: () => perfTabTap('Friends'),
+          focus: () => perfTabRendered('Friends'),
         }}
       />
     </Tab.Navigator>
