@@ -17,11 +17,7 @@ import {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import { AlertCircle, Nfc, PartyPopper, PiggyBank } from 'lucide-react-native';
-import {
-  readHuntTagPayload,
-  cancelNfcOperation,
-  isNfcEnabled,
-} from '../services/nfcService';
+import { readHuntTagPayload, cancelNfcOperation, isNfcEnabled } from '../services/nfcService';
 import {
   LnurlWithdrawError,
   claimLnurlWithdraw,
@@ -48,13 +44,7 @@ interface Props {
 // navigation churn for a one-tap action. The full flow now stays
 // in-sheet so the user lands back on the cache detail (with the find-
 // log composer already in view) the moment they dismiss.
-type SheetStage =
-  | 'ready'
-  | 'reading'
-  | 'claiming'
-  | 'claimed'
-  | 'sleeping'
-  | 'error';
+type SheetStage = 'ready' | 'reading' | 'claiming' | 'claimed' | 'sleeping' | 'error';
 
 // LNbits' withdraw endpoint returns 'Wait N seconds.' verbatim; older
 // versions / other backends use 'wait_time: N' or 'cooldown'. Match
@@ -140,7 +130,9 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
         );
       }
       if (!activeWalletId) {
-        throw new Error('No wallet connected — add a Lightning wallet (NWC) first, then try again.');
+        throw new Error(
+          'No wallet connected — add a Lightning wallet (NWC) first, then try again.',
+        );
       }
       if (!mountedRef.current) return;
       setStage('claiming');

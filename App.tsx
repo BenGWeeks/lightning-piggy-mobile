@@ -109,7 +109,9 @@ export default function App() {
           console.log(`[Link] skipped — coord just read by foreground NFC: ${coord}`);
           return;
         }
-        console.log(`[Link] → HuntPiggyDetail via ${trimmed.startsWith('https') ? 'https' : 'lightningpiggy://'} coord=${coord}`);
+        console.log(
+          `[Link] → HuntPiggyDetail via ${trimmed.startsWith('https') ? 'https' : 'lightningpiggy://'} coord=${coord}`,
+        );
         const tryNav = (attempt: number) => {
           if (navigateToHuntPiggyDetail(coord)) return;
           if (attempt >= 20 || cancelled) return;

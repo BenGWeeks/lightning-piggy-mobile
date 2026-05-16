@@ -61,6 +61,12 @@ export const buildCacheListing = (
   tags.push(['T', String(piggy.terrain ?? 1)]);
   tags.push(['S', piggy.size ?? 'micro']);
   tags.push(['t', piggy.cacheType ?? 'traditional']);
+  // rot13 here is the geocaching-traditional hint obfuscation — NOT
+  // encryption. The hint is intentionally public on the relay; rot13
+  // exists so a finder doesn't accidentally read it while scrolling
+  // the cache page and has to opt into a one-tap decode to view it.
+  // Anyone with a relay sub can trivially reverse it. See parseCache
+  // below for the symmetric decode on the read side.
   if (piggy.hint) tags.push(['hint', rot13(piggy.hint)]);
   if (piggy.hintPhotoUrl) tags.push(['image', piggy.hintPhotoUrl]);
   // NIP-32 label marker — flags this cache as a Lightning Piggy
@@ -189,6 +195,10 @@ export const parseCache = (event: VerifiedEvent): ParsedCache | null => {
     terrain: Number.isFinite(T) ? T : null,
     size: tag('S') ?? null,
     cacheType: tag('t') ?? null,
+    // rot13 here is the symmetric decode for the geocaching-traditional
+    // hint obfuscation written on the build side — NOT decryption. The
+    // hint is intentionally public on the relay; rot13 just reverses
+    // the publish-side rot13 so callers see the plaintext.
     hint: tag('hint') ? rot13(tag('hint') as string) : null,
     imageUrl: tag('image') ?? null,
     isLpPiggy: hasLpLabel(event.tags),

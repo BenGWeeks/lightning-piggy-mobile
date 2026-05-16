@@ -35,18 +35,26 @@ async function queryRelay(url) {
   return new Promise((resolve) => {
     const ws = new WebSocket(url);
     const timer = setTimeout(() => {
-      try { ws.close(); } catch {}
+      try {
+        ws.close();
+      } catch {}
       resolve({ url, count: events.size, note: 'timeout' });
     }, 6000);
     ws.on('open', () => ws.send(JSON.stringify(['REQ', SUB_ID, FILTER])));
     ws.on('message', (raw) => {
       let msg;
-      try { msg = JSON.parse(raw.toString()); } catch { return; }
+      try {
+        msg = JSON.parse(raw.toString());
+      } catch {
+        return;
+      }
       if (msg[0] === 'EVENT' && msg[1] === SUB_ID) {
         events.set(msg[2].id, msg[2]);
       } else if (msg[0] === 'EOSE' && msg[1] === SUB_ID) {
         clearTimeout(timer);
-        try { ws.close(); } catch {}
+        try {
+          ws.close();
+        } catch {}
         resolve({ url, count: events.size, note: 'eose' });
       }
     });
@@ -95,7 +103,9 @@ const rows = Array.from(byAddr.values()).filter((evt) => {
   return g.toLowerCase().startsWith(prefix.toLowerCase());
 });
 
-console.log(`\n=== ${rows.length} distinct listings${prefix ? ` matching prefix "${prefix}"` : ''} ===\n`);
+console.log(
+  `\n=== ${rows.length} distinct listings${prefix ? ` matching prefix "${prefix}"` : ''} ===\n`,
+);
 
 // NIP-GC convention: caches publish MULTIPLE `g` tags at different
 // precisions (typically 3, 5, 7, 9 chars) so relays can index by

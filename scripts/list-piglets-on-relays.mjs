@@ -47,7 +47,9 @@ async function queryRelay(url) {
     const ws = new WebSocket(url);
     const seen = new Set();
     const timer = setTimeout(() => {
-      try { ws.close(); } catch {}
+      try {
+        ws.close();
+      } catch {}
       resolve({ url, count: seen.size, note: 'timeout' });
     }, 6000);
 
@@ -56,7 +58,11 @@ async function queryRelay(url) {
     });
     ws.on('message', (raw) => {
       let msg;
-      try { msg = JSON.parse(raw.toString()); } catch { return; }
+      try {
+        msg = JSON.parse(raw.toString());
+      } catch {
+        return;
+      }
       if (msg[0] === 'EVENT' && msg[1] === SUB_ID) {
         const evt = msg[2];
         seen.add(evt.id);
@@ -65,13 +71,17 @@ async function queryRelay(url) {
         else events.set(evt.id, { evt, relays: new Set([url]) });
       } else if (msg[0] === 'EOSE' && msg[1] === SUB_ID) {
         clearTimeout(timer);
-        try { ws.close(); } catch {}
+        try {
+          ws.close();
+        } catch {}
         resolve({ url, count: seen.size, note: 'eose' });
       } else if (msg[0] === 'NOTICE') {
         console.error(`NOTICE from ${url}: ${JSON.stringify(msg[1])}`);
       } else if (msg[0] === 'CLOSED' && msg[1] === SUB_ID) {
         clearTimeout(timer);
-        try { ws.close(); } catch {}
+        try {
+          ws.close();
+        } catch {}
         resolve({ url, count: seen.size, note: `closed: ${msg[2] ?? ''}` });
       }
     });
@@ -106,7 +116,11 @@ for (const { evt, relays } of rows) {
   console.log(`${when}  author=${evt.pubkey.slice(0, 16)}…  d=${d}`);
   console.log(`  name=${JSON.stringify(name)}  g=${g}`);
   console.log(`  id=${evt.id}`);
-  console.log(`  on=${Array.from(relays).map((r) => r.replace('wss://', '')).join(',')}`);
+  console.log(
+    `  on=${Array.from(relays)
+      .map((r) => r.replace('wss://', ''))
+      .join(',')}`,
+  );
   console.log(`  content=${JSON.stringify(evt.content).slice(0, 140)}`);
   console.log('');
   byAuthor.set(evt.pubkey, (byAuthor.get(evt.pubkey) ?? 0) + 1);

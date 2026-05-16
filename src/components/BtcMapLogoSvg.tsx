@@ -1,13 +1,5 @@
 import React from 'react';
-import Svg, {
-  Path,
-  Circle,
-  Defs,
-  ClipPath,
-  Mask,
-  G,
-  Rect,
-} from 'react-native-svg';
+import Svg, { Path, Circle, Defs, ClipPath, Mask, G, Rect } from 'react-native-svg';
 
 // Vector renderer for BTC Map's official brand mark — copied verbatim
 // from btcmap.org/images/logo.svg so the asset stays sharp at any size.
@@ -33,27 +25,23 @@ export const BtcMapLogoSvg: React.FC<Props> = ({ width, height }) => (
       />
     </Mask>
     <G mask="url(#a)">
-      <Path
-        fill="#0099AF"
-        d="m132.369 171.819 93.032 93.032-94.525 94.525-93.032-93.032z"
-      />
+      <Path fill="#0099AF" d="m132.369 171.819 93.032 93.032-94.525 94.525-93.032-93.032z" />
       <Path
         d="m135.541 179.688 98.012 91.011c78.409-97.078 54.451-191.356 32.671-226.36L135.541 179.688Z"
         fill="#051173"
       />
-      <Path
-        fill="#53C5D5"
-        d="M36.691 247.691 242.633 41.75l27.095 27.095L63.786 274.786z"
-      />
-      <Path
-        fill="#53C5D5"
-        d="m153.3 172.688 84.884 84.884-27.095 27.095-84.884-84.884z"
-      />
+      <Path fill="#53C5D5" d="M36.691 247.691 242.633 41.75l27.095 27.095L63.786 274.786z" />
+      <Path fill="#53C5D5" d="m153.3 172.688 84.884 84.884-27.095 27.095-84.884-84.884z" />
     </G>
     <Circle cx="130.874" cy="140.017" r="79.343" fill="#E4EBEC" />
     <Defs>
       <ClipPath id="b">
-        <Rect width="83.976" height="106.37" transform="rotate(15) translate(-244.968 440.629)" fill="#fff" />
+        <Rect
+          width="83.976"
+          height="106.37"
+          transform="rotate(15) translate(-244.968 440.629)"
+          fill="#fff"
+        />
       </ClipPath>
     </Defs>
     <G clipPath="url(#b)">

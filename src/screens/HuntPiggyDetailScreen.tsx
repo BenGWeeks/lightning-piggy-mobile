@@ -130,7 +130,9 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const [cache, setCache] = useState<ParsedCache | null>(
     () => peekCachedCachesSync().find((c) => c.coord === coord) ?? null,
   );
-  const [loading, setLoading] = useState(() => !peekCachedCachesSync().some((c) => c.coord === coord));
+  const [loading, setLoading] = useState(
+    () => !peekCachedCachesSync().some((c) => c.coord === coord),
+  );
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<Map<string, FoundLog>>(new Map());
   // Zap totals per find-log id. Outer key is the kind-7516 log id;
@@ -147,12 +149,9 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     name: string | null;
     logId: string;
   } | null>(null);
-  const openZapForLog = useCallback(
-    (log: FoundLog, lud16: string, name: string | null) => {
-      setZapTarget({ lud16, pubkey: log.pubkey, name, logId: log.id });
-    },
-    [],
-  );
+  const openZapForLog = useCallback((log: FoundLog, lud16: string, name: string | null) => {
+    setZapTarget({ lud16, pubkey: log.pubkey, name, logId: log.id });
+  }, []);
   // Composer is always rendered (no toggle) — sharing a find is
   // independent of trying the LP prize. The route-param + scroll
   // effect just nudges the page to the composer when navigation
@@ -729,7 +728,11 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 )}
                 <View style={styles.composerActions}>
                   <TouchableOpacity
-                    style={[styles.composerPost, styles.composerPostFull, posting && styles.composerPostDim]}
+                    style={[
+                      styles.composerPost,
+                      styles.composerPostFull,
+                      posting && styles.composerPostDim,
+                    ]}
                     disabled={posting}
                     onPress={handlePostLog}
                     testID="hunt-piggy-detail-post-button"
@@ -920,9 +923,7 @@ const LogRow: React.FC<{
           // verifiable, so the copy says "reported", not "claimed".
           <View style={styles.logBadge}>
             <Zap size={12} color={colors.zapYellow} fill={colors.zapYellow} strokeWidth={2.5} />
-            <Text style={styles.logBadgeText}>
-              Reported {log.amountSats.toLocaleString()} sats
-            </Text>
+            <Text style={styles.logBadgeText}>Reported {log.amountSats.toLocaleString()} sats</Text>
           </View>
         ) : (
           <View />
@@ -953,10 +954,7 @@ const LogRow: React.FC<{
             strokeWidth={2.5}
           />
           {zapsReceivedSats > 0 ? (
-            <Text
-              style={styles.logZapText}
-              testID={`hunt-log-${log.id.slice(0, 8)}-zaps-received`}
-            >
+            <Text style={styles.logZapText} testID={`hunt-log-${log.id.slice(0, 8)}-zaps-received`}>
               {zapsReceivedSats.toLocaleString()}
             </Text>
           ) : null}

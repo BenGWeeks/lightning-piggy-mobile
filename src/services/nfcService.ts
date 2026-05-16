@@ -303,12 +303,7 @@ export async function writeNpubToTag(npub: string, onTagDetected?: () => void): 
  *   "android.nfc.tech.MifareUltralight"]`; we infer the family from
  * those plus the `type` heuristic the platform exposes.
  */
-type TagFamily =
-  | 'ntag-21x'
-  | 'ntag-424'
-  | 'mifare-ultralight'
-  | 'mifare-classic'
-  | 'unknown';
+type TagFamily = 'ntag-21x' | 'ntag-424' | 'mifare-ultralight' | 'mifare-classic' | 'unknown';
 
 const inferTagFamily = (tag: { techTypes?: string[]; type?: string } | null): TagFamily => {
   if (!tag) return 'unknown';
@@ -534,9 +529,7 @@ export interface WriteHuntTagOptions extends HuntTagPayload {
  * the encoded message exceeds the chip's ~140 byte ceiling. Larger
  * chips (NTAG215 / 216) accept the same payload with headroom.
  */
-export async function writeHuntTagToTag(
-  opts: WriteHuntTagOptions,
-): Promise<WriteLnurlResult> {
+export async function writeHuntTagToTag(opts: WriteHuntTagOptions): Promise<WriteLnurlResult> {
   const coord = opts.coord.trim();
   const naddr = opts.naddr.trim();
   const lnurl = opts.lnurl?.trim();
@@ -560,8 +553,7 @@ export async function writeHuntTagToTag(
   //
   // URI-encode the coord — colons in `kind:pubkey:d` would otherwise
   // be parsed as a port authority.
-  const HUNT_TAG_BASE =
-    (process.env.EXPO_PUBLIC_HUNT_TAG_BASE_URL ?? 'lightningpiggy://hunt/');
+  const HUNT_TAG_BASE = process.env.EXPO_PUBLIC_HUNT_TAG_BASE_URL ?? 'lightningpiggy://hunt/';
   const lpUri = `${HUNT_TAG_BASE}${encodeURIComponent(coord)}`;
   const nostrUri = naddr.startsWith('nostr:') ? naddr : `nostr:${naddr}`;
   // Bech32 LNURLs are case-insensitive — uppercase is conventional on
@@ -585,7 +577,7 @@ export async function writeHuntTagToTag(
   console.log(
     `[NFC] writeHuntTagToTag: ${ndefRecords.length} records, ${bytes.length} bytes ` +
       `(records: lp=${lpUri.length} nostr=${nostrUri.length}` +
-      (lnurl ? ` lnurl=${(ndefRecords[2] ? lnurl.length : 0)}` : '') +
+      (lnurl ? ` lnurl=${ndefRecords[2] ? lnurl.length : 0}` : '') +
       ')',
   );
   // Note: the size check is deferred until AFTER tag detection (below)
@@ -760,9 +752,7 @@ export function wasRecentlyRead(coord: string): boolean {
  * Nostr listing — it ONLY lives on the tag — so a tap is the only way
  * to claim.
  */
-export async function readHuntTagPayload(
-  opts: ReadHuntTagOpts = {},
-): Promise<HuntTagReadResult> {
+export async function readHuntTagPayload(opts: ReadHuntTagOpts = {}): Promise<HuntTagReadResult> {
   try {
     if (!(await ensureNfcStarted())) {
       throw new Error('NFC unavailable on this device');

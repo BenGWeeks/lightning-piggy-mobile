@@ -182,9 +182,7 @@ const HuntFoundScreen: React.FC<Props> = ({ navigation, route }) => {
             <View style={[styles.bigPiggy, { backgroundColor: colors.greenLight }]}>
               <PartyPopper size={88} color={colors.green} strokeWidth={2} />
             </View>
-            <Text style={styles.title}>
-              {stage.sats.toLocaleString()} sats inbound!
-            </Text>
+            <Text style={styles.title}>{stage.sats.toLocaleString()} sats inbound!</Text>
             <Text style={styles.memo}>
               Sent to your active wallet — the celebration toast fires the moment they land.
             </Text>

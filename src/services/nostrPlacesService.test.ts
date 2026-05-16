@@ -138,6 +138,17 @@ describe('buildFoundLog', () => {
       buildFoundLog('37516:abcd:p', '', { sats: -5 }).tags.find((t) => t[0] === 'amount'),
     ).toBeUndefined();
   });
+
+  it('SECURITY: never includes the lnurl tag or surfaces a bearer string anywhere in the event', () => {
+    // Mirror of the buildListing security test — finder-side flow must
+    // also stay leak-free. The find-log doesn't *have* an LNURL field
+    // to populate, but a future regression could surface it through
+    // content or a tag inherited from the cache. Re-checked on every
+    // build so a refactor can't quietly add one.
+    const evt = buildFoundLog('37516:abcd:piggy', 'Found it!', { imageUrl: 'https://x/y.jpg' });
+    expect(evt.tags.find((t) => t[0] === 'lnurl')).toBeUndefined();
+    expect(JSON.stringify(evt)).not.toMatch(/lnurl1[a-z0-9]/i);
+  });
 });
 
 describe('buildComment', () => {
@@ -156,6 +167,16 @@ describe('buildComment', () => {
   it('defaults to `note` type when not specified', () => {
     const evt = buildComment('37516:abcd:p', 'abcd', 'just a note');
     expect(evt.tags.find((t) => t[0] === 't')).toEqual(['t', 'note']);
+  });
+
+  it('SECURITY: never includes the lnurl tag or surfaces a bearer string anywhere in the event', () => {
+    // Comments are user-written free text — defensive belt-and-braces
+    // assertion so a future regression that copy-pastes from the cache
+    // detail (where the LNURL lives in SecureStore) into a comment
+    // build call doesn't ship the bearer to the relays.
+    const evt = buildComment('37516:abcd:p', 'abcd', 'this thread looks fine', 'note');
+    expect(evt.tags.find((t) => t[0] === 'lnurl')).toBeUndefined();
+    expect(JSON.stringify(evt)).not.toMatch(/lnurl1[a-z0-9]/i);
   });
 });
 

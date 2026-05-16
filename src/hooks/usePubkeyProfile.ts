@@ -48,10 +48,7 @@ const empty: PubkeyProfileSlice = { name: null, picture: null, lud16: null, load
 // remount triggers a fresh fetch if the cache has aged past TTL.
 const inFlight = new Map<string, Promise<NostrProfile | null>>();
 
-function fetchProfileDeduped(
-  pubkey: string,
-  readRelays: string[],
-): Promise<NostrProfile | null> {
+function fetchProfileDeduped(pubkey: string, readRelays: string[]): Promise<NostrProfile | null> {
   const existing = inFlight.get(pubkey);
   if (existing) return existing;
   const promise = nostrService

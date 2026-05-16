@@ -256,7 +256,6 @@ const LocationPickerSheet: React.FC<Props> = ({
   );
 };
 
-
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
     sheetBackground: {

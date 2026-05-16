@@ -17,10 +17,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useNostr } from '../contexts/NostrContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { type ParsedCache, parseCacheCoord } from '../services/nostrPlacesService';
-import {
-  fetchCachesByAuthor,
-  subscribeFoundLogsByAuthors,
-} from '../services/nostrPlacesPublisher';
+import { fetchCachesByAuthor, subscribeFoundLogsByAuthors } from '../services/nostrPlacesPublisher';
 import { loadCachedCaches, peekCachedCachesSync } from '../services/nostrPlacesStorage';
 import { loadPiggies, type HiddenPiggy } from '../services/piggyStorageService';
 import { republishPiggy } from '../services/republishPiggyService';
@@ -104,20 +101,17 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
   const [allCaches, setAllCaches] = useState<ParsedCache[]>(() => peekCachedCachesSync());
   // Merge helper used by mount, refresh, and the by-author fetch —
   // dedupe by coord, latest createdAt wins.
-  const mergeCaches = useCallback(
-    (incoming: ParsedCache[]) => {
-      setAllCaches((prev) => {
-        const merged = new Map<string, ParsedCache>();
-        for (const c of prev) merged.set(c.coord, c);
-        for (const c of incoming) {
-          const existing = merged.get(c.coord);
-          if (!existing || c.createdAt > existing.createdAt) merged.set(c.coord, c);
-        }
-        return [...merged.values()];
-      });
-    },
-    [],
-  );
+  const mergeCaches = useCallback((incoming: ParsedCache[]) => {
+    setAllCaches((prev) => {
+      const merged = new Map<string, ParsedCache>();
+      for (const c of prev) merged.set(c.coord, c);
+      for (const c of incoming) {
+        const existing = merged.get(c.coord);
+        if (!existing || c.createdAt > existing.createdAt) merged.set(c.coord, c);
+      }
+      return [...merged.values()];
+    });
+  }, []);
   useEffect(() => {
     let cancelled = false;
     loadCachedCaches().then((cs) => {

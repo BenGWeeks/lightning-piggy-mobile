@@ -279,10 +279,7 @@ const LibreMiniMapInner: React.FC<Props> = ({
             : undefined
         }
       >
-        <Camera
-          ref={cameraRef}
-          initialViewState={{ center: [lon, lat], zoom: defaultZoom }}
-        />
+        <Camera ref={cameraRef} initialViewState={{ center: [lon, lat], zoom: defaultZoom }} />
         {/* User position — translucent pulsing accuracy halo behind a
             solid dot. The halo sizes by GPS accuracy when known and is
             suppressed for dev-pinned positions (where accuracy is null).

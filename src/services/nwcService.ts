@@ -310,12 +310,16 @@ export async function getBalance(
       );
       const __dt = performance.now() - __t0;
       if (__dt > 500) {
-        console.log(`[PerfBlock] NWC.getBalance: ${Math.round(__dt)}ms (walletId=${walletId.slice(0, 8)}…)`);
+        console.log(
+          `[PerfBlock] NWC.getBalance: ${Math.round(__dt)}ms (walletId=${walletId.slice(0, 8)}…)`,
+        );
       }
       return b.balance;
     } catch (error) {
       const __dt = performance.now() - __t0;
-      console.log(`[PerfBlock] NWC.getBalance FAILED after ${Math.round(__dt)}ms (walletId=${walletId.slice(0, 8)}…)`);
+      console.log(
+        `[PerfBlock] NWC.getBalance FAILED after ${Math.round(__dt)}ms (walletId=${walletId.slice(0, 8)}…)`,
+      );
       console.warn(`getBalance error for ${walletId}:`, error);
       return null;
     }

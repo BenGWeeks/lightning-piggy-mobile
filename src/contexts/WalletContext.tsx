@@ -1685,7 +1685,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // source of the 20-45 s JS-thread freezes Ben hit on the Pixel
         // (#560). lookupInvoice stays on the 1 s tick so detection
         // latency for the expected payment is unchanged.
-        const runBalance = (__balanceTickCounter % 5) === 0;
+        const runBalance = __balanceTickCounter % 5 === 0;
         __balanceTickCounter += 1;
         try {
           const [lookupResult] = await Promise.allSettled([

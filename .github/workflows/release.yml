@@ -24,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write   # needed to upload assets to the Release
+  contents: write # needed to upload assets to the Release
 
 env:
   EAS_CLI_VERSION: '18.6.0'
@@ -132,7 +132,7 @@ jobs:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
       NODE_NO_WARNINGS: '1'
     permissions:
-      contents: write   # to push the reset RELEASE_NOTES_NEXT.md back to main
+      contents: write # to push the reset RELEASE_NOTES_NEXT.md back to main
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -204,7 +204,7 @@ jobs:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           ASC_API_KEY_ISSUER_ID: ${{ secrets.ASC_API_KEY_ISSUER_ID }}
           ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
-          ASC_APP_ID: '6762218164'   # matches eas.json → submit.production.ios.ascAppId
+          ASC_APP_ID: '6762218164' # matches eas.json → submit.production.ios.ascAppId
           ASC_BUILD_VERSION: ${{ steps.iosbuild.outputs.version }}
           WHATS_NEW: ${{ steps.changelog.outputs.whatsnew }}
         run: node scripts/asc-set-whats-new.mjs

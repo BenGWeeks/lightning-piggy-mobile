@@ -412,7 +412,10 @@ const evictLegacyCache = (): void => {
   AsyncStorage.removeItem(DATASET_STORAGE_KEY).catch(() => {});
 };
 
-const persistLastResult = (places: BtcMapPlace[], anchor: { lat: number; lon: number } | null): void => {
+const persistLastResult = (
+  places: BtcMapPlace[],
+  anchor: { lat: number; lon: number } | null,
+): void => {
   try {
     const f = lastResultFile();
     if (f.exists) f.delete();

@@ -295,8 +295,7 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
 
   const visibleCaches = useMemo(() => {
     return [...caches.values()].filter(
-      (c) =>
-        (c.isLpPiggy ? filters.piglet : filters.nipgcCache) && isTrusted(c.hiderPubkey),
+      (c) => (c.isLpPiggy ? filters.piglet : filters.nipgcCache) && isTrusted(c.hiderPubkey),
     );
   }, [caches, filters.piglet, filters.nipgcCache, isTrusted]);
 
@@ -457,7 +456,6 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         placesVisible={filters.lightning || filters.onchain}
         availableCategories={availableCategories}
       />
-
     </View>
   );
 };

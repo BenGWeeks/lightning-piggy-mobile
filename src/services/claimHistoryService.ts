@@ -108,9 +108,7 @@ export const lastClaimFor = async (lnurl: string): Promise<ClaimHistoryEntry | n
  * successful claim — keyed by `piggyId` rather than LNURL because the
  * detail screen never sees the bearer string, only the public coord.
  */
-export const lastClaimForPiggyId = async (
-  piggyId: string,
-): Promise<ClaimHistoryEntry | null> => {
+export const lastClaimForPiggyId = async (piggyId: string): Promise<ClaimHistoryEntry | null> => {
   const list = await loadClaimHistory();
   return list.find((e) => e.piggyId === piggyId) ?? null;
 };

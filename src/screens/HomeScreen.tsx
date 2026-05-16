@@ -377,9 +377,7 @@ const ProfiledHomeScreen: React.FC = () => (
     onRender={(id, phase, actualDuration) => {
       if (actualDuration > 100) {
         // eslint-disable-next-line no-console
-        console.log(
-          `[PerfBlock] render:${id} ${phase}=${Math.round(actualDuration)}ms`,
-        );
+        console.log(`[PerfBlock] render:${id} ${phase}=${Math.round(actualDuration)}ms`);
       }
     }}
   >

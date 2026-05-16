@@ -1544,19 +1544,13 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             Promise.all([
               loadRelays(pk!)
                 .catch((e) => console.warn('[Nostr] relay refresh failed:', e))
-                .finally(() =>
-                  console.log(`[PerfBlock] loadRelays: ${Date.now() - __tR}ms`),
-                ),
+                .finally(() => console.log(`[PerfBlock] loadRelays: ${Date.now() - __tR}ms`)),
               loadProfile(pk!, workingRelays)
                 .catch((e) => console.warn('[Nostr] profile refresh failed:', e))
-                .finally(() =>
-                  console.log(`[PerfBlock] loadProfile: ${Date.now() - __tP}ms`),
-                ),
+                .finally(() => console.log(`[PerfBlock] loadProfile: ${Date.now() - __tP}ms`)),
               loadContacts(pk!, workingRelays)
                 .catch((e) => console.warn('[Nostr] contact refresh failed:', e))
-                .finally(() =>
-                  console.log(`[PerfBlock] loadContacts: ${Date.now() - __tC}ms`),
-                ),
+                .finally(() => console.log(`[PerfBlock] loadContacts: ${Date.now() - __tC}ms`)),
             ]).then(() => {
               if (__DEV__) console.log(`[Nostr] parallel refresh complete in ${Date.now() - t0}ms`);
             });

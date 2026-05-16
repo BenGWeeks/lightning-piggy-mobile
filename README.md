@@ -196,12 +196,12 @@ plugins/            # Expo config plugins
 
 The Explore tab pulls in a small set of Expo modules beyond the wallet + Nostr core. All are listed in [docs/PACKAGES.adoc](docs/PACKAGES.adoc); the Explore-specific additions are:
 
-| Package | Used by | Why |
-| --- | --- | --- |
-| `react-native-webview` | `ExploreMiniMap`, `MapScreen` | Leaflet WebView for OSM tile rendering — no Google Maps API key, no billing setup. |
-| `expo-asset` + `expo-file-system` + `expo-sharing` | `HuntCreateScreen` "Save STL" | Ships the 188 KB Piggy Bag Charm STL inside the APK, copies it out on tap, and shares via the system sheet. |
-| `expo-calendar` | `EventDetailScreen` "Add to Calendar" | Native calendar insert with lazy permission prompt. |
-| `expo-notifications` | Geofence "Nearby merchants" feature (#467) | Foreground pings when the user walks past a Bitcoin merchant. |
+| Package                                            | Used by                                    | Why                                                                                                         |
+| -------------------------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `react-native-webview`                             | `ExploreMiniMap`, `MapScreen`              | Leaflet WebView for OSM tile rendering — no Google Maps API key, no billing setup.                          |
+| `expo-asset` + `expo-file-system` + `expo-sharing` | `HuntCreateScreen` "Save STL"              | Ships the 188 KB Piggy Bag Charm STL inside the APK, copies it out on tap, and shares via the system sheet. |
+| `expo-calendar`                                    | `EventDetailScreen` "Add to Calendar"      | Native calendar insert with lazy permission prompt.                                                         |
+| `expo-notifications`                               | Geofence "Nearby merchants" feature (#467) | Foreground pings when the user walks past a Bitcoin merchant.                                               |
 
 ## Screenshots
 

@@ -14,14 +14,14 @@ Everything you need to pick up where I left off.
 
 Source of truth: `/tmp/perf-suite-1778890010/summary.md` (commit it in if you want it tracked).
 
-| Surface | Modern jank | Legacy jank | 99th frame | 4950ms hits |
-|---|---:|---:|---:|---:|
-| Home tab cold tap | 10.0% | 18.7% | 400 ms | 2.5 |
-| **Messages tab cold tap** | **14.7%** | **47.5%** | **800 ms** | **6.0** ⚠️ |
-| Friends tab cold tap | 9.6% | 10.0% | 425 ms | 1.0 |
-| Explore tab cold tap | 10.6% | 13.2% | 625 ms | 1.5 |
-| Friends list scroll | 100.0% | 0.0% | 16.5 ms | 0 |
-| Messages list scroll | 66.7% | 0.0% | 16.0 ms | 0 |
+| Surface                   | Modern jank | Legacy jank | 99th frame | 4950ms hits |
+| ------------------------- | ----------: | ----------: | ---------: | ----------: |
+| Home tab cold tap         |       10.0% |       18.7% |     400 ms |         2.5 |
+| **Messages tab cold tap** |   **14.7%** |   **47.5%** | **800 ms** |  **6.0** ⚠️ |
+| Friends tab cold tap      |        9.6% |       10.0% |     425 ms |         1.0 |
+| Explore tab cold tap      |       10.6% |       13.2% |     625 ms |         1.5 |
+| Friends list scroll       |      100.0% |        0.0% |    16.5 ms |           0 |
+| Messages list scroll      |       66.7% |        0.0% |    16.0 ms |           0 |
 
 5 of the 11 surfaces reported `n/a` — those Maestro flows still reference old testIDs (Places rail, Geo-caches rail, Geo-caches list cold, FAB → FriendPicker, Group → Back). Listed in #560 as a follow-up; they need testID refreshes before they can measure.
 
@@ -29,22 +29,22 @@ Source of truth: `/tmp/perf-suite-1778890010/summary.md` (commit it in if you wa
 
 ## ✅ New PRs opened against `feat/explore-tab`
 
-| PR | Branch | Purpose | State |
-|---|---|---|---|
-| [#562](https://github.com/BenGWeeks/lightning-piggy-mobile/pull/562) | `perf/render-profiler-nip17-yield` | React.Profiler on Home + Explore + NIP-17 yield 4 → 2 | open |
-| [#563](https://github.com/BenGWeeks/lightning-piggy-mobile/pull/563) | `feat/maplibre-native` | MapLibre Native scaffolding (#552 — replace Leaflet WebView) | **draft** |
+| PR                                                                   | Branch                             | Purpose                                                      | State     |
+| -------------------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------ | --------- |
+| [#562](https://github.com/BenGWeeks/lightning-piggy-mobile/pull/562) | `perf/render-profiler-nip17-yield` | React.Profiler on Home + Explore + NIP-17 yield 4 → 2        | open      |
+| [#563](https://github.com/BenGWeeks/lightning-piggy-mobile/pull/563) | `feat/maplibre-native`             | MapLibre Native scaffolding (#552 — replace Leaflet WebView) | **draft** |
 
 ## ✅ Shipped on `feat/explore-tab` while you slept
 
-| Hash | What |
-|---|---|
+| Hash      | What                                                                                                |
+| --------- | --------------------------------------------------------------------------------------------------- |
 | `883cd54` | Two findings from PR #488 sub-agent review (fetchCache/fetchEvent maxWait + piggyStorage expiresAt) |
-| `b77e63f` | Merge PR #548 — three-tier WoT chip for Messages |
-| `1d5778c` | Merge PR #550 — Places rail cold-start paint |
-| `33f65c5` | Merge PR #551 — Leaflet bridge refactor |
-| `08ef469` | Try prize button hidden when no sats advertised |
-| `c9d11d2` | popToTop on Explore tab tap (StackActions, prior `navigate()` was a no-op when already focused) |
-| `fc4ffe1` | Comment refresh on `test-explore-tab-rename.yaml` to match rails layout |
+| `b77e63f` | Merge PR #548 — three-tier WoT chip for Messages                                                    |
+| `1d5778c` | Merge PR #550 — Places rail cold-start paint                                                        |
+| `33f65c5` | Merge PR #551 — Leaflet bridge refactor                                                             |
+| `08ef469` | Try prize button hidden when no sats advertised                                                     |
+| `c9d11d2` | popToTop on Explore tab tap (StackActions, prior `navigate()` was a no-op when already focused)     |
+| `fc4ffe1` | Comment refresh on `test-explore-tab-rename.yaml` to match rails layout                             |
 
 PRs #556 + #557 were already cherry-picked into the branch earlier in the session — code is there, no separate merges.
 
