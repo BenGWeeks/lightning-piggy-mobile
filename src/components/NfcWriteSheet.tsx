@@ -45,8 +45,24 @@ interface Props {
    * deep link + nostr:naddr1 listing reference + optional LNURL. When
    * supplied, takes precedence over `lnurl`. See #73. */
   huntPayload?: HuntTagPayload;
-  /** Fires once the tag write succeeds (before the user dismisses). */
-  onWritten?: () => void;
+  /** piglet mode — when true (default) the Android write path also sets
+   * a random PWD/PACK on the tag and returns the resulting PIN via
+   * `onWritten`. Set false to publish an unlocked tag. iOS always writes
+   * unlocked regardless. Issue #567. */
+  lockTag?: boolean;
+  /** piglet edit mode — when the Piglet was previously locked, pass the
+   * stored secrets so the write path PWD_AUTHs the chip before writing
+   * the new NDEF payload. The PIN stays the same after the rewrite —
+   * the hider doesn't have to track a fresh one. Issue #567. */
+  existingLock?: { pwdHex: string; packHex: string };
+  /** Fires once the tag write succeeds (before the user dismisses).
+   * Receives the lock secrets when the locked-write path ran — caller
+   * persists them on the matching `HiddenPiggy` so the PIN can be
+   * surfaced in My Piglets and the unlock flow can authenticate later. */
+  onWritten?: (result?: {
+    locked: boolean;
+    lock?: { pwdHex: string; packHex: string; pin: string; tagUid: string };
+  }) => void;
 }
 
 type WriteState = 'ready' | 'writing' | 'success' | 'error';
@@ -59,6 +75,8 @@ const NfcWriteSheet: React.FC<Props> = ({
   displayName = '',
   lnurl = '',
   huntPayload,
+  lockTag = true,
+  existingLock,
   onWritten,
 }) => {
   const isPiglet = mode === 'piglet';
@@ -134,12 +152,20 @@ const NfcWriteSheet: React.FC<Props> = ({
         // Tag detected — show writing state
         if (mountedRef.current) setState('writing');
       };
+      let writeResult: Awaited<ReturnType<typeof writeHuntTagToTag>> | null = null;
       if (isPiglet) {
         // New multi-record write when the caller supplies the richer
         // Hunt payload (#73); legacy single-record LNURL write stays
-        // as the fallback so we don't break any pre-#73 call-site.
+        // as the fallback so we don't break any pre-#73 call-site. The
+        // hunt-payload path also threads the lock toggle through —
+        // single-record LNURL writes don't currently expose locking.
         if (huntPayload) {
-          await writeHuntTagToTag({ ...huntPayload, onTagDetected });
+          writeResult = await writeHuntTagToTag({
+            ...huntPayload,
+            onTagDetected,
+            lockTag,
+            existingLock,
+          });
         } else {
           await writeLnurlToTag(lnurl, onTagDetected);
         }
@@ -148,7 +174,9 @@ const NfcWriteSheet: React.FC<Props> = ({
       }
       if (mountedRef.current) {
         setState('success');
-        onWritten?.();
+        onWritten?.(
+          writeResult ? { locked: writeResult.locked, lock: writeResult.lock } : undefined,
+        );
       }
     } catch (err) {
       if (mountedRef.current) {

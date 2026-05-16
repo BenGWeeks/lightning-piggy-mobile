@@ -128,6 +128,32 @@ export interface HiddenPiggy {
    * plaintext locally; ROT13-encoded on publish per the NIP-GC
    * client guidance to prevent inline spoilers. */
   hint?: string;
+  /** Reversible NTAG21x PWD/PACK lock secrets, captured at write time
+   * when the Hide-a-Piglet wizard's "Lock tag" toggle is on (default).
+   * The 8-hex-char PWD becomes the hider-visible PIN in My Piglets →
+   * Piglet detail → Reveal; PACK is verified during the unlock flow
+   * so a PIN collision against a different tag doesn't accidentally
+   * unlock a stranger's hardware. `tagUid` is the NTAG UID we wrote
+   * to — used to defend against the hider trying to unlock the wrong
+   * tag (rare in practice, but the PWD/PACK are uncorrelated across
+   * tags so a wrong-tag attempt would either fail PWD_AUTH outright
+   * or — worst case — disable protection on another tag that
+   * coincidentally shares the PIN). Issue #567. */
+  nfcLock?: {
+    /** Tag UID this lock was set on, hex-encoded as Android reports it. */
+    tagUid: string;
+    /** 8 uppercase hex chars — the NTAG215 4-byte PWD. Surfaced as the
+     * hider's PIN. */
+    pwdHex: string;
+    /** 4 uppercase hex chars — the 2-byte PACK the chip returns on
+     * PWD_AUTH. Used by the unlock flow to verify we're talking to the
+     * right tag before disabling protection. */
+    packHex: string;
+    /** Wall-clock unix-seconds the tag was locked. Purely
+     * informational — surfaces "Locked on …" in the PIN-reveal row so
+     * the hider knows it isn't ancient stale data. */
+    lockedAt: number;
+  };
 }
 
 // `AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY` mirrors `identitiesStore` and
@@ -241,5 +267,23 @@ const isValidPiggy = (v: unknown): v is HiddenPiggy => {
   // tag emitted). Pre-fix a corrupted 'soon' string would pass and
   // produce "expiration", "NaN" on the wire.
   if (p.expiresAt !== undefined && typeof p.expiresAt !== 'number') return false;
+  // nfcLock — added in #567. Optional, but if present every field is
+  // required (a half-written lock record would mean we can't authenticate
+  // the unlock and the tag is effectively bricked from this app's POV).
+  if (p.nfcLock !== undefined) {
+    const lock = p.nfcLock as Record<string, unknown> | null;
+    if (
+      !lock ||
+      typeof lock !== 'object' ||
+      typeof lock.tagUid !== 'string' ||
+      typeof lock.pwdHex !== 'string' ||
+      !/^[0-9A-Fa-f]{8}$/.test(lock.pwdHex) ||
+      typeof lock.packHex !== 'string' ||
+      !/^[0-9A-Fa-f]{4}$/.test(lock.packHex) ||
+      typeof lock.lockedAt !== 'number'
+    ) {
+      return false;
+    }
+  }
   return true;
 };

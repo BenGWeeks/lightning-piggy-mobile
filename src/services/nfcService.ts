@@ -7,6 +7,20 @@
  */
 import NfcManager, { NfcTech, Ndef, TagEvent, NfcAdapter } from 'react-native-nfc-manager';
 import { Platform, Linking } from 'react-native';
+import {
+  buildDisableAuthFrame,
+  buildEnableAuthFrame,
+  buildNdefTlvBytes,
+  buildPackWriteFrame,
+  buildPwdAuthFrame,
+  buildPwdWriteFrame,
+  buildSetAccessFrame,
+  generateLockSecrets,
+  NTAG21X_USER_PAGE_START,
+  packToHex,
+  pwdToPin,
+  splitIntoPages,
+} from '../utils/nfc/ntag215Lock';
 
 // Reader-mode options for every `requestTechnology` call. On Android this
 // routes the tag through `enableReaderMode` instead of foreground
@@ -330,7 +344,22 @@ const inferTagFamily = (tag: { techTypes?: string[]; type?: string } | null): Ta
 
 export type WriteLnurlResult = {
   family: TagFamily;
+  // True when the tag came out of the write session protected against
+  // subsequent rewrites. For NTAG21x via this service that means either
+  // the legacy one-way OTP lock (`makeReadOnly`, no recovery) or — when
+  // the caller opts in — a reversible PWD/PACK lock the hider can later
+  // undo from their My-Piglets PIN. `false` means the data is on the
+  // tag but the chip will still accept overwrites from any NFC writer.
   locked: boolean;
+  // Set on the reversible-lock path (see `lockMode === 'pwd-pack'`). The
+  // caller persists these alongside the cache record so the hider can
+  // surface the PIN later and authenticate the unlock flow. Issue #567.
+  lock?: {
+    pwdHex: string;
+    packHex: string;
+    pin: string;
+    tagUid: string;
+  };
 };
 
 /**
@@ -509,6 +538,21 @@ export interface HuntTagPayload {
 
 export interface WriteHuntTagOptions extends HuntTagPayload {
   onTagDetected?: () => void;
+  // When true (default), the Android NTAG21x write path enables PWD/PACK
+  // password protection on the tag using a fresh random 32-bit PWD + 16-
+  // bit PACK (NXP AN1303 §7.6). The PIN goes back to the caller via the
+  // returned `lock` field; the hider can unlock the tag later via the
+  // My-Piglets flow. Set false for the legacy unlocked-write behaviour
+  // (rarely useful — passers-by can repoint the tag). Issue #567.
+  lockTag?: boolean;
+  // Rewrite-aware locked write. When the hider edits an existing Piglet
+  // whose tag was locked, the wizard threads the previously-stored PWD
+  // + PACK here so the write path can PWD_AUTH the chip before writing
+  // the new NDEF payload, then leave AUTH0 in place — the SAME PIN
+  // keeps working post-rewrite without the hider tracking a fresh one.
+  // Used only on the Android locked-write path; ignored otherwise.
+  // Issue #567.
+  existingLock?: { pwdHex: string; packHex: string };
 }
 
 /**
@@ -585,84 +629,285 @@ export async function writeHuntTagToTag(opts: WriteHuntTagOptions): Promise<Writ
   // 140-byte ceiling on a payload their actual chip can fit. Pre-fix
   // we threw here unconditionally and the user saw "Write failed"
   // before they'd even tapped the tag (#73 follow-up).
+  // Lock toggle — default to the reversible PWD/PACK path on Android.
+  // Caller passes `lockTag: false` only when explicitly publishing an
+  // unlocked tag (legacy flow / iOS).
+  const wantLock = opts.lockTag !== false && Platform.OS === 'android';
+
   try {
     if (!(await ensureNfcStarted())) {
       throw new Error('NFC unavailable on this device');
     }
-    await NfcManager.requestTechnology(NfcTech.Ndef, READER_MODE_OPTS);
-    const tag = await NfcManager.getTag();
-    if (!tag) {
-      throw new Error('No tag detected');
+    // Android + lock requested → write + password-protect in a single
+    // MifareUltralight session so the user only taps once. The
+    // MifareUltralight tech exposes both `mifareUltralightWritePage`
+    // (for raw page writes) AND `transceive` (for the PWD_AUTH command
+    // used by the unlock flow). Going through `NfcTech.Ndef` here would
+    // make `transceive` unavailable — the native dispatch (NfcManager.java
+    // §transceive switch) has no Ndef case — and the alternative of
+    // cancelling Ndef and re-requesting NfcA needs the tag to leave and
+    // re-enter the field, which we want to avoid mid-write.
+    if (wantLock) {
+      return await writeHuntTagAndroidLocked(opts, bytes);
     }
-    const isAndroid = Platform.OS === 'android';
-    const family = isAndroid
-      ? inferTagFamily(tag as { techTypes?: string[]; type?: string })
-      : ('unknown' as TagFamily);
-    if (isAndroid && family === 'mifare-classic') {
+    // Unlocked path (iOS, or Android with lockTag=false) — original
+    // Ndef-tech write. The `locked: false` return is honest: no
+    // password set, no OTP lock bit flipped.
+    return await writeHuntTagUnlocked(opts, bytes);
+  } finally {
+    NfcManager.cancelTechnologyRequest().catch(() => {});
+  }
+}
+
+// Existing Ndef-tech write path, factored out so the lock-toggle
+// dispatch in `writeHuntTagToTag` stays readable. Reports `locked: false`
+// always — no longer flips the legacy one-way `makeReadOnly` bit, which
+// gave hiders no recovery path. Use the locked path (default) to gate
+// rewrites without permanently sealing the chip.
+async function writeHuntTagUnlocked(
+  opts: WriteHuntTagOptions,
+  bytes: number[],
+): Promise<WriteLnurlResult> {
+  await NfcManager.requestTechnology(NfcTech.Ndef, READER_MODE_OPTS);
+  const tag = await NfcManager.getTag();
+  if (!tag) throw new Error('No tag detected');
+  const isAndroid = Platform.OS === 'android';
+  const family = isAndroid
+    ? inferTagFamily(tag as { techTypes?: string[]; type?: string })
+    : ('unknown' as TagFamily);
+  if (isAndroid && family === 'mifare-classic') {
+    throw new Error(
+      "Mifare Classic tags can't be locked — use an NTAG215 / 216 chip so others can't overwrite this Piglet.",
+    );
+  }
+  if (isAndroid && family === 'unknown') {
+    throw new Error(
+      'Unrecognised tag type. Lightning Piggy supports NTAG213 / 215 / 216, NTAG424, and Mifare Ultralight C.',
+    );
+  }
+  const cap = isAndroid ? usableBytesFor(family) : null;
+  if (cap !== null && bytes.length > cap) {
+    throw new Error(
+      `Tag payload is ${bytes.length} bytes — this ${family.toUpperCase()} only fits ${cap}. Use an NTAG215 / 216 sticker (504–888 bytes).`,
+    );
+  }
+  opts.onTagDetected?.();
+  console.log(`[NFC] tag detected — family=${family} — writing ${bytes.length} bytes (unlocked)…`);
+  try {
+    await NfcManager.ndefHandler.writeNdefMessage(bytes);
+  } catch (writeErr) {
+    if (family === 'ntag-424') {
       throw new Error(
-        "Mifare Classic tags can't be permanently locked — use an NTAG215 / 216 chip so others can't overwrite this Piglet.",
+        "NTAG424 needs AES-key authentication which isn't supported yet (GH #558). Use an NTAG215 / 216 sticker for now.",
       );
     }
-    if (isAndroid && family === 'unknown') {
-      throw new Error(
-        'Unrecognised tag type. Lightning Piggy supports NTAG213 / 215 / 216, NTAG424, and Mifare Ultralight C.',
-      );
-    }
-    // Post-detection capacity check — guards against the chip silently
-    // truncating the write. 213 maxes out at 140 usable bytes; 215/216
-    // / 424 have plenty of headroom for the multi-record payload.
-    const cap = isAndroid ? usableBytesFor(family) : null;
-    if (cap !== null && bytes.length > cap) {
-      throw new Error(
-        `Tag payload is ${bytes.length} bytes — this ${family.toUpperCase()} only fits ${cap}. Use an NTAG215 / 216 sticker (504–888 bytes).`,
-      );
-    }
-    opts.onTagDetected?.();
-    console.log(`[NFC] tag detected — family=${family} — writing ${bytes.length} bytes…`);
+    throw writeErr;
+  }
+  console.log(`[NFC] writeHuntTagUnlocked done — family=${family}`);
+  return { family, locked: false };
+}
+
+// Android NTAG21x write + reversible PWD/PACK lock under a single
+// MifareUltralight tech session. Two sub-paths:
+//
+//  • Fresh write — generates new PWD/PACK + enables AUTH0=0x04.
+//  • Rewrite-aware — when `opts.existingLock` is set, PWD_AUTH with the
+//    stored PWD first so the chip will accept user-page writes, then
+//    just write the new NDEF data. AUTH0/PWD/PACK stay as they were
+//    so the SAME PIN survives the rewrite (issue #567 user request:
+//    "if it was locked before, it … locks it again with the same PIN").
+//
+// The chip's NDEF detection works off the factory CC at page 0x03,
+// which we never overwrite — so a finder scanning the locked tag still
+// sees a standard NDEF read response with the same three records
+// (`lightningpiggy://hunt/...`, `nostr:naddr1...`, optional
+// `lightning:lnurl1...`).
+async function writeHuntTagAndroidLocked(
+  opts: WriteHuntTagOptions,
+  ndefBytes: number[],
+): Promise<WriteLnurlResult> {
+  await NfcManager.requestTechnology(NfcTech.MifareUltralight, READER_MODE_OPTS);
+  const tag = await NfcManager.getTag();
+  if (!tag) throw new Error('No tag detected');
+  const family = inferTagFamily(tag as { techTypes?: string[]; type?: string });
+  if (family === 'mifare-classic') {
+    throw new Error(
+      "Mifare Classic tags can't be locked — use an NTAG215 / 216 chip so others can't overwrite this Piglet.",
+    );
+  }
+  if (family === 'ntag-424') {
+    throw new Error(
+      "NTAG424 doesn't support PWD/PACK locking — use an NTAG215 / 216 sticker (GH #558).",
+    );
+  }
+  const tagUid = (() => {
+    const id = (tag as { id?: string }).id;
+    return typeof id === 'string' && id.length > 0 ? id : '';
+  })();
+  // If the wizard passed in stored secrets for an existing lock,
+  // authenticate before the write so user pages accept it. PWD_AUTH
+  // failure means the tag isn't actually locked with this PIN — could
+  // be a fresh tag, a different tag, or one rewritten by another tool.
+  // Surface that clearly so the hider can recover (use a fresh tag,
+  // unlock first, etc.).
+  let reusedExistingLock: { pwdHex: string; packHex: string } | null = null;
+  if (opts.existingLock) {
+    const storedPwd = hexBytes(opts.existingLock.pwdHex, 4);
+    const expectedPack = hexBytes(opts.existingLock.packHex, 2);
     try {
-      await NfcManager.ndefHandler.writeNdefMessage(bytes);
-    } catch (writeErr) {
-      // NTAG424's NDEF file is gated by AES-key authentication on
-      // writes — plain `writeNdefMessage` fails with `java.io.IOException`
-      // on a factory-default chip. Full DESFire support is tracked in
-      // GH #558; until then surface a clear "use 215/216" prompt so the
-      // user doesn't think the app is broken.
-      if (family === 'ntag-424') {
+      const pack = await NfcManager.nfcAHandler.transceive(buildPwdAuthFrame(storedPwd));
+      const packMatches =
+        pack.length >= 2 && pack[0] === expectedPack[0] && pack[1] === expectedPack[1];
+      if (!packMatches) {
+        throw new Error("Tag PACK didn't match the stored value — this isn't the tag we locked.");
+      }
+      reusedExistingLock = { ...opts.existingLock };
+      console.log('[NFC] rewrite path — PWD_AUTH OK, reusing existing lock');
+    } catch (e) {
+      throw new Error(
+        `Tag is locked with a different PIN than the one we have stored for this Piglet. ${(e as Error)?.message ?? ''}`.trim(),
+      );
+    }
+  }
+  // Build the full byte stream we'll write into user pages: TLV envelope
+  // around the NDEF message, then page-aligned. NTAG215 has 126 user
+  // pages (504 bytes) starting at page 4; 213 has 36 (144 bytes); 216
+  // has 222 (888 bytes). We can't tell from techTypes alone, so we let
+  // the chip itself reject overruns via the native writePage error.
+  const tlvBytes = buildNdefTlvBytes(ndefBytes);
+  const pages = splitIntoPages(tlvBytes);
+  opts.onTagDetected?.();
+  console.log(
+    `[NFC] locked write — family=${family} uid=${tagUid} ndef=${ndefBytes.length}B ` +
+      `tlv=${tlvBytes.length}B pages=${pages.length} ` +
+      `mode=${reusedExistingLock ? 'rewrite-keep-pin' : 'fresh-lock'}`,
+  );
+  // Phase 1 — write NDEF data starting at page 0x04. Page-by-page so a
+  // mid-stream failure surfaces the offending page index in the error.
+  for (let i = 0; i < pages.length; i++) {
+    const offset = NTAG21X_USER_PAGE_START + i;
+    try {
+      await NfcManager.mifareUltralightHandlerAndroid.mifareUltralightWritePage(offset, pages[i]);
+    } catch (e) {
+      throw new Error(
+        `Tag write failed at page 0x${offset.toString(16)} (byte ${i * 4}/${tlvBytes.length}) — ${(e as Error)?.message ?? e}. ` +
+          'If the chip is an NTAG213, the payload may be too large — use NTAG215 / 216 instead.',
+      );
+    }
+  }
+  console.log('[NFC] NDEF user-data write OK');
+  // Phase 2a — re-write path keeps existing PWD/PACK/AUTH0 in place. We
+  // already PWD_AUTH'd above, and the chip remains locked with the
+  // same secrets after the session ends. Caller surfaces the SAME PIN
+  // back into the wizard.
+  if (reusedExistingLock) {
+    return {
+      family,
+      locked: true,
+      lock: {
+        pwdHex: reusedExistingLock.pwdHex,
+        packHex: reusedExistingLock.packHex,
+        pin: reusedExistingLock.pwdHex.toUpperCase(),
+        tagUid,
+      },
+    };
+  }
+  // Phase 2b — fresh-lock path. Set PWD/PACK + flip protection on.
+  // Order matters: PWD and PACK first (so the chip stores them), then
+  // ACCESS (configures read-still-allowed / write-blocked), then AUTH0
+  // LAST — once AUTH0 = 0x04 takes effect, subsequent writes to pages
+  // ≥ 4 require PWD_AUTH, including writes to PWD/PACK/CFG pages
+  // themselves. Writing AUTH0 before PWD/PACK would lock us out before
+  // we can store the password.
+  const secrets = generateLockSecrets();
+  await sendTransceive(buildPwdWriteFrame(secrets.pwd), 'WRITE PWD');
+  await sendTransceive(buildPackWriteFrame(secrets.pack), 'WRITE PACK');
+  await sendTransceive(buildSetAccessFrame(), 'WRITE ACCESS');
+  await sendTransceive(buildEnableAuthFrame(), 'WRITE AUTH0');
+  const pwdHex = secrets.pwd.map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join('');
+  const packHex = packToHex(secrets.pack);
+  const pin = pwdToPin(secrets.pwd);
+  console.log(`[NFC] locked write done — family=${family} pin=${pin.slice(0, 2)}******`);
+  return {
+    family,
+    locked: true,
+    lock: { pwdHex, packHex, pin, tagUid },
+  };
+}
+
+// Thin alias for `hexToBytes` from the lock module — keeps the calls
+// in this file readable without `ntag215Lock.hexToBytes` prefixing.
+const hexBytes = (hex: string, len: number): number[] => {
+  const out: number[] = [];
+  for (let i = 0; i < hex.length; i += 2) out.push(parseInt(hex.slice(i, i + 2), 16));
+  if (out.length !== len) throw new Error(`hex length mismatch: got ${out.length}, want ${len}`);
+  return out;
+};
+
+// Thin wrapper around `nfcAHandler.transceive` that surfaces the failing
+// command name in the error message. The native handler returns
+// `transceive fail: ${ex}` on TagLost / IOException; chaining the label
+// makes "WRITE AUTH0 failed: TAG_LOST" instantly diagnostic.
+async function sendTransceive(frame: number[], label: string): Promise<number[]> {
+  try {
+    return await NfcManager.nfcAHandler.transceive(frame);
+  } catch (e) {
+    throw new Error(`${label} failed: ${(e as Error)?.message ?? e}`);
+  }
+}
+
+/**
+ * Disable PWD/PACK protection on a previously-locked NTAG21x. Requires
+ * the hider's PIN (the 8-hex-char `pwdHex` originally returned from the
+ * lock flow). Performs PWD_AUTH first — if the PIN is wrong the chip
+ * returns a NAK and the unlock fails without changing tag state. On
+ * success, parks AUTH0 above the last real page so subsequent writes
+ * proceed without a password.
+ *
+ * Android-only — iOS doesn't support raw NTAG21x command transceive in
+ * the same library shape (CoreNFC's `MiFareTag` exposes a related API
+ * but the wrapping isn't in react-native-nfc-manager today).
+ */
+export interface UnlockHuntTagOptions {
+  pwd: number[];
+  expectedPack?: number[];
+  onTagDetected?: () => void;
+}
+
+export async function unlockHuntTag(opts: UnlockHuntTagOptions): Promise<{ tagUid: string }> {
+  if (Platform.OS !== 'android') {
+    throw new Error('Tag unlock is Android-only for now.');
+  }
+  try {
+    if (!(await ensureNfcStarted())) throw new Error('NFC unavailable on this device');
+    await NfcManager.requestTechnology(NfcTech.NfcA, READER_MODE_OPTS);
+    const tag = await NfcManager.getTag();
+    if (!tag) throw new Error('No tag detected');
+    opts.onTagDetected?.();
+    let pack: number[];
+    try {
+      pack = await NfcManager.nfcAHandler.transceive(buildPwdAuthFrame(opts.pwd));
+    } catch (e) {
+      throw new Error(
+        `PIN rejected — the tag refused authentication. ${(e as Error)?.message ?? ''}`.trim(),
+      );
+    }
+    if (opts.expectedPack) {
+      const match =
+        pack.length >= 2 && pack[0] === opts.expectedPack[0] && pack[1] === opts.expectedPack[1];
+      if (!match) {
+        // Different tag than the one we stored secrets for. Bail out
+        // before flipping AUTH0 so we don't accidentally unlock somebody
+        // else's tag using a PIN collision.
         throw new Error(
-          "NTAG424 needs AES-key authentication which isn't supported yet (GH #558). Use an NTAG215 / 216 sticker for now.",
+          "PIN matched the chip but this isn't the tag we locked. Try the original tag.",
         );
       }
-      throw writeErr;
     }
-    console.log('[NFC] write OK');
-    // Lock the NDEF area (Android NTAG21x / Ultralight C) so a passer-by
-    // can't overwrite the tag with a phishing payload. iOS has no
-    // equivalent API — we skip and report `locked: false`. Same shape
-    // as the pre-existing writeLnurlToTag flow below.
-    let locked = false;
-    if (isAndroid && family !== 'ntag-424') {
-      // NTAG21x / Ultralight C share the one-shot `makeReadOnly` lock
-      // bit. NTAG424 doesn't — its locking model is AES-key file
-      // access. Skip the call (it'd throw) and report locked: false
-      // so the UI surfaces the "tag is still re-writeable" warning.
-      // Full NTAG424 lock implementation tracked separately.
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const handler = NfcManager.ndefHandler as any;
-        if (typeof handler.makeReadOnly === 'function') {
-          const ok = await handler.makeReadOnly();
-          locked = ok !== false;
-        }
-      } catch (lockErr) {
-        // Lock failure is non-fatal — data is written; surface via
-        // `locked: false` so the UI can warn.
-        console.warn(`[NFC] makeReadOnly threw: ${(lockErr as Error)?.message ?? lockErr}`);
-      }
-    } else if (family === 'ntag-424') {
-      console.log('[NFC] NTAG424 — skipping makeReadOnly (uses key-based file access)');
-    }
-    console.log(`[NFC] writeHuntTagToTag done — family=${family} locked=${locked}`);
-    return { family, locked };
+    await sendTransceive(buildDisableAuthFrame(), 'WRITE AUTH0 (unlock)');
+    const tagUid = (tag as { id?: string }).id ?? '';
+    console.log(`[NFC] unlockHuntTag OK — uid=${tagUid}`);
+    return { tagUid };
   } finally {
     NfcManager.cancelTechnologyRequest().catch(() => {});
   }
