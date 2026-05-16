@@ -63,8 +63,10 @@ const NfcUnlockSheet: React.FC<Props> = ({
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [state, setState] = useState<UnlockState>('ready');
   const [errorMessage, setErrorMessage] = useState('');
+  // No explicit snapPoints — gorhom v5 defaults `enableDynamicSizing`
+  // to true, sizing the sheet to its content. Project rule: no
+  // hardcoded heights for bottom sheets.
   const sheetRef = useRef<BottomSheetModal>(null);
-  const snapPoints = useMemo(() => ['55%'], []);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -150,7 +152,6 @@ const NfcUnlockSheet: React.FC<Props> = ({
   return (
     <BottomSheetModal
       ref={sheetRef}
-      snapPoints={snapPoints}
       onDismiss={handleClose}
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}
@@ -258,14 +259,15 @@ const createStyles = (colors: Palette) =>
     },
     handleIndicator: { backgroundColor: colors.divider, width: 40 },
     content: {
-      flex: 1,
+      // No flex:1 — let the sheet hug its content (gorhom v5 dynamic
+      // sizing). Project rule: no hardcoded sheet heights.
       alignItems: 'center',
       paddingHorizontal: 24,
       paddingTop: 8,
       paddingBottom: 40,
     },
     title: { fontSize: 18, fontWeight: '700', color: colors.textHeader, marginBottom: 24 },
-    stateContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', width: '100%' },
+    stateContainer: { alignItems: 'center', justifyContent: 'center', width: '100%' },
     iconContainer: {
       width: 100,
       height: 100,

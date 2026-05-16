@@ -96,14 +96,12 @@ const NfcWriteSheet: React.FC<Props> = ({
     tagUid: string;
   } | null>(null);
   const [pinRevealed, setPinRevealed] = useState(false);
-  // Larger height when the success branch needs to fit the PIN card +
-  // the helper text. 55% is the bottom-sheet's default for the ready /
-  // error states; the success-with-PIN state grows to 78% so the Done
-  // button stays above the home gesture pill on tall phones.
-  const snapPoints = useMemo(
-    () => (state === 'success' && lastLock ? ['78%'] : ['55%']),
-    [state, lastLock],
-  );
+  // No explicit snapPoints — gorhom v5's `enableDynamicSizing={true}`
+  // (the default) sizes the sheet to its content, so the error state
+  // with a long diagnostic message gets a tall sheet, the simple
+  // success state gets a short one, and the user never has to swipe
+  // the sheet up to see hidden content. Project rule: no hardcoded
+  // sheet heights unless we genuinely need a fixed snap point.
   const sheetRef = useRef<BottomSheetModal>(null);
   const mountedRef = useRef(true);
 
@@ -247,7 +245,6 @@ const NfcWriteSheet: React.FC<Props> = ({
   return (
     <BottomSheetModal
       ref={sheetRef}
-      snapPoints={snapPoints}
       onDismiss={handleClose}
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}
@@ -416,7 +413,9 @@ const createStyles = (colors: Palette) =>
       width: 40,
     },
     content: {
-      flex: 1,
+      // No `flex: 1` — that overrides gorhom v5's content-driven
+      // sizing and forces the sheet to fill the screen instead of
+      // hugging its content. Project rule: no hardcoded sheet heights.
       alignItems: 'center',
       paddingHorizontal: 24,
       paddingTop: 8,
@@ -429,7 +428,10 @@ const createStyles = (colors: Palette) =>
       marginBottom: 24,
     },
     stateContainer: {
-      flex: 1,
+      // Hugs its children so dynamic sheet sizing measures the true
+      // content height. The flex:1 we had here pushed the sheet to
+      // full-screen and forced the user to swipe up to see the
+      // diagnostic message on error.
       alignItems: 'center',
       justifyContent: 'center',
       width: '100%',
