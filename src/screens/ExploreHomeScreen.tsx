@@ -691,6 +691,10 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
             events={eventsArr}
             onTapMap={onTapMap}
             onOpenLegend={onOpenLegend}
+            // Maestro flow test-explore-tab-rename.yaml asserts this
+            // testID — preserved across the MapLibre swap so the e2e
+            // smoke test doesn't need to be repointed.
+            testID="explore-minimap"
           />
         )}
 

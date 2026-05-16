@@ -11,7 +11,6 @@ import {
   PanResponder,
 } from 'react-native';
 import * as Location from 'expo-location';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ChevronLeft,
   Clock,
@@ -104,13 +103,6 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
       parent?.setOptions({ tabBarStyle: undefined });
     };
   }, [navigation]);
-
-  // Persist the last map viewport on every camera-settle so re-opening
-  // the Map starts where the user left off. One global slot; multiple
-  // maps would just race on the key — fine since they all want the
-  // same thing.
-  const VIEWPORT_KEY = '@lp:map-viewport';
-  const lastViewport = useRef<{ lat: number; lng: number; zoom: number } | null>(null);
 
   const [permission, setPermission] = useState<PermissionState>('unknown');
   // User position state — kept here so LibreMiniMap (interactive full-
@@ -328,13 +320,11 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
       debounceTimer.current = setTimeout(() => {
         lastBbox.current = next;
         refreshPlaces(next);
-        const centreLat = (next.minLat + next.maxLat) / 2;
-        const centreLng = (next.minLon + next.maxLon) / 2;
-        const span = next.maxLat - next.minLat;
-        const inferredZoom = Math.max(3, Math.min(18, Math.round(8 - Math.log2(span))));
-        const v = { lat: centreLat, lng: centreLng, zoom: inferredZoom };
-        lastViewport.current = v;
-        AsyncStorage.setItem(VIEWPORT_KEY, JSON.stringify(v)).catch(() => {});
+        // Viewport-persist on every camera-settle is on the to-do list
+        // (#552 follow-up — needs a matching hydrate effect on mount,
+        // wire through to Camera.initialViewState). Removed the stub
+        // write that Copilot caught — no point persisting if nothing
+        // reads it back.
       }, 500);
     },
     [refreshPlaces],

@@ -79,6 +79,11 @@ const LocationPickerSheet: React.FC<Props> = ({
   // the caller passed a real initialLat/Lon (i.e. we're editing an
   // existing pin), treat that as already-chosen.
   const [userMoved, setUserMoved] = useState<boolean>(hasInitialPin);
+  // MapLibre's onRegionDidChange fires once on mount at the initial
+  // centre — we must NOT count that as user intent or the confirm
+  // button enables without any actual interaction. This ref swallows
+  // the first emission; subsequent events are real pans.
+  const initialBoundsFiredRef = useRef(false);
 
   useEffect(() => {
     if (!visible) {
@@ -210,6 +215,14 @@ const LocationPickerSheet: React.FC<Props> = ({
                 const lat = (bbox.minLat + bbox.maxLat) / 2;
                 const lon = (bbox.minLon + bbox.maxLon) / 2;
                 setPicked({ lat, lon });
+                // Swallow the initial mount fire (MapLibre emits
+                // onRegionDidChange once at the resolved-start coords
+                // before any user input). Subsequent events are real
+                // pans — those count as user intent.
+                if (!initialBoundsFiredRef.current) {
+                  initialBoundsFiredRef.current = true;
+                  return;
+                }
                 setUserMoved(true);
               }}
             />

@@ -1,6 +1,14 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { Animated, View, StyleSheet, TouchableOpacity, Text } from 'react-native';
-import { Camera, Map, Marker, type CameraRef, type MapRef } from '@maplibre/maplibre-react-native';
+// Alias MapLibre's `Map` component so we can still use the built-in
+// `Map<K,V>` global for the coord → source lookups below.
+import {
+  Camera,
+  Map as MapLibreMap,
+  Marker,
+  type CameraRef,
+  type MapRef,
+} from '@maplibre/maplibre-react-native';
 import {
   Plus,
   Minus,
@@ -19,19 +27,20 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import type { Palette } from '../styles/palettes';
 
-// Native MapLibre replacement for ExploreMiniMap. GH #552 + project memory
-// `reference_map_stack_future_maplibre` agreed migration target: GrapheneOS
-// freezes the Vanadium WebView sandbox under memory pressure (visible in
-// the #560 logs as `ActivityManager: freezing ... app.vanadium.webview`),
-// leaving the Leaflet WebView blank until the user pull-to-refreshes. A
-// native MapLibre view is OS-managed alongside the rest of the React Native
-// tree so it doesn't get yanked.
+// Native MapLibre map — the single shared map component used by every
+// surface in the app (Explore hub, Geo-caches, Places, MapScreen,
+// LocationPickerSheet, and the four detail screens). Replaced the
+// WebView Leaflet stack in #552 / #563 to dodge GrapheneOS Vanadium
+// sandbox freezing (visible in #560 logs as `ActivityManager: freezing
+// app.vanadium.webview`), kill the ~30 s WebView mount on Pixel cold
+// starts, and unlock proper React-tree integration.
 //
-// Visual parity with ExploreMiniMap: same 200 px height, 16 px horizontal
-// margins, 14 px corner radius, same +/− zoom column top-left, recenter
-// + legend buttons bottom-left, "Open map" pill bottom-right. The pin
-// styling is still placeholder coloured dots — porting the SVG glyphs
-// from src/utils/mapPinSvgs/ to MapLibre SymbolLayer is the next sub-task.
+// Pins are RN-rendered `<Marker>` children with a 22 px circle chassis
+// + Lucide glyph per category (merchants via btcMapIconComponent so
+// the on-map icon matches the Places-rail card icon). Density follow-up
+// is to port these to a MapLibre SymbolLayer with image sprites before
+// shipping a dense-city market (Berlin / London / NYC have hundreds of
+// BTC Map pins).
 
 interface Props {
   lat: number | null;
@@ -86,30 +95,27 @@ interface Props {
   onSelectMerchant?: (m: BtcMapPlace) => void;
   onSelectCache?: (c: ParsedCache) => void;
   onSelectEvent?: (e: ParsedEvent) => void;
+  // Optional testID applied to the outer container. Lets host screens
+  // keep their existing Maestro-flow IDs (e.g. ExploreHomeScreen still
+  // hands "explore-minimap" through so test-explore-tab-rename.yaml
+  // doesn't need re-pointing). The on-map controls retain their
+  // own libre-minimap-* IDs separately.
+  testID?: string;
 }
 
-// OSM raster style — minimal inline JSON so we don't depend on an external
-// style-server. Tile URL goes through the standard tile.openstreetmap.org
-// CDN; the attribution string is required by the OSM ToS and surfaces as
-// an automatic copyright control inside the MapLibre view.
-const OSM_STYLE = {
-  version: 8,
-  sources: {
-    osm: {
-      type: 'raster',
-      tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-      tileSize: 256,
-      attribution: '© OpenStreetMap contributors',
-    },
-  },
-  layers: [
-    {
-      id: 'osm',
-      type: 'raster',
-      source: 'osm',
-    },
-  ],
-} as const;
+// Map style — OpenFreeMap's "Liberty" vector style. Donation-funded
+// community mirror of OSM rendering, built specifically for app use,
+// no API key, no per-call billing. We deliberately avoid
+// `tile.openstreetmap.org` directly: the OpenStreetMap Foundation's
+// Tile Usage Policy forbids "heavy use … distributing an app that uses
+// these tiles without prior permission", which a Play Store install
+// arguably qualifies as. OpenFreeMap is what btcmap.org itself uses —
+// keeping Lightning Piggy aligned with the Bitcoin community's stack.
+//
+// Vector tiles (not raster) — sharper at every zoom, smaller wire
+// payload, and renders properly into device-pixel ratios. The full
+// MapLibre style JSON lives at the URL; the bundle just references it.
+const MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
 
 const LibreMiniMapInner: React.FC<Props> = ({
   lat,
@@ -130,6 +136,7 @@ const LibreMiniMapInner: React.FC<Props> = ({
   onSelectMerchant,
   onSelectCache,
   onSelectEvent,
+  testID,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -163,6 +170,21 @@ const LibreMiniMapInner: React.FC<Props> = ({
     if (acc === null || acc === undefined || !Number.isFinite(acc)) return 60;
     return Math.max(50, Math.min(120, 40 + Math.log10(acc) * 22));
   }, [userAccuracyMetres]);
+
+  // O(1) coord → original-source lookups so onSelect* handlers don't do
+  // a linear .find() per rendered marker. The build cost is one
+  // map-construction pass per render where caches/events change; the
+  // lookup cost across all visible markers drops from O(n²) to O(n).
+  const cacheByCoord = useMemo(() => {
+    const m = new Map<string, ParsedCache>();
+    for (const c of caches) m.set(c.coord, c);
+    return m;
+  }, [caches]);
+  const eventByCoord = useMemo(() => {
+    const m = new Map<string, ParsedEvent>();
+    for (const e of events) m.set(e.coord, e);
+    return m;
+  }, [events]);
 
   const cachePoints = useMemo(
     () =>
@@ -216,11 +238,11 @@ const LibreMiniMapInner: React.FC<Props> = ({
   if (lat === null || lon === null) return <View style={styles.container} />;
 
   return (
-    <View style={fill ? styles.containerFill : styles.container}>
-      <Map
+    <View style={fill ? styles.containerFill : styles.container} testID={testID}>
+      <MapLibreMap
         ref={mapRef}
         style={styles.map}
-        mapStyle={JSON.stringify(OSM_STYLE)}
+        mapStyle={MAP_STYLE_URL}
         // Pan / rotate / pitch follow the `interactive` prop. Mini-map
         // mode (default) disables pan so the parent ScrollView can own
         // the vertical drag gesture for pull-to-refresh; full-screen
@@ -268,7 +290,12 @@ const LibreMiniMapInner: React.FC<Props> = ({
             dot are the same point). */}
         <Marker id="user" lngLat={[userLon ?? lon, userLat ?? lat]}>
           <View style={styles.userMarkerWrap}>
-            {userAccuracyMetres !== null && userAccuracyMetres !== undefined ? (
+            {/* Halo only when accuracy is a finite positive number —
+                NaN / Infinity / ≤ 0 would render at the fallback diameter
+                and silently mislead the user about their precision. */}
+            {typeof userAccuracyMetres === 'number' &&
+            Number.isFinite(userAccuracyMetres) &&
+            userAccuracyMetres > 0 ? (
               <Animated.View
                 style={[
                   styles.userHalo,
@@ -309,7 +336,7 @@ const LibreMiniMapInner: React.FC<Props> = ({
         {/* Caches: Piglet (Lightning Piggy) → PiggyBank pink, vanilla
             NIP-GC → MapPin purple. */}
         {cachePoints.map((c) => {
-          const original = caches.find((src) => src.coord === c.id);
+          const original = cacheByCoord.get(c.id);
           return (
             <Marker
               key={c.id}
@@ -329,7 +356,7 @@ const LibreMiniMapInner: React.FC<Props> = ({
         })}
         {/* Events: Calendar glyph in deep-purple. */}
         {eventPoints.map((e) => {
-          const original = events.find((src) => src.coord === e.id);
+          const original = eventByCoord.get(e.id);
           return (
             <Marker
               key={e.id}
@@ -343,7 +370,7 @@ const LibreMiniMapInner: React.FC<Props> = ({
             </Marker>
           );
         })}
-      </Map>
+      </MapLibreMap>
 
       {/* Top-left: +/− zoom column. Matches ExploreMiniMap's layout
           and spacing so the swap is visually neutral. */}
@@ -493,8 +520,8 @@ const createStyles = (colors: Palette) =>
     pinLn: { backgroundColor: colors.brandPink },
     pinOnchain: { backgroundColor: '#F7931A' },
     pinPiglet: { backgroundColor: colors.brandPink },
-    pinCache: { backgroundColor: '#7A5CFF' },
-    pinEvent: { backgroundColor: '#5b3aff' },
+    pinCache: { backgroundColor: colors.cachePurple },
+    pinEvent: { backgroundColor: colors.eventViolet },
     zoomColumn: {
       position: 'absolute',
       top: 10,

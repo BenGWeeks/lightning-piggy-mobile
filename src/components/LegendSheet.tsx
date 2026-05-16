@@ -118,10 +118,11 @@ export const LegendSheet: React.FC<Props> = ({
             <Text style={styles.sectionTitle}>Pin types</Text>
           </View>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollPad}>
-            {/* All pin-type rows render the same 28-px circle-with-glyph
-                treatment used on the actual map, so what the user sees in
-                the legend is exactly what they'll see in the viewport.
-                Colour signals payment / cache class; glyph signals what. */}
+            {/* All pin-type rows render the same 22-px circle-with-glyph
+                chassis used on the actual map markers, so what the user
+                sees in the legend is exactly what they'll see in the
+                viewport. Colour signals payment / cache class; glyph
+                signals what. */}
             <View style={styles.row}>
               <View style={[styles.pinChip, { backgroundColor: '#EC008C' }]}>
                 <Zap size={12} color="#fff" strokeWidth={2.5} />
@@ -141,7 +142,7 @@ export const LegendSheet: React.FC<Props> = ({
               <Text style={styles.rowLabel}>NIP-GC Piglet (Lightning Piggy)</Text>
             </View>
             <View style={styles.row}>
-              <View style={[styles.pinChip, { backgroundColor: '#7A5CFF' }]}>
+              <View style={[styles.pinChip, { backgroundColor: colors.cachePurple }]}>
                 <MapPin size={12} color="#fff" strokeWidth={2.5} />
               </View>
               <Text style={styles.rowLabel}>NIP-GC cache (vanilla)</Text>
