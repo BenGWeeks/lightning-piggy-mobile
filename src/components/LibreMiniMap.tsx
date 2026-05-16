@@ -153,17 +153,31 @@ const LibreMiniMapInner: React.FC<Props> = ({
   if (lat === null || lon === null) return <View style={styles.container} />;
 
   return (
-    <View style={styles.container}>
+    <View
+      style={styles.container}
+      // Belt + braces touch suppression. The wrapper's onStartShouldSet
+      // ResponderCapture claims the touch the instant a finger lands
+      // anywhere inside the map's bounds, BEFORE the outer ScrollView's
+      // RefreshControl can interpret a downward drag as pull-to-refresh.
+      // We don't actually keep the responder (native MapLibre handles
+      // pan/zoom via its own gesture recognizer below us), but the
+      // capture is enough to flip mapTouched=true synchronously on
+      // touch-down so scrollEnabled flips false before the gesture is
+      // classified. Region-change events (below) handle the longer-lived
+      // pan window for the same suppression.
+      onStartShouldSetResponderCapture={() => {
+        onInteractionChange?.(true);
+        return false; // don't actually capture — let MapLibre's native recognizer handle pan/zoom
+      }}
+      onResponderRelease={() => onInteractionChange?.(false)}
+      onResponderTerminate={() => onInteractionChange?.(false)}
+    >
       <Map
         style={styles.map}
         mapStyle={JSON.stringify(OSM_STYLE)}
-        // The native MapLibre view consumes touches before they bubble
-        // up to a parent View — so an onTouchStart handler on the wrapper
-        // never fires when the user pans the map. We catch the gesture
-        // via MapLibre's own region-change events instead, which fire
-        // exactly when the camera begins / finishes moving in response
-        // to user input. This is what suspends the outer ScrollView's
-        // pull-to-refresh while the user is panning the map.
+        // Reinforces the wrapper-level suppression: fires when the camera
+        // actually starts moving (long-running pan). Returns false when
+        // the user lifts a finger.
         onRegionWillChange={() => onInteractionChange?.(true)}
         onRegionDidChange={() => onInteractionChange?.(false)}
       >
