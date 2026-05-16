@@ -16,7 +16,8 @@
     "preview": {
       "distribution": "internal",
       "env": {
-        "APP_VARIANT": "preview"
+        "APP_VARIANT": "preview",
+        "EXPO_PUBLIC_KEEP_PERF_LOGS": "1"
       },
       "android": {
         "buildType": "apk"

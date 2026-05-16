@@ -10,6 +10,15 @@ import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 import LegendSheet from './LegendSheet';
 import { ME_DOT_CSS, ME_DOT_JS } from '../utils/mapMeDot';
 import { MAP_PIN_SVG_PALETTE_JS } from '../utils/mapPinSvgs';
+import { decodeGeohash } from '../utils/geohash';
+import {
+  LEAFLET_BASE_CSS,
+  LEAFLET_HEAD_TAGS,
+  LEAFLET_MAP_BACKGROUND_CSS,
+  LEAFLET_SCRIPT_TAG,
+  POST_BRIDGE_JS,
+  tileLayerJs,
+} from '../utils/mapWebview/tiles';
 
 export interface MiniMapBbox {
   minLat: number;
@@ -162,6 +171,68 @@ export const ExploreMiniMap: React.FC<Props> = ({
     webviewRef.current.injectJavaScript(js);
   }, [ready]);
 
+  // Snapshot of the pin payload at first WebView mount. Baked straight
+  // into the HTML so pins render alongside Leaflet on the very first
+  // paint — eliminates the React→WebView round-trip that the useEffect
+  // path below incurs (LP_setHub fires only after `ready`, which itself
+  // waits on the Leaflet CDN fetch). Without this, cached merchants
+  // still take a few hundred ms to appear on the map even though they
+  // were already in React state synchronously courtesy of PR #550's
+  // peekCachedPlacesSync seed.
+  //
+  // Stored in a ref so it doesn't change across renders — the HTML is
+  // frozen at first mount; live updates flow through the existing
+  // `useEffect → injectJavaScript → LP_setHub` path below.
+  const initialHubPayloadRef = useRef<string | null>(null);
+  if (initialHubPayloadRef.current === null && lat !== null && lon !== null) {
+    const places = merchants.map((m) => ({
+      lat: m.lat,
+      lng: m.lon,
+      lightning: acceptsLightning(m),
+      category: m.icon ?? null,
+    }));
+    const cacheLocs = caches
+      .filter((c) => c.geohash)
+      .map((c) => ({
+        ...decodeGeohash(c.geohash as string),
+        kind: c.isLpPiggy ? 'piggy' : 'cache',
+      }));
+    const eventLocs = events
+      .filter((e) => e.geohash)
+      .map((e) => decodeGeohash(e.geohash as string));
+    const meLat = cachePin && userLat !== null ? userLat : lat;
+    const meLon = cachePin && userLon !== null ? userLon : lon;
+    const hasMe = cachePin ? userLat !== null && userLon !== null : true;
+    initialHubPayloadRef.current = JSON.stringify({
+      me: hasMe ? { lat: meLat, lng: meLon, accuracy: userAccuracyMetres ?? null } : null,
+      merchants: places,
+      caches: cacheLocs,
+      events: eventLocs,
+      cachePin,
+    });
+  }
+
+  // Memoised HTML — only rebuilt when the map's structural inputs
+  // change (centre / zoom / interactivity). Stable across merchant /
+  // cache updates so we don't remount the WebView on every relay tick.
+  const html = useMemo(() => {
+    const __t0 = performance.now();
+    const out = makeHtml(
+      lat ?? 0,
+      lon ?? 0,
+      defaultZoom,
+      interactive,
+      initialHubPayloadRef.current ?? '',
+    );
+    const __dt = performance.now() - __t0;
+    if (__dt > 50) {
+      console.log(
+        `[PerfBlock] ExploreMiniMap makeHtml: ${Math.round(__dt)}ms (${out.length} chars)`,
+      );
+    }
+    return out;
+  }, [lat, lon, defaultZoom, interactive]);
+
   // Notify the parent every time a finger lands on / leaves the map.
   // The parent uses these to disable its own scroll + pull-to-refresh
   // for the duration; without that, a vertical pan that starts on an
@@ -230,12 +301,22 @@ export const ExploreMiniMap: React.FC<Props> = ({
         <WebView
           ref={webviewRef}
           originWhitelist={['*']}
-          source={{ html: makeHtml(lat, lon, defaultZoom, interactive) }}
+          source={{ html }}
           onMessage={(e) => {
             try {
               const msg = JSON.parse(e.nativeEvent.data);
-              if (msg.type === 'ready') setReady(true);
-              else if (msg.type === 'bounds' && msg.bbox && onBoundsChange) {
+              if (msg.type === 'ready') {
+                if (!ready) {
+                  // Single-shot marker — distinguishes WebView mount cost
+                  // from RN-level mount of the surrounding card. The HTML
+                  // is inlined so the round-trip is local; but Leaflet's
+                  // init + tile-spritesheet decode can still run hundreds
+                  // of ms on the WebView's renderer thread, and the bridge
+                  // 'ready' postMessage lands once that's done.
+                  console.log(`[PerfBlock] ExploreMiniMap WebView ready`);
+                }
+                setReady(true);
+              } else if (msg.type === 'bounds' && msg.bbox && onBoundsChange) {
                 onBoundsChange(msg.bbox);
               }
             } catch {}
@@ -352,13 +433,20 @@ export const ExploreMiniMap: React.FC<Props> = ({
     // interacting with the map. TouchableOpacity's typing doesn't
     // expose onTouch* — putting it on the inner View keeps types happy
     // without losing the tap-to-open behaviour.
+    //
+    // The wrapping View takes `containerStyle` too so `fill` mode's
+    // `flex: 1` propagates through; without it the unstyled View
+    // collapses to 0 px in a parent that constrains by height (cache
+    // detail hero), and the WebView paints into a 0×0 box (the empty
+    // grey container Ben saw on the cache-detail screen).
     <View
+      style={containerStyle}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchEnd}
     >
       <TouchableOpacity
-        style={containerStyle}
+        style={styles.tapFillOverlay}
         activeOpacity={0.85}
         onPress={onTapMap}
         accessibilityLabel="Open full map"
@@ -377,14 +465,18 @@ const makeHtml = (
   lon: number,
   defaultZoom: number,
   interactive: boolean,
+  // JSON-encoded LP_setHub payload to render alongside Leaflet on the
+  // very first paint. Empty string skips the inline call (subscriber
+  // updates will land via injectJavaScript when relay data arrives).
+  // See `initialHubPayloadRef` in the component for the bake site.
+  initialHubPayloadJson: string,
 ): string => `<!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="initial-scale=1.0,maximum-scale=1.0,user-scalable=no" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  ${LEAFLET_HEAD_TAGS}
   <style>
-    html,body,#map{margin:0;padding:0;height:100%;width:100%;background:#eee}
+    ${LEAFLET_BASE_CSS}
+    ${LEAFLET_MAP_BACKGROUND_CSS}
     .lp-pin{width:14px;height:14px;border-radius:7px;background:#EC008C;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.4)}
     .lp-pin.onchain{background:#F5A623}
     /* Round circles match the list-row iconWrap (pink for Piglet,
@@ -408,10 +500,10 @@ const makeHtml = (
 </head>
 <body>
 <div id="map"></div>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+${LEAFLET_SCRIPT_TAG}
 <script>
 ${ME_DOT_JS}
-const post=(m)=>window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(JSON.stringify(m));
+${POST_BRIDGE_JS}
 // minZoom 7 caps the bbox at about 400 km wide at UK latitudes — wider
 // than that and the list becomes "everything within a country" rather
 // than "nearby", which is the wrong product for an Explore-hub mini-map.
@@ -420,7 +512,7 @@ const post=(m)=>window.ReactNativeWebView&&window.ReactNativeWebView.postMessage
 // maxZoom 18 matches OSM tile availability.
 const __interactive=${interactive ? 'true' : 'false'};
 const map=L.map('map',{zoomControl:false,dragging:__interactive,scrollWheelZoom:__interactive,doubleClickZoom:__interactive,touchZoom:__interactive,boxZoom:false,keyboard:false,minZoom:7,maxZoom:18,tap:__interactive}).setView([${lat},${lon}],${defaultZoom});
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
+${tileLayerJs()}
 let merchantLayer=L.layerGroup().addTo(map),cacheLayer=L.layerGroup().addTo(map),eventLayer=L.layerGroup().addTo(map);
 const dot=(cls,size)=>L.divIcon({className:'',html:'<div class="'+cls+'"></div>',iconSize:[size,size]});
 // SVG palette + categorySvg() helper — sourced from
@@ -500,6 +592,11 @@ window.LP_recenter=function(){
   const target=__lastMe || {lat:${lat},lng:${lon}};
   map.setView([target.lat,target.lng],Math.max(map.getZoom(),${defaultZoom}));
 };
+// Render any pins the parent already had cached at mount time —
+// runs synchronously on first paint, no React round-trip required.
+// See initialHubPayloadRef in the component. Empty string skips
+// (parent had nothing to bake).
+${initialHubPayloadJson ? 'try{LP_setHub(' + initialHubPayloadJson + ');}catch(_){}' : ''}
 post({type:'ready'});
 // Also emit straight away — covers the case where LP_setHub hasn't
 // been called yet (parent has no data) but the map already shows the
@@ -507,35 +604,6 @@ post({type:'ready'});
 emitBounds();
 </script>
 </body></html>`;
-
-// Inline geohash decoder — same algorithm as MapScreen (kept duplicated
-// rather than extracted because both files want zero-overhead inline use).
-const GEOHASH_BASE32 = '0123456789bcdefghjkmnpqrstuvwxyz';
-const decodeGeohash = (gh: string): { lat: number; lng: number } => {
-  let latLo = -90,
-    latHi = 90,
-    lonLo = -180,
-    lonHi = 180,
-    even = true;
-  for (let i = 0; i < gh.length; i += 1) {
-    const idx = GEOHASH_BASE32.indexOf(gh[i].toLowerCase());
-    if (idx < 0) continue;
-    for (let bit = 4; bit >= 0; bit -= 1) {
-      const set = (idx >> bit) & 1;
-      if (even) {
-        const m = (lonLo + lonHi) / 2;
-        if (set) lonLo = m;
-        else lonHi = m;
-      } else {
-        const m = (latLo + latHi) / 2;
-        if (set) latLo = m;
-        else latHi = m;
-      }
-      even = !even;
-    }
-  }
-  return { lat: (latLo + latHi) / 2, lng: (lonLo + lonHi) / 2 };
-};
 
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
@@ -557,6 +625,11 @@ const createStyles = (colors: Palette) =>
       position: 'relative',
     },
     webview: { flex: 1, backgroundColor: 'transparent' },
+    // The non-interactive wrapper's inner TouchableOpacity used to own
+    // containerStyle. We moved that to the outer View so `fill` mode's
+    // flex propagates correctly; the TouchableOpacity now just needs
+    // to fill its parent.
+    tapFillOverlay: { flex: 1 },
     fallback: {
       flex: 1,
       alignItems: 'center',

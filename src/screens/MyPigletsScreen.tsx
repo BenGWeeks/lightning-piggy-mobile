@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  RefreshControl,
   SectionList,
   StyleSheet,
   Text,
@@ -16,7 +17,10 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useNostr } from '../contexts/NostrContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { type ParsedCache, parseCacheCoord } from '../services/nostrPlacesService';
-import { subscribeFoundLogsByAuthors } from '../services/nostrPlacesPublisher';
+import {
+  fetchCachesByAuthor,
+  subscribeFoundLogsByAuthors,
+} from '../services/nostrPlacesPublisher';
 import { loadCachedCaches, peekCachedCachesSync } from '../services/nostrPlacesStorage';
 import { loadPiggies, type HiddenPiggy } from '../services/piggyStorageService';
 import { republishPiggy } from '../services/republishPiggyService';
@@ -90,17 +94,89 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
   // cache coord.
   const [republishingCoord, setRepublishingCoord] = useState<string | null>(null);
 
-  // Local NIP-GC cache — paint instantly, then refresh from AsyncStorage.
+  // Local NIP-GC cache — paint instantly, then refresh from AsyncStorage,
+  // then ALSO query relays for the user's own kind 37516 listings by
+  // author so historical Piggies surface even when (a) the nearby
+  // subscription hasn't echoed them back, (b) the geohash sits outside
+  // the user's current "nearby" window, or (c) this device's
+  // ParsedCache store predates the publish. Three-layer hydrate keeps
+  // the page useful regardless of cache freshness (#73 follow-up).
   const [allCaches, setAllCaches] = useState<ParsedCache[]>(() => peekCachedCachesSync());
+  // Merge helper used by mount, refresh, and the by-author fetch —
+  // dedupe by coord, latest createdAt wins.
+  const mergeCaches = useCallback(
+    (incoming: ParsedCache[]) => {
+      setAllCaches((prev) => {
+        const merged = new Map<string, ParsedCache>();
+        for (const c of prev) merged.set(c.coord, c);
+        for (const c of incoming) {
+          const existing = merged.get(c.coord);
+          if (!existing || c.createdAt > existing.createdAt) merged.set(c.coord, c);
+        }
+        return [...merged.values()];
+      });
+    },
+    [],
+  );
   useEffect(() => {
     let cancelled = false;
     loadCachedCaches().then((cs) => {
-      if (!cancelled && cs.length > 0) setAllCaches(cs);
+      if (!cancelled && cs.length > 0) mergeCaches(cs);
     });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [mergeCaches]);
+  // Relay fetch — only when we know the user's pubkey. The empty-deps
+  // guard `lastFetchPubkeyRef` keeps this to one query per pubkey,
+  // not per render.
+  const lastFetchPubkeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pubkey || lastFetchPubkeyRef.current === pubkey) return;
+    lastFetchPubkeyRef.current = pubkey;
+    let cancelled = false;
+    const readRelays = relays.filter((r) => r.read).map((r) => r.url);
+    fetchCachesByAuthor(pubkey, readRelays.length > 0 ? readRelays : undefined)
+      .then((mine) => {
+        if (cancelled || mine.length === 0) return;
+        mergeCaches(mine);
+      })
+      .catch(() => {
+        // Non-fatal — the local cache still drives the page.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pubkey, relays, mergeCaches]);
+
+  // Pull-to-refresh: re-hydrate both the local HiddenPiggy storage
+  // (catches anything published since first mount) AND the relay-
+  // sourced ParsedCache cache (catches kind 37516 echoes that
+  // arrived while the Explore subscription was paused). Both reads
+  // are sub-100 ms on a warm device; the brief refresh spinner is
+  // the user-visible signal that the page is re-syncing.
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const readRelays = relays.filter((r) => r.read).map((r) => r.url);
+      const [piggies, caches, mine] = await Promise.all([
+        loadPiggies(),
+        loadCachedCaches(),
+        pubkey
+          ? fetchCachesByAuthor(pubkey, readRelays.length > 0 ? readRelays : undefined).catch(
+              () => [] as ParsedCache[],
+            )
+          : Promise.resolve([] as ParsedCache[]),
+      ]);
+      const m = new Map<string, HiddenPiggy>();
+      for (const p of piggies) m.set(p.id, p);
+      setPiggiesById(m);
+      mergeCaches([...caches, ...mine]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [mergeCaches, pubkey, relays]);
 
   // Map for finds → cache lookup. Built once per allCaches change.
   const cacheByCoord = useMemo(() => {
@@ -303,6 +379,14 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
         }
         contentContainerStyle={styles.listContent}
         stickySectionHeadersEnabled={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.brandPink}
+            colors={[colors.brandPink]}
+          />
+        }
         ListHeaderComponent={
           <TouchableOpacity
             style={styles.hideCta}

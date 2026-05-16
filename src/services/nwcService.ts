@@ -3,6 +3,21 @@ import type { Nip47GetInfoResponse } from '@getalby/sdk';
 
 const providers = new Map<string, NostrWebLNProvider>();
 const nwcUrls = new Map<string, string>();
+// In-flight reconnect promises, keyed by walletId. Dedupes parallel
+// `ensureConnected` callers (getBalance + makeInvoice + ...) so a single
+// dropped WebSocket doesn't spawn N simultaneous `provider.enable()`
+// handshakes, each holding the JS thread on the same slow relay. Pre-fix
+// a NWC blip during HuntPiggyDetailScreen mount could pin the thread for
+// 30 s while four reconnect attempts serialised through the same relay.
+const reconnectsInFlight = new Map<string, Promise<NostrWebLNProvider>>();
+
+// In-flight getBalance promises, keyed by walletId. Parallel callers
+// (initial-connect getBalance + refreshActiveBalance + expectPayment
+// tick) coalesce on the same request rather than firing three separate
+// `provider.getBalance()` calls and tripling the chance of a NIP-47
+// 'no info event' relay error. Cleared on settle so a later refresh
+// gets a fresh response.
+const getBalancesInFlight = new Map<string, Promise<number | null>>();
 
 // Per-wallet timestamp of the most recent relay-publish failure. Used
 // to fast-fail pay_invoice when the relay is unreachable (see #175).
@@ -267,28 +282,50 @@ export async function getBalance(
   walletId: string,
   options: GetBalanceOptions = {},
 ): Promise<number | null> {
-  const provider = await ensureConnected(walletId);
-  if (!provider) return null;
-  try {
-    // When replyTimeoutMs is set, run a single attempt so the timeout is a true total ceiling (1 × replyTimeoutMs). Without it, retry twice on slow relays so a single timeout doesn't flash "Disconnected" / null balance — the SDK's own 10 s replyTimeout still bounds each attempt.
-    const b = await withRetry(
-      () => {
-        const call = provider.getBalance();
-        return options.replyTimeoutMs !== undefined
-          ? withTimeout(call, options.replyTimeoutMs, `getBalance(${walletId})`)
-          : call;
-      },
-      {
-        label: `getBalance(${walletId})`,
-        attempts: options.replyTimeoutMs !== undefined ? 1 : 2,
-        delayMs: 1500,
-      },
-    );
-    return b.balance;
-  } catch (error) {
-    console.warn(`getBalance error for ${walletId}:`, error);
-    return null;
+  // Dedupe parallel callers. The replyTimeoutMs path bypasses the
+  // shared promise because each caller may want a different ceiling —
+  // forcing them onto a single longer-timeout request would be wrong.
+  if (options.replyTimeoutMs === undefined) {
+    const pending = getBalancesInFlight.get(walletId);
+    if (pending) return pending;
   }
+  const __t0 = performance.now();
+  const run = async (): Promise<number | null> => {
+    const provider = await ensureConnected(walletId);
+    if (!provider) return null;
+    try {
+      // When replyTimeoutMs is set, run a single attempt so the timeout is a true total ceiling (1 × replyTimeoutMs). Without it, retry twice on slow relays so a single timeout doesn't flash "Disconnected" / null balance — the SDK's own 10 s replyTimeout still bounds each attempt.
+      const b = await withRetry(
+        () => {
+          const call = provider.getBalance();
+          return options.replyTimeoutMs !== undefined
+            ? withTimeout(call, options.replyTimeoutMs, `getBalance(${walletId})`)
+            : call;
+        },
+        {
+          label: `getBalance(${walletId})`,
+          attempts: options.replyTimeoutMs !== undefined ? 1 : 2,
+          delayMs: 1500,
+        },
+      );
+      const __dt = performance.now() - __t0;
+      if (__dt > 500) {
+        console.log(`[PerfBlock] NWC.getBalance: ${Math.round(__dt)}ms (walletId=${walletId.slice(0, 8)}…)`);
+      }
+      return b.balance;
+    } catch (error) {
+      const __dt = performance.now() - __t0;
+      console.log(`[PerfBlock] NWC.getBalance FAILED after ${Math.round(__dt)}ms (walletId=${walletId.slice(0, 8)}…)`);
+      console.warn(`getBalance error for ${walletId}:`, error);
+      return null;
+    }
+  };
+  if (options.replyTimeoutMs !== undefined) return run();
+  const promise = run().finally(() => {
+    getBalancesInFlight.delete(walletId);
+  });
+  getBalancesInFlight.set(walletId, promise);
+  return promise;
 }
 
 export async function makeInvoice(
@@ -377,8 +414,18 @@ async function ensureConnected(walletId: string): Promise<NostrWebLNProvider | n
 
   const client = (provider as any).client;
   if (client && !client.connected && nwcUrls.has(walletId)) {
-    if (__DEV__) console.log('[NWC] Connection lost, reconnecting...');
-    provider = await reconnect(walletId);
+    // Dedupe parallel reconnect attempts — every concurrent ensureConnected
+    // caller awaits the same promise. Promise is cleared once resolved or
+    // rejected so a *later* drop can trigger a fresh reconnect.
+    let pending = reconnectsInFlight.get(walletId);
+    if (!pending) {
+      if (__DEV__) console.log('[NWC] Connection lost, reconnecting...');
+      pending = reconnect(walletId).finally(() => {
+        reconnectsInFlight.delete(walletId);
+      });
+      reconnectsInFlight.set(walletId, pending);
+    }
+    provider = await pending;
   }
   return provider;
 }

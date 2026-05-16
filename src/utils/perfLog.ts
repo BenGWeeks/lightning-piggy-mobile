@@ -39,6 +39,28 @@ export function perfAnchor(): void {
   if (T0 === null) T0 = Date.now();
 }
 
+// Tab-navigation tap-to-paint timing. Records the wall-clock at the
+// tabPress event and emits the delta when the destination screen's
+// focus event lands. The focus event is the closest proxy to "first
+// paint of the new tab content" available without a custom native
+// module — react-navigation fires it after the screen mounts and the
+// transition completes. Anything > 200 ms here is what the user
+// perceives as a sluggish tab; > 1 s is a noticeable freeze; > 5 s is
+// the kind of lockup that prompts "did I tap?" double-presses.
+const __tabTapAt = new Map<string, number>();
+export function perfTabTap(tabName: string): void {
+  if (!PERF_LOGS_ENABLED) return;
+  __tabTapAt.set(tabName, Date.now());
+  console.log(`[PerfTab] ${tabName} tap`);
+}
+export function perfTabRendered(tabName: string): void {
+  if (!PERF_LOGS_ENABLED) return;
+  const tapAt = __tabTapAt.get(tabName);
+  if (tapAt === undefined) return;
+  console.log(`[PerfTab] ${tabName} focus tap→focus=${Date.now() - tapAt}ms`);
+  __tabTapAt.delete(tabName);
+}
+
 // JS-thread heartbeat. A self-recurring `setTimeout(cb, 100)` that
 // logs `[Perf] heartbeat #N gap=Xms` every tick. If the JS thread is
 // blocked, the next tick fires LATE — `gap` reports the actual delay

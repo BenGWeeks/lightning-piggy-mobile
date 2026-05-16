@@ -8,9 +8,12 @@ import {
   ScrollView,
   ActivityIndicator,
   Image,
+  KeyboardAvoidingView,
   Linking,
+  Modal,
   Platform,
 } from 'react-native';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
@@ -28,6 +31,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   Clipboard as ClipboardIcon,
+  QrCode,
   Globe,
   ImagePlus,
   Lock,
@@ -54,7 +58,9 @@ import {
 import { loadPiggies, newPiggyId, savePiggy } from '../services/piggyStorageService';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 import { encodeGeohash } from '../utils/geohash';
-import { buildCacheListing } from '../services/nostrPlacesService';
+import { buildCacheListing, GC_LISTING_KIND, parseCache } from '../services/nostrPlacesService';
+import { peekCachedCachesSync, saveCaches } from '../services/nostrPlacesStorage';
+import * as nip19 from 'nostr-tools/nip19';
 import { publishCacheEvent } from '../services/nostrPlacesPublisher';
 import NfcWriteSheet from '../components/NfcWriteSheet';
 import LocationPickerSheet from '../components/LocationPickerSheet';
@@ -79,7 +85,7 @@ type Stage =
 const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { signEvent, relays } = useNostr();
+  const { signEvent, relays, pubkey } = useNostr();
 
   // Edit-mode identity. When the route carries a `piggyId` we reuse it
   // (and the original createdAt) on save so `savePiggy` overwrites the
@@ -91,6 +97,19 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   // anchor for NIP-40 windows. Captured during the hydration effect
   // below; null until then (and forever when creating fresh).
   const originalCreatedAt = useRef<number | null>(null);
+  // Piggy id is stable across NFC-write (step 4) and Save/publish
+  // (step 6). Holding it in a ref means the kind 37516 `d` tag, the
+  // local HiddenPiggy record, AND the NFC tag's nostr:naddr + LP-URL
+  // records all reference the same identifier. Lazy-init: editing
+  // mode hydrates from the existing id; fresh hides mint on first
+  // access via `ensurePiggyId()` below.
+  const piggyIdRef = useRef<string | null>(null);
+  const ensurePiggyId = useCallback((): string => {
+    if (piggyIdRef.current === null) {
+      piggyIdRef.current = editingId ?? newPiggyId();
+    }
+    return piggyIdRef.current;
+  }, [editingId]);
 
   const [lnurl, setLnurl] = useState('');
   const [isPublic, setIsPublic] = useState(false);
@@ -109,6 +128,12 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   // map-based location picker (step 4).
   const [nfcSheetVisible, setNfcSheetVisible] = useState(false);
   const [locationPickerVisible, setLocationPickerVisible] = useState(false);
+  // QR-scan modal for the LNURL input. Opened from the scan icon next
+  // to the paste button on step 2. Permission state is held by
+  // expo-camera's hook — null until first request resolves; we present
+  // a Grant button when the user has denied or not yet asked.
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   // Geocache-info step (step 5) — finder-facing metadata that becomes
   // the kind 37516 listing. Everything has a NIP-GC default so the
   // step can be skipped through.
@@ -152,6 +177,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         return;
       }
       originalCreatedAt.current = piggy.createdAt;
+      piggyIdRef.current = piggy.id;
       setLnurl(piggy.lnurlw);
       setIsPublic(piggy.isPublic);
       setStage({
@@ -228,6 +254,40 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     }
   }, []);
 
+  // Open the QR scanner — if permission was already granted we skip
+  // straight to the camera; otherwise the modal shows a Grant button
+  // and the user can request access in-context. The scanner self-
+  // closes on the first successful read.
+  const handleOpenScanner = useCallback(async () => {
+    if (!cameraPermission?.granted) {
+      const result = await requestCameraPermission();
+      if (!result.granted) {
+        // User denied — open the modal anyway so they can see the
+        // "Camera access needed" copy + retry the prompt.
+      }
+    }
+    setScannerOpen(true);
+  }, [cameraPermission?.granted, requestCameraPermission]);
+
+  // Camera scanner callback — fires once when the native barcode
+  // detector recognises a QR. We strip an optional "lightning:"
+  // prefix because LNURL QRs in the wild come both ways; the
+  // validation step accepts either, but the input field reads
+  // cleaner without the prefix.
+  const handleBarCodeScanned = useCallback(
+    ({ data }: { data: string }) => {
+      if (!scannerOpen) return;
+      const trimmed = data.trim();
+      const lnurlOnly = /^lightning:/i.test(trimmed)
+        ? trimmed.slice('lightning:'.length).trim()
+        : trimmed;
+      setLnurl(lnurlOnly);
+      if (stage.kind === 'validated') setStage({ kind: 'idle' });
+      setScannerOpen(false);
+    },
+    [scannerOpen, stage.kind],
+  );
+
   const handleValidate = useCallback(async () => {
     if (!lnurl.trim()) {
       Alert.alert('Paste an LNURL first', 'Create the link in your wallet, then paste it here.', [
@@ -250,7 +310,13 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [lnurl]);
 
   const handleSave = useCallback(async () => {
-    if (stage.kind !== 'validated') return;
+    console.log(
+      `[Publish] handleSave called — stage=${stage.kind} isPublic=${isPublic} pubkey=${pubkey ? pubkey.slice(0, 8) + '…' : 'null'}`,
+    );
+    if (stage.kind !== 'validated') {
+      console.log(`[Publish] aborted: stage !== validated (was ${stage.kind})`);
+      return;
+    }
     const waitMinutes = parseInt(waitMinutesText.trim(), 10);
     const waitSecondsHint =
       Number.isFinite(waitMinutes) && waitMinutes > 0 ? waitMinutes * 60 : undefined;
@@ -262,7 +328,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     // stays anchored to the original hide moment so the My Piglets
     // sort order doesn't reshuffle on every edit.
     const piggy = {
-      id: editingId ?? newPiggyId(),
+      id: ensurePiggyId(),
       lnurlw: lnurl.trim(),
       lnurlDescription: stage.params.defaultDescription ?? undefined,
       createdAt: originalCreatedAt.current ?? Date.now(),
@@ -292,7 +358,19 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
           ? undefined
           : Math.floor(Date.now() / 1000) + parseInt(expiryDays, 10) * 24 * 60 * 60,
     };
-    await savePiggy(piggy);
+    console.log(`[Publish] savePiggy starting (id=${piggy.id})`);
+    try {
+      await savePiggy(piggy);
+    } catch (e) {
+      console.log(`[Publish] savePiggy threw: ${(e as Error)?.message ?? e}`);
+      Toast.show({
+        type: 'error',
+        text1: 'Could not save Piggy',
+        text2: (e as Error).message,
+      });
+      return;
+    }
+    console.log(`[Publish] savePiggy ok`);
     setStage({ kind: 'saved', lnurlw: piggy.lnurlw });
     Toast.show({ type: 'success', text1: isEditMode ? 'Piggy updated 🐷' : 'Piggy hidden 🐷' });
 
@@ -305,6 +383,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     if (piggy.isPublic) {
       try {
         if (typeof piggy.lat !== 'number' || typeof piggy.lon !== 'number') {
+          console.log(`[Publish] aborted: no location pin`);
           Toast.show({
             type: 'info',
             text1: 'Saved locally — drop a pin to publish',
@@ -312,8 +391,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
           });
           return;
         }
+        console.log(`[Publish] buildCacheListing`);
         const unsigned = buildCacheListing(piggy);
+        console.log(`[Publish] signEvent calling — signer pubkey known? ${pubkey ? 'yes' : 'NO'}`);
         const signed = await signEvent(unsigned);
+        console.log(`[Publish] signEvent returned: ${signed ? 'signed' : 'null'}`);
         if (!signed) {
           Toast.show({
             type: 'error',
@@ -323,13 +405,39 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
           return;
         }
         const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
+        console.log(`[Publish] publishCacheEvent → ${writeRelays.length || 'default'} relays`);
         await publishCacheEvent(signed, writeRelays.length > 0 ? writeRelays : undefined);
+        console.log(`[Publish] publishCacheEvent ok`);
+        // Mirror the just-published event into the local ParsedCache
+        // cache that MyPiglets reads from. Otherwise the listing only
+        // appears after the user's NIP-GC subscription echoes it back
+        // — and that subscription is paused while the user is on this
+        // wizard (per #557's tab-blur pause), so the event lands at
+        // a dead subscriber. Parsing locally + writing to the same
+        // store the subscriber would have written to bridges the gap.
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const parsedFromSigned = parseCache(signed as any);
+          if (parsedFromSigned) {
+            const current = peekCachedCachesSync();
+            const existingIdx = current.findIndex((c) => c.coord === parsedFromSigned.coord);
+            const next =
+              existingIdx >= 0
+                ? current.map((c, i) => (i === existingIdx ? parsedFromSigned : c))
+                : [parsedFromSigned, ...current];
+            saveCaches(next);
+            console.log(`[Publish] mirrored to local cache (coord=${parsedFromSigned.coord})`);
+          }
+        } catch (mirrorErr) {
+          console.warn(`[Publish] local-cache mirror failed: ${(mirrorErr as Error).message}`);
+        }
         Toast.show({
           type: 'success',
           text1: isEditMode ? 'Piggy republished 🐷' : 'Piggy published 🐷',
           text2: isEditMode ? 'Updated listing live on relays.' : 'Visible on Discover.',
         });
       } catch (e) {
+        console.log(`[Publish] publish path threw: ${(e as Error)?.message ?? e}`);
         Toast.show({
           type: 'error',
           text1: 'Could not publish to relays',
@@ -359,7 +467,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     cacheSize,
     cacheType,
     expiryDays,
-    editingId,
+    ensurePiggyId,
     isEditMode,
     navigation,
     signEvent,
@@ -552,7 +660,22 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       : `${min.toLocaleString()}–${max.toLocaleString()} sats per claim`;
   })();
 
+  // True when the NFC step's primary button should be enabled. Step 5
+  // (Publish) sets stage='saved' or 'wrote-nfc' in the fresh-hide
+  // flow. In edit mode the listing was already published in a prior
+  // session, so an existing local HiddenPiggy + validated LNURL is
+  // enough — the relay-side event exists.
+  const nfcReady =
+    stage.kind === 'saved' ||
+    stage.kind === 'wrote-nfc' ||
+    (isEditMode && stage.kind === 'validated');
+
   return (
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      testID="hunt-create-screen-root"
+    >
     <View style={styles.container} testID="hunt-create-screen">
       <View style={styles.header}>
         <TouchableOpacity
@@ -637,9 +760,9 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               <View style={styles.getPiggyTagsHint}>
                 <Nfc size={12} color={colors.brandPink} strokeWidth={2.5} />
                 <Text style={styles.getPiggyTagsHintText}>
-                  <Text style={styles.getPiggyTagsHintBold}>Tag chips:</Text> NTAG213 / 215 / 216
-                  (recommended), Mifare Ultralight C also fine. Avoid Mifare Classic — it can't
-                  lock.
+                  <Text style={styles.getPiggyTagsHintBold}>Tag chips:</Text> NTAG215 / 216
+                  recommended (≥504 B fits the full multi-record write). NTAG213 / Mifare Ultralight
+                  C work but only fit a single record. Avoid Mifare Classic — it can't lock.
                 </Text>
               </View>
             </View>
@@ -677,9 +800,21 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 }}
                 autoCapitalize="none"
                 autoCorrect={false}
-                multiline
+                // Single line — LNURLs are long but truncating visually
+                // is fine. Multi-line was wrapping the LNURL across 3-4
+                // lines on a Pixel, pushing the cooldown / uses inputs
+                // below the fold + behind the on-screen keyboard.
+                numberOfLines={1}
                 testID="hunt-piggy-lnurl-input"
               />
+              <TouchableOpacity
+                onPress={handleOpenScanner}
+                style={styles.pasteButton}
+                accessibilityLabel="Scan LNURL QR code"
+                testID="hunt-piggy-scan-button"
+              >
+                <QrCode size={18} color={colors.brandPink} strokeWidth={2} />
+              </TouchableOpacity>
               <TouchableOpacity
                 onPress={handlePaste}
                 style={styles.pasteButton}
@@ -773,26 +908,49 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
           </>
         )}
 
-        {currentStep === 4 && (
+        {currentStep === 6 && (
           <>
             <StepHeader
-              n={4}
+              n={6}
               title="Write the tag"
-              subtitle="Write the prize link onto a physical NFC tag the finder will tap."
+              subtitle="Write the prize link onto an NFC tag the finder will tap."
               status={stage.kind === 'wrote-nfc' ? 'done' : 'active'}
               styles={styles}
               colors={colors}
             />
             <NfcSupportedTagsCard colors={colors} styles={styles} />
-            {!lnurl.trim() ? (
-              <Text style={styles.helper}>
-                Add a prize on step 2 first — the tag needs a link to write.
-              </Text>
+            {/* Gate: NFC writes the kind 37516 listing's nostr:naddr,
+                which only exists once the Piggy has been published. In
+                a fresh-hide flow that means step 5 (Publish) has to
+                run first. In edit mode the listing was already
+                published, so stage.kind === 'validated' is fine too. */}
+            {!nfcReady ? (
+              <Text style={styles.helper}>Publish the Piggy first (step 5).</Text>
+            ) : null}
+            {/* What we'll write, plain-text, so the hider can see the
+                three records that go on the tag before the camera /
+                NFC interaction starts (Ben's request). */}
+            {nfcReady && pubkey ? (
+              <View style={styles.payloadPreview}>
+                <Text style={styles.payloadPreviewLabel}>Tag will carry:</Text>
+                <Text style={styles.payloadPreviewLine} numberOfLines={1}>
+                  • {process.env.EXPO_PUBLIC_HUNT_TAG_BASE_URL ?? 'lightningpiggy://hunt/'}
+                  {ensurePiggyId().slice(0, 16)}…
+                </Text>
+                <Text style={styles.payloadPreviewLine} numberOfLines={1}>
+                  • nostr:naddr1… ({GC_LISTING_KIND}:{pubkey.slice(0, 8)}…:{ensurePiggyId().slice(0, 12)}…)
+                </Text>
+                {lnurl.trim() ? (
+                  <Text style={styles.payloadPreviewLine} numberOfLines={1}>
+                    • lightning:{lnurl.trim().slice(0, 12).toUpperCase()}…
+                  </Text>
+                ) : null}
+              </View>
             ) : null}
             <TouchableOpacity
-              style={[styles.primaryButton, !lnurl.trim() && styles.primaryButtonDisabled]}
+              style={[styles.primaryButton, !nfcReady && styles.primaryButtonDisabled]}
               onPress={handleOpenNfcSheet}
-              disabled={!lnurl.trim()}
+              disabled={!nfcReady}
               testID="hunt-write-nfc-button"
             >
               <Nfc size={18} color={colors.white} strokeWidth={2.5} />
@@ -801,8 +959,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               </Text>
             </TouchableOpacity>
             <StepNavRow
-              onBack={() => setCurrentStep(3)}
-              onNext={() => setCurrentStep(5)}
+              onBack={() => setCurrentStep(5)}
+              onNext={handleDone}
+              nextLabel="Done"
+              nextIcon={Check}
               styles={styles}
               colors={colors}
             />
@@ -900,10 +1060,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
           </>
         )}
 
-        {currentStep === 5 && (
+        {currentStep === 4 && (
           <>
             <StepHeader
-              n={5}
+              n={4}
               title="Geocache info"
               subtitle="The finder-facing listing — a photo, a name, and how tough it is to reach."
               status="active"
@@ -1060,18 +1220,18 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
             />
 
             <StepNavRow
-              onBack={() => setCurrentStep(4)}
-              onNext={() => setCurrentStep(6)}
+              onBack={() => setCurrentStep(3)}
+              onNext={() => setCurrentStep(5)}
               styles={styles}
               colors={colors}
             />
           </>
         )}
 
-        {currentStep === 6 && (
+        {currentStep === 5 && (
           <>
             <StepHeader
-              n={6}
+              n={5}
               title="Publish"
               subtitle="Write the cache to Nostr — finder-facing message, rules and visibility."
               status={stage.kind === 'saved' || stage.kind === 'wrote-nfc' ? 'done' : 'active'}
@@ -1107,35 +1267,57 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               it leaks.
             </Text>
 
-            {/* The publish action lives in the step nav row's "next"
-                slot — same shape as every other step. Its label tracks
-                the public toggle (Publish when public, Save when not)
-                and flips to Done once the Piggy is saved/published. */}
             {stage.kind === 'idle' || stage.kind === 'validating' ? (
               <Text style={styles.helper}>
                 Add and validate a prize on step 2 to enable publishing.
               </Text>
             ) : null}
+            {/* Publish / Save is the step's primary action — own
+                button above the nav row so it reads as the *thing
+                that publishes*, not a navigation step. Once the
+                Piggy is saved the button flips to a green
+                "Published" confirmation strip; the StepNavRow's
+                Next then becomes the way forward to the NFC step. */}
+            {stage.kind === 'saved' || stage.kind === 'wrote-nfc' ? (
+              <View style={styles.publishedStrip} testID="hunt-piggy-published-strip">
+                <Check size={18} color={colors.green} strokeWidth={2.5} />
+                <Text style={styles.publishedText}>
+                  {isPublic ? 'Published to relays' : 'Saved locally'}
+                </Text>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={[
+                  styles.primaryButton,
+                  (stage.kind === 'idle' || stage.kind === 'validating' || !pubkey) &&
+                    styles.primaryButtonDisabled,
+                ]}
+                onPress={handleSave}
+                // Defensive — block tap while pubkey hasn't hydrated.
+                // Without this guard a tap mid-cold-start can fire
+                // SecureStore lookups with an empty per-account
+                // suffix and crash with "Invalid key" (#554-adjacent).
+                disabled={
+                  stage.kind === 'idle' || stage.kind === 'validating' || !pubkey
+                }
+                testID="hunt-piggy-publish-button"
+                accessibilityLabel={isPublic ? 'Publish Piggy' : 'Save Piggy'}
+              >
+                {isPublic ? (
+                  <Globe size={18} color={colors.white} strokeWidth={2.5} />
+                ) : (
+                  <PiggyBank size={18} color={colors.white} strokeWidth={2.5} />
+                )}
+                <Text style={styles.primaryButtonText}>{isPublic ? 'Publish' : 'Save'}</Text>
+              </TouchableOpacity>
+            )}
             <StepNavRow
-              onBack={() => setCurrentStep(5)}
-              onNext={
-                stage.kind === 'saved' || stage.kind === 'wrote-nfc' ? handleDone : handleSave
-              }
-              nextLabel={
-                stage.kind === 'saved' || stage.kind === 'wrote-nfc'
-                  ? 'Done'
-                  : isPublic
-                    ? 'Publish'
-                    : 'Save'
-              }
-              nextIcon={
-                stage.kind === 'saved' || stage.kind === 'wrote-nfc'
-                  ? Check
-                  : isPublic
-                    ? Globe
-                    : PiggyBank
-              }
-              nextDisabled={stage.kind === 'idle' || stage.kind === 'validating'}
+              onBack={() => setCurrentStep(4)}
+              // Next only moves forward — it doesn't carry the publish
+              // action any more. Gated on stage.kind so the user can't
+              // skip publish.
+              onNext={() => setCurrentStep(6)}
+              nextDisabled={stage.kind !== 'saved' && stage.kind !== 'wrote-nfc'}
               styles={styles}
               colors={colors}
             />
@@ -1150,8 +1332,73 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         onClose={() => setNfcSheetVisible(false)}
         mode="piglet"
         lnurl={lnurl.trim()}
+        huntPayload={(() => {
+          // Multi-record payload (#73). Only useful when we have the
+          // hider's pubkey (logged-in user) AND the public toggle is
+          // on — a private Piggy has no kind 37516 listing for the
+          // nostr:naddr to reference, so we fall back to the legacy
+          // single-record LNURL write via `lnurl` above.
+          if (!pubkey || !isPublic) return undefined;
+          const piggyId = ensurePiggyId();
+          const naddr = nip19.naddrEncode({
+            kind: GC_LISTING_KIND,
+            pubkey,
+            identifier: piggyId,
+          });
+          return {
+            coord: `${GC_LISTING_KIND}:${pubkey}:${piggyId}`,
+            naddr,
+            lnurl: lnurl.trim() || undefined,
+          };
+        })()}
         onWritten={handleNfcWritten}
       />
+
+      {/* Step 2 — QR scanner for the LNURL input. Full-screen modal
+          (`Modal` from react-native, no extra dep) so the camera has
+          unambiguous focus; closes on first scan via handleBarCodeScanned
+          or on the X button. */}
+      <Modal
+        visible={scannerOpen}
+        animationType="slide"
+        onRequestClose={() => setScannerOpen(false)}
+        statusBarTranslucent
+      >
+        <View style={styles.scannerRoot}>
+          {!cameraPermission?.granted ? (
+            <View style={styles.scannerPermission}>
+              <Text style={styles.scannerPermissionText}>
+                Camera access needed to scan a QR code.
+              </Text>
+              <TouchableOpacity
+                style={styles.primaryButton}
+                onPress={requestCameraPermission}
+                testID="hunt-piggy-scan-grant"
+              >
+                <Text style={styles.primaryButtonText}>Grant Permission</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <CameraView
+              style={styles.scannerCamera}
+              facing="back"
+              barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+              onBarcodeScanned={handleBarCodeScanned}
+            />
+          )}
+          <View style={styles.scannerHintBar}>
+            <Text style={styles.scannerHint}>Point at an LNURL QR code</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.scannerCloseButton}
+            onPress={() => setScannerOpen(false)}
+            accessibilityLabel="Close scanner"
+            testID="hunt-piggy-scan-close"
+          >
+            <X size={22} color={colors.white} strokeWidth={2.5} />
+          </TouchableOpacity>
+        </View>
+      </Modal>
 
       {/* Step 4 — interactive map location picker. */}
       <LocationPickerSheet
@@ -1162,6 +1409,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         onConfirm={(lat, lon) => setPin({ lat, lon, geohash: encodeGeohash(lat, lon, 9) })}
       />
     </View>
+    </KeyboardAvoidingView>
   );
 };
 
@@ -1173,31 +1421,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
 // (see `writeLnurlToTag` in `nfcService.ts` for the threat model).
 // -----------------------------------------------------------------------------
 
-const SUPPORTED_TAGS: Array<{
-  name: string;
-  blurb: string;
-  capacity: string;
-  status: 'recommended' | 'ok' | 'avoid';
-}> = [
-  {
-    name: 'NTAG213 / 215 / 216',
-    blurb: 'Locks permanently after write. Common Amazon sticker / keyfob chip.',
-    capacity: '144 / 504 / 888 bytes',
-    status: 'recommended',
-  },
-  {
-    name: 'Mifare Ultralight C',
-    blurb: 'Also lockable. Slightly older but works the same in practice.',
-    capacity: '144 bytes',
-    status: 'ok',
-  },
-  {
-    name: 'Mifare Classic 1K / 4K',
-    blurb: 'No permanent NDEF lock — anyone with the default sector key can overwrite.',
-    capacity: '768 / 3.4 KB',
-    status: 'avoid',
-  },
-];
+// Tag-chip recommendations collapsed to a tick / cross pair — the
+// previous four-row matrix gave more detail than the hider needs at
+// write time. Reasons baked into each blurb so the user can pick a
+// sticker without reading a separate doc.
 
 // Numbered step header for the Hide-a-Piglet flow. The screen used to
 // be a flat list of section labels; now each stage gets a visible
@@ -1235,9 +1462,9 @@ const STEP_LABELS: { n: number; label: string }[] = [
   { n: 1, label: 'Hardware' },
   { n: 2, label: 'Prize' },
   { n: 3, label: 'Location' },
-  { n: 4, label: 'Write NFC' },
-  { n: 5, label: 'Details' },
-  { n: 6, label: 'Publish' },
+  { n: 4, label: 'Details' },
+  { n: 5, label: 'Publish' },
+  { n: 6, label: 'Write NFC' },
 ];
 
 const StepProgressBar: React.FC<{
@@ -1323,9 +1550,7 @@ const StepNavRow: React.FC<{
         <ChevronLeft size={16} color={colors.textHeader} strokeWidth={2.5} />
         <Text style={styles.stepNavBackText}>Back</Text>
       </TouchableOpacity>
-    ) : (
-      <View style={styles.stepNavSpacer} />
-    )}
+    ) : null}
     {onNext ? (
       <TouchableOpacity
         style={[styles.stepNavNextButton, nextDisabled && styles.stepNavNextButtonDisabled]}
@@ -1400,33 +1625,27 @@ const NfcSupportedTagsCard: React.FC<{
       <Lock size={14} color={colors.brandPink} strokeWidth={2.5} />
       <Text style={styles.tagsCardHeaderText}>Supported NFC tags</Text>
     </View>
-    <Text style={styles.tagsCardIntro}>
-      The Piglet is locked after writing so no one else can overwrite it. Two chip families support
-      that — one to avoid.
-    </Text>
-    {SUPPORTED_TAGS.map((tag) => (
-      <View key={tag.name} style={styles.tagsCardRow}>
-        <View
-          style={[
-            styles.tagsCardDot,
-            tag.status === 'recommended'
-              ? { backgroundColor: colors.brandPink }
-              : tag.status === 'ok'
-                ? { backgroundColor: '#F5A623' }
-                : { backgroundColor: colors.textSupplementary },
-          ]}
-        />
-        <View style={{ flex: 1 }}>
-          <Text style={styles.tagsCardName}>
-            {tag.name}
-            {tag.status === 'recommended' ? ' · Recommended' : ''}
-            {tag.status === 'avoid' ? ' · Avoid' : ''}
-          </Text>
-          <Text style={styles.tagsCardBlurb}>{tag.blurb}</Text>
-          <Text style={styles.tagsCardCapacity}>Capacity: {tag.capacity}</Text>
-        </View>
-      </View>
-    ))}
+    {/* Tightened two-row form so the "Write to NFC tag" + Next buttons
+        fit on a Pixel without scrolling. Long-form rationale lives in
+        docs/, not in the wizard. */}
+    <View style={styles.tagsCardParagraph}>
+      <Text style={styles.tagsCardCheck}>✓</Text>
+      <Text style={styles.tagsCardParagraphText}>
+        <Text style={styles.tagsCardName}>NTAG215 / 216</Text> — fit the payload + lock permanently.
+      </Text>
+    </View>
+    <View style={styles.tagsCardParagraph}>
+      <Text style={styles.tagsCardCross}>✗</Text>
+      <Text style={styles.tagsCardParagraphText}>
+        <Text style={styles.tagsCardName}>NTAG213 / Ultralight C / Mifare Classic</Text> — too small or can't lock.
+      </Text>
+    </View>
+    <View style={styles.tagsCardParagraph}>
+      <Text style={styles.tagsCardCross}>✗</Text>
+      <Text style={styles.tagsCardParagraphText}>
+        <Text style={styles.tagsCardName}>NTAG424</Text> — not supported yet (needs AES auth, GH #558).
+      </Text>
+    </View>
   </View>
 );
 
@@ -1454,7 +1673,9 @@ const createStyles = (colors: Palette) =>
       backgroundColor: colors.surface,
       borderRadius: 14,
       padding: 14,
-      marginBottom: 12,
+      // No marginBottom — StepNavRow's own marginTop (16) is the only
+      // inter-section gap. Avoids the previous 12 + 16 stack that
+      // dropped a 28 px hole between the card and the Next button.
       gap: 10,
     },
     getPiggyTitle: {
@@ -1552,7 +1773,7 @@ const createStyles = (colors: Palette) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 12,
-      marginTop: 18,
+      marginTop: 4,
       marginBottom: 8,
     },
     stepBadge: {
@@ -1635,12 +1856,15 @@ const createStyles = (colors: Palette) =>
       transform: [{ scale: 1.08 }],
     },
     stepperLabelCurrent: { color: colors.brandPink, fontWeight: '800' },
-    // Bottom-of-step Back / Next navigation row.
+    // Bottom-of-step Back / Next navigation row. When there's no Back
+    // button (step 1) the row collapses to just the Next button via
+    // `flex: 1` — symmetric paddingHorizontal on the button gives even
+    // left/right text padding without needing a width-matching spacer.
     stepNavRow: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      marginTop: 24,
+      marginTop: 8,
       marginBottom: 8,
       gap: 12,
     },
@@ -1658,7 +1882,86 @@ const createStyles = (colors: Palette) =>
       fontWeight: '700',
       color: colors.textHeader,
     },
-    stepNavSpacer: { width: 1 },
+    // ---- Publish step "Published" confirmation strip ----------------------
+    publishedStrip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: colors.greenLight,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      borderRadius: 10,
+      marginTop: 8,
+    },
+    publishedText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.green,
+    },
+    // ---- NFC payload preview card (step 6) -------------------------------
+    payloadPreview: {
+      backgroundColor: colors.surface,
+      borderRadius: 10,
+      padding: 12,
+      marginTop: 8,
+      gap: 4,
+    },
+    payloadPreviewLabel: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: colors.textSupplementary,
+      letterSpacing: 0.4,
+      textTransform: 'uppercase',
+      marginBottom: 2,
+    },
+    payloadPreviewLine: {
+      fontSize: 12,
+      color: colors.textBody,
+      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    },
+    // ---- QR scanner modal -------------------------------------------------
+    scannerRoot: { flex: 1, backgroundColor: '#000' },
+    scannerCamera: { flex: 1 },
+    scannerPermission: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 32,
+      gap: 16,
+      backgroundColor: '#000',
+    },
+    scannerPermissionText: {
+      color: colors.white,
+      fontSize: 15,
+      textAlign: 'center',
+      lineHeight: 22,
+    },
+    scannerHintBar: {
+      position: 'absolute',
+      bottom: 48,
+      left: 0,
+      right: 0,
+      alignItems: 'center',
+    },
+    scannerHint: {
+      color: colors.white,
+      fontSize: 14,
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      backgroundColor: 'rgba(0,0,0,0.55)',
+      borderRadius: 100,
+    },
+    scannerCloseButton: {
+      position: 'absolute',
+      top: 56,
+      right: 20,
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: 'rgba(0,0,0,0.55)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     stepNavNextButton: {
       flex: 1,
       flexDirection: 'row',
@@ -1851,6 +2154,29 @@ const createStyles = (colors: Palette) =>
       fontSize: 13,
       fontWeight: '700',
       color: colors.textHeader,
+    },
+    tagsCardParagraph: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 10,
+    },
+    tagsCardCheck: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: colors.green,
+      lineHeight: 18,
+    },
+    tagsCardCross: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: colors.red,
+      lineHeight: 18,
+    },
+    tagsCardParagraphText: {
+      flex: 1,
+      fontSize: 12,
+      lineHeight: 17,
+      color: colors.textBody,
     },
     tagsCardBlurb: {
       fontSize: 12,

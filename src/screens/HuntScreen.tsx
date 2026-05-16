@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   FlatList,
   Image,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import * as Location from 'expo-location';
 import {
@@ -26,7 +27,8 @@ import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
 import { type ParsedCache } from '../services/nostrPlacesService';
-import { subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
+import { fetchCachesByAuthor, subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
+import { useNostr } from '../contexts/NostrContext';
 import { loadCachedCaches, peekCachedCachesSync, saveCaches } from '../services/nostrPlacesStorage';
 import {
   decodeGeohash,
@@ -56,12 +58,54 @@ interface Props {
 const HuntScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const { pubkey, relays } = useNostr();
   const [pos, setPos] = useState<{ lat: number; lon: number; accuracy: number | null } | null>(
     null,
   );
   const [caches, setCaches] = useState<Map<string, ParsedCache>>(
     () => new Map(peekCachedCachesSync().map((c) => [c.coord, c])),
   );
+  // Pull-to-refresh: re-load the on-disk cache AND query relays for
+  // every kind 37516 listing by the signed-in user, so the rail
+  // includes the user's own historical Piggies even if the nearby
+  // subscription never echoed them back (same gap MyPiglets covers).
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    // Hard 8 s ceiling — even if fetchCachesByAuthor / loadCachedCaches
+    // hang somehow, the spinner clears so the user isn't blocked from
+    // tapping elsewhere on the page. fetchCachesByAuthor already has a
+    // 5 s maxWait but disk IO / device sleep can still stretch the
+    // wall-clock. Pre-fix Ben hit a state where pull-to-refresh
+    // appeared to block navigation entirely.
+    const safetyTimer = setTimeout(() => setRefreshing(false), 8000);
+    try {
+      const readRelays = relays.filter((r) => r.read).map((r) => r.url);
+      const [cached, mine] = await Promise.all([
+        loadCachedCaches(),
+        pubkey
+          ? fetchCachesByAuthor(pubkey, readRelays.length > 0 ? readRelays : undefined).catch(
+              () => [] as ParsedCache[],
+            )
+          : Promise.resolve([] as ParsedCache[]),
+      ]);
+      setCaches((prev) => {
+        const next = new Map(prev);
+        for (const c of cached) {
+          const existing = next.get(c.coord);
+          if (!existing || c.createdAt > existing.createdAt) next.set(c.coord, c);
+        }
+        for (const c of mine) {
+          const existing = next.get(c.coord);
+          if (!existing || c.createdAt > existing.createdAt) next.set(c.coord, c);
+        }
+        return next;
+      });
+    } finally {
+      clearTimeout(safetyTimer);
+      setRefreshing(false);
+    }
+  }, [pubkey, relays]);
 
   // Hydrate from AsyncStorage so the list paints instantly on cold
   // start while the live relay sub backfills.
@@ -110,10 +154,9 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   const [selectedTerrains, setSelectedTerrains] = useState<Set<number>>(new Set());
   // Whether the bottom-sheet filter UI is open.
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
-  // Mirrors ExploreMiniMap's onInteractionChange: while a finger is on
-  // the inline map we disable the FlatList's own scrolling so vertical
-  // pans drive Leaflet instead of shifting the list under the user.
-  const [mapTouched, setMapTouched] = useState(false);
+  // Map-touch tracking removed when the map moved out of the
+  // FlatList header (commit eedd82e follow-up). Map and list are now
+  // siblings, so touches on the map don't reach the FlatList at all.
   // Cache type filter — empty set = show every type (default). Built
   // dynamically from whatever types are present in the current caches
   // dataset; selected entries OR together so the list doesn't filter
@@ -303,40 +346,50 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
         <Text style={styles.headerTagline}>Hunt for sats hidden in the wild</Text>
       </View>
 
+      {/* Inline interactive map — lives OUTSIDE the FlatList rather
+          than as ListHeaderComponent so a vertical pan on the map
+          never reaches the FlatList's RefreshControl. The earlier
+          `scrollEnabled={!mapTouched}` toggle had a state-update race
+          that let the FlatList capture the gesture before mapTouched
+          flipped, accidentally firing pull-to-refresh when the user
+          tried to pan the map down. Trade-off: the map no longer
+          scrolls out of view as the user scrolls the list — but that
+          matches the typical map+list pattern (Uber, Citymapper, etc.).
+          The list below filters by WoT + difficulty/terrain/type +
+          search; passing `filteredCaches` so the map matches the list
+          visually (#19). */}
+      <View style={styles.mapWrap}>
+        <ExploreMiniMap
+          lat={pos?.lat ?? null}
+          lon={pos?.lon ?? null}
+          userAccuracyMetres={pos?.accuracy ?? null}
+          merchants={[]}
+          caches={filteredCaches.map((c) => c.cache)}
+          events={[]}
+          onTapMap={() => navigation.navigate('Map')}
+          onBoundsChange={setMapBbox}
+          // One zoom level wider than ExploreMiniMap's default 13 so
+          // the Geo-caches hub map shows a bigger catchment without
+          // the user having to pinch-zoom out (Ben's feedback).
+          defaultZoom={12}
+          interactive
+        />
+      </View>
+
       <FlatList
         data={filteredCaches}
         keyExtractor={({ cache }) => cache.coord}
         contentContainerStyle={styles.listContent}
-        scrollEnabled={!mapTouched}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.brandPink}
+            colors={[colors.brandPink]}
+          />
+        }
         ListHeaderComponent={
           <View>
-            {/* Inline interactive map — drag, pinch-zoom, recenter on
-                me. The "Open map" button (overlay) is the only path to
-                the full MapScreen; the surrounding card no longer
-                consumes taps. Cache pins only (no merchants / events)
-                so the page stays focused. */}
-            <View style={styles.mapWrap}>
-              <ExploreMiniMap
-                lat={pos?.lat ?? null}
-                lon={pos?.lon ?? null}
-                userAccuracyMetres={pos?.accuracy ?? null}
-                merchants={[]}
-                // The list below filters by WoT + difficulty/terrain/type
-                // + search query (see sortedCaches → filteredCaches). The
-                // map must show the same set so the user's filters apply
-                // visually too — passing the raw `caches` Map would let
-                // untrusted-pubkey pins show through and contradict the
-                // list. Closes the inconsistency where Hunt's mini-map
-                // ignored the WoT chip while the list respected it.
-                caches={filteredCaches.map((c) => c.cache)}
-                events={[]}
-                onTapMap={() => navigation.navigate('Map')}
-                onBoundsChange={setMapBbox}
-                onInteractionChange={setMapTouched}
-                interactive
-              />
-            </View>
-
             <View style={styles.searchRow}>
               <Search size={16} color={colors.textSupplementary} strokeWidth={2.5} />
               <TextInput
