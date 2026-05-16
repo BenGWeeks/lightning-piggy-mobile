@@ -1,11 +1,15 @@
 appId: com.lightningpiggy.app.dev
-name: Explore tab renders the hub with Lessons / Map / Hunt / Events cards
+name: Explore tab renders the hub with Places / Geo-caches / Events / Lessons rails
 ---
 # Verifies the rename of the Learn tab to Explore: the bottom-tab button
-# answers to `tab-explore`, taps land on the new ExploreHome hub, and all
-# four cards (Lessons, Map, Hunt, Events) are reachable. Lessons opens the
-# existing course catalog (regression check); Map / Hunt / Events open the
-# stub "Coming soon" screens that subsequent milestones will fill in.
+# answers to `tab-explore`, taps land on the new ExploreHome hub, and the
+# four content rails (Places, Geo-caches, Events, Lessons) are reachable.
+# The legacy `explore-card-{key}` testIDs are preserved on each rail's
+# "See all →" button (see ExploreHomeScreen.tsx seeAllTestId props) so
+# this flow still uses them as scroll/tap targets — but the surrounding
+# layout is rails, not the original four-card grid the comment used to
+# describe. Lessons drills into the existing course catalog (regression
+# check); Map / Hunt / Events open their sub-screens.
 #
 # Run: maestro test tests/e2e/test-explore-tab-rename.yaml
 
