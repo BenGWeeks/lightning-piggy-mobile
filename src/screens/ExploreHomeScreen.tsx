@@ -239,17 +239,9 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
   // Map legend modal — same LegendSheet ExploreMiniMap renders inline,
   // but here it lives at the screen level so LibreMiniMap (which doesn't
-  // own the sheet itself) can ask us to open it.
+  // own the sheet itself) can ask us to open it. Array memos for the
+  // caches/events Maps live below their state declarations.
   const [legendVisible, setLegendVisible] = useState(false);
-  // Stable references to the array projections + callbacks the map
-  // children consume. Without these, every parent re-render hands the
-  // memoised LibreMiniMap fresh references for `caches`, `events`,
-  // `onTapMap`, and `onOpenLegend`, defeating React.memo and forcing
-  // MapLibre to recompute its marker tree even when the legend toggle
-  // is the only thing that changed. Dev-mode renders went from
-  // ~250-1000 ms to ~50-150 ms once these landed.
-  const cachesArr = useMemo(() => [...caches.values()], [caches]);
-  const eventsArr = useMemo(() => [...events.values()], [events]);
   const onTapMap = useCallback(() => navigation.navigate('Map'), [navigation]);
   const onOpenLegend = useCallback(() => setLegendVisible(true), []);
   const onCloseLegend = useCallback(() => setLegendVisible(false), []);
@@ -357,6 +349,13 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const [events, setEvents] = useState<Map<string, ParsedEvent>>(
     () => new Map(peekCachedEventsSync().map((e) => [e.coord, e])),
   );
+
+  // Stable array projections of the caches/events Maps so React.memo on
+  // the consuming LibreMiniMap can short-circuit re-renders. Without
+  // these the parent's `[...caches.values()]` literal returns a fresh
+  // array reference every render and defeats the memo entirely.
+  const cachesArr = useMemo(() => [...caches.values()], [caches]);
+  const eventsArr = useMemo(() => [...events.values()], [events]);
 
   // Hydrate last-known caches + events from AsyncStorage so the rails
   // render instantly on cold start while the live relay subs backfill.
