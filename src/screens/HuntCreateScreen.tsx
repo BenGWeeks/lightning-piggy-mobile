@@ -1590,7 +1590,22 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 // so a validated LNURL is enough to advance and rewrite
                 // the NFC tag (no need to re-publish just to reach
                 // step 6).
-                onNext={() => setCurrentStep(6)}
+                onNext={async () => {
+                  // In edit mode with a still-validated stage the user
+                  // may have changed fields in steps 1-5 (LNURL, name,
+                  // expiry, …) but not yet tapped the Publish button.
+                  // Auto-save before advancing so those edits actually
+                  // hit storage / relays — otherwise the NFC write on
+                  // step 6 emits the new payload while the persisted
+                  // record stays stale (Copilot #572 r4 catch).
+                  // `handleSave` is the same handler the Publish
+                  // button calls; it bails out cleanly on its own if
+                  // the stage isn't validated.
+                  if (isEditMode && stage.kind === 'validated') {
+                    await handleSave();
+                  }
+                  setCurrentStep(6);
+                }}
                 nextDisabled={
                   isEditMode
                     ? stage.kind !== 'validated' &&

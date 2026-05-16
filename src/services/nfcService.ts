@@ -352,15 +352,17 @@ const inferTagFamily = (tag: { techTypes?: string[]; type?: string } | null): Ta
 export type WriteLnurlResult = {
   family: TagFamily;
   // True when the tag came out of the write session protected against
-  // subsequent rewrites. For NTAG21x via this service that means either
-  // the legacy one-way OTP lock (`makeReadOnly`, no recovery) or — when
-  // the caller opts in — a reversible PWD/PACK lock the hider can later
-  // undo from their My-Piglets PIN. `false` means the data is on the
-  // tag but the chip will still accept overwrites from any NFC writer.
+  // subsequent rewrites. For NTAG21x via this service that means a
+  // reversible PWD/PACK lock the hider can later undo via the unlock
+  // flow on step 6 of the wizard. `false` means the data is on the
+  // tag but the chip will still accept overwrites from any NFC
+  // writer (callers opt in via `lockTag: true` on
+  // `WriteHuntTagOptions` / `WriteLnurlOptions`).
   locked: boolean;
-  // Set on the reversible-lock path (see `lockMode === 'pwd-pack'`). The
-  // caller persists these alongside the cache record so the hider can
-  // surface the PIN later and authenticate the unlock flow. Issue #567.
+  // Set on the reversible-lock path (caller opted in via
+  // `lockTag: true`). The caller persists these alongside the cache
+  // record so the hider can surface the PIN later and authenticate
+  // the unlock flow. Issue #567.
   lock?: {
     pwdHex: string;
     packHex: string;
@@ -764,7 +766,20 @@ async function writeNdefBytesAndLockAndroid(
   opts: LockedWriteOptions,
   ndefBytes: number[],
 ): Promise<WriteLnurlResult> {
-  await NfcManager.requestTechnology(NfcTech.MifareUltralight, READER_MODE_OPTS);
+  // Requesting MifareUltralight specifically would let
+  // Mifare-Classic / NTAG424 / IsoDep chips sit silently in reader
+  // mode until they time out — the user just sees the spinner
+  // forever. Catch the failure and translate to the same friendly
+  // guidance the techFamily branch below produces. Copilot #572 r4
+  // catch.
+  try {
+    await NfcManager.requestTechnology(NfcTech.MifareUltralight, READER_MODE_OPTS);
+  } catch (e) {
+    throw new Error(
+      "This chip doesn't expose Mifare Ultralight pages — Lightning Piggy needs an NTAG215 / 216. " +
+        `(${(e as Error)?.message ?? e})`,
+    );
+  }
   const tag = await NfcManager.getTag();
   if (!tag) throw new Error('No tag detected');
   const techFamily = inferTagFamily(tag as { techTypes?: string[]; type?: string });

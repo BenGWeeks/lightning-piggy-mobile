@@ -15,6 +15,7 @@ import {
   pagesForFamily,
   buildGetVersionFrame,
   familyFromGetVersion,
+  diagnoseTagLockState,
 } from './ntag21xLock';
 
 const ntag215 = pagesForFamily('ntag-215');
@@ -231,5 +232,104 @@ describe('NDEF TLV wrapping', () => {
 
   it('rejects a non-aligned byte stream so callers fix the input, not silently truncate', () => {
     expect(() => splitIntoPages([1, 2, 3])).toThrow(/page-aligned/);
+  });
+});
+
+describe('diagnoseTagLockState', () => {
+  // Factory-default chip: lock bytes are 0, AUTH0 is 0xFF (disabled),
+  // dynamic lock byte is 0. Should report "open".
+  it('reports open for a factory-fresh chip', () => {
+    const openPage02 = [0x04, 0x00, 0x00, 0x00];
+    expect(diagnoseTagLockState(openPage02, 0x00, 0xff, ntag215)).toEqual({ kind: 'open' });
+  });
+
+  // makeReadOnly path: LOCK0 byte 2 sets bit 4 (lock page 0x04) — the
+  // first user page is now read-only. Should report otp-locked.
+  it('detects static lock bit on page 4 (LOCK0 bit 4)', () => {
+    expect(diagnoseTagLockState([0x04, 0x00, 0x10, 0x00], 0x00, 0xff, ntag215)).toEqual({
+      kind: 'otp-locked',
+      pagesLockedFrom: 4,
+    });
+  });
+
+  it('detects static lock bit on page 5 (LOCK0 bit 5)', () => {
+    expect(diagnoseTagLockState([0x04, 0x00, 0x20, 0x00], 0x00, 0xff, ntag215)).toEqual({
+      kind: 'otp-locked',
+      pagesLockedFrom: 5,
+    });
+  });
+
+  it('detects static lock bits across the high byte of LOCK0 (page 7+)', () => {
+    expect(diagnoseTagLockState([0x04, 0x00, 0x80, 0x00], 0x00, 0xff, ntag215)).toEqual({
+      kind: 'otp-locked',
+      pagesLockedFrom: 6,
+    });
+  });
+
+  it('detects static lock bits in LOCK1 (pages 8-15)', () => {
+    expect(diagnoseTagLockState([0x04, 0x00, 0x00, 0x01], 0x00, 0xff, ntag215)).toEqual({
+      kind: 'otp-locked',
+      pagesLockedFrom: 6,
+    });
+  });
+
+  // Dynamic lock (page 0x82 on NTAG215) covers user-memory blocks
+  // from page 16 up. A non-zero byte means at least one block is
+  // OTP-locked.
+  it('detects dynamic lock bits (page 16+)', () => {
+    expect(diagnoseTagLockState([0x04, 0x00, 0x00, 0x00], 0x01, 0xff, ntag215)).toEqual({
+      kind: 'otp-locked',
+      pagesLockedFrom: 16,
+    });
+  });
+
+  // AUTH0 ≤ last user page means the chip is gating writes behind
+  // PWD_AUTH. Recoverable via the Edit → Unlock flow.
+  it('detects PWD-protection when AUTH0 ≤ last user page', () => {
+    expect(diagnoseTagLockState([0x04, 0x00, 0x00, 0x00], 0x00, 0x04, ntag215)).toEqual({
+      kind: 'pwd-protected',
+      auth0: 0x04,
+    });
+  });
+
+  // AUTH0 right at the boundary (last user page) should still trip
+  // the protected branch.
+  it('treats AUTH0 equal to last user page as PWD-protected', () => {
+    expect(
+      diagnoseTagLockState([0x04, 0x00, 0x00, 0x00], 0x00, ntag215.userPageLast, ntag215),
+    ).toEqual({
+      kind: 'pwd-protected',
+      auth0: ntag215.userPageLast,
+    });
+  });
+
+  // AUTH0 above the last real page = no protection. Combined with
+  // clean lock bytes = open.
+  it('treats AUTH0 above the last real page as open', () => {
+    expect(diagnoseTagLockState([0x04, 0x00, 0x00, 0x00], 0x00, 0x87, ntag215)).toEqual({
+      kind: 'open',
+    });
+  });
+
+  // OTP lock wins over PWD when both are set — the OTP bits are
+  // irreversible so the hider's recovery options are different.
+  it('prefers OTP-locked over PWD-protected when both are present', () => {
+    const state = diagnoseTagLockState([0x04, 0x00, 0x10, 0x00], 0x00, 0x04, ntag215);
+    expect(state.kind).toBe('otp-locked');
+  });
+
+  // The NTAG216 pageset has a different `userPageLast` (0xE1) than
+  // NTAG215 (0x81). AUTH0=0x82 is one past 215's last user page so
+  // protection is OFF on 215, but it's well inside 216's user range
+  // so protection is ON on 216 — same byte, different verdict per
+  // chip family.
+  it('honours the family-specific userPageLast boundary', () => {
+    expect(diagnoseTagLockState([0x04, 0x00, 0x00, 0x00], 0x00, 0x82, ntag216)).toEqual({
+      kind: 'pwd-protected',
+      auth0: 0x82,
+    });
+    expect(diagnoseTagLockState([0x04, 0x00, 0x00, 0x00], 0x00, 0x82, ntag215)).toEqual({
+      kind: 'open',
+    });
   });
 });

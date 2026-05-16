@@ -153,9 +153,10 @@ export interface HiddenPiggy {
      * PWD_AUTH. Used by the unlock flow to verify we're talking to the
      * right tag before disabling protection. */
     packHex: string;
-    /** Wall-clock unix-seconds the tag was locked. Purely
-     * informational — surfaces "Locked on …" in the PIN-reveal row so
-     * the hider knows it isn't ancient stale data. */
+    /** Wall-clock unix-seconds the tag was locked. Reserved for a
+     * future "Locked on …" caption on the PIN card — the current UI
+     * shows only the PIN + helper copy. Kept on the record so when
+     * we do surface it, no migration is needed. */
     lockedAt: number;
   };
 }
@@ -280,6 +281,14 @@ const isValidPiggy = (v: unknown): v is HiddenPiggy => {
       !lock ||
       typeof lock !== 'object' ||
       typeof lock.tagUid !== 'string' ||
+      // Non-empty hex required — pre-fix any string (including empty)
+      // passed the type check, but unlockHuntTag skips the UID guard
+      // when expectedUid is falsy, so an empty UID would silently
+      // disable wrong-tag protection for that record (Copilot #572
+      // r4 catch). NTAG21x UIDs are 7 bytes = 14 hex chars; Android
+      // typically lowercases them but case-insensitive comparison
+      // happens at unlock time.
+      !/^[0-9A-Fa-f]+$/.test(lock.tagUid) ||
       typeof lock.pwdHex !== 'string' ||
       !/^[0-9A-Fa-f]{8}$/.test(lock.pwdHex) ||
       typeof lock.packHex !== 'string' ||

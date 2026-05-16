@@ -311,18 +311,22 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     }
   }, [coord]);
 
+  // Track first-focus skip via a ref, NOT useState/closure. Pre-fix
+  // the skip flag lived inside the useCallback closure and depended on
+  // `cache`, so every successful refetch (which setCaches the new
+  // value) recreated the callback, which made useFocusEffect re-run
+  // while the screen was still focused — an infinite refetch loop
+  // every time the screen had focus and the relay was reachable.
+  // Copilot #572 r4 catch.
+  const isFirstFocusRef = useRef(true);
   useFocusEffect(
     useCallback(() => {
-      // Skip the first focus (the mount-time effect above is already
-      // running). Subsequent focuses (back-from-edit, tab switch) hit
-      // this and re-pull the cache from relays.
-      let isFirstFocus = !cache;
-      if (isFirstFocus) {
-        isFirstFocus = false;
+      if (isFirstFocusRef.current) {
+        isFirstFocusRef.current = false;
         return;
       }
       void refetchCache();
-    }, [refetchCache, cache]),
+    }, [refetchCache]),
   );
 
   const [refreshing, setRefreshing] = useState(false);
