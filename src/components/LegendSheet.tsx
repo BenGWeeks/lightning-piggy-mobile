@@ -119,27 +119,27 @@ export const LegendSheet: React.FC<Props> = ({
                 Colour signals payment / cache class; glyph signals what. */}
             <View style={styles.row}>
               <View style={[styles.pinChip, { backgroundColor: '#EC008C' }]}>
-                <Zap size={14} color="#fff" strokeWidth={2.5} />
+                <Zap size={12} color="#fff" strokeWidth={2.5} />
               </View>
               <Text style={styles.rowLabel}>Lightning merchant</Text>
             </View>
             <View style={styles.row}>
               <View style={[styles.pinChip, { backgroundColor: '#F7931A' }]}>
-                <Bitcoin size={14} color="#fff" strokeWidth={2.5} />
+                <Bitcoin size={12} color="#fff" strokeWidth={2.5} />
               </View>
               <Text style={styles.rowLabel}>On-chain merchant</Text>
             </View>
             <View style={styles.row}>
               <View style={[styles.pinChip, { backgroundColor: '#EC008C' }]}>
-                <PiggyBank size={14} color="#fff" strokeWidth={2.5} />
+                <PiggyBank size={12} color="#fff" strokeWidth={2.5} />
               </View>
-              <Text style={styles.rowLabel}>Piglet (Lightning Piggy)</Text>
+              <Text style={styles.rowLabel}>NIP-GC Piglet (Lightning Piggy)</Text>
             </View>
             <View style={styles.row}>
               <View style={[styles.pinChip, { backgroundColor: '#7A5CFF' }]}>
-                <MapPin size={14} color="#fff" strokeWidth={2.5} />
+                <MapPin size={12} color="#fff" strokeWidth={2.5} />
               </View>
-              <Text style={styles.rowLabel}>NIP-GC cache</Text>
+              <Text style={styles.rowLabel}>NIP-GC cache (vanilla)</Text>
             </View>
             <View style={styles.row}>
               <View style={styles.userDotChip}>
@@ -166,7 +166,7 @@ export const LegendSheet: React.FC<Props> = ({
                           separately). Same 28-px / 14-px proportions so
                           every row in the sheet visually aligns. */}
                       <View style={[styles.pinChip, { backgroundColor: colors.brandPink }]}>
-                        <Icon size={14} color="#fff" strokeWidth={2.5} />
+                        <Icon size={12} color="#fff" strokeWidth={2.5} />
                       </View>
                       <Text style={styles.rowLabel}>{row.label}</Text>
                     </View>
@@ -231,31 +231,28 @@ const createStyles = (colors: Palette) =>
       borderWidth: 1.5,
       borderColor: '#fff',
     },
-    // Shared chassis for every pin-type / category row chip. Same 28 px
-    // diameter as the map markers' 22 px + slight border bump so the
-    // size reads identically. Glyph inside is always 14 px white.
+    // Shared chassis for every pin-type / category row chip. 22 px
+    // diameter byte-for-byte matches the map markers so the legend
+    // swatches are the same size as what the user sees on the map.
+    // 12-px glyph inside, 1.5-px white border around.
     pinChip: {
-      width: 28,
-      height: 28,
-      borderRadius: 14,
-      borderWidth: 2,
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      borderWidth: 1.5,
       borderColor: '#fff',
       alignItems: 'center',
       justifyContent: 'center',
     },
-    // The "You" row mirrors the map's user dot — 14 px blue dot inside
-    // a slightly larger transparent halo for visual weight that matches
-    // the other 28-px chips on the row.
+    // The "You" row inner dot matches the map's user dot exactly.
     userDotChip: {
-      width: 28,
-      height: 28,
-      borderRadius: 14,
+      width: 22,
+      height: 22,
+      borderRadius: 11,
       alignItems: 'center',
       justifyContent: 'center',
     },
     userDotInner: {
-      // Match the map's user dot size (22 px) so the legend swatch reads
-      // as the same element. Fits snugly inside the 28-px chassis.
       width: 22,
       height: 22,
       borderRadius: 11,

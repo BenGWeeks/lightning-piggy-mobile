@@ -241,6 +241,18 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // but here it lives at the screen level so LibreMiniMap (which doesn't
   // own the sheet itself) can ask us to open it.
   const [legendVisible, setLegendVisible] = useState(false);
+  // Stable references to the array projections + callbacks the map
+  // children consume. Without these, every parent re-render hands the
+  // memoised LibreMiniMap fresh references for `caches`, `events`,
+  // `onTapMap`, and `onOpenLegend`, defeating React.memo and forcing
+  // MapLibre to recompute its marker tree even when the legend toggle
+  // is the only thing that changed. Dev-mode renders went from
+  // ~250-1000 ms to ~50-150 ms once these landed.
+  const cachesArr = useMemo(() => [...caches.values()], [caches]);
+  const eventsArr = useMemo(() => [...events.values()], [events]);
+  const onTapMap = useCallback(() => navigation.navigate('Map'), [navigation]);
+  const onOpenLegend = useCallback(() => setLegendVisible(true), []);
+  const onCloseLegend = useCallback(() => setLegendVisible(false), []);
   // Mirrors finger-on-map state from ExploreMiniMap's onInteractionChange.
   // While true we disable the outer ScrollView's scroll (which also
   // disables pull-to-refresh) so a vertical pan on the inline map pans
@@ -691,11 +703,11 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
                 lon={pos?.lon ?? null}
                 userAccuracyMetres={pos?.accuracy ?? null}
                 merchants={merchants}
-                caches={[...caches.values()]}
-                events={[...events.values()]}
-                onTapMap={() => navigation.navigate('Map')}
+                caches={cachesArr}
+                events={eventsArr}
+                onTapMap={onTapMap}
                 onInteractionChange={setMapTouched}
-                onOpenLegend={() => setLegendVisible(true)}
+                onOpenLegend={onOpenLegend}
               />
             ) : (
               <ExploreMiniMap
@@ -845,7 +857,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           tap actually triggers setLegendVisible. */}
       <LegendSheet
         visible={legendVisible}
-        onClose={() => setLegendVisible(false)}
+        onClose={onCloseLegend}
         placesVisible
         availableCategories={[
           ...new Set(merchants.flatMap((m) => m.categories ?? []).filter(Boolean)),

@@ -71,7 +71,7 @@ const OSM_STYLE = {
   ],
 } as const;
 
-export const LibreMiniMap: React.FC<Props> = ({
+const LibreMiniMapInner: React.FC<Props> = ({
   lat,
   lon,
   merchants,
@@ -153,13 +153,20 @@ export const LibreMiniMap: React.FC<Props> = ({
   if (lat === null || lon === null) return <View style={styles.container} />;
 
   return (
-    <View
-      style={styles.container}
-      onTouchStart={() => onInteractionChange?.(true)}
-      onTouchEnd={() => onInteractionChange?.(false)}
-      onTouchCancel={() => onInteractionChange?.(false)}
-    >
-      <Map style={styles.map} mapStyle={JSON.stringify(OSM_STYLE)}>
+    <View style={styles.container}>
+      <Map
+        style={styles.map}
+        mapStyle={JSON.stringify(OSM_STYLE)}
+        // The native MapLibre view consumes touches before they bubble
+        // up to a parent View — so an onTouchStart handler on the wrapper
+        // never fires when the user pans the map. We catch the gesture
+        // via MapLibre's own region-change events instead, which fire
+        // exactly when the camera begins / finishes moving in response
+        // to user input. This is what suspends the outer ScrollView's
+        // pull-to-refresh while the user is panning the map.
+        onRegionWillChange={() => onInteractionChange?.(true)}
+        onRegionDidChange={() => onInteractionChange?.(false)}
+      >
         <Camera
           ref={cameraRef}
           initialViewState={{ center: [lon, lat], zoom: defaultZoom }}
@@ -415,5 +422,12 @@ const createStyles = (colors: Palette) =>
       elevation: 3,
     },
   });
+
+// Wrap in React.memo so a parent re-render that doesn't change our
+// props (e.g. opening/closing the LegendSheet on ExploreHomeScreen)
+// doesn't force MapLibre to re-mount its marker children. In dev mode
+// each unguarded render of ExploreHomeScreen logged 250–1000 ms — the
+// memo cuts that cost out for the legend-toggle path entirely.
+export const LibreMiniMap = React.memo(LibreMiniMapInner);
 
 export default LibreMiniMap;
