@@ -45,6 +45,13 @@ interface Props {
   // signals "your position is somewhere inside this circle". Suppressed
   // when null (e.g. dev-pinned location, where accuracy is meaningless).
   userAccuracyMetres?: number | null;
+  // Optional explicit user-position override. Used by detail screens
+  // (cache / place / event) where the map is centred on the *thing*
+  // (lat/lon) but should still draw the user's dot at their actual
+  // GPS coordinates somewhere else on the map. When unset, the user
+  // dot sits at lat/lon (mini-map default).
+  userLat?: number | null;
+  userLon?: number | null;
   // "Open map" tap target. Surfaces the affordance the user uses to jump
   // to the full-screen MapScreen which is fully interactive (pan + zoom
   // + filters). If undefined, the button is hidden.
@@ -112,6 +119,8 @@ const LibreMiniMapInner: React.FC<Props> = ({
   events,
   defaultZoom = 13,
   userAccuracyMetres,
+  userLat,
+  userLon,
   onTapMap,
   onOpenLegend,
   interactive = false,
@@ -253,8 +262,11 @@ const LibreMiniMapInner: React.FC<Props> = ({
         />
         {/* User position — translucent pulsing accuracy halo behind a
             solid dot. The halo sizes by GPS accuracy when known and is
-            suppressed for dev-pinned positions (where accuracy is null). */}
-        <Marker id="user" lngLat={[lon, lat]}>
+            suppressed for dev-pinned positions (where accuracy is null).
+            userLat/userLon (detail-screen override) takes precedence
+            over lat/lon (mini-map default where camera centre + user
+            dot are the same point). */}
+        <Marker id="user" lngLat={[userLon ?? lon, userLat ?? lat]}>
           <View style={styles.userMarkerWrap}>
             {userAccuracyMetres !== null && userAccuracyMetres !== undefined ? (
               <Animated.View

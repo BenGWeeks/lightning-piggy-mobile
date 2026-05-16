@@ -40,6 +40,7 @@ import { btcMapIconComponent } from '../utils/btcMapIcon';
 import BtcMapAttribution from '../components/BtcMapAttribution';
 import { LibreMiniMap } from '../components/LibreMiniMap';
 import PlacesFilterSheet, { countActiveFilters } from '../components/PlacesFilterSheet';
+import LegendSheet from '../components/LegendSheet';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -163,6 +164,7 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
   // doesn't filter to zero (most listings carry 0-2 categories).
   const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
+  const [legendVisible, setLegendVisible] = useState(false);
   const availableCategories = useMemo(() => {
     const seen = new Set<string>();
     for (const p of places) for (const c of p.categories ?? []) seen.add(c);
@@ -272,6 +274,7 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
                 events={[]}
                 onTapMap={() => navigation.navigate('Map')}
                 onBoundsChange={setMapBbox}
+                onOpenLegend={() => setLegendVisible(true)}
                 defaultZoom={10}
               />
             </View>
@@ -353,6 +356,12 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
         selectedCategories={selectedCategories}
         onChangeCategories={setSelectedCategories}
         onClearAll={() => setSelectedCategories(new Set())}
+      />
+      <LegendSheet
+        visible={legendVisible}
+        onClose={() => setLegendVisible(false)}
+        placesVisible
+        availableCategories={availableCategories}
       />
     </View>
   );

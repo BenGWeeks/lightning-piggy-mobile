@@ -47,7 +47,7 @@ import {
 } from '../services/btcMapService';
 import { formatDistance, haversineMetres } from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
-import { ExploreMiniMap } from '../components/ExploreMiniMap';
+import { LibreMiniMap } from '../components/LibreMiniMap';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import SocialIcon, { socialLabel, type SocialNetwork } from '../components/SocialIcon';
 
@@ -345,7 +345,7 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
             {/* Single-pin map preview — same component the Hub mini-map
                 uses, centred on the merchant. Tap → full Map. */}
             <View style={styles.mapWrap}>
-              <ExploreMiniMap
+              <LibreMiniMap
                 lat={place.lat}
                 lon={place.lon}
                 merchants={[place]}
