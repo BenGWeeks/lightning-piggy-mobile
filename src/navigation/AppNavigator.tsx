@@ -208,13 +208,13 @@ function HomeTabs() {
             const state = navigation.getState();
             const tabRoute = state?.routes.find((r) => r.name === 'Explore');
             const subState = tabRoute?.state;
+            const exploreIsFocused = state.routes[state.index]?.name === 'Explore';
+            console.log(
+              `[Tab:Explore] tabPress focused=${exploreIsFocused} subIdx=${subState?.index} subKey=${subState?.key} routes=[${(subState?.routes ?? []).map((r) => r.name).join(',')}]`,
+            );
             if (subState && typeof subState.index === 'number' && subState.index > 0) {
-              // When Explore isn't yet focused, let RN's default
-              // tab-switch run too (so focus actually shifts) — only
-              // preventDefault when Explore IS focused, since then
-              // tapping again is a no-op without our intervention.
-              const exploreIsFocused = state.routes[state.index]?.name === 'Explore';
               if (exploreIsFocused) e.preventDefault();
+              console.log(`[Tab:Explore] dispatching popToTop target=${subState.key}`);
               navigation.dispatch({
                 ...StackActions.popToTop(),
                 target: subState.key,
