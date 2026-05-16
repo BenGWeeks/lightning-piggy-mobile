@@ -15,7 +15,9 @@ import {
   buildPackWriteFrame,
   buildPwdAuthFrame,
   buildPwdWriteFrame,
+  buildReadFrame,
   buildSetAccessFrame,
+  diagnoseTagLockState,
   familyFromGetVersion,
   generateLockSecrets,
   pagesForFamily,
@@ -23,6 +25,7 @@ import {
   pwdToPin,
   splitIntoPages,
   type NtagFamily,
+  type NtagPages,
 } from '../utils/nfc/ntag21xLock';
 
 // Reader-mode options for every `requestTechnology` call. On Android this
@@ -870,7 +873,10 @@ async function writeNdefBytesAndLockAndroid(
   );
   // Phase 1 — write NDEF data starting at the chip's first user page
   // (0x04 on every NTAG21x). Page-by-page so a mid-stream failure
-  // surfaces the offending page index in the error.
+  // surfaces the offending page index in the error. On failure we
+  // also run the lock-status diagnostic so the hider gets a clear
+  // "OTP-locked, get a fresh chip" vs "PWD-protected, unlock first"
+  // message instead of just "Transceive failed" (Pixel test session).
   for (let i = 0; i < tlvPages.length; i++) {
     const offset = pages.userPageFirst + i;
     try {
@@ -879,9 +885,9 @@ async function writeNdefBytesAndLockAndroid(
         tlvPages[i],
       );
     } catch (e) {
-      throw new Error(
-        `Tag write failed at page 0x${offset.toString(16)} (byte ${i * 4}/${tlvBytes.length}) — ${(e as Error)?.message ?? e}.`,
-      );
+      const raw = `Tag write failed at page 0x${offset.toString(16)} (byte ${i * 4}/${tlvBytes.length}) — ${(e as Error)?.message ?? e}.`;
+      const diagnosis = await diagnoseAndExplainLockState(pages).catch(() => null);
+      throw new Error(diagnosis ? `${diagnosis}\n\n(${raw})` : raw);
     }
   }
   console.log('[NFC] NDEF user-data write OK');
@@ -931,6 +937,72 @@ async function writeNdefBytesAndLockAndroid(
     locked: true,
     lock: { pwdHex, packHex, pin, tagUid },
   };
+}
+
+// Read the chip's lock-status bytes after a writePage failure and
+// translate the state into a hider-readable explanation. Three
+// states the user might see:
+//
+//   • OTP-locked: the static/dynamic lock bits at page 0x02 / family-
+//     specific dynamic-lock page are set. These are one-way; once
+//     flipped the chip is permanently read-only and no software can
+//     recover it. Usually a relic of the pre-#567 path that called
+//     Ndef.makeReadOnly() after every write — NFC Tools reports this
+//     as "Writeable: No". The hider needs a fresh NTAG215.
+//   • PWD-protected: AUTH0 ≤ last user page, so the chip is gating
+//     writes behind PWD_AUTH. The hider can recover by entering the
+//     Edit flow for the Piglet that originally locked this tag and
+//     tapping Unlock tag.
+//   • Open: no lock detected, the IOException came from elsewhere
+//     (tag connection drop, broken antenna pad, mis-detected
+//     family, …). Surface the raw transceive error.
+//
+// Each branch returns the prose; the caller composes it into the
+// thrown error so the BrandedAlert / write-sheet error state shows
+// it verbatim.
+async function diagnoseAndExplainLockState(pages: NtagPages): Promise<string | null> {
+  try {
+    // READ at page 0x02 returns 16 bytes (pages 0x02-0x05). The
+    // static lock bits live in bytes 2-3 of page 0x02.
+    const staticRead = await NfcManager.nfcAHandler.transceive(buildReadFrame(0x02));
+    if (staticRead.length < 4) return null;
+    // READ at the dynamic-lock page (215: 0x82, 216: 0xE2, 213:
+    // 0x28). Byte 0 holds the dynamic lock bits.
+    const dynamicRead = await NfcManager.nfcAHandler.transceive(
+      buildReadFrame(pages.dynamicLockPage),
+    );
+    if (dynamicRead.length < 1) return null;
+    // READ CFG_0 → byte 3 is AUTH0 (first page that requires
+    // PWD_AUTH for writes). Pre-set 0xFF (disabled) on a factory
+    // chip; PR #567's lock flow sets it to 0x04.
+    const cfg0Read = await NfcManager.nfcAHandler.transceive(buildReadFrame(pages.cfg0));
+    if (cfg0Read.length < 4) return null;
+    const state = diagnoseTagLockState(staticRead.slice(0, 4), dynamicRead[0], cfg0Read[3], pages);
+    switch (state.kind) {
+      case 'otp-locked':
+        return (
+          'This tag is permanently locked — its chip-level lock bits have been flipped ' +
+          '(usually by an earlier app calling makeReadOnly). No software can rewrite it ' +
+          'or undo the lock. Grab a fresh NTAG215 sticker / charm to continue.'
+        );
+      case 'pwd-protected':
+        return (
+          "This tag is password-locked by a Lightning Piggy PIN we don't have stored on " +
+          `this device (chip AUTH0 = 0x${state.auth0.toString(16).padStart(2, '0').toUpperCase()}). ` +
+          'Open the original Piglet from My Piglets, tap Edit, then Unlock tag on the PIN ' +
+          'card. After that the chip accepts a fresh write.'
+        );
+      case 'open':
+        return null;
+      default:
+        return null;
+    }
+  } catch {
+    // READ itself can fail if the tag left the antenna mid-write. In
+    // that case the diagnostic adds nothing — fall back to the raw
+    // transceive error.
+    return null;
+  }
 }
 
 // Thin alias for `hexToBytes` from the lock module — keeps the calls

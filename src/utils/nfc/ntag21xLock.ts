@@ -38,6 +38,11 @@ export interface NtagPages {
   cfg1: number;
   pwd: number;
   pack: number;
+  // OTP dynamic-lock page — one-way lock bits for the high half of
+  // user memory (pages 16+). 213: 0x28, 215: 0x82, 216: 0xE2. Read
+  // by the diagnostic to tell the hider whether their tag is
+  // recoverable (PWD-protected) or bricked (OTP-locked).
+  dynamicLockPage: number;
 }
 
 const NTAG_PAGES: Record<NtagFamily, NtagPages> = {
@@ -49,6 +54,7 @@ const NTAG_PAGES: Record<NtagFamily, NtagPages> = {
     cfg1: 0x2a,
     pwd: 0x2b,
     pack: 0x2c,
+    dynamicLockPage: 0x28,
   },
   'ntag-215': {
     family: 'ntag-215',
@@ -58,6 +64,7 @@ const NTAG_PAGES: Record<NtagFamily, NtagPages> = {
     cfg1: 0x84,
     pwd: 0x85,
     pack: 0x86,
+    dynamicLockPage: 0x82,
   },
   'ntag-216': {
     family: 'ntag-216',
@@ -67,6 +74,7 @@ const NTAG_PAGES: Record<NtagFamily, NtagPages> = {
     cfg1: 0xe4,
     pwd: 0xe5,
     pack: 0xe6,
+    dynamicLockPage: 0xe2,
   },
 };
 
@@ -160,11 +168,65 @@ export const buildDisableAuthFrame = (pages: NtagPages): number[] => [
   AUTH0_DISABLED,
 ];
 
+// NTAG21x READ command per NXP datasheet §10.5.3: 0x30 <page>, returns
+// 16 bytes (4 consecutive pages). Caller slices the response for the
+// page they want.
+export const buildReadFrame = (page: number): number[] => [0x30, page & 0xff];
+
 // 8-byte GET_VERSION response (NXP AN11340). Byte 6 carries the
 // storage-size identifier we use to pick the right `NtagPages` config.
 // Returns null when the bytes aren't a recognisable NTAG21x reply
 // (caller decides how to surface "this isn't a chip we support").
 export const buildGetVersionFrame = (): number[] => [0x60];
+
+// Diagnose why a tag is rejecting writes. NTAG21x has two layers of
+// permanent write protection — neither reversible at the silicon
+// level — plus the reversible PWD/PACK lock we own. Reads the OTP
+// lock bytes at page 0x02 (static lock, covers CC + pages 0x04-0x0F)
+// AND the dynamic lock byte at the family-specific dynamic-lock page
+// (215: 0x82, 216: 0xE2, 213: 0x28) AND the CFG_0 byte 3 (AUTH0).
+// Returns a tagged result so the caller can branch on whether
+// recovery is possible (PWD_AUTH unlock works) or hopeless (OTP
+// flipped → buy a fresh chip). Issue #567 / Pixel test session.
+export type TagLockState =
+  | { kind: 'open' }
+  | { kind: 'otp-locked'; pagesLockedFrom: number }
+  | { kind: 'pwd-protected'; auth0: number }
+  | { kind: 'unknown' };
+
+export const diagnoseTagLockState = (
+  staticLockPage: number[], // 4-byte page 0x02 read response
+  dynamicLockByte0: number, // byte 0 of family.dynamicLockPage
+  auth0: number, // byte 3 of family.cfg0
+  pages: NtagPages,
+): TagLockState => {
+  // Static lock bytes live at page 0x02 bytes 2-3. Byte 2 (LOCK0):
+  // bit 3 locks CC (page 0x03); bits 4-7 lock user pages 0x04-0x07.
+  // Byte 3 (LOCK1): bits 0-7 lock pages 0x08-0x0F.
+  const lock0 = staticLockPage[2];
+  const lock1 = staticLockPage[3];
+  // Bits 4-7 of LOCK0 = pages 4-7 locked, plus all of LOCK1 = pages
+  // 8-15 locked. Any set bit means at least one user page is OTP-
+  // locked and the tag is no longer writable in that range.
+  const userPagesOtpLocked = ((lock0 & 0xf0) | lock1) !== 0;
+  if (userPagesOtpLocked) {
+    const firstLocked = (lock0 & 0x10) !== 0 ? 4 : (lock0 & 0x20) !== 0 ? 5 : 6;
+    return { kind: 'otp-locked', pagesLockedFrom: firstLocked };
+  }
+  // Dynamic lock — covers pages 16-end of user memory on 215/216. A
+  // non-zero byte means at least one 8-page block of dynamic memory
+  // is OTP-locked.
+  if (dynamicLockByte0 !== 0) {
+    return { kind: 'otp-locked', pagesLockedFrom: 16 };
+  }
+  // AUTH0 < first invalid page means PWD/PACK is gating writes. The
+  // hider can recover by entering the right Piglet's Edit → Unlock
+  // flow (if they have the PIN).
+  if (auth0 <= pages.userPageLast) {
+    return { kind: 'pwd-protected', auth0 };
+  }
+  return { kind: 'open' };
+};
 
 export const familyFromGetVersion = (response: number[]): NtagFamily | null => {
   if (response.length < 7) return null;
