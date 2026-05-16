@@ -81,11 +81,28 @@ export const navigateToHuntFound = (lnurl: string): boolean => {
 // emitted by the multi-record NFC tags (#73).
 export const navigateToHuntPiggyDetail = (coord: string): boolean => {
   if (!navigationRef.isReady()) return false;
+  // Set the Explore stack state explicitly so back from HuntPiggyDetail
+  // walks through Hunt (Geo-caches list) → ExploreHome, matching the
+  // user's mental model. Pre-fix the nested `navigate(..., { screen:
+  // 'HuntPiggyDetail' })` shortcut left the Explore stack with only
+  // HuntPiggyDetail at index 0 — back-press exited Explore to the
+  // previous tab (usually Home), and Explore-tab-tap was a no-op
+  // because there was nothing to pop. Bug spotted on Pixel: "back
+  // goes to home — not to Geo-caches".
   navigationRef.navigate('Main', {
     screen: 'MainTabs',
     params: {
       screen: 'Explore',
-      params: { screen: 'HuntPiggyDetail', params: { coord } },
+      params: {
+        state: {
+          index: 2,
+          routes: [
+            { name: 'ExploreHome' },
+            { name: 'Hunt' },
+            { name: 'HuntPiggyDetail', params: { coord } },
+          ],
+        },
+      },
     },
   });
   return true;

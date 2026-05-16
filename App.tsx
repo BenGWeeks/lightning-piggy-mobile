@@ -119,11 +119,7 @@ export default function App() {
       });
     };
     const isDuplicate = async (url: string): Promise<boolean> => {
-      if (
-        lastRouted &&
-        lastRouted.url === url &&
-        Date.now() - lastRouted.at < ROUTE_DEDUPE_MS
-      ) {
+      if (lastRouted && lastRouted.url === url && Date.now() - lastRouted.at < ROUTE_DEDUPE_MS) {
         return true;
       }
       // Disk fallback for the race where getInitialURL fires before
@@ -143,7 +139,9 @@ export default function App() {
       void isDuplicate(trimmed).then((dup) => {
         if (cancelled) return;
         if (dup) {
-          console.log(`[Link] de-duped Android-resurrected NDEF intent within ${ROUTE_DEDUPE_MS}ms`);
+          console.log(
+            `[Link] de-duped Android-resurrected NDEF intent within ${ROUTE_DEDUPE_MS}ms`,
+          );
           return;
         }
         const entry = { url: trimmed, at: Date.now() };
