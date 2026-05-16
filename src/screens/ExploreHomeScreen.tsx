@@ -1053,4 +1053,24 @@ const createLocalStyles = (colors: Palette) =>
     },
   });
 
-export default ExploreHomeScreen;
+// React.Profiler wrapper — see HomeScreen for the rationale (#560).
+// Explore is the screen Ben saw the 24-57 s freezes on; this surfaces
+// the render-commit cost so we can finally see whether the freezes are
+// React work (Profiler fires) or something else (silent).
+const ProfiledExploreHomeScreen: React.FC<Props> = (props) => (
+  <React.Profiler
+    id="ExploreHomeScreen"
+    onRender={(id, phase, actualDuration) => {
+      if (actualDuration > 100) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[PerfBlock] render:${id} ${phase}=${Math.round(actualDuration)}ms`,
+        );
+      }
+    }}
+  >
+    <ExploreHomeScreen {...props} />
+  </React.Profiler>
+);
+
+export default ProfiledExploreHomeScreen;

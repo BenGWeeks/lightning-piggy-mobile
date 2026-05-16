@@ -484,8 +484,15 @@ const DECRYPT_YIELD_EVERY = 15;
  * breathing room for gorhom-bottom-sheet's open animation to schedule
  * frames. Halving this doubles yield frequency, drops the per-burst
  * blocking from ~8 ms to ~4 ms, and lets bottom-sheet opens stay
- * smooth during inbox drain. */
-const NIP17_LOOP_YIELD_EVERY = 4;
+ * smooth during inbox drain.
+ *
+ * Lowered again 2026-05-16 from 4 → 2: tonight's instrumented Pixel
+ * logs (issue #560) showed refreshDmInbox running for 8.6 s wall-clock
+ * with 3 s heartbeat gaps stacking during the decrypt loop. Yielding
+ * every 2 wraps cuts each per-burst block back to ~2 ms; the
+ * setImmediate cost is amortised across the still-significant
+ * per-wrap decrypt work so the overhead is < 5%. */
+const NIP17_LOOP_YIELD_EVERY = 2;
 
 /**
  * Minimum gap between `refreshDmInbox` calls fired by
