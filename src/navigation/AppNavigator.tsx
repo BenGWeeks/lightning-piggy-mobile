@@ -1,6 +1,10 @@
 import React, { useMemo } from 'react';
 import { StyleSheet, ActivityIndicator, View, Platform, useWindowDimensions } from 'react-native';
-import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
+import {
+  NavigationContainer,
+  StackActions,
+  createNavigationContainerRef,
+} from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createDrawerNavigator } from '@react-navigation/drawer';
@@ -180,16 +184,22 @@ function HomeTabs() {
           // tab is tapped. Without this, an NFC-tap deep-link pushes
           // HuntPiggyDetail onto the stack and the next Explore-tap
           // resumes there instead of showing the Explore home rails.
-          // Ben hit this after claiming a Piggy: tapping Explore took
-          // him straight back to the Busway detail rather than the
-          // hub he was looking for.
+          //
+          // The earlier version used navigation.navigate('Explore',
+          // { screen: 'ExploreHome' }) which RN treats as a no-op when
+          // Explore is already focused. Dispatching StackActions.popToTop
+          // hits the inner Explore stack navigator directly, regardless
+          // of focus, and pops every screen above ExploreHome.
           tabPress: (e) => {
             const state = navigation.getState();
             const tabRoute = state?.routes.find((r) => r.name === 'Explore');
             const subState = tabRoute?.state;
             if (subState && typeof subState.index === 'number' && subState.index > 0) {
               e.preventDefault();
-              navigation.navigate('Explore', { screen: 'ExploreHome' });
+              navigation.dispatch({
+                ...StackActions.popToTop(),
+                target: subState.key,
+              });
             }
           },
         })}
