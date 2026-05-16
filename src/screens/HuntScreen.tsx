@@ -25,7 +25,8 @@ import { useTrustGraph } from '../contexts/TrustGraphContext';
 import HuntFilterSheet, { countActiveFilters } from '../components/HuntFilterSheet';
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
-import { ExploreMiniMap } from '../components/ExploreMiniMap';
+import { LibreMiniMap } from '../components/LibreMiniMap';
+import LegendSheet from '../components/LegendSheet';
 import { type ParsedCache } from '../services/nostrPlacesService';
 import { fetchCachesByAuthor, subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
 import { useNostr } from '../contexts/NostrContext';
@@ -154,6 +155,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   const [selectedTerrains, setSelectedTerrains] = useState<Set<number>>(new Set());
   // Whether the bottom-sheet filter UI is open.
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
+  const [legendVisible, setLegendVisible] = useState(false);
   // Map-touch tracking removed when the map moved out of the
   // FlatList header (commit eedd82e follow-up). Map and list are now
   // siblings, so touches on the map don't reach the FlatList at all.
@@ -359,7 +361,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
           search; passing `filteredCaches` so the map matches the list
           visually (#19). */}
       <View style={styles.mapWrap}>
-        <ExploreMiniMap
+        <LibreMiniMap
           lat={pos?.lat ?? null}
           lon={pos?.lon ?? null}
           userAccuracyMetres={pos?.accuracy ?? null}
@@ -367,12 +369,11 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
           caches={filteredCaches.map((c) => c.cache)}
           events={[]}
           onTapMap={() => navigation.navigate('Map')}
-          onBoundsChange={setMapBbox}
-          // One zoom level wider than ExploreMiniMap's default 13 so
-          // the Geo-caches hub map shows a bigger catchment without
-          // the user having to pinch-zoom out (Ben's feedback).
+          onOpenLegend={() => setLegendVisible(true)}
+          // One zoom level wider than the default 13 so the Geo-caches
+          // hub map shows a bigger catchment without the user having to
+          // pinch-zoom out.
           defaultZoom={12}
-          interactive
         />
       </View>
 
@@ -471,6 +472,15 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
           // controls it via the bottom-sheet picker so "Clear all" stays
           // a filter-only action, not a safety-affecting one.
         }}
+      />
+      {/* Map-legend sheet — no merchants on the Geo-caches surface, so
+          the categories section is suppressed and the sheet just lists
+          the Piglet / NIP-GC cache / user pin types. */}
+      <LegendSheet
+        visible={legendVisible}
+        onClose={() => setLegendVisible(false)}
+        placesVisible={false}
+        availableCategories={[]}
       />
     </View>
   );
@@ -571,14 +581,17 @@ const createStyles = (colors: Palette) =>
       // `scrollContent.paddingTop` and PlacesScreen's `listContent`
       // top padding so the three Explore-stack screens match.
       marginTop: 16,
-      marginBottom: 8,
+      // 10 dp below the map = same gap between search and rows below =
+      // same gap between rows. Three identical vertical rhythms so the
+      // page reads as a tidy stack rather than three different spacings.
+      marginBottom: 10,
     },
     searchRow: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
       marginHorizontal: 16,
-      marginBottom: 8,
+      marginBottom: 10,
       backgroundColor: colors.surface,
       borderRadius: 100,
       paddingHorizontal: 14,

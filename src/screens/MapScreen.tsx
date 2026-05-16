@@ -10,9 +10,7 @@ import {
   Animated,
   PanResponder,
 } from 'react-native';
-import { WebView, WebViewMessageEvent } from 'react-native-webview';
 import * as Location from 'expo-location';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ChevronLeft,
   Clock,
@@ -47,7 +45,8 @@ import {
   lightningAddressOf,
 } from '../services/btcMapService';
 import type { ParsedCache } from '../services/nostrPlacesService';
-import { subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
+import { fetchCachesByAuthor, subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
+import { useNostr } from '../contexts/NostrContext';
 import { decodeGeohash, encodeGeohash, geohashPrefixes } from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
@@ -55,14 +54,7 @@ import SocialIcon from '../components/SocialIcon';
 import WebOfTrustChip from '../components/WebOfTrustChip';
 import WebOfTrustBottomSheet from '../components/WebOfTrustBottomSheet';
 import LegendSheet from '../components/LegendSheet';
-import { ME_DOT_CSS, ME_DOT_JS } from '../utils/mapMeDot';
-import {
-  LEAFLET_BASE_CSS,
-  LEAFLET_HEAD_TAGS,
-  LEAFLET_SCRIPT_TAG,
-  POST_BRIDGE_JS,
-  tileLayerJs,
-} from '../utils/mapWebview/tiles';
+import { LibreMiniMap } from '../components/LibreMiniMap';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -70,30 +62,13 @@ interface Props {
 
 type PermissionState = 'unknown' | 'granted' | 'denied';
 
-interface BridgeMessage {
-  type: 'ready' | 'bounds' | 'markerTap' | 'cacheTap';
-  bbox?: Bbox;
-  /** Viewport centre alongside the bbox — used to persist last-viewed. */
-  centre?: { lat: number; lng: number };
-  /** Leaflet zoom level alongside the bbox. */
-  zoom?: number;
-  /** True when the bounds change came from a user gesture (drag/zoom),
-   * false / undefined when it came from a programmatic LP_setViewport
-   * call or Leaflet's initial bootstrap setView. */
-  userInitiated?: boolean;
-  id?: number;
-  /** Cache coord (`<kind>:<pubkey>:<d>`) for cacheTap messages. */
-  coord?: string;
-}
-
 /**
  * Map sub-screen — discovers Bitcoin-accepting merchants near the user via
  * the BTC Map API (OSM-backed). Closes the foreground-browse part of #467;
  * the background-geofence + notifications part lands in milestone 3.
  *
- * Renderer is Leaflet on OpenStreetMap tiles via WebView (no Google Maps,
- * no API key, OSM-aligned with the underlying merchant data — see project
- * memory `BTC Map runs the commons (Nathan)`).
+ * Renderer is native MapLibre via the shared LibreMiniMap component (no
+ * Google Maps, no API key, OSM tiles streamed from openstreetmap.org).
  */
 const MapScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
@@ -105,6 +80,7 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   // 306270c — the full map was the last surface still showing every
   // cache regardless of trust.
   const { isTrusted, wotTier } = useTrustGraph();
+  const { pubkey: signedInPubkey, relays: userRelays } = useNostr();
   // WoT bottom-sheet visibility — opened from the chip inside the
   // FilterSheet so the user can change tier without leaving the map.
   const [wotSheetVisible, setWotSheetVisible] = useState(false);
@@ -113,7 +89,6 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   // strip that used to sit under the map and ate vertical space.
   const [legendVisible, setLegendVisible] = useState(false);
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const webviewRef = useRef<WebView>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastBbox = useRef<Bbox | null>(null);
 
@@ -129,22 +104,14 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
     };
   }, [navigation]);
 
-  // Persist the last map viewport so re-opening the Map doesn't snap
-  // back to London while we wait for the GPS resolve. Hydrated in a
-  // useEffect on mount (async, can't be a useState init) and written on
-  // every `moveend` / `zoomend` (debounced inside the WebView's bounds
-  // event). One global slot — multiple maps would just race on the key.
-  const VIEWPORT_KEY = '@lp:map-viewport';
-  const lastViewport = useRef<{ lat: number; lng: number; zoom: number } | null>(null);
-  const hydratedViewport = useRef(false);
-  // Render-gate. AsyncStorage is async, so on first render the WebView
-  // would otherwise mount with `injectedJavaScriptBeforeContentLoaded`
-  // referencing a not-yet-hydrated viewport and fall through to the
-  // London default. We block the WebView render until hydration
-  // finishes so the injected JS always carries the correct slot.
-  const [viewportHydrated, setViewportHydrated] = useState(false);
-
   const [permission, setPermission] = useState<PermissionState>('unknown');
+  // User position state — kept here so LibreMiniMap (interactive full-
+  // screen variant) can render the GPS dot + accuracy halo. The WebView
+  // path reads via injectJavaScript on resolve; the LibreMiniMap path
+  // reads declaratively from this state.
+  const [pos, setPos] = useState<{ lat: number; lon: number; accuracy: number | null } | null>(
+    null,
+  );
   const [places, setPlaces] = useState<BtcMapPlace[]>([]);
   const [caches, setCaches] = useState<Map<string, ParsedCache>>(new Map());
   const [selected, setSelected] = useState<BtcMapPlace | null>(null);
@@ -165,49 +132,8 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   const [categoryFilter, setCategoryFilter] = useState<Set<string>>(new Set());
   const cachesCloserRef = useRef<(() => void) | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [webviewReady, setWebviewReady] = useState(false);
 
   // ------- permissions + initial position --------------------------------
-
-  // Hydrate the last-saved viewport before the WebView bridge resolves.
-  // If found, we'll inject it instead of letting the location-resolve
-  // flow re-centre — the user picks up exactly where they left off.
-  useEffect(() => {
-    (async () => {
-      try {
-        const raw = await AsyncStorage.getItem(VIEWPORT_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw) as { lat: number; lng: number; zoom: number };
-          // Detect the legacy bug where Leaflet's hardcoded London fallback
-          // got persisted as the "user's last viewport" via the initial
-          // setView's moveend. Treat that exact triple as unhydrated and
-          // wipe the slot so the GPS-centre branch takes over.
-          const isLondonFallback =
-            Math.abs(parsed.lat - 51.5074) < 1e-4 &&
-            Math.abs(parsed.lng - -0.1278) < 1e-4 &&
-            parsed.zoom === 12;
-          if (
-            Number.isFinite(parsed.lat) &&
-            Number.isFinite(parsed.lng) &&
-            Number.isFinite(parsed.zoom) &&
-            !isLondonFallback
-          ) {
-            lastViewport.current = parsed;
-            hydratedViewport.current = true;
-          } else if (isLondonFallback) {
-            await AsyncStorage.removeItem(VIEWPORT_KEY).catch(() => {});
-          }
-        }
-      } catch {
-        // Storage IO is best-effort — fall through to GPS-centre flow.
-      } finally {
-        // Always flip — even on miss / IO error the WebView should
-        // render (it'll just open at the London fallback for users
-        // with no saved viewport yet).
-        setViewportHydrated(true);
-      }
-    })();
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -249,6 +175,10 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
       }
       try {
         if (cancelled) return;
+        // Mirror lat/lon/accuracy into state so the LibreMiniMap path
+        // can render the GPS dot + accuracy halo. WebView path keeps
+        // using its injectJavaScript flow below.
+        setPos({ lat, lon, accuracy });
         // Wider initial bbox + lower default zoom so rural users (no
         // Bitcoin merchants within walking distance) see at least a
         // few drive-away pins on first paint. They can zoom in from
@@ -267,18 +197,13 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         // hostile. We still drop a `me` marker at GPS so they know
         // where they are; the recentre button + recenterOnUser puts
         // them back on themselves on demand.
-        if (hydratedViewport.current && lastViewport.current) {
-          const v = lastViewport.current;
-          setViewportInWebView(v.lat, v.lng, v.zoom);
-          // Drop a me-marker at GPS without re-centring.
-          if (webviewReady && webviewRef.current) {
-            const js = `window.LP_setMeMarker && window.LP_setMeMarker(${lat}, ${lon}, ${accuracy ?? 'null'}); true;`;
-            webviewRef.current.injectJavaScript(js);
-          }
-        } else {
-          setViewportInWebView(lat, lon, 10, accuracy);
-        }
-        await refreshPlaces(initBbox);
+        // LibreMiniMap fires onRegionDidChange shortly after mount with
+        // its actual viewport — that bounds-driven fetch is now the
+        // single source of truth for the visible-merchants set. (The
+        // previous WebView path used to fetch the wider init bbox here
+        // because Leaflet's first `bounds` message coincided with
+        // `ready`; with native MapLibre the bounds event fires
+        // separately so we just let it lead.)
 
         // Subscribe to NIP-GC kind 37516 caches in the user's coarse
         // geohash neighbourhood. Renders Lightning Piggies (com.lightningpiggy.app
@@ -308,95 +233,40 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ------- WebView communication ----------------------------------------
-
-  // Queues the most-recent intended viewport so we can re-issue it
-  // once the WebView bridge fires its `ready` message. Without this
-  // the initial location-resolve happens before `LP_setViewport`
-  // exists inside the WebView and the call no-ops, leaving the map
-  // stranded on Leaflet's hardcoded London fallback.
-  const pendingViewport = useRef<{ lat: number; lng: number; zoom: number } | null>(null);
-
-  const setViewportInWebView = useCallback(
-    (lat: number, lng: number, zoom: number, accuracyMetres: number | null = null) => {
-      pendingViewport.current = { lat, lng, zoom };
-      if (!webviewRef.current || !webviewReady) return;
-      // accuracy is optional — null suppresses the halo (dev pin or
-      // platforms that don't report). The shared drawAccuracyCircle
-      // in src/utils/mapMeDot.ts no-ops on null.
-      const js = `window.LP_setViewport && window.LP_setViewport(${lat}, ${lng}, ${zoom}, ${accuracyMetres ?? 'null'}); true;`;
-      webviewRef.current.injectJavaScript(js);
-    },
-    [webviewReady],
-  );
-
-  // Replay the pending viewport once the bridge comes up.
+  // Surface the signed-in user's own published Piglets on the map even
+  // when no nearby-geohash subscription has echoed them back. The
+  // nearby sub filters by `#g` prefixes derived from the user's current
+  // GPS — so a Piglet hidden outside that neighbourhood (e.g. away
+  // from home, on holiday) wouldn't appear on the map without an
+  // author-side fetch. Mirrors ExploreHomeScreen's by-author merge.
+  // One-shot per pubkey via the ref so re-renders don't refire.
+  const byAuthorFetchedForRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!webviewReady) return;
-    const v = pendingViewport.current;
-    if (!v || !webviewRef.current) return;
-    const js = `window.LP_setViewport && window.LP_setViewport(${v.lat}, ${v.lng}, ${v.zoom}); true;`;
-    webviewRef.current.injectJavaScript(js);
-  }, [webviewReady]);
-
-  const sendMarkers = useCallback((list: BtcMapPlace[]) => {
-    if (!webviewRef.current) return;
-    const payload = list.map((p) => ({
-      id: p.id,
-      lat: p.lat,
-      lng: p.lon,
-      lightning: acceptsLightning(p),
-      // BTC Map's curated category glyph (Material Symbols name). Falls
-      // back to 'storefront' in the WebView when missing so every pin
-      // still gets an obvious shop-shaped marker.
-      icon: p.icon ?? 'storefront',
-    }));
-    const js = `window.LP_setMarkers && window.LP_setMarkers(${JSON.stringify(payload)}); true;`;
-    webviewRef.current.injectJavaScript(js);
-  }, []);
-
-  const sendCaches = useCallback((list: ParsedCache[]) => {
-    if (!webviewRef.current) return;
-    const payload = list
-      .filter((c) => c.geohash) // skip caches with no location
-      .map((c) => ({
-        coord: c.coord,
-        // Decode the longest geohash back to lat/lon — quick and
-        // dirty by inverse-bisection inline; for now we'll request
-        // each cache's lat/lon to come pre-decoded from a separate
-        // helper. The simplest path: caches with multi-precision g
-        // tags from precision 9 give us ~5 m resolution which is
-        // plenty for a pin. We use the longest tag's geohash decoded
-        // via a tiny inverse-encode (TODO: extract).
-        ...decodeGeohash(c.geohash as string),
-        kind: c.isLpPiggy ? 'piggy' : 'cache',
-      }));
-    const js = `window.LP_setCaches && window.LP_setCaches(${JSON.stringify(payload)}); true;`;
-    webviewRef.current.injectJavaScript(js);
-  }, []);
-
-  // Re-emit markers any time `places` or pin-type filters change. The
-  // filter sheet flips lightning / onchain / piglet / nipgcCache flags;
-  // we apply them here so the WebView only ever sees the visible
-  // subset, keeping Leaflet layer state in sync without extra bridge
-  // calls.
-  useEffect(() => {
-    if (!webviewReady) return;
-    const filtered = places.filter((p) => {
-      // Pin-type filter — Lightning vs On-chain.
-      const typeOk = acceptsLightning(p)
-        ? filters.lightning
-        : acceptsOnchain(p)
-          ? filters.onchain
-          : filters.lightning || filters.onchain;
-      if (!typeOk) return false;
-      // Category filter — empty set = show every category.
-      if (categoryFilter.size === 0) return true;
-      const cats = p.categories ?? [];
-      return cats.some((c) => categoryFilter.has(c));
-    });
-    sendMarkers(filtered);
-  }, [places, webviewReady, filters.lightning, filters.onchain, categoryFilter, sendMarkers]);
+    if (!signedInPubkey) return;
+    if (byAuthorFetchedForRef.current === signedInPubkey) return;
+    byAuthorFetchedForRef.current = signedInPubkey;
+    let cancelled = false;
+    const readRelays = userRelays.filter((r) => r.read).map((r) => r.url);
+    fetchCachesByAuthor(signedInPubkey, readRelays.length > 0 ? readRelays : undefined)
+      .then((mine) => {
+        if (cancelled || mine.length === 0) return;
+        setCaches((prev) => {
+          const next = new Map(prev);
+          for (const c of mine) {
+            const existing = next.get(c.coord);
+            if (!existing || c.createdAt > existing.createdAt) next.set(c.coord, c);
+          }
+          return next;
+        });
+      })
+      .catch(() => {
+        // Best-effort — the nearby subscription will fill the gap if the
+        // user happens to be in the right neighbourhood.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [signedInPubkey, userRelays]);
 
   // Distinct categories across the currently-loaded places — fed into
   // the FilterSheet so the available chips reflect what's actually on
@@ -407,20 +277,28 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
     return [...seen].sort();
   }, [places]);
 
-  useEffect(() => {
-    if (!webviewReady) return;
-    const filtered = [...caches.values()].filter(
+  // Filtered arrays for LibreMiniMap. Same predicates the WebView path
+  // used to send across the bridge — now plain memoised derived state.
+  const visibleMerchants = useMemo(() => {
+    return places.filter((p) => {
+      const typeOk = acceptsLightning(p)
+        ? filters.lightning
+        : acceptsOnchain(p)
+          ? filters.onchain
+          : filters.lightning || filters.onchain;
+      if (!typeOk) return false;
+      if (categoryFilter.size === 0) return true;
+      const cats = p.categories ?? [];
+      return cats.some((c) => categoryFilter.has(c));
+    });
+  }, [places, filters.lightning, filters.onchain, categoryFilter]);
+
+  const visibleCaches = useMemo(() => {
+    return [...caches.values()].filter(
       (c) =>
-        // Type chip — Piglet vs vanilla NIP-GC.
-        (c.isLpPiggy ? filters.piglet : filters.nipgcCache) &&
-        // Web-of-Trust gate — same rule the Hunt list applies. An
-        // untrusted-publisher pin only shows when the user explicitly
-        // sets WoT to "All" (the predicate returns true unconditionally
-        // in that tier).
-        isTrusted(c.hiderPubkey),
+        (c.isLpPiggy ? filters.piglet : filters.nipgcCache) && isTrusted(c.hiderPubkey),
     );
-    sendCaches(filtered);
-  }, [caches, webviewReady, filters.piglet, filters.nipgcCache, sendCaches, isTrusted]);
+  }, [caches, filters.piglet, filters.nipgcCache, isTrusted]);
 
   const refreshPlaces = useCallback(async (bbox: Bbox) => {
     try {
@@ -432,79 +310,25 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
     }
   }, []);
 
-  const onMessage = useCallback(
-    (event: WebViewMessageEvent) => {
-      let msg: BridgeMessage;
-      try {
-        msg = JSON.parse(event.nativeEvent.data);
-      } catch {
-        return;
-      }
-      if (msg.type === 'ready') {
-        setWebviewReady(true);
-      } else if (msg.type === 'bounds' && msg.bbox) {
-        const next = msg.bbox;
-        if (debounceTimer.current) clearTimeout(debounceTimer.current);
-        debounceTimer.current = setTimeout(() => {
-          lastBbox.current = next;
-          refreshPlaces(next);
-        }, 500);
-        // Persist centre + zoom only when the move was user-initiated —
-        // never persist programmatic LP_setViewport calls or Leaflet's
-        // own initial setView fallback, otherwise London (the bootstrap
-        // default) gets baked in as the user's "last viewport" forever.
-        if (
-          msg.userInitiated === true &&
-          typeof msg.centre?.lat === 'number' &&
-          typeof msg.centre?.lng === 'number' &&
-          typeof msg.zoom === 'number'
-        ) {
-          const v = { lat: msg.centre.lat, lng: msg.centre.lng, zoom: msg.zoom };
-          lastViewport.current = v;
-          AsyncStorage.setItem(VIEWPORT_KEY, JSON.stringify(v)).catch(() => {});
-        }
-      } else if (msg.type === 'markerTap' && typeof msg.id === 'number') {
-        const hit = places.find((p) => p.id === msg.id);
-        if (hit) setSelected(hit);
-      } else if (msg.type === 'cacheTap' && typeof msg.coord === 'string') {
-        // Mirror the merchant flow: preview the cache in a bottom sheet
-        // first, then let the user opt into the full HuntPiggyDetail
-        // page via "View details". Jumping straight to a stack push
-        // burns navigation context that's expensive to recover when the
-        // user just wanted a quick look.
-        const hit = caches.get(msg.coord);
-        if (hit) setSelectedCache(hit);
-      }
+  // Bounds-change handler. 500 ms after the camera settles we re-fetch
+  // the merchant set for the visible bbox and write the centre back to
+  // AsyncStorage so reopening the screen starts where the user left off.
+  const onLibreBounds = useCallback(
+    (bbox: { minLat: number; maxLat: number; minLon: number; maxLon: number }) => {
+      const next: Bbox = bbox;
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+      debounceTimer.current = setTimeout(() => {
+        lastBbox.current = next;
+        refreshPlaces(next);
+        // Viewport-persist on every camera-settle is on the to-do list
+        // (#552 follow-up — needs a matching hydrate effect on mount,
+        // wire through to Camera.initialViewState). Removed the stub
+        // write that Copilot caught — no point persisting if nothing
+        // reads it back.
+      }, 500);
     },
-    [places, caches, refreshPlaces],
+    [refreshPlaces],
   );
-
-  const recenterOnUser = useCallback(async () => {
-    // Dev-pin first — the same override the initial-position effect
-    // honours (see line 200). Without this, the recenter button on the
-    // emulator ignores EXPO_PUBLIC_DEV_LAT/LON and jumps to the
-    // AVD's real fused-location fix (typically Mountain View), which
-    // contradicts every other location surface in the app.
-    const pinned = getDevPinnedLocation();
-    if (pinned) {
-      setViewportInWebView(pinned.lat, pinned.lon, 15);
-      return;
-    }
-    if (permission !== 'granted') return;
-    try {
-      const pos = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-      setViewportInWebView(
-        pos.coords.latitude,
-        pos.coords.longitude,
-        15,
-        typeof pos.coords.accuracy === 'number' ? pos.coords.accuracy : null,
-      );
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }, [permission, setViewportInWebView]);
 
   // ------- render --------------------------------------------------------
 
@@ -543,50 +367,20 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         colors={colors}
       />
       <View style={styles.webviewWrapper}>
-        {viewportHydrated ? (
-          <WebView
-            ref={webviewRef}
-            originWhitelist={['*']}
-            source={{ html: LEAFLET_HTML }}
-            onMessage={onMessage}
-            // Seed `window.LP_initialViewport` before Leaflet's first
-            // `setView` call so the map opens at the user's last centre
-            // instead of flashing London. Gated on `viewportHydrated`
-            // above — without that gate the WebView mounts before the
-            // AsyncStorage hydrate completes and falls through to the
-            // London default every time MapScreen remounts (e.g. after
-            // a navigation pop from PlaceDetail).
-            injectedJavaScriptBeforeContentLoaded={
-              lastViewport.current
-                ? `window.LP_initialViewport = ${JSON.stringify(lastViewport.current)}; true;`
-                : 'true;'
-            }
-            style={styles.webview}
-            javaScriptEnabled
-            domStorageEnabled
-            allowFileAccess={false}
-            mixedContentMode="never"
-            testID="map-webview"
-          />
-        ) : (
-          <View style={styles.webview} />
-        )}
-        <TouchableOpacity
-          style={styles.recenterButton}
-          onPress={recenterOnUser}
-          accessibilityLabel="Recenter on me"
-          testID="map-recenter-button"
-        >
-          <LocateFixed size={18} color="#2D88FF" strokeWidth={2.5} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.legendButton}
-          onPress={() => setLegendVisible(true)}
-          accessibilityLabel="Show map legend"
-          testID="map-legend-button"
-        >
-          <Info size={18} color={colors.brandPink} strokeWidth={2.5} />
-        </TouchableOpacity>
+        <LibreMiniMap
+          lat={pos?.lat ?? null}
+          lon={pos?.lon ?? null}
+          userAccuracyMetres={pos?.accuracy ?? null}
+          merchants={visibleMerchants}
+          caches={visibleCaches}
+          events={[]}
+          interactive
+          fill
+          onBoundsChange={onLibreBounds}
+          onSelectMerchant={(m) => setSelected(m)}
+          onSelectCache={(c) => setSelectedCache(c)}
+          onOpenLegend={() => setLegendVisible(true)}
+        />
       </View>
 
       <View style={styles.footer}>
@@ -664,11 +458,6 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         availableCategories={availableCategories}
       />
 
-      {!webviewReady && (
-        <View style={styles.loadingOverlay} pointerEvents="none">
-          <ActivityIndicator size="large" color={colors.brandPink} />
-        </View>
-      )}
     </View>
   );
 };
@@ -1257,195 +1046,6 @@ const bboxAround = (lat: number, lng: number, halfDegrees: number): Bbox => ({
   maxLon: lng + halfDegrees,
   maxLat: lat + halfDegrees,
 });
-
-// -----------------------------------------------------------------------------
-// Leaflet HTML — kept inline so the bundle has no runtime CDN dependency
-// for the loader, while tile imagery itself still streams from OSM at use
-// time. Communicates with React Native via `window.ReactNativeWebView.
-// postMessage`. Two RN→WebView entry-points are exposed: `LP_setViewport`
-// and `LP_setMarkers`.
-// -----------------------------------------------------------------------------
-
-const LEAFLET_HTML = `<!DOCTYPE html>
-<html>
-<head>
-  ${LEAFLET_HEAD_TAGS}
-  <!-- Material Symbols Outlined — same icon family BTC Map ships, so
-       every BtcMapPlace.icon name resolves to a recognisable glyph
-       (storefront, chalet, cafe, pub, bicycle, …). Self-hosted from
-       Google Fonts CDN; no JS, just a single CSS+woff2 fetch. -->
-  <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Symbols+Outlined" />
-  <style>
-    ${LEAFLET_BASE_CSS}
-    /* Leaflet's default zoom buttons are small + tucked top-left.
-       Bump size + contrast so they land at thumb-tappable size and
-       are obvious to users who don't realise they can pinch. */
-    .leaflet-control-zoom a {
-      width: 36px !important;
-      height: 36px !important;
-      line-height: 36px !important;
-      font-size: 22px !important;
-      font-weight: 700;
-      color: #1a1a1a !important;
-      background: #ffffff !important;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.25);
-    }
-    .leaflet-control-zoom a:hover { background: #f4f4f4 !important; }
-    /* Merchant pin — circular badge sized big enough for a glyph to
-       read clearly. Pink for Lightning, bitcoin orange (#F7931A) for
-       on-chain only. Material-Symbols glyph centred inside. */
-    .lp-pin {
-      width: 32px; height: 32px; border-radius: 16px;
-      background: #EC008C; border: 2px solid #fff;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.4);
-      display: flex; align-items: center; justify-content: center;
-      color: #fff;
-    }
-    .lp-pin.onchain { background: #F7931A; }
-    .lp-pin .material-symbols-outlined {
-      font-size: 18px;
-      font-variation-settings: 'FILL' 1, 'wght' 500;
-      line-height: 1;
-    }
-    /* Vanilla NIP-GC cache pin — grey diamond, no glyph. Diamond shape
-       distinguishes it from circular merchant pins on a busy map. */
-    .lp-cache {
-      width: 22px; height: 22px;
-      background: #7A5CFF; border: 2px solid #fff;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.4);
-      transform: rotate(45deg);
-    }
-    /* Piglet pin — pink circle with a piggy-bank glyph (Material
-       Symbols savings). Round, not diamond, because a Piglet pays
-       sats and shares visual language with merchant pins; the glyph +
-       brand pink mark it apart from the bitcoin-orange / white-glyph
-       merchant pins. */
-    .lp-piglet {
-      width: 32px; height: 32px; border-radius: 16px;
-      background: #EC008C; border: 2px solid #fff;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.4);
-      display: flex; align-items: center; justify-content: center;
-      color: #fff;
-    }
-    .lp-piglet .material-symbols-outlined {
-      font-size: 18px;
-      font-variation-settings: 'FILL' 1, 'wght' 500;
-      line-height: 1;
-    }
-    ${ME_DOT_CSS}
-  </style>
-</head>
-<body>
-  <div id="map"></div>
-  ${LEAFLET_SCRIPT_TAG}
-  <script>
-    ${ME_DOT_JS}
-    ${POST_BRIDGE_JS}
-    // Honor a viewport injected via injectedJavaScriptBeforeContentLoaded
-    // — that's MapScreen's saved-viewport hydrate. Falls back to a UK
-    // central default only when there's truly nothing better.
-    const __iv = (window.LP_initialViewport && typeof window.LP_initialViewport.lat === 'number')
-      ? window.LP_initialViewport
-      : { lat: 51.5074, lng: -0.1278, zoom: 12 };
-    const map = L.map('map', { zoomControl: true }).setView([__iv.lat, __iv.lng], __iv.zoom);
-    ${tileLayerJs("attribution:'© OpenStreetMap contributors'")}
-
-    // meMarker / meAccuracyCircle live in __lpMeState inside ME_DOT_JS
-    // — no need to track them here.
-    let markerLayer = L.layerGroup().addTo(map);
-    let cacheLayer = L.layerGroup().addTo(map);
-
-    // Distinguish programmatic vs user-initiated moves. The initial
-    // setView above (and every LP_setViewport call) is programmatic;
-    // drag/zoom gestures are not. React only persists user-initiated
-    // viewport changes so the London bootstrap fallback never gets
-    // baked into AsyncStorage as the "user's last viewport".
-    let __pendingProgrammatic = true;
-    let __userMovedInBatch = false;
-
-    const debounce = (fn, ms) => {
-      let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
-    };
-    const emitBounds = debounce(() => {
-      const b = map.getBounds();
-      const c = map.getCenter();
-      const userInitiated = __userMovedInBatch;
-      __userMovedInBatch = false;
-      post({ type: 'bounds', bbox: {
-        minLon: b.getWest(), minLat: b.getSouth(),
-        maxLon: b.getEast(), maxLat: b.getNorth(),
-      }, centre: { lat: c.lat, lng: c.lng }, zoom: map.getZoom(), userInitiated });
-    }, 350);
-
-    map.on('moveend', () => {
-      if (!__pendingProgrammatic) __userMovedInBatch = true;
-      __pendingProgrammatic = false;
-      emitBounds();
-    });
-    map.on('zoomend', () => {
-      if (!__pendingProgrammatic) __userMovedInBatch = true;
-      __pendingProgrammatic = false;
-      emitBounds();
-    });
-
-    // placeOrUpdateMe + removeMe come from src/utils/mapMeDot.ts
-    // (interpolated via ${ME_DOT_JS} above). Reusing the helper means
-    // the dot + halo + CSS pulse behave byte-identically with the
-    // mini-maps on Hunt / Explore.
-    window.LP_setViewport = function(lat, lng, zoom, accuracyMetres) {
-      __pendingProgrammatic = true;
-      map.setView([lat, lng], zoom || map.getZoom());
-      placeOrUpdateMe(map, [lat, lng], accuracyMetres);
-    };
-
-    // Drop / move the "you are here" marker without changing the
-    // viewport. Used after the user's last-seen viewport is restored
-    // so they can still see where they are on someone else's pan.
-    window.LP_setMeMarker = function(lat, lng, accuracyMetres) {
-      placeOrUpdateMe(map, [lat, lng], accuracyMetres);
-    };
-
-    // Validate Material Symbols name with a strict regex instead of a
-    // hardcoded whitelist — Material Symbols ships ~3000 glyphs and BTC
-    // Map uses many we'd otherwise miss (imagesearch_roller, etc.). The
-    // regex matches Google's own naming rules (lowercase letters,
-    // digits, underscore; max 64 chars) so a malformed payload can't
-    // inject HTML/text into the DOM.
-    const ICON_RE = /^[a-z0-9_]{1,64}$/;
-    const safeIcon = (name) => (typeof name === 'string' && ICON_RE.test(name)) ? name : 'storefront';
-
-    window.LP_setMarkers = function(list) {
-      markerLayer.clearLayers();
-      list.forEach((m) => {
-        const cls = 'lp-pin' + (m.lightning ? '' : ' onchain');
-        const glyph = safeIcon(m.icon);
-        const html = '<div class="' + cls + '"><span class="material-symbols-outlined">' + glyph + '</span></div>';
-        const icon = L.divIcon({ className: '', html: html, iconSize: [32, 32] });
-        const marker = L.marker([m.lat, m.lng], { icon });
-        marker.on('click', () => post({ type: 'markerTap', id: m.id }));
-        marker.addTo(markerLayer);
-      });
-    };
-
-    window.LP_setCaches = function(list) {
-      cacheLayer.clearLayers();
-      list.forEach((c) => {
-        const isPiggy = c.kind === 'piggy';
-        const html = isPiggy
-          ? '<div class="lp-piglet"><span class="material-symbols-outlined">savings</span></div>'
-          : '<div class="lp-cache"></div>';
-        const size = isPiggy ? 32 : 22;
-        const icon = L.divIcon({ className: '', html: html, iconSize: [size, size] });
-        const marker = L.marker([c.lat, c.lng], { icon });
-        marker.on('click', () => post({ type: 'cacheTap', coord: c.coord }));
-        marker.addTo(cacheLayer);
-      });
-    };
-
-    post({ type: 'ready' });
-  </script>
-</body>
-</html>`;
 
 // -----------------------------------------------------------------------------
 // styles

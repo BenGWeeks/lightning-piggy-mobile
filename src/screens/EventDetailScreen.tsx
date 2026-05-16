@@ -30,7 +30,7 @@ import type { ParsedEvent } from '../services/nostrPlacesService';
 import { loadCachedEvents, peekCachedEventsSync } from '../services/nostrPlacesStorage';
 import { fetchEvent } from '../services/nostrPlacesPublisher';
 import { useNostr } from '../contexts/NostrContext';
-import { ExploreMiniMap } from '../components/ExploreMiniMap';
+import { LibreMiniMap } from '../components/LibreMiniMap';
 import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import Toast from '../components/BrandedToast';
@@ -262,7 +262,7 @@ const EventDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                 component as PlaceDetail; tap → full Map. */}
             {venueCoord ? (
               <View style={styles.mapWrap}>
-                <ExploreMiniMap
+                <LibreMiniMap
                   lat={venueCoord.lat}
                   lon={venueCoord.lng}
                   merchants={[]}

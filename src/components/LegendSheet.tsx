@@ -9,7 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { MapPin, PiggyBank, Zap } from 'lucide-react-native';
+import { Bitcoin, MapPin, PiggyBank, Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
@@ -108,32 +108,51 @@ export const LegendSheet: React.FC<Props> = ({
       <View style={styles.backdrop} testID="legend-sheet">
         <TouchableOpacity style={styles.tapAway} onPress={onClose} activeOpacity={1} />
         <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>
-          <View {...responder.panHandlers} style={styles.grabber} testID="legend-sheet-grabber">
+          {/* The whole header strip — grabber pill, the "Pin types"
+              section title, AND a tall transparent area around them —
+              is one big drag target so the user doesn't have to aim
+              for the 4-px pill to dismiss. Everything below the title
+              lives in the ScrollView and scrolls independently. */}
+          <View {...responder.panHandlers} style={styles.grabberZone} testID="legend-sheet-grabber">
             <View style={styles.handle} />
+            <Text style={styles.sectionTitle}>Pin types</Text>
           </View>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollPad}>
-            <Text style={styles.sectionTitle}>Pin types</Text>
-            <Item dot color="#EC008C" label="⚡ Lightning merchant" />
-            <Item dot color="#F7931A" label="On-chain merchant" />
-            {/* Cache rows render the same 28-px circle-with-glyph as
-                the map pins so the legend matches what's on screen.
-                Flat diamonds were the previous shorthand. */}
+            {/* All pin-type rows render the same 22-px circle-with-glyph
+                chassis used on the actual map markers, so what the user
+                sees in the legend is exactly what they'll see in the
+                viewport. Colour signals payment / cache class; glyph
+                signals what. */}
             <View style={styles.row}>
-              <View style={[styles.cacheCircle, { backgroundColor: '#EC008C' }]}>
-                <PiggyBank size={14} color="#fff" strokeWidth={2.5} />
-                <View style={styles.cacheZapBadge}>
-                  <Zap size={8} color="#fff" fill="#fff" strokeWidth={2.5} />
-                </View>
+              <View style={[styles.pinChip, { backgroundColor: '#EC008C' }]}>
+                <Zap size={12} color="#fff" strokeWidth={2.5} />
               </View>
-              <Text style={styles.rowLabel}>Piglet (Lightning Piggy)</Text>
+              <Text style={styles.rowLabel}>Lightning merchant</Text>
             </View>
             <View style={styles.row}>
-              <View style={[styles.cacheCircle, { backgroundColor: '#7A5CFF' }]}>
-                <MapPin size={14} color="#fff" strokeWidth={2.5} />
+              <View style={[styles.pinChip, { backgroundColor: '#F7931A' }]}>
+                <Bitcoin size={12} color="#fff" strokeWidth={2.5} />
               </View>
-              <Text style={styles.rowLabel}>NIP-GC cache</Text>
+              <Text style={styles.rowLabel}>On-chain merchant</Text>
             </View>
-            <Item dot color="#2D88FF" label="You" />
+            <View style={styles.row}>
+              <View style={[styles.pinChip, { backgroundColor: '#EC008C' }]}>
+                <PiggyBank size={12} color="#fff" strokeWidth={2.5} />
+              </View>
+              <Text style={styles.rowLabel}>NIP-GC Piglet (Lightning Piggy)</Text>
+            </View>
+            <View style={styles.row}>
+              <View style={[styles.pinChip, { backgroundColor: colors.cachePurple }]}>
+                <MapPin size={12} color="#fff" strokeWidth={2.5} />
+              </View>
+              <Text style={styles.rowLabel}>NIP-GC cache (vanilla)</Text>
+            </View>
+            <View style={styles.row}>
+              <View style={styles.userDotChip}>
+                <View style={styles.userDotInner} />
+              </View>
+              <Text style={styles.rowLabel}>You</Text>
+            </View>
 
             {categoryRows.length > 0 ? (
               <>
@@ -145,8 +164,15 @@ export const LegendSheet: React.FC<Props> = ({
                   const Icon = btcMapIconComponent(row.key);
                   return (
                     <View key={row.key} style={styles.row}>
-                      <View style={styles.iconWrap}>
-                        <Icon size={16} color={colors.brandPink} strokeWidth={2.5} />
+                      {/* Category rows reuse the same pinChip chassis as
+                          pin types — coloured pink (the default Lightning
+                          merchant tint, since the map carries the same
+                          category icon for both Lightning + on-chain
+                          merchants and the colour signals payment type
+                          separately). Same 28-px / 14-px proportions so
+                          every row in the sheet visually aligns. */}
+                      <View style={[styles.pinChip, { backgroundColor: colors.brandPink }]}>
+                        <Icon size={12} color="#fff" strokeWidth={2.5} />
                       </View>
                       <Text style={styles.rowLabel}>{row.label}</Text>
                     </View>
@@ -194,7 +220,16 @@ const createStyles = (colors: Palette) =>
       paddingBottom: 32,
     },
     grabber: { width: '100%', paddingVertical: 12, alignItems: 'center' },
-    handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.divider },
+    // Expanded drag zone — grabber pill at the top + the "Pin types"
+    // section title below it. The whole 60-px tall strip catches the
+    // PanResponder so the user can dismiss from anywhere near the top.
+    grabberZone: {
+      width: '100%',
+      paddingTop: 12,
+      paddingBottom: 4,
+      alignItems: 'stretch',
+    },
+    handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.divider, alignSelf: 'center' },
     scrollPad: { paddingBottom: 8 },
     sectionTitle: { fontSize: 18, fontWeight: '700', color: colors.textHeader },
     sectionSub: { fontSize: 13, color: colors.textSupplementary, marginTop: 2, marginBottom: 8 },
@@ -209,6 +244,35 @@ const createStyles = (colors: Palette) =>
       height: 14,
       borderRadius: 7,
       borderWidth: 1.5,
+      borderColor: '#fff',
+    },
+    // Shared chassis for every pin-type / category row chip. 22 px
+    // diameter byte-for-byte matches the map markers so the legend
+    // swatches are the same size as what the user sees on the map.
+    // 12-px glyph inside, 1.5-px white border around.
+    pinChip: {
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      borderWidth: 1.5,
+      borderColor: '#fff',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    // The "You" row inner dot matches the map's user dot exactly.
+    userDotChip: {
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    userDotInner: {
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      backgroundColor: '#2D88FF',
+      borderWidth: 2,
       borderColor: '#fff',
     },
     cacheCircle: {

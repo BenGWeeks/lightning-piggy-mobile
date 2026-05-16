@@ -30,10 +30,12 @@ name: Map sub-screen renders with WebView and recenter control
 
 - assertVisible:
     id: 'map-screen'
+# MapLibre swap (#552 / #563) removed the WebView host + the manual
+# recenter button (LibreMiniMap owns recenter via libre-minimap-recenter).
+# map-screen above already confirms we landed; libre-minimap-recenter
+# confirms the new chrome rendered.
 - assertVisible:
-    id: 'map-webview'
-- assertVisible:
-    id: 'map-recenter-button'
+    id: 'libre-minimap-recenter'
 - assertVisible:
     id: 'map-back-button'
 

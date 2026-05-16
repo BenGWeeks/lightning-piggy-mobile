@@ -38,8 +38,9 @@ import { formatDistance, haversineMetres } from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import BtcMapAttribution from '../components/BtcMapAttribution';
-import { ExploreMiniMap } from '../components/ExploreMiniMap';
+import { LibreMiniMap } from '../components/LibreMiniMap';
 import PlacesFilterSheet, { countActiveFilters } from '../components/PlacesFilterSheet';
+import LegendSheet from '../components/LegendSheet';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -163,10 +164,7 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
   // doesn't filter to zero (most listings carry 0-2 categories).
   const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
-  // Mirrors ExploreMiniMap's onInteractionChange. While truthy we
-  // freeze the FlatList's scrolling so vertical taps + drags on the
-  // inline map don't accidentally trigger pull-to-refresh.
-  const [mapTouched, setMapTouched] = useState(false);
+  const [legendVisible, setLegendVisible] = useState(false);
   const availableCategories = useMemo(() => {
     const seen = new Set<string>();
     for (const p of places) for (const c of p.categories ?? []) seen.add(c);
@@ -256,7 +254,6 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
         }
         keyExtractor={({ place }) => String(place.id)}
         contentContainerStyle={styles.listContent}
-        scrollEnabled={!mapTouched}
         refreshControl={
           <RefreshControl
             refreshing={loading && places.length > 0}
@@ -268,16 +265,16 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
         ListHeaderComponent={
           <>
             <View style={styles.miniMapContainer}>
-              <ExploreMiniMap
+              <LibreMiniMap
                 lat={pos?.lat ?? null}
                 lon={pos?.lon ?? null}
+                userAccuracyMetres={null}
                 merchants={sortedPlaces.map((p) => p.place)}
                 caches={[]}
                 events={[]}
-                loading={loading && sortedPlaces.length === 0}
                 onTapMap={() => navigation.navigate('Map')}
                 onBoundsChange={setMapBbox}
-                onInteractionChange={setMapTouched}
+                onOpenLegend={() => setLegendVisible(true)}
                 defaultZoom={10}
               />
             </View>
@@ -288,7 +285,7 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
               <Search size={16} color={colors.textSupplementary} strokeWidth={2.5} />
               <TextInput
                 style={styles.searchInput}
-                placeholder="Search places by name or address…"
+                placeholder="Search places"
                 placeholderTextColor={colors.textSupplementary}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
@@ -359,6 +356,12 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
         selectedCategories={selectedCategories}
         onChangeCategories={setSelectedCategories}
         onClearAll={() => setSelectedCategories(new Set())}
+      />
+      <LegendSheet
+        visible={legendVisible}
+        onClose={() => setLegendVisible(false)}
+        placesVisible
+        availableCategories={availableCategories}
       />
     </View>
   );
@@ -472,15 +475,21 @@ const createStyles = (colors: Palette) =>
       fontSize: 13,
       fontWeight: '500',
     },
+    // Match HuntScreen's rounded-pill search row so the two Explore
+    // sub-screens look like siblings rather than cousins. Same gap,
+    // padding, and borderRadius 100 for the pill. Skips
+    // marginHorizontal: 16 because the FlatList's listContent already
+    // applies 16 dp padding here — adding margin on top double-insets
+    // the search so it ends up narrower than the map + row cards.
     searchRow: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
+      marginBottom: 8,
       backgroundColor: colors.surface,
-      paddingHorizontal: 12,
+      borderRadius: 100,
+      paddingHorizontal: 14,
       paddingVertical: 8,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.divider,
     },
     attributionRow: {
       // Cancel the `listContent` 16px padding then re-apply 16px so the
@@ -539,7 +548,10 @@ const createStyles = (colors: Palette) =>
       marginTop: 8,
     },
     retryButtonText: { color: colors.white, fontWeight: '700', fontSize: 14 },
-    listContent: { padding: 16, gap: 10 },
+    // Tighter gap between row cards (10 → 6) so PlacesScreen feels as
+    // dense as HuntScreen's Geo-caches list — Ben asked the two
+    // Explore sub-screens to read as siblings.
+    listContent: { padding: 16, gap: 6 },
     row: {
       flexDirection: 'row',
       alignItems: 'center',

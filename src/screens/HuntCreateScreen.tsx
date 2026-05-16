@@ -64,7 +64,7 @@ import * as nip19 from 'nostr-tools/nip19';
 import { publishCacheEvent } from '../services/nostrPlacesPublisher';
 import NfcWriteSheet from '../components/NfcWriteSheet';
 import LocationPickerSheet from '../components/LocationPickerSheet';
-import { ExploreMiniMap } from '../components/ExploreMiniMap';
+import { LibreMiniMap } from '../components/LibreMiniMap';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -982,7 +982,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
             {pin ? (
               <>
                 <View style={styles.pinMapPreview}>
-                  <ExploreMiniMap
+                  <LibreMiniMap
                     lat={pin.lat}
                     lon={pin.lon}
                     merchants={[]}

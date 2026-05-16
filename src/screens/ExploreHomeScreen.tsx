@@ -21,7 +21,8 @@ import {
 } from 'lucide-react-native';
 import TabHeader from '../components/TabHeader';
 import { ContentRail } from '../components/ContentRail';
-import { ExploreMiniMap } from '../components/ExploreMiniMap';
+import { LibreMiniMap } from '../components/LibreMiniMap';
+import LegendSheet from '../components/LegendSheet';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import { courses, type Course } from '../data/learnContent';
 import {
@@ -229,11 +230,14 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // down/re-open NIP-GC + NIP-52 subscriptions in one gesture.
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
-  // Mirrors finger-on-map state from ExploreMiniMap's onInteractionChange.
-  // While true we disable the outer ScrollView's scroll (which also
-  // disables pull-to-refresh) so a vertical pan on the inline map pans
-  // Leaflet instead of refreshing the page.
-  const [mapTouched, setMapTouched] = useState(false);
+  // Map legend modal — same LegendSheet ExploreMiniMap renders inline,
+  // but here it lives at the screen level so LibreMiniMap (which doesn't
+  // own the sheet itself) can ask us to open it. Array memos for the
+  // caches/events Maps live below their state declarations.
+  const [legendVisible, setLegendVisible] = useState(false);
+  const onTapMap = useCallback(() => navigation.navigate('Map'), [navigation]);
+  const onOpenLegend = useCallback(() => setLegendVisible(true), []);
+  const onCloseLegend = useCallback(() => setLegendVisible(false), []);
   // Stale-while-revalidate: `peekCachedPlacesSync()` already seeded
   // the initial `merchants` state above; the live fetch below replaces
   // it once `pos` lands. Previously this effect re-paint-from-cache via
@@ -335,6 +339,13 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const [events, setEvents] = useState<Map<string, ParsedEvent>>(
     () => new Map(peekCachedEventsSync().map((e) => [e.coord, e])),
   );
+
+  // Stable array projections of the caches/events Maps so React.memo on
+  // the consuming LibreMiniMap can short-circuit re-renders. Without
+  // these the parent's `[...caches.values()]` literal returns a fresh
+  // array reference every render and defeats the memo entirely.
+  const cachesArr = useMemo(() => [...caches.values()], [caches]);
+  const eventsArr = useMemo(() => [...events.values()], [events]);
 
   // Hydrate last-known caches + events from AsyncStorage so the rails
   // render instantly on cold start while the live relay subs backfill.
@@ -649,7 +660,6 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         style={styles.scrollArea}
         contentContainerStyle={localStyles.scrollContent}
         showsVerticalScrollIndicator={false}
-        scrollEnabled={!mapTouched}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -673,26 +683,20 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
             </View>
           </View>
         ) : (
-          <>
-            <ExploreMiniMap
-              lat={pos?.lat ?? null}
-              lon={pos?.lon ?? null}
-              userAccuracyMetres={pos?.accuracy ?? null}
-              merchants={merchants}
-              caches={[...caches.values()]}
-              events={[...events.values()]}
-              loading={merchantsLoading && caches.size === 0}
-              onTapMap={() => navigation.navigate('Map')}
-              onInteractionChange={setMapTouched}
-              interactive
-              // Feed the BTC Map category keys present in the current
-              // merchant set into the Legend sheet so it can show the
-              // category iconography below the pin-type rows.
-              legendCategories={[
-                ...new Set(merchants.flatMap((m) => m.categories ?? []).filter(Boolean)),
-              ]}
-            />
-          </>
+          <LibreMiniMap
+            lat={pos?.lat ?? null}
+            lon={pos?.lon ?? null}
+            userAccuracyMetres={pos?.accuracy ?? null}
+            merchants={merchants}
+            caches={cachesArr}
+            events={eventsArr}
+            onTapMap={onTapMap}
+            onOpenLegend={onOpenLegend}
+            // Maestro flow test-explore-tab-rename.yaml asserts this
+            // testID — preserved across the MapLibre swap so the e2e
+            // smoke test doesn't need to be repointed.
+            testID="explore-minimap"
+          />
         )}
 
         <ContentRail<{ place: BtcMapPlace; distance: number }>
@@ -813,6 +817,19 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           )}
         />
       </ScrollView>
+      {/* Map legend bottom sheet — shared by LibreMiniMap (no inline
+          sheet) and used here so the (i) button has somewhere to go. The
+          inline ExploreMiniMap path owns its own LegendSheet, so this
+          one is harmless in both branches; opens only when the legend
+          tap actually triggers setLegendVisible. */}
+      <LegendSheet
+        visible={legendVisible}
+        onClose={onCloseLegend}
+        placesVisible
+        availableCategories={[
+          ...new Set(merchants.flatMap((m) => m.categories ?? []).filter(Boolean)),
+        ]}
+      />
     </View>
   );
 };

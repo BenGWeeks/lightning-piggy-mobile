@@ -1,6 +1,7 @@
 import React from 'react';
-import { Image, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Linking, StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { BtcMapLogoSvg } from './BtcMapLogoSvg';
 
 interface Props {
   variant?: 'inline' | 'badge';
@@ -18,11 +19,12 @@ const BtcMapAttribution: React.FC<Props> = ({ variant = 'inline', testID }) => {
       accessibilityLabel="Powered by BTC Map — opens btcmap.org"
       style={wrapStyle}
     >
-      <Image
-        source={require('../../assets/images/btcmap-logo.png')}
-        style={styles.logo}
-        resizeMode="contain"
-      />
+      {/* Official BTC Map brand mark, rendered as a React Native SVG so
+          the paths stay crisp at any size. Replaces the rasterised PNG
+          whose downscale to chip size produced antialiasing fringes
+          around the pin's blue/cyan inner stripes. Source SVG: copied
+          verbatim from btcmap.org/images/logo.svg. */}
+      <BtcMapLogoSvg width={17} height={22} />
       <Text style={[styles.text, { color: colors.textSupplementary }]}>Powered by BTC Map</Text>
     </TouchableOpacity>
   );
@@ -43,10 +45,6 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 999,
     backgroundColor: 'rgba(0, 0, 0, 0.55)',
-  },
-  logo: {
-    width: 18,
-    height: 22,
   },
   text: {
     fontSize: 11,

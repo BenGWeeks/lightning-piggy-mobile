@@ -51,7 +51,7 @@ import { ExploreNavigation, ExploreStackParamList } from '../navigation/types';
 import { Alert } from '../components/BrandedAlert';
 import Toast from '../components/BrandedToast';
 import { buildFoundLog, parseCacheCoord, type ParsedCache } from '../services/nostrPlacesService';
-import { ExploreMiniMap } from '../components/ExploreMiniMap';
+import { LibreMiniMap } from '../components/LibreMiniMap';
 import CacheSpecSheet from '../components/CacheSpecSheet';
 import { decodeGeohash, formatDistance } from '../utils/geohash';
 import { useCompassNavigation } from '../hooks/useCompassNavigation';
@@ -503,9 +503,8 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                   <Image source={{ uri: cache.imageUrl }} style={styles.hero} resizeMode="cover" />
                 ) : cache.geohash ? (
                   <View style={styles.hero}>
-                    <ExploreMiniMap
+                    <LibreMiniMap
                       fill
-                      cachePin
                       lat={decodeGeohash(cache.geohash).lat}
                       lon={decodeGeohash(cache.geohash).lng}
                       userLat={userPos?.lat ?? null}

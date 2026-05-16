@@ -15,19 +15,11 @@ import {
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
-import { WebView } from 'react-native-webview';
 import { MapPin, Check, X } from 'lucide-react-native';
+import { LibreMiniMap } from './LibreMiniMap';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { getDevPinnedLocation } from '../utils/devLocation';
-import {
-  LEAFLET_BASE_CSS,
-  LEAFLET_HEAD_TAGS,
-  LEAFLET_MAP_BACKGROUND_CSS,
-  LEAFLET_SCRIPT_TAG,
-  POST_BRIDGE_JS,
-  tileLayerJs,
-} from '../utils/mapWebview/tiles';
 
 interface Props {
   visible: boolean;
@@ -87,6 +79,11 @@ const LocationPickerSheet: React.FC<Props> = ({
   // the caller passed a real initialLat/Lon (i.e. we're editing an
   // existing pin), treat that as already-chosen.
   const [userMoved, setUserMoved] = useState<boolean>(hasInitialPin);
+  // MapLibre's onRegionDidChange fires once on mount at the initial
+  // centre — we must NOT count that as user intent or the confirm
+  // button enables without any actual interaction. This ref swallows
+  // the first emission; subsequent events are real pans.
+  const initialBoundsFiredRef = useRef(false);
 
   useEffect(() => {
     if (!visible) {
@@ -196,29 +193,39 @@ const LocationPickerSheet: React.FC<Props> = ({
               <ActivityIndicator color={colors.brandPink} />
             </View>
           ) : (
-          <WebView
-            originWhitelist={['*']}
-            source={{ html: makeHtml(resolvedStart.lat, resolvedStart.lon, resolvedStart.zoom) }}
-            onMessage={(e) => {
-              try {
-                const msg = JSON.parse(e.nativeEvent.data);
-                if (
-                  msg.type === 'pin' &&
-                  typeof msg.lat === 'number' &&
-                  typeof msg.lon === 'number'
-                ) {
-                  setPicked({ lat: msg.lat, lon: msg.lon });
-                  // Only count drag-end / tap as user intent — the
-                  // map's initial emit on load is just reporting the
-                  // marker's default seat, not a choice.
-                  if (msg.userMoved) setUserMoved(true);
+            // LibreMiniMap with the crosshair overlay + onBoundsChange
+            // gives a pick-by-pan UX: user pans the map so the centred
+            // crosshair lands on the chosen spot. We treat every
+            // post-mount region change as user intent (the initial
+            // mount fires once at the resolved-start coords; everything
+            // after is the user panning to a new spot).
+            <LibreMiniMap
+              lat={resolvedStart.lat}
+              lon={resolvedStart.lon}
+              userAccuracyMetres={null}
+              merchants={[]}
+              caches={[]}
+              events={[]}
+              defaultZoom={resolvedStart.zoom}
+              interactive
+              fill
+              crosshair
+              onBoundsChange={(bbox) => {
+                // Centre of the bbox is where the crosshair sits.
+                const lat = (bbox.minLat + bbox.maxLat) / 2;
+                const lon = (bbox.minLon + bbox.maxLon) / 2;
+                setPicked({ lat, lon });
+                // Swallow the initial mount fire (MapLibre emits
+                // onRegionDidChange once at the resolved-start coords
+                // before any user input). Subsequent events are real
+                // pans — those count as user intent.
+                if (!initialBoundsFiredRef.current) {
+                  initialBoundsFiredRef.current = true;
+                  return;
                 }
-              } catch {
-                // Ignore malformed bridge messages.
-              }
-            }}
-            style={styles.webview}
-          />
+                setUserMoved(true);
+              }}
+            />
           )}
         </View>
 
@@ -249,39 +256,6 @@ const LocationPickerSheet: React.FC<Props> = ({
   );
 };
 
-// Leaflet HTML with a single draggable marker. Posts `{type:'pin',lat,
-// lon,userMoved}` on every change. `userMoved` is false on the initial
-// post (just reporting the marker's default seat) and true after the
-// user drags it or taps the map — RN uses that to decide whether to
-// show "Tap or drag…" or the coords. Mirrors the pin language of
-// ExploreMiniMap / MapScreen.
-const makeHtml = (lat: number, lon: number, zoom: number): string => `<!DOCTYPE html>
-<html>
-<head>
-  ${LEAFLET_HEAD_TAGS}
-  <style>
-    ${LEAFLET_BASE_CSS}
-    ${LEAFLET_MAP_BACKGROUND_CSS}
-    .lp-drop{width:20px;height:20px;border-radius:10px;background:#EC008C;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.45)}
-    .leaflet-control-attribution{font-size:9px}
-  </style>
-</head>
-<body>
-<div id="map"></div>
-${LEAFLET_SCRIPT_TAG}
-<script>
-  ${POST_BRIDGE_JS}
-  const map=L.map('map',{zoomControl:true,minZoom:3,maxZoom:19}).setView([${lat},${lon}],${zoom});
-  ${tileLayerJs()}
-  const icon=L.divIcon({className:'',html:'<div class="lp-drop"></div>',iconSize:[20,20],iconAnchor:[10,10]});
-  const marker=L.marker([${lat},${lon}],{icon:icon,draggable:true}).addTo(map);
-  const emit=(userMoved)=>{const p=marker.getLatLng();post({type:'pin',lat:p.lat,lon:p.lng,userMoved:!!userMoved});};
-  marker.on('dragend',()=>emit(true));
-  map.on('click',(e)=>{marker.setLatLng(e.latlng);emit(true);});
-  post({type:'ready'});
-  emit(false);
-</script>
-</body></html>`;
 
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
@@ -313,7 +287,6 @@ const createStyles = (colors: Palette) =>
       overflow: 'hidden',
       backgroundColor: colors.background,
     },
-    webview: { flex: 1, backgroundColor: 'transparent' },
     mapLoading: {
       flex: 1,
       alignItems: 'center',

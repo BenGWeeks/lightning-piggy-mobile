@@ -22,6 +22,11 @@ export const lightPalette = {
   bitcoinOrangeLight: '#FFF1E0',
   boltzNavy: '#232742',
   zapYellow: '#FFC107',
+  // Map-pin accent colours used by LibreMiniMap + LegendSheet. Promoting
+  // these to palette tokens so the theme owns them (was inline hex on
+  // map pin + legend chip styles).
+  cachePurple: '#7A5CFF',
+  eventViolet: '#5B3AFF',
 };
 
 // Dark palette: keep the Lightning Piggy brand hot-pink intact, swap the
@@ -48,6 +53,10 @@ export const darkPalette: typeof lightPalette = {
   bitcoinOrangeLight: '#3A2410',
   boltzNavy: '#3A3F5C',
   zapYellow: '#FFC107',
+  // Match the light-palette accents — purple reads well on both
+  // themes so no adjustment needed.
+  cachePurple: '#7A5CFF',
+  eventViolet: '#5B3AFF',
 };
 
 export type Palette = typeof lightPalette;
