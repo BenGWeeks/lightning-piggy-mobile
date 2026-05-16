@@ -7,19 +7,40 @@ import React, {
   useMemo,
   useState,
 } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNostr } from './NostrContext';
 import {
   DEFAULT_SEED_PUBKEYS,
   computeTrustSet,
   isPubkeyTrusted,
 } from '../services/trustGraphService';
-import { fetchL2Follows, loadL2Cache, persistL2Cache } from '../services/trustGraphFetcher';
+// L2 (friends-of-friends) is currently disabled. The previous
+// implementation eagerly fetched + cached the L2 set on every cold
+// start, regardless of which WoT tier the user was on. For a graph of
+// ~600 follows this produced a ~2 MB JSON blob in AsyncStorage —
+// exactly at Android's SQLite CursorWindow ceiling — and a 20-30 s
+// JS-thread freeze on read when the blob crossed the limit
+// (SQLiteBlobTooBigException, see #565). The cost was paid by every
+// user even though the default 'friends' tier doesn't use L2 at all.
+//
+// Next implementation should be foreground + explicit: when the user
+// selects the FoF tier we open a progress dialog ("Downloading follow
+// lists from N relays…"), stream the kind-3 fetches with a cancel
+// button, and persist the result in a sharded form that can't exceed
+// the CursorWindow limit (16 buckets keyed by first hex digit, each
+// ~130 KB max). Tracked under GH #565.
+//
+// The fetcher module is intentionally not imported here while disabled,
+// so any accidental call site fails at type-check.
+// import { fetchL2Follows, loadL2Cache, persistL2Cache } from '../services/trustGraphFetcher';
 import {
   loadWotSettings,
   saveWotSettings,
   type WotSettings,
   type WotTier,
 } from '../services/wotSettingsService';
+
+const L2_CACHE_KEY_PREFIX = '@lp:trust-graph-l2:';
 
 // Re-export the tier type so consumers (chip + sheet) can type their props
 // without reaching into the service layer.
@@ -84,55 +105,42 @@ export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
     return s;
   }, [contacts]);
 
-  // L2 friends-of-follows. Cached in AsyncStorage; refreshed when the
-  // L1 set changes or the 7-day TTL lapses.
-  const [l2Follows, setL2Follows] = useState<Set<string>>(new Set());
-  const [l2Loading, setL2Loading] = useState<boolean>(false);
+  // L2 friends-of-follows is currently disabled (see top-of-file
+  // comment + #565). Stays as an empty Set; consumers that consult
+  // `l2Follows` (e.g. trustSet's tier branch) silently degrade FoF to
+  // Friends-only. The setters are retained so we don't have to thread
+  // conditional optionality through the rest of the file.
+  const [l2Follows] = useState<Set<string>>(new Set());
+  const l2Loading = false;
 
   const refreshL2 = useCallback(async () => {
-    if (!pubkey) return;
-    setL2Loading(true);
-    try {
-      const fresh = await fetchL2Follows(l1Follows);
-      setL2Follows(fresh);
-      await persistL2Cache(pubkey, l1Follows, fresh);
-    } finally {
-      setL2Loading(false);
-    }
-  }, [pubkey, l1Follows]);
+    // No-op while L2 is disabled. Stubbed (rather than removed) so the
+    // context's public shape stays stable for consumers like
+    // WebOfTrustBottomSheet that already pull this through `useTrustGraph`.
+  }, []);
 
-  // On L1 / pubkey change: try the cache first (cheap), then refresh
-  // in the background if the cache is cold / stale / keyed differently.
+  // One-time cleanup of the legacy L2 cache. The previous implementation
+  // wrote a single ~2 MB blob keyed by `${L2_CACHE_KEY_PREFIX}${pubkey}`;
+  // leaving it around (a) wastes storage for every existing install and
+  // (b) keeps the SQLiteBlobTooBigException primed to fire if any code
+  // path still tries to read it. Iterating getAllKeys is O(n) over total
+  // AsyncStorage keys, which for this app is ~50, so the cost is trivial.
   useEffect(() => {
-    if (!pubkey) {
-      setL2Follows(new Set());
-      return;
-    }
     let cancelled = false;
     (async () => {
-      const cached = await loadL2Cache(pubkey, l1Follows);
-      if (cancelled) return;
-      if (cached) {
-        setL2Follows(cached);
-        return;
-      }
-      // No usable cache — go to relays. Don't await here so the UI
-      // doesn't block on the network round-trip; consumers see the
-      // L1-only filter (more aggressive, safer) until L2 lands.
-      setL2Loading(true);
       try {
-        const fresh = await fetchL2Follows(l1Follows);
+        const keys = await AsyncStorage.getAllKeys();
         if (cancelled) return;
-        setL2Follows(fresh);
-        await persistL2Cache(pubkey, l1Follows, fresh);
-      } finally {
-        if (!cancelled) setL2Loading(false);
+        const stale = keys.filter((k) => k.startsWith(L2_CACHE_KEY_PREFIX));
+        if (stale.length > 0) await AsyncStorage.multiRemove(stale);
+      } catch {
+        // Best-effort cleanup; failure is non-fatal and re-tries next launch.
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [pubkey, l1Follows]);
+  }, []);
 
   // Persisted tier. Default 'friends' (#535). Legacy boolean payloads
   // are migrated inside `loadWotSettings`.
