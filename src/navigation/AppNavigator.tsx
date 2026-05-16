@@ -226,12 +226,20 @@ function HomeTabs() {
             const tabRoute = state?.routes.find((r) => r.name === 'Explore');
             const subState = tabRoute?.state;
             const exploreIsFocused = state.routes[state.index]?.name === 'Explore';
-            console.log(
-              `[Tab:Explore] tabPress focused=${exploreIsFocused} subIdx=${subState?.index} subKey=${subState?.key} routes=[${(subState?.routes ?? []).map((r) => r.name).join(',')}]`,
-            );
+            // Gated on __DEV__ so the diagnostic doesn't leak into
+            // perf-instrumented release builds — EXPO_PUBLIC_KEEP_PERF_LOGS
+            // disables babel's transform-remove-console plugin, which
+            // would otherwise strip these (Copilot #578 r1 catch).
+            if (__DEV__) {
+              console.log(
+                `[Tab:Explore] tabPress focused=${exploreIsFocused} subIdx=${subState?.index} subKey=${subState?.key} routes=[${(subState?.routes ?? []).map((r) => r.name).join(',')}]`,
+              );
+            }
             if (subState && typeof subState.index === 'number' && subState.index > 0) {
               if (exploreIsFocused) e.preventDefault();
-              console.log(`[Tab:Explore] dispatching popToTop target=${subState.key}`);
+              if (__DEV__) {
+                console.log(`[Tab:Explore] dispatching popToTop target=${subState.key}`);
+              }
               navigation.dispatch({
                 ...StackActions.popToTop(),
                 target: subState.key,
