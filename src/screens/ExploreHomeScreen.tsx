@@ -245,38 +245,6 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const onTapMap = useCallback(() => navigation.navigate('Map'), [navigation]);
   const onOpenLegend = useCallback(() => setLegendVisible(true), []);
   const onCloseLegend = useCallback(() => setLegendVisible(false), []);
-  // Belt-and-braces wrapper around setMapTouched: if a region-change
-  // 'did change' event ever fails to fire (edge case: instantaneous pan
-  // start + finish, or MapLibre swallowing the event during the first
-  // tile-load), mapTouched would stick true and the outer ScrollView
-  // would refuse to scroll. The fallback timer clears it 1.5 s after
-  // the last 'true' if no 'false' arrives — generous enough not to
-  // flicker during normal pans, tight enough to recover quickly.
-  const mapTouchedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const safelySetMapTouched = useCallback((touching: boolean) => {
-    if (mapTouchedTimerRef.current) {
-      clearTimeout(mapTouchedTimerRef.current);
-      mapTouchedTimerRef.current = null;
-    }
-    setMapTouched(touching);
-    if (touching) {
-      mapTouchedTimerRef.current = setTimeout(() => {
-        setMapTouched(false);
-        mapTouchedTimerRef.current = null;
-      }, 1500);
-    }
-  }, []);
-  useEffect(
-    () => () => {
-      if (mapTouchedTimerRef.current) clearTimeout(mapTouchedTimerRef.current);
-    },
-    [],
-  );
-  // Mirrors finger-on-map state from ExploreMiniMap's onInteractionChange.
-  // While true we disable the outer ScrollView's scroll (which also
-  // disables pull-to-refresh) so a vertical pan on the inline map pans
-  // Leaflet instead of refreshing the page.
-  const [mapTouched, setMapTouched] = useState(false);
   // Stale-while-revalidate: `peekCachedPlacesSync()` already seeded
   // the initial `merchants` state above; the live fetch below replaces
   // it once `pos` lands. Previously this effect re-paint-from-cache via
@@ -698,7 +666,6 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         style={styles.scrollArea}
         contentContainerStyle={localStyles.scrollContent}
         showsVerticalScrollIndicator={false}
-        scrollEnabled={!mapTouched}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -732,7 +699,6 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
                 caches={cachesArr}
                 events={eventsArr}
                 onTapMap={onTapMap}
-                onInteractionChange={safelySetMapTouched}
                 onOpenLegend={onOpenLegend}
               />
             ) : (
@@ -745,7 +711,6 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
                 events={[...events.values()]}
                 loading={merchantsLoading && caches.size === 0}
                 onTapMap={() => navigation.navigate('Map')}
-                onInteractionChange={safelySetMapTouched}
                 interactive
                 // Feed the BTC Map category keys present in the current
                 // merchant set into the Legend sheet so it can show the

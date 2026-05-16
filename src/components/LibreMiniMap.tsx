@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { Animated, View, StyleSheet, TouchableOpacity, Text } from 'react-native';
 import { Camera, Map, Marker, type CameraRef } from '@maplibre/maplibre-react-native';
-import { Plus, Minus, LocateFixed, Info, Maximize2, PiggyBank, MapPin, Calendar } from 'lucide-react-native';
+import { Plus, Minus, Info, Maximize2, PiggyBank, MapPin, Calendar } from 'lucide-react-native';
 import { type BtcMapPlace, acceptsLightning } from '../services/btcMapService';
 import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 import { decodeGeohash } from '../utils/geohash';
@@ -35,14 +35,9 @@ interface Props {
   // signals "your position is somewhere inside this circle". Suppressed
   // when null (e.g. dev-pinned location, where accuracy is meaningless).
   userAccuracyMetres?: number | null;
-  // Fired when the user starts/stops touching the map. Parent screens use
-  // this to suspend their outer ScrollView's pull-to-refresh while the
-  // user is panning the map (otherwise a vertical drag on the map starts
-  // a refresh instead of panning). Mirrors ExploreMiniMap's prop of the
-  // same name.
-  onInteractionChange?: (touching: boolean) => void;
-  // "Open map" tap target. Surfaces the same affordance ExploreMiniMap
-  // does; if undefined, the button is hidden.
+  // "Open map" tap target. Surfaces the affordance the user uses to jump
+  // to the full-screen MapScreen which is fully interactive (pan + zoom
+  // + filters). If undefined, the button is hidden.
   onTapMap?: () => void;
   // Open legend bottom sheet. Same shape as ExploreMiniMap.
   onOpenLegend?: () => void;
@@ -79,7 +74,6 @@ const LibreMiniMapInner: React.FC<Props> = ({
   events,
   defaultZoom = 13,
   userAccuracyMetres,
-  onInteractionChange,
   onTapMap,
   onOpenLegend,
 }) => {
@@ -141,14 +135,18 @@ const LibreMiniMapInner: React.FC<Props> = ({
     cameraRef.current?.zoomTo(next, { duration: 200 });
   };
 
-  const recenterOnMe = () => {
+  // Auto-follow GPS: whenever the user's position updates, recentre the
+  // camera. Inline mini-maps are always centred on the user (no pan, no
+  // recenter button — see top-of-file comment), so any drift just re-aligns
+  // automatically rather than asking the user to recenter manually.
+  useEffect(() => {
     if (lat === null || lon === null) return;
     cameraRef.current?.flyTo({
       center: [lon, lat],
       zoom: currentZoomRef.current,
-      duration: 400,
+      duration: 250,
     });
-  };
+  }, [lat, lon]);
 
   if (lat === null || lon === null) return <View style={styles.container} />;
 
@@ -157,19 +155,19 @@ const LibreMiniMapInner: React.FC<Props> = ({
       <Map
         style={styles.map}
         mapStyle={JSON.stringify(OSM_STYLE)}
-        // The native MapLibre view consumes touches before they bubble
-        // up to a parent View. We catch user-driven pan/zoom via the
-        // map's own region-change events. onRegionWillChange fires when
-        // the camera begins moving, onRegionDidChange when it stops —
-        // bracketing the window during which the outer ScrollView's
-        // RefreshControl needs to stay disabled. (Previous attempt used
-        // onStartShouldSetResponderCapture on the wrapper to flip the
-        // flag synchronously on touch-down, but returning false from
-        // capture meant onResponderRelease never fired — the flag would
-        // stick true and freeze page scrolling until reload. See the
-        // 2026-05 commit history for the regression.)
-        onRegionWillChange={() => onInteractionChange?.(true)}
-        onRegionDidChange={() => onInteractionChange?.(false)}
+        // Mini-map is intentionally non-interactive for pan, rotate, and
+        // pitch. The map stays centred on the user (auto-follow GPS via
+        // the useEffect above) and zoom is driven by the +/− RN overlay
+        // buttons. This removes every reason for the map to compete with
+        // the outer ScrollView's pull-to-refresh gesture — pulling down
+        // anywhere on the page now reliably triggers a refresh. Pinch-
+        // zoom stays enabled because two-finger gestures don't conflict
+        // with the single-finger pull-to-refresh, and it's the natural
+        // way to zoom on a touch device. Full pan is reserved for
+        // MapScreen via the Open Map pill.
+        dragPan={false}
+        touchRotate={false}
+        touchPitch={false}
       >
         <Camera
           ref={cameraRef}
@@ -259,15 +257,9 @@ const LibreMiniMapInner: React.FC<Props> = ({
         </TouchableOpacity>
       </View>
 
-      {/* Bottom-left: recenter + info-legend stack. */}
-      <TouchableOpacity
-        style={styles.recenterButton}
-        onPress={recenterOnMe}
-        accessibilityLabel="Recenter on my location"
-        testID="libre-minimap-recenter"
-      >
-        <LocateFixed size={18} color="#2D88FF" strokeWidth={2.5} />
-      </TouchableOpacity>
+      {/* Bottom-left: legend button. The recenter button is gone — the
+          map is always centred on the user (auto-follow useEffect above)
+          so there's nothing to recenter to. */}
       {onOpenLegend ? (
         <TouchableOpacity
           style={styles.legendButton}
@@ -393,25 +385,9 @@ const createStyles = (colors: Palette) =>
       borderRadius: 100,
     },
     openBadgeText: { color: colors.white, fontSize: 11, fontWeight: '700' },
-    recenterButton: {
-      position: 'absolute',
-      bottom: 10,
-      left: 10,
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: '#fff',
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: '#000',
-      shadowOpacity: 0.25,
-      shadowRadius: 4,
-      shadowOffset: { width: 0, height: 1 },
-      elevation: 3,
-    },
     legendButton: {
       position: 'absolute',
-      bottom: 52,
+      bottom: 10,
       left: 10,
       width: 36,
       height: 36,
