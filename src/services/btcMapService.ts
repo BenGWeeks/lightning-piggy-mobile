@@ -118,7 +118,14 @@ const V4_FIELDS_RICH = [
   'updated_at',
 ].join(',');
 
-const FETCH_TIMEOUT_MS = 20_000;
+// 5 s is enough for a healthy BTC Map v4 search response (~200-800 ms
+// typical). Anything beyond that signals the API is degraded or the
+// device is offline — in which case we'd rather bail fast and fall back
+// to the in-memory + on-disk lastResult cache than keep the merchants
+// rail in the loading shimmer. Previously this sat at 20 s, which
+// produced a 14 s blank-rail freeze on every cold start where the
+// network was even slightly slow (#566).
+const FETCH_TIMEOUT_MS = 5_000;
 // Legacy AsyncStorage key for the old worldwide dump — only referenced
 // now to evict any stale multi-MB blob left over from a prior install.
 const DATASET_STORAGE_KEY = '@lp:btcmap-dataset-v4u';
