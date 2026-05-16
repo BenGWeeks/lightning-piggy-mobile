@@ -78,7 +78,7 @@ const formatCountdown = (seconds: number): string => {
 const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { activeWalletId, makeInvoice } = useWallet();
+  const { activeWalletId, makeInvoice, lastIncomingPayment } = useWallet();
   const [stage, setStage] = useState<SheetStage>('ready');
   const [errorMessage, setErrorMessage] = useState('');
   const [claimedSats, setClaimedSats] = useState<number | null>(null);
@@ -89,6 +89,12 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['55%'], []);
   const mountedRef = useRef(true);
+  // Timestamp of the moment we entered `claimed` (LNURL-w issuer
+  // accepted our invoice). Used to gate the auto-dismiss below so
+  // only payments that land AFTER the claim trigger sheet close —
+  // not unrelated wallet activity from before the user tapped Try
+  // prize.
+  const claimedAtRef = useRef<number | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -96,6 +102,31 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
       mountedRef.current = false;
     };
   }, []);
+
+  // Auto-dismiss the sheet when the actual bolt11 settlement lands
+  // for our claim. The app-root `GlobalIncomingPaymentOverlay`
+  // already pops the confetti celebration on every
+  // `lastIncomingPayment` event — but its native Modal layer sits
+  // BELOW the bottom-sheet's portal while we're open, so the user
+  // can't see the celebration until they dismiss. Closing the sheet
+  // automatically reveals the overlay on HuntPiggyDetail with the
+  // exact same animation Home shows, no duplicated celebration
+  // code. The 250 ms timeout lets the success state's "X sats
+  // inbound!" copy register first before the sheet animates away.
+  useEffect(() => {
+    if (
+      stage !== 'claimed' ||
+      !lastIncomingPayment ||
+      !claimedAtRef.current ||
+      lastIncomingPayment.at < claimedAtRef.current
+    ) {
+      return;
+    }
+    const t = setTimeout(() => {
+      if (mountedRef.current) onClose();
+    }, 250);
+    return () => clearTimeout(t);
+  }, [lastIncomingPayment, stage, onClose]);
 
   const startRead = useCallback(async () => {
     setErrorMessage('');
@@ -158,6 +189,11 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
           piggyId: expectedCoord,
         });
         setClaimedSats(claim.sats);
+        // Stamp the claim moment so the auto-dismiss effect above
+        // only reacts to bolt11 settlements that land AFTER this
+        // point — unrelated wallet activity that happened before
+        // the user tapped Try prize must not close the sheet.
+        claimedAtRef.current = Date.now();
         setStage('claimed');
       } catch (e) {
         if (!mountedRef.current) return;
@@ -186,6 +222,7 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
       setErrorMessage('');
       setClaimedSats(null);
       setCooldownRemaining(null);
+      claimedAtRef.current = null;
       sheetRef.current?.present();
       startRead();
     } else {
@@ -195,6 +232,7 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
       setErrorMessage('');
       setClaimedSats(null);
       setCooldownRemaining(null);
+      claimedAtRef.current = null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
