@@ -1850,14 +1850,15 @@ const NfcSupportedTagsCard: React.FC<{
     <View style={styles.tagsCardParagraph}>
       <Text style={styles.tagsCardCheck}>✓</Text>
       <Text style={styles.tagsCardParagraphText}>
-        <Text style={styles.tagsCardName}>NTAG215 / 216</Text> — fit the payload + lock permanently.
+        <Text style={styles.tagsCardName}>NTAG215 / 216</Text> — fit the multi-record payload + the
+        reversible PWD/PACK lock.
       </Text>
     </View>
     <View style={styles.tagsCardParagraph}>
       <Text style={styles.tagsCardCross}>✗</Text>
       <Text style={styles.tagsCardParagraphText}>
-        <Text style={styles.tagsCardName}>NTAG213 / Ultralight C / Mifare Classic</Text> — too small
-        or can't lock.
+        <Text style={styles.tagsCardName}>Ultralight C / Mifare Classic</Text> — too small or can't
+        lock.
       </Text>
     </View>
     <View style={styles.tagsCardParagraph}>

@@ -14,7 +14,9 @@ import {
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
-import { Nfc, AlertCircle } from 'lucide-react-native';
+import { Nfc, AlertCircle, Copy, Eye, EyeOff, Lock } from 'lucide-react-native';
+import * as Clipboard from 'expo-clipboard';
+import { Toast } from './BrandedToast';
 import {
   writeNpubToTag,
   writeLnurlToTag,
@@ -84,8 +86,25 @@ const NfcWriteSheet: React.FC<Props> = ({
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [state, setState] = useState<WriteState>('ready');
   const [errorMessage, setErrorMessage] = useState('');
+  // Lock outcome from the most recent write. Drives the inline PIN
+  // reveal on the success state so the hider sees the PIN the instant
+  // the chip confirms — no need to dismiss the sheet first. Issue #567.
+  const [lastLock, setLastLock] = useState<{
+    pwdHex: string;
+    packHex: string;
+    pin: string;
+    tagUid: string;
+  } | null>(null);
+  const [pinRevealed, setPinRevealed] = useState(false);
+  // Larger height when the success branch needs to fit the PIN card +
+  // the helper text. 55% is the bottom-sheet's default for the ready /
+  // error states; the success-with-PIN state grows to 78% so the Done
+  // button stays above the home gesture pill on tall phones.
+  const snapPoints = useMemo(
+    () => (state === 'success' && lastLock ? ['78%'] : ['55%']),
+    [state, lastLock],
+  );
   const sheetRef = useRef<BottomSheetModal>(null);
-  const snapPoints = useMemo(() => ['55%'], []);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -99,6 +118,12 @@ const NfcWriteSheet: React.FC<Props> = ({
     if (visible) {
       setState('ready');
       setErrorMessage('');
+      // Also clear the previous PIN — reopening the sheet either re-
+      // writes (fresh secrets) or unlock-then-rewrite (same PIN, but
+      // we'll re-receive it via writeResult). Either way, leaking the
+      // old PIN into the new ready/error state is wrong.
+      setLastLock(null);
+      setPinRevealed(false);
       sheetRef.current?.present();
       startWrite();
     } else {
@@ -111,6 +136,8 @@ const NfcWriteSheet: React.FC<Props> = ({
       // copy (#73 follow-up).
       setState('ready');
       setErrorMessage('');
+      setLastLock(null);
+      setPinRevealed(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
@@ -173,6 +200,12 @@ const NfcWriteSheet: React.FC<Props> = ({
         await writeNpubToTag(npub, onTagDetected);
       }
       if (mountedRef.current) {
+        if (writeResult?.lock) {
+          setLastLock(writeResult.lock);
+        } else {
+          setLastLock(null);
+        }
+        setPinRevealed(false);
         setState('success');
         onWritten?.(
           writeResult ? { locked: writeResult.locked, lock: writeResult.lock } : undefined,
@@ -258,12 +291,49 @@ const NfcWriteSheet: React.FC<Props> = ({
             <View style={[styles.iconContainer, styles.successIcon]}>
               <Text style={styles.checkmark}>&#10003;</Text>
             </View>
-            <Text style={styles.instruction}>Successfully written!</Text>
+            <Text style={styles.instruction}>
+              {isPiglet && lastLock ? 'Successfully written and locked' : 'Successfully written!'}
+            </Text>
             <Text style={styles.description}>
               {isPiglet
-                ? 'The prize link is on the tag and locked. Hide the Piglet, then drop a pin so finders can hunt for it.'
+                ? lastLock
+                  ? 'The prize link is on the tag and the chip is password-protected so no-one can overwrite it. Save the PIN below — you’ll need it to repoint the tag later.'
+                  : 'The prize link is on the tag. Anyone with an NFC writer can still overwrite it — flip the Lock toggle on the previous screen to password-protect this chip on a re-write.'
                 : `${displayName}'s npub has been written to the NFC tag. Anyone can now tap this tag to view the profile.`}
             </Text>
+            {isPiglet && lastLock ? (
+              <View style={styles.pinCard} testID="nfc-write-pin-card">
+                <View style={styles.pinHeaderRow}>
+                  <Lock size={13} color={colors.brandPink} strokeWidth={2.5} />
+                  <Text style={styles.pinHeaderText}>Your PIN</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.pinValueRow}
+                  onPress={() => setPinRevealed((v) => !v)}
+                  accessibilityLabel={pinRevealed ? 'Hide PIN' : 'Reveal PIN'}
+                  testID="nfc-write-pin-reveal"
+                >
+                  <Text style={styles.pinValueText}>{pinRevealed ? lastLock.pin : '••••••••'}</Text>
+                  {pinRevealed ? (
+                    <EyeOff size={16} color={colors.textSupplementary} strokeWidth={2} />
+                  ) : (
+                    <Eye size={16} color={colors.textSupplementary} strokeWidth={2} />
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.pinCopyButton}
+                  onPress={async () => {
+                    await Clipboard.setStringAsync(lastLock.pin);
+                    Toast.show({ type: 'success', text1: 'PIN copied' });
+                  }}
+                  accessibilityLabel="Copy PIN"
+                  testID="nfc-write-pin-copy"
+                >
+                  <Copy size={14} color={colors.brandPink} strokeWidth={2.5} />
+                  <Text style={styles.pinCopyButtonText}>Copy</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
             <TouchableOpacity
               style={styles.doneButton}
               onPress={handleClose}
@@ -443,6 +513,55 @@ const createStyles = (colors: Palette) =>
       fontWeight: '700',
       color: colors.white,
     },
+    // ---- Post-write PIN card (success state, #567) -----------------------
+    pinCard: {
+      width: '100%',
+      padding: 12,
+      marginBottom: 16,
+      borderRadius: 12,
+      backgroundColor: colors.brandPinkLight,
+      borderWidth: 1,
+      borderColor: colors.brandPink,
+      gap: 8,
+    },
+    pinHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    pinHeaderText: {
+      fontSize: 11,
+      fontWeight: '800',
+      color: colors.brandPink,
+      letterSpacing: 0.4,
+      textTransform: 'uppercase',
+    },
+    pinValueRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      borderRadius: 10,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.divider,
+    },
+    pinValueText: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: colors.textHeader,
+      letterSpacing: 2,
+      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    },
+    pinCopyButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      paddingVertical: 8,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.brandPink,
+      backgroundColor: colors.surface,
+    },
+    pinCopyButtonText: { fontSize: 12, fontWeight: '700', color: colors.brandPink },
   });
 
 export default NfcWriteSheet;
