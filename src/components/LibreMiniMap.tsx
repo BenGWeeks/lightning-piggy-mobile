@@ -1,7 +1,17 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { Animated, View, StyleSheet, TouchableOpacity, Text } from 'react-native';
-import { Camera, Map, Marker, type CameraRef } from '@maplibre/maplibre-react-native';
-import { Plus, Minus, Info, Maximize2, PiggyBank, MapPin, Calendar } from 'lucide-react-native';
+import { Camera, Map, Marker, type CameraRef, type MapRef } from '@maplibre/maplibre-react-native';
+import {
+  Plus,
+  Minus,
+  Info,
+  Maximize2,
+  PiggyBank,
+  MapPin,
+  Calendar,
+  LocateFixed,
+  Crosshair,
+} from 'lucide-react-native';
 import { type BtcMapPlace, acceptsLightning } from '../services/btcMapService';
 import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 import { decodeGeohash } from '../utils/geohash';
@@ -41,6 +51,34 @@ interface Props {
   onTapMap?: () => void;
   // Open legend bottom sheet. Same shape as ExploreMiniMap.
   onOpenLegend?: () => void;
+  // When true, full pan / rotate / pitch are enabled and the camera
+  // STOPS auto-following GPS so the user's pan persists. Used by
+  // MapScreen, PlacesScreen, and LocationPickerSheet. Default false
+  // (inline mini-map behaviour — zoom-only, GPS-follow).
+  interactive?: boolean;
+  // When true, the map fills its parent (no fixed height / margins / corner
+  // radius). The parent owns layout. Used by full-screen MapScreen and
+  // LocationPickerSheet. Default false (200 px chassis with 16 px margins).
+  fill?: boolean;
+  // Fired on each region-did-change with the current map bounds. Lets
+  // host screens filter their list to whatever's visible. Mirrors the
+  // ExploreMiniMap prop of the same name.
+  onBoundsChange?: (bbox: {
+    minLat: number;
+    maxLat: number;
+    minLon: number;
+    maxLon: number;
+  }) => void;
+  // When true, render a centred crosshair overlay — used by the
+  // LocationPickerSheet where the user picks the geocache coordinate
+  // by panning the map until the crosshair sits where they want it.
+  crosshair?: boolean;
+  // Marker-tap callbacks. Optional — when unset the pin is decorative
+  // (mini-map use case). MapScreen wires these to open MerchantDetail-
+  // Sheet / CacheDetailSheet.
+  onSelectMerchant?: (m: BtcMapPlace) => void;
+  onSelectCache?: (c: ParsedCache) => void;
+  onSelectEvent?: (e: ParsedEvent) => void;
 }
 
 // OSM raster style — minimal inline JSON so we don't depend on an external
@@ -76,10 +114,18 @@ const LibreMiniMapInner: React.FC<Props> = ({
   userAccuracyMetres,
   onTapMap,
   onOpenLegend,
+  interactive = false,
+  fill = false,
+  onBoundsChange,
+  crosshair = false,
+  onSelectMerchant,
+  onSelectCache,
+  onSelectEvent,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const cameraRef = useRef<CameraRef>(null);
+  const mapRef = useRef<MapRef>(null);
   const currentZoomRef = useRef(defaultZoom);
 
   // Pulse the accuracy halo so the user can pick out their own dot
@@ -135,39 +181,71 @@ const LibreMiniMapInner: React.FC<Props> = ({
     cameraRef.current?.zoomTo(next, { duration: 200 });
   };
 
-  // Auto-follow GPS: whenever the user's position updates, recentre the
-  // camera. Inline mini-maps are always centred on the user (no pan, no
-  // recenter button — see top-of-file comment), so any drift just re-aligns
-  // automatically rather than asking the user to recenter manually.
+  // Auto-follow GPS for inline mini-maps (non-interactive). When
+  // interactive, leave the camera wherever the user panned it — the
+  // recenter-on-me overlay button gives them an explicit affordance to
+  // jump back to their location.
   useEffect(() => {
+    if (interactive) return;
     if (lat === null || lon === null) return;
     cameraRef.current?.flyTo({
       center: [lon, lat],
       zoom: currentZoomRef.current,
       duration: 250,
     });
-  }, [lat, lon]);
+  }, [lat, lon, interactive]);
+
+  const recenterOnMe = () => {
+    if (lat === null || lon === null) return;
+    cameraRef.current?.flyTo({
+      center: [lon, lat],
+      zoom: currentZoomRef.current,
+      duration: 400,
+    });
+  };
 
   if (lat === null || lon === null) return <View style={styles.container} />;
 
   return (
-    <View style={styles.container}>
+    <View style={fill ? styles.containerFill : styles.container}>
       <Map
+        ref={mapRef}
         style={styles.map}
         mapStyle={JSON.stringify(OSM_STYLE)}
-        // Mini-map is intentionally non-interactive for pan, rotate, and
-        // pitch. The map stays centred on the user (auto-follow GPS via
-        // the useEffect above) and zoom is driven by the +/− RN overlay
-        // buttons. This removes every reason for the map to compete with
-        // the outer ScrollView's pull-to-refresh gesture — pulling down
-        // anywhere on the page now reliably triggers a refresh. Pinch-
-        // zoom stays enabled because two-finger gestures don't conflict
-        // with the single-finger pull-to-refresh, and it's the natural
-        // way to zoom on a touch device. Full pan is reserved for
-        // MapScreen via the Open Map pill.
-        dragPan={false}
-        touchRotate={false}
-        touchPitch={false}
+        // Pan / rotate / pitch follow the `interactive` prop. Mini-map
+        // mode (default) disables pan so the parent ScrollView can own
+        // the vertical drag gesture for pull-to-refresh; full-screen
+        // mode enables everything for the proper map exploration UX.
+        dragPan={interactive}
+        touchRotate={interactive}
+        touchPitch={interactive}
+        // Emit bbox on every camera-settle so host screens can filter
+        // their list to what's visible. Only wired when an onBoundsChange
+        // prop is provided — keeps the inline mini-map free of the
+        // event-marshalling cost.
+        onRegionDidChange={
+          onBoundsChange
+            ? async () => {
+                try {
+                  const bounds = await mapRef.current?.getBounds();
+                  if (!bounds) return;
+                  // MapLibre LngLatBounds shape: [west, south, east, north]
+                  // when accessed via the array indices. Convert to the
+                  // lat/lon bbox the host screens expect.
+                  const arr = bounds as unknown as [number, number, number, number];
+                  onBoundsChange({
+                    minLat: arr[1],
+                    maxLat: arr[3],
+                    minLon: arr[0],
+                    maxLon: arr[2],
+                  });
+                } catch {
+                  // Bounds query can race the camera tear-down on screen
+                  // unmount — swallow.
+                }
+              }
+            : undefined
+        }
       >
         <Camera
           ref={cameraRef}
@@ -204,7 +282,12 @@ const LibreMiniMapInner: React.FC<Props> = ({
           const ln = acceptsLightning(m);
           const Icon = btcMapIconComponent(m.icon);
           return (
-            <Marker key={m.id} id={`merchant-${m.id}`} lngLat={[m.lon, m.lat]}>
+            <Marker
+              key={m.id}
+              id={`merchant-${m.id}`}
+              lngLat={[m.lon, m.lat]}
+              onPress={onSelectMerchant ? () => onSelectMerchant(m) : undefined}
+            >
               <View style={[styles.pin, ln ? styles.pinLn : styles.pinOnchain]}>
                 <Icon size={12} color="#fff" strokeWidth={2.5} />
               </View>
@@ -213,25 +296,41 @@ const LibreMiniMapInner: React.FC<Props> = ({
         })}
         {/* Caches: Piglet (Lightning Piggy) → PiggyBank pink, vanilla
             NIP-GC → MapPin purple. */}
-        {cachePoints.map((c) => (
-          <Marker key={c.id} id={`cache-${c.id}`} lngLat={[c.lng, c.lat]}>
-            <View style={[styles.pin, c.isLpPiggy ? styles.pinPiglet : styles.pinCache]}>
-              {c.isLpPiggy ? (
-                <PiggyBank size={12} color="#fff" strokeWidth={2.5} />
-              ) : (
-                <MapPin size={12} color="#fff" strokeWidth={2.5} />
-              )}
-            </View>
-          </Marker>
-        ))}
+        {cachePoints.map((c) => {
+          const original = caches.find((src) => src.coord === c.id);
+          return (
+            <Marker
+              key={c.id}
+              id={`cache-${c.id}`}
+              lngLat={[c.lng, c.lat]}
+              onPress={onSelectCache && original ? () => onSelectCache(original) : undefined}
+            >
+              <View style={[styles.pin, c.isLpPiggy ? styles.pinPiglet : styles.pinCache]}>
+                {c.isLpPiggy ? (
+                  <PiggyBank size={12} color="#fff" strokeWidth={2.5} />
+                ) : (
+                  <MapPin size={12} color="#fff" strokeWidth={2.5} />
+                )}
+              </View>
+            </Marker>
+          );
+        })}
         {/* Events: Calendar glyph in deep-purple. */}
-        {eventPoints.map((e) => (
-          <Marker key={e.id} id={`event-${e.id}`} lngLat={[e.lng, e.lat]}>
-            <View style={[styles.pin, styles.pinEvent]}>
-              <Calendar size={12} color="#fff" strokeWidth={2.5} />
-            </View>
-          </Marker>
-        ))}
+        {eventPoints.map((e) => {
+          const original = events.find((src) => src.coord === e.id);
+          return (
+            <Marker
+              key={e.id}
+              id={`event-${e.id}`}
+              lngLat={[e.lng, e.lat]}
+              onPress={onSelectEvent && original ? () => onSelectEvent(original) : undefined}
+            >
+              <View style={[styles.pin, styles.pinEvent]}>
+                <Calendar size={12} color="#fff" strokeWidth={2.5} />
+              </View>
+            </Marker>
+          );
+        })}
       </Map>
 
       {/* Top-left: +/− zoom column. Matches ExploreMiniMap's layout
@@ -257,12 +356,31 @@ const LibreMiniMapInner: React.FC<Props> = ({
         </TouchableOpacity>
       </View>
 
-      {/* Bottom-left: legend button. The recenter button is gone — the
-          map is always centred on the user (auto-follow useEffect above)
-          so there's nothing to recenter to. */}
+      {/* Centred crosshair (location-picker mode) — sits on top of the
+          map and ignores touches so panning still works underneath. */}
+      {crosshair ? (
+        <View pointerEvents="none" style={styles.crosshairWrap}>
+          <Crosshair size={36} color={colors.brandPink} strokeWidth={2.5} />
+        </View>
+      ) : null}
+
+      {/* Bottom-left: legend button. In interactive mode the recenter
+          button sits above it so the pair lines up with the WebView
+          MapScreen's existing layout. Mini-map mode hides the recenter
+          (no pan = nothing to recenter from). */}
+      {interactive && lat !== null && lon !== null ? (
+        <TouchableOpacity
+          style={styles.recenterButton}
+          onPress={recenterOnMe}
+          accessibilityLabel="Recenter on my location"
+          testID="libre-minimap-recenter"
+        >
+          <LocateFixed size={18} color="#2D88FF" strokeWidth={2.5} />
+        </TouchableOpacity>
+      ) : null}
       {onOpenLegend ? (
         <TouchableOpacity
-          style={styles.legendButton}
+          style={interactive ? styles.legendButtonAboveRecenter : styles.legendButton}
           onPress={onOpenLegend}
           accessibilityLabel="Show map legend"
           testID="libre-minimap-legend"
@@ -297,6 +415,14 @@ const createStyles = (colors: Palette) =>
       marginHorizontal: 16,
       marginBottom: 18,
       borderRadius: 14,
+      overflow: 'hidden',
+      backgroundColor: colors.surface,
+      position: 'relative',
+    },
+    // Fill variant for MapScreen / LocationPickerSheet — no fixed height,
+    // no margins, no corner radius. The parent owns layout.
+    containerFill: {
+      flex: 1,
       overflow: 'hidden',
       backgroundColor: colors.surface,
       position: 'relative',
@@ -385,6 +511,47 @@ const createStyles = (colors: Palette) =>
       borderRadius: 100,
     },
     openBadgeText: { color: colors.white, fontSize: 11, fontWeight: '700' },
+    crosshairWrap: {
+      position: 'absolute',
+      top: '50%',
+      left: '50%',
+      marginTop: -18,
+      marginLeft: -18,
+    },
+    recenterButton: {
+      position: 'absolute',
+      bottom: 10,
+      left: 10,
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: '#fff',
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOpacity: 0.25,
+      shadowRadius: 4,
+      shadowOffset: { width: 0, height: 1 },
+      elevation: 3,
+    },
+    // Legend sits above recenter when both exist (interactive mode);
+    // otherwise sits at the bottom-left on its own.
+    legendButtonAboveRecenter: {
+      position: 'absolute',
+      bottom: 52,
+      left: 10,
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: '#fff',
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOpacity: 0.25,
+      shadowRadius: 4,
+      shadowOffset: { width: 0, height: 1 },
+      elevation: 3,
+    },
     legendButton: {
       position: 'absolute',
       bottom: 10,
