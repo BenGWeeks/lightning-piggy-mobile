@@ -254,7 +254,17 @@ const NfcWriteSheet: React.FC<Props> = ({
             </Text>
             <Text style={styles.description}>
               {isPiglet
-                ? 'This writes the prize link onto the tag and locks it so no one can overwrite it. Keep the Piglet still against the phone until it confirms.'
+                ? // Honest copy keyed to the actual write mode (Copilot
+                  // #572 review). The legacy "and locks it" claim ran
+                  // even when `lockTag` was false or the platform was
+                  // iOS (no lock primitive in the lib today). We split
+                  // the three real cases so the hider knows what's
+                  // about to happen.
+                  lockTag && Platform.OS === 'android' && huntPayload
+                  ? 'This writes the prize link onto the tag and password-locks the chip so no-one can overwrite it. Keep the Piglet still against the phone until it confirms.'
+                  : Platform.OS !== 'android'
+                    ? "This writes the prize link onto the tag. iOS doesn't support our reversible lock yet, so the chip stays open — anyone with an NFC writer could repoint it."
+                    : 'This writes the prize link onto the tag and leaves the chip open. Anyone with an NFC writer can later overwrite it — turn on Lock the tag on the previous screen to password-protect.'
                 : `This will write ${displayName}'s Nostr identity (npub) to the tag. Anyone with a Nostr-compatible app can tap the tag to view the profile.`}
             </Text>
             {!isPiglet && (

@@ -130,15 +130,19 @@ export interface HiddenPiggy {
   hint?: string;
   /** Reversible NTAG21x PWD/PACK lock secrets, captured at write time
    * when the Hide-a-Piglet wizard's "Lock tag" toggle is on (default).
-   * The 8-hex-char PWD becomes the hider-visible PIN in My Piglets →
-   * Piglet detail → Reveal; PACK is verified during the unlock flow
-   * so a PIN collision against a different tag doesn't accidentally
-   * unlock a stranger's hardware. `tagUid` is the NTAG UID we wrote
-   * to — used to defend against the hider trying to unlock the wrong
-   * tag (rare in practice, but the PWD/PACK are uncorrelated across
-   * tags so a wrong-tag attempt would either fail PWD_AUTH outright
-   * or — worst case — disable protection on another tag that
-   * coincidentally shares the PIN). Issue #567. */
+   * The 8-hex-char PWD becomes the hider-visible PIN on **step 6 of
+   * the Hide-a-Piglet wizard** (the screen that owns the NFC write +
+   * Edit re-entry), which is where the PIN card lives end-to-end. An
+   * earlier design surfaced the PIN from My Piglets → Piglet detail;
+   * that was dropped on user feedback ("doesn't need to be on the
+   * actual Geocache page") and re-routed entirely through the wizard,
+   * so the hider re-opens this record via the Edit affordance.
+   *
+   * Verification fields: `tagUid` is checked before any PWD_AUTH on
+   * unlock so we never talk to a tag we didn't lock; `packHex` gates
+   * the AUTH0=0xFF disable write so a PWD collision against an
+   * unrelated tag can't silently open it. See `unlockHuntTag` for the
+   * runtime checks. Issue #567. */
   nfcLock?: {
     /** Tag UID this lock was set on, hex-encoded as Android reports it. */
     tagUid: string;

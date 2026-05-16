@@ -871,6 +871,13 @@ async function sendTransceive(frame: number[], label: string): Promise<number[]>
 export interface UnlockHuntTagOptions {
   pwd: number[];
   expectedPack?: number[];
+  // Tag UID we originally locked this PIN onto, as Android reports it
+  // (lowercase hex from `tag.id`). Defends against PIN collisions when
+  // the hider has more than one tag — without the UID check, a PIN that
+  // happens to match a *different* locked tag's PWD would silently
+  // disable that other tag's protection. See Copilot #572 review +
+  // the storage contract on `HiddenPiggy.nfcLock.tagUid`.
+  expectedUid?: string;
   onTagDetected?: () => void;
 }
 
@@ -883,6 +890,15 @@ export async function unlockHuntTag(opts: UnlockHuntTagOptions): Promise<{ tagUi
     await NfcManager.requestTechnology(NfcTech.NfcA, READER_MODE_OPTS);
     const tag = await NfcManager.getTag();
     if (!tag) throw new Error('No tag detected');
+    const tagUid = (tag as { id?: string }).id ?? '';
+    // UID check runs BEFORE PWD_AUTH so we don't tip off a stranger's
+    // tag that we know any PIN at all. Case-insensitive equality — the
+    // platform normalises UID hex inconsistently across vendors.
+    if (opts.expectedUid && opts.expectedUid.toLowerCase() !== tagUid.toLowerCase()) {
+      throw new Error(
+        "This isn't the tag we locked. Hold the original Piglet tag against the phone.",
+      );
+    }
     opts.onTagDetected?.();
     let pack: number[];
     try {
@@ -905,7 +921,6 @@ export async function unlockHuntTag(opts: UnlockHuntTagOptions): Promise<{ tagUi
       }
     }
     await sendTransceive(buildDisableAuthFrame(), 'WRITE AUTH0 (unlock)');
-    const tagUid = (tag as { id?: string }).id ?? '';
     console.log(`[NFC] unlockHuntTag OK — uid=${tagUid}`);
     return { tagUid };
   } finally {

@@ -35,6 +35,11 @@ interface Props {
   // that they're signed into the same wallet that hid the Piggy.
   pwdHex: string;
   packHex: string;
+  // UID of the tag the secrets correspond to. Compared against the
+  // detected tag's UID before any PWD_AUTH frame is sent — defends
+  // against accidentally unlocking a *different* tag whose PWD
+  // happens to collide. Issue #567 storage-contract guarantee.
+  tagUid: string;
   // Fires once the unlock succeeds — caller usually clears the
   // `nfcLock` field on the matching HiddenPiggy.
   onUnlocked?: () => void;
@@ -42,7 +47,14 @@ interface Props {
 
 type UnlockState = 'ready' | 'unlocking' | 'success' | 'error';
 
-const NfcUnlockSheet: React.FC<Props> = ({ visible, onClose, pwdHex, packHex, onUnlocked }) => {
+const NfcUnlockSheet: React.FC<Props> = ({
+  visible,
+  onClose,
+  pwdHex,
+  packHex,
+  tagUid,
+  onUnlocked,
+}) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [state, setState] = useState<UnlockState>('ready');
@@ -80,6 +92,7 @@ const NfcUnlockSheet: React.FC<Props> = ({ visible, onClose, pwdHex, packHex, on
       await unlockHuntTag({
         pwd,
         expectedPack,
+        expectedUid: tagUid,
         onTagDetected: () => mountedRef.current && setState('unlocking'),
       });
       if (mountedRef.current) {
@@ -92,7 +105,7 @@ const NfcUnlockSheet: React.FC<Props> = ({ visible, onClose, pwdHex, packHex, on
         setErrorMessage(err instanceof Error ? err.message : 'Failed to unlock tag');
       }
     }
-  }, [onUnlocked, packHex, pwdHex]);
+  }, [onUnlocked, packHex, pwdHex, tagUid]);
 
   useEffect(() => {
     if (visible) {

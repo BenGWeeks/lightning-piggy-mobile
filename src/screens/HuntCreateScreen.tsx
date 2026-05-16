@@ -152,6 +152,14 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   } | null>(null);
   const [pinRevealed, setPinRevealed] = useState(false);
   const [unlockSheetOpen, setUnlockSheetOpen] = useState(false);
+  // Tracks whether the most recent unlock sheet open actually completed
+  // the unlock. The sheet's success state can only render while
+  // `lastWrittenLock` is truthy (the sheet is rendered conditionally on
+  // it), so we delay clearing the in-memory PIN until the sheet has
+  // closed — and only then if `onUnlocked` fired. Avoids the "Tag
+  // unlocked" success state being unmounted before the hider sees it
+  // (Copilot #572 review).
+  const unlockSucceededRef = useRef(false);
   const [locationPickerVisible, setLocationPickerVisible] = useState(false);
   // QR-scan modal for the LNURL input. Opened from the scan icon next
   // to the paste button on step 2. Permission state is held by
@@ -362,7 +370,15 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     // itself under the same `d` tag (NIP-33 addressable). createdAt
     // stays anchored to the original hide moment so the My Piglets
     // sort order doesn't reshuffle on every edit.
+    //
+    // Pre-load the existing record so we can carry forward fields the
+    // wizard doesn't surface — currently `nfcLock` (set by the NFC
+    // write path, never reconstructed from wizard state). Without this
+    // an edit-save wiped the stored PIN and the hider could no longer
+    // unlock the tag (Copilot #572 review).
+    const existing = editingId ? (await loadPiggies()).find((p) => p.id === editingId) : undefined;
     const piggy = {
+      ...(existing ?? {}),
       id: ensurePiggyId(),
       lnurlw: lnurl.trim(),
       lnurlDescription: stage.params.defaultDescription ?? undefined,
@@ -503,8 +519,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     cacheType,
     expiryDays,
     ensurePiggyId,
+    editingId,
     isEditMode,
     navigation,
+    pubkey,
     signEvent,
     relays,
   ]);
@@ -686,6 +704,46 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     setNfcSheetVisible(true);
   }, [lnurl]);
 
+  const handleOpenUnlockSheet = useCallback(() => {
+    unlockSucceededRef.current = false;
+    setUnlockSheetOpen(true);
+  }, []);
+
+  const handleUnlockSheetClose = useCallback(() => {
+    setUnlockSheetOpen(false);
+    // Only clear the in-memory PIN if the unlock actually completed —
+    // otherwise the hider's cancel/error should leave the PIN card in
+    // place so they can retry without losing the PIN. The sheet's own
+    // success state has already played by this point (we render the
+    // sheet conditional on `lastWrittenLock` being truthy, so it stays
+    // mounted through the success animation up until this close).
+    if (unlockSucceededRef.current) {
+      setLastWrittenLock(null);
+      setPinRevealed(false);
+      Toast.show({ type: 'success', text1: 'Tag unlocked' });
+    }
+    unlockSucceededRef.current = false;
+  }, []);
+
+  const handleUnlocked = useCallback(async () => {
+    unlockSucceededRef.current = true;
+    // Clear the on-disk lock immediately so a crash before the sheet
+    // closes still leaves the storage in the right shape. The wizard
+    // keeps showing the PIN card until the sheet calls onClose.
+    const id = ensurePiggyId();
+    try {
+      const all = await loadPiggies();
+      const existing = all.find((p) => p.id === id);
+      if (existing && existing.nfcLock) {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { nfcLock, ...rest } = existing;
+        await savePiggy(rest);
+      }
+    } catch (e) {
+      console.warn(`[HuntCreate] clear nfcLock after unlock failed: ${(e as Error)?.message ?? e}`);
+    }
+  }, [ensurePiggyId]);
+
   const handleNfcWritten = useCallback(
     async (result?: {
       locked: boolean;
@@ -703,6 +761,12 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         // below is the durable copy that survives wizard exit.
         setLastWrittenLock(result.lock);
         setPinRevealed(false);
+        // Persist the secrets onto the matching HiddenPiggy. The
+        // hider's tag is now physically locked with `result.lock.pwd`
+        // — if we lose this record they can read the LNURL but never
+        // unlock or rewrite the chip. Treat persist failure as a
+        // top-level alert (Copilot #572 review) so the hider can copy
+        // the PIN manually from the on-screen card before dismissing.
         try {
           const id = ensurePiggyId();
           const all = await loadPiggies();
@@ -720,12 +784,22 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
             await savePiggy(next);
             console.log(`[HuntCreate] persisted nfcLock for piggy=${id} uid=${result.lock.tagUid}`);
           } else {
-            console.warn(
-              `[HuntCreate] tag written + locked but no matching HiddenPiggy id=${id}; PIN cannot be recovered`,
+            // The local HiddenPiggy hasn't been written yet (locked
+            // write happened before Publish on step 5). Surface a
+            // visible warning — the PIN is only on screen, not on
+            // disk yet — and instruct the hider to copy it before
+            // tapping Done.
+            Alert.alert(
+              'Save the PIN now',
+              "The tag is locked, but we couldn't find the Piglet record to save its PIN onto. Copy the PIN from the card below before you leave this screen.",
             );
           }
         } catch (e) {
           console.warn(`[HuntCreate] persist nfcLock failed: ${(e as Error)?.message ?? e}`);
+          Alert.alert(
+            'PIN not saved to this device',
+            `The tag is locked, but we couldn't write the PIN to local storage (${(e as Error).message}). Copy the PIN from the card below before you leave this screen — otherwise you'll need an external NFC writer to recover the tag.`,
+          );
         }
       } else {
         // No lock result returned — either lockTag was off (iOS / hider
@@ -1127,7 +1201,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.pinActionSecondary}
-                      onPress={() => setUnlockSheetOpen(true)}
+                      onPress={handleOpenUnlockSheet}
                       accessibilityLabel="Unlock tag"
                       testID="hunt-write-pin-unlock"
                     >
@@ -1542,34 +1616,20 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         />
 
         {/* Reversible-lock unlock sheet — opens from the PIN card's
-          "Unlock tag" button above. On success, drops the stored
-          `nfcLock` so the wizard's PIN card hides itself + the tag is
-          accurately marked as open again. Issue #567. */}
+          "Unlock tag" button above. On success, the sheet plays its
+          own "Tag unlocked" state until the hider dismisses; only
+          then do we clear `lastWrittenLock` and hide the wizard's PIN
+          card. Pre-fix the clear ran inside `onUnlocked` and
+          immediately unmounted the sheet, hiding the success state
+          (Copilot #572 review). Issue #567. */}
         {lastWrittenLock ? (
           <NfcUnlockSheet
             visible={unlockSheetOpen}
-            onClose={() => setUnlockSheetOpen(false)}
+            tagUid={lastWrittenLock.tagUid}
             pwdHex={lastWrittenLock.pwdHex}
             packHex={lastWrittenLock.packHex}
-            onUnlocked={async () => {
-              const id = ensurePiggyId();
-              try {
-                const all = await loadPiggies();
-                const existing = all.find((p) => p.id === id);
-                if (existing && existing.nfcLock) {
-                  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                  const { nfcLock, ...rest } = existing;
-                  await savePiggy(rest);
-                }
-              } catch (e) {
-                console.warn(
-                  `[HuntCreate] clear nfcLock after unlock failed: ${(e as Error)?.message ?? e}`,
-                );
-              }
-              setLastWrittenLock(null);
-              setPinRevealed(false);
-              Toast.show({ type: 'success', text1: 'Tag unlocked' });
-            }}
+            onUnlocked={handleUnlocked}
+            onClose={handleUnlockSheetClose}
           />
         ) : null}
 
