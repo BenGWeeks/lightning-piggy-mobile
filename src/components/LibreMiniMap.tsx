@@ -438,6 +438,11 @@ const createStyles = (colors: Palette) =>
     // Blue dot at the same 22 px diameter as the merchant / cache /
     // event pin chassis so the GPS marker reads as a peer rather than a
     // smaller secondary element. The accuracy halo sits behind it.
+    // No zIndex so merchant / cache / event pins layered on top of the
+    // user dot remain tappable. The user-dot Marker is decorative — it
+    // has no onPress — so being underneath a clickable pin is the right
+    // visual + tap behaviour. (Previously zIndex:2 made the dot capture
+    // taps on co-located pins like Bee Happy Farm.)
     userDot: {
       width: 22,
       height: 22,
@@ -445,7 +450,6 @@ const createStyles = (colors: Palette) =>
       backgroundColor: '#2D88FF',
       borderWidth: 2,
       borderColor: colors.white,
-      zIndex: 2,
     },
     // Google-Maps-style translucent blue accuracy halo. The transform
     // scale animation lives on the Animated.View at render time.
