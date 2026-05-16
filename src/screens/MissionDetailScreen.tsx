@@ -15,11 +15,11 @@ import { createMissionDetailScreenStyles } from '../styles/MissionDetailScreen.s
 import { useThemeColors } from '../contexts/ThemeContext';
 import { extractYouTubeId } from '../utils/youtube';
 
-import { LearnNavigation, MissionDetailRoute } from '../navigation/types';
+import { ExploreNavigation, MissionDetailRoute } from '../navigation/types';
 
 interface Props {
   route: MissionDetailRoute;
-  navigation: LearnNavigation;
+  navigation: ExploreNavigation;
 }
 
 const MissionDetailScreen: React.FC<Props> = ({ route, navigation }) => {

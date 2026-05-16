@@ -71,6 +71,14 @@ A glossary of key terms used throughout this document.
 
 | **Jank**
 | A user-visible stutter or freeze caused by a frame missing its render budget (16.6 ms at 60 fps). Android's `OpenGLRenderer` emits a `Davey!` warning to logcat when a frame takes >700 ms — the kernel's "severe jank" alarm, named after Dave Burke (Android engineering lead at the time). Common causes in RN: heavy synchronous work on the JS thread blocking the bridge, image decoding on the UI thread, or React reconciliation cascades from rapid `setState` calls.
++
+The repo's perf suite (`scripts/perf-suite.sh`) parses `dumpsys gfxinfo` and surfaces these columns, each measuring a distinct flavour of jank:
++
+* **Modern jank %** — frames the user perceptibly saw drop (Android Q+ `Janky frames` rubric, accounts for the variable refresh-rate budget). Under 5 % is excellent, under 10 % acceptable, the metric to optimise against.
+* **Legacy jank %** — the older 16.6 ms-fixed counter (`Janky frames (legacy)`). Always larger than Modern because it flags any frame > 16.6 ms regardless of whether the user noticed. Useful as a coarse trend signal but not as a goal.
+* **99th frame ms** — the worst 1 % of frame durations over the sample window. Under 33 ms = no perceptible single-frame stutters; over 100 ms = visible hitches; over 700 ms is a Davey-grade freeze.
+* **4950 ms hits** — count of frames that took ~5 seconds (the gfxinfo upper bin). Each hit is a multi-second freeze rather than a stutter — the kind of lockup users describe as "the app went away for a moment." Zero is the only acceptable count for production.
+* **GPU 99th ms** — the worst 1 % of GPU-side frame durations. AVD emulators report a sticky 4950 ms floor here from cold Skia / RenderThread init that's not a real device-level signal; on hardware it tracks render-thread health.
 
 | **Key-path Spend**
 | Spending a Taproot output using a single Schnorr signature against the tweaked output key. No script is revealed on-chain, maximising privacy. For Boltz swaps this requires cooperative MuSig2 between user and Boltz.
@@ -82,7 +90,10 @@ A glossary of key terms used throughout this document.
 | A Layer 2 payment protocol built on top of Bitcoin, enabling instant, low-cost transactions. All payments in Lightning Piggy use the Lightning Network.
 
 | **LNURL**
-| A set of protocols (https://github.com/lnurl/luds[LUD specs]) for interacting with Lightning Network services via HTTP. Lightning Piggy uses LNURL-pay (LUD-16) for resolving lightning addresses to bolt11 invoices.
+| A set of protocols (https://github.com/lnurl/luds[LUD specs]) for interacting with Lightning Network services via HTTP. Lightning Piggy uses LNURL-pay (LUD-16) for resolving lightning addresses to bolt11 invoices, and LNURL-withdraw (LUD-03) for the Hunt feature's Piggy claims.
+
+| **LNURL-withdraw / LNURL-w**
+| The LNURL flavour for *withdrawing* sats from an issuer (https://github.com/lnurl/luds/blob/luds/03.md[LUD-03]). The wallet GETs the LNURL endpoint to fetch a `withdrawRequest` payload (`callback`, `k1`, `min/maxWithdrawable`, `defaultDescription`), generates a bolt11 invoice for the desired amount, and POSTs it to `callback`. The issuer pays the invoice. Used by Hunt Piggies (#468): hider creates the LNURL-w in their own wallet (LNbits / Alby / Mutiny / …) — Lightning Piggy is the *client* and *publisher*, never the issuer. The metadata is stateless — `wait_time` and `uses` caps are enforced server-side and only surface as a LUD-03 error envelope when a finder POSTs during the cooldown.
 
 | **Lockup Address**
 | The Taproot (`bc1p...`) address generated for a swap. Its script encodes both a claim path (hash-lock via preimage) and a refund path (time-lock via `nLockTime`).
@@ -102,11 +113,23 @@ A glossary of key terms used throughout this document.
 | **MuSig2**
 | A multi-signature scheme (https://bips.dev/327/[BIP-327]) that aggregates multiple Schnorr signatures into a single signature. Used by Boltz for cooperative Taproot key-path spending.
 
+| **NDEF**
+| NFC Data Exchange Format — the data layout the NFC Forum standardised for storing structured payloads on NFC tags and exchanging them between devices. An NDEF *Message* is a sequence of NDEF *Records*; each record has a Type Name Format (TNF), a Type identifier, an optional ID, and a Payload. Common record types: `URI` (TNF 0x01, RTD `U` — what Lightning Piggy writes for `lightning:LNURL...` and `nostr:nevent...`), `Text` (RTD `T`), `MIME` (TNF 0x02). When an Android device taps a tag whose first record is a URI, the OS dispatches the URI to the registered handler app — that's how a `lightning:` URI on a tag wakes a Lightning wallet without any app being open. Lightning Piggy reads/writes NDEF via `react-native-nfc-manager`'s `Ndef.uriRecord` / `NfcManager.ndefHandler.writeNdefMessage`. Tag capacity matters: NTAG213 (~120 chars after overhead) is too small for a typical LNURL-w; NTAG215 (504 B) or NTAG216 (888 B) are the right choices for Hunt Piggies, especially when writing the dual `lightning:` + `nostr:` records.
+
 | **NIP**
 | Nostr Implementation Possibility — a numbered specification in the Nostr protocol. Key NIPs used: NIP-01 (events), NIP-19 (bech32 encoding), NIP-55 (Android signer), NIP-57 (zaps), NIP-65 (relay lists).
 
 | **NIP-20**
 | Nostr Implementation Possibility for OK responses (https://github.com/nostr-protocol/nips/blob/master/01.md[NIP-01]). Relays must send `["OK", event_id, success, message]` after receiving an EVENT.
+
+| **NIP-22**
+| Nostr Implementation Possibility for comments (https://github.com/nostr-protocol/nips/blob/master/22.md[NIP-22]). Defines a generic comment-threading model with uppercase `["A"/"K"/"P"]` tags pointing at the root and lowercase `["a"/"k"/"p"]` pointing at the parent. Used by NIP-GC for cache status comments (kind 1111 — DNF / note / maintenance / archived) tagged to the kind 37516 listing.
+
+| **NIP-32**
+| Nostr Implementation Possibility for labels (https://github.com/nostr-protocol/nips/blob/master/32.md[NIP-32]). A standardised pattern for annotating events / pubkeys / URLs with structured tags under namespaced vocabularies. Format: `["L", "namespace"]` declares the namespace, `["l", "value", "namespace"]` carries the value within it. Lets multiple labelling systems (moderation services, country tags, MIME types, etc.) coexist without colliding. Lightning Piggy uses namespace `com.lightningpiggy.app` with value `payout-lnurl-w` on its kind-37516 Hunt cache listings — a marker that says "this cache pays via LNURL-w on the physical artifact" without leaking the bearer LNURL onto public relays. NIP-32 also defines kind 1985 standalone label events (used when a third party wants to annotate content without the original author's involvement); we use the inline-on-the-event form, not 1985.
+
+| **NIP-GC**
+| The Nostr Geocaching draft NIP (`d="geocaching-events"` published as a kind-30817 storage event by https://nostrhub.io/naddr1qvzqq…gkwet0vdskx6rfdenj6etkv4h8guc6gs5y5[chad@chadwick.site / hodlbod@coracle.social]). Defines kind 37516 (geocache listing — replaceable, with `D/T/S/t/g/hint/image` tags), kind 7516 (found-log — append-only with `a` tag pointing at the listing), kind 1111 (comments per NIP-22 for DNF / note / maintenance / archived), and kind 7517 (cryptographic verification of a physical find via per-cache verification key). Lightning Piggy adopts NIP-GC verbatim and adds a NIP-32 `com.lightningpiggy.app / payout-lnurl-w` label marker on listings to flag Lightning-payout caches without leaking the LNURL bearer token to public relays. See `docs/PROTOCOLS.adoc` → "Hunt: Lightning extension to NIP-GC".
 
 | **Nostr**
 | An open protocol for decentralised social networking (https://github.com/nostr-protocol/nostr[nostr-protocol/nostr]). Lightning Piggy uses Nostr for identity, social features (friends, profiles), and zaps.

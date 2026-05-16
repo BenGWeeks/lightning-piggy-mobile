@@ -17,7 +17,12 @@ import * as nip59 from 'nostr-tools/nip59';
 import type { NostrProfile, NostrContact, RelayConfig } from '../types/nostr';
 import { slimDisplayProfile } from '../utils/profileSanitize';
 
-const pool = new SimplePool();
+// Exported so feature-specific modules (e.g. nostrPlacesPublisher.ts for
+// the Hunt feature's NIP-GC subs) can share the single connection pool
+// rather than spinning up parallel SimplePool instances per feature —
+// each pool maintains its own WebSockets per relay, so duplication adds
+// real connection cost.
+export const pool = new SimplePool();
 
 // Fast-path verification for kind-0 (profile / metadata) events.
 // `SimplePool` runs `verifyEvent` synchronously for every event before
@@ -690,16 +695,23 @@ export function createZapRequestEvent(
   amountMsats: number,
   relays: string[],
   content: string,
+  // Optional event id to zap. NIP-57 says the `e` tag MAY appear on a
+  // 9734 to scope the zap to one note; LNURL servers copy it through
+  // to the 9735 receipt's `e` tag so clients can aggregate zaps on
+  // that note (see `findLogZapsService` for the consumer side).
+  zapEventId?: string,
 ): { kind: number; created_at: number; tags: string[][]; content: string; pubkey: string } {
+  const tags: string[][] = [
+    ['p', recipientPubkey],
+    ['amount', amountMsats.toString()],
+    ['relays', ...relays],
+  ];
+  if (zapEventId) tags.push(['e', zapEventId]);
   return {
     kind: 9734,
     created_at: Math.floor(Date.now() / 1000),
     pubkey: senderPubkey,
-    tags: [
-      ['p', recipientPubkey],
-      ['amount', amountMsats.toString()],
-      ['relays', ...relays],
-    ],
+    tags,
     content,
   };
 }

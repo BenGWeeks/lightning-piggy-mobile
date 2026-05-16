@@ -364,4 +364,25 @@ const HomeScreen: React.FC = () => {
   );
 };
 
-export default HomeScreen;
+// React.Profiler wrapper to surface render-commit costs as
+// [PerfBlock] log lines. Threshold-gated to ≥ 100 ms (the user-perceived
+// jank floor) so the log doesn't drown on healthy frames. The id arg
+// is the screen name so multi-screen Profiler output is greppable as
+// [PerfBlock] render:<screen>. Pre-fix the silent 20-45 s freezes in
+// #560 had no React-side instrumentation, so render-storm cost from
+// the 596-contact setContacts dispatch was completely invisible.
+const ProfiledHomeScreen: React.FC = () => (
+  <React.Profiler
+    id="HomeScreen"
+    onRender={(id, phase, actualDuration) => {
+      if (actualDuration > 100) {
+        // eslint-disable-next-line no-console
+        console.log(`[PerfBlock] render:${id} ${phase}=${Math.round(actualDuration)}ms`);
+      }
+    }}
+  >
+    <HomeScreen />
+  </React.Profiler>
+);
+
+export default ProfiledHomeScreen;

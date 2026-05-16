@@ -19,7 +19,6 @@ if (typeof global !== 'undefined') {
 // up here so any test that touches storage (e.g. sendThresholdService
 // in #82) gets a working get/set/clear without each test file having
 // to add its own jest.mock(...) boilerplate.
-jest.mock(
-  '@react-native-async-storage/async-storage',
-  () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
+jest.mock('@react-native-async-storage/async-storage', () =>
+  require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );

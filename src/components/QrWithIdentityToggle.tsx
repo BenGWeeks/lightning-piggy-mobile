@@ -3,8 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, Share } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
 import Toast from './BrandedToast';
-import { Copy, Share2 } from 'lucide-react-native';
-import NfcIcon from './icons/NfcIcon';
+import { Copy, Share2, Nfc } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 
@@ -138,7 +137,11 @@ const QrWithIdentityToggle: React.FC<Props> = ({
             }
             testID="profile-qr-nfc-button"
           >
-            <NfcIcon size={22} color={nfcSupported ? colors.brandPink : colors.textSupplementary} />
+            <Nfc
+              size={22}
+              color={nfcSupported ? colors.brandPink : colors.textSupplementary}
+              strokeWidth={2}
+            />
           </TouchableOpacity>
         )}
 

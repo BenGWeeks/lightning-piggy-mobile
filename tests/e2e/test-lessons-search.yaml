@@ -1,9 +1,11 @@
 appId: com.lightningpiggy.app.dev
-name: Learn Search Filters Course Grid by Title / Mission Text
+name: Lessons Search Filters Course Grid by Title / Mission Text
 ---
-# Verifies that the Learn-tab search input filters the course grid by
-# matching the typed query against course titles, descriptions, and the
+# Verifies that the Lessons sub-screen search input filters the course grid
+# by matching the typed query against course titles, descriptions, and the
 # titles + descriptions of nested missions.
+#
+# Lessons lives under Explore (tab-explore → ExploreHome → Lessons card).
 #
 # The catalog ships with a "The Inflation Monster" mission inside the
 # "The Money Problem" course (src/data/courses.json), so typing
@@ -11,16 +13,20 @@ name: Learn Search Filters Course Grid by Title / Mission Text
 # wallet-themed and Satoshi courses. When we clear the search the full
 # grid should come back.
 #
-# Run: maestro test tests/e2e/test-learn-search.yaml
+# Run: maestro test tests/e2e/test-lessons-search.yaml
 
 - waitForAnimationToEnd:
     timeout: 10000
 
-# Land on the Learn tab
+# Land on the Explore tab, then drill into Lessons.
 - tapOn:
-    id: 'tab-learn'
+    id: 'tab-explore'
 - waitForAnimationToEnd:
-    timeout: 3000
+    timeout: 2000
+- tapOn:
+    id: 'explore-card-lessons'
+- waitForAnimationToEnd:
+    timeout: 2000
 
 # Sanity: a course we expect to be filtered OUT is currently visible.
 - assertVisible: 'Satoshi Nakamoto'

@@ -14,21 +14,54 @@ import {
   BottomSheetBackdropProps,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
-import NfcIcon from './icons/NfcIcon';
-import { writeNpubToTag, cancelNfcOperation, isNfcEnabled } from '../services/nfcService';
+import { Nfc, AlertCircle } from 'lucide-react-native';
+import {
+  writeNpubToTag,
+  writeLnurlToTag,
+  writeHuntTagToTag,
+  cancelNfcOperation,
+  isNfcEnabled,
+  type HuntTagPayload,
+} from '../services/nfcService';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
-  npub: string;
-  displayName: string;
+  /**
+   * Write mode. `npub` (default) writes a Nostr identity to a contact's
+   * tag; `piglet` writes an LNURL-withdraw prize link to a Hide-a-Piglet
+   * tag and locks it so a passer-by can't repoint it.
+   */
+  mode?: 'npub' | 'piglet';
+  /** npub mode — the Nostr identity to write + the name shown in copy. */
+  npub?: string;
+  displayName?: string;
+  /** piglet mode — the LNURL-withdraw link to write to the tag.
+   * Legacy single-record path used when `huntPayload` is absent. */
+  lnurl?: string;
+  /** piglet mode (preferred) — multi-record NDEF payload: lightningpiggy://
+   * deep link + nostr:naddr1 listing reference + optional LNURL. When
+   * supplied, takes precedence over `lnurl`. See #73. */
+  huntPayload?: HuntTagPayload;
+  /** Fires once the tag write succeeds (before the user dismisses). */
+  onWritten?: () => void;
 }
 
 type WriteState = 'ready' | 'writing' | 'success' | 'error';
 
-const NfcWriteSheet: React.FC<Props> = ({ visible, onClose, npub, displayName }) => {
+const NfcWriteSheet: React.FC<Props> = ({
+  visible,
+  onClose,
+  mode = 'npub',
+  npub = '',
+  displayName = '',
+  lnurl = '',
+  huntPayload,
+  onWritten,
+}) => {
+  const isPiglet = mode === 'piglet';
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [state, setState] = useState<WriteState>('ready');
@@ -53,6 +86,13 @@ const NfcWriteSheet: React.FC<Props> = ({ visible, onClose, npub, displayName })
     } else {
       sheetRef.current?.dismiss();
       cancelNfcOperation();
+      // Reset on close too — the BottomSheet keeps the component mounted,
+      // so a previous error / success state would persist into the next
+      // open without this. Pre-fix the user reopened the sheet after a
+      // capacity-error and still saw the old "Tag payload is N bytes"
+      // copy (#73 follow-up).
+      setState('ready');
+      setErrorMessage('');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
@@ -90,12 +130,25 @@ const NfcWriteSheet: React.FC<Props> = ({ visible, onClose, npub, displayName })
 
     setState('ready');
     try {
-      await writeNpubToTag(npub, () => {
+      const onTagDetected = () => {
         // Tag detected — show writing state
         if (mountedRef.current) setState('writing');
-      });
+      };
+      if (isPiglet) {
+        // New multi-record write when the caller supplies the richer
+        // Hunt payload (#73); legacy single-record LNURL write stays
+        // as the fallback so we don't break any pre-#73 call-site.
+        if (huntPayload) {
+          await writeHuntTagToTag({ ...huntPayload, onTagDetected });
+        } else {
+          await writeLnurlToTag(lnurl, onTagDetected);
+        }
+      } else {
+        await writeNpubToTag(npub, onTagDetected);
+      }
       if (mountedRef.current) {
         setState('success');
+        onWritten?.();
       }
     } catch (err) {
       if (mountedRef.current) {
@@ -126,21 +179,28 @@ const NfcWriteSheet: React.FC<Props> = ({ visible, onClose, npub, displayName })
       handleIndicatorStyle={styles.handleIndicator}
     >
       <BottomSheetView style={styles.content}>
-        <Text style={styles.title}>Write to NFC</Text>
+        <Text style={styles.title}>{isPiglet ? 'Write the Piglet tag' : 'Write to NFC'}</Text>
 
         {state === 'ready' && (
           <View style={styles.stateContainer}>
             <View style={styles.iconContainer}>
-              <NfcIcon size={64} color={colors.brandPink} />
+              <Nfc size={64} color={colors.brandPink} strokeWidth={2} />
             </View>
-            <Text style={styles.instruction}>Hold your phone against an NFC tag</Text>
+            <Text style={styles.instruction}>
+              {isPiglet
+                ? 'Hold the Piglet to the back of your phone'
+                : 'Hold your phone against an NFC tag'}
+            </Text>
             <Text style={styles.description}>
-              This will write {displayName}&apos;s Nostr identity (npub) to the tag. Anyone with a
-              Nostr-compatible app can tap the tag to view the profile.
+              {isPiglet
+                ? 'This writes the prize link onto the tag and locks it so no one can overwrite it. Keep the Piglet still against the phone until it confirms.'
+                : `This will write ${displayName}'s Nostr identity (npub) to the tag. Anyone with a Nostr-compatible app can tap the tag to view the profile.`}
             </Text>
-            <Text style={styles.npubPreview} numberOfLines={1}>
-              {npub.slice(0, 20)}...{npub.slice(-8)}
-            </Text>
+            {!isPiglet && (
+              <Text style={styles.npubPreview} numberOfLines={1}>
+                {npub.slice(0, 20)}...{npub.slice(-8)}
+              </Text>
+            )}
             <ActivityIndicator
               size="small"
               color={colors.brandPink}
@@ -172,8 +232,9 @@ const NfcWriteSheet: React.FC<Props> = ({ visible, onClose, npub, displayName })
             </View>
             <Text style={styles.instruction}>Successfully written!</Text>
             <Text style={styles.description}>
-              {displayName}&apos;s npub has been written to the NFC tag. Anyone can now tap this tag
-              to view the profile.
+              {isPiglet
+                ? 'The prize link is on the tag and locked. Hide the Piglet, then drop a pin so finders can hunt for it.'
+                : `${displayName}'s npub has been written to the NFC tag. Anyone can now tap this tag to view the profile.`}
             </Text>
             <TouchableOpacity
               style={styles.doneButton}
@@ -189,7 +250,10 @@ const NfcWriteSheet: React.FC<Props> = ({ visible, onClose, npub, displayName })
         {state === 'error' && (
           <View style={styles.stateContainer}>
             <View style={[styles.iconContainer, styles.errorIcon]}>
-              <Text style={styles.errorMark}>!</Text>
+              <Nfc size={64} color={colors.red} strokeWidth={2} />
+              <View style={styles.errorBadge}>
+                <AlertCircle size={26} color={colors.red} strokeWidth={2.5} />
+              </View>
             </View>
             <Text style={styles.instruction}>Write failed</Text>
             <Text style={styles.description}>{errorMessage}</Text>
@@ -271,10 +335,13 @@ const createStyles = (colors: Palette) =>
       color: colors.green,
       fontWeight: '700',
     },
-    errorMark: {
-      fontSize: 48,
-      color: colors.red,
-      fontWeight: '700',
+    errorBadge: {
+      position: 'absolute',
+      bottom: 0,
+      right: 0,
+      backgroundColor: colors.surface,
+      borderRadius: 14,
+      padding: 1,
     },
     instruction: {
       fontSize: 18,

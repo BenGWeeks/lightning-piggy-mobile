@@ -30,6 +30,11 @@ export const lightPalette = {
   // and matches the Bootstrap-style alert convention readers recognise.
   zapYellowLight: '#FFF3CD',
   zapYellowDark: '#856404',
+  // Map-pin accent colours used by LibreMiniMap + LegendSheet. Promoting
+  // these to palette tokens so the theme owns them (was inline hex on
+  // map pin + legend chip styles).
+  cachePurple: '#7A5CFF',
+  eventViolet: '#5B3AFF',
 };
 
 // Dark palette: keep the Lightning Piggy brand hot-pink intact, swap the
@@ -63,6 +68,10 @@ export const darkPalette: typeof lightPalette = {
   // a brighter ink so the warning copy stays readable on a dark sheet.
   zapYellowLight: '#3A2F10',
   zapYellowDark: '#FFD566',
+  // Match the light-palette map accents — purple reads well on both
+  // themes so no adjustment needed.
+  cachePurple: '#7A5CFF',
+  eventViolet: '#5B3AFF',
 };
 
 export type Palette = typeof lightPalette;

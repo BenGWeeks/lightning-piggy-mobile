@@ -892,3 +892,135 @@ Breakdown lets us confirm cache-hit behaviour on a real device without attaching
 - `pool.querySync` is still one-shot — real-time message arrival requires pull-to-refresh today. Filed as #188 (persistent relay subscription, architectural ~4 h).
 - BitmapFactory exception flood on unsupported avatar formats contributes to GC pressure on the Pixel. Filed as #189.
 - `react-native-mmkv` swap for the DM-cache AsyncStorage reads/writes would be ~100× faster at scale; marginal at current inbox sizes. Deferred.
+
+'''
+
+= Explore tab (PR #488)
+
+== Overview
+
+The Explore tab adds three location-aware discovery surfaces on top of the existing Lightning + Nostr stack:
+
+* **Map / Places** — Bitcoin-accepting merchants worldwide, sourced from the https://btcmap.org[BTC Map] v4 REST API (~28 k merchants, curated from OpenStreetMap).
+* **Hunt (Geo-caches)** — NIP-GC `kind 37516` cache listings + `kind 7516` find-logs (see `docs/PROTOCOLS.adoc` → "Hunt: Lightning extension to NIP-GC").
+* **Events** — NIP-52 `kind 31923` time-based calendar events (Bitcoin meetups, conferences, workshops).
+
+All three surfaces share one architectural pattern: an AsyncStorage-backed in-memory cache with a 7-day TTL, a native MapLibre mini-map that emits viewport-bbox events to drive list filtering, and a shared "within X km" radius preference.
+
+== Architecture
+
+[source]
+----
+ExploreHomeScreen (hub: 4 rails — Lessons / Map / Hunt / Events)
+  │
+  ├─ MapScreen           — full-bleed native MapLibre map (merchants + caches)
+  ├─ PlacesScreen        — filterable merchant list + mini-map
+  │    └─ PlaceDetailScreen
+  ├─ HuntScreen          — filterable cache list + mini-map
+  │    ├─ HuntPiggyDetailScreen   (listing + find-log + Zap finder)
+  │    ├─ HuntCreateScreen        ("Hide a Piglet" 5-section flow + NFC write)
+  │    └─ HuntFoundScreen         (claim flow, opened via lightning: deep-link)
+  └─ EventsScreen        — filterable event list + mini-map
+       └─ EventDetailScreen        (Add-to-Calendar via expo-calendar)
+----
+
+The `Tab.Navigator` (`src/navigation/AppNavigator.tsx`) sets `lazy: true` (commit `ede4309`) so the Messages / Explore / Friends trees do not mount until the user first focuses each tab — keeps cold-start work confined to Home.
+
+=== Key files
+
+[cols="1,2", options="header"]
+|===
+| File | Purpose
+
+| `src/services/btcMapService.ts` | Read-only consumer of BTC Map v4 (`https://api.btcmap.org/v4/places`). One global fetch with an explicit field list (top-level curated + `osm:`-prefixed raw tags), 7-day TTL, single AsyncStorage blob. Hydrate-on-import + sync peek for instant first paint.
+| `src/services/nostrPlacesService.ts` | Pure builders + parsers for `kind 37516` listings, `kind 7516` find-logs, `kind 1111` NIP-22 comments, `kind 31923` NIP-52 events. Carries the `GC_LISTING_KIND` / `GC_FOUND_LOG_KIND` / `GC_COMMENT_KIND` / `NIP52_TIME_BASED_KIND` constants.
+| `src/services/nostrPlacesPublisher.ts` | `subscribeNearbyCaches`, `subscribeNearbyEvents`, `subscribeCacheFoundLog`, `subscribeCacheComments` — geohash-prefix `#g` filters for proximity discovery.
+| `src/services/nostrPlacesStorage.ts` | AsyncStorage mirror of parsed caches + events. Capped at 500 entries each, 7-day TTL, hydrate kicked at module import, sync peek (`peekCachedCachesSync` / `peekCachedEventsSync`) for first paint.
+| `src/services/nearbyRadiusService.ts` | Single AsyncStorage key for the user's "within X km" preference (default 50 km, options 5 / 25 / 50 / 150 km — no "All" / 500 km options after user feedback that those bands made the list useless).
+| `src/hooks/useNearbyRadius.ts` | React subscription to the shared radius value.
+| `src/hooks/usePubkeyProfile.ts` | Pubkey → kind-0 metadata slice. Reads `zapSenderProfileStorage` first (in-memory + AsyncStorage), falls through to `nostrService.fetchProfile` on miss and writes back. Used by hider attribution on cache rows + detail, finder chips on the find-log, and the organiser row on EventDetail.
+| `src/components/LibreMiniMap.tsx` | Native MapLibre map — single shared component used on every map surface (Explore hub, Geo-caches / Hunt, Places, full-screen MapScreen, LocationPickerSheet, and the four detail screens). Replaced the Leaflet WebView in #552 / #563 to dodge GrapheneOS Vanadium sandbox freezing and kill the ~30 s WebView cold-mount. Props gate behaviour: `interactive` enables pan + recenter, `fill` fills the parent, `crosshair` overlays the location-picker reticle, `onBoundsChange` emits viewport bbox for list-filter hosts (debounced 500 ms on MapScreen via `onRegionDidChange`). Pins are RN `<Marker>` children with a 22 px chassis + Lucide glyph per BTC Map category — the SymbolLayer port for dense-city density lives as a follow-up.
+| `src/components/BtcMapAttribution.tsx` | "Powered by BTC Map" chip — attribution required by the BTC Map data licence.
+| `src/components/SocialIcon.tsx` | Inline Simple-Icons brand SVGs for X / Facebook / Instagram / Telegram / WhatsApp. Lucide dropped brand glyphs in v0.34, so we ship the SVG paths ourselves.
+|===
+
+== BTC Map dataset
+
+=== Why v4 (and why not bbox)
+
+V3's `/places?bbox=…` endpoint was removed; v4 returns only `{id}` by default and requires an explicit field list with source prefixes (`osm:payment:lightning`, etc.) — see https://github.com/teambtcmap/btcmap-api/issues/52[teambtcmap/btcmap-api#52]. We pull the full global list **once per week** with the explicit field list in `V4_FIELDS` (`btcMapService.ts:28`) and filter client-side. Trade-off: ~6 MB JSON download once per week vs the alternative of issuing a fresh fetch on every viewport change.
+
+=== Caching shape
+
+* In-memory mirror + a single AsyncStorage blob keyed `@btcmap:places-v1`.
+* `DATASET_TTL_MS = 7 days`. After expiry the next viewport fetch refreshes; pull-to-refresh on the Explore hub force-refreshes immediately.
+* Hydrate is kicked at module-import time so a navigation tap that lands on PlacesScreen can `peekDatasetSync()` and paint within a frame.
+
+=== ±2° bbox widening (fix in `ffd63a4`)
+
+The mini-map's `onBoundsChange` emits the current viewport bbox. Naive filtering (rows whose `lat/lon` falls inside the exact bbox) feels broken when the user zooms out — markers appear before list rows because MapLibre's marker layer paints the moment merchants enter the canvas, but a tight bbox excludes anything not strictly inside. The fix widens the filter bbox by ±2° (roughly ±220 km at UK latitudes) so the list mirrors what the user actually sees as "the area I'm exploring". See `ffd63a4 fix(places + explore): widen merchant bbox to ±2° so zoom-out actually loads` (originally landed on Leaflet, behaves identically on MapLibre because both emit the same `lat/lon` bbox).
+
+== NIP-GC + NIP-52 cache layer (`nostrPlacesStorage`)
+
+Mirrors the BTC Map pattern:
+
+* **Two AsyncStorage keys** — `@lp:nostr-caches-v1` (kind 37516) and `@lp:nostr-events-v1` (kind 31923).
+* **In-memory mirror** + sync peek so the first useState init in HuntScreen / EventsScreen has populated data on warm starts.
+* **Capped at 500 entries each** — newest by `createdAt` for caches, newest-upcoming by `startsAt` for events. The blob is well under 200 KB at the cap.
+* **7-day TTL** on the persisted blob; the live relay subscription (`subscribeNearbyCaches` / `subscribeNearbyEvents`) authoritatively backfills as soon as the user lands on the rail.
+* **Write-through replace**, fire-and-forget. The in-memory state stays authoritative for the current session — a failed AsyncStorage write doesn't pollute the rendered list.
+
+This is the same pattern PR #508 used for NIP-17 DM wrap IDs (paint cached state instantly, let the live sub update in place).
+
+=== Bbox-driven list filter
+
+The mini-map on Places / Hunt / Events emits `{minLat, maxLat, minLon, maxLon}` whenever the user pans or zooms. The host screen filters its list against that bbox. UX consequence: zooming out reveals more rows; zooming in narrows them. Pairs with the "within X km radius" chip — bbox is the primary filter, radius is the secondary cap.
+
+== `usePubkeyProfile` hook
+
+Reusable kind-0 lookup with layered caching:
+
+. **In-memory `zapSenderProfileStorage`** — already populated for any pubkey the wallet has ever seen as a zap sender or contact.
+. **AsyncStorage fallback** — `zapSenderProfileStorage.get(pubkey)` reads from disk on miss.
+. **Relay fetch** — `nostrService.fetchProfile(pubkey, readRelays)` unions the user's NIP-65 read relays with `PROFILE_RELAYS` (purplepag.es / nostr.band / primal.net). Result is written back to the cache.
+
+Consumers (hider chip on `HuntPiggyDetailScreen`, finder chip on each find-log row, organiser row on `EventDetailScreen`) all resolve instantly for any pubkey the user has interacted with before, and degrade gracefully to a pubkey-prefix fallback when neither cache nor relay yields a name.
+
+== `useNearbyRadius` shared setting
+
+A single AsyncStorage key (`@lp:nearby-radius-v1`) holds the user's preferred "within X km" radius. Default is 50 km; options are 5 / 25 / 50 / 250 km + "anywhere" (null). Every screen that surfaces a "nearby" affordance — the home rail, PlacesScreen, HuntScreen, EventsScreen, distance chips on geo-cache rows — reads through `useNearbyRadius()` so a change on one screen propagates everywhere on the next render.
+
+== Pre-seed on first render (`5776fcc`)
+
+A naive `useState([])` on Explore / Hunt / Events would paint a blank rail for one frame even when the in-memory mirror is populated. Each list screen now seeds its initial state via `peekCachedCachesSync()` / `peekCachedEventsSync()` / `peekDatasetSync()` so the first paint already shows real rows. The live sub then overwrites in place as fresh events land.
+
+== Native dependencies added in PR #488
+
+[cols="1,2", options="header"]
+|===
+| Package | Used for
+
+| `@maplibre/maplibre-react-native` | Native MapLibre — single map renderer for every surface. Replaced the Leaflet-in-WebView stack in #552 / #563 (see commit log on `feat/maplibre-native`); native MapView (`react-native-maps`) was rejected because it forces a Google Maps API key + billing setup. OSM-aligned via OpenFreeMap's `bright` vector style — no API key, donation-funded, same provider btcmap.org itself uses, sidesteps OSMF's tile-server policy concerns for distributed apps.
+| `react-native-svg` | Vector rendering for the BTC Map attribution logo (`BtcMapLogoSvg.tsx`) and the geocaching pin glyphs. SVG paths preserved at any size — no rasterisation fringes at chip-sized renders.
+| `expo-asset` + `expo-file-system` + `expo-sharing` | "Save STL" button on `HuntCreateScreen` — bundles the Piggy Bag Charm 3D-print file (`assets/piggy-bag-charm.stl`, 188 KB) into the APK, copies it out of the bundle on tap, and shares via the system share sheet.
+| `expo-calendar` | "Add to Calendar" affordance on `EventDetailScreen`. Requests `READ_CALENDAR` + `WRITE_CALENDAR` at the moment the user taps the button; declines fall back to a copy-to-clipboard hint.
+| `expo-notifications` | Foreground geofence pings for the opt-in "Nearby merchants" feature (#467). Permission requested lazily, channel created on first opt-in.
+|===
+
+== Offline cold-start test (`scripts/test-offline-cold-start.sh`)
+
+End-to-end guard that the cache layers above actually paint without network:
+
+. Shell wrapper disables Wi-Fi + mobile data via `adb shell svc wifi disable` / `svc data disable`.
+. Force-stops the app and cold-launches it.
+. Runs `tests/e2e/test-offline-cold-start.yaml` which asserts every cached surface (Home tx list, Friends, DM inbox, Explore hub, Places list, Hunt list, Events list) paints within the Maestro default timeout.
+. `trap` restores network whether the flow passes or fails — a regression doesn't strand the device offline.
+
+Pre-req: the app must have been opened at least once on the device with network, so BTC Map + NIP-GC + NIP-52 caches are on disk. Run nightly on the AVD; spot-checked on the Pixel before each prod release.
+
+== Known limitations / future work
+
+* **Mini-map zoom controls** — native overlay buttons (`libre-minimap-zoom-in` / `-zoom-out`) replaced the cramped WebView default; tracked as ✅ delivered.
+* **Map markers for geo-caches** don't yet match the list-row icon style (issue #34 in the explore task board).
+* **My Piglets page** (hidden / found / friends' finds, edit, NFC re-write) is scoped but not built yet.
+* **Pull-to-refresh** is on the Explore hub only; Places + Events have a refresh button but no PTR (UI follow-up in the board).

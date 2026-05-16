@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, type TextStyle } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, type TextStyle } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ProfileIcon from './ProfileIcon';
@@ -12,9 +12,11 @@ interface Props {
   /**
    * The page-identifying glyph rendered inside the round badge on the
    * left. Passed as a ReactNode so the screen can choose between tinted
-   * `Image` (Home, Learn) and `Svg` components (Messages, Friends) — both
-   * match their tab-bar counterparts. Decorative only: the badge never
-   * navigates anywhere on tap (per #139's AC).
+   * `Image` (Home) and `Svg`/Lucide components (Messages, Explore,
+   * Friends) — both match their tab-bar counterparts. Decorative by
+   * default (per #139's AC), but a screen can pass `onIconPress` to
+   * make the badge tappable — used in sub-screens to navigate back
+   * (e.g. Hunt detail → Hunt hub).
    */
   icon: React.ReactNode;
   /** Page title text. For Home this carries the "Hello, <name>!" greeting. */
@@ -31,12 +33,22 @@ interface Props {
   accessibilityLabel?: string;
   /** Optional style override for the title Text. Home uses this to pull the
    * greeting back to the lighter weight/size it had pre-#139 (section
-   * titles like "Messages"/"Friends"/"Learn" keep the default bold). */
+   * titles like "Messages"/"Friends"/"Explore" keep the default bold). */
   titleStyle?: TextStyle;
+  /**
+   * Optional tap handler for the round badge. Top-level tabs leave this
+   * undefined — the badge stays decorative-only per #139. Sub-screens
+   * that reuse `TabHeader` (e.g. Lessons) can pass a `goBack` callback
+   * here and swap the glyph for a `ChevronLeft`, getting a tappable
+   * back affordance without redesigning the header.
+   */
+  onIconPress?: () => void;
+  /** Accessibility label for the badge when `onIconPress` is set. */
+  iconAccessibilityLabel?: string;
 }
 
 /**
- * Shared header row for the four top-level tabs (Home, Messages, Learn,
+ * Shared header row for the four top-level tabs (Home, Messages, Explore,
  * Friends). Fixes the prior inconsistency where each screen rolled its
  * own page-icon badge, title position, and profile-icon placement.
  *
@@ -52,6 +64,8 @@ const TabHeader: React.FC<Props> = ({
   rightAction,
   accessibilityLabel,
   titleStyle,
+  onIconPress,
+  iconAccessibilityLabel,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -73,14 +87,27 @@ const TabHeader: React.FC<Props> = ({
 
   return (
     <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-      <View
-        style={styles.badge}
-        accessible={false}
-        // Decorative only — not tappable. See #139 AC.
-        importantForAccessibility="no-hide-descendants"
-      >
-        {icon}
-      </View>
+      {onIconPress ? (
+        <TouchableOpacity
+          style={styles.badge}
+          onPress={onIconPress}
+          accessibilityLabel={iconAccessibilityLabel ?? 'Back'}
+          accessibilityRole="button"
+          testID="tab-header-icon-button"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          {icon}
+        </TouchableOpacity>
+      ) : (
+        <View
+          style={styles.badge}
+          accessible={false}
+          // Decorative only — not tappable. See #139 AC.
+          importantForAccessibility="no-hide-descendants"
+        >
+          {icon}
+        </View>
+      )}
       <Text
         style={[styles.title, titleStyle]}
         numberOfLines={1}
@@ -115,7 +142,7 @@ const createStyles = (colors: Palette) =>
       color: colors.white,
       // Slightly lighter than the previous per-screen 28/700 because Home's
       // "Hello, <name>!" greeting reads better at a softer weight and the
-      // section titles (Messages / Friends / Learn) still look substantial.
+      // section titles (Messages / Friends / Explore) still look substantial.
       fontSize: 24,
       fontWeight: '600',
       flexShrink: 1,

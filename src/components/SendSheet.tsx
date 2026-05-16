@@ -50,6 +50,12 @@ interface Props {
   initialPicture?: string;
   recipientPubkey?: string;
   recipientName?: string;
+  // Optional Nostr event id to zap. When set, the 9734 zap request
+  // carries an `e` tag scoping the zap to that note — the LNURL
+  // server echoes it onto the 9735 receipt so per-note aggregation
+  // (e.g. the find-log zaps-received pill in HuntPiggyDetail) picks
+  // the zap up. Omit for plain zap-the-author flows.
+  zapEventId?: string;
 }
 
 type InputMode = 'scan' | 'paste';
@@ -105,6 +111,7 @@ const SendSheet: React.FC<Props> = ({
   initialPicture,
   recipientPubkey,
   recipientName,
+  zapEventId,
 }) => {
   if (visible && !__sendSheetFirstVisibleLogged) {
     __sendSheetFirstVisibleLogged = true;
@@ -508,7 +515,12 @@ const SendSheet: React.FC<Props> = ({
         // NIP-57 zap: sign a zap request if this is a Nostr contact and the server supports it
         if (activePubkey && lnurlParams.allowsNostr) {
           try {
-            const zapRequestJson = await signZapRequest(activePubkey, currentSats, memo);
+            const zapRequestJson = await signZapRequest(
+              activePubkey,
+              currentSats,
+              memo,
+              zapEventId,
+            );
             if (zapRequestJson) {
               invoiceOptions.nostr = zapRequestJson;
             } else if (__DEV__) {

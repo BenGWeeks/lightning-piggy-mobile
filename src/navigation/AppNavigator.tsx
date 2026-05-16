@@ -1,22 +1,37 @@
 import React, { useMemo } from 'react';
 import { StyleSheet, ActivityIndicator, View, Platform, useWindowDimensions } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import {
+  NavigationContainer,
+  StackActions,
+  createNavigationContainerRef,
+} from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createDrawerNavigator } from '@react-navigation/drawer';
-import { Home, MessageCircle, GraduationCap, Users } from 'lucide-react-native';
+import { Home, MessageCircle, Compass, Users } from 'lucide-react-native';
 import { useWallet } from '../contexts/WalletContext';
 import { useTheme } from '../contexts/ThemeContext';
 import {
   RootStackParamList,
-  LearnStackParamList,
+  ExploreStackParamList,
   MainTabParamList,
   AccountDrawerParamList,
 } from './types';
 
 import HomeScreen from '../screens/HomeScreen';
 import MessagesScreen from '../screens/MessagesScreen';
-import LearnScreen from '../screens/LearnScreen';
+import ExploreHomeScreen from '../screens/ExploreHomeScreen';
+import LessonsScreen from '../screens/LessonsScreen';
+import MapScreen from '../screens/MapScreen';
+import PlacesScreen from '../screens/PlacesScreen';
+import PlaceDetailScreen from '../screens/PlaceDetailScreen';
+import HuntScreen from '../screens/HuntScreen';
+import HuntCreateScreen from '../screens/HuntCreateScreen';
+import HuntFoundScreen from '../screens/HuntFoundScreen';
+import HuntPiggyDetailScreen from '../screens/HuntPiggyDetailScreen';
+import MyPigletsScreen from '../screens/MyPigletsScreen';
+import EventsScreen from '../screens/EventsScreen';
+import EventDetailScreen from '../screens/EventDetailScreen';
 import CourseDetailScreen from '../screens/CourseDetailScreen';
 import MissionDetailScreen from '../screens/MissionDetailScreen';
 import FriendsScreen from '../screens/FriendsScreen';
@@ -24,31 +39,81 @@ import ConversationScreen from '../screens/ConversationScreen';
 import GroupsScreen from '../screens/GroupsScreen';
 import GroupConversationScreen from '../screens/GroupConversationScreen';
 import ContactProfileScreen from '../screens/ContactProfileScreen';
+import UnsupportedEntityScreen from '../screens/UnsupportedEntityScreen';
 import ProfileScreen from '../screens/account/ProfileScreen';
 import WalletsScreen from '../screens/account/WalletsScreen';
 import NostrScreen from '../screens/account/NostrScreen';
 import OnChainScreen from '../screens/account/OnChainScreen';
 import DisplayScreen from '../screens/account/DisplayScreen';
 import AppearanceScreen from '../screens/account/AppearanceScreen';
+import NearbyScreen from '../screens/account/NearbyScreen';
 import SecurityScreen from '../screens/account/SecurityScreen';
 import AboutScreen from '../screens/account/AboutScreen';
 import AccountDrawerContent from '../components/AccountDrawerContent';
-import { perfLog } from '../utils/perfLog';
+import { perfLog, perfTabTap, perfTabRendered } from '../utils/perfLog';
 
 let __appNavigatorFirstRenderLogged = false;
 
+/**
+ * Imperative navigation ref consumed by `App.tsx`'s Linking listener so
+ * incoming `lightning:LNURL…` URIs (NFC tag tap, deep link from another
+ * app) can route to HuntFoundScreen without React-Navigation's static
+ * `linking` config — which doesn't fit a non-path-segmented URI scheme
+ * cleanly. Use `navigateToHuntFound(lnurl)` from outside the React tree.
+ */
+export const navigationRef = createNavigationContainerRef<RootStackParamList>();
+
+export const navigateToHuntFound = (lnurl: string): boolean => {
+  if (!navigationRef.isReady()) return false;
+  navigationRef.navigate('Main', {
+    screen: 'MainTabs',
+    params: {
+      screen: 'Explore',
+      params: { screen: 'HuntFound', params: { lnurl } },
+    },
+  });
+  return true;
+};
+
+// Navigate to a specific Piggy listing by coord (`kind:pubkey:d`).
+// Entry-points: the App.tsx Linking listener for
+// `lightningpiggy://hunt/<coord>` AND `nostr:naddr1...` deep links
+// emitted by the multi-record NFC tags (#73).
+export const navigateToHuntPiggyDetail = (coord: string): boolean => {
+  if (!navigationRef.isReady()) return false;
+  navigationRef.navigate('Main', {
+    screen: 'MainTabs',
+    params: {
+      screen: 'Explore',
+      params: { screen: 'HuntPiggyDetail', params: { coord } },
+    },
+  });
+  return true;
+};
+
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
-const LearnStack = createNativeStackNavigator<LearnStackParamList>();
+const ExploreStack = createNativeStackNavigator<ExploreStackParamList>();
 const AccountDrawer = createDrawerNavigator<AccountDrawerParamList>();
 
-function LearnStackNavigator() {
+function ExploreStackNavigator() {
   return (
-    <LearnStack.Navigator screenOptions={{ headerShown: false }}>
-      <LearnStack.Screen name="LearnHome" component={LearnScreen} />
-      <LearnStack.Screen name="CourseDetail" component={CourseDetailScreen} />
-      <LearnStack.Screen name="MissionDetail" component={MissionDetailScreen} />
-    </LearnStack.Navigator>
+    <ExploreStack.Navigator screenOptions={{ headerShown: false }}>
+      <ExploreStack.Screen name="ExploreHome" component={ExploreHomeScreen} />
+      <ExploreStack.Screen name="Lessons" component={LessonsScreen} />
+      <ExploreStack.Screen name="CourseDetail" component={CourseDetailScreen} />
+      <ExploreStack.Screen name="MissionDetail" component={MissionDetailScreen} />
+      <ExploreStack.Screen name="Map" component={MapScreen} />
+      <ExploreStack.Screen name="Places" component={PlacesScreen} />
+      <ExploreStack.Screen name="PlaceDetail" component={PlaceDetailScreen} />
+      <ExploreStack.Screen name="Hunt" component={HuntScreen} />
+      <ExploreStack.Screen name="HuntCreate" component={HuntCreateScreen} />
+      <ExploreStack.Screen name="HuntFound" component={HuntFoundScreen} />
+      <ExploreStack.Screen name="HuntPiggyDetail" component={HuntPiggyDetailScreen} />
+      <ExploreStack.Screen name="MyPiglets" component={MyPigletsScreen} />
+      <ExploreStack.Screen name="Events" component={EventsScreen} />
+      <ExploreStack.Screen name="EventDetail" component={EventDetailScreen} />
+    </ExploreStack.Navigator>
   );
 }
 
@@ -58,6 +123,14 @@ function HomeTabs() {
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
+        // Lazy-mount tabs so cold-start only pays for the focused one.
+        // Without this, react-navigation v7 mounts every Tab.Screen at
+        // boot — and the Explore stack alone fires a ~3 MB BTC Map
+        // fetch, two Nostr relay subscriptions, and a foreground
+        // location request before the user has ever tapped Explore.
+        // Combined with `freezeOnBlur: true` below, screens still hold
+        // their state across tab switches once they've been visited.
+        lazy: true,
         freezeOnBlur: true,
         tabBarStyle: {
           backgroundColor: colors.surface,
@@ -84,6 +157,10 @@ function HomeTabs() {
             <Home size={size} color={color} strokeWidth={focused ? 2.5 : 2} />
           ),
         }}
+        listeners={{
+          tabPress: () => perfTabTap('Home'),
+          focus: () => perfTabRendered('Home'),
+        }}
       />
       <Tab.Screen
         name="Messages"
@@ -95,17 +172,47 @@ function HomeTabs() {
             <MessageCircle size={size} color={color} strokeWidth={focused ? 2.5 : 2} />
           ),
         }}
+        listeners={{
+          tabPress: () => perfTabTap('Messages'),
+          focus: () => perfTabRendered('Messages'),
+        }}
       />
       <Tab.Screen
-        name="Learn"
-        component={LearnStackNavigator}
+        name="Explore"
+        component={ExploreStackNavigator}
         options={{
-          tabBarButtonTestID: 'tab-learn',
-          tabBarAccessibilityLabel: 'Learn tab',
+          tabBarButtonTestID: 'tab-explore',
+          tabBarAccessibilityLabel: 'Explore tab',
           tabBarIcon: ({ focused, color, size }) => (
-            <GraduationCap size={size} color={color} strokeWidth={focused ? 2.5 : 2} />
+            <Compass size={size} color={color} strokeWidth={focused ? 2.5 : 2} />
           ),
         }}
+        listeners={({ navigation }) => ({
+          // Pop the Explore sub-stack back to its root every time the
+          // tab is tapped. Without this, an NFC-tap deep-link pushes
+          // HuntPiggyDetail onto the stack and the next Explore-tap
+          // resumes there instead of showing the Explore home rails.
+          //
+          // The earlier version used navigation.navigate('Explore',
+          // { screen: 'ExploreHome' }) which RN treats as a no-op when
+          // Explore is already focused. Dispatching StackActions.popToTop
+          // hits the inner Explore stack navigator directly, regardless
+          // of focus, and pops every screen above ExploreHome.
+          tabPress: (e) => {
+            perfTabTap('Explore');
+            const state = navigation.getState();
+            const tabRoute = state?.routes.find((r) => r.name === 'Explore');
+            const subState = tabRoute?.state;
+            if (subState && typeof subState.index === 'number' && subState.index > 0) {
+              e.preventDefault();
+              navigation.dispatch({
+                ...StackActions.popToTop(),
+                target: subState.key,
+              });
+            }
+          },
+          focus: () => perfTabRendered('Explore'),
+        })}
       />
       <Tab.Screen
         name="Friends"
@@ -116,6 +223,10 @@ function HomeTabs() {
           tabBarIcon: ({ focused, color, size }) => (
             <Users size={size} color={color} strokeWidth={focused ? 2.5 : 2} />
           ),
+        }}
+        listeners={{
+          tabPress: () => perfTabTap('Friends'),
+          focus: () => perfTabRendered('Friends'),
         }}
       />
     </Tab.Navigator>
@@ -154,6 +265,7 @@ function MainDrawer() {
       <AccountDrawer.Screen name="AccountOnChain" component={OnChainScreen} />
       <AccountDrawer.Screen name="AccountDisplay" component={DisplayScreen} />
       <AccountDrawer.Screen name="AccountAppearance" component={AppearanceScreen} />
+      <AccountDrawer.Screen name="AccountNearby" component={NearbyScreen} />
       <AccountDrawer.Screen name="AccountSecurity" component={SecurityScreen} />
       <AccountDrawer.Screen name="AccountAbout" component={AboutScreen} />
     </AccountDrawer.Navigator>
@@ -198,13 +310,14 @@ export default function AppNavigator() {
   }
 
   return (
-    <NavigationContainer theme={navTheme}>
+    <NavigationContainer ref={navigationRef} theme={navTheme}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Main" component={MainDrawer} />
         <Stack.Screen name="Conversation" component={ConversationScreen} />
         <Stack.Screen name="Groups" component={GroupsScreen} />
         <Stack.Screen name="GroupConversation" component={GroupConversationScreen} />
         <Stack.Screen name="ContactProfile" component={ContactProfileScreen} />
+        <Stack.Screen name="UnsupportedEntity" component={UnsupportedEntityScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

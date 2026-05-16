@@ -29,17 +29,17 @@ const PIGGIES = [
     envVar: 'MAESTRO_NSEC_BIG',
     label: 'Big Piggy',
     notes: [
-      "Saving sats one swipe at a time. 🐷",
-      "If your bank says no, your wallet should say sure thing.",
-      "Family-friendly Lightning. No keys lost on my watch.",
+      'Saving sats one swipe at a time. 🐷',
+      'If your bank says no, your wallet should say sure thing.',
+      'Family-friendly Lightning. No keys lost on my watch.',
     ],
   },
   {
     envVar: 'MAESTRO_NSEC_LITTLE',
     label: 'Little Piggy',
     notes: [
-      "Tiniest sats matter. ✨",
-      "Mum gave me 21 sats today. Already plotting how to spend them.",
+      'Tiniest sats matter. ✨',
+      'Mum gave me 21 sats today. Already plotting how to spend them.',
     ],
   },
   {
@@ -47,17 +47,14 @@ const PIGGIES = [
     label: 'Middle Piggy',
     notes: [
       "Caught between Big Piggy's lectures and Little Piggy's pranks. Living the dream.",
-      "Nostr-only since I forgot my Twitter password.",
+      'Nostr-only since I forgot my Twitter password.',
       "Zap me if you've ever watched two ads to skip one ad.",
     ],
   },
   {
     envVar: 'MAESTRO_NSEC_EVIL',
     label: 'Evil Piggy',
-    notes: [
-      "Plotting. Always plotting.",
-      "If you can read this, you've already lost.",
-    ],
+    notes: ['Plotting. Always plotting.', "If you can read this, you've already lost."],
   },
 ];
 

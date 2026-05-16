@@ -75,7 +75,9 @@ const pool = new SimplePool();
 const results = await Promise.allSettled(pool.publish(RELAYS, event));
 for (let i = 0; i < RELAYS.length; i++) {
   const r = results[i];
-  console.log(`[${envVar}] ${RELAYS[i]} — ${r.status}${r.status === 'rejected' ? ': ' + r.reason : ''}`);
+  console.log(
+    `[${envVar}] ${RELAYS[i]} — ${r.status}${r.status === 'rejected' ? ': ' + r.reason : ''}`,
+  );
 }
 await new Promise((r) => setTimeout(r, 1500));
 pool.close(RELAYS);

@@ -51,13 +51,17 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     resizeMode: 'contain',
     backgroundColor: '#e91e63',
   },
-  // Only the app's own `lightningpiggy://` scheme is registered globally.
-  // The PR #231 NFC-write feature does NOT need a `lightning:` scheme
-  // — `writeNpubToTag` drives the NfcManager session directly. Adding
-  // `lightning:` here would register Lightning Piggy as a system-wide
-  // handler for `lightning:` URIs without a Linking listener to route
-  // them, intercepting users' preferred LN wallet. The deferred NFC
-  // SCAN flow can re-add it when JS-side deep-link routing lands.
+  // `lightningpiggy://` — LP's own deep-link scheme. Cross-platform.
+  // `lightning:` registration is **Android-only**, wired via the
+  // `intentFilters` block on the `android` config below. iOS is
+  // deliberately excluded: iOS doesn't show a chooser for custom URL
+  // schemes, so registering `lightning:` globally would silently
+  // hijack every bolt11 / LNURL-pay link into LP — but `App.tsx`'s
+  // Linking listener currently only routes the Hunt-eligible subset
+  // (`lnurl1…`, `lnurlw://`, `lnurl://`) into HuntFoundScreen and
+  // no-ops other payloads. Until full `lightning:` invoice/pay
+  // routing is in, leaving iOS off the scheme avoids dead-ends for
+  // TestFlight users (Copilot review #488).
   scheme: 'lightningpiggy',
   ios: {
     supportsTablet: true,
@@ -90,6 +94,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // on it don't regress — can remove once verified.
     './plugins/withAdjustResize',
     './plugins/withAmberQueries',
+    './plugins/withLargeHeap',
+    // MapLibre Native — replaces the Leaflet-in-WebView map stack.
+    // The library auto-links on iOS via CocoaPods and on Android via
+    // Gradle; the Expo plugin (shipped with the package) wires the
+    // required native dependencies into the prebuild output. See GH
+    // #552 for migration rationale + memory `reference_map_stack_future_maplibre`.
+    '@maplibre/maplibre-react-native',
     './plugins/withNfc',
     'expo-secure-store',
     [
@@ -111,10 +122,21 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       'expo-location',
       {
         locationWhenInUsePermission:
-          'Allow Lightning Piggy to access your location so you can share it in a private message.',
-        isAndroidBackgroundLocationEnabled: false,
+          'Allow Lightning Piggy to access your location to show nearby Bitcoin merchants and to share it in private messages.',
+        // Background location is needed for the opt-in "Nearby merchants"
+        // alerts (#467) — geofences fire even when the app is backgrounded
+        // so the user gets the notification while walking past the shop.
+        // The toggle defaults to OFF; nothing runs in the background until
+        // the user enables it from Account → Nearby merchants.
+        locationAlwaysAndWhenInUsePermission:
+          'Allow Lightning Piggy to access your location even when the app is closed so we can alert you when you walk past a Bitcoin-accepting merchant. You can turn this off any time in Account → Nearby merchants.',
+        isAndroidBackgroundLocationEnabled: true,
       },
     ],
+    // Local notifications for the geofence alerts (#467). No FCM / no
+    // remote push — these all fire from the on-device TaskManager task.
+    'expo-notifications',
+    'expo-task-manager',
   ],
   android: {
     adaptiveIcon: {
@@ -132,6 +154,18 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     },
     predictiveBackGestureEnabled: false,
     package: getAndroidPackage(),
+    // Android-only `lightning:` deep-link registration (see comment on
+    // top-level `scheme`). The intent filter wakes the app on an NFC
+    // tag tap or a `Linking.openURL('lightning:lnurl1…')`. Android
+    // shows its standard chooser if multiple LN-aware wallets handle
+    // the scheme, so this doesn't hijack other wallets' flows.
+    intentFilters: [
+      {
+        action: 'VIEW',
+        category: ['BROWSABLE', 'DEFAULT'],
+        data: [{ scheme: 'lightning' }],
+      },
+    ],
     // Floor for the local-build versionCode. EAS *cloud* production
     // builds use a separate remote counter (`eas.json` →
     // `appVersionSource: "remote"`) and ignore this. EAS *local* builds
