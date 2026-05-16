@@ -10,17 +10,20 @@ import { Platform, Linking } from 'react-native';
 import {
   buildDisableAuthFrame,
   buildEnableAuthFrame,
+  buildGetVersionFrame,
   buildNdefTlvBytes,
   buildPackWriteFrame,
   buildPwdAuthFrame,
   buildPwdWriteFrame,
   buildSetAccessFrame,
+  familyFromGetVersion,
   generateLockSecrets,
-  NTAG21X_USER_PAGE_START,
+  pagesForFamily,
   packToHex,
   pwdToPin,
   splitIntoPages,
-} from '../utils/nfc/ntag215Lock';
+  type NtagFamily,
+} from '../utils/nfc/ntag21xLock';
 
 // Reader-mode options for every `requestTechnology` call. On Android this
 // routes the tag through `enableReaderMode` instead of foreground
@@ -729,17 +732,42 @@ async function writeHuntTagAndroidLocked(
   await NfcManager.requestTechnology(NfcTech.MifareUltralight, READER_MODE_OPTS);
   const tag = await NfcManager.getTag();
   if (!tag) throw new Error('No tag detected');
-  const family = inferTagFamily(tag as { techTypes?: string[]; type?: string });
-  if (family === 'mifare-classic') {
+  const techFamily = inferTagFamily(tag as { techTypes?: string[]; type?: string });
+  if (techFamily === 'mifare-classic') {
     throw new Error(
       "Mifare Classic tags can't be locked — use an NTAG215 / 216 chip so others can't overwrite this Piglet.",
     );
   }
-  if (family === 'ntag-424') {
+  if (techFamily === 'ntag-424') {
     throw new Error(
       "NTAG424 doesn't support PWD/PACK locking — use an NTAG215 / 216 sticker (GH #558).",
     );
   }
+  // GET_VERSION tells us 213 vs 215 vs 216 — the configuration pages
+  // live at different addresses per chip (213: 0x29-0x2C, 215: 0x83-
+  // 0x86, 216: 0xE3-0xE6) so we have to know before issuing any
+  // PWD/PACK/AUTH0 write. Pre-Copilot-#572-review this hard-coded
+  // 215's addresses and would have silently written into user memory
+  // on a 216, leaving the chip in an undefined state.
+  let chip: NtagFamily;
+  try {
+    const versionBytes = await NfcManager.nfcAHandler.transceive(buildGetVersionFrame());
+    const detected = familyFromGetVersion(versionBytes);
+    if (!detected) {
+      throw new Error(
+        "Couldn't identify the chip from its GET_VERSION reply — use an NTAG215 / 216 sticker.",
+      );
+    }
+    chip = detected;
+  } catch (e) {
+    throw new Error(`Tag identification (GET_VERSION) failed: ${(e as Error)?.message ?? e}`);
+  }
+  if (chip === 'ntag-213') {
+    throw new Error(
+      'NTAG213 only has 144 bytes of user memory — not enough for a Hide-a-Piglet payload. Use an NTAG215 / 216 instead.',
+    );
+  }
+  const pages = pagesForFamily(chip);
   const tagUid = (() => {
     const id = (tag as { id?: string }).id;
     return typeof id === 'string' && id.length > 0 ? id : '';
@@ -770,28 +798,41 @@ async function writeHuntTagAndroidLocked(
     }
   }
   // Build the full byte stream we'll write into user pages: TLV envelope
-  // around the NDEF message, then page-aligned. NTAG215 has 126 user
-  // pages (504 bytes) starting at page 4; 213 has 36 (144 bytes); 216
-  // has 222 (888 bytes). We can't tell from techTypes alone, so we let
-  // the chip itself reject overruns via the native writePage error.
+  // around the NDEF message, then page-aligned.
   const tlvBytes = buildNdefTlvBytes(ndefBytes);
-  const pages = splitIntoPages(tlvBytes);
+  const tlvPages = splitIntoPages(tlvBytes);
+  // Capacity guard — abort BEFORE issuing any writePage if the TLV
+  // doesn't fit in the chip's user-memory window. Without this guard
+  // an oversize NDEF on a 215 would happily overwrite the dynamic
+  // lock / config / PWD pages at 0x82+, leaving the tag bricked. The
+  // datasheet's writePage behaviour past the user-memory boundary is
+  // chip-specific (some return NAK, others silently write — neither is
+  // safe). Copilot #572 review flagged this as a blocking issue.
+  const userMemoryPageCount = pages.userPageLast - pages.userPageFirst + 1;
+  if (tlvPages.length > userMemoryPageCount) {
+    throw new Error(
+      `Payload needs ${tlvPages.length * 4} bytes but ${chip.toUpperCase()} only offers ${userMemoryPageCount * 4} bytes of user memory. Use a larger chip (NTAG216 = 888 bytes).`,
+    );
+  }
   opts.onTagDetected?.();
   console.log(
-    `[NFC] locked write — family=${family} uid=${tagUid} ndef=${ndefBytes.length}B ` +
-      `tlv=${tlvBytes.length}B pages=${pages.length} ` +
+    `[NFC] locked write — chip=${chip} uid=${tagUid} ndef=${ndefBytes.length}B ` +
+      `tlv=${tlvBytes.length}B pages=${tlvPages.length}/${userMemoryPageCount} ` +
       `mode=${reusedExistingLock ? 'rewrite-keep-pin' : 'fresh-lock'}`,
   );
-  // Phase 1 — write NDEF data starting at page 0x04. Page-by-page so a
-  // mid-stream failure surfaces the offending page index in the error.
-  for (let i = 0; i < pages.length; i++) {
-    const offset = NTAG21X_USER_PAGE_START + i;
+  // Phase 1 — write NDEF data starting at the chip's first user page
+  // (0x04 on every NTAG21x). Page-by-page so a mid-stream failure
+  // surfaces the offending page index in the error.
+  for (let i = 0; i < tlvPages.length; i++) {
+    const offset = pages.userPageFirst + i;
     try {
-      await NfcManager.mifareUltralightHandlerAndroid.mifareUltralightWritePage(offset, pages[i]);
+      await NfcManager.mifareUltralightHandlerAndroid.mifareUltralightWritePage(
+        offset,
+        tlvPages[i],
+      );
     } catch (e) {
       throw new Error(
-        `Tag write failed at page 0x${offset.toString(16)} (byte ${i * 4}/${tlvBytes.length}) — ${(e as Error)?.message ?? e}. ` +
-          'If the chip is an NTAG213, the payload may be too large — use NTAG215 / 216 instead.',
+        `Tag write failed at page 0x${offset.toString(16)} (byte ${i * 4}/${tlvBytes.length}) — ${(e as Error)?.message ?? e}.`,
       );
     }
   }
@@ -802,7 +843,7 @@ async function writeHuntTagAndroidLocked(
   // back into the wizard.
   if (reusedExistingLock) {
     return {
-      family,
+      family: techFamily,
       locked: true,
       lock: {
         pwdHex: reusedExistingLock.pwdHex,
@@ -820,16 +861,16 @@ async function writeHuntTagAndroidLocked(
   // themselves. Writing AUTH0 before PWD/PACK would lock us out before
   // we can store the password.
   const secrets = generateLockSecrets();
-  await sendTransceive(buildPwdWriteFrame(secrets.pwd), 'WRITE PWD');
-  await sendTransceive(buildPackWriteFrame(secrets.pack), 'WRITE PACK');
-  await sendTransceive(buildSetAccessFrame(), 'WRITE ACCESS');
-  await sendTransceive(buildEnableAuthFrame(), 'WRITE AUTH0');
+  await sendTransceive(buildPwdWriteFrame(pages, secrets.pwd), 'WRITE PWD');
+  await sendTransceive(buildPackWriteFrame(pages, secrets.pack), 'WRITE PACK');
+  await sendTransceive(buildSetAccessFrame(pages), 'WRITE ACCESS');
+  await sendTransceive(buildEnableAuthFrame(pages), 'WRITE AUTH0');
   const pwdHex = secrets.pwd.map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join('');
   const packHex = packToHex(secrets.pack);
   const pin = pwdToPin(secrets.pwd);
-  console.log(`[NFC] locked write done — family=${family} pin=${pin.slice(0, 2)}******`);
+  console.log(`[NFC] locked write done — chip=${chip} pin=${pin.slice(0, 2)}******`);
   return {
-    family,
+    family: techFamily,
     locked: true,
     lock: { pwdHex, packHex, pin, tagUid },
   };
@@ -900,6 +941,23 @@ export async function unlockHuntTag(opts: UnlockHuntTagOptions): Promise<{ tagUi
       );
     }
     opts.onTagDetected?.();
+    // Family detection so the disable-auth write below targets the
+    // right CFG_0 page (215: 0x83, 216: 0xE3). Pre-Copilot-#572-review
+    // this was hard-coded to 215's address; on a 216 the write would
+    // have hit a user-memory page instead of the config page, leaving
+    // the tag still locked (and a stale write in user memory).
+    let chip: NtagFamily;
+    try {
+      const versionBytes = await NfcManager.nfcAHandler.transceive(buildGetVersionFrame());
+      const detected = familyFromGetVersion(versionBytes);
+      if (!detected) {
+        throw new Error("Couldn't identify the chip from its GET_VERSION reply.");
+      }
+      chip = detected;
+    } catch (e) {
+      throw new Error(`Tag identification (GET_VERSION) failed: ${(e as Error)?.message ?? e}`);
+    }
+    const pages = pagesForFamily(chip);
     let pack: number[];
     try {
       pack = await NfcManager.nfcAHandler.transceive(buildPwdAuthFrame(opts.pwd));
@@ -920,8 +978,8 @@ export async function unlockHuntTag(opts: UnlockHuntTagOptions): Promise<{ tagUi
         );
       }
     }
-    await sendTransceive(buildDisableAuthFrame(), 'WRITE AUTH0 (unlock)');
-    console.log(`[NFC] unlockHuntTag OK — uid=${tagUid}`);
+    await sendTransceive(buildDisableAuthFrame(pages), 'WRITE AUTH0 (unlock)');
+    console.log(`[NFC] unlockHuntTag OK — uid=${tagUid} chip=${chip}`);
     return { tagUid };
   } finally {
     NfcManager.cancelTechnologyRequest().catch(() => {});

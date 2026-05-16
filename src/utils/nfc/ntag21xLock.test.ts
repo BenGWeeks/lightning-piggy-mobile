@@ -12,30 +12,36 @@ import {
   pinToPwd,
   packToHex,
   hexToBytes,
-} from './ntag215Lock';
+  pagesForFamily,
+  buildGetVersionFrame,
+  familyFromGetVersion,
+} from './ntag21xLock';
 
-describe('ntag215Lock byte builders', () => {
+const ntag215 = pagesForFamily('ntag-215');
+const ntag216 = pagesForFamily('ntag-216');
+const ntag213 = pagesForFamily('ntag-213');
+
+describe('ntag21xLock byte builders (NTAG215)', () => {
   it('builds the PWD write frame at page 0x85', () => {
-    const frame = buildPwdWriteFrame([0xde, 0xad, 0xbe, 0xef]);
+    const frame = buildPwdWriteFrame(ntag215, [0xde, 0xad, 0xbe, 0xef]);
     expect(frame).toEqual([0xa2, 0x85, 0xde, 0xad, 0xbe, 0xef]);
   });
 
   it('builds the PACK write frame at page 0x86 with RFUI zeros', () => {
-    const frame = buildPackWriteFrame([0xca, 0xfe]);
+    const frame = buildPackWriteFrame(ntag215, [0xca, 0xfe]);
     expect(frame).toEqual([0xa2, 0x86, 0xca, 0xfe, 0x00, 0x00]);
   });
 
   it('enable-auth frame protects from user-memory page 0x04 onwards', () => {
-    // [WRITE, CFG_0, MIRROR=0, RFUI=0, MIRROR_PAGE=0, AUTH0=0x04]
-    expect(buildEnableAuthFrame()).toEqual([0xa2, 0x83, 0x00, 0x00, 0x00, 0x04]);
+    expect(buildEnableAuthFrame(ntag215)).toEqual([0xa2, 0x83, 0x00, 0x00, 0x00, 0x04]);
   });
 
   it('set-access frame leaves reads open (PROT=0) and CFG unfrozen (CFGLCK=0)', () => {
-    expect(buildSetAccessFrame()).toEqual([0xa2, 0x84, 0x00, 0x00, 0x00, 0x00]);
+    expect(buildSetAccessFrame(ntag215)).toEqual([0xa2, 0x84, 0x00, 0x00, 0x00, 0x00]);
   });
 
   it('disable-auth frame parks AUTH0 above the last real page', () => {
-    expect(buildDisableAuthFrame()).toEqual([0xa2, 0x83, 0x00, 0x00, 0x00, 0xff]);
+    expect(buildDisableAuthFrame(ntag215)).toEqual([0xa2, 0x83, 0x00, 0x00, 0x00, 0xff]);
   });
 
   it('PWD_AUTH frame is 0x1B + the 4 password bytes', () => {
@@ -43,16 +49,84 @@ describe('ntag215Lock byte builders', () => {
   });
 
   it('rejects malformed PWD lengths so callers fail fast instead of bricking a tag', () => {
-    expect(() => buildPwdWriteFrame([0xde, 0xad])).toThrow(/4 bytes/);
-    expect(() => buildPackWriteFrame([0xca, 0xfe, 0x00])).toThrow(/2 bytes/);
+    expect(() => buildPwdWriteFrame(ntag215, [0xde, 0xad])).toThrow(/4 bytes/);
+    expect(() => buildPackWriteFrame(ntag215, [0xca, 0xfe, 0x00])).toThrow(/2 bytes/);
     expect(() => buildPwdAuthFrame([1, 2, 3, 4, 5])).toThrow(/4 bytes/);
   });
 
   it('rejects out-of-range byte values (signed JS numbers, fractional, NaN)', () => {
-    expect(() => buildPwdWriteFrame([-1, 0, 0, 0])).toThrow(/non-byte/);
-    expect(() => buildPwdWriteFrame([256, 0, 0, 0])).toThrow(/non-byte/);
-    expect(() => buildPwdWriteFrame([1.5, 0, 0, 0])).toThrow(/non-byte/);
-    expect(() => buildPwdWriteFrame([NaN, 0, 0, 0])).toThrow(/non-byte/);
+    expect(() => buildPwdWriteFrame(ntag215, [-1, 0, 0, 0])).toThrow(/non-byte/);
+    expect(() => buildPwdWriteFrame(ntag215, [256, 0, 0, 0])).toThrow(/non-byte/);
+    expect(() => buildPwdWriteFrame(ntag215, [1.5, 0, 0, 0])).toThrow(/non-byte/);
+    expect(() => buildPwdWriteFrame(ntag215, [NaN, 0, 0, 0])).toThrow(/non-byte/);
+  });
+});
+
+describe('ntag21xLock byte builders (NTAG216 — different page addresses)', () => {
+  it('builds NTAG216 PWD frame at page 0xE5', () => {
+    expect(buildPwdWriteFrame(ntag216, [0xde, 0xad, 0xbe, 0xef])).toEqual([
+      0xa2, 0xe5, 0xde, 0xad, 0xbe, 0xef,
+    ]);
+  });
+
+  it('builds NTAG216 PACK frame at page 0xE6', () => {
+    expect(buildPackWriteFrame(ntag216, [0xca, 0xfe])).toEqual([
+      0xa2, 0xe6, 0xca, 0xfe, 0x00, 0x00,
+    ]);
+  });
+
+  it('NTAG216 enable-auth lands on CFG_0 = 0xE3', () => {
+    expect(buildEnableAuthFrame(ntag216)).toEqual([0xa2, 0xe3, 0x00, 0x00, 0x00, 0x04]);
+  });
+
+  it('NTAG216 access frame writes CFG_1 = 0xE4', () => {
+    expect(buildSetAccessFrame(ntag216)).toEqual([0xa2, 0xe4, 0x00, 0x00, 0x00, 0x00]);
+  });
+
+  it('NTAG216 user pages run 0x04..0xE1 (222 pages, 888 bytes)', () => {
+    expect(ntag216.userPageFirst).toBe(0x04);
+    expect(ntag216.userPageLast).toBe(0xe1);
+    expect(ntag216.userPageLast - ntag216.userPageFirst + 1).toBe(222);
+  });
+
+  it('NTAG213 user pages run 0x04..0x27 (36 pages, 144 bytes)', () => {
+    expect(ntag213.userPageFirst).toBe(0x04);
+    expect(ntag213.userPageLast).toBe(0x27);
+    expect(ntag213.userPageLast - ntag213.userPageFirst + 1).toBe(36);
+  });
+});
+
+describe('GET_VERSION family detection', () => {
+  it('emits the single-byte 0x60 command frame', () => {
+    expect(buildGetVersionFrame()).toEqual([0x60]);
+  });
+
+  it('decodes NTAG213 storage byte (0x0F)', () => {
+    expect(familyFromGetVersion([0x00, 0x04, 0x04, 0x02, 0x01, 0x00, 0x0f, 0x03])).toBe('ntag-213');
+  });
+
+  it('decodes NTAG215 storage byte (0x11)', () => {
+    expect(familyFromGetVersion([0x00, 0x04, 0x04, 0x02, 0x01, 0x00, 0x11, 0x03])).toBe('ntag-215');
+  });
+
+  it('decodes NTAG216 storage byte (0x13)', () => {
+    expect(familyFromGetVersion([0x00, 0x04, 0x04, 0x02, 0x01, 0x00, 0x13, 0x03])).toBe('ntag-216');
+  });
+
+  it('returns null for non-NXP vendor byte', () => {
+    expect(familyFromGetVersion([0x00, 0x05, 0x04, 0x02, 0x01, 0x00, 0x11, 0x03])).toBeNull();
+  });
+
+  it('returns null for non-NTAG product byte', () => {
+    expect(familyFromGetVersion([0x00, 0x04, 0x05, 0x02, 0x01, 0x00, 0x11, 0x03])).toBeNull();
+  });
+
+  it('returns null for unknown storage size (future chip variant)', () => {
+    expect(familyFromGetVersion([0x00, 0x04, 0x04, 0x02, 0x01, 0x00, 0x99, 0x03])).toBeNull();
+  });
+
+  it('returns null when the response is too short to read byte 6', () => {
+    expect(familyFromGetVersion([0x00, 0x04, 0x04])).toBeNull();
   });
 });
 
@@ -71,9 +145,6 @@ describe('PWD random-byte generator', () => {
   it('does not repeat across calls (sanity check on RNG plumbing)', () => {
     const a = generateLockSecrets();
     const b = generateLockSecrets();
-    // Collision odds at random are 1/2^48 — if this ever flakes, the
-    // polyfill has regressed to a constant source and many other things
-    // are also broken.
     expect([...a.pwd, ...a.pack]).not.toEqual([...b.pwd, ...b.pack]);
   });
 });
@@ -106,10 +177,8 @@ describe('PIN encoding round-trips', () => {
 
 describe('NDEF TLV wrapping', () => {
   it('wraps a short message with the 1-byte length form + terminator + page padding', () => {
-    // 5 NDEF bytes + [type, len, terminator] = 8 → already page-aligned.
     const aligned = [0xd1, 0x01, 0x02, 0x55, 0x03];
     expect(buildNdefTlvBytes(aligned)).toEqual([0x03, 0x05, 0xd1, 0x01, 0x02, 0x55, 0x03, 0xfe]);
-    // 6 NDEF bytes + 3 envelope = 9 → pads up to 12 with three zeros.
     const padded = [0xd1, 0x01, 0x03, 0x55, 0x03, 0x2f];
     expect(buildNdefTlvBytes(padded)).toEqual([
       0x03, 0x06, 0xd1, 0x01, 0x03, 0x55, 0x03, 0x2f, 0xfe, 0x00, 0x00, 0x00,
@@ -120,7 +189,6 @@ describe('NDEF TLV wrapping', () => {
   it('uses the 3-byte length form once the NDEF exceeds 254 bytes', () => {
     const ndef = new Array(300).fill(0xaa);
     const tlv = buildNdefTlvBytes(ndef);
-    // [03, FF, hi, lo, ...300 bytes..., FE, padding...]
     expect(tlv[0]).toBe(0x03);
     expect(tlv[1]).toBe(0xff);
     expect((tlv[2] << 8) | tlv[3]).toBe(300);

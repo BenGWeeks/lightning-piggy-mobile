@@ -17,7 +17,7 @@ import {
 import { Unlock, AlertCircle } from 'lucide-react-native';
 import { cancelNfcOperation, isNfcEnabled, unlockHuntTag } from '../services/nfcService';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { hexToBytes } from '../utils/nfc/ntag215Lock';
+import { hexToBytes } from '../utils/nfc/ntag21xLock';
 import type { Palette } from '../styles/palettes';
 
 // Bottom-sheet companion to NfcWriteSheet that drives the reversible-

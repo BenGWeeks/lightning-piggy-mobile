@@ -1,12 +1,76 @@
 // NTAG21x password-lock byte builders. Pure functions; no native deps.
-// Sequenced per NXP AN1303 §7.6 + the NTAG215 datasheet (rev 3.2, table 13):
-// PWD lives at page 0x85, PACK at 0x86, AUTH0 in CFG_0 byte 3 (page 0x83),
-// ACCESS in CFG_1 byte 0 (page 0x84). Locks are reversible — the hider's
-// PIN derives back from PWD via `pwdToPin`, and `buildDisableAuthFrame`
-// clears AUTH0 once the hider re-authenticates.
+// Sequenced per NXP AN1303 §7.6 + the NTAG213/215/216 datasheets — the
+// commands are identical across the family (WRITE = 0xA2, PWD_AUTH =
+// 0x1B), but the configuration / password / PACK pages live at chip-
+// specific addresses. The caller passes a NtagPages config — usually
+// obtained from `pagesForFamily(family)` — and the builders emit the
+// frame the chip expects.
 //
-// Issue #567 — the older `Ndef.makeReadOnly()` path we replace was a one-
-// way OTP lock and gave the hider no path back to rewriting the tag.
+// Locks are reversible — the hider's PIN derives back from PWD via
+// `pwdToPin`, and `buildDisableAuthFrame` clears AUTH0 once the hider
+// re-authenticates.
+//
+// Issue #567 — the older `Ndef.makeReadOnly()` path we replace was a
+// one-way OTP lock and gave the hider no path back to rewriting the
+// tag. Copilot review on PR #572 asked the lock module to handle 213
+// + 216 too rather than hard-coding NTAG215 addresses; this is that
+// refactor.
+
+// NTAG21x family the lock module supports. NTAG213 is rejected by the
+// runtime (too small for the multi-record Hunt payload) but kept in
+// the type so we can surface a clear error rather than a write
+// failure deep in the call stack.
+export type NtagFamily = 'ntag-213' | 'ntag-215' | 'ntag-216';
+
+// Chip-specific page layout. NTAG21x is 4-byte pages, user memory
+// starting at page 4, configuration + password at the tail of memory.
+// Per the datasheets (rev 3.2 §8 for 215, §8 for 216, §8 for 213).
+export interface NtagPages {
+  family: NtagFamily;
+  // First and last user-memory page (inclusive). 213: 0x04-0x27,
+  // 215: 0x04-0x81, 216: 0x04-0xE1. The TLV envelope + NDEF payload
+  // must fit within this window; anything beyond bleeds into the
+  // dynamic-lock/config pages and will brick the tag.
+  userPageFirst: number;
+  userPageLast: number;
+  // Configuration pages, in write order.
+  cfg0: number;
+  cfg1: number;
+  pwd: number;
+  pack: number;
+}
+
+const NTAG_PAGES: Record<NtagFamily, NtagPages> = {
+  'ntag-213': {
+    family: 'ntag-213',
+    userPageFirst: 0x04,
+    userPageLast: 0x27,
+    cfg0: 0x29,
+    cfg1: 0x2a,
+    pwd: 0x2b,
+    pack: 0x2c,
+  },
+  'ntag-215': {
+    family: 'ntag-215',
+    userPageFirst: 0x04,
+    userPageLast: 0x81,
+    cfg0: 0x83,
+    cfg1: 0x84,
+    pwd: 0x85,
+    pack: 0x86,
+  },
+  'ntag-216': {
+    family: 'ntag-216',
+    userPageFirst: 0x04,
+    userPageLast: 0xe1,
+    cfg0: 0xe3,
+    cfg1: 0xe4,
+    pwd: 0xe5,
+    pack: 0xe6,
+  },
+};
+
+export const pagesForFamily = (family: NtagFamily): NtagPages => NTAG_PAGES[family];
 
 // 4-byte password + 2-byte PACK acknowledge. Generated client-side and
 // persisted in piggyStorageService keyed by the tag UID.
@@ -16,23 +80,19 @@ export interface LockSecrets {
 }
 
 // NTAG21x write command per NXP datasheet §10.5.4: WRITE = 0xA2 followed
-// by the 1-byte page address and 4 data bytes. Pages on NTAG215 run
-// 0x00..0x86 (135 pages, 4 bytes each).
+// by the 1-byte page address and 4 data bytes. Same opcode across the
+// family.
 const CMD_WRITE = 0xa2;
 // PWD_AUTH = 0x1B + 4-byte PWD; tag responds with the 2-byte PACK on
 // success, NAK on failure. Section §10.7.
 const CMD_PWD_AUTH = 0x1b;
-// Page addresses for configuration / password storage. See datasheet
-// table 5 (NTAG215 memory layout).
-const PAGE_CFG_0 = 0x83;
-const PAGE_CFG_1 = 0x84;
-const PAGE_PWD = 0x85;
-const PAGE_PACK = 0x86;
 // AUTH0 byte controls the first page that requires authentication for
-// writes. NTAG215 user memory starts at page 0x04, so 0x04 protects all
-// user data while leaving the manufacturer header (UID/CC/lock) free.
-// Anything ≥ 0x87 (≥ first invalid page) disables protection — we use
-// 0xFF for "off" to match NXP example code.
+// writes. User memory starts at page 0x04 on every NTAG21x, so 0x04
+// protects all user data while leaving the manufacturer header
+// (UID/CC/lock) free. Setting AUTH0 to a page index above the chip's
+// last real page disables protection — we use 0xFF for "off" to match
+// NXP example code (valid on 213/215/216 because their largest real
+// page is well below 0xFF).
 const AUTH0_PROTECT_USER_MEMORY = 0x04;
 const AUTH0_DISABLED = 0xff;
 
@@ -47,27 +107,27 @@ const assertByteArray = (label: string, bytes: number[], len: number): void => {
   }
 };
 
-// WRITE PWD frame: A2 85 pwd[0..3]. Bytes 4-7 are the password the chip
-// will compare against on PWD_AUTH.
-export const buildPwdWriteFrame = (pwd: number[]): number[] => {
+// WRITE PWD frame: A2 <pwdPage> pwd[0..3]. Bytes 4-7 are the password
+// the chip will compare against on PWD_AUTH.
+export const buildPwdWriteFrame = (pages: NtagPages, pwd: number[]): number[] => {
   assertByteArray('pwd', pwd, 4);
-  return [CMD_WRITE, PAGE_PWD, ...pwd];
+  return [CMD_WRITE, pages.pwd, ...pwd];
 };
 
-// WRITE PACK frame: A2 86 pack[0..1] 00 00. Bytes 6-7 of page 0x86 are
-// RFUI (must be 0).
-export const buildPackWriteFrame = (pack: number[]): number[] => {
+// WRITE PACK frame: A2 <packPage> pack[0..1] 00 00. Bytes 6-7 of the
+// PACK page are RFUI (must be 0).
+export const buildPackWriteFrame = (pages: NtagPages, pack: number[]): number[] => {
   assertByteArray('pack', pack, 2);
-  return [CMD_WRITE, PAGE_PACK, pack[0], pack[1], 0x00, 0x00];
+  return [CMD_WRITE, pages.pack, pack[0], pack[1], 0x00, 0x00];
 };
 
-// WRITE CFG_0 to turn protection on. Page 0x83 = [MIRROR, RFUI,
+// WRITE CFG_0 to turn protection on. Page = [MIRROR, RFUI,
 // MIRROR_PAGE, AUTH0]. Setting MIRROR=0 + AUTH0=0x04 leaves UID/CC/lock
 // pages free and password-gates everything from user-memory page 4 up,
 // including PWD/PACK/CFG so a finder can't read them back.
-export const buildEnableAuthFrame = (): number[] => [
+export const buildEnableAuthFrame = (pages: NtagPages): number[] => [
   CMD_WRITE,
-  PAGE_CFG_0,
+  pages.cfg0,
   0x00,
   0x00,
   0x00,
@@ -79,19 +139,48 @@ export const buildEnableAuthFrame = (): number[] => [
 // the hider can disable protection later, AUTHLIM=0 = no brute-force
 // counter. We deliberately keep PROT=0 — finders MUST be able to read
 // the LNURL on tap.
-export const buildSetAccessFrame = (): number[] => [CMD_WRITE, PAGE_CFG_1, 0x00, 0x00, 0x00, 0x00];
+export const buildSetAccessFrame = (pages: NtagPages): number[] => [
+  CMD_WRITE,
+  pages.cfg1,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+];
 
 // WRITE CFG_0 to turn protection OFF — sets AUTH0 to a page index above
 // the chip's last real page so the password check never triggers. Used
 // by `unlockHuntTag` after a successful PWD_AUTH.
-export const buildDisableAuthFrame = (): number[] => [
+export const buildDisableAuthFrame = (pages: NtagPages): number[] => [
   CMD_WRITE,
-  PAGE_CFG_0,
+  pages.cfg0,
   0x00,
   0x00,
   0x00,
   AUTH0_DISABLED,
 ];
+
+// 8-byte GET_VERSION response (NXP AN11340). Byte 6 carries the
+// storage-size identifier we use to pick the right `NtagPages` config.
+// Returns null when the bytes aren't a recognisable NTAG21x reply
+// (caller decides how to surface "this isn't a chip we support").
+export const buildGetVersionFrame = (): number[] => [0x60];
+
+export const familyFromGetVersion = (response: number[]): NtagFamily | null => {
+  if (response.length < 7) return null;
+  // Vendor (byte 1) must be NXP = 0x04, product (byte 2) = 0x04.
+  if (response[1] !== 0x04 || response[2] !== 0x04) return null;
+  switch (response[6]) {
+    case 0x0f:
+      return 'ntag-213';
+    case 0x11:
+      return 'ntag-215';
+    case 0x13:
+      return 'ntag-216';
+    default:
+      return null;
+  }
+};
 
 // PWD_AUTH frame the unlock flow sends to prove possession of the PIN
 // before flipping AUTH0. Tag responds with PACK (2 bytes) on success.
