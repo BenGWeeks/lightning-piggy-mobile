@@ -10,7 +10,6 @@ import {
   Animated,
   PanResponder,
 } from 'react-native';
-import { WebView, WebViewMessageEvent } from 'react-native-webview';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
@@ -47,7 +46,8 @@ import {
   lightningAddressOf,
 } from '../services/btcMapService';
 import type { ParsedCache } from '../services/nostrPlacesService';
-import { subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
+import { fetchCachesByAuthor, subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
+import { useNostr } from '../contexts/NostrContext';
 import { decodeGeohash, encodeGeohash, geohashPrefixes } from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
@@ -63,30 +63,13 @@ interface Props {
 
 type PermissionState = 'unknown' | 'granted' | 'denied';
 
-interface BridgeMessage {
-  type: 'ready' | 'bounds' | 'markerTap' | 'cacheTap';
-  bbox?: Bbox;
-  /** Viewport centre alongside the bbox — used to persist last-viewed. */
-  centre?: { lat: number; lng: number };
-  /** Leaflet zoom level alongside the bbox. */
-  zoom?: number;
-  /** True when the bounds change came from a user gesture (drag/zoom),
-   * false / undefined when it came from a programmatic LP_setViewport
-   * call or Leaflet's initial bootstrap setView. */
-  userInitiated?: boolean;
-  id?: number;
-  /** Cache coord (`<kind>:<pubkey>:<d>`) for cacheTap messages. */
-  coord?: string;
-}
-
 /**
  * Map sub-screen — discovers Bitcoin-accepting merchants near the user via
  * the BTC Map API (OSM-backed). Closes the foreground-browse part of #467;
  * the background-geofence + notifications part lands in milestone 3.
  *
- * Renderer is Leaflet on OpenStreetMap tiles via WebView (no Google Maps,
- * no API key, OSM-aligned with the underlying merchant data — see project
- * memory `BTC Map runs the commons (Nathan)`).
+ * Renderer is native MapLibre via the shared LibreMiniMap component (no
+ * Google Maps, no API key, OSM tiles streamed from openstreetmap.org).
  */
 const MapScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
@@ -98,6 +81,7 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   // 306270c — the full map was the last surface still showing every
   // cache regardless of trust.
   const { isTrusted, wotTier } = useTrustGraph();
+  const { pubkey: signedInPubkey, relays: userRelays } = useNostr();
   // WoT bottom-sheet visibility — opened from the chip inside the
   // FilterSheet so the user can change tier without leaving the map.
   const [wotSheetVisible, setWotSheetVisible] = useState(false);
@@ -106,7 +90,6 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   // strip that used to sit under the map and ate vertical space.
   const [legendVisible, setLegendVisible] = useState(false);
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const webviewRef = useRef<WebView>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastBbox = useRef<Bbox | null>(null);
 
@@ -122,20 +105,12 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
     };
   }, [navigation]);
 
-  // Persist the last map viewport so re-opening the Map doesn't snap
-  // back to London while we wait for the GPS resolve. Hydrated in a
-  // useEffect on mount (async, can't be a useState init) and written on
-  // every `moveend` / `zoomend` (debounced inside the WebView's bounds
-  // event). One global slot — multiple maps would just race on the key.
+  // Persist the last map viewport on every camera-settle so re-opening
+  // the Map starts where the user left off. One global slot; multiple
+  // maps would just race on the key — fine since they all want the
+  // same thing.
   const VIEWPORT_KEY = '@lp:map-viewport';
   const lastViewport = useRef<{ lat: number; lng: number; zoom: number } | null>(null);
-  const hydratedViewport = useRef(false);
-  // Render-gate. AsyncStorage is async, so on first render the WebView
-  // would otherwise mount with `injectedJavaScriptBeforeContentLoaded`
-  // referencing a not-yet-hydrated viewport and fall through to the
-  // London default. We block the WebView render until hydration
-  // finishes so the injected JS always carries the correct slot.
-  const [viewportHydrated, setViewportHydrated] = useState(false);
 
   const [permission, setPermission] = useState<PermissionState>('unknown');
   // User position state — kept here so LibreMiniMap (interactive full-
@@ -165,49 +140,8 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   const [categoryFilter, setCategoryFilter] = useState<Set<string>>(new Set());
   const cachesCloserRef = useRef<(() => void) | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [webviewReady, setWebviewReady] = useState(false);
 
   // ------- permissions + initial position --------------------------------
-
-  // Hydrate the last-saved viewport before the WebView bridge resolves.
-  // If found, we'll inject it instead of letting the location-resolve
-  // flow re-centre — the user picks up exactly where they left off.
-  useEffect(() => {
-    (async () => {
-      try {
-        const raw = await AsyncStorage.getItem(VIEWPORT_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw) as { lat: number; lng: number; zoom: number };
-          // Detect the legacy bug where Leaflet's hardcoded London fallback
-          // got persisted as the "user's last viewport" via the initial
-          // setView's moveend. Treat that exact triple as unhydrated and
-          // wipe the slot so the GPS-centre branch takes over.
-          const isLondonFallback =
-            Math.abs(parsed.lat - 51.5074) < 1e-4 &&
-            Math.abs(parsed.lng - -0.1278) < 1e-4 &&
-            parsed.zoom === 12;
-          if (
-            Number.isFinite(parsed.lat) &&
-            Number.isFinite(parsed.lng) &&
-            Number.isFinite(parsed.zoom) &&
-            !isLondonFallback
-          ) {
-            lastViewport.current = parsed;
-            hydratedViewport.current = true;
-          } else if (isLondonFallback) {
-            await AsyncStorage.removeItem(VIEWPORT_KEY).catch(() => {});
-          }
-        }
-      } catch {
-        // Storage IO is best-effort — fall through to GPS-centre flow.
-      } finally {
-        // Always flip — even on miss / IO error the WebView should
-        // render (it'll just open at the London fallback for users
-        // with no saved viewport yet).
-        setViewportHydrated(true);
-      }
-    })();
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -271,17 +205,6 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         // hostile. We still drop a `me` marker at GPS so they know
         // where they are; the recentre button + recenterOnUser puts
         // them back on themselves on demand.
-        if (hydratedViewport.current && lastViewport.current) {
-          const v = lastViewport.current;
-          setViewportInWebView(v.lat, v.lng, v.zoom);
-          // Drop a me-marker at GPS without re-centring.
-          if (webviewReady && webviewRef.current) {
-            const js = `window.LP_setMeMarker && window.LP_setMeMarker(${lat}, ${lon}, ${accuracy ?? 'null'}); true;`;
-            webviewRef.current.injectJavaScript(js);
-          }
-        } else {
-          setViewportInWebView(lat, lon, 10, accuracy);
-        }
         // LibreMiniMap fires onRegionDidChange shortly after mount with
         // its actual viewport — that bounds-driven fetch is now the
         // single source of truth for the visible-merchants set. (The
@@ -318,95 +241,40 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ------- WebView communication ----------------------------------------
-
-  // Queues the most-recent intended viewport so we can re-issue it
-  // once the WebView bridge fires its `ready` message. Without this
-  // the initial location-resolve happens before `LP_setViewport`
-  // exists inside the WebView and the call no-ops, leaving the map
-  // stranded on Leaflet's hardcoded London fallback.
-  const pendingViewport = useRef<{ lat: number; lng: number; zoom: number } | null>(null);
-
-  const setViewportInWebView = useCallback(
-    (lat: number, lng: number, zoom: number, accuracyMetres: number | null = null) => {
-      pendingViewport.current = { lat, lng, zoom };
-      if (!webviewRef.current || !webviewReady) return;
-      // accuracy is optional — null suppresses the halo (dev pin or
-      // platforms that don't report). The shared drawAccuracyCircle
-      // in src/utils/mapMeDot.ts no-ops on null.
-      const js = `window.LP_setViewport && window.LP_setViewport(${lat}, ${lng}, ${zoom}, ${accuracyMetres ?? 'null'}); true;`;
-      webviewRef.current.injectJavaScript(js);
-    },
-    [webviewReady],
-  );
-
-  // Replay the pending viewport once the bridge comes up.
+  // Surface the signed-in user's own published Piglets on the map even
+  // when no nearby-geohash subscription has echoed them back. The
+  // nearby sub filters by `#g` prefixes derived from the user's current
+  // GPS — so a Piglet hidden outside that neighbourhood (e.g. away
+  // from home, on holiday) wouldn't appear on the map without an
+  // author-side fetch. Mirrors ExploreHomeScreen's by-author merge.
+  // One-shot per pubkey via the ref so re-renders don't refire.
+  const byAuthorFetchedForRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!webviewReady) return;
-    const v = pendingViewport.current;
-    if (!v || !webviewRef.current) return;
-    const js = `window.LP_setViewport && window.LP_setViewport(${v.lat}, ${v.lng}, ${v.zoom}); true;`;
-    webviewRef.current.injectJavaScript(js);
-  }, [webviewReady]);
-
-  const sendMarkers = useCallback((list: BtcMapPlace[]) => {
-    if (!webviewRef.current) return;
-    const payload = list.map((p) => ({
-      id: p.id,
-      lat: p.lat,
-      lng: p.lon,
-      lightning: acceptsLightning(p),
-      // BTC Map's curated category glyph (Material Symbols name). Falls
-      // back to 'storefront' in the WebView when missing so every pin
-      // still gets an obvious shop-shaped marker.
-      icon: p.icon ?? 'storefront',
-    }));
-    const js = `window.LP_setMarkers && window.LP_setMarkers(${JSON.stringify(payload)}); true;`;
-    webviewRef.current.injectJavaScript(js);
-  }, []);
-
-  const sendCaches = useCallback((list: ParsedCache[]) => {
-    if (!webviewRef.current) return;
-    const payload = list
-      .filter((c) => c.geohash) // skip caches with no location
-      .map((c) => ({
-        coord: c.coord,
-        // Decode the longest geohash back to lat/lon — quick and
-        // dirty by inverse-bisection inline; for now we'll request
-        // each cache's lat/lon to come pre-decoded from a separate
-        // helper. The simplest path: caches with multi-precision g
-        // tags from precision 9 give us ~5 m resolution which is
-        // plenty for a pin. We use the longest tag's geohash decoded
-        // via a tiny inverse-encode (TODO: extract).
-        ...decodeGeohash(c.geohash as string),
-        kind: c.isLpPiggy ? 'piggy' : 'cache',
-      }));
-    const js = `window.LP_setCaches && window.LP_setCaches(${JSON.stringify(payload)}); true;`;
-    webviewRef.current.injectJavaScript(js);
-  }, []);
-
-  // Re-emit markers any time `places` or pin-type filters change. The
-  // filter sheet flips lightning / onchain / piglet / nipgcCache flags;
-  // we apply them here so the WebView only ever sees the visible
-  // subset, keeping Leaflet layer state in sync without extra bridge
-  // calls.
-  useEffect(() => {
-    if (!webviewReady) return;
-    const filtered = places.filter((p) => {
-      // Pin-type filter — Lightning vs On-chain.
-      const typeOk = acceptsLightning(p)
-        ? filters.lightning
-        : acceptsOnchain(p)
-          ? filters.onchain
-          : filters.lightning || filters.onchain;
-      if (!typeOk) return false;
-      // Category filter — empty set = show every category.
-      if (categoryFilter.size === 0) return true;
-      const cats = p.categories ?? [];
-      return cats.some((c) => categoryFilter.has(c));
-    });
-    sendMarkers(filtered);
-  }, [places, webviewReady, filters.lightning, filters.onchain, categoryFilter, sendMarkers]);
+    if (!signedInPubkey) return;
+    if (byAuthorFetchedForRef.current === signedInPubkey) return;
+    byAuthorFetchedForRef.current = signedInPubkey;
+    let cancelled = false;
+    const readRelays = userRelays.filter((r) => r.read).map((r) => r.url);
+    fetchCachesByAuthor(signedInPubkey, readRelays.length > 0 ? readRelays : undefined)
+      .then((mine) => {
+        if (cancelled || mine.length === 0) return;
+        setCaches((prev) => {
+          const next = new Map(prev);
+          for (const c of mine) {
+            const existing = next.get(c.coord);
+            if (!existing || c.createdAt > existing.createdAt) next.set(c.coord, c);
+          }
+          return next;
+        });
+      })
+      .catch(() => {
+        // Best-effort — the nearby subscription will fill the gap if the
+        // user happens to be in the right neighbourhood.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [signedInPubkey, userRelays]);
 
   // Distinct categories across the currently-loaded places — fed into
   // the FilterSheet so the available chips reflect what's actually on
@@ -417,10 +285,8 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
     return [...seen].sort();
   }, [places]);
 
-  // Filtered arrays for the LibreMiniMap path. Mirrors the same predicates
-  // the WebView path applies via `sendMarkers` / `sendCaches`, but as
-  // memoised derived state so LibreMiniMap's markers list is the filter
-  // truth — no imperative bridge calls needed.
+  // Filtered arrays for LibreMiniMap. Same predicates the WebView path
+  // used to send across the bridge — now plain memoised derived state.
   const visibleMerchants = useMemo(() => {
     return places.filter((p) => {
       const typeOk = acceptsLightning(p)
@@ -442,26 +308,6 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
     );
   }, [caches, filters.piglet, filters.nipgcCache, isTrusted]);
 
-  // Bounds-change handler for the LibreMiniMap path is defined below
-  // (after refreshPlaces). Keeping the declaration order matches the
-  // existing WebView flow where the onMessage handler also references
-  // refreshPlaces.
-
-  useEffect(() => {
-    if (!webviewReady) return;
-    const filtered = [...caches.values()].filter(
-      (c) =>
-        // Type chip — Piglet vs vanilla NIP-GC.
-        (c.isLpPiggy ? filters.piglet : filters.nipgcCache) &&
-        // Web-of-Trust gate — same rule the Hunt list applies. An
-        // untrusted-publisher pin only shows when the user explicitly
-        // sets WoT to "All" (the predicate returns true unconditionally
-        // in that tier).
-        isTrusted(c.hiderPubkey),
-    );
-    sendCaches(filtered);
-  }, [caches, webviewReady, filters.piglet, filters.nipgcCache, sendCaches, isTrusted]);
-
   const refreshPlaces = useCallback(async (bbox: Bbox) => {
     try {
       const list = await fetchPlacesInBbox(bbox);
@@ -472,11 +318,9 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
     }
   }, []);
 
-  // Bounds-change handler for the LibreMiniMap path. Mirrors the WebView
-  // path's debounce + viewport-persist behaviour: 500 ms after the camera
-  // settles we re-fetch the merchant set for the visible bbox and write
-  // the centre back to AsyncStorage so reopening the screen starts where
-  // the user left off.
+  // Bounds-change handler. 500 ms after the camera settles we re-fetch
+  // the merchant set for the visible bbox and write the centre back to
+  // AsyncStorage so reopening the screen starts where the user left off.
   const onLibreBounds = useCallback(
     (bbox: { minLat: number; maxLat: number; minLon: number; maxLon: number }) => {
       const next: Bbox = bbox;
@@ -495,80 +339,6 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
     },
     [refreshPlaces],
   );
-
-  const onMessage = useCallback(
-    (event: WebViewMessageEvent) => {
-      let msg: BridgeMessage;
-      try {
-        msg = JSON.parse(event.nativeEvent.data);
-      } catch {
-        return;
-      }
-      if (msg.type === 'ready') {
-        setWebviewReady(true);
-      } else if (msg.type === 'bounds' && msg.bbox) {
-        const next = msg.bbox;
-        if (debounceTimer.current) clearTimeout(debounceTimer.current);
-        debounceTimer.current = setTimeout(() => {
-          lastBbox.current = next;
-          refreshPlaces(next);
-        }, 500);
-        // Persist centre + zoom only when the move was user-initiated —
-        // never persist programmatic LP_setViewport calls or Leaflet's
-        // own initial setView fallback, otherwise London (the bootstrap
-        // default) gets baked in as the user's "last viewport" forever.
-        if (
-          msg.userInitiated === true &&
-          typeof msg.centre?.lat === 'number' &&
-          typeof msg.centre?.lng === 'number' &&
-          typeof msg.zoom === 'number'
-        ) {
-          const v = { lat: msg.centre.lat, lng: msg.centre.lng, zoom: msg.zoom };
-          lastViewport.current = v;
-          AsyncStorage.setItem(VIEWPORT_KEY, JSON.stringify(v)).catch(() => {});
-        }
-      } else if (msg.type === 'markerTap' && typeof msg.id === 'number') {
-        const hit = places.find((p) => p.id === msg.id);
-        if (hit) setSelected(hit);
-      } else if (msg.type === 'cacheTap' && typeof msg.coord === 'string') {
-        // Mirror the merchant flow: preview the cache in a bottom sheet
-        // first, then let the user opt into the full HuntPiggyDetail
-        // page via "View details". Jumping straight to a stack push
-        // burns navigation context that's expensive to recover when the
-        // user just wanted a quick look.
-        const hit = caches.get(msg.coord);
-        if (hit) setSelectedCache(hit);
-      }
-    },
-    [places, caches, refreshPlaces],
-  );
-
-  const recenterOnUser = useCallback(async () => {
-    // Dev-pin first — the same override the initial-position effect
-    // honours (see line 200). Without this, the recenter button on the
-    // emulator ignores EXPO_PUBLIC_DEV_LAT/LON and jumps to the
-    // AVD's real fused-location fix (typically Mountain View), which
-    // contradicts every other location surface in the app.
-    const pinned = getDevPinnedLocation();
-    if (pinned) {
-      setViewportInWebView(pinned.lat, pinned.lon, 15);
-      return;
-    }
-    if (permission !== 'granted') return;
-    try {
-      const pos = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-      setViewportInWebView(
-        pos.coords.latitude,
-        pos.coords.longitude,
-        15,
-        typeof pos.coords.accuracy === 'number' ? pos.coords.accuracy : null,
-      );
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }, [permission, setViewportInWebView]);
 
   // ------- render --------------------------------------------------------
 
