@@ -126,7 +126,14 @@ export const LibreMiniMap: React.FC<Props> = ({
 
 const createStyles = (colors: Palette) =>
   StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.surface },
+    // Fixed height for parity with ExploreMiniMap's WebView-backed
+    // counterpart (200 px). flex: 1 here collapsed the map to 0 px when
+    // hosted inside a ScrollView column where the parent's available
+    // vertical space is unbounded — the symptom Ben saw was the entire
+    // Explore body painting solid black behind the header, because the
+    // map View consumed the column with no intrinsic content height
+    // wired through.
+    container: { height: 200, backgroundColor: colors.surface, marginHorizontal: 16 },
     map: { flex: 1 },
     userDot: {
       width: 14,
