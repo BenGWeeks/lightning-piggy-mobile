@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Linking,
+  RefreshControl,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import {
@@ -37,7 +38,11 @@ import {
   X,
   Zap,
 } from 'lucide-react-native';
-import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
+import {
+  type CompositeNavigationProp,
+  type RouteProp,
+  useFocusEffect,
+} from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import type { VerifiedEvent } from 'nostr-tools';
@@ -289,6 +294,47 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     };
   }, [coord]);
 
+  // Refetch the cache when the user comes back from HuntCreate (Edit
+  // mode) so a rename / spec change shows up immediately, plus the
+  // RefreshControl on the ScrollView below for manual refetch. The
+  // mount-time effect above only fires once per `coord`; without
+  // this, an Edit-then-back-button would leave the detail showing
+  // the stale title.
+  const refetchCache = useCallback(async () => {
+    const parts = parseCacheCoord(coord);
+    if (!parts) return;
+    try {
+      const c = await fetchCache(parts.pubkey, parts.d);
+      if (c) setCache(c);
+    } catch {
+      // Non-fatal — keep the current render until next attempt.
+    }
+  }, [coord]);
+
+  useFocusEffect(
+    useCallback(() => {
+      // Skip the first focus (the mount-time effect above is already
+      // running). Subsequent focuses (back-from-edit, tab switch) hit
+      // this and re-pull the cache from relays.
+      let isFirstFocus = !cache;
+      if (isFirstFocus) {
+        isFirstFocus = false;
+        return;
+      }
+      void refetchCache();
+    }, [refetchCache, cache]),
+  );
+
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refetchCache();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refetchCache]);
+
   // Re-subscribe to zap receipts referencing the current find-log set
   // every time a new log lands. The filter uses the kind-7516 ids on
   // the `#e` tag — any kind-9735 receipt zapping a log surfaces here
@@ -489,7 +535,18 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         )}
       </View>
 
-      <ScrollView ref={scrollRef} contentContainerStyle={styles.body}>
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={styles.body}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.brandPink}
+            colors={[colors.brandPink]}
+          />
+        }
+      >
         {loading ? (
           <ActivityIndicator color={colors.brandPink} />
         ) : error ? (
