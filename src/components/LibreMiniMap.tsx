@@ -1,22 +1,12 @@
-import React, { useMemo, useRef, useState } from 'react';
-import { View, StyleSheet, TouchableOpacity, Text } from 'react-native';
+import React, { useEffect, useMemo, useRef } from 'react';
+import { Animated, View, StyleSheet, TouchableOpacity, Text } from 'react-native';
 import { Camera, Map, Marker, type CameraRef } from '@maplibre/maplibre-react-native';
-import {
-  Plus,
-  Minus,
-  LocateFixed,
-  Info,
-  Maximize2,
-  Zap,
-  Bitcoin,
-  PiggyBank,
-  MapPin,
-  Calendar,
-} from 'lucide-react-native';
+import { Plus, Minus, LocateFixed, Info, Maximize2, PiggyBank, MapPin, Calendar } from 'lucide-react-native';
 import { type BtcMapPlace, acceptsLightning } from '../services/btcMapService';
 import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 import { decodeGeohash } from '../utils/geohash';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { btcMapIconComponent } from '../utils/btcMapIcon';
 import type { Palette } from '../styles/palettes';
 
 // Native MapLibre replacement for ExploreMiniMap. GH #552 + project memory
@@ -40,6 +30,11 @@ interface Props {
   caches: ParsedCache[];
   events: ParsedEvent[];
   defaultZoom?: number;
+  // GPS horizontal accuracy in metres. When provided, draws a translucent
+  // blue accuracy halo around the user dot — the Google-Maps idiom that
+  // signals "your position is somewhere inside this circle". Suppressed
+  // when null (e.g. dev-pinned location, where accuracy is meaningless).
+  userAccuracyMetres?: number | null;
   // Fired when the user starts/stops touching the map. Parent screens use
   // this to suspend their outer ScrollView's pull-to-refresh while the
   // user is panning the map (otherwise a vertical drag on the map starts
@@ -83,6 +78,7 @@ export const LibreMiniMap: React.FC<Props> = ({
   caches,
   events,
   defaultZoom = 13,
+  userAccuracyMetres,
   onInteractionChange,
   onTapMap,
   onOpenLegend,
@@ -91,6 +87,33 @@ export const LibreMiniMap: React.FC<Props> = ({
   const styles = useMemo(() => createStyles(colors), [colors]);
   const cameraRef = useRef<CameraRef>(null);
   const currentZoomRef = useRef(defaultZoom);
+
+  // Pulse the accuracy halo so the user can pick out their own dot
+  // against busy maps. 1.0 → 1.18 → 1.0 over 1.6 s, native-driven so the
+  // JS thread stays free. Mirrors the Google Maps cadence.
+  const pulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1.18, duration: 800, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1.0, duration: 800, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
+
+  // Halo size: a fixed-pixel sizing scaled gently by accuracy so a 1000 m
+  // fix looks larger than a 5 m fix, but never balloons larger than the
+  // mini-map can show. The numbers are deliberately not geographic — a
+  // proper geographic radius would need a CircleLayer with a GeoJSON
+  // source, deferred to a follow-up. For the mini-map at zoom 13 a
+  // 60-100 px halo reads as "your location is somewhere around here".
+  const haloDiameter = useMemo(() => {
+    const acc = userAccuracyMetres;
+    if (acc === null || acc === undefined || !Number.isFinite(acc)) return 60;
+    return Math.max(50, Math.min(120, 40 + Math.log10(acc) * 22));
+  }, [userAccuracyMetres]);
 
   const cachePoints = useMemo(
     () =>
@@ -141,24 +164,40 @@ export const LibreMiniMap: React.FC<Props> = ({
           ref={cameraRef}
           initialViewState={{ center: [lon, lat], zoom: defaultZoom }}
         />
-        {/* User position — keep as a flat dot (matches the legend's "You"
-            row). Pulsing-halo treatment can land in a follow-up. */}
+        {/* User position — translucent pulsing accuracy halo behind a
+            solid dot. The halo sizes by GPS accuracy when known and is
+            suppressed for dev-pinned positions (where accuracy is null). */}
         <Marker id="user" lngLat={[lon, lat]}>
-          <View style={styles.userDot} />
+          <View style={styles.userMarkerWrap}>
+            {userAccuracyMetres !== null && userAccuracyMetres !== undefined ? (
+              <Animated.View
+                style={[
+                  styles.userHalo,
+                  {
+                    width: haloDiameter,
+                    height: haloDiameter,
+                    borderRadius: haloDiameter / 2,
+                    transform: [{ scale: pulse }],
+                  },
+                ]}
+              />
+            ) : null}
+            <View style={styles.userDot} />
+          </View>
         </Marker>
-        {/* Merchants: Lightning-accepting → Zap glyph in pink, on-chain
-            only → Bitcoin glyph in orange. Mirrors the legend rows the
-            user sees in MapLegendSheet. */}
+        {/* Merchants: pin colour signals payment type (pink Lightning,
+            orange on-chain only). Glyph mirrors the BTC Map category
+            icon the user sees on the Places-for-you rail card for the
+            same merchant — `restaurant` shows a fork, `cafe` a cup, etc.
+            Falls back to a Store glyph when BTC Map ships a category we
+            haven't mapped yet. */}
         {merchants.map((m) => {
           const ln = acceptsLightning(m);
+          const Icon = btcMapIconComponent(m.icon);
           return (
             <Marker key={m.id} id={`merchant-${m.id}`} lngLat={[m.lon, m.lat]}>
               <View style={[styles.pin, ln ? styles.pinLn : styles.pinOnchain]}>
-                {ln ? (
-                  <Zap size={12} color="#fff" strokeWidth={2.5} />
-                ) : (
-                  <Bitcoin size={12} color="#fff" strokeWidth={2.5} />
-                )}
+                <Icon size={12} color="#fff" strokeWidth={2.5} />
               </View>
             </Marker>
           );
@@ -260,13 +299,33 @@ const createStyles = (colors: Palette) =>
       position: 'relative',
     },
     map: { flex: 1 },
+    // Wrapper that centres the dot inside the pulsing halo. Without it
+    // Marker would anchor the top-left of the halo at the lng/lat, off
+    // by half the halo diameter.
+    userMarkerWrap: {
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    // Blue dot at the same 22 px diameter as the merchant / cache /
+    // event pin chassis so the GPS marker reads as a peer rather than a
+    // smaller secondary element. The accuracy halo sits behind it.
     userDot: {
-      width: 14,
-      height: 14,
-      borderRadius: 7,
+      width: 22,
+      height: 22,
+      borderRadius: 11,
       backgroundColor: '#2D88FF',
       borderWidth: 2,
       borderColor: colors.white,
+      zIndex: 2,
+    },
+    // Google-Maps-style translucent blue accuracy halo. The transform
+    // scale animation lives on the Animated.View at render time.
+    userHalo: {
+      position: 'absolute',
+      backgroundColor: 'rgba(45, 136, 255, 0.18)',
+      borderWidth: 1,
+      borderColor: 'rgba(45, 136, 255, 0.45)',
+      zIndex: 1,
     },
     // Shared pin chassis — circular white-bordered chip carrying the
     // category Lucide glyph. 22 px matches the Leaflet `lp-pin` size in

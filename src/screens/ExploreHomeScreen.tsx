@@ -23,6 +23,7 @@ import TabHeader from '../components/TabHeader';
 import { ContentRail } from '../components/ContentRail';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
 import { LibreMiniMap } from '../components/LibreMiniMap';
+import LegendSheet from '../components/LegendSheet';
 // A/B switch for the native MapLibre POC (#552 / #563). When the env
 // flag is set, the Explore hub renders LibreMiniMap (native renderer,
 // no WebView) instead of ExploreMiniMap (WebView Leaflet). Lets us
@@ -236,6 +237,10 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // down/re-open NIP-GC + NIP-52 subscriptions in one gesture.
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  // Map legend modal — same LegendSheet ExploreMiniMap renders inline,
+  // but here it lives at the screen level so LibreMiniMap (which doesn't
+  // own the sheet itself) can ask us to open it.
+  const [legendVisible, setLegendVisible] = useState(false);
   // Mirrors finger-on-map state from ExploreMiniMap's onInteractionChange.
   // While true we disable the outer ScrollView's scroll (which also
   // disables pull-to-refresh) so a vertical pan on the inline map pans
@@ -684,11 +689,13 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
               <LibreMiniMap
                 lat={pos?.lat ?? null}
                 lon={pos?.lon ?? null}
+                userAccuracyMetres={pos?.accuracy ?? null}
                 merchants={merchants}
                 caches={[...caches.values()]}
                 events={[...events.values()]}
                 onTapMap={() => navigation.navigate('Map')}
                 onInteractionChange={setMapTouched}
+                onOpenLegend={() => setLegendVisible(true)}
               />
             ) : (
               <ExploreMiniMap
@@ -831,6 +838,19 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           )}
         />
       </ScrollView>
+      {/* Map legend bottom sheet — shared by LibreMiniMap (no inline
+          sheet) and used here so the (i) button has somewhere to go. The
+          inline ExploreMiniMap path owns its own LegendSheet, so this
+          one is harmless in both branches; opens only when the legend
+          tap actually triggers setLegendVisible. */}
+      <LegendSheet
+        visible={legendVisible}
+        onClose={() => setLegendVisible(false)}
+        placesVisible
+        availableCategories={[
+          ...new Set(merchants.flatMap((m) => m.categories ?? []).filter(Boolean)),
+        ]}
+      />
     </View>
   );
 };
