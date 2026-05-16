@@ -268,7 +268,9 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         });
         const __ms = Math.round(performance.now() - __t0);
         if (__ms > 200) {
-          console.log(`[PerfBlock] ExploreHome fetchPlacesInBbox: ${__ms}ms places=${places.length}`);
+          console.log(
+            `[PerfBlock] ExploreHome fetchPlacesInBbox: ${__ms}ms places=${places.length}`,
+          );
         }
         if (!cancelled) setMerchants(places);
       } catch {
@@ -393,9 +395,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         if (cancelled) return;
         console.log(
           `[PerfBlock] ExploreHome by-author merge: fetched=${mine.length} ` +
-            mine
-              .map((c) => `${c.name ?? c.d}@${c.geohash?.slice(0, 5) ?? '??'}`)
-              .join(', '),
+            mine.map((c) => `${c.name ?? c.d}@${c.geohash?.slice(0, 5) ?? '??'}`).join(', '),
         );
         if (mine.length === 0) return;
         setCaches((prev) => {
@@ -408,7 +408,9 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
               added++;
             }
           }
-          console.log(`[PerfBlock] ExploreHome by-author merge: ${added} new/updated in caches Map`);
+          console.log(
+            `[PerfBlock] ExploreHome by-author merge: ${added} new/updated in caches Map`,
+          );
           return next;
         });
       })
@@ -449,10 +451,10 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // JS-thread responsiveness is the better trade.
   useFocusEffect(
     useCallback(() => {
-      // refreshKey is a dep but not referenced in the body — it bumps
-      // on pull-to-refresh and we want that to tear down + re-run the
-      // subscriptions. The explicit `void` keeps exhaustive-deps happy.
-      void refreshKey;
+      // `refreshKey` is intentionally listed in the deps below so that
+      // pull-to-refresh (which bumps it) tears down + re-runs the
+      // subscriptions, even though the value isn't referenced inside
+      // the body.
       if (!pos) return;
       const myGh = encodeGeohash(pos.lat, pos.lon, 7);
       // Caches sit at precision 5 (~5 km) — geocaching is inherently
@@ -574,8 +576,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         pos && center
           ? haversineMetres({ lat: pos.lat, lon: pos.lon }, { lat: center.lat, lon: center.lng })
           : Number.POSITIVE_INFINITY;
-      const isOwn =
-        lowerPubkey !== null && cache.hiderPubkey.toLowerCase() === lowerPubkey;
+      const isOwn = lowerPubkey !== null && cache.hiderPubkey.toLowerCase() === lowerPubkey;
       return { cache, distance, isOwn };
     });
     // Trace own-listing trajectory so a missing-own-cache regression
@@ -1094,9 +1095,7 @@ const ProfiledExploreHomeScreen: React.FC<Props> = (props) => (
     onRender={(id, phase, actualDuration) => {
       if (actualDuration > 100) {
         // eslint-disable-next-line no-console
-        console.log(
-          `[PerfBlock] render:${id} ${phase}=${Math.round(actualDuration)}ms`,
-        );
+        console.log(`[PerfBlock] render:${id} ${phase}=${Math.round(actualDuration)}ms`);
       }
     }}
   >

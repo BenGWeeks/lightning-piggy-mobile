@@ -1,15 +1,17 @@
 // Seeds a handful of NIP-52 kind 31923 events from Big Piggy so the
 // Events sub-screen has realistic-looking content for screenshots
 // and demo videos. Each event:
-//   - Signs with $NSEC (defaults to $MAESTRO_NSEC_BIG) so the WoT
-//     filter passes
+//   - Signs with a named Piggy fixture sourced via `pickRole` /
+//     `resolvePiggy` from scripts/_piggyFixtures.mjs (default: BIG,
+//     i.e. `MAESTRO_NSEC_BIG`) so the WoT filter passes. The legacy
+//     `NSEC` env var is no longer read.
 //   - Has multi-precision g tags so geohash-prefix subs catch it
 //   - Carries an `image` tag pointing at a flyer in `docs/test-fixtures/`
 //   - Has start times spread across the next 4 weeks so the Events
 //     screen's "UP NEXT" highlight + chronological ordering both
 //     have material to work with
 //
-//   NSEC=nsec1... node scripts/publish-test-event-batch.mjs
+//   node scripts/publish-test-event-batch.mjs [--piggy=ROLE]
 import { finalizeEvent, nip19 } from 'nostr-tools';
 import { SimplePool } from 'nostr-tools/pool';
 import { useWebSocketImplementation } from 'nostr-tools/relay';

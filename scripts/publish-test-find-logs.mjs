@@ -2,12 +2,14 @@
 // Geo-Cache 1 so the HuntPiggyDetail screen's "Find log" section has
 // realistic entries for screenshots + UX testing.
 //
-// Each find is signed by a different Piggy fixture (Big / Middle /
-// Little) so the in-app `usePubkeyProfile` lookup resolves real
+// Each find is signed by a different Piggy fixture (Middle / Little /
+// Evil) so the in-app `usePubkeyProfile` lookup resolves real
 // kind-0 display names + avatars, not anonymous hex pubkeys. (An
 // earlier version used `generateSecretKey()` per find — fresh
 // disposable keys that have no published kind-0 profile, so the find
-// rows fell back to a generic User icon.)
+// rows fell back to a generic User icon.) The Evil-signed entry is
+// deliberate: it exercises the find-log row's untrusted-publisher path
+// without needing a separate test script.
 //
 //   node scripts/publish-test-find-logs.mjs
 //
