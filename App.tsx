@@ -77,21 +77,20 @@ export default function App() {
   // mount, so we retry briefly until `navigationRef.isReady()`.
   useEffect(() => {
     let cancelled = false;
-    // De-dupe NFC-tag launch URLs. Android keeps the NDEF_DISCOVERED
-    // intent attached to the activity's `baseIntent`, so every time
-    // the user brings the app back from recents (or after a low-
-    // memory restart) `Linking.getInitialURL()` re-returns the same
-    // `lightningpiggy://hunt/<coord>` URL — and the in-process Linking
-    // event listener also re-fires for the redelivered intent. Pre-
-    // fix this meant every tab-tap that woke the app shoved
-    // HuntPiggyDetail back onto the Explore stack, even after the
-    // user explicitly tapped Explore to pop to root. Track the most
-    // recent routed URL + its timestamp; ignore re-deliveries within
-    // 30s (covers the recents/wake re-entry window). After that
-    // window a genuine fresh tap on the same physical tag still
-    // routes normally.
+    // Very short in-memory dedupe to absorb the cold-start race where
+    // both `getInitialURL()` and `addEventListener('url')` deliver the
+    // SAME URL within a few hundred ms of JS init. Tens of seconds
+    // would be safer, but persistent dedupe (across JS restarts via
+    // AsyncStorage) turned out to over-fire when the user re-scans
+    // the same tag in the same hour — stale storage swallowed
+    // genuine fresh taps. The "Explore tab takes you to the cached
+    // detail" bug was actually a different problem (deep-link
+    // navigator didn't seed ExploreHome / Hunt below HuntPiggyDetail,
+    // see `navigateToHuntPiggyDetail`); now that's fixed, 2 seconds
+    // is plenty to catch the cold-start double-fire without
+    // mis-blocking deliberate re-scans.
+    const ROUTE_DEDUPE_MS = 2_000;
     let lastRouted: { url: string; at: number } | null = null;
-    const ROUTE_DEDUPE_MS = 30_000;
     const route = (raw: string | null | undefined) => {
       if (cancelled || !raw) return;
       const trimmed = raw.trim();
@@ -100,10 +99,13 @@ export default function App() {
         lastRouted.url === trimmed &&
         Date.now() - lastRouted.at < ROUTE_DEDUPE_MS
       ) {
-        console.log(`[Link] de-duped Android-resurrected NDEF intent within ${ROUTE_DEDUPE_MS}ms`);
+        console.log(`[Link] de-duped cold-start double-fire within ${ROUTE_DEDUPE_MS}ms`);
         return;
       }
       lastRouted = { url: trimmed, at: Date.now() };
+      routeFresh(trimmed);
+    };
+    const routeFresh = (trimmed: string) => {
       // Truncate noisy URIs so the log doesn't blow past logcat's
       // line limit but keep enough head + tail to identify them.
       const peek = trimmed.length > 96 ? trimmed.slice(0, 60) + '…' + trimmed.slice(-20) : trimmed;
