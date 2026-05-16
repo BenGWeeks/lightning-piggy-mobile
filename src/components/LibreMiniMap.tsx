@@ -1,8 +1,19 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { View, StyleSheet, TouchableOpacity, Text } from 'react-native';
 import { Camera, Map, Marker, type CameraRef } from '@maplibre/maplibre-react-native';
-import { Plus, Minus, LocateFixed, Info, Maximize2 } from 'lucide-react-native';
-import type { BtcMapPlace } from '../services/btcMapService';
+import {
+  Plus,
+  Minus,
+  LocateFixed,
+  Info,
+  Maximize2,
+  Zap,
+  Bitcoin,
+  PiggyBank,
+  MapPin,
+  Calendar,
+} from 'lucide-react-native';
+import { type BtcMapPlace, acceptsLightning } from '../services/btcMapService';
 import type { ParsedCache, ParsedEvent } from '../services/nostrPlacesService';
 import { decodeGeohash } from '../utils/geohash';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -84,7 +95,11 @@ export const LibreMiniMap: React.FC<Props> = ({
   const cachePoints = useMemo(
     () =>
       caches
-        .map((c) => (c.geohash ? { ...decodeGeohash(c.geohash), id: c.coord, name: c.name } : null))
+        .map((c) =>
+          c.geohash
+            ? { ...decodeGeohash(c.geohash), id: c.coord, name: c.name, isLpPiggy: c.isLpPiggy }
+            : null,
+        )
         .filter((c): c is NonNullable<typeof c> => c !== null),
     [caches],
   );
@@ -126,24 +141,47 @@ export const LibreMiniMap: React.FC<Props> = ({
           ref={cameraRef}
           initialViewState={{ center: [lon, lat], zoom: defaultZoom }}
         />
-        {/* User position — placeholder; the pulsing-halo from mapMeDot.ts
-            ports in a follow-up. */}
+        {/* User position — keep as a flat dot (matches the legend's "You"
+            row). Pulsing-halo treatment can land in a follow-up. */}
         <Marker id="user" lngLat={[lon, lat]}>
           <View style={styles.userDot} />
         </Marker>
-        {merchants.map((m) => (
-          <Marker key={m.id} id={`merchant-${m.id}`} lngLat={[m.lon, m.lat]}>
-            <View style={styles.merchantDot} />
-          </Marker>
-        ))}
+        {/* Merchants: Lightning-accepting → Zap glyph in pink, on-chain
+            only → Bitcoin glyph in orange. Mirrors the legend rows the
+            user sees in MapLegendSheet. */}
+        {merchants.map((m) => {
+          const ln = acceptsLightning(m);
+          return (
+            <Marker key={m.id} id={`merchant-${m.id}`} lngLat={[m.lon, m.lat]}>
+              <View style={[styles.pin, ln ? styles.pinLn : styles.pinOnchain]}>
+                {ln ? (
+                  <Zap size={12} color="#fff" strokeWidth={2.5} />
+                ) : (
+                  <Bitcoin size={12} color="#fff" strokeWidth={2.5} />
+                )}
+              </View>
+            </Marker>
+          );
+        })}
+        {/* Caches: Piglet (Lightning Piggy) → PiggyBank pink, vanilla
+            NIP-GC → MapPin purple. */}
         {cachePoints.map((c) => (
           <Marker key={c.id} id={`cache-${c.id}`} lngLat={[c.lng, c.lat]}>
-            <View style={styles.cacheDot} />
+            <View style={[styles.pin, c.isLpPiggy ? styles.pinPiglet : styles.pinCache]}>
+              {c.isLpPiggy ? (
+                <PiggyBank size={12} color="#fff" strokeWidth={2.5} />
+              ) : (
+                <MapPin size={12} color="#fff" strokeWidth={2.5} />
+              )}
+            </View>
           </Marker>
         ))}
+        {/* Events: Calendar glyph in deep-purple. */}
         {eventPoints.map((e) => (
           <Marker key={e.id} id={`event-${e.id}`} lngLat={[e.lng, e.lat]}>
-            <View style={styles.eventDot} />
+            <View style={[styles.pin, styles.pinEvent]}>
+              <Calendar size={12} color="#fff" strokeWidth={2.5} />
+            </View>
           </Marker>
         ))}
       </Map>
@@ -226,34 +264,33 @@ const createStyles = (colors: Palette) =>
       width: 14,
       height: 14,
       borderRadius: 7,
-      backgroundColor: colors.brandPink,
+      backgroundColor: '#2D88FF',
       borderWidth: 2,
       borderColor: colors.white,
     },
-    merchantDot: {
-      width: 14,
-      height: 14,
-      borderRadius: 7,
-      backgroundColor: colors.brandPink,
+    // Shared pin chassis — circular white-bordered chip carrying the
+    // category Lucide glyph. 22 px matches the Leaflet `lp-pin` size in
+    // the WebView spec so the swap is visually consistent across the
+    // two renderers.
+    pin: {
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      alignItems: 'center',
+      justifyContent: 'center',
       borderWidth: 1.5,
       borderColor: colors.white,
+      shadowColor: '#000',
+      shadowOpacity: 0.25,
+      shadowRadius: 2,
+      shadowOffset: { width: 0, height: 1 },
+      elevation: 2,
     },
-    cacheDot: {
-      width: 14,
-      height: 14,
-      borderRadius: 7,
-      backgroundColor: '#7A5CFF',
-      borderWidth: 1.5,
-      borderColor: colors.white,
-    },
-    eventDot: {
-      width: 14,
-      height: 14,
-      borderRadius: 3,
-      backgroundColor: '#5b3aff',
-      borderWidth: 1.5,
-      borderColor: colors.white,
-    },
+    pinLn: { backgroundColor: colors.brandPink },
+    pinOnchain: { backgroundColor: '#F7931A' },
+    pinPiglet: { backgroundColor: colors.brandPink },
+    pinCache: { backgroundColor: '#7A5CFF' },
+    pinEvent: { backgroundColor: '#5b3aff' },
     zoomColumn: {
       position: 'absolute',
       top: 10,
