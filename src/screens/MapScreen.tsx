@@ -757,7 +757,12 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         availableCategories={availableCategories}
       />
 
-      {!webviewReady && (
+      {/* Spinner only applies to the WebView path — LibreMiniMap paints
+          synchronously so there's no "waiting for the bridge ready"
+          window to cover. Without this guard the spinner sat forever
+          in the LibreMiniMap branch because the WebView 'ready'
+          message that flips webviewReady never fires. */}
+      {!USE_LIBRE_MAP && !webviewReady && (
         <View style={styles.loadingOverlay} pointerEvents="none">
           <ActivityIndicator size="large" color={colors.brandPink} />
         </View>

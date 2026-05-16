@@ -518,9 +518,13 @@ const createStyles = (colors: Palette) =>
       marginTop: -18,
       marginLeft: -18,
     },
+    // 34 px clears the MapLibre attribution logo + © OSM text strip
+    // that the native SDK pins to the bottom-left edge. Without this
+    // bump the recenter / legend buttons overlap the attribution and
+    // it reads as a layout bug.
     recenterButton: {
       position: 'absolute',
-      bottom: 10,
+      bottom: 34,
       left: 10,
       width: 36,
       height: 36,
@@ -538,7 +542,7 @@ const createStyles = (colors: Palette) =>
     // otherwise sits at the bottom-left on its own.
     legendButtonAboveRecenter: {
       position: 'absolute',
-      bottom: 52,
+      bottom: 76,
       left: 10,
       width: 36,
       height: 36,
@@ -554,7 +558,7 @@ const createStyles = (colors: Palette) =>
     },
     legendButton: {
       position: 'absolute',
-      bottom: 10,
+      bottom: 34,
       left: 10,
       width: 36,
       height: 36,

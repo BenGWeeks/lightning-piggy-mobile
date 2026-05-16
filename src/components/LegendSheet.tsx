@@ -108,11 +108,16 @@ export const LegendSheet: React.FC<Props> = ({
       <View style={styles.backdrop} testID="legend-sheet">
         <TouchableOpacity style={styles.tapAway} onPress={onClose} activeOpacity={1} />
         <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>
-          <View {...responder.panHandlers} style={styles.grabber} testID="legend-sheet-grabber">
+          {/* The whole header strip — grabber pill, the "Pin types"
+              section title, AND a tall transparent area around them —
+              is one big drag target so the user doesn't have to aim
+              for the 4-px pill to dismiss. Everything below the title
+              lives in the ScrollView and scrolls independently. */}
+          <View {...responder.panHandlers} style={styles.grabberZone} testID="legend-sheet-grabber">
             <View style={styles.handle} />
+            <Text style={styles.sectionTitle}>Pin types</Text>
           </View>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollPad}>
-            <Text style={styles.sectionTitle}>Pin types</Text>
             {/* All pin-type rows render the same 28-px circle-with-glyph
                 treatment used on the actual map, so what the user sees in
                 the legend is exactly what they'll see in the viewport.
@@ -214,7 +219,16 @@ const createStyles = (colors: Palette) =>
       paddingBottom: 32,
     },
     grabber: { width: '100%', paddingVertical: 12, alignItems: 'center' },
-    handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.divider },
+    // Expanded drag zone — grabber pill at the top + the "Pin types"
+    // section title below it. The whole 60-px tall strip catches the
+    // PanResponder so the user can dismiss from anywhere near the top.
+    grabberZone: {
+      width: '100%',
+      paddingTop: 12,
+      paddingBottom: 4,
+      alignItems: 'stretch',
+    },
+    handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.divider, alignSelf: 'center' },
     scrollPad: { paddingBottom: 8 },
     sectionTitle: { fontSize: 18, fontWeight: '700', color: colors.textHeader },
     sectionSub: { fontSize: 13, color: colors.textSupplementary, marginTop: 2, marginBottom: 8 },
