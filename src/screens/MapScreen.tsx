@@ -55,6 +55,11 @@ import SocialIcon from '../components/SocialIcon';
 import WebOfTrustChip from '../components/WebOfTrustChip';
 import WebOfTrustBottomSheet from '../components/WebOfTrustBottomSheet';
 import LegendSheet from '../components/LegendSheet';
+import { LibreMiniMap } from '../components/LibreMiniMap';
+// A/B flag — when set, the full-screen Map uses native MapLibre instead
+// of the WebView Leaflet path. Same flag wires LibreMiniMap on Explore
+// + Hunt. Keeps the WebView fallback alive while the swap is verified.
+const USE_LIBRE_MAP = process.env.EXPO_PUBLIC_USE_LIBRE_MAP === '1';
 import { ME_DOT_CSS, ME_DOT_JS } from '../utils/mapMeDot';
 import {
   LEAFLET_BASE_CSS,
@@ -145,6 +150,13 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   const [viewportHydrated, setViewportHydrated] = useState(false);
 
   const [permission, setPermission] = useState<PermissionState>('unknown');
+  // User position state — kept here so LibreMiniMap (interactive full-
+  // screen variant) can render the GPS dot + accuracy halo. The WebView
+  // path reads via injectJavaScript on resolve; the LibreMiniMap path
+  // reads declaratively from this state.
+  const [pos, setPos] = useState<{ lat: number; lon: number; accuracy: number | null } | null>(
+    null,
+  );
   const [places, setPlaces] = useState<BtcMapPlace[]>([]);
   const [caches, setCaches] = useState<Map<string, ParsedCache>>(new Map());
   const [selected, setSelected] = useState<BtcMapPlace | null>(null);
@@ -249,6 +261,10 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
       }
       try {
         if (cancelled) return;
+        // Mirror lat/lon/accuracy into state so the LibreMiniMap path
+        // can render the GPS dot + accuracy halo. WebView path keeps
+        // using its injectJavaScript flow below.
+        setPos({ lat, lon, accuracy });
         // Wider initial bbox + lower default zoom so rural users (no
         // Bitcoin merchants within walking distance) see at least a
         // few drive-away pins on first paint. They can zoom in from
@@ -407,6 +423,36 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
     return [...seen].sort();
   }, [places]);
 
+  // Filtered arrays for the LibreMiniMap path. Mirrors the same predicates
+  // the WebView path applies via `sendMarkers` / `sendCaches`, but as
+  // memoised derived state so LibreMiniMap's markers list is the filter
+  // truth — no imperative bridge calls needed.
+  const visibleMerchants = useMemo(() => {
+    return places.filter((p) => {
+      const typeOk = acceptsLightning(p)
+        ? filters.lightning
+        : acceptsOnchain(p)
+          ? filters.onchain
+          : filters.lightning || filters.onchain;
+      if (!typeOk) return false;
+      if (categoryFilter.size === 0) return true;
+      const cats = p.categories ?? [];
+      return cats.some((c) => categoryFilter.has(c));
+    });
+  }, [places, filters.lightning, filters.onchain, categoryFilter]);
+
+  const visibleCaches = useMemo(() => {
+    return [...caches.values()].filter(
+      (c) =>
+        (c.isLpPiggy ? filters.piglet : filters.nipgcCache) && isTrusted(c.hiderPubkey),
+    );
+  }, [caches, filters.piglet, filters.nipgcCache, isTrusted]);
+
+  // Bounds-change handler for the LibreMiniMap path is defined below
+  // (after refreshPlaces). Keeping the declaration order matches the
+  // existing WebView flow where the onMessage handler also references
+  // refreshPlaces.
+
   useEffect(() => {
     if (!webviewReady) return;
     const filtered = [...caches.values()].filter(
@@ -431,6 +477,30 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
       setError((e as Error).message);
     }
   }, []);
+
+  // Bounds-change handler for the LibreMiniMap path. Mirrors the WebView
+  // path's debounce + viewport-persist behaviour: 500 ms after the camera
+  // settles we re-fetch the merchant set for the visible bbox and write
+  // the centre back to AsyncStorage so reopening the screen starts where
+  // the user left off.
+  const onLibreBounds = useCallback(
+    (bbox: { minLat: number; maxLat: number; minLon: number; maxLon: number }) => {
+      const next: Bbox = bbox;
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+      debounceTimer.current = setTimeout(() => {
+        lastBbox.current = next;
+        refreshPlaces(next);
+        const centreLat = (next.minLat + next.maxLat) / 2;
+        const centreLng = (next.minLon + next.maxLon) / 2;
+        const span = next.maxLat - next.minLat;
+        const inferredZoom = Math.max(3, Math.min(18, Math.round(8 - Math.log2(span))));
+        const v = { lat: centreLat, lng: centreLng, zoom: inferredZoom };
+        lastViewport.current = v;
+        AsyncStorage.setItem(VIEWPORT_KEY, JSON.stringify(v)).catch(() => {});
+      }, 500);
+    },
+    [refreshPlaces],
+  );
 
   const onMessage = useCallback(
     (event: WebViewMessageEvent) => {
@@ -543,7 +613,22 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         colors={colors}
       />
       <View style={styles.webviewWrapper}>
-        {viewportHydrated ? (
+        {USE_LIBRE_MAP ? (
+          <LibreMiniMap
+            lat={pos?.lat ?? null}
+            lon={pos?.lon ?? null}
+            userAccuracyMetres={pos?.accuracy ?? null}
+            merchants={visibleMerchants}
+            caches={visibleCaches}
+            events={[]}
+            interactive
+            fill
+            onBoundsChange={onLibreBounds}
+            onSelectMerchant={(m) => setSelected(m)}
+            onSelectCache={(c) => setSelectedCache(c)}
+            onOpenLegend={() => setLegendVisible(true)}
+          />
+        ) : viewportHydrated ? (
           <WebView
             ref={webviewRef}
             originWhitelist={['*']}
@@ -571,22 +656,30 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         ) : (
           <View style={styles.webview} />
         )}
-        <TouchableOpacity
-          style={styles.recenterButton}
-          onPress={recenterOnUser}
-          accessibilityLabel="Recenter on me"
-          testID="map-recenter-button"
-        >
-          <LocateFixed size={18} color="#2D88FF" strokeWidth={2.5} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.legendButton}
-          onPress={() => setLegendVisible(true)}
-          accessibilityLabel="Show map legend"
-          testID="map-legend-button"
-        >
-          <Info size={18} color={colors.brandPink} strokeWidth={2.5} />
-        </TouchableOpacity>
+        {/* WebView path needs RN-overlay buttons because Leaflet's own
+            controls don't match the app's idiom. LibreMiniMap path owns
+            equivalent buttons internally (recenter + legend) so we hide
+            the manual ones to avoid duplicates. */}
+        {USE_LIBRE_MAP ? null : (
+          <>
+            <TouchableOpacity
+              style={styles.recenterButton}
+              onPress={recenterOnUser}
+              accessibilityLabel="Recenter on me"
+              testID="map-recenter-button"
+            >
+              <LocateFixed size={18} color="#2D88FF" strokeWidth={2.5} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.legendButton}
+              onPress={() => setLegendVisible(true)}
+              accessibilityLabel="Show map legend"
+              testID="map-legend-button"
+            >
+              <Info size={18} color={colors.brandPink} strokeWidth={2.5} />
+            </TouchableOpacity>
+          </>
+        )}
       </View>
 
       <View style={styles.footer}>
