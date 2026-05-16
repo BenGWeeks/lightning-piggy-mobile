@@ -28,10 +28,14 @@ interface Props {
   navigation: ExploreNavigation;
 }
 
-// Parsed kind 7516 found-log keyed by the cache it refers to, kept
-// flat so the SectionList renderer can render a single row regardless
-// of which section it came from. coord is the `<kind>:<pubkey>:<d>`
-// of the cache being claimed; finderPubkey is the author of the 7516.
+// Parsed kind 7516 found-log, flat shape so the SectionList renderer
+// can render a single row regardless of which section it came from.
+// `coord` is the `<kind>:<pubkey>:<d>` of the cache being claimed;
+// `finderPubkey` is the author of the 7516. The Maps that hold these
+// entries are keyed differently per section: `myFinds` keys by coord
+// (most-recent claim per cache), `friendFinds` keys by event id (so
+// multiple friends finding the same cache each get a social-feed
+// row). See the comments on those two state hooks below.
 //
 // Deliberately does NOT embed the matching ParsedCache — the render
 // path looks that up on demand via `cacheByCoord`. Earlier the entry
@@ -384,6 +388,14 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
 
       <SectionList
         sections={sections}
+        // SectionList's default render-bail otherwise skips renderItem
+        // when `sections` reference-equals — but a kind 37516 echo that
+        // only mutates `cacheByCoord` can land *without* my-finds /
+        // friends'-finds list arrays changing, leaving the cached row
+        // showing "Cache no longer on relays" until the next prop
+        // change. Wiring the lookup map into `extraData` forces the
+        // re-render the renderItem comment promises (#574 follow-up).
+        extraData={cacheByCoord}
         keyExtractor={(item) =>
           item.kind === 'hidden' ? `h:${item.cache.coord}` : `${item.kind}:${item.entry.id}`
         }
@@ -434,10 +446,11 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
           const entry = item.entry;
           // Cache resolution moved from the find-log subscribe callback
           // to this render path — see the FoundEntry comment. The lookup
-          // is O(1) and the SectionList already re-renders when
-          // cacheByCoord changes (it's in this render's closure via the
-          // sections useMemo dep), so an entry whose cache arrives late
-          // re-paints with the resolved name in the same frame.
+          // is O(1) and we wire `cacheByCoord` into the SectionList via
+          // `extraData` below so a late-arriving kind 37516 always
+          // re-runs `renderItem` and the row's name re-paints, even on
+          // the my-finds path (whose `foundList` useMemo doesn't itself
+          // depend on the cache mirror).
           const matchingCache = cacheByCoord.get(entry.coord) ?? null;
           const meta =
             (entry.amountSats ? `⚡ ${entry.amountSats} sats` : 'Found') +
