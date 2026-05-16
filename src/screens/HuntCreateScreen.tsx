@@ -1584,10 +1584,20 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               <StepNavRow
                 onBack={() => setCurrentStep(4)}
                 // Next only moves forward — it doesn't carry the publish
-                // action any more. Gated on stage.kind so the user can't
-                // skip publish.
+                // action any more. Gated on stage.kind so the user
+                // can't skip publish for a fresh hide; in edit mode the
+                // listing is already on relays from the prior session,
+                // so a validated LNURL is enough to advance and rewrite
+                // the NFC tag (no need to re-publish just to reach
+                // step 6).
                 onNext={() => setCurrentStep(6)}
-                nextDisabled={stage.kind !== 'saved' && stage.kind !== 'wrote-nfc'}
+                nextDisabled={
+                  isEditMode
+                    ? stage.kind !== 'validated' &&
+                      stage.kind !== 'saved' &&
+                      stage.kind !== 'wrote-nfc'
+                    : stage.kind !== 'saved' && stage.kind !== 'wrote-nfc'
+                }
                 styles={styles}
                 colors={colors}
               />
