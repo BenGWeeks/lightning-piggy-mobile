@@ -304,7 +304,7 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
               <Search size={16} color={colors.textSupplementary} strokeWidth={2.5} />
               <TextInput
                 style={styles.searchInput}
-                placeholder="Search places by name or address…"
+                placeholder="Search places"
                 placeholderTextColor={colors.textSupplementary}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
@@ -488,15 +488,21 @@ const createStyles = (colors: Palette) =>
       fontSize: 13,
       fontWeight: '500',
     },
+    // Match HuntScreen's rounded-pill search row so the two Explore
+    // sub-screens look like siblings rather than cousins. Same gap,
+    // padding, and borderRadius 100 for the pill. Skips
+    // marginHorizontal: 16 because the FlatList's listContent already
+    // applies 16 dp padding here — adding margin on top double-insets
+    // the search so it ends up narrower than the map + row cards.
     searchRow: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
+      marginBottom: 8,
       backgroundColor: colors.surface,
-      paddingHorizontal: 12,
+      borderRadius: 100,
+      paddingHorizontal: 14,
       paddingVertical: 8,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.divider,
     },
     attributionRow: {
       // Cancel the `listContent` 16px padding then re-apply 16px so the
@@ -555,7 +561,10 @@ const createStyles = (colors: Palette) =>
       marginTop: 8,
     },
     retryButtonText: { color: colors.white, fontWeight: '700', fontSize: 14 },
-    listContent: { padding: 16, gap: 10 },
+    // Tighter gap between row cards (10 → 6) so PlacesScreen feels as
+    // dense as HuntScreen's Geo-caches list — Ben asked the two
+    // Explore sub-screens to read as siblings.
+    listContent: { padding: 16, gap: 6 },
     row: {
       flexDirection: 'row',
       alignItems: 'center',
