@@ -335,10 +335,10 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // JS-thread responsiveness is the better trade.
   useFocusEffect(
     useCallback(() => {
-      // refreshKey is a dep but not referenced in the body — it bumps
-      // on pull-to-refresh and we want that to tear down + re-run the
-      // subscriptions. The explicit `void` keeps exhaustive-deps happy.
-      void refreshKey;
+      // `refreshKey` is intentionally listed in the deps below so that
+      // pull-to-refresh (which bumps it) tears down + re-runs the
+      // subscriptions, even though the value isn't referenced inside
+      // the body.
       if (!pos) return;
       const myGh = encodeGeohash(pos.lat, pos.lon, 7);
       // Caches sit at precision 5 (~5 km) — geocaching is inherently

@@ -11,9 +11,9 @@
 //   EVIL   → MAESTRO_NSEC_EVIL      (the antagonist — for moderation /
 //                                    untrusted-publisher test paths)
 //
-// Reference: reference_ben_nostr_identity memory + the existing
-// MAESTRO_NSEC_* convention already in publish-test-find-logs.mjs,
-// send-nip17-test.mjs, verify-bigpiggy-outbox.mjs, verify-recv.mjs.
+// Reference: the existing MAESTRO_NSEC_* convention already in use
+// across publish-test-find-logs.mjs, send-nip17-test.mjs,
+// verify-bigpiggy-outbox.mjs, and verify-recv.mjs.
 
 import { getPublicKey } from 'nostr-tools/pure';
 import * as nip19 from 'nostr-tools/nip19';
@@ -52,9 +52,7 @@ export function decodeNsec(nsec, contextLabel = 'nsec') {
 //   const { sk, pk } = resolvePiggy('BIG');
 export function resolvePiggy(role) {
   if (!PIGGY_NSEC_ENV[role]) {
-    throw new Error(
-      `Unknown Piggy role "${role}". Known roles: ${PIGGY_ROLES.join(', ')}`,
-    );
+    throw new Error(`Unknown Piggy role "${role}". Known roles: ${PIGGY_ROLES.join(', ')}`);
   }
   const envVar = PIGGY_NSEC_ENV[role];
   const nsec = process.env[envVar];

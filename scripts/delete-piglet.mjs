@@ -5,13 +5,14 @@
 // kind 5 still sees the listing as effectively retracted (NIP-01
 // replaceable: newest per (author, kind, d) wins).
 //
-// The signing key is one of the named Piggy fixtures (see
-// scripts/_piggyFixtures.mjs). Default is BIG; pass --piggy=ROLE or
-// set PIGGY_ROLE to delete a Piglet hidden by a different fixture.
-// The author of the targeted event must match the chosen Piggy.
+// The signing key comes from the named Piggy fixture chosen via
+// `--piggy=ROLE` (or the `PIGGY_ROLE` env var) — see scripts/
+// _piggyFixtures.mjs for the role → MAESTRO_NSEC_* mapping. Defaults
+// to BIG; the legacy `PIGGY_NSEC` env var is no longer read. The
+// author of the targeted event must match the chosen Piggy.
 //
 // Usage:
-//   PIGGY_NSEC=nsec1… node scripts/delete-piglet.mjs <eventId> <dTag>
+//   node scripts/delete-piglet.mjs [--piggy=ROLE] <eventId> <dTag>
 //
 // Example:
 //   node scripts/delete-piglet.mjs \
@@ -91,16 +92,24 @@ async function publish(url, evt) {
   return new Promise((resolve) => {
     const ws = new WebSocket(url);
     const timer = setTimeout(() => {
-      try { ws.close(); } catch {}
+      try {
+        ws.close();
+      } catch {}
       resolve({ url, ok: false, note: 'timeout' });
     }, 5000);
     ws.on('open', () => ws.send(JSON.stringify(['EVENT', evt])));
     ws.on('message', (raw) => {
       let msg;
-      try { msg = JSON.parse(raw.toString()); } catch { return; }
+      try {
+        msg = JSON.parse(raw.toString());
+      } catch {
+        return;
+      }
       if (msg[0] === 'OK' && msg[1] === evt.id) {
         clearTimeout(timer);
-        try { ws.close(); } catch {}
+        try {
+          ws.close();
+        } catch {}
         resolve({ url, ok: msg[2], note: msg[3] ?? '' });
       } else if (msg[0] === 'NOTICE') {
         console.error(`NOTICE from ${url}: ${JSON.stringify(msg[1])}`);
