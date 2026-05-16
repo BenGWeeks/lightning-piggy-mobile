@@ -179,11 +179,13 @@ const NfcWriteSheet: React.FC<Props> = ({
       };
       let writeResult: Awaited<ReturnType<typeof writeHuntTagToTag>> | null = null;
       if (isPiglet) {
-        // New multi-record write when the caller supplies the richer
-        // Hunt payload (#73); legacy single-record LNURL write stays
-        // as the fallback so we don't break any pre-#73 call-site. The
-        // hunt-payload path also threads the lock toggle through —
-        // single-record LNURL writes don't currently expose locking.
+        // Multi-record write when the caller supplies the richer Hunt
+        // payload (#73); single-record LNURL write covers private
+        // hides without a published kind 37516. BOTH paths thread the
+        // lock toggle through to the same MifareUltralight helper
+        // (#567 r3) — pre-fix the single-record fallback silently
+        // skipped locking and the toggle was a lie for private
+        // Piglets.
         if (huntPayload) {
           writeResult = await writeHuntTagToTag({
             ...huntPayload,
@@ -265,16 +267,18 @@ const NfcWriteSheet: React.FC<Props> = ({
             </Text>
             <Text style={styles.description}>
               {isPiglet
-                ? // Honest copy keyed to the actual write mode (Copilot
-                  // #572 review). The legacy "and locks it" claim ran
-                  // even when `lockTag` was false or the platform was
-                  // iOS (no lock primitive in the lib today). We split
-                  // the three real cases so the hider knows what's
-                  // about to happen.
-                  lockTag && Platform.OS === 'android' && huntPayload
-                  ? 'This writes the prize link onto the tag and password-locks the chip so no-one can overwrite it. Keep the Piglet still against the phone until it confirms.'
-                  : Platform.OS !== 'android'
-                    ? "This writes the prize link onto the tag. iOS doesn't support our reversible lock yet, so the chip stays open — anyone with an NFC writer could repoint it."
+                ? // Honest copy keyed to the actual write mode. Both
+                  // the multi-record (public) AND single-record
+                  // (private) write paths route the lock toggle
+                  // through the same MifareUltralight helper, so the
+                  // branch is lockTag + platform only — `huntPayload`
+                  // is irrelevant to whether the chip ends up locked.
+                  // Copilot #572 r3 caught the stale `huntPayload`
+                  // gate that lied to private hiders.
+                  Platform.OS !== 'android'
+                  ? "This writes the prize link onto the tag. iOS doesn't support our reversible lock yet, so the chip stays open — anyone with an NFC writer could repoint it."
+                  : lockTag
+                    ? 'This writes the prize link onto the tag and password-locks the chip so no-one can overwrite it. Keep the Piglet still against the phone until it confirms.'
                     : 'This writes the prize link onto the tag and leaves the chip open. Anyone with an NFC writer can later overwrite it — turn on Lock the tag on the previous screen to password-protect.'
                 : `This will write ${displayName}'s Nostr identity (npub) to the tag. Anyone with a Nostr-compatible app can tap the tag to view the profile.`}
             </Text>
@@ -319,7 +323,9 @@ const NfcWriteSheet: React.FC<Props> = ({
               {isPiglet
                 ? lastLock
                   ? 'The prize link is on the tag and the chip is password-protected so no-one can overwrite it. Save the PIN below — you’ll need it to repoint the tag later.'
-                  : 'The prize link is on the tag. Anyone with an NFC writer can still overwrite it — flip the Lock toggle on the previous screen to password-protect this chip on a re-write.'
+                  : Platform.OS !== 'android'
+                    ? "The prize link is on the tag. iOS doesn't support our reversible lock yet, so the chip is left open — anyone with an NFC writer could later repoint it."
+                    : 'The prize link is on the tag. Anyone with an NFC writer can still overwrite it — flip the Lock toggle on the previous screen to password-protect this chip on a re-write.'
                 : `${displayName}'s npub has been written to the NFC tag. Anyone can now tap this tag to view the profile.`}
             </Text>
             {isPiglet && lastLock ? (

@@ -20,6 +20,7 @@ import {
   diagnoseTagLockState,
   familyFromGetVersion,
   generateLockSecrets,
+  hexToBytes,
   pagesForFamily,
   packToHex,
   pwdToPin,
@@ -504,32 +505,15 @@ export async function writeLnurlToTag(
 
     await NfcManager.ndefHandler.writeNdefMessage(bytes);
 
-    // Permanently lock the NDEF area so a passer-by can't overwrite
-    // this Piglet with a phishing / lure URL. `makeReadOnly` writes
-    // the dynamic lock bytes on NTAG21x + Mifare Ultralight C; the
-    // operation is irreversible by design. iOS has no equivalent
-    // API — we skip the call and report `locked: false`.
-    let locked = false;
-    if (isAndroid) {
-      try {
-        // The react-native-nfc-manager API exposes makeReadOnly through
-        // the Android NDEF handler. Use a defensive `any` cast because
-        // the typings on some versions omit the method even though the
-        // native impl is present (issue revolutionsystems/.../#1212).
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const handler = NfcManager.ndefHandler as any;
-        if (typeof handler.makeReadOnly === 'function') {
-          const ok = await handler.makeReadOnly();
-          locked = ok !== false;
-        }
-      } catch {
-        // Lock failure is non-fatal — the data is written. Surface via
-        // `locked: false` so the UI can warn the user that the tag is
-        // still re-writeable and recommend using an NTAG21x chip.
-      }
-    }
-
-    return { family, locked };
+    // No `makeReadOnly()` here — the legacy one-way OTP lock is the
+    // exact behaviour issue #567 set out to replace. When the hider
+    // wants the chip protected they flip the "Lock the tag" toggle on
+    // the wizard, which routes through the new reversible PWD/PACK
+    // path above (Android only). An unlocked write should leave the
+    // chip genuinely unlocked so a future write can update it.
+    // Copilot review on #572 r3 caught the regression where
+    // `lockTag: false` still triggered makeReadOnly for private hides.
+    return { family, locked: false };
   } finally {
     NfcManager.cancelTechnologyRequest().catch(() => {});
   }
@@ -831,8 +815,8 @@ async function writeNdefBytesAndLockAndroid(
   // unlock first, etc.).
   let reusedExistingLock: { pwdHex: string; packHex: string } | null = null;
   if (opts.existingLock) {
-    const storedPwd = hexBytes(opts.existingLock.pwdHex, 4);
-    const expectedPack = hexBytes(opts.existingLock.packHex, 2);
+    const storedPwd = hexToBytes(opts.existingLock.pwdHex, 4);
+    const expectedPack = hexToBytes(opts.existingLock.packHex, 2);
     try {
       const pack = await NfcManager.nfcAHandler.transceive(buildPwdAuthFrame(storedPwd));
       const packMatches =
@@ -1005,14 +989,11 @@ async function diagnoseAndExplainLockState(pages: NtagPages): Promise<string | n
   }
 }
 
-// Thin alias for `hexToBytes` from the lock module — keeps the calls
-// in this file readable without `ntag215Lock.hexToBytes` prefixing.
-const hexBytes = (hex: string, len: number): number[] => {
-  const out: number[] = [];
-  for (let i = 0; i < hex.length; i += 2) out.push(parseInt(hex.slice(i, i + 2), 16));
-  if (out.length !== len) throw new Error(`hex length mismatch: got ${out.length}, want ${len}`);
-  return out;
-};
+// (Removed local `hexBytes` parser — was less strict than the shared
+// `hexToBytes` from `ntag21xLock` and silently accepted odd-length
+// inputs like 'ABCDEF0'. Copilot #572 r3 caught this. Call sites
+// below now use the exported helper directly so corrupted stored
+// secrets fail fast with a clear format error.)
 
 // Thin wrapper around `nfcAHandler.transceive` that surfaces the failing
 // command name in the error message. The native handler returns

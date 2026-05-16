@@ -1942,6 +1942,13 @@ const NfcSupportedTagsCard: React.FC<{
     <View style={styles.tagsCardParagraph}>
       <Text style={styles.tagsCardCross}>✗</Text>
       <Text style={styles.tagsCardParagraphText}>
+        <Text style={styles.tagsCardName}>NTAG213</Text> — only 144 bytes of user memory, too small
+        for the Hide-a-Piglet payload.
+      </Text>
+    </View>
+    <View style={styles.tagsCardParagraph}>
+      <Text style={styles.tagsCardCross}>✗</Text>
+      <Text style={styles.tagsCardParagraphText}>
         <Text style={styles.tagsCardName}>Ultralight C / Mifare Classic</Text> — too small or can't
         lock.
       </Text>
