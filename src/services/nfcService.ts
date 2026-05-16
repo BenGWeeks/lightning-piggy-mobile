@@ -387,10 +387,26 @@ export type WriteLnurlResult = {
  * @param onTagDetected - Optional callback fired the moment a tag is
  *   detected (just before write). Mirrors `writeNpubToTag`.
  */
+// Options-form to thread the issue-#567 `lockTag` toggle through. The
+// legacy two-positional-arg signature is kept as an overload so any
+// older call site keeps compiling, but callers that want the reversible
+// lock should pass the options form.
+export interface WriteLnurlOptions {
+  lnurl: string;
+  onTagDetected?: () => void;
+  lockTag?: boolean;
+  existingLock?: { pwdHex: string; packHex: string };
+}
+
 export async function writeLnurlToTag(
-  lnurl: string,
-  onTagDetected?: () => void,
+  opts: WriteLnurlOptions | string,
+  legacyOnTagDetected?: () => void,
 ): Promise<WriteLnurlResult> {
+  // Normalise the two signatures into a single options object so the
+  // body below only handles one shape.
+  const normalised: WriteLnurlOptions =
+    typeof opts === 'string' ? { lnurl: opts, onTagDetected: legacyOnTagDetected } : opts;
+  const { lnurl, onTagDetected, lockTag = false, existingLock } = normalised;
   const trimmed = lnurl.trim();
   if (!trimmed) {
     throw new Error('Empty LNURL — paste or scan one first');
@@ -425,6 +441,24 @@ export async function writeLnurlToTag(
     : isBech32
       ? `lightning:${trimmed.toUpperCase()}`
       : `lightning:${trimmed}`;
+
+  // Reversible-lock path for single-record LNURL writes (private
+  // Piglets that don't have a nostr:naddr to emit). Bridges to the same
+  // MifareUltralight write+lock the multi-record `writeHuntTagToTag`
+  // uses, so the lock toggle behaves consistently across public AND
+  // private hides. Pre-#572 Copilot review the private path silently
+  // fell back to the legacy one-way `makeReadOnly` even when the
+  // wizard toggle said "Lock the tag — on".
+  if (lockTag && Platform.OS === 'android') {
+    const bytes = Ndef.encodeMessage([Ndef.uriRecord(uri)]);
+    if (!bytes) throw new Error('Failed to encode NDEF message');
+    try {
+      if (!(await ensureNfcStarted())) throw new Error('NFC unavailable on this device');
+      return await writeNdefBytesAndLockAndroid({ onTagDetected, existingLock }, bytes);
+    } finally {
+      NfcManager.cancelTechnologyRequest().catch(() => {});
+    }
+  }
 
   try {
     if (!(await ensureNfcStarted())) {
@@ -651,7 +685,10 @@ export async function writeHuntTagToTag(opts: WriteHuntTagOptions): Promise<Writ
     // cancelling Ndef and re-requesting NfcA needs the tag to leave and
     // re-enter the field, which we want to avoid mid-write.
     if (wantLock) {
-      return await writeHuntTagAndroidLocked(opts, bytes);
+      return await writeNdefBytesAndLockAndroid(
+        { onTagDetected: opts.onTagDetected, existingLock: opts.existingLock },
+        bytes,
+      );
     }
     // Unlocked path (iOS, or Android with lockTag=false) — original
     // Ndef-tech write. The `locked: false` return is honest: no
@@ -725,8 +762,19 @@ async function writeHuntTagUnlocked(
 // sees a standard NDEF read response with the same three records
 // (`lightningpiggy://hunt/...`, `nostr:naddr1...`, optional
 // `lightning:lnurl1...`).
-async function writeHuntTagAndroidLocked(
-  opts: WriteHuntTagOptions,
+// Shared Android NDEF write + reversible PWD/PACK lock. Both
+// `writeHuntTagToTag` (multi-record public hide) and `writeLnurlToTag`
+// (single-record private hide) route through here so the lock
+// behaviour is uniform regardless of payload size. Caller has already
+// gone through `ensureNfcStarted()` + owns its own
+// `cancelTechnologyRequest` in a finally.
+interface LockedWriteOptions {
+  onTagDetected?: () => void;
+  existingLock?: { pwdHex: string; packHex: string };
+}
+
+async function writeNdefBytesAndLockAndroid(
+  opts: LockedWriteOptions,
   ndefBytes: number[],
 ): Promise<WriteLnurlResult> {
   await NfcManager.requestTechnology(NfcTech.MifareUltralight, READER_MODE_OPTS);

@@ -194,7 +194,21 @@ const NfcWriteSheet: React.FC<Props> = ({
             existingLock,
           });
         } else {
-          await writeLnurlToTag(lnurl, onTagDetected);
+          // Private Piglet — no nostr:naddr to emit, just the LNURL
+          // bearer record. The locked-write path still applies on
+          // Android so a passer-by can't repoint the chip (Copilot
+          // #572 review: this branch used to silently fall back to
+          // the irreversible `makeReadOnly` lock even when the
+          // wizard toggle was on). The single-record writer routes
+          // through the same MifareUltralight helper as the
+          // multi-record path when lockTag is true.
+          const result = await writeLnurlToTag({
+            lnurl,
+            onTagDetected,
+            lockTag,
+            existingLock,
+          });
+          writeResult = result;
         }
       } else {
         await writeNpubToTag(npub, onTagDetected);

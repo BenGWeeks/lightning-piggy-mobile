@@ -1102,14 +1102,25 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
               {nfcReady && pubkey ? (
                 <View style={styles.payloadPreview}>
                   <Text style={styles.payloadPreviewLabel}>Tag will carry:</Text>
-                  <Text style={styles.payloadPreviewLine} numberOfLines={1}>
-                    • {process.env.EXPO_PUBLIC_HUNT_TAG_BASE_URL ?? 'lightningpiggy://hunt/'}
-                    {ensurePiggyId().slice(0, 16)}…
-                  </Text>
-                  <Text style={styles.payloadPreviewLine} numberOfLines={1}>
-                    • nostr:naddr1… ({GC_LISTING_KIND}:{pubkey.slice(0, 8)}…:
-                    {ensurePiggyId().slice(0, 12)}…)
-                  </Text>
+                  {/* Public hides emit three records (LP deep link +
+                      Nostr naddr + LNURL bearer); private hides emit
+                      only the LNURL because the cache isn't on relays
+                      and the LP deep-link would route to a missing
+                      kind 37516. The runtime matches via
+                      writeHuntTagToTag (public) vs writeLnurlToTag
+                      (private) below. */}
+                  {isPublic ? (
+                    <>
+                      <Text style={styles.payloadPreviewLine} numberOfLines={1}>
+                        • {process.env.EXPO_PUBLIC_HUNT_TAG_BASE_URL ?? 'lightningpiggy://hunt/'}
+                        {ensurePiggyId().slice(0, 16)}…
+                      </Text>
+                      <Text style={styles.payloadPreviewLine} numberOfLines={1}>
+                        • nostr:naddr1… ({GC_LISTING_KIND}:{pubkey.slice(0, 8)}…:
+                        {ensurePiggyId().slice(0, 12)}…)
+                      </Text>
+                    </>
+                  ) : null}
                   {lnurl.trim() ? (
                     <Text style={styles.payloadPreviewLine} numberOfLines={1}>
                       • lightning:{lnurl.trim().slice(0, 12).toUpperCase()}…
