@@ -305,8 +305,18 @@ export const ExploreMiniMap: React.FC<Props> = ({
           onMessage={(e) => {
             try {
               const msg = JSON.parse(e.nativeEvent.data);
-              if (msg.type === 'ready') setReady(true);
-              else if (msg.type === 'bounds' && msg.bbox && onBoundsChange) {
+              if (msg.type === 'ready') {
+                if (!ready) {
+                  // Single-shot marker — distinguishes WebView mount cost
+                  // from RN-level mount of the surrounding card. The HTML
+                  // is inlined so the round-trip is local; but Leaflet's
+                  // init + tile-spritesheet decode can still run hundreds
+                  // of ms on the WebView's renderer thread, and the bridge
+                  // 'ready' postMessage lands once that's done.
+                  console.log(`[PerfBlock] ExploreMiniMap WebView ready`);
+                }
+                setReady(true);
+              } else if (msg.type === 'bounds' && msg.bbox && onBoundsChange) {
                 onBoundsChange(msg.bbox);
               }
             } catch {}

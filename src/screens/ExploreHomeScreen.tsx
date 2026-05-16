@@ -111,7 +111,20 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // and Home-tab users pay nothing — the prefetch only fires when the
   // Explore tab is first visited.
   useEffect(() => {
-    prefetchDataset();
+    // Defer off the synchronous mount path. prefetchDataset reads a file
+    // and parses 100s of KB of merchant JSON on the JS thread; calling it
+    // inline meant cold-mount paid that cost before paint. setTimeout(0)
+    // yields once so the first render lands first; the prefetch then runs
+    // before any pos-gated fetch needs the cache, so the user still sees
+    // the merchant rail seeded from memory.
+    const handle = setTimeout(() => {
+      const __t0 = performance.now();
+      prefetchDataset();
+      console.log(
+        `[PerfBlock] ExploreHome prefetchDataset kicked: +${Math.round(performance.now() - __t0)}ms`,
+      );
+    }, 0);
+    return () => clearTimeout(handle);
   }, []);
 
   // ----- location ---------------------------------------------------------
@@ -233,6 +246,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     (async () => {
       setMerchantsLoading(true);
       try {
+        const __t0 = performance.now();
         // ~50 km half-side around the user. Rural users (Longstanton,
         // Highlands, mid-Wales) sit in 0-merchant 5 km tiles; widening
         // to ~50 km surfaces the closest drive-away merchants on the
@@ -246,6 +260,10 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           maxLon: pos.lon + 2,
           maxLat: pos.lat + 2,
         });
+        const __ms = Math.round(performance.now() - __t0);
+        if (__ms > 200) {
+          console.log(`[PerfBlock] ExploreHome fetchPlacesInBbox: ${__ms}ms places=${places.length}`);
+        }
         if (!cancelled) setMerchants(places);
       } catch {
         // BTC Map outage shouldn't break the whole hub — empty rail.
@@ -314,8 +332,15 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // render instantly on cold start while the live relay subs backfill.
   useEffect(() => {
     let cancelled = false;
+    const __t0 = performance.now();
     Promise.all([loadCachedCaches(), loadCachedEvents()]).then(([cs, es]) => {
       if (cancelled) return;
+      const __ms = Math.round(performance.now() - __t0);
+      if (__ms > 200) {
+        console.log(
+          `[PerfBlock] ExploreHome loadCachedCaches+Events: ${__ms}ms caches=${cs.length} events=${es.length}`,
+        );
+      }
       if (cs.length > 0) {
         setCaches((prev) => {
           if (prev.size > 0) return prev; // live sub already filled in
