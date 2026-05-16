@@ -8,7 +8,6 @@ import {
   ActivityIndicator,
   AppState,
   type AppStateStatus,
-  Platform,
 } from 'react-native';
 import {
   BottomSheetModal,
@@ -17,7 +16,7 @@ import {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import { AlertCircle, Nfc, PartyPopper, PiggyBank } from 'lucide-react-native';
-import { readHuntTagPayload, cancelNfcOperation, isNfcEnabled } from '../services/nfcService';
+import { readHuntTagPayload, cancelNfcOperation } from '../services/nfcService';
 import {
   LnurlWithdrawError,
   claimLnurlWithdraw,
@@ -131,18 +130,16 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
   const startRead = useCallback(async () => {
     setErrorMessage('');
     setClaimedSats(null);
-    const enabled = await isNfcEnabled();
-    if (!enabled) {
-      if (mountedRef.current) {
-        setStage('error');
-        setErrorMessage(
-          Platform.OS === 'android'
-            ? 'NFC is turned off. Please enable NFC in your device settings.'
-            : 'NFC is turned off. Go to Settings to enable NFC.',
-        );
-      }
-      return;
-    }
+    // Skip the synchronous `isNfcEnabled()` pre-flight here so we
+    // can call requestTechnology (which is what activates Android
+    // reader-mode and stops the OS NDEF dispatcher from showing
+    // "Open with…") as quickly as possible after the sheet opens.
+    // Each native round-trip on Android costs ~100 ms; the previous
+    // pre-flight gave a fast hider enough time to bring the tag to
+    // the phone BEFORE reader-mode came up, so the OS chooser
+    // intercepted. If NFC is actually disabled, readHuntTagPayload's
+    // `ensureNfcStarted()` returns false and surfaces the same error
+    // message below.
     setStage('ready');
     try {
       const result = await readHuntTagPayload({
