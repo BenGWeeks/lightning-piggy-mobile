@@ -22,6 +22,13 @@ import {
 import TabHeader from '../components/TabHeader';
 import { ContentRail } from '../components/ContentRail';
 import { ExploreMiniMap } from '../components/ExploreMiniMap';
+import { LibreMiniMap } from '../components/LibreMiniMap';
+// A/B switch for the native MapLibre POC (#552 / #563). When the env
+// flag is set, the Explore hub renders LibreMiniMap (native renderer,
+// no WebView) instead of ExploreMiniMap (WebView Leaflet). Lets us
+// compare perceived mount latency + JS-thread occupancy without
+// shipping the swap to every user.
+const USE_LIBRE_MAP = process.env.EXPO_PUBLIC_USE_LIBRE_MAP === '1';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import { courses, type Course } from '../data/learnContent';
 import {
@@ -667,24 +674,34 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           </View>
         ) : (
           <>
-            <ExploreMiniMap
-              lat={pos?.lat ?? null}
-              lon={pos?.lon ?? null}
-              userAccuracyMetres={pos?.accuracy ?? null}
-              merchants={merchants}
-              caches={[...caches.values()]}
-              events={[...events.values()]}
-              loading={merchantsLoading && caches.size === 0}
-              onTapMap={() => navigation.navigate('Map')}
-              onInteractionChange={setMapTouched}
-              interactive
-              // Feed the BTC Map category keys present in the current
-              // merchant set into the Legend sheet so it can show the
-              // category iconography below the pin-type rows.
-              legendCategories={[
-                ...new Set(merchants.flatMap((m) => m.categories ?? []).filter(Boolean)),
-              ]}
-            />
+            {USE_LIBRE_MAP ? (
+              <LibreMiniMap
+                lat={pos?.lat ?? null}
+                lon={pos?.lon ?? null}
+                merchants={merchants}
+                caches={[...caches.values()]}
+                events={[...events.values()]}
+              />
+            ) : (
+              <ExploreMiniMap
+                lat={pos?.lat ?? null}
+                lon={pos?.lon ?? null}
+                userAccuracyMetres={pos?.accuracy ?? null}
+                merchants={merchants}
+                caches={[...caches.values()]}
+                events={[...events.values()]}
+                loading={merchantsLoading && caches.size === 0}
+                onTapMap={() => navigation.navigate('Map')}
+                onInteractionChange={setMapTouched}
+                interactive
+                // Feed the BTC Map category keys present in the current
+                // merchant set into the Legend sheet so it can show the
+                // category iconography below the pin-type rows.
+                legendCategories={[
+                  ...new Set(merchants.flatMap((m) => m.categories ?? []).filter(Boolean)),
+                ]}
+              />
+            )}
           </>
         )}
 
