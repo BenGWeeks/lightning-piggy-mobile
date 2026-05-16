@@ -687,6 +687,8 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
                 merchants={merchants}
                 caches={[...caches.values()]}
                 events={[...events.values()]}
+                onTapMap={() => navigation.navigate('Map')}
+                onInteractionChange={setMapTouched}
               />
             ) : (
               <ExploreMiniMap
