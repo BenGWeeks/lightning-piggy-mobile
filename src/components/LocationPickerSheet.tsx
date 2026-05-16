@@ -17,6 +17,8 @@ import {
 } from '@gorhom/bottom-sheet';
 import { WebView } from 'react-native-webview';
 import { MapPin, Check, X } from 'lucide-react-native';
+import { LibreMiniMap } from './LibreMiniMap';
+const USE_LIBRE_MAP = process.env.EXPO_PUBLIC_USE_LIBRE_MAP === '1';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { getDevPinnedLocation } from '../utils/devLocation';
@@ -195,6 +197,32 @@ const LocationPickerSheet: React.FC<Props> = ({
             <View style={styles.mapLoading}>
               <ActivityIndicator color={colors.brandPink} />
             </View>
+          ) : USE_LIBRE_MAP ? (
+            // LibreMiniMap with the crosshair overlay + onBoundsChange
+            // gives us the same pick-by-pan UX as the Leaflet draggable
+            // marker, but with the native renderer. We treat every
+            // post-mount region change as user intent (the initial
+            // mount fires once at the resolved-start coords; everything
+            // after is the user panning to a new spot).
+            <LibreMiniMap
+              lat={resolvedStart.lat}
+              lon={resolvedStart.lon}
+              userAccuracyMetres={null}
+              merchants={[]}
+              caches={[]}
+              events={[]}
+              defaultZoom={resolvedStart.zoom}
+              interactive
+              fill
+              crosshair
+              onBoundsChange={(bbox) => {
+                // Centre of the bbox is where the crosshair sits.
+                const lat = (bbox.minLat + bbox.maxLat) / 2;
+                const lon = (bbox.minLon + bbox.maxLon) / 2;
+                setPicked({ lat, lon });
+                setUserMoved(true);
+              }}
+            />
           ) : (
           <WebView
             originWhitelist={['*']}
