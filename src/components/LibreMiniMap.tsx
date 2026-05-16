@@ -153,31 +153,21 @@ const LibreMiniMapInner: React.FC<Props> = ({
   if (lat === null || lon === null) return <View style={styles.container} />;
 
   return (
-    <View
-      style={styles.container}
-      // Belt + braces touch suppression. The wrapper's onStartShouldSet
-      // ResponderCapture claims the touch the instant a finger lands
-      // anywhere inside the map's bounds, BEFORE the outer ScrollView's
-      // RefreshControl can interpret a downward drag as pull-to-refresh.
-      // We don't actually keep the responder (native MapLibre handles
-      // pan/zoom via its own gesture recognizer below us), but the
-      // capture is enough to flip mapTouched=true synchronously on
-      // touch-down so scrollEnabled flips false before the gesture is
-      // classified. Region-change events (below) handle the longer-lived
-      // pan window for the same suppression.
-      onStartShouldSetResponderCapture={() => {
-        onInteractionChange?.(true);
-        return false; // don't actually capture — let MapLibre's native recognizer handle pan/zoom
-      }}
-      onResponderRelease={() => onInteractionChange?.(false)}
-      onResponderTerminate={() => onInteractionChange?.(false)}
-    >
+    <View style={styles.container}>
       <Map
         style={styles.map}
         mapStyle={JSON.stringify(OSM_STYLE)}
-        // Reinforces the wrapper-level suppression: fires when the camera
-        // actually starts moving (long-running pan). Returns false when
-        // the user lifts a finger.
+        // The native MapLibre view consumes touches before they bubble
+        // up to a parent View. We catch user-driven pan/zoom via the
+        // map's own region-change events. onRegionWillChange fires when
+        // the camera begins moving, onRegionDidChange when it stops —
+        // bracketing the window during which the outer ScrollView's
+        // RefreshControl needs to stay disabled. (Previous attempt used
+        // onStartShouldSetResponderCapture on the wrapper to flip the
+        // flag synchronously on touch-down, but returning false from
+        // capture meant onResponderRelease never fired — the flag would
+        // stick true and freeze page scrolling until reload. See the
+        // 2026-05 commit history for the regression.)
         onRegionWillChange={() => onInteractionChange?.(true)}
         onRegionDidChange={() => onInteractionChange?.(false)}
       >
