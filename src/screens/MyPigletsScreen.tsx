@@ -447,7 +447,7 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
           // Cache resolution moved from the find-log subscribe callback
           // to this render path — see the FoundEntry comment. The lookup
           // is O(1) and we wire `cacheByCoord` into the SectionList via
-          // `extraData` below so a late-arriving kind 37516 always
+          // `extraData` above so a late-arriving kind 37516 always
           // re-runs `renderItem` and the row's name re-paints, even on
           // the my-finds path (whose `foundList` useMemo doesn't itself
           // depend on the cache mirror).
