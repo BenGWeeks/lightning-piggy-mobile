@@ -248,57 +248,12 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
           </>
         )}
 
-        {/* NWC wallet: relay URL (read-only) */}
-        {wallet.walletType === 'nwc' && relayUrl && (
-          <>
-            <Text style={[styles.label, { marginTop: 20 }]}>Relay</Text>
-            <Text style={styles.xpubText} numberOfLines={2}>
-              {relayUrl}
-            </Text>
-          </>
-        )}
-
-        {/* On-chain wallet: show xpub (read-only) */}
-        {wallet.walletType === 'onchain' && xpubDisplay && (
-          <>
-            <Text style={[styles.label, { marginTop: 20 }]}>Extended Public Key</Text>
-            <TouchableOpacity onPress={handleCopyXpub} activeOpacity={0.7}>
-              <Text style={styles.xpubText} numberOfLines={3}>
-                {xpubDisplay}
-              </Text>
-              <Text style={styles.copyHint}>Tap to copy</Text>
-            </TouchableOpacity>
-          </>
-        )}
-
-        <Text style={[styles.label, { marginTop: 20 }]}>Card Design</Text>
-        <View style={styles.themeGrid}>
-          {themeList.map((theme) => (
-            <MiniWalletCard
-              key={theme.id}
-              theme={theme}
-              selected={selectedTheme === theme.id}
-              onPress={() => setSelectedTheme(theme.id)}
-            />
-          ))}
-        </View>
-
-        <TouchableOpacity
-          style={styles.saveButton}
-          onPress={handleSave}
-          testID="wallet-settings-save"
-          accessibilityLabel="Save wallet settings"
-        >
-          <Text style={styles.saveButtonText}>Save</Text>
-        </TouchableOpacity>
-
         {/* CoinOS managed-wallet recovery callout (#287). Visually
-            prominent block — pink-tinted surface with shield-alert
+            prominent block — pink-bordered surface with shield-alert
             badge — so the recovery credentials read as a "save this
             now" affordance rather than just another settings row.
-            Mirrors the copy from CoinosRecoverySheet so a user who
-            dismissed the post-create sheet too quickly sees the same
-            warning here. */}
+            Sits between Lightning Address and Relay so the user sees
+            it inline with the other wallet identity fields. */}
         {coinosRecovery && (
           <View style={styles.recoveryCallout}>
             <View style={styles.recoveryCalloutHeader}>
@@ -355,6 +310,50 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
             {recoveryError && <Text style={styles.recoveryErrorText}>{recoveryError}</Text>}
           </View>
         )}
+
+        {/* NWC wallet: relay URL (read-only) */}
+        {wallet.walletType === 'nwc' && relayUrl && (
+          <>
+            <Text style={[styles.label, { marginTop: 20 }]}>Relay</Text>
+            <Text style={styles.xpubText} numberOfLines={2}>
+              {relayUrl}
+            </Text>
+          </>
+        )}
+
+        {/* On-chain wallet: show xpub (read-only) */}
+        {wallet.walletType === 'onchain' && xpubDisplay && (
+          <>
+            <Text style={[styles.label, { marginTop: 20 }]}>Extended Public Key</Text>
+            <TouchableOpacity onPress={handleCopyXpub} activeOpacity={0.7}>
+              <Text style={styles.xpubText} numberOfLines={3}>
+                {xpubDisplay}
+              </Text>
+              <Text style={styles.copyHint}>Tap to copy</Text>
+            </TouchableOpacity>
+          </>
+        )}
+
+        <Text style={[styles.label, { marginTop: 20 }]}>Card Design</Text>
+        <View style={styles.themeGrid}>
+          {themeList.map((theme) => (
+            <MiniWalletCard
+              key={theme.id}
+              theme={theme}
+              selected={selectedTheme === theme.id}
+              onPress={() => setSelectedTheme(theme.id)}
+            />
+          ))}
+        </View>
+
+        <TouchableOpacity
+          style={styles.saveButton}
+          onPress={handleSave}
+          testID="wallet-settings-save"
+          accessibilityLabel="Save wallet settings"
+        >
+          <Text style={styles.saveButtonText}>Save</Text>
+        </TouchableOpacity>
 
         {coinosRecovery && (
           <TouchableOpacity
