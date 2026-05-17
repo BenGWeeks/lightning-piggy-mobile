@@ -518,7 +518,11 @@ function useDismissibleSheet(onClose: () => void): {
             duration: 180,
             useNativeDriver: true,
           }).start(() => {
-            translateY.setValue(0);
+            // Don't reset translateY before unmounting — that snaps the
+            // sheet back to the open position for one frame ("flashes
+            // full size and then disappears"). The component unmounts
+            // when onClose flips the parent's selected state to null,
+            // and the next mount creates a fresh translateY at 0.
             onClose();
           });
         } else {
