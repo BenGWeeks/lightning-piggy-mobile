@@ -19,14 +19,36 @@ interface PersistedNavState {
   savedAt: number;
 }
 
+// Minimal NavigationState shape check — enough to keep us from handing
+// NavigationContainer a malformed blob that crashes on mount. We don't
+// recurse into nested route state; React Navigation rebuilds nested
+// state lazily as the user navigates, so a missing nested field
+// degrades to "restore the parent stack, lose the child" rather than
+// throwing. An empty `{}` or an array of routes-without-names would
+// throw at mount, hence the explicit array / `name`-string check.
+const isNavigationStateShape = (v: unknown): v is NavigationState => {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
+  const s = v as Record<string, unknown>;
+  if (typeof s.index !== 'number') return false;
+  if (!Array.isArray(s.routes)) return false;
+  if (!Array.isArray(s.routeNames)) return false;
+  if (
+    !s.routes.every(
+      (r) => r && typeof r === 'object' && typeof (r as { name?: unknown }).name === 'string',
+    )
+  ) {
+    return false;
+  }
+  return true;
+};
+
 const isPersistedNavState = (v: unknown): v is PersistedNavState => {
   if (!v || typeof v !== 'object') return false;
   const o = v as Record<string, unknown>;
   return (
     typeof o.version === 'number' &&
     typeof o.savedAt === 'number' &&
-    typeof o.state === 'object' &&
-    o.state !== null
+    isNavigationStateShape(o.state)
   );
 };
 
@@ -62,9 +84,10 @@ export const persistNavigationState = async (state: NavigationState | undefined)
   }
 };
 
-// Clear the persisted state. Used on sign-out so the next signed-in
-// session doesn't restore the previous user's last screen, and exposed
-// for tests / debug.
+// Clear the persisted state. Exposed for tests / debug; intended for
+// future sign-out / identity-switch wiring so the next signed-in
+// session doesn't restore the previous user's last screen. Not yet
+// called from the auth flow — see #598 follow-up.
 export const clearPersistedNavigationState = async (): Promise<void> => {
   try {
     await AsyncStorage.removeItem(NAV_STATE_KEY);

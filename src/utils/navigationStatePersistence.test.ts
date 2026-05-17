@@ -85,6 +85,35 @@ describe('navigationStatePersistence — defensive parsing', () => {
     expect(await loadPersistedNavigationState()).toBeUndefined();
   });
 
+  it('returns undefined when the saved state is an empty object', async () => {
+    // Pre-fix, this slipped past the type guard and crashed NavigationContainer.
+    await AsyncStorage.setItem(
+      NAV_STATE_KEY,
+      JSON.stringify({ version: 1, state: {}, savedAt: 0 }),
+    );
+    expect(await loadPersistedNavigationState()).toBeUndefined();
+  });
+
+  it('returns undefined when the saved state has routes without `name`', async () => {
+    await AsyncStorage.setItem(
+      NAV_STATE_KEY,
+      JSON.stringify({
+        version: 1,
+        savedAt: 0,
+        state: { index: 0, routeNames: ['X'], routes: [{ key: 'k' }] },
+      }),
+    );
+    expect(await loadPersistedNavigationState()).toBeUndefined();
+  });
+
+  it('returns undefined when the saved state is an array (not an object)', async () => {
+    await AsyncStorage.setItem(
+      NAV_STATE_KEY,
+      JSON.stringify({ version: 1, savedAt: 0, state: [] }),
+    );
+    expect(await loadPersistedNavigationState()).toBeUndefined();
+  });
+
   it('swallows AsyncStorage failures on load', async () => {
     const spy = jest.spyOn(AsyncStorage, 'getItem').mockRejectedValueOnce(new Error('disk full'));
     expect(await loadPersistedNavigationState()).toBeUndefined();

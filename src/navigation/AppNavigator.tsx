@@ -343,6 +343,12 @@ export default function AppNavigator() {
         if (initialUrl) return;
         const saved = await loadPersistedNavigationState();
         if (!cancelled && saved) setInitialNavState(saved);
+      } catch {
+        // Linking.getInitialURL() can reject on platforms where the
+        // intent-resolution chain isn't ready yet (rare, but seen on
+        // some Android OEMs). Treat it as "no deep-link, no saved
+        // state" — the navigator renders its defaults and the user
+        // lands on Home.
       } finally {
         if (!cancelled) setIsRestoringNavState(false);
       }
