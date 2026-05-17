@@ -45,6 +45,12 @@ export interface UseLiveUserLocationResult {
 }
 
 export interface UseLiveUserLocationOptions {
+  /** When false the hook is a no-op — no permission request, no GPS
+   *  calls, no watch subscription. Used by `UserLocationProvider` to
+   *  make the shared subscription lazy: the hook always runs (so the
+   *  React tree stays stable) but only fires up real GPS once at
+   *  least one map screen has retained it. */
+  enabled?: boolean;
   /** Initial `pos` to seed the state with — used by callers that
    *  already have a cached anchor (e.g. `ExploreHomeScreen`'s
    *  merchant-cache anchor) so the map paints something before the
@@ -82,6 +88,7 @@ export function useLiveUserLocation(
     let cancelled = false;
     let watch: Location.LocationSubscription | null = null;
 
+    if (opts.enabled === false) return;
     const accuracy = opts.accuracy ?? Location.Accuracy.High;
     const timeInterval = opts.timeIntervalMs ?? DEFAULT_TIME_INTERVAL_MS;
     const distanceInterval = opts.distanceIntervalM ?? DEFAULT_DISTANCE_INTERVAL_M;
@@ -165,7 +172,7 @@ export function useLiveUserLocation(
     // parent render. The accuracy / interval values are stable for
     // any given screen, so this is safe.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opts.accuracy, opts.timeIntervalMs, opts.distanceIntervalM]);
+  }, [opts.enabled, opts.accuracy, opts.timeIntervalMs, opts.distanceIntervalM]);
 
   return { pos, denied };
 }

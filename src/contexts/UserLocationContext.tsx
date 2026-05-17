@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   useLiveUserLocation,
   type LiveUserLocation,
@@ -21,9 +21,13 @@ import {
  * would have triggered the location permission prompt on every app
  * launch, and kept the GPS hot during Home / Messages / Friends flows
  * that never show a map. So the provider here is lazy: the underlying
- * `useLiveUserLocation` hook only fires once at least one consumer
- * has called `useUserLocation()`. When the last consumer unmounts
- * the subscription tears down automatically.
+ * `useLiveUserLocation` hook only fires its GPS calls once at least
+ * one consumer has called `useUserLocation()`. When the last consumer
+ * unmounts the subscription tears down automatically.
+ *
+ * The hook itself always runs in the provider (so the React tree
+ * stays stable across enable/disable transitions) — it just no-ops
+ * its GPS path when `enabled === false`.
  */
 interface UserLocationValue {
   pos: LiveUserLocation | null;
@@ -36,45 +40,33 @@ const UserLocationContext = createContext<{
   release: () => void;
 } | null>(null);
 
-/**
- * Inner component that subscribes via the hook only when activated.
- * Lives behind a conditional so when `active === false` no GPS calls
- * are made at all.
- */
-const LiveSubscription: React.FC<
-  UseLiveUserLocationOptions & {
-    onChange: (v: UserLocationValue) => void;
-  }
-> = ({ onChange, ...opts }) => {
-  const value = useLiveUserLocation(opts);
-  // Hand the hook's current state up to the provider so it can be
-  // distributed via context. We don't use the hook's return directly
-  // because consumers are subscribed via the context's Provider —
-  // this component's render output is intentionally null.
-  useEffect(() => {
-    onChange(value);
-  }, [value, onChange]);
-  return null;
-};
-
 export const UserLocationProvider: React.FC<
   { children: React.ReactNode } & UseLiveUserLocationOptions
 > = ({ children, ...opts }) => {
-  // Ref count of active consumers. When > 0, mount the subscription.
-  // When it drops back to 0, unmount it so GPS goes idle.
+  // Ref count of active consumers. When > 0, enable the hook's GPS
+  // path. When it drops back to 0, the hook tears its watch down.
   const [refCount, setRefCount] = useState(0);
-  const [value, setValue] = useState<UserLocationValue>({ pos: null, denied: false });
   // Stable retain/release identity so consumers' useEffect cleanup
-  // doesn't see "different function" on every render and re-run.
+  // doesn't see "different function" on every render and re-run
+  // (which would loop release/retain indefinitely).
   const retain = useRef(() => setRefCount((c) => c + 1)).current;
   const release = useRef(() => setRefCount((c) => Math.max(0, c - 1))).current;
 
-  return (
-    <UserLocationContext.Provider value={{ value, retain, release }}>
-      {refCount > 0 ? <LiveSubscription {...opts} onChange={setValue} /> : null}
-      {children}
-    </UserLocationContext.Provider>
+  // Single hook call, with `enabled` flipping between gpu-cold and
+  // gpu-hot. Tree-stable: no remount of children when refCount
+  // transitions 0 ↔ 1.
+  const live = useLiveUserLocation({ ...opts, enabled: refCount > 0 });
+
+  // Stabilise the context object's identity by reference — without
+  // this every parent render passes a fresh object as `value` to
+  // every consumer's useContext, which would re-render every map
+  // even when pos hasn't changed. Memo on the load-bearing fields.
+  const ctxValue = useMemo(
+    () => ({ value: { pos: live.pos, denied: live.denied }, retain, release }),
+    [live.pos, live.denied, retain, release],
   );
+
+  return <UserLocationContext.Provider value={ctxValue}>{children}</UserLocationContext.Provider>;
 };
 
 /**
