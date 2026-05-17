@@ -20,7 +20,6 @@ import {
   getCoinosRecovery,
   type CoinosRecoveryInfo,
 } from '../services/walletStorageService';
-import CoinosRecoverySheet, { CoinosRecoveryDetails } from './CoinosRecoverySheet';
 import { Copy as CopyIcon, Eye, EyeOff, ShieldAlert } from 'lucide-react-native';
 
 interface Props {
@@ -65,15 +64,19 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   // masked password row with a copy button. Null = either not a CoinOS
   // wallet or SecureStore had no record.
   const [coinosRecovery, setCoinosRecovery] = useState<CoinosRecoveryInfo | null>(null);
-  // Eye-toggle for the password row in the recovery callout. Defaults
-  // hidden so the password isn't sitting on-screen if the user opens
-  // settings near a colleague / camera.
+  // Eye-toggles for the secret rows in the recovery callout. Both
+  // default hidden — passwords and NWC strings shouldn't be on-screen
+  // by default if the user opens settings near a colleague / camera.
   const [passwordRevealed, setPasswordRevealed] = useState(false);
-  // Populated lazily when the user taps "View recovery info" — pulls
-  // the username/password from SecureStore and the NWC URL from its
-  // own SecureStore key, then assembles the CoinosRecoveryDetails for
-  // the recovery sheet.
-  const [recoveryDetails, setRecoveryDetails] = useState<CoinosRecoveryDetails | null>(null);
+  const [nwcRevealed, setNwcRevealed] = useState(false);
+  // Full NWC connection string. Loaded alongside relayUrl from
+  // SecureStore so the recovery callout can surface it for managed
+  // CoinOS wallets without forcing the user into the full recovery
+  // sheet just to copy it.
+  const [nwcConnection, setNwcConnection] = useState<string | null>(null);
+  // Surface a non-fatal error if something prevents us from rendering
+  // the recovery callout fully (currently unused — kept for parity
+  // with the original API and as a hook for future failure paths).
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
 
   // Populate fields ONCE when the sheet opens for a given walletId. Using
@@ -93,8 +96,11 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         setRelayUrl(null);
       } else if (wallet.walletType === 'nwc' && walletId) {
         setXpubDisplay(null);
-        // Extract relay URL from NWC connection string
+        // Extract relay URL from NWC connection string. Also stash
+        // the full NWC string so the recovery callout can surface it
+        // for managed CoinOS wallets.
         getNwcUrl(walletId).then((url) => {
+          setNwcConnection(url);
           if (url) {
             try {
               const params = new URLSearchParams(url.split('?')[1] || '');
@@ -112,36 +118,19 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         getCoinosRecovery(walletId).then((rec) => {
           setCoinosRecovery(rec);
           setPasswordRevealed(false);
+          setNwcRevealed(false);
         });
       } else {
         setXpubDisplay(null);
         setRelayUrl(null);
+        setNwcConnection(null);
         setCoinosRecovery(null);
         setPasswordRevealed(false);
+        setNwcRevealed(false);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walletId]);
-
-  const handleViewRecovery = useCallback(async () => {
-    if (!walletId || !coinosRecovery) return;
-    setRecoveryError(null);
-    try {
-      const nwcUrl = await getNwcUrl(walletId);
-      if (!nwcUrl) {
-        setRecoveryError('Recovery info is missing for this wallet.');
-        return;
-      }
-      setRecoveryDetails({
-        baseUrl: coinosRecovery.baseUrl,
-        username: coinosRecovery.username,
-        password: coinosRecovery.password,
-        nwc: nwcUrl,
-      });
-    } catch (e) {
-      setRecoveryError(e instanceof Error ? e.message : 'Failed to load recovery info.');
-    }
-  }, [walletId, coinosRecovery]);
 
   const handleSheetChange = useCallback(
     (index: number) => {
@@ -325,14 +314,46 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
                 </TouchableOpacity>
               </View>
 
-              <TouchableOpacity
-                style={styles.recoveryCalloutLink}
-                onPress={handleViewRecovery}
-                accessibilityLabel="View full CoinOS recovery info including NWC connection string"
-                testID="wallet-settings-view-recovery"
-              >
-                <Text style={styles.recoveryCalloutLinkText}>View full recovery info →</Text>
-              </TouchableOpacity>
+              {nwcConnection && (
+                <>
+                  <Text style={styles.recoveryCalloutLabel}>NWC connection</Text>
+                  <View style={styles.credentialRow}>
+                    <Text
+                      style={styles.credentialText}
+                      selectable={nwcRevealed}
+                      numberOfLines={nwcRevealed ? 3 : 1}
+                    >
+                      {nwcRevealed ? nwcConnection : '••••••••••••'}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => setNwcRevealed((v) => !v)}
+                      accessibilityLabel={
+                        nwcRevealed ? 'Hide NWC connection' : 'Reveal NWC connection'
+                      }
+                      testID="settings-coinos-reveal-nwc"
+                      hitSlop={8}
+                    >
+                      {nwcRevealed ? (
+                        <EyeOff size={18} color={colors.textSupplementary} strokeWidth={2} />
+                      ) : (
+                        <Eye size={18} color={colors.textSupplementary} strokeWidth={2} />
+                      )}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={async () => {
+                        await Clipboard.setStringAsync(nwcConnection);
+                        Alert.alert('Copied', 'NWC connection copied to clipboard.');
+                      }}
+                      accessibilityLabel="Copy NWC connection"
+                      testID="settings-coinos-copy-nwc"
+                      hitSlop={8}
+                    >
+                      <CopyIcon size={18} color={colors.brandPink} strokeWidth={2} />
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+
               {recoveryError && <Text style={styles.recoveryErrorText}>{recoveryError}</Text>}
             </View>
           )}
@@ -400,18 +421,6 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
           </TouchableOpacity>
         </BottomSheetScrollView>
       </BottomSheetModal>
-      {/* Recovery sheet hoisted OUT of the settings BottomSheetModal — a
-        BottomSheetModal nested inside another doesn't dismiss reliably
-        (the inner ref.dismiss() doesn't escape the outer modal's
-        portal context). Rendering as a fragment-level sibling lets it
-        own its own modal stack entry and respond to Done normally. */}
-      <CoinosRecoverySheet
-        visible={!!recoveryDetails}
-        details={recoveryDetails}
-        requireAcknowledge={false}
-        onAcknowledge={() => setRecoveryDetails(null)}
-        onClose={() => setRecoveryDetails(null)}
-      />
     </>
   );
 };

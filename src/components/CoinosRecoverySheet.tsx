@@ -154,6 +154,9 @@ const CoinosRecoverySheet: React.FC<Props> = ({
           // The NWC URL is long; the row stretches and wraps but copy
           // is still the primary affordance.
           truncate
+          // NWC string contains the wallet secret — masking it by
+          // default matches the password row's treatment.
+          maskable
           testID="coinos-recovery-nwc"
         />
 
