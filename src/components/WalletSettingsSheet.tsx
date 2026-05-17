@@ -21,7 +21,7 @@ import {
   type CoinosRecoveryInfo,
 } from '../services/walletStorageService';
 import CoinosRecoverySheet, { CoinosRecoveryDetails } from './CoinosRecoverySheet';
-import { Copy as CopyIcon } from 'lucide-react-native';
+import { Copy as CopyIcon, ShieldAlert } from 'lucide-react-native';
 
 interface Props {
   walletId: string | null;
@@ -292,14 +292,27 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
           <Text style={styles.saveButtonText}>Save</Text>
         </TouchableOpacity>
 
-        {/* CoinOS managed-wallet credentials (#287). Inline username +
-            masked password with copy actions; full NWC string lives
-            behind the "View recovery info" button which opens the
-            CoinosRecoverySheet. Only shown for wallets minted via the
-            managed-wallet flow. */}
+        {/* CoinOS managed-wallet recovery callout (#287). Visually
+            prominent block — pink-tinted surface with shield-alert
+            badge — so the recovery credentials read as a "save this
+            now" affordance rather than just another settings row.
+            Mirrors the copy from CoinosRecoverySheet so a user who
+            dismissed the post-create sheet too quickly sees the same
+            warning here. */}
         {coinosRecovery && (
-          <View style={styles.coinosBlock}>
-            <Text style={[styles.label, { marginTop: 20 }]}>CoinOS Username</Text>
+          <View style={styles.recoveryCallout}>
+            <View style={styles.recoveryCalloutHeader}>
+              <ShieldAlert size={20} color={colors.brandPink} strokeWidth={2.5} />
+              <Text style={styles.recoveryCalloutTitle}>Recovery info</Text>
+            </View>
+            <Text style={styles.recoveryCalloutBody}>
+              Lightning Piggy keeps these securely on this device, but a phone wipe loses access.
+              Save them somewhere safe (a password manager, written down) so you can sign back in to{' '}
+              {coinosRecovery.baseUrl.replace(/^https?:\/\//, '').replace(/\/api$/, '')} and recover
+              your funds.
+            </Text>
+
+            <Text style={styles.recoveryCalloutLabel}>Username</Text>
             <TouchableOpacity
               activeOpacity={0.7}
               onPress={async () => {
@@ -316,7 +329,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
               <CopyIcon size={18} color={colors.brandPink} strokeWidth={2} />
             </TouchableOpacity>
 
-            <Text style={[styles.label, { marginTop: 12 }]}>CoinOS Password</Text>
+            <Text style={styles.recoveryCalloutLabel}>Password</Text>
             <TouchableOpacity
               activeOpacity={0.7}
               onPress={async () => {
@@ -332,26 +345,29 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.coinosRow}
+              style={styles.recoveryCalloutLink}
               onPress={handleViewRecovery}
-              accessibilityLabel="View full CoinOS recovery info"
+              accessibilityLabel="View full CoinOS recovery info including NWC connection string"
               testID="wallet-settings-view-recovery"
             >
-              <Text style={styles.coinosRowText}>View full recovery info</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.coinosRow, styles.coinosRowDisabled]}
-              disabled
-              accessibilityLabel="Migrate to self-custody (coming soon)"
-              testID="wallet-settings-migrate"
-            >
-              <Text style={[styles.coinosRowText, styles.coinosRowTextDisabled]}>
-                Migrate to self-custody
-              </Text>
-              <Text style={styles.coinosRowHint}>Coming soon</Text>
+              <Text style={styles.recoveryCalloutLinkText}>View full recovery info →</Text>
             </TouchableOpacity>
             {recoveryError && <Text style={styles.recoveryErrorText}>{recoveryError}</Text>}
           </View>
+        )}
+
+        {coinosRecovery && (
+          <TouchableOpacity
+            style={[styles.coinosRow, styles.coinosRowDisabled]}
+            disabled
+            accessibilityLabel="Migrate to self-custody (coming soon)"
+            testID="wallet-settings-migrate"
+          >
+            <Text style={[styles.coinosRowText, styles.coinosRowTextDisabled]}>
+              Migrate to self-custody
+            </Text>
+            <Text style={styles.coinosRowHint}>Coming soon</Text>
+          </TouchableOpacity>
         )}
 
         <TouchableOpacity style={styles.disconnectButton} onPress={handleDisconnect}>
@@ -460,6 +476,49 @@ const createStyles = (colors: Palette) =>
     coinosBlock: {
       marginTop: 16,
       gap: 8,
+    },
+    recoveryCallout: {
+      marginTop: 20,
+      backgroundColor: colors.brandPinkLight,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.brandPink,
+      padding: 16,
+      gap: 8,
+    },
+    recoveryCalloutHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    recoveryCalloutTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: colors.brandPink,
+    },
+    recoveryCalloutBody: {
+      fontSize: 13,
+      color: colors.textBody,
+      lineHeight: 18,
+      marginBottom: 4,
+    },
+    recoveryCalloutLabel: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.textSupplementary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+      marginTop: 8,
+    },
+    recoveryCalloutLink: {
+      marginTop: 8,
+      paddingVertical: 6,
+      alignSelf: 'flex-start',
+    },
+    recoveryCalloutLinkText: {
+      color: colors.brandPink,
+      fontSize: 14,
+      fontWeight: '700',
     },
     credentialRow: {
       backgroundColor: colors.background,
