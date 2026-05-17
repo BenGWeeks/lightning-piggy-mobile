@@ -175,7 +175,7 @@ interface WalletContextType {
    * balance-diff detector still runs independently — so if invoice A's
    * expectation is replaced by invoice B before A settles, A's eventual
    * balance increment will *still* fire the overlay via the diff path,
-   * just with worst-case 30 s latency (baseline poll) instead of 1 s.
+   * just with worst-case 10 s latency (baseline poll) instead of 1 s.
    *
    * When `expectedAmountSats` is provided and the lookup reports
    * `paid: true`, the overlay uses that exact amount rather than the
@@ -193,7 +193,7 @@ interface WalletContextType {
   ) => void;
 
   /**
-   * Demand-counted gate on the 30 s background `getBalance` poll. The
+   * Demand-counted gate on the 10 s background `getBalance` poll. The
    * poll runs only while at least one caller has an outstanding request
    * — typical pattern is a balance-displaying screen calling
    * `requestBalancePoll()` inside `useFocusEffect` and using the
@@ -1863,15 +1863,15 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   //
   //   - app returns to foreground → one-shot refresh to catch anything
   //     that arrived while backgrounded.
-  //   - 30 s slow poll while the app is foregrounded → catches
+  //   - 10 s slow poll while the app is foregrounded → catches
   //     lightning-address payments that land without an in-app
-  //     invoice-generation trigger. Worst-case latency ~30 s, which
-  //     is acceptable for casual address receives; the expectPayment
-  //     fast poll (1 s for 3 min) takes over when the user is
-  //     *actively* waiting on a specific invoice.
+  //     invoice-generation trigger. Worst-case latency ~10 s (was 30 s
+  //     pre-#585), still acceptable for casual address receives;
+  //     the expectPayment fast poll (1 s for 3 min) takes over when
+  //     the user is *actively* waiting on a specific invoice.
   //
   // On-chain is skipped — BDK sync is expensive and not safe to run
-  // every 30 s; #134 tracks the on-chain variant of this coverage.
+  // every 10 s; #134 tracks the on-chain variant of this coverage.
   // True background / app-closed delivery needs OS push (#45).
   // Track the active wallet's connection state as an explicit dep so
   // the poll starts/stops when a wallet reconnects without the active
@@ -1883,7 +1883,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const activeWalletConnected =
     activeWallet?.walletType !== 'onchain' && activeWallet?.isConnected === true;
 
-  // Demand-counter for the 30 s balance poll. Incremented by
+  // Demand-counter for the 10 s balance poll. Incremented by
   // `requestBalancePoll()` callers (typically balance-displaying screens
   // inside `useFocusEffect`) and decremented by their returned cleanup.
   // The poll effect below gates on `balancePollDemand > 0` so we only
@@ -1910,17 +1910,28 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // (focus event in a balance-displaying screen).
     if (balancePollDemand <= 0) return;
 
+    // In-flight guard. With a 10 s tick and NWC `getBalance` that can
+    // take >10 s on a slow relay, multiple interval ticks would stack
+    // (each attaching another `.then`) and end up double-writing the
+    // balance + tripling relay traffic. Short-circuit ticks while a
+    // previous one is still pending.
+    let inFlight = false;
     const refreshOnce = () => {
       // Bail if the wallet has since disconnected — we read through
       // `walletsRef` rather than the closure so this is current.
       const current = walletsRef.current.find((w) => w.id === activeWalletId);
       if (!current || !current.isConnected || current.walletType === 'onchain') return;
+      if (inFlight) return;
+      inFlight = true;
       nwcService
         .getBalance(activeWalletId)
         .then((b) => {
           if (b !== null) updateWalletInState(activeWalletId, { balance: b });
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => {
+          inFlight = false;
+        });
     };
 
     let interval: ReturnType<typeof setInterval> | null = null;
