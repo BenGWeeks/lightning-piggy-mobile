@@ -262,8 +262,10 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
           <>
             <View style={styles.miniMapContainer}>
               <LibreMiniMap
-                lat={pos?.lat ?? null}
-                lon={pos?.lon ?? null}
+                // Mini-map follows GPS — camera anchor should track
+                // the live position, not the stale one-shot `pos`.
+                lat={livePos?.lat ?? pos?.lat ?? null}
+                lon={livePos?.lon ?? pos?.lon ?? null}
                 userLat={livePos?.lat ?? null}
                 userLon={livePos?.lon ?? null}
                 userAccuracyMetres={livePos?.accuracy ?? null}

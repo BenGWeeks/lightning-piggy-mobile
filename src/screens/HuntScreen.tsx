@@ -358,8 +358,10 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
           visually (#19). */}
       <View style={styles.mapWrap}>
         <LibreMiniMap
-          lat={pos?.lat ?? null}
-          lon={pos?.lon ?? null}
+          // Mini-map follows GPS — camera anchor should track live
+          // position, not the stale one-shot fetch `pos`.
+          lat={livePos?.lat ?? pos?.lat ?? null}
+          lon={livePos?.lon ?? pos?.lon ?? null}
           userLat={livePos?.lat ?? null}
           userLon={livePos?.lon ?? null}
           userAccuracyMetres={livePos?.accuracy ?? pos?.accuracy ?? null}

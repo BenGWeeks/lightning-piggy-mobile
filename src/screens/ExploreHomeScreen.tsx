@@ -678,8 +678,13 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           </View>
         ) : (
           <LibreMiniMap
-            lat={pos?.lat ?? null}
-            lon={pos?.lon ?? null}
+            // Mini-map is non-interactive (zoom-only, follows GPS) — so
+            // the camera anchor SHOULD track the live position, not
+            // the stale one-shot `pos` (which was seeded from a cached
+            // merchant-centroid anchor on cold start). Falls back to
+            // `pos` only while the live fix is still resolving.
+            lat={livePos?.lat ?? pos?.lat ?? null}
+            lon={livePos?.lon ?? pos?.lon ?? null}
             userLat={livePos?.lat ?? null}
             userLon={livePos?.lon ?? null}
             userAccuracyMetres={livePos?.accuracy ?? pos?.accuracy ?? null}
