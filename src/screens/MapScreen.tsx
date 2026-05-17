@@ -9,6 +9,7 @@ import {
   ScrollView,
   Animated,
   PanResponder,
+  Dimensions,
 } from 'react-native';
 import * as Location from 'expo-location';
 import {
@@ -48,13 +49,13 @@ import type { ParsedCache } from '../services/nostrPlacesService';
 import { fetchCachesByAuthor, subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
 import { useNostr } from '../contexts/NostrContext';
 import { decodeGeohash, encodeGeohash, geohashPrefixes } from '../utils/geohash';
-import { getDevPinnedLocation } from '../utils/devLocation';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import SocialIcon from '../components/SocialIcon';
 import WebOfTrustChip from '../components/WebOfTrustChip';
 import WebOfTrustBottomSheet from '../components/WebOfTrustBottomSheet';
 import LegendSheet from '../components/LegendSheet';
 import { LibreMiniMap } from '../components/LibreMiniMap';
+import { useUserLocation } from '../contexts/UserLocationContext';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -112,6 +113,10 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   const [pos, setPos] = useState<{ lat: number; lon: number; accuracy: number | null } | null>(
     null,
   );
+  // Live position for the user dot — refreshes as the user walks
+  // around without re-centring the map (the camera stays anchored to
+  // the user's initial pos so panning behaviour isn't fighting GPS).
+  const { pos: livePos } = useUserLocation();
   const [places, setPlaces] = useState<BtcMapPlace[]>([]);
   const [caches, setCaches] = useState<Map<string, ParsedCache>>(new Map());
   const [selected, setSelected] = useState<BtcMapPlace | null>(null);
@@ -138,31 +143,30 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // Dev-only emulator fallback (see `getDevPinnedLocation`).
-      const pinned = getDevPinnedLocation();
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (cancelled) return;
+      if (status !== 'granted') {
+        setPermission('denied');
+        return;
+      }
+      setPermission('granted');
       let lat: number;
       let lon: number;
       let accuracy: number | null = null;
-      if (pinned) {
-        lat = pinned.lat;
-        lon = pinned.lon;
-        // Dev-pinned position is a literal lat/lon — no real-world
-        // accuracy applies. Leaving accuracy null suppresses the
-        // halo (drawAccuracyCircle no-ops on null) so the dev pin
-        // doesn't imply false-precision.
-        accuracy = null;
-        setPermission('granted');
+      // Prefer the cached position from UserLocationContext when it's
+      // already populated (the user just came from Explore / Hunt etc.,
+      // so the shared watch has a recent fix). Running a second
+      // independent getCurrentPositionAsync here used to race the
+      // shared watch and snap the camera to a different, sometimes
+      // less-accurate point. The dot stays live via `livePos` below.
+      if (livePos !== null) {
+        lat = livePos.lat;
+        lon = livePos.lon;
+        accuracy = livePos.accuracy;
       } else {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (cancelled) return;
-        if (status !== 'granted') {
-          setPermission('denied');
-          return;
-        }
-        setPermission('granted');
         try {
           const pos = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
+            accuracy: Location.Accuracy.High,
           });
           if (cancelled) return;
           lat = pos.coords.latitude;
@@ -369,7 +373,14 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         <LibreMiniMap
           lat={pos?.lat ?? null}
           lon={pos?.lon ?? null}
-          userAccuracyMetres={pos?.accuracy ?? null}
+          userLat={livePos?.lat ?? null}
+          userLon={livePos?.lon ?? null}
+          // Fall back to the initial fix's accuracy ONLY when there's
+          // no live fix yet. If livePos exists but its accuracy is
+          // null (platform didn't report it), pass null to suppress
+          // the halo — using `pos.accuracy` here would draw a halo
+          // around live coords using accuracy from a different fix.
+          userAccuracyMetres={livePos ? livePos.accuracy : (pos?.accuracy ?? null)}
           merchants={visibleMerchants}
           caches={visibleCaches}
           events={[]}
@@ -520,12 +531,23 @@ function useDismissibleSheet(onClose: () => void): {
       onPanResponderRelease: (_e, g) => {
         const dismiss = g.dy > 100 || g.vy > 0.5;
         if (dismiss) {
+          // Animate fully off-screen, not the old hard-coded 600 px.
+          // The sheet has `maxHeight: '80%'`, so on a tall device
+          // (Pixel 8 ≈ 2400 px) 80% is ~1920 px — translateY=600
+          // left ~1320 px still visible at the moment we unmounted,
+          // which the user saw as the sheet flashing back to full
+          // size right before disappearing. Using the actual screen
+          // height as the off-screen target makes the animation end
+          // truly invisible before unmount.
+          const screenHeight = Dimensions.get('window').height;
           Animated.timing(translateY, {
-            toValue: 600,
+            toValue: screenHeight,
             duration: 180,
             useNativeDriver: true,
           }).start(() => {
-            translateY.setValue(0);
+            // No translateY reset — the sheet unmounts on `onClose`
+            // and the next mount creates a fresh translateY at 0
+            // via useDismissibleSheet's useRef.
             onClose();
           });
         } else {

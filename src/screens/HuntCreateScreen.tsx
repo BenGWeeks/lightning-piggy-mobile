@@ -70,6 +70,7 @@ import NfcWriteSheet from '../components/NfcWriteSheet';
 import NfcUnlockSheet from '../components/NfcUnlockSheet';
 import LocationPickerSheet from '../components/LocationPickerSheet';
 import { LibreMiniMap } from '../components/LibreMiniMap';
+import { useUserLocation } from '../contexts/UserLocationContext';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -91,6 +92,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { signEvent, relays, pubkey } = useNostr();
+  // Live user position for the hide-pin preview map. Map is centred on
+  // the pin the user picked; the user dot follows them as they
+  // potentially walk closer / further while finalising the hide.
+  const { pos: livePos } = useUserLocation();
 
   // Edit-mode identity. When the route carries a `piggyId` we reuse it
   // (and the original createdAt) on save so `savePiggy` overwrites the
@@ -660,7 +665,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         ]);
         return;
       }
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       const lat = pos.coords.latitude;
       const lon = pos.coords.longitude;
       setPin({ lat, lon, geohash: encodeGeohash(lat, lon, 9) });
@@ -1400,6 +1405,9 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                     <LibreMiniMap
                       lat={pin.lat}
                       lon={pin.lon}
+                      userLat={livePos?.lat ?? null}
+                      userLon={livePos?.lon ?? null}
+                      userAccuracyMetres={livePos?.accuracy ?? null}
                       merchants={[]}
                       caches={[]}
                       events={[]}

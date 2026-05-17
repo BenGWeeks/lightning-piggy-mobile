@@ -19,7 +19,6 @@ import { MapPin, Check, X } from 'lucide-react-native';
 import { LibreMiniMap } from './LibreMiniMap';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
-import { getDevPinnedLocation } from '../utils/devLocation';
 
 interface Props {
   visible: boolean;
@@ -64,9 +63,13 @@ const LocationPickerSheet: React.FC<Props> = ({
   // the location lands a few hundred ms after the sheet opens. Order
   // of preference:
   //   1. caller-supplied `initialLat`/`Lon` (edit-mode + already-pinned)
-  //   2. dev-pinned location (emulator parity — see useCompassNavigation)
+  //   2. `Location.getCurrentPositionAsync` (fresh GPS — up to 1.5 s)
   //   3. `Location.getLastKnownPositionAsync` (instant, returns cached fix)
   //   4. UK fallback (54.0, -2.0) at low zoom
+  // We race (2) against a 1.5 s timeout that falls through to (3); a
+  // fresh fix arrives before the user pans in the common case. The
+  // bare last-known path is what caused #595 — a 10-min-old fix from
+  // elsewhere in town quietly seeded the map.
   const [resolvedStart, setResolvedStart] = useState<{
     lat: number;
     lon: number;
@@ -79,6 +82,13 @@ const LocationPickerSheet: React.FC<Props> = ({
   // the caller passed a real initialLat/Lon (i.e. we're editing an
   // existing pin), treat that as already-chosen.
   const [userMoved, setUserMoved] = useState<boolean>(hasInitialPin);
+  // Mirror of `userMoved` for the async fresh-fix .then() to read.
+  // The closure captures the initial value at effect-start so we
+  // can't rely on the React state directly — a ref keeps the
+  // late-arriving fresh-fix race honest about whether the user has
+  // panned in the meantime.
+  const userMovedRef = useRef(userMoved);
+  userMovedRef.current = userMoved;
   // MapLibre's onRegionDidChange fires once on mount at the initial
   // centre — we must NOT count that as user intent or the confirm
   // button enables without any actual interaction. This ref swallows
@@ -93,37 +103,81 @@ const LocationPickerSheet: React.FC<Props> = ({
     }
     sheetRef.current?.present();
     let cancelled = false;
-    const seed = (lat: number, lon: number, zoom: number) => {
+    // `seedSource` tracks WHY the camera is where it is, so a slow
+    // fresh fix can still overwrite the last-known fallback when it
+    // eventually lands (Copilot review on #597). The progression is:
+    //   none → fallback (provisional)
+    //   none → fresh (locked, fresh fix won the race)
+    //   fallback → fresh (provisional fallback upgraded to fresh)
+    //   anything → user-pan: locked (we check userMovedRef below)
+    // We use a ref for userMoved because the region-change callback
+    // writes to setUserMoved and we need to read its CURRENT value
+    // inside the async fresh-fix .then(), not the value captured at
+    // effect-start (which would always be the initial hasInitialPin).
+    let seedSource: 'none' | 'fallback' | 'fresh' = 'none';
+    const seed = (lat: number, lon: number, zoom: number, source: 'fallback' | 'fresh') => {
       if (cancelled) return;
+      if (seedSource === 'fresh') return; // fresh always wins, never re-seed.
+      if (seedSource === 'fallback' && source === 'fallback') return; // first fallback wins.
+      if (seedSource === 'fallback' && source === 'fresh' && userMovedRef.current) {
+        // Fresh fix landed AFTER the user already panned — respect
+        // their manual choice; don't yank the camera back.
+        seedSource = 'fresh';
+        return;
+      }
+      seedSource = source;
       setResolvedStart({ lat, lon, zoom });
       setPicked({ lat, lon });
       setUserMoved(hasInitialPin);
     };
     if (hasInitialPin) {
-      seed(initialLat as number, initialLon as number, 16);
+      // Edit mode — caller-supplied pin is treated as the locked
+      // 'fresh' choice; no further auto-seeds run.
+      seed(initialLat as number, initialLon as number, 16, 'fresh');
       return () => {
         cancelled = true;
       };
     }
-    // Emulator override — same source the rest of the app uses so dev
-    // pins agree across screens.
-    const pinned = getDevPinnedLocation();
-    if (pinned) {
-      seed(pinned.lat, pinned.lon, 16);
-      return () => {
-        cancelled = true;
-      };
-    }
-    // Last-known is nearly-instant (returns the OS's cached fix) so
-    // the sheet doesn't feel laggy. If null / denied, fall back to UK.
-    Location.getLastKnownPositionAsync({ maxAge: 10 * 60 * 1000 })
-      .then((known) => {
-        if (known) seed(known.coords.latitude, known.coords.longitude, 16);
-        else seed(54.0, -2.0, 5);
+    // Fast-first / fresh-second: kick off a fresh GPS fix immediately,
+    // but race it against a 1.5 s timeout that falls back to the OS's
+    // last-known fix so the sheet never hangs. Both can seed the map;
+    // a fresh fix arriving AFTER the fallback still upgrades the
+    // camera (unless the user has manually panned in the meantime).
+    //
+    // Why not bare last-known (the pre-#595 behaviour)? `maxAge: 10 min`
+    // means a fix from the *same town* a few streets away counts as
+    // "known" — the map opens centred on yesterday's coffee shop.
+    const freshTimeout = setTimeout(() => {
+      Location.getLastKnownPositionAsync({ maxAge: 10 * 60 * 1000 })
+        .then((known) => {
+          if (known) seed(known.coords.latitude, known.coords.longitude, 16, 'fallback');
+          else seed(54.0, -2.0, 5, 'fallback');
+        })
+        .catch(() => seed(54.0, -2.0, 5, 'fallback'));
+    }, 1500);
+    // Request foreground permission BEFORE the fresh fix. Opening
+    // "Pick on map" directly from Hide-a-Piglet step 3 may be the
+    // very first GPS-touching surface in the session — without this
+    // request `getCurrentPositionAsync` rejects with a permission
+    // error and we silently fall through to the UK fallback.
+    Location.requestForegroundPermissionsAsync()
+      .then((perm) => {
+        if (cancelled) return;
+        if (perm.status !== 'granted') return; // last-known/UK paths take over
+        return Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       })
-      .catch(() => seed(54.0, -2.0, 5));
+      .then((pos) => {
+        if (!pos || cancelled) return;
+        clearTimeout(freshTimeout);
+        seed(pos.coords.latitude, pos.coords.longitude, 16, 'fresh');
+      })
+      .catch(() => {
+        // Permission denied / hardware failure — let the timeout path
+        // take over (last-known → UK fallback).
+      });
     return () => {
       cancelled = true;
+      clearTimeout(freshTimeout);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, initialLat, initialLon]);

@@ -4,11 +4,14 @@ import { Animated, View, StyleSheet, TouchableOpacity, Text } from 'react-native
 // `Map<K,V>` global for the coord → source lookups below.
 import {
   Camera,
+  GeoJSONSource,
+  Layer,
   Map as MapLibreMap,
   Marker,
   type CameraRef,
   type MapRef,
 } from '@maplibre/maplibre-react-native';
+import type { Feature, Polygon } from 'geojson';
 import {
   Plus,
   Minus,
@@ -118,6 +121,40 @@ interface Props {
 // without the heavier styling of fully-3D variants.
 const MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/bright';
 
+/**
+ * Geographic accuracy halo. The halo's RADIUS encodes precision
+ * (driven by `userAccuracyMetres` in metres) and CHANGES as the
+ * accuracy improves — walking outside shrinks the radius from
+ * ~250 m indoors to ~5 m outdoors within a few seconds, which is
+ * itself a visible "this is live" signal. An earlier iteration
+ * added an opacity pulse on top via setInterval, but the per-tick
+ * setState contended with PanResponder gesture handling on
+ * MapScreen and caused user-visible bottom-sheet drag jank
+ * (#597 review). Pulse removed; if we want one back, the proper
+ * path is an Animated.Value with `useNativeDriver: true`, or
+ * waiting until the PanResponder migrates to Reanimated.
+ */
+const AccuracyHalo: React.FC<{ feature: Feature<Polygon> }> = ({ feature }) => {
+  return (
+    <GeoJSONSource id="user-accuracy-source" data={feature}>
+      <Layer
+        id="user-accuracy-fill"
+        type="fill"
+        paint={{ 'fill-color': '#4285F4', 'fill-opacity': 0.18 }}
+      />
+      <Layer
+        id="user-accuracy-outline"
+        type="line"
+        paint={{
+          'line-color': '#4285F4',
+          'line-opacity': 0.45,
+          'line-width': 1,
+        }}
+      />
+    </GeoJSONSource>
+  );
+};
+
 const LibreMiniMapInner: React.FC<Props> = ({
   lat,
   lon,
@@ -160,17 +197,64 @@ const LibreMiniMapInner: React.FC<Props> = ({
     return () => loop.stop();
   }, [pulse]);
 
-  // Halo size: a fixed-pixel sizing scaled gently by accuracy so a 1000 m
-  // fix looks larger than a 5 m fix, but never balloons larger than the
-  // mini-map can show. The numbers are deliberately not geographic — a
-  // proper geographic radius would need a CircleLayer with a GeoJSON
-  // source, deferred to a follow-up. For the mini-map at zoom 13 a
-  // 60-100 px halo reads as "your location is somewhere around here".
-  const haloDiameter = useMemo(() => {
-    const acc = userAccuracyMetres;
-    if (acc === null || acc === undefined || !Number.isFinite(acc)) return 60;
-    return Math.max(50, Math.min(120, 40 + Math.log10(acc) * 22));
-  }, [userAccuracyMetres]);
+  // Build a many-sided polygon approximating a circle of
+  // `userAccuracyMetres` radius around the user's lat/lon. Rendered as
+  // a GeoJSONSource + Layer (fill) so MapLibre's projection handles
+  // zoom-scaling automatically — the halo grows / shrinks with the
+  // map exactly like a Google-Maps blue accuracy circle should.
+  //
+  // Pre-#593 we rendered a fixed-pixel halo via Marker, which stayed
+  // visually identical at any zoom — wildly over-representing accuracy
+  // at wide zoom and under-representing at close zoom (cf the comment
+  // we just replaced + the screenshots on the original issue).
+  //
+  // 64-vertex polygon strikes the perceptual balance: smooth enough
+  // that nobody notices it's not a true circle at any sensible zoom,
+  // cheap enough that re-computing on lat/lon/accuracy change is free.
+  // Flat-earth lat/lon offsets — exact within sub-metre tolerance up
+  // to several km, which is the worst-case civilian-GPS accuracy.
+  // Halo follows the same three-mode rule as the user dot below:
+  // explicit numbers win, explicit null suppresses (don't paint a halo
+  // around the cache while the cached fix is still loading), undefined
+  // falls back to camera centre (mini-map default).
+  const haloLat = userLat !== undefined ? userLat : lat;
+  const haloLon = userLon !== undefined ? userLon : lon;
+  const haloFeature = useMemo<Feature<Polygon> | null>(() => {
+    if (
+      typeof userAccuracyMetres !== 'number' ||
+      !Number.isFinite(userAccuracyMetres) ||
+      userAccuracyMetres <= 0 ||
+      haloLat === null ||
+      haloLon === null
+    ) {
+      return null;
+    }
+    const VERTICES = 64;
+    const METRES_PER_DEG_LAT = 111_320;
+    const metresPerDegLng = 111_320 * Math.cos((haloLat * Math.PI) / 180);
+    // Near the poles cos(lat) collapses toward zero, so dividing the
+    // east-west offset by metresPerDegLng would explode (or divide by
+    // zero) and produce wildly invalid coordinates. The flat-earth
+    // approximation also stops being meaningful past ~85°. Suppress
+    // the halo in that band rather than render a deformed polygon.
+    if (!Number.isFinite(metresPerDegLng) || Math.abs(metresPerDegLng) < 1) {
+      return null;
+    }
+    const ring: [number, number][] = [];
+    for (let i = 0; i < VERTICES; i++) {
+      const theta = (i / VERTICES) * 2 * Math.PI;
+      const dLat = (userAccuracyMetres * Math.cos(theta)) / METRES_PER_DEG_LAT;
+      const dLng = (userAccuracyMetres * Math.sin(theta)) / metresPerDegLng;
+      ring.push([haloLon + dLng, haloLat + dLat]);
+    }
+    // Close the ring — GeoJSON polygons require first === last vertex.
+    ring.push(ring[0]);
+    return {
+      type: 'Feature',
+      properties: {},
+      geometry: { type: 'Polygon', coordinates: [ring] },
+    };
+  }, [haloLat, haloLon, userAccuracyMetres]);
 
   // O(1) coord → original-source lookups so onSelect* handlers don't do
   // a linear .find() per rendered marker. The build cost is one
@@ -217,26 +301,49 @@ const LibreMiniMapInner: React.FC<Props> = ({
   // interactive, leave the camera wherever the user panned it — the
   // recenter-on-me overlay button gives them an explicit affordance to
   // jump back to their location.
+  //
+  // 3-second pan when the position updates. The watch fires at most
+  // every 30 s, so the user perceives a smooth glide from the old
+  // centre to the new instead of a hard cut. The user-dot Marker has
+  // fixed lat/lon coords; MapLibre re-projects it every animation
+  // frame as the camera moves, so the dot smoothly slides into the
+  // viewport centre over those 3 s without any per-frame setState.
   useEffect(() => {
     if (interactive) return;
     if (lat === null || lon === null) return;
     cameraRef.current?.flyTo({
       center: [lon, lat],
       zoom: currentZoomRef.current,
-      duration: 250,
+      duration: 3000,
     });
   }, [lat, lon, interactive]);
 
   const recenterOnMe = () => {
-    if (lat === null || lon === null) return;
+    // Target the user's live position (userLat/userLon) when it's
+    // been supplied — the map anchor (lat/lon) is the static initial
+    // camera centre on the interactive full-screen map and would
+    // jump us back to where we OPENED the screen, not where we are
+    // RIGHT NOW. Falls back to the anchor when no live override is
+    // wired (mini-map case where centre and user are the same).
+    const targetLat = userLat ?? lat;
+    const targetLon = userLon ?? lon;
+    if (targetLat === null || targetLon === null) return;
     cameraRef.current?.flyTo({
-      center: [lon, lat],
+      center: [targetLon, targetLat],
       zoom: currentZoomRef.current,
       duration: 400,
     });
   };
 
-  if (lat === null || lon === null) return <View style={styles.container} />;
+  if (lat === null || lon === null) {
+    // Empty-state placeholder while GPS is still resolving. Must honour
+    // `fill` — otherwise full-screen consumers (MapScreen,
+    // LocationPickerSheet) briefly render the mini-map chassis (16 px
+    // margin, 14 px radius, small fixed height) before the layout flips
+    // to fill once a fix arrives. #601 caught this as a visible
+    // size-flash on the Map-screen open transition.
+    return <View style={fill ? styles.containerFill : styles.container} testID={testID} />;
+  }
 
   return (
     <View style={fill ? styles.containerFill : styles.container} testID={testID}>
@@ -280,35 +387,51 @@ const LibreMiniMapInner: React.FC<Props> = ({
         }
       >
         <Camera ref={cameraRef} initialViewState={{ center: [lon, lat], zoom: defaultZoom }} />
-        {/* User position — translucent pulsing accuracy halo behind a
-            solid dot. The halo sizes by GPS accuracy when known and is
-            suppressed for dev-pinned positions (where accuracy is null).
-            userLat/userLon (detail-screen override) takes precedence
-            over lat/lon (mini-map default where camera centre + user
-            dot are the same point). */}
-        <Marker id="user" lngLat={[userLon ?? lon, userLat ?? lat]}>
-          <View style={styles.userMarkerWrap}>
-            {/* Halo only when accuracy is a finite positive number —
-                NaN / Infinity / ≤ 0 would render at the fallback diameter
-                and silently mislead the user about their precision. */}
-            {typeof userAccuracyMetres === 'number' &&
-            Number.isFinite(userAccuracyMetres) &&
-            userAccuracyMetres > 0 ? (
-              <Animated.View
-                style={[
-                  styles.userHalo,
-                  {
-                    width: haloDiameter,
-                    height: haloDiameter,
-                    borderRadius: haloDiameter / 2,
-                    transform: [{ scale: pulse }],
-                  },
-                ]}
-              />
-            ) : null}
-            <View style={styles.userDot} />
-          </View>
-        </Marker>
+        {/* Accuracy halo — geographic polygon so the map's projection
+            scales it with zoom (#593). Rendered BEFORE the user-dot
+            Marker so the solid dot draws on top of the translucent
+            fill. Suppressed when accuracy is null / non-positive
+            (dev-pinned positions, no-GPS state) — silently misleading
+            the user about their precision was the pre-fix behaviour. */}
+        {haloFeature && <AccuracyHalo feature={haloFeature} />}
+        {/* User position — solid dot. Three prop modes:
+              - userLat/userLon both numbers → render there.
+              - userLat/userLon both undefined (mini-map default: not
+                passed) → render at camera centre [lon, lat]; centre
+                IS the user in those flows.
+              - userLat/userLon explicitly null → the caller (a detail
+                screen) is telling us "we don't know yet". DON'T fall
+                through to camera centre — that would plant the dot
+                on the cache / merchant / event for one frame before
+                the cached fix arrives, which is exactly the
+                "location momentarily showed as the geo-cache then
+                jumped" bug we hit.
+            The pixel-sized Marker stays a position indicator — sizing
+            it geographically would make it vanish at wide zoom and
+            dominate at close zoom. */}
+        {(() => {
+          const userLatProvided = userLat !== undefined;
+          const userLonProvided = userLon !== undefined;
+          const dotLat = userLatProvided ? userLat : lat;
+          const dotLon = userLonProvided ? userLon : lon;
+          if (dotLat === null || dotLon === null) return null;
+          return (
+            <Marker id="user" lngLat={[dotLon, dotLat]}>
+              <View style={styles.userMarkerWrap}>
+                {/* Pixel-marker pulse is only useful as a "find
+                    yourself" affordance when no geographic halo is
+                    rendered (no accuracy / dev-pinned position). Once
+                    the GeoJSON halo is in place it makes the dot
+                    look like it has two halos — drop the pixel
+                    pulse in that case. */}
+                {!haloFeature && (
+                  <Animated.View style={[styles.userDotPulse, { transform: [{ scale: pulse }] }]} />
+                )}
+                <View style={styles.userDot} />
+              </View>
+            </Marker>
+          );
+        })()}
         {/* Merchants: pin colour signals payment type (pink Lightning,
             orange on-chain only). Glyph mirrors the BTC Map category
             icon the user sees on the Places-for-you rail card for the
@@ -488,14 +611,16 @@ const createStyles = (colors: Palette) =>
       borderWidth: 2,
       borderColor: colors.white,
     },
-    // Google-Maps-style translucent blue accuracy halo. The transform
-    // scale animation lives on the Animated.View at render time.
-    userHalo: {
+    // Subtle "I'm here" pulse around the user dot. The geographic
+    // accuracy halo (rendered as a MapLibre fill layer behind the
+    // marker) is the precision indicator; this pulse is purely a
+    // helps-find-yourself affordance.
+    userDotPulse: {
       position: 'absolute',
-      backgroundColor: 'rgba(45, 136, 255, 0.18)',
-      borderWidth: 1,
-      borderColor: 'rgba(45, 136, 255, 0.45)',
-      zIndex: 1,
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: 'rgba(45, 136, 255, 0.22)',
     },
     // Shared pin chassis — circular white-bordered chip carrying the
     // category Lucide glyph. 22 px matches the Leaflet `lp-pin` size in

@@ -26,6 +26,7 @@ import HuntFilterSheet, { countActiveFilters } from '../components/HuntFilterShe
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
 import { LibreMiniMap } from '../components/LibreMiniMap';
+import { useUserLocation } from '../contexts/UserLocationContext';
 import LegendSheet from '../components/LegendSheet';
 import { type ParsedCache } from '../services/nostrPlacesService';
 import { fetchCachesByAuthor, subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
@@ -38,7 +39,6 @@ import {
   geohashPrefixes,
   haversineMetres,
 } from '../utils/geohash';
-import { getDevPinnedLocation } from '../utils/devLocation';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -63,6 +63,10 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   const [pos, setPos] = useState<{ lat: number; lon: number; accuracy: number | null } | null>(
     null,
   );
+  // Live position for the user dot — refreshes as the user walks
+  // around without re-firing the nearby-cache subscription (which is
+  // keyed on the initial `pos`).
+  const { pos: livePos } = useUserLocation();
   const [caches, setCaches] = useState<Map<string, ParsedCache>>(
     () => new Map(peekCachedCachesSync().map((c) => [c.coord, c])),
   );
@@ -165,18 +169,10 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   // to zero when a hider uses an unusual cache type.
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
 
-  // Location resolve — dev-fallback first, then real GPS.
+  // Location resolve.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const pinned = getDevPinnedLocation();
-      if (pinned) {
-        // Dev pin is a literal lat/lon — no real accuracy applies, so
-        // null suppresses the halo (drawAccuracyCircle in
-        // src/utils/mapMeDot.ts no-ops on null).
-        if (!cancelled) setPos({ ...pinned, accuracy: null });
-        return;
-      }
       try {
         const perm = await Location.requestForegroundPermissionsAsync();
         if (perm.status !== 'granted') {
@@ -184,7 +180,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
           return;
         }
         const fix = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
+          accuracy: Location.Accuracy.High,
         });
         if (!cancelled) {
           // `coords.accuracy` is 1-σ horizontal accuracy in metres on
@@ -362,9 +358,17 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
           visually (#19). */}
       <View style={styles.mapWrap}>
         <LibreMiniMap
-          lat={pos?.lat ?? null}
-          lon={pos?.lon ?? null}
-          userAccuracyMetres={pos?.accuracy ?? null}
+          // Mini-map follows GPS — camera anchor should track live
+          // position, not the stale one-shot fetch `pos`.
+          lat={livePos?.lat ?? pos?.lat ?? null}
+          lon={livePos?.lon ?? pos?.lon ?? null}
+          userLat={livePos?.lat ?? null}
+          userLon={livePos?.lon ?? null}
+          // Only fall back to the initial-fetch accuracy when there's
+          // no live fix yet; once livePos exists, trust its accuracy
+          // (including null) so we never render a halo around live
+          // coords with stale accuracy.
+          userAccuracyMetres={livePos ? livePos.accuracy : (pos?.accuracy ?? null)}
           merchants={[]}
           caches={filteredCaches.map((c) => c.cache)}
           events={[]}
