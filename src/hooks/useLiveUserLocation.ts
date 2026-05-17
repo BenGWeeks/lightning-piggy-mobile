@@ -95,7 +95,7 @@ export function useLiveUserLocation(
       }
 
       // Step 1: last-known fix (instant, may be 10 min stale). Paints
-      // the map while step 2 fetches a fresh one in parallel.
+      // the map while the parallel fetch + watch land below.
       try {
         const last = await Location.getLastKnownPositionAsync({ maxAge: 10 * 60 * 1000 });
         if (!cancelled && last) {
@@ -109,23 +109,27 @@ export function useLiveUserLocation(
         /* non-fatal — fall through */
       }
 
-      // Step 2: fresh fix that overwrites the stale last-known.
-      try {
-        const fresh = await Location.getCurrentPositionAsync({ accuracy });
-        if (!cancelled) {
+      // Step 2 + 3: kick off the fresh one-shot AND the watch in
+      // parallel. Awaiting the one-shot before the watch let
+      // `getCurrentPositionAsync` stalls (an Android quirk that
+      // already bit us in `locationService.ts`) silently block the
+      // live subscription forever — so the dot would freeze on the
+      // last-known fix and never update.
+      Location.getCurrentPositionAsync({ accuracy })
+        .then((fresh) => {
+          if (cancelled) return;
           setPos({
             lat: fresh.coords.latitude,
             lon: fresh.coords.longitude,
             accuracy: typeof fresh.coords.accuracy === 'number' ? fresh.coords.accuracy : null,
           });
-        }
-      } catch {
-        /* non-fatal — last-known stands in until the watch fires */
-      }
+        })
+        .catch(() => {
+          /* non-fatal — last-known stands in until the watch fires */
+        });
 
-      // Step 3: keep the dot live as the user walks around.
       try {
-        watch = await Location.watchPositionAsync(
+        const sub = await Location.watchPositionAsync(
           { accuracy, timeInterval, distanceInterval },
           (update) => {
             if (cancelled) return;
@@ -136,6 +140,16 @@ export function useLiveUserLocation(
             });
           },
         );
+        // Race: if the component unmounted while watchPositionAsync
+        // was resolving, the cleanup at the bottom of this effect
+        // already ran (watch was still `null` at that point). The
+        // newly-resolved subscription would then be orphaned and
+        // leak GPS forever. Remove it inline before assigning.
+        if (cancelled) {
+          sub.remove();
+        } else {
+          watch = sub;
+        }
       } catch {
         /* non-fatal — the dot stops updating but the map still works */
       }

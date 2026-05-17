@@ -121,6 +121,56 @@ interface Props {
 // without the heavier styling of fully-3D variants.
 const MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/bright';
 
+/**
+ * Geographic accuracy halo + its gentle opacity pulse, factored out
+ * into its own component so the pulse's React-state churn doesn't
+ * re-render `LibreMiniMapInner`'s marker-rich subtree. With the pulse
+ * inlined into the parent, each setState (8 fps) was re-running the
+ * full markers map every ~125 ms — on a dense MapScreen that's a lot
+ * of work for an opacity oscillation. Isolated here, only the two
+ * Layers re-render on pulse tick.
+ *
+ * The pulse itself signals "this is a live signal, not a frozen
+ * snapshot". The halo's RADIUS already encodes precision (driven by
+ * GPS accuracy in metres); this opacity oscillation is a separate
+ * "alive" affordance.
+ */
+const AccuracyHalo: React.FC<{ feature: Feature<Polygon> }> = ({ feature }) => {
+  const [pulse, setPulse] = useState(0);
+  useEffect(() => {
+    const PULSE_PERIOD_MS = 1600;
+    const PULSE_FPS = 8;
+    const start = Date.now();
+    const id = setInterval(() => {
+      const t = ((Date.now() - start) % PULSE_PERIOD_MS) / PULSE_PERIOD_MS;
+      setPulse(Math.sin(t * 2 * Math.PI));
+    }, 1000 / PULSE_FPS);
+    return () => clearInterval(id);
+  }, []);
+  // Base + amplitude — centralised so designers can tune without
+  // chasing literals across the two paint props below.
+  const fillOpacity = 0.175 + 0.045 * pulse;
+  const lineOpacity = 0.45 + 0.15 * pulse;
+  return (
+    <GeoJSONSource id="user-accuracy-source" data={feature}>
+      <Layer
+        id="user-accuracy-fill"
+        type="fill"
+        paint={{ 'fill-color': '#4285F4', 'fill-opacity': fillOpacity }}
+      />
+      <Layer
+        id="user-accuracy-outline"
+        type="line"
+        paint={{
+          'line-color': '#4285F4',
+          'line-opacity': lineOpacity,
+          'line-width': 1,
+        }}
+      />
+    </GeoJSONSource>
+  );
+};
+
 const LibreMiniMapInner: React.FC<Props> = ({
   lat,
   lon,
@@ -218,37 +268,6 @@ const LibreMiniMapInner: React.FC<Props> = ({
     };
   }, [haloLat, haloLon, userAccuracyMetres]);
 
-  // Gentle opacity pulse on the geographic accuracy halo so the user
-  // sees that it's a live signal — not a frozen snapshot. The halo's
-  // RADIUS is the precision indicator (driven by GPS accuracy); this
-  // opacity pulse is a "this is alive" affordance separate from
-  // accuracy itself. ~1.6 s round-trip matches the user-dot pulse.
-  //
-  // MapLibre's paint prop doesn't natively accept animated drivers, so
-  // we modulate the opacity via React state at ~8 fps — smooth enough
-  // for an opacity-only pulse, cheap on the JS thread. The Layer
-  // re-renders on each state change; the halo's GeoJSON source stays
-  // stable so no projection recompute happens.
-  const [haloPulse, setHaloPulse] = useState(0);
-  const haloOn = haloFeature !== null;
-  useEffect(() => {
-    if (!haloOn) return;
-    const PULSE_PERIOD_MS = 1600;
-    const PULSE_FPS = 8;
-    const start = Date.now();
-    const id = setInterval(() => {
-      // Sine wave in [-1, +1]; consumers below map this to opacity
-      // ranges so the visual amplitude is centralised here.
-      const t = ((Date.now() - start) % PULSE_PERIOD_MS) / PULSE_PERIOD_MS;
-      setHaloPulse(Math.sin(t * 2 * Math.PI));
-    }, 1000 / PULSE_FPS);
-    return () => clearInterval(id);
-  }, [haloOn]);
-  // Centralise the opacity envelope so designers can tune without
-  // chasing literals in two places. Base + amplitude.
-  const haloFillOpacity = 0.175 + 0.045 * haloPulse;
-  const haloLineOpacity = 0.45 + 0.15 * haloPulse;
-
   // O(1) coord → original-source lookups so onSelect* handlers don't do
   // a linear .find() per rendered marker. The build cost is one
   // map-construction pass per render where caches/events change; the
@@ -305,9 +324,17 @@ const LibreMiniMapInner: React.FC<Props> = ({
   }, [lat, lon, interactive]);
 
   const recenterOnMe = () => {
-    if (lat === null || lon === null) return;
+    // Target the user's live position (userLat/userLon) when it's
+    // been supplied — the map anchor (lat/lon) is the static initial
+    // camera centre on the interactive full-screen map and would
+    // jump us back to where we OPENED the screen, not where we are
+    // RIGHT NOW. Falls back to the anchor when no live override is
+    // wired (mini-map case where centre and user are the same).
+    const targetLat = userLat ?? lat;
+    const targetLon = userLon ?? lon;
+    if (targetLat === null || targetLon === null) return;
     cameraRef.current?.flyTo({
-      center: [lon, lat],
+      center: [targetLon, targetLat],
       zoom: currentZoomRef.current,
       duration: 400,
     });
@@ -371,24 +398,7 @@ const LibreMiniMapInner: React.FC<Props> = ({
             fill. Suppressed when accuracy is null / non-positive
             (dev-pinned positions, no-GPS state) — silently misleading
             the user about their precision was the pre-fix behaviour. */}
-        {haloFeature && (
-          <GeoJSONSource id="user-accuracy-source" data={haloFeature}>
-            <Layer
-              id="user-accuracy-fill"
-              type="fill"
-              paint={{ 'fill-color': '#4285F4', 'fill-opacity': haloFillOpacity }}
-            />
-            <Layer
-              id="user-accuracy-outline"
-              type="line"
-              paint={{
-                'line-color': '#4285F4',
-                'line-opacity': haloLineOpacity,
-                'line-width': 1,
-              }}
-            />
-          </GeoJSONSource>
-        )}
+        {haloFeature && <AccuracyHalo feature={haloFeature} />}
         {/* User position — solid dot. userLat/userLon (detail-screen
             override) takes precedence over lat/lon (mini-map default
             where camera centre + user dot are the same point). The dot
