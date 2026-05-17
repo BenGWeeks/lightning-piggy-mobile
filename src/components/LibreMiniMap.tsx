@@ -740,11 +740,65 @@ const createStyles = (colors: Palette) =>
     },
   });
 
+// Item-identity equality for memoised array props. ExploreHomeScreen
+// derives `cachesArr` via `useMemo(() => [...caches.values()], [caches])`
+// — the array is a fresh reference every time the underlying `caches`
+// Map changes, which is once per coalesced flush during a relay backfill
+// (see #605 / PR #612). A bare `React.memo` shallow-comparator sees the
+// fresh reference and re-renders MapLibre's entire marker layout on
+// every flush — visible to the user as the map "flashing" each time
+// they switch tabs back to Explore.
+//
+// Reference identity per element catches the real change cases (new
+// cache pushed, existing one updated to a newer event — both produce a
+// new object reference for that index) while skipping the re-render
+// when the content is unchanged by reference. O(N) but N is small —
+// typical Explore burst is <100 caches + <50 events, so the comparator
+// runs in microseconds vs the tens-of-ms MapLibre marker re-layout it
+// avoids.
+// `<T,>` (with trailing comma) — in .tsx files a bare `<T>` parses as JSX.
+const sameByItemRef = <T,>(a: readonly T[], b: readonly T[]): boolean => {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return false;
+  return true;
+};
+
+const arePropsEqual = (prev: Props, next: Props): boolean => {
+  // Cheap primitives first — bail on the most common change paths.
+  if (prev.lat !== next.lat) return false;
+  if (prev.lon !== next.lon) return false;
+  if (prev.userAccuracyMetres !== next.userAccuracyMetres) return false;
+  if (prev.userLat !== next.userLat) return false;
+  if (prev.userLon !== next.userLon) return false;
+  if (prev.defaultZoom !== next.defaultZoom) return false;
+  if (prev.interactive !== next.interactive) return false;
+  if (prev.fill !== next.fill) return false;
+  if (prev.crosshair !== next.crosshair) return false;
+  if (prev.testID !== next.testID) return false;
+  // Handlers — host screens should `useCallback` these but fall back
+  // gracefully on reference identity if not.
+  if (prev.onTapMap !== next.onTapMap) return false;
+  if (prev.onOpenLegend !== next.onOpenLegend) return false;
+  if (prev.onBoundsChange !== next.onBoundsChange) return false;
+  if (prev.onSelectMerchant !== next.onSelectMerchant) return false;
+  if (prev.onSelectCache !== next.onSelectCache) return false;
+  if (prev.onSelectEvent !== next.onSelectEvent) return false;
+  // Marker arrays — the whole point of the custom comparator.
+  if (!sameByItemRef(prev.merchants, next.merchants)) return false;
+  if (!sameByItemRef(prev.caches, next.caches)) return false;
+  if (!sameByItemRef(prev.events, next.events)) return false;
+  return true;
+};
+
 // Wrap in React.memo so a parent re-render that doesn't change our
-// props (e.g. opening/closing the LegendSheet on ExploreHomeScreen)
-// doesn't force MapLibre to re-mount its marker children. In dev mode
-// each unguarded render of ExploreHomeScreen logged 250–1000 ms — the
-// memo cuts that cost out for the legend-toggle path entirely.
-export const LibreMiniMap = React.memo(LibreMiniMapInner);
+// props (e.g. opening/closing the LegendSheet on ExploreHomeScreen, or
+// a coalesced cache/event flush that produces a new array reference
+// but the same items) doesn't force MapLibre to re-mount its marker
+// children. In dev mode each unguarded render of ExploreHomeScreen
+// logged 250–1000 ms — the memo cuts that cost out for the
+// legend-toggle path, and the custom comparator extends that to the
+// tab-switch path.
+export const LibreMiniMap = React.memo(LibreMiniMapInner, arePropsEqual);
 
 export default LibreMiniMap;
