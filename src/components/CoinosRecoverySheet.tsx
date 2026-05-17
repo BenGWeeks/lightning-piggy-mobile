@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { BottomSheetModal, BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import * as Clipboard from 'expo-clipboard';
-import { Copy, ShieldAlert } from 'lucide-react-native';
+import { Copy, Eye, EyeOff, ShieldAlert } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 
@@ -142,6 +142,7 @@ const CoinosRecoverySheet: React.FC<Props> = ({
           onCopy={() => copyToClipboard('Password', details.password)}
           colors={colors}
           monospace
+          maskable
           testID="coinos-recovery-password"
         />
         <RecoveryRow
@@ -164,7 +165,19 @@ const CoinosRecoverySheet: React.FC<Props> = ({
 
         <TouchableOpacity
           style={styles.primaryButton}
-          onPress={requireAcknowledge ? onAcknowledge : onClose}
+          onPress={() => {
+            // Belt-and-braces: dismiss the modal locally AND notify the
+            // parent. The useEffect-driven dismissal (via visible=false)
+            // wasn't firing reliably when this sheet is presented over
+            // another BottomSheetModal (settings) — the inner ref.dismiss
+            // call gets swallowed by the outer modal's portal context.
+            // Calling dismiss() directly here pops just this modal; the
+            // onChange handler then propagates to onClose so parent
+            // state stays in sync.
+            ref.current?.dismiss();
+            if (requireAcknowledge) onAcknowledge();
+            else onClose();
+          }}
           testID="coinos-recovery-acknowledge"
           accessibilityLabel={
             requireAcknowledge ? "I've saved this somewhere" : 'Close recovery info'
@@ -186,9 +199,15 @@ const RecoveryRow: React.FC<{
   colors: Palette;
   monospace?: boolean;
   truncate?: boolean;
+  /** Hide the value behind dots with an eye-toggle. For secrets like
+   *  the account password the recipient shouldn't have on-screen by
+   *  default in case they're holding the phone in public. */
+  maskable?: boolean;
   testID?: string;
-}> = ({ label, value, onCopy, colors, monospace, truncate, testID }) => {
+}> = ({ label, value, onCopy, colors, monospace, truncate, maskable, testID }) => {
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const [revealed, setRevealed] = useState(false);
+  const shown = maskable && !revealed ? '••••••••••••' : value;
   return (
     <View style={styles.row}>
       <Text style={styles.rowLabel}>{label}</Text>
@@ -198,8 +217,23 @@ const RecoveryRow: React.FC<{
           numberOfLines={truncate ? 3 : undefined}
           testID={testID}
         >
-          {value}
+          {shown}
         </Text>
+        {maskable && (
+          <TouchableOpacity
+            onPress={() => setRevealed((v) => !v)}
+            style={styles.copyButton}
+            accessibilityLabel={revealed ? `Hide ${label}` : `Reveal ${label}`}
+            testID={`${testID}-reveal`}
+            hitSlop={8}
+          >
+            {revealed ? (
+              <EyeOff size={18} color={colors.textSupplementary} strokeWidth={2} />
+            ) : (
+              <Eye size={18} color={colors.textSupplementary} strokeWidth={2} />
+            )}
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           onPress={onCopy}
           style={styles.copyButton}
