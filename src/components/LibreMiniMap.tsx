@@ -360,9 +360,7 @@ const LibreMiniMapInner: React.FC<Props> = ({
                 accuracy halo is in place it makes the dot look like
                 it has two halos — drop the pixel pulse in that case. */}
             {!haloFeature && (
-              <Animated.View
-                style={[styles.userDotPulse, { transform: [{ scale: pulse }] }]}
-              />
+              <Animated.View style={[styles.userDotPulse, { transform: [{ scale: pulse }] }]} />
             )}
             <View style={styles.userDot} />
           </View>
