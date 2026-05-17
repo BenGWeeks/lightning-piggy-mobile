@@ -81,7 +81,35 @@ export type ExploreStackParamList = {
   // reuses the same screen, pre-fills every field, and on save replaces
   // the local record + re-emits the kind 37516 listing under the same
   // `d` tag. Omit to create a new Piggy.
-  HuntCreate: { piggyId?: string } | undefined;
+  //
+  // `fallbackCache` (optional) is the published ParsedCache as known to
+  // the caller — used to hydrate the wizard when the local HiddenPiggy
+  // record is missing on this device but the active identity is the
+  // event's author (#596 cross-device edit). Plain-JSON shape, safe to
+  // serialise through navigation state.
+  HuntCreate:
+    | {
+        piggyId?: string;
+        fallbackCache?: {
+          coord: string;
+          hiderPubkey: string;
+          d: string;
+          name: string;
+          description: string;
+          geohash: string | null;
+          difficulty: number | null;
+          terrain: number | null;
+          size: string | null;
+          cacheType: string | null;
+          hint: string | null;
+          imageUrl: string | null;
+          createdAt: number;
+          expiresAt: number | null;
+          waitSeconds: number | null;
+          uses: number | null;
+        };
+      }
+    | undefined;
   // `coord` (optional) is the kind 37516 cache coord the finder is
   // claiming against. When supplied, recordClaim stores it as piggyId
   // so HuntPiggyDetailScreen can unlock the find-log composer via
