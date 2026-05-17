@@ -1,0 +1,51 @@
+appId: com.lightningpiggy.app.dev
+name: Subflow — generate a 21-sat bolt11 and share it to the open thread
+---
+# Reusable subflow: from the currently-open conversation thread (1:1
+# OR group), opens the Receive sheet via the attach panel, enters
+# 21 sats, generates an invoice, taps "Send to <friend/group>".
+#
+# After the send a bolt11 bubble renders showing "21 sats" + an
+# expiry countdown. The receiver gets a Pay button; the sender's
+# bolt11SettlementCache + usePaidInvoiceTracker poll for settlement
+# and flip the bubble to "Paid" once the recipient pays it.
+
+- tapOn:
+    id: 'conversation-attach'
+- waitForAnimationToEnd: { timeout: 1500 }
+- tapOn:
+    id: 'attach-send-invoice'
+- waitForAnimationToEnd: { timeout: 3000 }
+
+# We're in Receive sheet's "Custom amount" view (preset-friend / preset-
+# group flow lands here directly). Use AmountEntryScreen's per-key
+# testIDs rather than `text:` matchers — Maestro text matchers are
+# regex-based and a single-digit "2" / "1" can race against any other
+# numeric copy on screen.
+- tapOn: { id: 'amount-entry-key-2' }
+- tapOn: { id: 'amount-entry-key-1' }
+- assertVisible: '21'
+
+# Generate invoice — this issues a real bolt11 from the active wallet
+# (which should be MAESTRO_NWC_LITTLE on the AVD). Use the
+# amount-entry-confirm testID rather than the "Generate invoice" text
+# label so a future copy change won't silently break the test.
+- tapOn: { id: 'amount-entry-confirm' }
+
+# `receive-send-to-friend` mounts immediately on the receive view but
+# stays disabled until friendShareValue (the bolt11) is ready.
+# Waiting only for visibility races and taps a disabled button. Wait
+# for the rendered bolt11 string itself first — `lnbc` prefix is
+# universal across mainnet bolt11 invoices and means the invoice has
+# materialised in state.
+- extendedWaitUntil:
+    visible: { text: 'lnbc.*' }
+    timeout: 15000
+
+# Send to friend / group — same testID for both flows.
+- tapOn:
+    id: 'receive-send-to-friend'
+- waitForAnimationToEnd: { timeout: 5000 }
+
+# Sheet dismisses; bubble lands in the thread.
+- assertVisible: '21 sats'

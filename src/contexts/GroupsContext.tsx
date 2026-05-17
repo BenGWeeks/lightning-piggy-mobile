@@ -28,8 +28,18 @@ import {
   GROUP_STATE_KIND,
   subscribeGroupStateForViewer,
 } from '../services/nostrService';
+import { perAccountKey } from '../services/perAccountStorage';
+import { useTrustGraph } from './TrustGraphContext';
+import { saveWotSettings, type WotTier } from '../services/wotSettingsService';
+import { deriveInitialWotTier } from '../utils/wotMigration';
 
-const FOLLOWING_ONLY_KEY = 'groups_following_only';
+const FOLLOWING_ONLY_KEY_BASE = 'groups_following_only';
+// One-shot migration marker keyed off the legacy followingOnly → wotTier
+// derivation (#547). The migration only runs once per device — after the
+// first successful derive we set this flag so re-mounts of GroupsProvider
+// (account switches, hot reload) never re-stomp a wotTier the user has
+// since edited via the WoT bottom sheet.
+const WOT_MIGRATION_DONE_KEY = '@lp:wot-migration:v1-from-followingOnly';
 
 interface GroupsContextType {
   groups: Group[];
@@ -40,14 +50,39 @@ interface GroupsContextType {
    */
   visibleGroups: Group[];
   /**
-   * If true, only groups that include at least one OTHER member from the
-   * current user's follow list are shown. Default true; in dev_mode the
-   * user can toggle it off via the chip on GroupsScreen.
+   * @deprecated Since #547 the messages + groups filter is driven by the
+   * three-tier `wotTier` in TrustGraphContext, not this boolean. Kept
+   * exposed for the migration window so any external consumer doesn't
+   * crash — derived from `effectiveWotTier !== 'all'`. New code should
+   * read `effectiveWotTier` (or `useTrustGraph().wotTier`) directly.
    */
   followingOnly: boolean;
+  /**
+   * @deprecated See `followingOnly`. Setting this maps onto `setWotTier`:
+   * true → 'friends', false → 'all' (clamped to 'friends' when not in
+   * secret mode, matching the production hard-lock).
+   */
   setFollowingOnly: (next: boolean) => void;
-  /** Mirrors AsyncStorage `dev_mode`. Controls whether the chip is interactive. */
-  devMode: boolean;
+  // Effective WoT tier after the production hard-lock has been applied.
+  // Mirrors the persisted `wotTier` from TrustGraphContext except that
+  // 'all' is coerced to 'friends' when the user is not in secret mode —
+  // preventing a stale persisted 'all' from leaking past the parental-
+  // control gate after secretMode is flipped back off. Consumers should
+  // read this rather than `useTrustGraph().wotTier` when the visibility
+  // decision must honour the hard-lock.
+  effectiveWotTier: WotTier;
+  /** Mirrors AsyncStorage `secret_mode`. Controls whether the chip is interactive. */
+  secretMode: boolean;
+  /**
+   * Persist + broadcast a new secret-mode value. Writes to AsyncStorage
+   * AND updates the context state so every consumer (AboutScreen,
+   * Messages, Groups, Hunt's WoT picker) sees the change immediately.
+   * Without this setter the triple-tap on About would only update
+   * AboutScreen's local state, leaving consumers stuck on the value
+   * read at GroupsProvider mount — the cause of the "WoT chip stays
+   * disabled even though I just enabled secret mode" bug.
+   */
+  setSecretMode: (next: boolean) => void;
   loading: boolean;
   createGroup: (name: string, memberPubkeys: string[]) => Promise<Group>;
   renameGroup: (groupId: string, newName: string) => Promise<boolean>;
@@ -130,13 +165,21 @@ const GroupsContext = createContext<GroupsContextType | undefined>(undefined);
 export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
-  const [followingOnly, setFollowingOnlyState] = useState(true);
-  const [devMode, setDevMode] = useState(false);
+  const [secretMode, setSecretModeState] = useState(false);
+  // Tier source-of-truth lives in TrustGraphContext (#547). We read it here
+  // so visibleGroups can apply the same trust filter the Map / Hunt / Events
+  // surfaces use — keeping the three-tier model unified across the app.
+  // `isTrustedAtTier` (not `isTrusted`) so the `visibleGroups` filter
+  // evaluates against `effectiveWotTier`. Otherwise a persisted 'all'
+  // would short-circuit `isTrusted` even when the hard-lock clamps to
+  // 'friends' (secretMode off), letting hidden groups leak past the
+  // parental-control gate (#547 follow-up).
+  const { wotTier, setWotTier, isTrustedAtTier } = useTrustGraph();
   // Per-group activity rollup (last message + recent senders). Populated
   // on mount from AsyncStorage and kept fresh by the inbound-message
   // listener below + a local hook from GroupConversationScreen sends.
   const [activityByGroup, setActivityByGroup] = useState<Record<string, GroupActivity>>({});
-  const { publishGroupState, pubkey, relays, isLoggedIn, contacts } = useNostr();
+  const { publishGroupState, pubkey, relays, isLoggedIn } = useNostr();
   // Track the latest reconciler in a ref so the subscription effect can
   // call it without re-subscribing on every group state change.
   const reconcilerRef = useRef<
@@ -150,27 +193,145 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     | null
   >(null);
 
+  // Re-load groups whenever the active identity flips. Without keying
+  // off pubkey, switching from Big Piggy to Middle Piggy would still
+  // show Big's groups until a hard reload — the whole point of the
+  // multi-account refactor (#288) is the seamless switch.
   useEffect(() => {
-    loadGroups()
+    if (!pubkey) {
+      // Logged out: clear so a fresh login (or restart) doesn't render
+      // the previous identity's group cache for a frame.
+      setGroups([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    loadGroups(pubkey)
       .then((loaded) => setGroups(loaded))
       .finally(() => setLoading(false));
-  }, []);
+  }, [pubkey]);
 
-  // Load persisted user preferences for the chip + dev-mode escape hatch.
-  // dev_mode is shared with AboutScreen's hidden-tap unlock so the same
-  // override surfaces across the app.
+  // Load persisted secret-mode flag with a one-shot migration from the
+  // pre-rename 'dev_mode' key. Without this, anyone who'd already
+  // unlocked the mode before that PR would silently revert to locked on
+  // upgrade (and the legacy key would linger in AsyncStorage forever).
+  // Read both, prefer the new key if present, otherwise migrate the
+  // legacy value forward + delete the old key.
   useEffect(() => {
-    AsyncStorage.getItem(FOLLOWING_ONLY_KEY).then((v) => {
-      // Default ON; only flip OFF if the user explicitly persisted false.
-      if (v === 'false') setFollowingOnlyState(false);
-    });
-    AsyncStorage.getItem('dev_mode').then((v) => setDevMode(v === 'true'));
+    (async () => {
+      const secret = await AsyncStorage.getItem('secret_mode');
+      if (secret !== null) {
+        setSecretModeState(secret === 'true');
+        return;
+      }
+      const legacy = await AsyncStorage.getItem('dev_mode');
+      if (legacy !== null) {
+        setSecretModeState(legacy === 'true');
+        await AsyncStorage.setItem('secret_mode', legacy);
+        await AsyncStorage.removeItem('dev_mode');
+      }
+    })();
+  }, [pubkey]);
+
+  // One-shot legacy → tier migration (#547). The pre-#547 Messages /
+  // Groups filter persisted a boolean `followingOnly` per account; the
+  // unified WoT tier lives in a single device-wide key (`@lp:wot-settings:v1`).
+  // On first run after the upgrade we derive a starting tier from the
+  // legacy boolean (+ secretMode) so the user's intent survives intact:
+  //   followingOnly=true                       → 'friends'
+  //   followingOnly=false && secretMode=true   → 'all' (legacy dev escape hatch)
+  //   anything else                            → 'friends' (safe default)
+  // Guarded by `WOT_MIGRATION_DONE_KEY` so it never re-runs; also skipped
+  // entirely if the user has already saved a wotTier explicitly (so a
+  // Map-side preference isn't stomped). Mirrors the dev_mode → secret_mode
+  // migration pattern just above.
+  useEffect(() => {
+    // The migration reads a *per-account-scoped* key
+    // (`perAccountKey(FOLLOWING_ONLY_KEY_BASE, pubkey)`). When the
+    // provider mounts before identity hydration `pubkey` is still
+    // null/undefined and `perAccountKey` would fall back to the un-
+    // namespaced base key, potentially missing the real legacy value
+    // and persisting `WOT_MIGRATION_DONE_KEY=true` before the actual
+    // per-account legacy slot is reachable — permanently locking the
+    // user into the safe default. Wait for hydration first; the effect
+    // re-runs when `pubkey` lands.
+    if (!pubkey) return;
+    (async () => {
+      const done = await AsyncStorage.getItem(WOT_MIGRATION_DONE_KEY);
+      if (done === 'true') return;
+      try {
+        // Skip if the user has already saved an explicit wotTier — the
+        // loadWotSettings call inside TrustGraphContext returns defaults
+        // for a missing key, so we have to probe the raw storage slot.
+        const existing = await AsyncStorage.getItem('@lp:wot-settings:v1');
+        if (existing !== null) {
+          await AsyncStorage.setItem(WOT_MIGRATION_DONE_KEY, 'true');
+          return;
+        }
+        // followingOnly was per-account; we migrate using whichever
+        // account is currently active. Defaults to true (ON) if the
+        // legacy key was never written.
+        const raw = await AsyncStorage.getItem(perAccountKey(FOLLOWING_ONLY_KEY_BASE, pubkey));
+        const followingOnlyLegacy: boolean | null = raw === null ? null : raw !== 'false';
+        const secretRaw = await AsyncStorage.getItem('secret_mode');
+        const secret = secretRaw === 'true';
+        const next = deriveInitialWotTier({
+          followingOnly: followingOnlyLegacy,
+          secretMode: secret,
+        });
+        // Persist directly via the service (cheaper than going through
+        // TrustGraphContext's setter, which would also schedule a render)
+        // and then notify the in-memory state so the UI picks it up on
+        // the next render without waiting for loadWotSettings to re-run.
+        await saveWotSettings({ wotTier: next });
+        setWotTier(next);
+        await AsyncStorage.setItem(WOT_MIGRATION_DONE_KEY, 'true');
+      } catch {
+        // Best-effort; failures leave the marker unset so a later mount
+        // can retry. The user sees the safe default ('friends') in the
+        // meantime, which is the conservative outcome.
+      }
+    })();
+  }, [pubkey, setWotTier]);
+
+  // Persist + broadcast a secret-mode toggle. Used by AboutScreen's
+  // triple-tap unlock — keeping the writer in the context means every
+  // subscriber (the WoT picker, Messages, Groups) sees the change in
+  // the same render tick. Before this lived in the context, AboutScreen
+  // had its own local useState which didn't reach the rest of the app,
+  // so e.g. the "All" WoT tier stayed greyed out until a full app
+  // restart re-read AsyncStorage from inside GroupsProvider.
+  const setSecretMode = useCallback((next: boolean) => {
+    setSecretModeState(next);
+    AsyncStorage.setItem('secret_mode', next ? 'true' : 'false').catch(() => {});
   }, []);
 
-  const setFollowingOnly = useCallback((next: boolean) => {
-    setFollowingOnlyState(next);
-    AsyncStorage.setItem(FOLLOWING_ONLY_KEY, next ? 'true' : 'false').catch(() => {});
-  }, []);
+  // Production hard-lock guard (#547). A stale persisted 'all' must never
+  // leak past the parental-control gate after secret mode has been
+  // flipped back off — clamp to 'friends' (the safest tier) in that case.
+  // The persisted wotTier itself is left alone so the user keeps their
+  // wider tier preference if they re-enable secret mode later. This
+  // mirrors the `followingOnly || !secretMode` defence-in-depth that
+  // visibleGroups used before #547 — same rule, three-tier shape.
+  const effectiveWotTier: WotTier = !secretMode && wotTier === 'all' ? 'friends' : wotTier;
+
+  // Deprecated boolean view of the tier — see the interface docstring.
+  // Kept for any out-of-tree consumer; in-tree consumers should read
+  // `effectiveWotTier` directly. `true` = filter-on (friends or fof),
+  // `false` = filter-off ('all'). FoF is treated as "filter on" because
+  // it still applies a trust gate, just a wider one.
+  const followingOnly = effectiveWotTier !== 'all';
+
+  const setFollowingOnly = useCallback(
+    (next: boolean) => {
+      // Map the legacy boolean back onto the tier: true → 'friends',
+      // false → 'all'. The hard-lock guard in the predicate above means
+      // a non-secret-mode user who flips this to false still sees the
+      // 'friends' behaviour at the visibility layer.
+      setWotTier(next ? 'friends' : 'all');
+    },
+    [setWotTier],
+  );
 
   // Keep the module-level routing registry in lock-step with React state
   // so NostrContext's NIP-17 decrypt loop can resolve which group an
@@ -262,21 +423,17 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return unsub;
   }, [groups]);
 
-  const followPubkeys = useMemo(() => {
-    const set = new Set<string>();
-    for (const c of contacts) set.add(c.pubkey.toLowerCase());
-    return set;
-  }, [contacts]);
-
   // Anti-spam: a group is visible only if at least one OTHER member is
-  // in the viewer's follow list. Mirrors the 1:1 "Following only" rule
-  // at MessagesScreen.tsx:128-143. Locked-on outside dev_mode; in
-  // dev_mode the user can flip it via the chip on GroupsScreen.
+  // in the viewer's trust set at the current tier (#547). For 'friends'
+  // the trust set is L1 follows + seeds + viewer; for 'fof' it adds L2
+  // follows-of-follows; for 'all' the filter is disabled. Same defence-
+  // in-depth rule the 1:1 DM gate uses inside MessagesScreen.
   const visibleGroups = useMemo(() => {
-    const enforce = followingOnly || !devMode;
-    if (!enforce) return groups;
-    return groups.filter((g) => g.memberPubkeys.some((pk) => followPubkeys.has(pk.toLowerCase())));
-  }, [groups, followPubkeys, followingOnly, devMode]);
+    if (effectiveWotTier === 'all') return groups;
+    return groups.filter((g) =>
+      g.memberPubkeys.some((pk) => isTrustedAtTier(effectiveWotTier, pk)),
+    );
+  }, [groups, effectiveWotTier, isTrustedAtTier]);
 
   // Synchronous mirror of the `groups` state used as the read source
   // for `persist` so concurrent mutators serialise correctly without
@@ -297,17 +454,20 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     groupsRef.current = groups;
   }, [groups]);
 
-  const persist = useCallback(async (mutate: (curr: Group[]) => Group[]): Promise<Group[]> => {
-    const after = mutate(groupsRef.current);
-    // Update the ref BEFORE setGroups so a concurrent caller scheduled
-    // immediately after this one reads the fresh array — otherwise
-    // both callers' mutates would run against the same `curr` and the
-    // second's write would clobber the first's.
-    groupsRef.current = after;
-    setGroups(after);
-    await saveGroups(after);
-    return after;
-  }, []);
+  const persist = useCallback(
+    async (mutate: (curr: Group[]) => Group[]): Promise<Group[]> => {
+      const after = mutate(groupsRef.current);
+      // Update the ref BEFORE setGroups so a concurrent caller scheduled
+      // immediately after this one reads the fresh array — otherwise
+      // both callers' mutates would run against the same `curr` and the
+      // second's write would clobber the first's.
+      groupsRef.current = after;
+      setGroups(after);
+      await saveGroups(pubkey, after);
+      return after;
+    },
+    [pubkey],
+  );
 
   // Synthetic-room reconciler: invoked from NostrContext's group routing
   // path when a kind-14 arrives from a foreign client (Amethyst / Quartz,
@@ -701,7 +861,9 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       visibleGroups,
       followingOnly,
       setFollowingOnly,
-      devMode,
+      effectiveWotTier,
+      secretMode,
+      setSecretMode,
       loading,
       createGroup,
       renameGroup,
@@ -717,7 +879,9 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       visibleGroups,
       followingOnly,
       setFollowingOnly,
-      devMode,
+      effectiveWotTier,
+      secretMode,
+      setSecretMode,
       loading,
       createGroup,
       renameGroup,

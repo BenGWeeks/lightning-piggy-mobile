@@ -35,6 +35,16 @@ DEVICE_VC=$(adb -s "$PIXEL" shell dumpsys package "$PACKAGE" 2>/dev/null | grep 
 echo "device $PIXEL has $PACKAGE versionCode=$DEVICE_VC"
 [ -z "$DEVICE_VC" ] && { echo "could not read device versionCode — is the device connected?"; exit 1; }
 
+# Keep the screen on while we deploy + run the perf suite. The phone
+# defaults to a 30 s – 2 min lock timeout; if it locks mid-flow, the
+# `adb install` reauth prompt is missed and Maestro / dumpsys gfxinfo
+# stop receiving events. `stayon true` is per-session (resets on
+# reboot); we restore it on EXIT below. See docs/TROUBLESHOOTING.adoc.
+PRIOR_STAYON=$(adb -s "$PIXEL" shell dumpsys power 2>/dev/null | grep -oP 'mStayOn=\K\w+' | head -1)
+echo "stayon: was=$PRIOR_STAYON; setting to true for the deploy + perf run"
+adb -s "$PIXEL" shell svc power stayon true 2>/dev/null || true
+trap 'echo "restoring stayon=${PRIOR_STAYON:-false}"; adb -s "$PIXEL" shell svc power stayon ${PRIOR_STAYON:-false} 2>/dev/null || true' EXIT
+
 echo "starting eas build --local in background (logs: $BUILD_LOG)"
 # `setsid` puts the build in its own process group so we can kill the whole
 # tree later (eas-cli spawns npm, npx, java/gradle — a plain kill on the

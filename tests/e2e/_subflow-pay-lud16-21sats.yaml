@@ -1,0 +1,42 @@
+appId: com.lightningpiggy.app.dev
+name: Subflow — pay a lightning-address bubble for 21 sats
+---
+# Reusable subflow: tap Pay on a "Lightning address" bubble in the
+# currently-open thread, enter 21 via the in-app keypad, send.
+#
+# Caller must already have the thread open AND a recent enough
+# lightning:<lud16> bubble visible (incoming side — own outgoing
+# bubbles don't render a Pay button).
+#
+# Costs: 21 sats from the active wallet on the AVD + LNURL-pay's
+# normal routing fee. With Little Piggy's 10k-sat wallet that's ~470
+# runs of headroom.
+
+# Tap the Pay button on a lud16 card. accessibilityLabel disambiguates
+# from bolt11 / on-chain Pay buttons in the same thread.
+- tapOn:
+    text: 'Pay this lightning address'
+- waitForAnimationToEnd: { timeout: 4000 }
+
+# SendSheet routes through AmountEntryScreen for lud16. Tap the
+# amount picker and enter 21 sats.
+- tapOn:
+    id: 'send-amount-picker'
+- extendedWaitUntil:
+    visible: { id: 'amount-entry-screen' }
+    timeout: 5000
+- tapOn: { id: 'amount-entry-key-2' }
+- tapOn: { id: 'amount-entry-key-1' }
+- assertVisible: '21'
+- tapOn: { id: 'amount-entry-confirm' }
+- waitForAnimationToEnd: { timeout: 2000 }
+- assertVisible: '21 sats'
+
+# Send. Wait for either success (PaymentProgressOverlay flips to
+# success) or for the sheet to dismiss back to the thread.
+- tapOn:
+    text: 'Send'
+- extendedWaitUntil:
+    visible: 'Sent'
+    timeout: 30000
+- waitForAnimationToEnd: { timeout: 2000 }

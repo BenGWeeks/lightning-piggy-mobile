@@ -1,0 +1,49 @@
+appId: com.lightningpiggy.app.preview
+name: PERF — DM pull-to-refresh contended with Explore mount (PR #533 regression guard)
+---
+# Companion to scripts/perf-dm-refresh-explore.sh. Drives the worst-case
+# JS-thread contention surfaced by PR #533: yank pull-to-refresh on
+# Messages, then immediately switch to Explore. Pre-#533 (NIP-17
+# decrypt yield-budget) the refresh batch was a single uninterrupted
+# turn that blocked first-paint of Explore for hundreds of ms.
+#
+# No assertions — this is a measurement aid. The wrapper script resets
+# gfxinfo immediately before the swipe and snapshots after Explore has
+# settled, so the captured frames cover the contended window only.
+#
+# `appId` defaults to the preview package because that's the channel
+# with `EXPO_PUBLIC_KEEP_PERF_LOGS=1` baked in (preview is what we
+# sideload for perf measurement). Override via PKG=… in the wrapper.
+
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 30000
+
+# Messages must be the active tab so the pull-to-refresh gesture lands
+# on the conversation list (not on Home).
+- tapOn:
+    id: 'tab-messages'
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Pull-to-refresh: a top-anchored DOWN swipe that's long enough to
+# trip the RefreshControl threshold. The wrapper resets gfxinfo right
+# before this flow starts so the captured window is exactly:
+#   refresh trigger → decrypt batch → Explore mount → first paint.
+- swipe:
+    start: 50%, 25%
+    end: 50%, 85%
+    duration: 600
+
+# No `waitForAnimationToEnd` here — the whole point is to NOT give the
+# decrypt batch any breathing room before we ask for a tab switch.
+- tapOn:
+    id: 'tab-explore'
+
+# Let Explore mount + first-paint settle so gfxinfo captures the full
+# contended window. 4 s matches the post-swipe budget used in the
+# other perf flows; the actual measurement window is the wrapper's
+# post-snapshot, not this wait.
+- waitForAnimationToEnd:
+    timeout: 4000

@@ -46,7 +46,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   const [xpub, setXpub] = useState('');
   const [mnemonicInput, setMnemonicInput] = useState('');
   const [alias, setAlias] = useState('');
-  const [devMode, setDevMode] = useState(false);
+  const [secretMode, setSecretMode] = useState(false);
   const [selectedTheme, setSelectedTheme] = useState<CardTheme>('lightning-piggy');
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +58,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   // No explicit snapPoints — content-height only, not user-draggable.
 
   useEffect(() => {
-    AsyncStorage.getItem('dev_mode').then((v) => setDevMode(v === 'true'));
+    AsyncStorage.getItem('secret_mode').then((v) => setSecretMode(v === 'true'));
   }, [visible]);
 
   const reset = useCallback(() => {
@@ -321,7 +321,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                 </Text>
               </View>
             </TouchableOpacity>
-            {devMode && (
+            {secretMode && (
               <TouchableOpacity
                 style={styles.typeCard}
                 onPress={handleMnemonicSelect}
@@ -464,9 +464,32 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                   testID="xpub-input"
                   accessibilityLabel="Extended public key or address input"
                 />
-                <TouchableOpacity style={styles.secondaryButton} onPress={handleScan}>
-                  <Text style={styles.secondaryButtonText}>Scan QR Code</Text>
-                </TouchableOpacity>
+                <View style={styles.secondaryButtonRow}>
+                  <TouchableOpacity
+                    style={[styles.secondaryButton, styles.secondaryButtonHalf]}
+                    onPress={handleScan}
+                    accessibilityLabel="Scan QR Code"
+                    testID="wizard-xpub-scan"
+                  >
+                    <QrCode size={18} color={colors.textBody} strokeWidth={2} />
+                    <Text style={styles.secondaryButtonText}>Scan QR</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.secondaryButton, styles.secondaryButtonHalf]}
+                    onPress={async () => {
+                      const text = await Clipboard.getStringAsync();
+                      if (text) {
+                        setXpub(text.trim());
+                        setError(null);
+                      }
+                    }}
+                    accessibilityLabel="Paste xpub from clipboard"
+                    testID="wizard-xpub-paste"
+                  >
+                    <ClipboardPaste size={18} color={colors.textBody} strokeWidth={2} />
+                    <Text style={styles.secondaryButtonText}>Paste</Text>
+                  </TouchableOpacity>
+                </View>
                 {error && <Text style={styles.errorText}>{error}</Text>}
                 <View style={styles.buttonRow}>
                   <TouchableOpacity
@@ -512,6 +535,21 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
               testID="mnemonic-input"
               accessibilityLabel="Seed phrase input"
             />
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={async () => {
+                const text = await Clipboard.getStringAsync();
+                if (text) {
+                  setMnemonicInput(text.trim());
+                  setError(null);
+                }
+              }}
+              accessibilityLabel="Paste seed phrase from clipboard"
+              testID="wizard-mnemonic-paste"
+            >
+              <ClipboardPaste size={18} color={colors.textBody} strokeWidth={2} />
+              <Text style={styles.secondaryButtonText}>Paste</Text>
+            </TouchableOpacity>
             {error && <Text style={styles.errorText}>{error}</Text>}
             <View style={styles.buttonRow}>
               <TouchableOpacity

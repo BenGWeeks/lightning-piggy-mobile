@@ -24,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write   # needed to upload assets to the Release
+  contents: write # needed to upload assets to the Release
 
 env:
   EAS_CLI_VERSION: '18.6.0'
@@ -132,7 +132,7 @@ jobs:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
       NODE_NO_WARNINGS: '1'
     permissions:
-      contents: write   # to push the reset RELEASE_NOTES_NEXT.md back to main
+      contents: write # to push the reset RELEASE_NOTES_NEXT.md back to main
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -204,7 +204,7 @@ jobs:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           ASC_API_KEY_ISSUER_ID: ${{ secrets.ASC_API_KEY_ISSUER_ID }}
           ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
-          ASC_APP_ID: '6762218164'   # matches eas.json → submit.production.ios.ascAppId
+          ASC_APP_ID: '6762218164' # matches eas.json → submit.production.ios.ascAppId
           ASC_BUILD_VERSION: ${{ steps.iosbuild.outputs.version }}
           WHATS_NEW: ${{ steps.changelog.outputs.whatsnew }}
         run: node scripts/asc-set-whats-new.mjs
@@ -266,22 +266,70 @@ jobs:
       - name: Resolve latest finished Android APK URL
         id: find
         env:
-          # Suppress Node `(node:NNN) [DEPxxxx] DeprecationWarning: ...`
-          # lines that eas-cli emits to stdout, which would otherwise
-          # poison the JSON pipe to jq with `Invalid numeric literal`.
-          # See #207 for the v1.0.0-rc2 release where this manifested.
+          # Suppress Node deprecation warnings on stdout. NODE_NO_WARNINGS
+          # only handles Node-level deprecations though — eas-cli itself
+          # can also print error / progress noise to stdout (`Error:
+          # build:list command failed.` on transient API hiccups,
+          # update-notifier banners), which is what v1.0.2-rc1 tripped on.
+          # The script below captures stderr separately, retries once on
+          # failure, and strips any pre-JSON prefix before jq sees it.
           NODE_NO_WARNINGS: '1'
         run: |
+          set -uo pipefail
+
           # Pick the most recent FINISHED Android production build (the one we just submitted).
           # Filter by the git commit of the Release tag so we don't accidentally grab an
           # unrelated older build.
-          url=$(npx -y -p eas-cli@${{ env.EAS_CLI_VERSION }} eas build:list \
-            --platform android --status finished --limit 5 --json \
-            --non-interactive \
-            | jq -r --arg sha "${{ github.sha }}" \
-                '[.[] | select(.gitCommitHash == $sha)][0].artifacts.buildUrl // empty')
+
+          fetch() {
+            local out_file="$1" err_file="$2"
+            npx -y -p eas-cli@${{ env.EAS_CLI_VERSION }} eas build:list \
+              --platform android --status finished --limit 5 --json \
+              --non-interactive \
+              > "$out_file" 2> "$err_file"
+          }
+
+          OUT=$(mktemp)
+          ERR=$(mktemp)
+          if ! fetch "$OUT" "$ERR"; then
+            echo "::warning title=eas build:list failed once — retrying in 8 s::Transient EAS API hiccup; see grouped logs below if the retry also fails."
+            sleep 8
+            if ! fetch "$OUT" "$ERR"; then
+              echo "::error title=eas build:list failed twice::See grouped logs below for stderr and stdout."
+              echo "::group::eas build:list stderr"
+              cat "$ERR"
+              echo "::endgroup::"
+              echo "::group::eas build:list stdout"
+              cat "$OUT"
+              echo "::endgroup::"
+              exit 1
+            fi
+          fi
+
+          # Strip any non-JSON prefix lines (deprecation banners, error noise
+          # written to stdout) — find the first `[` line and keep everything
+          # from there.
+          CLEAN=$(mktemp)
+          sed -n '/^\[/,$p' "$OUT" > "$CLEAN"
+
+          if ! url=$(jq -r --arg sha "${{ github.sha }}" \
+                       '[.[] | select(.gitCommitHash == $sha)][0].artifacts.buildUrl // empty' \
+                       "$CLEAN" 2>/dev/null); then
+            echo "::error title=jq parse failed on eas build:list output::See grouped logs below for raw stdout and the stripped JSON we tried to parse."
+            echo "::group::raw stdout"
+            cat "$OUT"
+            echo "::endgroup::"
+            echo "::group::stripped JSON (post sed)"
+            cat "$CLEAN"
+            echo "::endgroup::"
+            exit 1
+          fi
+
           if [ -z "$url" ] || [ "$url" = "null" ]; then
-            echo "::error title=No Android build artifact::Could not find a finished Android build for commit ${{ github.sha }}. The EAS build may still be running, or failed."
+            echo "::error title=No Android build artifact for commit ${{ github.sha }}::EAS build may still be running, or failed. Recent builds dumped in the grouped log below."
+            echo "::group::recent builds (cleaned)"
+            cat "$CLEAN"
+            echo "::endgroup::"
             exit 1
           fi
           echo "url=$url" >> "$GITHUB_OUTPUT"

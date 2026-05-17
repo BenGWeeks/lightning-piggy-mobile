@@ -25,7 +25,9 @@ const ProfileIcon: React.FC<Props> = ({ uri, size = 36, onPress }) => {
           <Image
             source={{ uri }}
             style={{ width: size, height: size, borderRadius: size / 2 }}
-            cachePolicy="disk"
+            cachePolicy="memory-disk"
+            recyclingKey={uri}
+            autoplay={false}
           />
         ) : (
           <UserRound size={size * 0.6} color={colors.white} strokeWidth={1.75} />

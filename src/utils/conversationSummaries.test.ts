@@ -42,7 +42,7 @@ describe('buildDmSummaries follow gate', () => {
     expect(result[0].pubkey).toBe(FOLLOWED);
   });
 
-  it('keeps unfollowed senders when followPubkeys is undefined (devMode + Following-only=off)', () => {
+  it('keeps unfollowed senders when followPubkeys is undefined (secretMode + Following-only=off)', () => {
     const result = buildDmSummaries(
       [entry(FOLLOWED), entry(UNFOLLOWED)],
       [followedContact],

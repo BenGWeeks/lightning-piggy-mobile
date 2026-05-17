@@ -1,8 +1,103 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { WalletMetadata } from '../types/wallet';
+import { perAccountKey } from './perAccountStorage';
 
-const WALLET_LIST_KEY = 'wallet_list';
+// Per-account namespacing landed with multi-account switching (#288).
+// Wallets are scoped to the active Nostr identity so signing into a
+// second identity gets a fresh wallet list rather than inheriting the
+// previous user's NWC connections. Pre-multi-account installs ran the
+// `migrateToPerAccountStorage` helper at first launch which copied the
+// global `wallet_list` into `wallet_list_${activePubkey}`.
+//
+// `_activePubkey` is mirrored from NostrContext via
+// `setActivePubkeyForWalletStorage`. When null (rare race during cold
+// boot before identity hydrates) we fall back to the bare global key
+// so legacy single-account installs keep working until the migration
+// completes.
+let _activePubkey: string | null = null;
+
+// Subscribers (typically WalletContext) get notified whenever the
+// active pubkey changes so they can tear down + re-hydrate the wallet
+// list against the new account's namespaced storage. Without this,
+// switching identities leaves the previous identity's wallets visible
+// in-memory until the next cold start (see #288 review).
+type ActivePubkeyListener = (pk: string | null) => void;
+const _activePubkeyListeners = new Set<ActivePubkeyListener>();
+
+// Resolves on the first `setActivePubkeyForWalletStorage` call —
+// regardless of whether the value is a hex pubkey or null. Used by
+// WalletContext's startup to gate the initial `getWalletList()` until
+// NostrContext has hydrated identity from SecureStore. Without this
+// gate WalletContext could read `wallet_list` (no suffix) on cold
+// start, missing the per-account `wallet_list_${pubkey}` and showing
+// the wrong identity's wallets — that's the root cause of the
+// wallet-leak symptom (#461 / Copilot review on #442).
+let _firstSetResolve: (() => void) | null = null;
+const _firstSetPromise = new Promise<void>((resolve) => {
+  _firstSetResolve = resolve;
+});
+
+export function setActivePubkeyForWalletStorage(pk: string | null): void {
+  if (_activePubkey === pk) {
+    // Idempotent same-value call still counts as "Nostr has spoken" —
+    // resolve the gate even if the value matches the bootstrap null.
+    if (_firstSetResolve) {
+      _firstSetResolve();
+      _firstSetResolve = null;
+    }
+    return;
+  }
+  _activePubkey = pk;
+  if (_firstSetResolve) {
+    _firstSetResolve();
+    _firstSetResolve = null;
+  }
+  for (const listener of _activePubkeyListeners) {
+    try {
+      listener(pk);
+    } catch (e) {
+      // Don't let one buggy subscriber break the others.
+      if (__DEV__) console.warn('[walletStorage] listener threw:', e);
+    }
+  }
+}
+
+/**
+ * Resolves once NostrContext has called `setActivePubkeyForWalletStorage`
+ * at least once — i.e. the activePubkey has been hydrated (whether to a
+ * hex pubkey for a signed-in identity or to null for a logged-out
+ * install). Race-fixes the cold-start window where WalletProvider
+ * mounts before NostrProvider and would otherwise read the wrong
+ * AsyncStorage key.
+ *
+ * Safe-fallback timeout (default 2 s) means a wedged NostrContext
+ * doesn't permanently block wallet UI — callers fall through to
+ * whatever `_activePubkey` happens to be (still null) and hit the
+ * legacy unsuffixed key, matching pre-#288 behaviour.
+ */
+export async function awaitActivePubkeyHydrated(timeoutMs = 2000): Promise<void> {
+  if (_firstSetResolve === null) return;
+  await Promise.race([
+    _firstSetPromise,
+    new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+  ]);
+}
+
+export function subscribeActivePubkey(listener: ActivePubkeyListener): () => void {
+  _activePubkeyListeners.add(listener);
+  return () => {
+    _activePubkeyListeners.delete(listener);
+  };
+}
+
+export function getActivePubkey(): string | null {
+  return _activePubkey;
+}
+const WALLET_LIST_KEY_BASE = 'wallet_list';
+function walletListKey(): string {
+  return perAccountKey(WALLET_LIST_KEY_BASE, _activePubkey);
+}
 const NWC_URL_PREFIX = 'nwc_url_';
 const ONCHAIN_XPUB_PREFIX = 'onchain_xpub_';
 const ELECTRUM_SERVER_KEY = 'electrum_server';
@@ -34,7 +129,7 @@ const SECURE_OPTIONS: SecureStore.SecureStoreOptions = {
 };
 
 export async function getWalletList(): Promise<WalletMetadata[]> {
-  const json = await AsyncStorage.getItem(WALLET_LIST_KEY);
+  const json = await AsyncStorage.getItem(walletListKey());
   if (!json) return [];
   try {
     return JSON.parse(json);
@@ -44,7 +139,7 @@ export async function getWalletList(): Promise<WalletMetadata[]> {
 }
 
 export async function saveWalletList(wallets: WalletMetadata[]): Promise<void> {
-  await AsyncStorage.setItem(WALLET_LIST_KEY, JSON.stringify(wallets));
+  await AsyncStorage.setItem(walletListKey(), JSON.stringify(wallets));
 }
 
 // --- NWC ---

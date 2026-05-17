@@ -13,6 +13,7 @@ import {
 } from '../services/locationService';
 import {
   type BubbleContent,
+  extractBitcoinUri,
   extractImageUrl,
   extractInvoice,
   extractLightningAddress,
@@ -21,6 +22,9 @@ import {
   formatRelativeFuture,
 } from '../utils/messageContent';
 import { isSupportedImageUrl } from '../utils/imageUrl';
+import { extractUrls } from '../utils/extractUrls';
+import { isBlocklisted } from '../services/linkPreviewBlocklist';
+import MessageLinkPreview from './MessageLinkPreview';
 
 interface Props {
   // Identifying fields used for testID stability and parent diffing.
@@ -195,6 +199,52 @@ const MessageBubble: React.FC<Props> = ({
     );
   }
 
+  const bitcoinUri = extractBitcoinUri(text);
+  if (bitcoinUri) {
+    // On-chain BIP-21 share. Tap → parent's onPayInvoice (which opens
+    // SendSheet pre-filled — SendSheet already parses `bitcoin:` URIs
+    // and pre-fills both address and BIP-21 amount, so we hand the raw
+    // URI straight through). Receiver-only Pay button — outgoing
+    // bubbles are informational.
+    const shortAddr =
+      bitcoinUri.address.length > 16
+        ? `${bitcoinUri.address.slice(0, 8)}…${bitcoinUri.address.slice(-6)}`
+        : bitcoinUri.address;
+    return (
+      <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
+        <View style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}>
+          {SenderLabel}
+          <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>
+            {fromMe ? 'On-chain address sent' : 'On-chain address'}
+          </Text>
+          {bitcoinUri.amountSats !== null ? (
+            <Text style={[styles.invoiceAmount, fromMe && styles.invoiceAmountMe]}>
+              {bitcoinUri.amountSats.toLocaleString()} sats
+            </Text>
+          ) : null}
+          <Text style={[styles.invoiceMemo, fromMe && styles.invoiceMemoMe]} numberOfLines={1}>
+            {shortAddr}
+          </Text>
+          {fromMe ? null : (
+            <TouchableOpacity
+              style={styles.invoicePayButton}
+              onPress={() => onPayInvoice(bitcoinUri.raw)}
+              accessibilityRole="link"
+              accessibilityLabel="Pay this on-chain address"
+              testID={`${testIdPrefix}-bitcoin-pay-${id}`}
+            >
+              <Zap size={16} color={colors.white} fill={colors.white} />
+              <Text style={styles.invoicePayText}>Pay</Text>
+            </TouchableOpacity>
+          )}
+          <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
+            {formatTime(createdAt)}
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
   const invoice = extractInvoice(text);
   if (invoice) {
     const expired = invoice.expiresAt !== null && invoice.expiresAt * 1000 < Date.now();
@@ -221,7 +271,11 @@ const MessageBubble: React.FC<Props> = ({
           ) : null}
           <View style={styles.invoiceTagRow}>
             {paid ? (
-              <View style={[styles.invoiceTag, styles.invoiceTagPaid]}>
+              <View
+                style={[styles.invoiceTag, styles.invoiceTagPaid]}
+                accessibilityLabel="Invoice paid"
+                testID={`${testIdPrefix}-paid-badge-${id}`}
+              >
                 <Text style={styles.invoiceTagPaidText}>Paid</Text>
               </View>
             ) : expired ? (
@@ -243,6 +297,7 @@ const MessageBubble: React.FC<Props> = ({
             <TouchableOpacity
               style={styles.invoicePayButton}
               onPress={() => onPayInvoice(invoice.raw)}
+              accessibilityRole="link"
               accessibilityLabel="Pay this invoice"
               testID={`${testIdPrefix}-pay-${id}`}
             >
@@ -286,9 +341,12 @@ const MessageBubble: React.FC<Props> = ({
             <View style={[styles.contactAvatar, styles.contactAvatarFallback]}>
               <UserRound size={26} color={colors.textBody} strokeWidth={1.75} />
               {prof?.picture && isSupportedImageUrl(prof.picture) ? (
-                <Image
+                <ExpoImage
                   source={{ uri: prof.picture }}
                   style={[StyleSheet.absoluteFillObject, { borderRadius: 22 }]}
+                  cachePolicy="memory-disk"
+                  recyclingKey={prof.picture}
+                  autoplay={false}
                 />
               ) : null}
             </View>
@@ -346,12 +404,23 @@ const MessageBubble: React.FC<Props> = ({
     );
   }
 
-  // Plain text fallback — no rich content detected.
+  // Plain text fallback — no rich content detected. Cap link previews
+  // at 1 per message: first non-blocklisted URL wins. Any other URLs in
+  // the body remain clickable as plain text via OS link recognition.
+  const previewUrl = (() => {
+    const urls = extractUrls(text);
+    for (const u of urls) {
+      if (!isBlocklisted(u)) return u;
+    }
+    return null;
+  })();
+
   return (
     <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
       <View style={[styles.bubble, fromMe ? styles.bubbleMe : styles.bubbleThem]}>
         {SenderLabel}
         <Text style={[styles.bubbleText, fromMe && styles.bubbleTextMe]}>{text}</Text>
+        {previewUrl ? <MessageLinkPreview url={previewUrl} eventId={id} fromMe={fromMe} /> : null}
         <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
           {formatTime(createdAt)}
         </Text>
@@ -409,27 +478,18 @@ const createStyles = (colors: Palette) =>
       color: 'rgba(255,255,255,0.85)',
     },
     invoiceCard: {
-      maxWidth: '85%',
-      minWidth: 240,
+      width: 240,
       paddingTop: 12,
       paddingBottom: 4,
       paddingHorizontal: 14,
       borderRadius: 14,
-      borderWidth: 1,
       gap: 6,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-      elevation: 1,
     },
     invoiceCardMe: {
       backgroundColor: colors.brandPink,
-      borderColor: colors.brandPink,
     },
     invoiceCardThem: {
       backgroundColor: colors.surface,
-      borderColor: colors.zapYellow,
     },
     invoiceLabel: {
       fontSize: 12,

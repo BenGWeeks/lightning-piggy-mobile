@@ -27,6 +27,7 @@ import TabHeader from '../components/TabHeader';
 import { ArrowDownIcon, ArrowUpIcon, ArrowLeftRightIcon } from '../components/icons/ArrowIcons';
 import { createHomeScreenStyles } from '../styles/HomeScreen.styles';
 import { isSendableWallet } from '../utils/walletCapabilities';
+import { perfLog } from '../utils/perfLog';
 import type { MainTabParamList } from '../navigation/types';
 
 const HomeScreen: React.FC = () => {
@@ -50,6 +51,7 @@ const HomeScreen: React.FC = () => {
     setActiveWallet,
     btcPrice,
     currency,
+    requestBalancePoll,
   } = useWallet();
   const { isLoggedIn, profile, refreshProfile } = useNostr();
   const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList, 'Home'>>();
@@ -84,6 +86,20 @@ const HomeScreen: React.FC = () => {
       const handle = InteractionManager.runAfterInteractions(() => refreshProfile());
       return () => handle.cancel();
     }, [isLoggedIn, refreshProfile]),
+  );
+
+  // Drive the 30 s NWC balance poll only while Home is focused — see
+  // #569. The poll lives in WalletContext but is now demand-gated: this
+  // screen signals "the balance is on screen, keep refreshing it" on
+  // focus, and the cleanup signals "I no longer need it" on blur. The
+  // initial in-effect `refreshOnce()` inside WalletContext means the
+  // balance refreshes immediately on return to Home rather than waiting
+  // up to 30 s for the next tick.
+  useFocusEffect(
+    useCallback(() => {
+      const release = requestBalancePoll();
+      return release;
+    }, [requestBalancePoll]),
   );
 
   // Handle sendToAddress from navigation params (e.g., from Friends tab zap)
@@ -123,22 +139,31 @@ const HomeScreen: React.FC = () => {
     fetchTransactionsForWalletRef.current = fetchTransactionsForWallet;
   }, [wallets, refreshActiveBalance, fetchTransactionsForWallet]);
 
-  const fetchTransactions = useCallback(async () => {
-    if (!activeWalletId) return;
-    await fetchTransactionsForWalletRef.current(activeWalletId);
-  }, [activeWalletId]);
+  const fetchTransactions = useCallback(
+    async (opts?: { force?: boolean }) => {
+      if (!activeWalletId) return;
+      await fetchTransactionsForWalletRef.current(activeWalletId, opts);
+    },
+    [activeWalletId],
+  );
 
-  const fetchData = useCallback(async () => {
-    // For on-chain wallets, fetchTransactions already does syncAndRefresh
-    // which updates both balance and transactions in a single sync.
-    // Only call refreshActiveBalance separately for NWC wallets.
-    const wallet = walletsRef.current.find((w) => w.id === activeWalletId);
-    if (wallet?.walletType === 'onchain') {
-      await fetchTransactions();
-    } else {
-      await Promise.all([refreshActiveBalanceRef.current(), fetchTransactions()]);
-    }
-  }, [activeWalletId, fetchTransactions]);
+  // `force` is set by an explicit pull-to-refresh — it bypasses the
+  // zap-resolver's fingerprint skip so a manual refresh always does a
+  // full attribution pass even when nothing looks changed (#526).
+  const fetchData = useCallback(
+    async (opts?: { force?: boolean }) => {
+      // For on-chain wallets, fetchTransactions already does syncAndRefresh
+      // which updates both balance and transactions in a single sync.
+      // Only call refreshActiveBalance separately for NWC wallets.
+      const wallet = walletsRef.current.find((w) => w.id === activeWalletId);
+      if (wallet?.walletType === 'onchain') {
+        await fetchTransactions(opts);
+      } else {
+        await Promise.all([refreshActiveBalanceRef.current(), fetchTransactions(opts)]);
+      }
+    },
+    [activeWalletId, fetchTransactions],
+  );
 
   const isWalletAvailable =
     activeWallet?.walletType === 'onchain' ? true : (activeWallet?.isConnected ?? false);
@@ -175,7 +200,8 @@ const HomeScreen: React.FC = () => {
   const handleRefresh = async () => {
     setRefreshing(true);
     if (activeWalletId) fetchedWallets.current.delete(activeWalletId);
-    await fetchData();
+    // Explicit pull-to-refresh — force a full zap-resolver pass.
+    await fetchData({ force: true });
     setRefreshing(false);
   };
 
@@ -197,20 +223,14 @@ const HomeScreen: React.FC = () => {
   const isOnchainWallet = activeWallet?.walletType === 'onchain';
   const isWatchOnly = isOnchainWallet && activeWallet?.onchainImportMethod !== 'mnemonic';
   // Don't gate Send/Receive on the transient `isConnected` flag: post-PR-D
-  // NWC wallets land in state with `isConnected: false` and flip true in
-  // background, so gating here would dead-lock the buttons for the 2-14 s
-  // enable() window, or indefinitely if the WebSocket blips. `pay` /
-  // `makeInvoice` auto-await the in-flight connect, so "in state" is
-  // enough.
-  const hasActiveConnection = !!activeWallet;
-  const canSend = hasActiveConnection && !isWatchOnly;
-  // Transfer requires at least 1 wallet that can send + 1 other wallet.
-  // `isSendableWallet` mirrors the per-wallet rule used by `canSend`
-  // above — in particular it does NOT gate NWC wallets on the
-  // transient `isConnected` flag, which was the root cause of #199 /
-  // #302 where Transfer stayed greyed out while Send worked fine.
-  const hasSendableWallet = wallets.some(isSendableWallet);
-  const canTransfer = hasSendableWallet && wallets.length >= 2;
+  // The previous `hasActiveConnection`, `canSend`, `canTransfer`
+  // gates were inlined into the `is*Disabled` constants below — see
+  // #474. They required an in-state activeWallet (i.e. a populated
+  // wallet list, not necessarily a completed NWC handshake) and a
+  // sendable wallet for transfer. We now gate on wallet count alone
+  // since the bottom sheets handle their own connection-loading
+  // states; blocking the BUTTON tap during the NWC handshake left
+  // the app feeling locked.
 
   // Cold-start gating: until the WalletContext finishes its initial
   // AsyncStorage read, `wallets` is `[]` and `activeWallet` is `null` —
@@ -225,9 +245,22 @@ const HomeScreen: React.FC = () => {
   // matches interactivity. During hydration both come out `false` so
   // the buttons render neutral AND remain tappable; the receive sheet
   // / transfer flow handles "wallets not loaded yet" gracefully.
-  const isReceiveDisabled = walletsHydrated && !hasActiveConnection;
-  const isTransferDisabled = walletsHydrated && !canTransfer;
-  const isSendDisabled = walletsHydrated && !canSend;
+  // Disable each button only when the user has no wallet to act on —
+  // not while NWC connections are still handshaking. The bottom
+  // sheets handle their own loading states; gating the BUTTON on
+  // `hasActiveConnection` left taps un-feedback-able for the 1-3 s
+  // cold-start window while NWC handshakes complete (#474).
+  const isReceiveDisabled = walletsHydrated && wallets.length === 0;
+  // Send is also disabled when the active wallet itself can't sign —
+  // watch-only on-chain (xpub) and bare-receive-address imports
+  // (Xapo deposit addresses, etc.) have no signing material so the
+  // Send sheet can't complete from them. Per #493. The "no wallets
+  // at all" case still kicks in first.
+  const isSendDisabled =
+    (walletsHydrated && wallets.length === 0) ||
+    (activeWallet !== null && !isSendableWallet(activeWallet));
+  // Transfer needs at least two wallets (a source + destination).
+  const isTransferDisabled = walletsHydrated && wallets.length < 2;
 
   return (
     <View style={styles.container}>
@@ -286,7 +319,10 @@ const HomeScreen: React.FC = () => {
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.actionButton, isSendDisabled && styles.actionButtonDisabled]}
-            onPress={() => setSendOpen(true)}
+            onPress={() => {
+              perfLog('btn-send onPress');
+              setSendOpen(true);
+            }}
             disabled={isSendDisabled}
             accessibilityLabel="Send"
             testID="btn-send"
@@ -343,4 +379,25 @@ const HomeScreen: React.FC = () => {
   );
 };
 
-export default HomeScreen;
+// React.Profiler wrapper to surface render-commit costs as
+// [PerfBlock] log lines. Threshold-gated to ≥ 100 ms (the user-perceived
+// jank floor) so the log doesn't drown on healthy frames. The id arg
+// is the screen name so multi-screen Profiler output is greppable as
+// [PerfBlock] render:<screen>. Pre-fix the silent 20-45 s freezes in
+// #560 had no React-side instrumentation, so render-storm cost from
+// the 596-contact setContacts dispatch was completely invisible.
+const ProfiledHomeScreen: React.FC = () => (
+  <React.Profiler
+    id="HomeScreen"
+    onRender={(id, phase, actualDuration) => {
+      if (actualDuration > 100) {
+        // eslint-disable-next-line no-console
+        console.log(`[PerfBlock] render:${id} ${phase}=${Math.round(actualDuration)}ms`);
+      }
+    }}
+  >
+    <HomeScreen />
+  </React.Profiler>
+);
+
+export default ProfiledHomeScreen;

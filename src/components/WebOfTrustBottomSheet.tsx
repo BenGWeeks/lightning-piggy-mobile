@@ -1,0 +1,318 @@
+// Bottom-sheet explainer + tier picker for the Web of Trust filter (#535).
+//
+// Tapping any of the three WoT chips (Messages, Hunt, Events) opens this
+// sheet. Friends is always selectable; FoF + All are secret-mode gated.
+// First-time selection of FoF kicks off the FoF compute (kind-3 batch
+// fetch + heuristics in `friendsOfFriendsService`) with a progress modal.
+
+import React, { useMemo, useRef } from 'react';
+import {
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { ShieldCheck, ShieldOff, ShieldQuestion, X } from 'lucide-react-native';
+import { useThemeColors } from '../contexts/ThemeContext';
+import { useTrustGraph } from '../contexts/TrustGraphContext';
+import type { Palette } from '../styles/palettes';
+import type { WotTier } from '../services/wotSettingsService';
+
+interface Props {
+  visible: boolean;
+  onClose: () => void;
+}
+
+interface TierRowProps {
+  tier: WotTier;
+  title: string;
+  subtitle: string;
+  active: boolean;
+  disabled: boolean;
+  onSelect: () => void;
+}
+
+const TierRow: React.FC<TierRowProps> = ({ tier, title, subtitle, active, disabled, onSelect }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const Icon = tier === 'friends' ? ShieldCheck : tier === 'fof' ? ShieldQuestion : ShieldOff;
+  return (
+    <TouchableOpacity
+      style={[
+        styles.tierRow,
+        active ? styles.tierRowActive : null,
+        disabled ? styles.tierRowDisabled : null,
+      ]}
+      onPress={onSelect}
+      disabled={disabled}
+      testID={`wot-tier-${tier}-chip`}
+      accessibilityRole="radio"
+      accessibilityState={{ selected: active, disabled }}
+      accessibilityLabel={`${title}. ${disabled ? 'Locked. Stick to Friends for now.' : ''}`}
+    >
+      <View style={styles.tierIcon}>
+        <Icon
+          size={20}
+          color={disabled ? colors.textSupplementary : colors.textHeader}
+          strokeWidth={2.5}
+        />
+      </View>
+      <View style={styles.tierBody}>
+        <Text style={[styles.tierTitle, disabled ? styles.tierTitleDisabled : null]}>{title}</Text>
+        <Text style={styles.tierSubtitle}>{subtitle}</Text>
+      </View>
+      <View style={[styles.radioOuter, active ? styles.radioOuterActive : null]}>
+        {active ? <View style={styles.radioInner} /> : null}
+      </View>
+    </TouchableOpacity>
+  );
+};
+
+const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose }) => {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const { wotTier, setWotTier } = useTrustGraph();
+
+  // `lastTierRef` is retained for the future FoF re-enable so the
+  // "compute now" affordance can compare incoming vs persisted tier
+  // without re-reading state.
+  const lastTierRef = useRef<WotTier>(wotTier);
+
+  const handleSelect = (next: WotTier): void => {
+    // Only `friends` is currently selectable — fof + all are disabled
+    // until #565 lands the foreground compute dialog. Defensive guard
+    // so any future regression on the TierRow disabled prop doesn't
+    // silently switch tier under us.
+    if (next !== 'friends') return;
+    lastTierRef.current = next;
+    setWotTier(next);
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose} testID="wot-sheet-backdrop" />
+      <View style={styles.sheet} testID="wot-bottom-sheet">
+        <View style={styles.handleBar} />
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>Web of Trust</Text>
+          <TouchableOpacity
+            onPress={onClose}
+            testID="wot-sheet-close"
+            accessibilityLabel="Close"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <X size={20} color={colors.textHeader} strokeWidth={2.5} />
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+          <Text style={styles.explainer}>
+            We filter out unverified senders, cache hiders, and event organisers — anyone could
+            publish a phishing message or set up a physical lure, so by default you only see content
+            from people in your trust graph.
+          </Text>
+
+          <TierRow
+            tier="friends"
+            title="Friends"
+            subtitle="Only people you follow."
+            active={wotTier === 'friends'}
+            disabled={false}
+            onSelect={() => handleSelect('friends')}
+          />
+          <TierRow
+            tier="fof"
+            title="Friends of friends"
+            subtitle="Not yet implemented — coming soon. We're working out how to download and cache the extended graph without freezing the app."
+            active={false}
+            disabled
+            onSelect={() => {}}
+          />
+          <TierRow
+            tier="all"
+            title="All"
+            subtitle="Not yet implemented — coming soon. Will let you opt out of the trust filter entirely once the foreground compute flow lands."
+            active={false}
+            disabled
+            onSelect={() => {}}
+          />
+
+          <Text style={styles.gateHint} testID="wot-sheet-gate-hint">
+            The wider tiers are temporarily disabled while we rework the trust-graph compute (#565).
+            Stick to Friends for now — it's the safest feed regardless.
+          </Text>
+
+          {/* The computing banner + fof meta row + error row hang off L2 state
+              that's currently stubbed to empty / non-loading. They render as
+              no-ops while L2 is disabled and will come back when GH #565 lands
+              the foreground compute dialog. */}
+        </ScrollView>
+
+        <TouchableOpacity
+          style={styles.doneButton}
+          onPress={onClose}
+          testID="wot-sheet-done"
+          accessibilityLabel="Done"
+        >
+          <Text style={styles.doneText}>Done</Text>
+        </TouchableOpacity>
+      </View>
+    </Modal>
+  );
+};
+
+const createStyles = (colors: Palette) =>
+  StyleSheet.create({
+    backdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    },
+    sheet: {
+      position: 'absolute',
+      bottom: 0,
+      left: 0,
+      right: 0,
+      maxHeight: '85%',
+      backgroundColor: colors.background,
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      paddingHorizontal: 20,
+      paddingBottom: 28,
+      paddingTop: 8,
+    },
+    handleBar: {
+      alignSelf: 'center',
+      width: 40,
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: colors.divider,
+      marginBottom: 10,
+    },
+    titleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      marginBottom: 4,
+    },
+    title: {
+      flex: 1,
+      fontSize: 20,
+      fontWeight: '800',
+      color: colors.textHeader,
+    },
+    scroll: {
+      flexGrow: 0,
+    },
+    explainer: {
+      fontSize: 13,
+      lineHeight: 19,
+      color: colors.textBody,
+      marginTop: 10,
+      marginBottom: 18,
+    },
+    tierRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingVertical: 12,
+      paddingHorizontal: 12,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.divider,
+      marginBottom: 8,
+      backgroundColor: colors.surface,
+    },
+    tierRowActive: {
+      borderColor: colors.zapYellow,
+      backgroundColor: 'rgba(255, 193, 7, 0.10)',
+    },
+    tierRowDisabled: {
+      opacity: 0.5,
+    },
+    tierIcon: {
+      width: 28,
+      alignItems: 'center',
+    },
+    tierBody: {
+      flex: 1,
+    },
+    tierTitle: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: colors.textHeader,
+    },
+    tierTitleDisabled: {
+      color: colors.textSupplementary,
+    },
+    tierSubtitle: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      marginTop: 2,
+      lineHeight: 16,
+    },
+    radioOuter: {
+      width: 20,
+      height: 20,
+      borderRadius: 10,
+      borderWidth: 2,
+      borderColor: colors.divider,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    radioOuterActive: {
+      borderColor: colors.zapYellow,
+    },
+    radioInner: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+      backgroundColor: colors.zapYellow,
+    },
+    gateHint: {
+      marginTop: 8,
+      fontSize: 12,
+      color: colors.textSupplementary,
+      fontStyle: 'italic',
+      lineHeight: 17,
+    },
+    computeBanner: {
+      marginTop: 14,
+      padding: 12,
+      borderRadius: 10,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.zapYellow,
+    },
+    computeBannerText: {
+      fontSize: 12,
+      color: colors.textBody,
+      lineHeight: 17,
+    },
+    metaText: {
+      marginTop: 12,
+      fontSize: 12,
+      color: colors.textSupplementary,
+    },
+    errorText: {
+      marginTop: 12,
+      fontSize: 12,
+      color: colors.brandPink,
+    },
+    doneButton: {
+      marginTop: 16,
+      paddingVertical: 14,
+      borderRadius: 999,
+      backgroundColor: colors.brandPink,
+      alignItems: 'center',
+    },
+    doneText: {
+      color: colors.white,
+      fontSize: 15,
+      fontWeight: '700',
+    },
+  });
+
+export default WebOfTrustBottomSheet;

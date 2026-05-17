@@ -8,7 +8,7 @@
 ## Deploying a release APK to a physical device
 
 - The user's primary device is a Pixel running an EAS-built production install. **`npx expo run:android --variant release` will not upgrade it** — locally-signed APK fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE` (different keystore than EAS) and `INSTALL_FAILED_VERSION_DOWNGRADE` (local pipeline reads `versionCode` from `app.config.ts` directly, and that floor sits behind whatever EAS's cloud counter most recently published).
-- To preserve the user's app data (wallets, Nostr login, message history), use `eas build --local --profile production --platform android --non-interactive` instead. This runs EAS's pipeline on this machine, fetching the EAS upload keystore so the signature matches an existing EAS-installed app. **Important**: `appVersionSource: "remote"` in `eas.json` only affects EAS *cloud* builds — `eas build --local` (and `expo run:android --variant release`) both read `versionCode` from `app.config.ts` directly. **Before each local prod build, bump `versionCode` in `app.config.ts` to ≥ the versionCode currently on the target device** (otherwise install fails with `INSTALL_FAILED_VERSION_DOWNGRADE`). Sideload with `adb -s <serial> install -r build-*.apk` (note: `adb` takes the serial, `expo run:android --device` takes the model name like `Pixel_8`).
+- To preserve the user's app data (wallets, Nostr login, message history), use `eas build --local --profile production --platform android --non-interactive` instead. This runs EAS's pipeline on this machine, fetching the EAS upload keystore so the signature matches an existing EAS-installed app. **Important**: `appVersionSource: "remote"` in `eas.json` only affects EAS _cloud_ builds — `eas build --local` (and `expo run:android --variant release`) both read `versionCode` from `app.config.ts` directly. **Before each local prod build, bump `versionCode` in `app.config.ts` to ≥ the versionCode currently on the target device** (otherwise install fails with `INSTALL_FAILED_VERSION_DOWNGRADE`). Sideload with `adb -s <serial> install -r build-*.apk` (note: `adb` takes the serial, `expo run:android --device` takes the model name like `Pixel_8`).
 - Full recipe + rationale (case 1 vs case 2) lives in `docs/DEPLOYMENT.adoc` → "Local production builds". When a deploy fails for one of these reasons, update that section if anything's changed.
 
 ## Testing
@@ -22,6 +22,11 @@
 - Tab bar buttons use `tabBarButtonTestID` (e.g., `tab-friends`) and `tabBarAccessibilityLabel` (e.g., `Friends tab`)
 - Alphabet sidebar letters use `testID` pattern `alphabet-{letter}` (e.g., `alphabet-M`)
 - Maestro selectors: use `id: 'testID-value'` for testID, `text: 'label'` for text/accessibilityLabel
+
+## Naming
+
+- The brand is **Lightning Piggy** — never shorten to "LP" in user-facing strings. "LP" only belongs in internal type / variable names (`isLpPiggy`) and code comments.
+- Geo-caches published by this app are called **Piglets** in UI copy (the wallet is the "Piggy", a cache stash is its "Piglet"). Vanilla NIP-GC caches stay "NIP-GC cache".
 
 ## Code Style
 

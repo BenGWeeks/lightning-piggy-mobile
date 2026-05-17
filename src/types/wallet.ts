@@ -58,6 +58,12 @@ export interface ZapCounterpartyInfo {
     displayName: string | null;
     picture: string | null;
     nip05: string | null;
+    // Lightning address (`name@host`) from the kind-0 `lud16` field.
+    // Optional rather than required so this stays backward-compatible
+    // with cached entries that pre-date persistence: `undefined` means
+    // "we don't know yet, fetch", whereas `null` means "fetched, no
+    // address". Drives the Zap-back button in usePubkeyProfile.
+    lud16?: string | null;
   } | null;
   /** Zap comment from the kind-9734 content field, if any. */
   comment: string;
