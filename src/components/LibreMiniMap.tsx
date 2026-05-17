@@ -240,7 +240,7 @@ const LibreMiniMapInner: React.FC<Props> = ({
     // Empty-state placeholder while GPS is still resolving. Must honour
     // `fill` — otherwise full-screen consumers (MapScreen,
     // LocationPickerSheet) briefly render the mini-map chassis (16 px
-    // margin, 16 px radius, small fixed height) before the layout flips
+    // margin, 14 px radius, small fixed height) before the layout flips
     // to fill once a fix arrives. #601 caught this as a visible
     // size-flash on the Map-screen open transition.
     return <View style={fill ? styles.containerFill : styles.container} testID={testID} />;
