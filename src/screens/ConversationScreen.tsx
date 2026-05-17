@@ -36,6 +36,8 @@ import ConversationComposer from '../components/ConversationComposer';
 import GifPickerSheet from '../components/GifPickerSheet';
 import ReceiveSheet from '../components/ReceiveSheet';
 import MessageBubble from '../components/MessageBubble';
+import SecretModeCelebration from '../components/SecretModeCelebration';
+import { useGroups } from '../contexts/GroupsContext';
 import TransactionDetailSheet, {
   TransactionDetailData,
 } from '../components/TransactionDetailSheet';
@@ -191,6 +193,19 @@ const ConversationScreen: React.FC = () => {
   // every fetch batch writes the state).
   const scheduledProfilePubkeys = useRef(new Set<string>());
   const [attachPanelOpen, setAttachPanelOpen] = useState(false);
+  // Secret Mode chat-trigger card overlay state — driven by
+  // MessageBubble's "secretthreewords" magic message. Owned here so
+  // the celebration confetti renders once over the conversation, not
+  // per bubble cell.
+  const { secretMode, setSecretMode } = useGroups();
+  const [secretCelebrationVisible, setSecretCelebrationVisible] = useState(false);
+  const [secretPendingEnabled, setSecretPendingEnabled] = useState(false);
+  const handleToggleSecretMode = useCallback(() => {
+    const next = !secretMode;
+    setSecretMode(next);
+    setSecretPendingEnabled(next);
+    setSecretCelebrationVisible(true);
+  }, [secretMode, setSecretMode]);
   // Memoised here (not inline at the JSX site) so the FlatList's
   // `contentContainerStyle` reference is stable across keystrokes —
   // every render of ConversationScreen would otherwise re-create the
@@ -805,6 +820,7 @@ const ConversationScreen: React.FC = () => {
           onOpenContact={openSharedContact}
           onOpenLocation={openLocation}
           onOpenGifFullscreen={setFullscreenGifUrl}
+          onToggleSecretMode={handleToggleSecretMode}
           testIdPrefix="conversation"
         />
       );
@@ -1167,6 +1183,11 @@ const ConversationScreen: React.FC = () => {
               }
             : undefined
         }
+      />
+      <SecretModeCelebration
+        visible={secretCelebrationVisible}
+        enabled={secretPendingEnabled}
+        onDismiss={() => setSecretCelebrationVisible(false)}
       />
     </View>
   );

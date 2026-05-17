@@ -18,6 +18,7 @@ import {
   extractInvoice,
   extractLightningAddress,
   extractSharedContact,
+  isSecretModeTrigger,
   formatTime,
   formatRelativeFuture,
 } from '../utils/messageContent';
@@ -61,6 +62,11 @@ interface Props {
   // when omitted the cards still render but tap is a no-op.
   onOpenGifFullscreen?: (url: string) => void;
   onOpenImageFullscreen?: (url: string) => void;
+  // Tapping the "Toggle Secret Mode" button on the magic-trigger card
+  // (when the message body is exactly "secretthreewords"). Parent
+  // owns the secretMode setter + celebration overlay so a list of
+  // cells doesn't each render their own confetti instance.
+  onToggleSecretMode?: () => void;
   // Test-id prefix lets 1:1 and group bubbles coexist in the same Maestro
   // run with stable selectors. e.g. `conversation` → `conversation-pay-…`.
   testIdPrefix: string;
@@ -80,6 +86,7 @@ const MessageBubble: React.FC<Props> = ({
   onOpenLocation,
   onOpenGifFullscreen,
   onOpenImageFullscreen,
+  onToggleSecretMode,
   testIdPrefix,
 }) => {
   const colors = useThemeColors();
@@ -195,6 +202,43 @@ const MessageBubble: React.FC<Props> = ({
             {formatTime(createdAt)}
           </Text>
         </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // "secretthreewords" magic trigger — render an inline card with a
+  // Toggle Secret Mode button. Only LP renders the special UI; on
+  // other Nostr clients the recipient sees the plain word and won't
+  // know what it does. We render the card on BOTH sides (sender +
+  // receiver) so the sender sees a confirmation that the trigger
+  // landed, but only the receiver can usefully tap the button —
+  // sender's button is harmless (toggles their own mode).
+  if (isSecretModeTrigger(text)) {
+    return (
+      <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
+        <View style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}>
+          {SenderLabel}
+          <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>Secret Mode</Text>
+          <Text style={[styles.invoiceMemo, fromMe && styles.invoiceMemoMe]}>
+            {fromMe
+              ? 'Lightning Piggy will offer the recipient a button to toggle Secret Mode.'
+              : 'Unlocks dev / power-user surfaces in Lightning Piggy.'}
+          </Text>
+          {!fromMe && onToggleSecretMode && (
+            <TouchableOpacity
+              style={styles.invoicePayButton}
+              onPress={onToggleSecretMode}
+              accessibilityRole="button"
+              accessibilityLabel="Toggle Secret Mode"
+              testID={`${testIdPrefix}-secret-mode-toggle-${id}`}
+            >
+              <Text style={styles.invoicePayText}>Toggle Secret Mode</Text>
+            </TouchableOpacity>
+          )}
+          <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
+            {formatTime(createdAt)}
+          </Text>
+        </View>
       </View>
     );
   }

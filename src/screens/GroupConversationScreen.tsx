@@ -39,6 +39,7 @@ import FriendPickerSheet, { PickedFriend } from '../components/FriendPickerSheet
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 import MessageBubble from '../components/MessageBubble';
+import SecretModeCelebration from '../components/SecretModeCelebration';
 import { isConfigured as isGifConfigured, type Gif } from '../services/giphyService';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 import {
@@ -98,7 +99,7 @@ const GroupConversationScreen: React.FC = () => {
   const route = useRoute<GroupConversationRoute>();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { getGroup, deleteGroup } = useGroups();
+  const { getGroup, deleteGroup, secretMode, setSecretMode } = useGroups();
   const {
     contacts,
     sendGroupMessage,
@@ -125,6 +126,18 @@ const GroupConversationScreen: React.FC = () => {
   const [sendSheetOpen, setSendSheetOpen] = useState(false);
   const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
   const [fullscreenGifUrl, setFullscreenGifUrl] = useState<string | null>(null);
+  // Secret Mode chat-trigger card overlay state. Mirrors the 1:1
+  // wiring in ConversationScreen — owned at screen level so the
+  // celebration confetti renders once over the group conversation,
+  // not per bubble cell.
+  const [secretCelebrationVisible, setSecretCelebrationVisible] = useState(false);
+  const [secretPendingEnabled, setSecretPendingEnabled] = useState(false);
+  const handleToggleSecretMode = useCallback(() => {
+    const next = !secretMode;
+    setSecretMode(next);
+    setSecretPendingEnabled(next);
+    setSecretCelebrationVisible(true);
+  }, [secretMode, setSecretMode]);
   // Contact preview sheet — peek a member or shared contact without
   // leaving the group conversation. The sheet's "View full profile"
   // link drills into ContactProfile when the user wants the deep view.
@@ -559,6 +572,7 @@ const GroupConversationScreen: React.FC = () => {
           onOpenContact={openSharedContact}
           onOpenLocation={openLocation}
           onOpenGifFullscreen={setFullscreenGifUrl}
+          onToggleSecretMode={handleToggleSecretMode}
           isInvoicePaid={isInvoicePaid}
           testIdPrefix="group-conversation"
         />
@@ -889,6 +903,11 @@ const GroupConversationScreen: React.FC = () => {
               }
             : undefined
         }
+      />
+      <SecretModeCelebration
+        visible={secretCelebrationVisible}
+        enabled={secretPendingEnabled}
+        onDismiss={() => setSecretCelebrationVisible(false)}
       />
     </View>
   );
