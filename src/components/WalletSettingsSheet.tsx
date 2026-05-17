@@ -15,7 +15,8 @@ import { CardTheme } from '../types/wallet';
 import { themeList } from '../themes/cardThemes';
 import { MiniWalletCard } from './WalletCard';
 import { getXpub, getNwcUrl } from '../services/walletStorageService';
-import { Copy as CopyIcon, Eye, EyeOff } from 'lucide-react-native';
+import { Copy as CopyIcon, Eye, EyeOff, QrCode as QrCodeIcon } from 'lucide-react-native';
+import QRCode from 'react-native-qrcode-svg';
 
 interface Props {
   walletId: string | null;
@@ -61,6 +62,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   // wallet access.
   const [nwcConnection, setNwcConnection] = useState<string | null>(null);
   const [nwcRevealed, setNwcRevealed] = useState(false);
+  const [nwcQrShown, setNwcQrShown] = useState(false);
 
   // Populate fields ONCE when the sheet opens for a given walletId. Using
   // `wallet` as a dep would re-fire on every `wallets` array update (balance
@@ -85,6 +87,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         getNwcUrl(walletId).then((url) => {
           setNwcConnection(url);
           setNwcRevealed(false);
+          setNwcQrShown(false);
           if (url) {
             try {
               const params = new URLSearchParams(url.split('?')[1] || '');
@@ -99,6 +102,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         setRelayUrl(null);
         setNwcConnection(null);
         setNwcRevealed(false);
+        setNwcQrShown(false);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -257,6 +261,16 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
                 )}
               </TouchableOpacity>
               <TouchableOpacity
+                onPress={() => setNwcQrShown((v) => !v)}
+                accessibilityLabel={
+                  nwcQrShown ? 'Hide NWC connection QR code' : 'Show NWC connection QR code'
+                }
+                testID="settings-nwc-qr"
+                hitSlop={8}
+              >
+                <QrCodeIcon size={18} color={colors.textSupplementary} strokeWidth={2} />
+              </TouchableOpacity>
+              <TouchableOpacity
                 onPress={async () => {
                   await Clipboard.setStringAsync(nwcConnection);
                   Alert.alert('Copied', 'NWC connection copied to clipboard.');
@@ -268,6 +282,19 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
                 <CopyIcon size={18} color={colors.brandPink} strokeWidth={2} />
               </TouchableOpacity>
             </View>
+            {nwcQrShown && (
+              <View style={styles.qrPanel} testID="settings-nwc-qr-panel">
+                <QRCode
+                  value={nwcConnection}
+                  size={220}
+                  backgroundColor={colors.white}
+                  color={colors.textHeader}
+                />
+                <Text style={styles.qrHint}>
+                  Scan from another Lightning Piggy install or NWC client to import this wallet.
+                </Text>
+              </View>
+            )}
             <Text style={styles.hintText}>
               Use this string to move the wallet to another device or NWC client.
             </Text>
@@ -372,6 +399,19 @@ const createStyles = (colors: Palette) =>
       fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
       fontSize: 13,
       color: colors.textBody,
+    },
+    qrPanel: {
+      backgroundColor: colors.white,
+      borderRadius: 12,
+      padding: 16,
+      alignItems: 'center',
+      gap: 12,
+      marginTop: 8,
+    },
+    qrHint: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      textAlign: 'center',
     },
     hintText: {
       fontSize: 12,
