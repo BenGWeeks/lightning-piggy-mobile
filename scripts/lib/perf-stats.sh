@@ -119,8 +119,14 @@ perf_gfxinfo_sample() {
 # /data/local/tmp with no easy way to know if the daemon's done. This
 # wrapper smooths those edges.
 
-PERFETTO_DEVICE_CFG=/data/local/tmp/lp-perfetto-config.txt
-PERFETTO_DEVICE_OUT=/data/local/tmp/lp-perfetto-trace.pftrace
+# Paths matter on Android — `/data/local/tmp` has SELinux context
+# `shell_data_file:s0`, which the perfetto daemon can't read. The
+# canonical config dir `/data/misc/perfetto-configs` carries
+# `perfetto_configs_data_file:s0` and works.
+# Trace output goes to `/data/misc/perfetto-traces`. Log stays under
+# `/data/local/tmp` because we read it from the host via `adb shell cat`.
+PERFETTO_DEVICE_CFG=/data/misc/perfetto-configs/lp-perfetto-config.txt
+PERFETTO_DEVICE_OUT=/data/misc/perfetto-traces/lp-perfetto-trace.pftrace
 PERFETTO_DEVICE_LOG=/data/local/tmp/lp-perfetto.log
 
 # Generate the config locally then push it.
@@ -162,10 +168,16 @@ duration_ms: $duration_ms
 EOF
 )"
   # Push via a local temp file — heredoc-through-adb-shell drops bytes.
+  # Stage in /data/local/tmp first, then `mv` so the file inherits the
+  # destination dir's SELinux context (perfetto_configs_data_file). A
+  # direct `adb push` to /data/misc/perfetto-configs sometimes fails
+  # with "Permission denied" because shell uid lacks write into that
+  # dir; staging + `mv` via adb-shell-as-shell works around it.
   local local_tmp; local_tmp=$(mktemp)
   printf '%s\n' "$cfg" > "$local_tmp"
-  adb -s "$device" push "$local_tmp" "$PERFETTO_DEVICE_CFG" > /dev/null 2>&1
+  adb -s "$device" push "$local_tmp" "/data/local/tmp/lp-perfetto-staging.txt" > /dev/null 2>&1
   rm -f "$local_tmp"
+  adb -s "$device" shell "cat /data/local/tmp/lp-perfetto-staging.txt > $PERFETTO_DEVICE_CFG && rm /data/local/tmp/lp-perfetto-staging.txt" 2>/dev/null
 }
 
 perf_perfetto_start() {
