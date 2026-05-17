@@ -363,7 +363,12 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
           lon={pos?.lon ?? null}
           userLat={livePos?.lat ?? null}
           userLon={livePos?.lon ?? null}
-          userAccuracyMetres={livePos?.accuracy ?? pos?.accuracy ?? null}
+          // Fall back to the initial fix's accuracy ONLY when there's
+          // no live fix yet. If livePos exists but its accuracy is
+          // null (platform didn't report it), pass null to suppress
+          // the halo — using `pos.accuracy` here would draw a halo
+          // around live coords using accuracy from a different fix.
+          userAccuracyMetres={livePos ? livePos.accuracy : (pos?.accuracy ?? null)}
           merchants={visibleMerchants}
           caches={visibleCaches}
           events={[]}

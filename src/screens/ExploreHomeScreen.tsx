@@ -687,7 +687,11 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
             lon={livePos?.lon ?? pos?.lon ?? null}
             userLat={livePos?.lat ?? null}
             userLon={livePos?.lon ?? null}
-            userAccuracyMetres={livePos?.accuracy ?? pos?.accuracy ?? null}
+            // Cached anchor accuracy is only useful BEFORE a live fix
+            // arrives. Once livePos exists, trust its accuracy (even
+            // if null) so the halo never renders around live coords
+            // using stale data from a different measurement.
+            userAccuracyMetres={livePos ? livePos.accuracy : (pos?.accuracy ?? null)}
             merchants={merchants}
             caches={cachesArr}
             events={eventsArr}

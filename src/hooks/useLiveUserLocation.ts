@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as Location from 'expo-location';
 
 /**
@@ -89,6 +89,15 @@ export function useLiveUserLocation(
   const [pos, setPos] = useState<LiveUserLocation | null>(opts.initial ?? null);
   const [denied, setDenied] = useState(false);
 
+  // Latest applied fix timestamp. Both the parallel one-shot and the
+  // watch can race — without ordering they could overwrite each
+  // other (e.g. watch delivers a fresh fix first, then the one-shot
+  // resolves with an OLDER LocationObject.timestamp). Track the
+  // latest applied timestamp in a ref and drop any update that's
+  // older. The ref outlives renders so the comparison stays
+  // consistent across both update channels.
+  const lastTimestampRef = useRef<number>(0);
+
   useEffect(() => {
     let cancelled = false;
     let watch: Location.LocationSubscription | null = null;
@@ -97,6 +106,21 @@ export function useLiveUserLocation(
     const accuracy = opts.accuracy ?? Location.Accuracy.High;
     const timeInterval = opts.timeIntervalMs ?? DEFAULT_TIME_INTERVAL_MS;
     const distanceInterval = opts.distanceIntervalM ?? DEFAULT_DISTANCE_INTERVAL_M;
+
+    // Shared helper — apply a Location.LocationObject if and only if
+    // its timestamp is newer than the last one we applied. Falls
+    // back to Date.now() when the platform didn't report a
+    // timestamp (rare).
+    const applyIfNewer = (fix: Location.LocationObject) => {
+      const ts = typeof fix.timestamp === 'number' ? fix.timestamp : Date.now();
+      if (ts <= lastTimestampRef.current) return;
+      lastTimestampRef.current = ts;
+      setPos({
+        lat: fix.coords.latitude,
+        lon: fix.coords.longitude,
+        accuracy: typeof fix.coords.accuracy === 'number' ? fix.coords.accuracy : null,
+      });
+    };
 
     (async () => {
       const perm = await Location.requestForegroundPermissionsAsync();
@@ -110,13 +134,7 @@ export function useLiveUserLocation(
       // the map while the parallel fetch + watch land below.
       try {
         const last = await Location.getLastKnownPositionAsync({ maxAge: 10 * 60 * 1000 });
-        if (!cancelled && last) {
-          setPos({
-            lat: last.coords.latitude,
-            lon: last.coords.longitude,
-            accuracy: typeof last.coords.accuracy === 'number' ? last.coords.accuracy : null,
-          });
-        }
+        if (!cancelled && last) applyIfNewer(last);
       } catch {
         /* non-fatal — fall through */
       }
@@ -130,11 +148,7 @@ export function useLiveUserLocation(
       Location.getCurrentPositionAsync({ accuracy })
         .then((fresh) => {
           if (cancelled) return;
-          setPos({
-            lat: fresh.coords.latitude,
-            lon: fresh.coords.longitude,
-            accuracy: typeof fresh.coords.accuracy === 'number' ? fresh.coords.accuracy : null,
-          });
+          applyIfNewer(fresh);
         })
         .catch(() => {
           /* non-fatal — last-known stands in until the watch fires */
@@ -145,11 +159,7 @@ export function useLiveUserLocation(
           { accuracy, timeInterval, distanceInterval },
           (update) => {
             if (cancelled) return;
-            setPos({
-              lat: update.coords.latitude,
-              lon: update.coords.longitude,
-              accuracy: typeof update.coords.accuracy === 'number' ? update.coords.accuracy : null,
-            });
+            applyIfNewer(update);
           },
         );
         // Race: if the component unmounted while watchPositionAsync

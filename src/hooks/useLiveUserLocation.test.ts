@@ -54,15 +54,22 @@ describe('useLiveUserLocation', () => {
     mockedLocation.requestForegroundPermissionsAsync.mockResolvedValue({
       status: 'granted',
     } as Awaited<ReturnType<typeof Location.requestForegroundPermissionsAsync>>);
+    // Explicit increasing timestamps — the new race-ordering logic
+    // drops any fix that's older than the last one applied.
     mockedLocation.getLastKnownPositionAsync.mockResolvedValue({
       coords: { latitude: 1, longitude: 1, accuracy: 50 },
+      timestamp: 1000,
     } as Awaited<ReturnType<typeof Location.getLastKnownPositionAsync>>);
     mockedLocation.getCurrentPositionAsync.mockResolvedValue({
       coords: { latitude: 2, longitude: 2, accuracy: 20 },
+      timestamp: 2000,
     } as Awaited<ReturnType<typeof Location.getCurrentPositionAsync>>);
 
     let watchCb:
-      | ((p: { coords: { latitude: number; longitude: number; accuracy: number } }) => void)
+      | ((p: {
+          coords: { latitude: number; longitude: number; accuracy: number };
+          timestamp: number;
+        }) => void)
       | null = null;
     const removeMock = jest.fn();
     mockedLocation.watchPositionAsync.mockImplementation(async (_opts, cb) => {
@@ -80,9 +87,49 @@ describe('useLiveUserLocation', () => {
 
     // Watch fires — the dot moves.
     await act(async () => {
-      watchCb?.({ coords: { latitude: 3, longitude: 3, accuracy: 10 } });
+      watchCb?.({ coords: { latitude: 3, longitude: 3, accuracy: 10 }, timestamp: 3000 });
     });
     expect(result.current.pos).toEqual({ lat: 3, lon: 3, accuracy: 10 });
+  });
+
+  it('drops out-of-order fixes (older timestamp than the last applied)', async () => {
+    mockedLocation.requestForegroundPermissionsAsync.mockResolvedValue({
+      status: 'granted',
+    } as Awaited<ReturnType<typeof Location.requestForegroundPermissionsAsync>>);
+    mockedLocation.getLastKnownPositionAsync.mockResolvedValue(null);
+    mockedLocation.getCurrentPositionAsync.mockResolvedValue({
+      coords: { latitude: 0, longitude: 0, accuracy: 100 },
+      timestamp: 5000,
+    } as Awaited<ReturnType<typeof Location.getCurrentPositionAsync>>);
+    let watchCb:
+      | ((p: {
+          coords: { latitude: number; longitude: number; accuracy: number };
+          timestamp: number;
+        }) => void)
+      | null = null;
+    mockedLocation.watchPositionAsync.mockImplementation(async (_opts, cb) => {
+      watchCb = cb as typeof watchCb;
+      return { remove: jest.fn() } as Location.LocationSubscription;
+    });
+
+    const { result } = renderHook(() => useLiveUserLocation());
+
+    // Wait for the fresh fix (ts=5000) to land.
+    await waitFor(() => {
+      expect(result.current.pos).toEqual({ lat: 0, lon: 0, accuracy: 100 });
+    });
+
+    // Watch delivers an OLDER fix (ts=3000) — must be ignored.
+    await act(async () => {
+      watchCb?.({ coords: { latitude: 9, longitude: 9, accuracy: 5 }, timestamp: 3000 });
+    });
+    expect(result.current.pos).toEqual({ lat: 0, lon: 0, accuracy: 100 });
+
+    // Then a newer one (ts=7000) — must be applied.
+    await act(async () => {
+      watchCb?.({ coords: { latitude: 1, longitude: 1, accuracy: 8 }, timestamp: 7000 });
+    });
+    expect(result.current.pos).toEqual({ lat: 1, lon: 1, accuracy: 8 });
   });
 
   it('removes the watch subscription on unmount', async () => {

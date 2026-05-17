@@ -364,7 +364,11 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
           lon={livePos?.lon ?? pos?.lon ?? null}
           userLat={livePos?.lat ?? null}
           userLon={livePos?.lon ?? null}
-          userAccuracyMetres={livePos?.accuracy ?? pos?.accuracy ?? null}
+          // Only fall back to the initial-fetch accuracy when there's
+          // no live fix yet; once livePos exists, trust its accuracy
+          // (including null) so we never render a halo around live
+          // coords with stale accuracy.
+          userAccuracyMetres={livePos ? livePos.accuracy : (pos?.accuracy ?? null)}
           merchants={[]}
           caches={filteredCaches.map((c) => c.cache)}
           events={[]}

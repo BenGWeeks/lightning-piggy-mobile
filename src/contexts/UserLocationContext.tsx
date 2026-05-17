@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   useLiveUserLocation,
   type LiveUserLocation,
@@ -86,9 +87,18 @@ export const useUserLocation = (): UserLocationValue => {
     throw new Error('useUserLocation must be used inside <UserLocationProvider>');
   }
   const { value, retain, release } = ctx;
-  useEffect(() => {
-    retain();
-    return () => release();
-  }, [retain, release]);
+  // useFocusEffect, NOT useEffect — the bottom-tab navigator uses
+  // `freezeOnBlur: true` + `lazy: true`, which keeps screens mounted
+  // when their tab is hidden. A plain mount/unmount retain/release
+  // would never tear the GPS watch down once a map screen had been
+  // visited, even when the user is back on Home / Messages /
+  // Friends. Focus-effect runs the cleanup on blur, so the watch
+  // sleeps as soon as no map tab is visible.
+  useFocusEffect(
+    useCallback(() => {
+      retain();
+      return () => release();
+    }, [retain, release]),
+  );
   return value;
 };
