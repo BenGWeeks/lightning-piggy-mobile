@@ -1926,7 +1926,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     let interval: ReturnType<typeof setInterval> | null = null;
     const startPoll = () => {
       if (interval) return;
-      interval = setInterval(refreshOnce, 30000);
+      // 10 s tick (down from 30 s). LUD-16 receives — payments sent to
+      // the user's lightning address rather than to a specific invoice
+      // we issued — can only be detected via the balance-diff polling
+      // here; the previous 30 s interval made these receives feel laggy
+      // in testing. Demand-gating (#569) means the poll only runs while
+      // a balance surface is focused, so this doesn't change idle
+      // battery / NWC traffic costs.
+      interval = setInterval(refreshOnce, 10000);
     };
     const stopPoll = () => {
       if (interval) {
