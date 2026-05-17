@@ -47,17 +47,18 @@ appId: $APP_ID
 YAML
 
 echo "Running $RUNS cold-launch samples on $DEVICE for $APP_ID…"
-[ "${PERFETTO:-0}" = "1" ] && echo "(PERFETTO=1: a 40s trace will be captured on run 1)"
+[ "${PERFETTO:-0}" = "1" ] && echo "(PERFETTO=1: a 65s trace will be captured on run 1)"
 totals=()
 for i in $(seq 1 "$RUNS"); do
   adb -s "$DEVICE" shell am force-stop "$APP_ID"
   sleep 2
   # Reset gfxinfo before each run so frame counters reflect only this launch.
   perf_gfxinfo_reset "$DEVICE" "$APP_ID"
-  # Capture a Perfetto trace on the first run only — 40s covers the
-  # measured cold-start with margin. Subsequent runs are wall-clock only.
+  # Capture a Perfetto trace on the first run only — 65 s comfortably
+  # exceeds the Maestro flow timeout (60 s) so we never end the trace
+  # mid-launch on a regression. Subsequent runs are wall-clock only.
   if [ "$i" = "1" ]; then
-    perf_perfetto_start "$DEVICE" 40000 "$APP_ID"
+    perf_perfetto_start "$DEVICE" 65000 "$APP_ID"
   fi
   t1=$(date +%s%3N)
   adb -s "$DEVICE" shell am start -n "$APP_ID/.MainActivity" >/dev/null
@@ -71,6 +72,9 @@ for i in $(seq 1 "$RUNS"); do
     echo "  run $i: TIMEOUT (>60s — flow failed)"
   fi
   if [ "$i" = "1" ]; then
+    # `perf_perfetto_stop` polls until the daemon exits — when the Maestro
+    # flow timed out, that's ~25 s of silence to the user. The helper now
+    # emits a "waiting…" line up front so the delay is non-confusing.
     perf_perfetto_stop "$DEVICE" "/tmp/explore-cold-start-trace-$(date +%H%M%S).pftrace"
   fi
 done

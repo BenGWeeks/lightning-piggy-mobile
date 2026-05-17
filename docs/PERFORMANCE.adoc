@@ -147,8 +147,10 @@ perf_stats_report "My measurement" "${totals[@]}"
 == Setting up the emulator for accurate GPS
 
 `expo-location` reads through Android's AOSP `LocationManager` — no
-Google Play Services needed (Lightning Piggy intentionally avoids the
-Fused Location Provider; see memory `feedback_no_google_location_services`).
+Google Play Services needed. Lightning Piggy intentionally avoids the
+Fused Location Provider so the app works for GrapheneOS / degoogled
+users (see PR #597, which removed the FLP dependency and the dev-pin
+workaround).
 
 If the app sits in "Locating you…" forever:
 

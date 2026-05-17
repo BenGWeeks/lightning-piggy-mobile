@@ -11,8 +11,14 @@
 #   perf_perfetto_start <device> <out_local>    # if PERFETTO=1 in env
 #   perf_perfetto_stop <device> <out_local>
 #
-# Style: bash 4 features (associative arrays, sort -n), no external deps
-# beyond adb, awk, sort, sed.
+# **Requires bash 4+** (uses `mapfile`, `local -a`, arithmetic context). The
+# default `/bin/bash` on macOS is 3.2 — install a newer bash via Homebrew
+# (`brew install bash`) and ensure it precedes `/bin/bash` on PATH.
+(( BASH_VERSINFO[0] >= 4 )) || {
+  echo "perf-stats.sh requires bash 4+ (you have ${BASH_VERSION})" >&2
+  echo "On macOS: brew install bash, then make sure it precedes /bin/bash on PATH" >&2
+  exit 1
+}
 
 set -u  # callers usually -euo pipefail; we don't redo that here.
 
@@ -31,9 +37,11 @@ perf_stats_report() {
     printf '%s: no samples\n' "$label"
     return
   fi
-  # Sort numerically into a new array.
+  # Sort numerically into a new array. `mapfile -t` is the clean bash-4
+  # idiom — avoids the IFS / read -d '' brittleness which can mis-handle
+  # `set -e` callers.
   local -a sorted
-  IFS=$'\n' read -r -d '' -a sorted < <(printf '%s\n' "${samples[@]}" | sort -n && printf '\0')
+  mapfile -t sorted < <(printf '%s\n' "${samples[@]}" | sort -n)
   local min="${sorted[0]}"
   local max="${sorted[n-1]}"
   # Index via nearest-rank — p99 of 3 samples is just max.
@@ -82,13 +90,17 @@ perf_gfxinfo_sample() {
     printf 'gfxinfo: (no data — package not running?)\n'
     return
   fi
+  # Anchor the line matches — on newer Android, `Janky frames` appears
+  # in nested sub-blocks (e.g. "Janky frames (legacy):") before the
+  # top-level total, so an unanchored regex can latch onto the wrong
+  # line. `^[[:space:]]*Janky frames:` matches only the canonical line.
   local total janky pct p50 p95 p99
-  total=$(printf '%s\n' "$dump" | awk -F': *' '/Total frames rendered/ {print $2; exit}')
-  janky=$(printf '%s\n' "$dump" | awk '/Janky frames/ {print $3; exit}')
-  pct=$(printf   '%s\n' "$dump" | awk '/Janky frames/ {gsub(/[()%]/, "", $4); print $4; exit}')
-  p50=$(printf   '%s\n' "$dump" | awk -F': *' '/50th percentile/ {print $2; exit}')
-  p95=$(printf   '%s\n' "$dump" | awk -F': *' '/95th percentile/ {print $2; exit}')
-  p99=$(printf   '%s\n' "$dump" | awk -F': *' '/99th percentile/ {print $2; exit}')
+  total=$(printf '%s\n' "$dump" | awk -F': *' '/^[[:space:]]*Total frames rendered/ {print $2; exit}')
+  janky=$(printf '%s\n' "$dump" | awk '/^[[:space:]]*Janky frames:/ {print $3; exit}')
+  pct=$(printf   '%s\n' "$dump" | awk '/^[[:space:]]*Janky frames:/ {gsub(/[()%]/, "", $4); print $4; exit}')
+  p50=$(printf   '%s\n' "$dump" | awk -F': *' '/^[[:space:]]*50th percentile/ {print $2; exit}')
+  p95=$(printf   '%s\n' "$dump" | awk -F': *' '/^[[:space:]]*95th percentile/ {print $2; exit}')
+  p99=$(printf   '%s\n' "$dump" | awk -F': *' '/^[[:space:]]*99th percentile/ {print $2; exit}')
   printf 'gfxinfo: total=%s janky=%s (%s%%) p50=%s p95=%s p99=%s\n' \
     "${total:-?}" "${janky:-?}" "${pct:-?}" "${p50:-?}" "${p95:-?}" "${p99:-?}"
 }
@@ -170,16 +182,29 @@ perf_perfetto_start() {
 perf_perfetto_stop() {
   local device="$1" out_local="$2"
   [ "${PERFETTO:-0}" = "1" ] || return 0
-  # Give the daemon up to 60s to finish its own duration_ms window.
+  printf 'perfetto: waiting for trace window to close…\n'
+  # Give the daemon up to 90s — covers the largest reasonable
+  # `duration_ms` (configured up to 60s by callers) plus daemon
+  # teardown. `pgrep -x perfetto` matches the executable name exactly;
+  # an unanchored `-f perfetto` substring match snags
+  # `traced` / `traced_probes` / any `adb shell` whose argv mentions
+  # "perfetto", blocking the loop for the full timeout when our
+  # daemon has actually already exited.
   local waited=0
-  while (( waited < 60 )); do
-    if ! adb -s "$device" shell pgrep -f perfetto > /dev/null 2>&1; then break; fi
+  while (( waited < 90 )); do
+    if ! adb -s "$device" shell pgrep -x perfetto > /dev/null 2>&1; then break; fi
     sleep 2
     waited=$(( waited + 2 ))
   done
-  if adb -s "$device" pull "$PERFETTO_DEVICE_OUT" "$out_local" > /dev/null 2>&1; then
+  # `test -s` returns true only if the file exists and is non-empty —
+  # avoids treating an empty file (daemon crashed before writing) as
+  # a successful capture. Surface the device-side log on failure so
+  # the dev sees the actual perfetto error, not just "trace missing".
+  if adb -s "$device" shell test -s "$PERFETTO_DEVICE_OUT" 2>/dev/null \
+     && adb -s "$device" pull "$PERFETTO_DEVICE_OUT" "$out_local" > /dev/null 2>&1; then
     printf 'perfetto: pulled to %s — open at https://ui.perfetto.dev (drag-drop the file)\n' "$out_local"
   else
-    printf 'perfetto: trace file missing — check %s on device\n' "$PERFETTO_DEVICE_LOG"
+    printf 'perfetto: trace missing or empty. Device log:\n' >&2
+    adb -s "$device" shell cat "$PERFETTO_DEVICE_LOG" 2>/dev/null | sed 's/^/  /' >&2 || true
   fi
 }
