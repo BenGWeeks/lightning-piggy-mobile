@@ -61,7 +61,7 @@ import {
 } from '../services/lnurlWithdrawService';
 import { loadPiggies, newPiggyId, savePiggy } from '../services/piggyStorageService';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
-import { encodeGeohash } from '../utils/geohash';
+import { decodeGeohash, encodeGeohash } from '../utils/geohash';
 import { buildCacheListing, GC_LISTING_KIND, parseCache } from '../services/nostrPlacesService';
 import { peekCachedCachesSync, saveCaches } from '../services/nostrPlacesStorage';
 import * as nip19 from 'nostr-tools/nip19';
@@ -102,7 +102,16 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   // existing record AND the kind 37516 listing republished under the
   // same `d` tag replaces the previous one on relays via NIP-33.
   const editingId = route?.params?.piggyId ?? null;
+  const fallbackCache = route?.params?.fallbackCache ?? null;
   const isEditMode = editingId !== null;
+  // Cross-device edit (#596): the user opened Edit on a phone that
+  // doesn't have the local HiddenPiggy record, but they ARE the event
+  // author (proven by pubkey match in the hydration effect below). The
+  // wizard hydrates from the published kind 37516 event instead of
+  // SecureStore; LNURL stays blank until the user pastes a fresh one,
+  // and step 6's NFC-write step becomes optional so they can update
+  // the listing without re-writing a tag they may not be near.
+  const [crossDeviceEdit, setCrossDeviceEdit] = useState(false);
   // Original createdAt is preserved across edits — the unix-seconds
   // anchor for NIP-40 windows. Captured during the hydration effect
   // below; null until then (and forever when creating fresh).
@@ -208,6 +217,101 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       if (cancelled) return;
       const piggy = all.find((p) => p.id === editingId);
       if (!piggy) {
+        // Cross-device edit fallback (#596): local record is missing
+        // (the Piggy was created on another phone), but the active
+        // identity might still own the Nostr event. If the caller
+        // supplied a fallbackCache AND its author matches the current
+        // pubkey, hydrate the wizard from the published event instead
+        // of bailing. LNURL stays empty — the user will paste a fresh
+        // one if they want to re-write the tag, otherwise step 6 is
+        // skippable and the save updates the listing only.
+        //
+        // Defer (return silently) when pubkey hasn't hydrated yet but
+        // fallbackCache is present: the effect's deps include `pubkey`,
+        // so it will re-run when NostrContext resolves the signer.
+        // Showing the error toast in this window would flash a false
+        // "Local record missing" before ownership can even be checked.
+        if (fallbackCache && !pubkey) {
+          return;
+        }
+        if (
+          fallbackCache &&
+          pubkey &&
+          fallbackCache.hiderPubkey.toLowerCase() === pubkey.toLowerCase()
+        ) {
+          setCrossDeviceEdit(true);
+          piggyIdRef.current = editingId;
+          // Anchor createdAt to the on-relay event so the NIP-40 expiry
+          // window we restamp at save time aligns with the original
+          // hide. The event stores unix-seconds; HiddenPiggy.createdAt
+          // is ms, so multiply to match.
+          originalCreatedAt.current = fallbackCache.createdAt * 1000;
+          // LNURL deliberately stays empty. Stage stays `idle` so step
+          // 2's validate-affordance is what the user sees if they want
+          // to paste a fresh link.
+          if (typeof fallbackCache.geohash === 'string' && fallbackCache.geohash.length > 0) {
+            // Decode lat/lon back from the published geohash so the
+            // map pin pre-renders. The event omits raw lat/lon to
+            // preserve hider precision — geohash precision 9 is ≈ 5 m
+            // which is what the wizard stores anyway. decodeGeohash
+            // returns { lat, lng }; rename `lng` to `lon` to match the
+            // pin shape the rest of the wizard uses.
+            const { lat, lng } = decodeGeohash(fallbackCache.geohash);
+            setPin({ lat, lon: lng, geohash: fallbackCache.geohash });
+          }
+          setCacheName(fallbackCache.name ?? '');
+          setCacheDescription(fallbackCache.description ?? '');
+          if (typeof fallbackCache.difficulty === 'number')
+            setDifficulty(Math.min(5, Math.max(1, fallbackCache.difficulty)) as 1 | 2 | 3 | 4 | 5);
+          if (typeof fallbackCache.terrain === 'number')
+            setTerrain(Math.min(5, Math.max(1, fallbackCache.terrain)) as 1 | 2 | 3 | 4 | 5);
+          if (
+            fallbackCache.size === 'micro' ||
+            fallbackCache.size === 'small' ||
+            fallbackCache.size === 'regular' ||
+            fallbackCache.size === 'large' ||
+            fallbackCache.size === 'other'
+          ) {
+            setCacheSize(fallbackCache.size);
+          }
+          if (
+            fallbackCache.cacheType === 'traditional' ||
+            fallbackCache.cacheType === 'multi' ||
+            fallbackCache.cacheType === 'mystery' ||
+            fallbackCache.cacheType === 'virtual'
+          ) {
+            setCacheType(fallbackCache.cacheType);
+          }
+          if (fallbackCache.imageUrl) setHintPhotoUrl(fallbackCache.imageUrl);
+          if (typeof fallbackCache.waitSeconds === 'number')
+            setWaitMinutesText(String(Math.round(fallbackCache.waitSeconds / 60)));
+          if (typeof fallbackCache.uses === 'number') setUsesText(String(fallbackCache.uses));
+          // Reverse-map the event's NIP-40 expiry back onto one of the
+          // picker chips so a metadata-only save doesn't silently
+          // change the listing's expiry (a `Never` cache would
+          // otherwise re-stamp as 365d on save). Same window-snap
+          // logic as the local-record branch below.
+          if (typeof fallbackCache.expiresAt !== 'number' || fallbackCache.expiresAt === null) {
+            setExpiryDays('never');
+          } else {
+            const windowSec = fallbackCache.expiresAt - fallbackCache.createdAt;
+            const day = 24 * 60 * 60;
+            const closest = [
+              { key: '30' as const, sec: 30 * day },
+              { key: '90' as const, sec: 90 * day },
+              { key: '180' as const, sec: 180 * day },
+              { key: '365' as const, sec: 365 * day },
+            ].reduce((best, opt) =>
+              Math.abs(opt.sec - windowSec) < Math.abs(best.sec - windowSec) ? opt : best,
+            ).key;
+            setExpiryDays(closest);
+          }
+          // The cache is on-relay, so it must have been published —
+          // default isPublic on. The user can flip it off on step 6
+          // before save if they want to convert it to a private Piggy.
+          setIsPublic(true);
+          return;
+        }
         Toast.show({
           type: 'error',
           text1: "Can't edit this Piglet",
@@ -293,7 +397,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     return () => {
       cancelled = true;
     };
-  }, [editingId, navigation]);
+  }, [editingId, fallbackCache, navigation, pubkey]);
 
   const handlePaste = useCallback(async () => {
     try {
@@ -361,9 +465,13 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const handleSave = useCallback(async () => {
     console.log(
-      `[Publish] handleSave called — stage=${stage.kind} isPublic=${isPublic} pubkey=${pubkey ? pubkey.slice(0, 8) + '…' : 'null'}`,
+      `[Publish] handleSave called — stage=${stage.kind} crossDeviceEdit=${crossDeviceEdit} isPublic=${isPublic} pubkey=${pubkey ? pubkey.slice(0, 8) + '…' : 'null'}`,
     );
-    if (stage.kind !== 'validated') {
+    // Cross-device edit accepts an `idle` stage: the user can update
+    // metadata (title, location, etc.) without re-validating an LNURL
+    // they may not have on this device. Normal flow still requires
+    // `validated` so a brand-new hide must vet the LNURL first.
+    if (stage.kind !== 'validated' && !crossDeviceEdit) {
       console.log(`[Publish] aborted: stage !== validated (was ${stage.kind})`);
       return;
     }
@@ -384,14 +492,25 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     // an edit-save wiped the stored PIN and the hider could no longer
     // unlock the tag (Copilot #572 review).
     const existing = editingId ? (await loadPiggies()).find((p) => p.id === editingId) : undefined;
+    // In cross-device mode the stage may still be `idle` — pick up
+    // defaults from the wizard state instead of `stage.params`. The
+    // user can still paste a fresh LNURL on step 2, which flips stage
+    // to `validated` and the normal path applies. If they don't,
+    // `lnurlw` saves as an empty string and the local stub still
+    // registers in My Piglets — next edit on this device works the
+    // normal hydration path.
+    const lnurlDescription =
+      stage.kind === 'validated' ? (stage.params.defaultDescription ?? undefined) : undefined;
+    const maxWithdrawableMsat =
+      stage.kind === 'validated' ? stage.params.maxWithdrawable : undefined;
     const piggy = {
       ...(existing ?? {}),
       id: ensurePiggyId(),
       lnurlw: lnurl.trim(),
-      lnurlDescription: stage.params.defaultDescription ?? undefined,
+      lnurlDescription,
       createdAt: originalCreatedAt.current ?? Date.now(),
       isPublic,
-      maxWithdrawableMsat: stage.params.maxWithdrawable,
+      maxWithdrawableMsat,
       hintPhotoUrl: hintPhotoUrl ?? undefined,
       waitSecondsHint,
       usesHint,
@@ -525,6 +644,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     cacheSize,
     cacheType,
     expiryDays,
+    crossDeviceEdit,
     ensurePiggyId,
     editingId,
     isEditMode,
@@ -841,7 +961,12 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   const nfcReady =
     stage.kind === 'saved' ||
     stage.kind === 'wrote-nfc' ||
-    (isEditMode && stage.kind === 'validated');
+    (isEditMode && stage.kind === 'validated') ||
+    // Cross-device edit without a fresh LNURL: the user is updating
+    // the listing only, no NFC write. The Save button still appears
+    // on step 6, but the Write-Tag affordance stays disabled until a
+    // fresh LNURL is pasted on step 2.
+    (crossDeviceEdit && stage.kind === 'idle');
 
   return (
     <KeyboardAvoidingView
@@ -958,6 +1083,14 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 styles={styles}
                 colors={colors}
               />
+              {crossDeviceEdit && stage.kind !== 'validated' && (
+                <View style={styles.crossDeviceBanner} testID="hunt-piggy-cross-device-banner">
+                  <Text style={styles.crossDeviceBannerText}>
+                    No LNURL on this device — paste a fresh withdraw link to re-write the tag, or
+                    skip step 6 to update the listing only.
+                  </Text>
+                </View>
+              )}
               <Text style={styles.helper}>
                 Create a withdraw link in your own wallet (LNbits, Alby, Mutiny, …) — set the
                 per-claim amount, daily limit, and total uses there — then paste it here.
@@ -1166,9 +1299,17 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 </TouchableOpacity>
               ) : null}
               <TouchableOpacity
-                style={[styles.primaryButton, !nfcReady && styles.primaryButtonDisabled]}
+                style={[
+                  styles.primaryButton,
+                  (!nfcReady || !lnurl.trim()) && styles.primaryButtonDisabled,
+                ]}
                 onPress={handleOpenNfcSheet}
-                disabled={!nfcReady}
+                // Cross-device edit can reach this step with an empty
+                // LNURL — the listing-only-save path. `handleOpenNfcSheet`
+                // bails silently on `!lnurl.trim()` anyway, but the
+                // affordance needs to look disabled so the user knows
+                // to paste an LNURL on step 2 first.
+                disabled={!nfcReady || !lnurl.trim()}
                 testID="hunt-write-nfc-button"
               >
                 <Nfc size={18} color={colors.white} strokeWidth={2.5} />
@@ -1176,6 +1317,12 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                   {stage.kind === 'wrote-nfc' ? 'Write another tag' : 'Write to NFC tag'}
                 </Text>
               </TouchableOpacity>
+              {nfcReady && !lnurl.trim() ? (
+                <Text style={styles.helper}>
+                  No LNURL yet — paste a fresh withdraw link on step 2 to enable the tag write. Or
+                  skip this step: the listing already saved without touching the tag.
+                </Text>
+              ) : null}
               {/* Post-write PIN row — visible whenever we have lock
                   secrets in hand, either fresh from this session's
                   write or rehydrated from the saved HiddenPiggy in
@@ -1569,7 +1716,12 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 <TouchableOpacity
                   style={[
                     styles.primaryButton,
-                    (stage.kind === 'idle' || stage.kind === 'validating' || !pubkey) &&
+                    // Disabled when: still validating, no signer hydrated,
+                    // or stage is idle WITHOUT the cross-device-edit
+                    // override (which allows metadata-only saves).
+                    (stage.kind === 'validating' ||
+                      !pubkey ||
+                      (stage.kind === 'idle' && !crossDeviceEdit)) &&
                       styles.primaryButtonDisabled,
                   ]}
                   onPress={handleSave}
@@ -1577,7 +1729,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                   // Without this guard a tap mid-cold-start can fire
                   // SecureStore lookups with an empty per-account
                   // suffix and crash with "Invalid key" (#554-adjacent).
-                  disabled={stage.kind === 'idle' || stage.kind === 'validating' || !pubkey}
+                  disabled={
+                    stage.kind === 'validating' ||
+                    !pubkey ||
+                    (stage.kind === 'idle' && !crossDeviceEdit)
+                  }
                   testID="hunt-piggy-publish-button"
                   accessibilityLabel={isPublic ? 'Publish Piggy' : 'Save Piggy'}
                 >
@@ -1609,7 +1765,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                   // `handleSave` is the same handler the Publish
                   // button calls; it bails out cleanly on its own if
                   // the stage isn't validated.
-                  if (isEditMode && stage.kind === 'validated') {
+                  if (
+                    isEditMode &&
+                    (stage.kind === 'validated' || (crossDeviceEdit && stage.kind === 'idle'))
+                  ) {
                     await handleSave();
                   }
                   setCurrentStep(6);
@@ -2475,6 +2634,20 @@ const createStyles = (colors: Palette) =>
       color: colors.white,
       fontSize: 15,
       fontWeight: '700',
+    },
+    crossDeviceBanner: {
+      backgroundColor: colors.surface,
+      borderLeftWidth: 3,
+      borderLeftColor: colors.brandPink,
+      borderRadius: 8,
+      padding: 12,
+      marginTop: 12,
+      marginBottom: 4,
+    },
+    crossDeviceBannerText: {
+      color: colors.textHeader,
+      fontSize: 13,
+      lineHeight: 18,
     },
     validatedCard: {
       flexDirection: 'row',
