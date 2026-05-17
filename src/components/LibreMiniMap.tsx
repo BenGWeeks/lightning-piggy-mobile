@@ -194,6 +194,14 @@ const LibreMiniMapInner: React.FC<Props> = ({
     const VERTICES = 64;
     const METRES_PER_DEG_LAT = 111_320;
     const metresPerDegLng = 111_320 * Math.cos((haloLat * Math.PI) / 180);
+    // Near the poles cos(lat) collapses toward zero, so dividing the
+    // east-west offset by metresPerDegLng would explode (or divide by
+    // zero) and produce wildly invalid coordinates. The flat-earth
+    // approximation also stops being meaningful past ~85°. Suppress
+    // the halo in that band rather than render a deformed polygon.
+    if (!Number.isFinite(metresPerDegLng) || Math.abs(metresPerDegLng) < 1) {
+      return null;
+    }
     const ring: [number, number][] = [];
     for (let i = 0; i < VERTICES; i++) {
       const theta = (i / VERTICES) * 2 * Math.PI;
