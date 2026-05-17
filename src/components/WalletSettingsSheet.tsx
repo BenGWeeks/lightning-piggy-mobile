@@ -21,7 +21,7 @@ import {
   type CoinosRecoveryInfo,
 } from '../services/walletStorageService';
 import CoinosRecoverySheet, { CoinosRecoveryDetails } from './CoinosRecoverySheet';
-import { Copy as CopyIcon, ShieldAlert } from 'lucide-react-native';
+import { Copy as CopyIcon, Eye, EyeOff, ShieldAlert } from 'lucide-react-native';
 
 interface Props {
   walletId: string | null;
@@ -65,6 +65,10 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   // masked password row with a copy button. Null = either not a CoinOS
   // wallet or SecureStore had no record.
   const [coinosRecovery, setCoinosRecovery] = useState<CoinosRecoveryInfo | null>(null);
+  // Eye-toggle for the password row in the recovery callout. Defaults
+  // hidden so the password isn't sitting on-screen if the user opens
+  // settings near a colleague / camera.
+  const [passwordRevealed, setPasswordRevealed] = useState(false);
   // Populated lazily when the user taps "View recovery info" — pulls
   // the username/password from SecureStore and the NWC URL from its
   // own SecureStore key, then assembles the CoinosRecoveryDetails for
@@ -105,11 +109,15 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         // a masked password row. The password is never logged or
         // serialised — it only travels from SecureStore → state →
         // Clipboard.setStringAsync when the user explicitly taps copy.
-        getCoinosRecovery(walletId).then((rec) => setCoinosRecovery(rec));
+        getCoinosRecovery(walletId).then((rec) => {
+          setCoinosRecovery(rec);
+          setPasswordRevealed(false);
+        });
       } else {
         setXpubDisplay(null);
         setRelayUrl(null);
         setCoinosRecovery(null);
+        setPasswordRevealed(false);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -189,192 +197,214 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   };
 
   return (
-    <BottomSheetModal
-      ref={bottomSheetRef}
-      snapPoints={snapPoints}
-      // v5 defaults `enableDynamicSizing` to true, which overrides
-      // `snapPoints`. Disable it explicitly so the sheet honours the
-      // 85% pin. See docs/TROUBLESHOOTING.adoc
-      // "v5 modal collapses to a thin strip when its
-      // BottomSheetTextInput is focused".
-      enableDynamicSizing={false}
-      enablePanDownToClose
-      onChange={handleSheetChange}
-      backdropComponent={renderBackdrop}
-      backgroundStyle={styles.sheetBackground}
-      handleIndicatorStyle={styles.handle}
-      keyboardBehavior="interactive"
-      keyboardBlurBehavior="restore"
-      android_keyboardInputMode="adjustResize"
-    >
-      <BottomSheetScrollView
-        contentContainerStyle={[
-          styles.content,
-          { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
-        ]}
-        keyboardShouldPersistTaps="handled"
+    <>
+      <BottomSheetModal
+        ref={bottomSheetRef}
+        snapPoints={snapPoints}
+        // v5 defaults `enableDynamicSizing` to true, which overrides
+        // `snapPoints`. Disable it explicitly so the sheet honours the
+        // 85% pin. See docs/TROUBLESHOOTING.adoc
+        // "v5 modal collapses to a thin strip when its
+        // BottomSheetTextInput is focused".
+        enableDynamicSizing={false}
+        enablePanDownToClose
+        onChange={handleSheetChange}
+        backdropComponent={renderBackdrop}
+        backgroundStyle={styles.sheetBackground}
+        handleIndicatorStyle={styles.handle}
+        keyboardBehavior="interactive"
+        keyboardBlurBehavior="restore"
+        android_keyboardInputMode="adjustResize"
       >
-        <Text style={styles.title}>Wallet Settings</Text>
+        <BottomSheetScrollView
+          contentContainerStyle={[
+            styles.content,
+            { paddingBottom: keyboardHeight > 0 ? keyboardHeight + 80 : 40 },
+          ]}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Text style={styles.title}>Wallet Settings</Text>
 
-        <Text style={styles.label}>Alias</Text>
-        <BottomSheetTextInput
-          style={styles.input}
-          value={alias}
-          onChangeText={setAlias}
-          placeholder="Wallet name"
-          placeholderTextColor={colors.textSupplementary}
-          autoCapitalize="words"
-        />
+          <Text style={styles.label}>Alias</Text>
+          <BottomSheetTextInput
+            style={styles.input}
+            value={alias}
+            onChangeText={setAlias}
+            placeholder="Wallet name"
+            placeholderTextColor={colors.textSupplementary}
+            autoCapitalize="words"
+          />
 
-        {/* NWC wallet: lightning address (LUD-16) */}
-        {wallet.walletType === 'nwc' && (
-          <>
-            <Text style={[styles.label, { marginTop: 20 }]}>Lightning Address</Text>
-            <BottomSheetTextInput
-              style={styles.input}
-              value={lnAddress}
-              onChangeText={setLnAddress}
-              placeholder="user@domain.com"
-              placeholderTextColor={colors.textSupplementary}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="email-address"
-              testID="wallet-lightning-address-input"
-              accessibilityLabel="Lightning Address"
-            />
-            <Text style={styles.hintText}>
-              LUD-16 address for receiving payments. Usually provided by the NWC connection.
-            </Text>
-          </>
-        )}
+          {/* NWC wallet: lightning address (LUD-16) */}
+          {wallet.walletType === 'nwc' && (
+            <>
+              <Text style={[styles.label, { marginTop: 20 }]}>Lightning Address</Text>
+              <BottomSheetTextInput
+                style={styles.input}
+                value={lnAddress}
+                onChangeText={setLnAddress}
+                placeholder="user@domain.com"
+                placeholderTextColor={colors.textSupplementary}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                testID="wallet-lightning-address-input"
+                accessibilityLabel="Lightning Address"
+              />
+              <Text style={styles.hintText}>
+                LUD-16 address for receiving payments. Usually provided by the NWC connection.
+              </Text>
+            </>
+          )}
 
-        {/* CoinOS managed-wallet recovery callout (#287). Visually
+          {/* CoinOS managed-wallet recovery callout (#287). Visually
             prominent block — pink-bordered surface with shield-alert
             badge — so the recovery credentials read as a "save this
             now" affordance rather than just another settings row.
             Sits between Lightning Address and Relay so the user sees
             it inline with the other wallet identity fields. */}
-        {coinosRecovery && (
-          <View style={styles.recoveryCallout}>
-            <View style={styles.recoveryCalloutHeader}>
-              <ShieldAlert size={20} color={colors.brandPink} strokeWidth={2.5} />
-              <Text style={styles.recoveryCalloutTitle}>Recovery info</Text>
+          {coinosRecovery && (
+            <View style={styles.recoveryCallout}>
+              <View style={styles.recoveryCalloutHeader}>
+                <ShieldAlert size={20} color={colors.brandPink} strokeWidth={2.5} />
+                <Text style={styles.recoveryCalloutTitle}>Recovery info</Text>
+              </View>
+              <Text style={styles.recoveryCalloutBody}>
+                Lightning Piggy keeps these securely on this device, but a phone wipe loses access.
+                Save them somewhere safe (a password manager, written down) so you can sign back in
+                to {coinosRecovery.baseUrl.replace(/^https?:\/\//, '').replace(/\/api$/, '')} and
+                recover your funds.
+              </Text>
+
+              <Text style={styles.recoveryCalloutLabel}>Username</Text>
+              <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={async () => {
+                  await Clipboard.setStringAsync(coinosRecovery.username);
+                  Alert.alert('Copied', 'CoinOS username copied to clipboard.');
+                }}
+                style={styles.credentialRow}
+                accessibilityLabel="Copy CoinOS username"
+                testID="settings-coinos-copy-username"
+              >
+                <Text style={styles.credentialText} selectable>
+                  {coinosRecovery.username}
+                </Text>
+                <CopyIcon size={18} color={colors.brandPink} strokeWidth={2} />
+              </TouchableOpacity>
+
+              <Text style={styles.recoveryCalloutLabel}>Password</Text>
+              <View style={styles.credentialRow}>
+                <Text style={styles.credentialText} selectable={passwordRevealed}>
+                  {passwordRevealed ? coinosRecovery.password : '••••••••••••'}
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setPasswordRevealed((v) => !v)}
+                  accessibilityLabel={
+                    passwordRevealed ? 'Hide CoinOS password' : 'Reveal CoinOS password'
+                  }
+                  testID="settings-coinos-reveal-password"
+                  hitSlop={8}
+                >
+                  {passwordRevealed ? (
+                    <EyeOff size={18} color={colors.textSupplementary} strokeWidth={2} />
+                  ) : (
+                    <Eye size={18} color={colors.textSupplementary} strokeWidth={2} />
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={async () => {
+                    await Clipboard.setStringAsync(coinosRecovery.password);
+                    Alert.alert('Copied', 'CoinOS password copied to clipboard.');
+                  }}
+                  accessibilityLabel="Copy CoinOS password"
+                  testID="settings-coinos-copy-password"
+                  hitSlop={8}
+                >
+                  <CopyIcon size={18} color={colors.brandPink} strokeWidth={2} />
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                style={styles.recoveryCalloutLink}
+                onPress={handleViewRecovery}
+                accessibilityLabel="View full CoinOS recovery info including NWC connection string"
+                testID="wallet-settings-view-recovery"
+              >
+                <Text style={styles.recoveryCalloutLinkText}>View full recovery info →</Text>
+              </TouchableOpacity>
+              {recoveryError && <Text style={styles.recoveryErrorText}>{recoveryError}</Text>}
             </View>
-            <Text style={styles.recoveryCalloutBody}>
-              Lightning Piggy keeps these securely on this device, but a phone wipe loses access.
-              Save them somewhere safe (a password manager, written down) so you can sign back in to{' '}
-              {coinosRecovery.baseUrl.replace(/^https?:\/\//, '').replace(/\/api$/, '')} and recover
-              your funds.
-            </Text>
+          )}
 
-            <Text style={styles.recoveryCalloutLabel}>Username</Text>
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={async () => {
-                await Clipboard.setStringAsync(coinosRecovery.username);
-                Alert.alert('Copied', 'CoinOS username copied to clipboard.');
-              }}
-              style={styles.credentialRow}
-              accessibilityLabel="Copy CoinOS username"
-              testID="settings-coinos-copy-username"
-            >
-              <Text style={styles.credentialText} selectable>
-                {coinosRecovery.username}
+          {/* NWC wallet: relay URL (read-only) */}
+          {wallet.walletType === 'nwc' && relayUrl && (
+            <>
+              <Text style={[styles.label, { marginTop: 20 }]}>Relay</Text>
+              <Text style={styles.xpubText} numberOfLines={2}>
+                {relayUrl}
               </Text>
-              <CopyIcon size={18} color={colors.brandPink} strokeWidth={2} />
-            </TouchableOpacity>
+            </>
+          )}
 
-            <Text style={styles.recoveryCalloutLabel}>Password</Text>
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={async () => {
-                await Clipboard.setStringAsync(coinosRecovery.password);
-                Alert.alert('Copied', 'CoinOS password copied to clipboard.');
-              }}
-              style={styles.credentialRow}
-              accessibilityLabel="Copy CoinOS password"
-              testID="settings-coinos-copy-password"
-            >
-              <Text style={styles.credentialText}>••••••••••••</Text>
-              <CopyIcon size={18} color={colors.brandPink} strokeWidth={2} />
-            </TouchableOpacity>
+          {/* On-chain wallet: show xpub (read-only) */}
+          {wallet.walletType === 'onchain' && xpubDisplay && (
+            <>
+              <Text style={[styles.label, { marginTop: 20 }]}>Extended Public Key</Text>
+              <TouchableOpacity onPress={handleCopyXpub} activeOpacity={0.7}>
+                <Text style={styles.xpubText} numberOfLines={3}>
+                  {xpubDisplay}
+                </Text>
+                <Text style={styles.copyHint}>Tap to copy</Text>
+              </TouchableOpacity>
+            </>
+          )}
 
-            <TouchableOpacity
-              style={styles.recoveryCalloutLink}
-              onPress={handleViewRecovery}
-              accessibilityLabel="View full CoinOS recovery info including NWC connection string"
-              testID="wallet-settings-view-recovery"
-            >
-              <Text style={styles.recoveryCalloutLinkText}>View full recovery info →</Text>
-            </TouchableOpacity>
-            {recoveryError && <Text style={styles.recoveryErrorText}>{recoveryError}</Text>}
+          <Text style={[styles.label, { marginTop: 20 }]}>Card Design</Text>
+          <View style={styles.themeGrid}>
+            {themeList.map((theme) => (
+              <MiniWalletCard
+                key={theme.id}
+                theme={theme}
+                selected={selectedTheme === theme.id}
+                onPress={() => setSelectedTheme(theme.id)}
+              />
+            ))}
           </View>
-        )}
 
-        {/* NWC wallet: relay URL (read-only) */}
-        {wallet.walletType === 'nwc' && relayUrl && (
-          <>
-            <Text style={[styles.label, { marginTop: 20 }]}>Relay</Text>
-            <Text style={styles.xpubText} numberOfLines={2}>
-              {relayUrl}
-            </Text>
-          </>
-        )}
-
-        {/* On-chain wallet: show xpub (read-only) */}
-        {wallet.walletType === 'onchain' && xpubDisplay && (
-          <>
-            <Text style={[styles.label, { marginTop: 20 }]}>Extended Public Key</Text>
-            <TouchableOpacity onPress={handleCopyXpub} activeOpacity={0.7}>
-              <Text style={styles.xpubText} numberOfLines={3}>
-                {xpubDisplay}
-              </Text>
-              <Text style={styles.copyHint}>Tap to copy</Text>
-            </TouchableOpacity>
-          </>
-        )}
-
-        <Text style={[styles.label, { marginTop: 20 }]}>Card Design</Text>
-        <View style={styles.themeGrid}>
-          {themeList.map((theme) => (
-            <MiniWalletCard
-              key={theme.id}
-              theme={theme}
-              selected={selectedTheme === theme.id}
-              onPress={() => setSelectedTheme(theme.id)}
-            />
-          ))}
-        </View>
-
-        <TouchableOpacity
-          style={styles.saveButton}
-          onPress={handleSave}
-          testID="wallet-settings-save"
-          accessibilityLabel="Save wallet settings"
-        >
-          <Text style={styles.saveButtonText}>Save</Text>
-        </TouchableOpacity>
-
-        {coinosRecovery && (
           <TouchableOpacity
-            style={[styles.coinosRow, styles.coinosRowDisabled]}
-            disabled
-            accessibilityLabel="Migrate to self-custody (coming soon)"
-            testID="wallet-settings-migrate"
+            style={styles.saveButton}
+            onPress={handleSave}
+            testID="wallet-settings-save"
+            accessibilityLabel="Save wallet settings"
           >
-            <Text style={[styles.coinosRowText, styles.coinosRowTextDisabled]}>
-              Migrate to self-custody
-            </Text>
-            <Text style={styles.coinosRowHint}>Coming soon</Text>
+            <Text style={styles.saveButtonText}>Save</Text>
           </TouchableOpacity>
-        )}
 
-        <TouchableOpacity style={styles.disconnectButton} onPress={handleDisconnect}>
-          <Text style={styles.disconnectButtonText}>Remove Wallet</Text>
-        </TouchableOpacity>
-      </BottomSheetScrollView>
-      {/* Recovery sheet rendered as a sibling so its own
-          BottomSheetModal stack doesn't fight the settings sheet. */}
+          {coinosRecovery && (
+            <TouchableOpacity
+              style={[styles.coinosRow, styles.coinosRowDisabled]}
+              disabled
+              accessibilityLabel="Migrate to self-custody (coming soon)"
+              testID="wallet-settings-migrate"
+            >
+              <Text style={[styles.coinosRowText, styles.coinosRowTextDisabled]}>
+                Migrate to self-custody
+              </Text>
+              <Text style={styles.coinosRowHint}>Coming soon</Text>
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity style={styles.disconnectButton} onPress={handleDisconnect}>
+            <Text style={styles.disconnectButtonText}>Remove Wallet</Text>
+          </TouchableOpacity>
+        </BottomSheetScrollView>
+      </BottomSheetModal>
+      {/* Recovery sheet hoisted OUT of the settings BottomSheetModal — a
+        BottomSheetModal nested inside another doesn't dismiss reliably
+        (the inner ref.dismiss() doesn't escape the outer modal's
+        portal context). Rendering as a fragment-level sibling lets it
+        own its own modal stack entry and respond to Done normally. */}
       <CoinosRecoverySheet
         visible={!!recoveryDetails}
         details={recoveryDetails}
@@ -382,7 +412,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         onAcknowledge={() => setRecoveryDetails(null)}
         onClose={() => setRecoveryDetails(null)}
       />
-    </BottomSheetModal>
+    </>
   );
 };
 
