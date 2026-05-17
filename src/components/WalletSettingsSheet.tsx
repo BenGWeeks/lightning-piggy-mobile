@@ -21,7 +21,14 @@ import {
   type CoinosRecoveryInfo,
 } from '../services/walletStorageService';
 import { hostFromBaseUrl } from '../services/coinosService';
-import { Copy as CopyIcon, Eye, EyeOff, ShieldAlert } from 'lucide-react-native';
+import {
+  Copy as CopyIcon,
+  Eye,
+  EyeOff,
+  ShieldAlert,
+  QrCode as QrCodeIcon,
+} from 'lucide-react-native';
+import QRCode from 'react-native-qrcode-svg';
 
 interface Props {
   walletId: string | null;
@@ -65,16 +72,18 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   // masked password row with a copy button. Null = either not a CoinOS
   // wallet or SecureStore had no record.
   const [coinosRecovery, setCoinosRecovery] = useState<CoinosRecoveryInfo | null>(null);
-  // Eye-toggles for the secret rows in the recovery callout. Both
-  // default hidden — passwords and NWC strings shouldn't be on-screen
-  // by default if the user opens settings near a colleague / camera.
+  // Eye-toggle for the password row in the CoinOS recovery callout —
+  // defaults hidden so a password isn't on-screen by default when
+  // the user opens settings near a colleague / camera.
   const [passwordRevealed, setPasswordRevealed] = useState(false);
-  const [nwcRevealed, setNwcRevealed] = useState(false);
-  // Full NWC connection string. Loaded alongside relayUrl from
-  // SecureStore so the recovery callout can surface it for managed
-  // CoinOS wallets without forcing the user into the full recovery
-  // sheet just to copy it.
+  // Full NWC connection string. Surfaced for every NWC wallet (#588 —
+  // not just CoinOS) so users can copy it back out and move the
+  // wallet to another device / NWC client without losing access.
+  // Hidden behind dots + eye toggle by default since the secret in
+  // the URL grants wallet access; a QR overlay is also available.
   const [nwcConnection, setNwcConnection] = useState<string | null>(null);
+  const [nwcRevealed, setNwcRevealed] = useState(false);
+  const [nwcQrShown, setNwcQrShown] = useState(false);
   // Surface a non-fatal error if something prevents us from rendering
   // the recovery callout fully (currently unused — kept for parity
   // with the original API and as a hook for future failure paths).
@@ -86,19 +95,22 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   // progress edits with the stored value — symptom: typing into Lightning
   // Address makes characters disappear.
   useEffect(() => {
-    // Cancellation flag so a fast wallet-switch doesn't leak the
-    // previous wallet's CoinOS recovery / NWC string after the new
-    // wallet is active. Each .then() bails when cancelled is true.
+    // Cancellation flag so a fast wallet-switch / sheet dismiss
+    // doesn't leak the previous wallet's CoinOS recovery / NWC string
+    // after the new wallet is active. Each .then() bails when
+    // cancelled is true.
     let cancelled = false;
 
     // Eager-clear all secret-bearing state on every walletId change —
     // covers wallet switch, sheet close, on-chain branch. Without
     // this the previous wallet's CoinOS username/password callout
-    // would briefly remain visible while the new wallet's
-    // getCoinosRecovery promise was still in-flight (privacy leak).
+    // or NWC connection string would briefly remain visible while
+    // the new wallet's getCoinosRecovery / getNwcUrl promises were
+    // still in-flight (privacy leak).
     setRelayUrl(null);
     setNwcConnection(null);
     setNwcRevealed(false);
+    setNwcQrShown(false);
     setCoinosRecovery(null);
     setPasswordRevealed(false);
 
@@ -116,8 +128,11 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
       } else if (wallet.walletType === 'nwc' && walletId) {
         setXpubDisplay(null);
         // Extract relay URL from NWC connection string. Also stash
-        // the full NWC string so the recovery callout can surface it
-        // for managed CoinOS wallets.
+        // the full NWC string so:
+        // - every NWC wallet's settings can surface a copyable +
+        //   QR-able NWC row (#588)
+        // - the CoinOS recovery callout (#287) can surface it
+        //   alongside the username/password for managed wallets.
         getNwcUrl(walletId).then((url) => {
           if (cancelled) return;
           setNwcConnection(url);
@@ -333,45 +348,11 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
                 </TouchableOpacity>
               </View>
 
-              {nwcConnection && (
-                <>
-                  <Text style={styles.recoveryCalloutLabel}>NWC connection</Text>
-                  <View style={styles.credentialRow}>
-                    <Text
-                      style={styles.credentialText}
-                      selectable={nwcRevealed}
-                      numberOfLines={nwcRevealed ? 3 : 1}
-                    >
-                      {nwcRevealed ? nwcConnection : '••••••••••••'}
-                    </Text>
-                    <TouchableOpacity
-                      onPress={() => setNwcRevealed((v) => !v)}
-                      accessibilityLabel={
-                        nwcRevealed ? 'Hide NWC connection' : 'Reveal NWC connection'
-                      }
-                      testID="settings-coinos-reveal-nwc"
-                      hitSlop={8}
-                    >
-                      {nwcRevealed ? (
-                        <EyeOff size={18} color={colors.textSupplementary} strokeWidth={2} />
-                      ) : (
-                        <Eye size={18} color={colors.textSupplementary} strokeWidth={2} />
-                      )}
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={async () => {
-                        await Clipboard.setStringAsync(nwcConnection);
-                        Alert.alert('Copied', 'NWC connection copied to clipboard.');
-                      }}
-                      accessibilityLabel="Copy NWC connection"
-                      testID="settings-coinos-copy-nwc"
-                      hitSlop={8}
-                    >
-                      <CopyIcon size={18} color={colors.brandPink} strokeWidth={2} />
-                    </TouchableOpacity>
-                  </View>
-                </>
-              )}
+              {/* NWC connection isn't repeated inside the CoinOS callout
+                  — the standalone "NWC Connection" row below renders
+                  for every NWC wallet (#588) with the same masked +
+                  copy affordance plus a QR overlay, so duplicating it
+                  here would just be noise. */}
 
               {recoveryError && <Text style={styles.recoveryErrorText}>{recoveryError}</Text>}
             </View>
@@ -383,6 +364,82 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
               <Text style={[styles.label, { marginTop: 20 }]}>Relay</Text>
               <Text style={styles.xpubText} numberOfLines={2}>
                 {relayUrl}
+              </Text>
+            </>
+          )}
+
+          {/* NWC wallet: full connection string (#588). Behind dots +
+              eye toggle by default — the secret in the URL grants
+              wallet access, so we don't want it sitting on-screen if
+              the user opens settings near a colleague / camera. Copy
+              and QR are separate affordances so paste into a password
+              manager / scan from another device both work without
+              needing to reveal the secret first. Applies to every
+              NWC wallet, not just managed CoinOS ones. */}
+          {wallet.walletType === 'nwc' && nwcConnection && (
+            <>
+              <Text style={[styles.label, { marginTop: 20 }]}>NWC Connection</Text>
+              <View style={styles.nwcRow}>
+                <Text
+                  style={styles.nwcRowText}
+                  selectable={nwcRevealed}
+                  numberOfLines={nwcRevealed ? undefined : 1}
+                >
+                  {nwcRevealed ? nwcConnection : '••••••••••••'}
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setNwcRevealed((v) => !v)}
+                  accessibilityLabel={nwcRevealed ? 'Hide NWC connection' : 'Reveal NWC connection'}
+                  testID="settings-nwc-reveal"
+                  hitSlop={8}
+                >
+                  {nwcRevealed ? (
+                    <EyeOff size={18} color={colors.textSupplementary} strokeWidth={2} />
+                  ) : (
+                    <Eye size={18} color={colors.textSupplementary} strokeWidth={2} />
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setNwcQrShown((v) => !v)}
+                  accessibilityLabel={
+                    nwcQrShown ? 'Hide NWC connection QR code' : 'Show NWC connection QR code'
+                  }
+                  testID="settings-nwc-qr"
+                  hitSlop={8}
+                >
+                  <QrCodeIcon size={18} color={colors.textSupplementary} strokeWidth={2} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={async () => {
+                    await Clipboard.setStringAsync(nwcConnection);
+                    Alert.alert('Copied', 'NWC connection copied to clipboard.');
+                  }}
+                  accessibilityLabel="Copy NWC connection"
+                  testID="settings-nwc-copy"
+                  hitSlop={8}
+                >
+                  <CopyIcon size={18} color={colors.brandPink} strokeWidth={2} />
+                </TouchableOpacity>
+              </View>
+              {nwcQrShown && (
+                <View style={styles.qrPanel} testID="settings-nwc-qr-panel">
+                  <QRCode
+                    value={nwcConnection}
+                    size={220}
+                    // Hard-code black-on-white so the QR stays scannable
+                    // in both themes — `colors.textHeader` is near-white
+                    // in dark mode, which against the white qrPanel
+                    // background renders the QR effectively invisible.
+                    backgroundColor="#FFFFFF"
+                    color="#000000"
+                  />
+                  <Text style={styles.qrHint}>
+                    Scan from another Lightning Piggy install or NWC client to import this wallet.
+                  </Text>
+                </View>
+              )}
+              <Text style={styles.hintText}>
+                Use this string to move the wallet to another device or NWC client.
               </Text>
             </>
           )}
@@ -486,6 +543,33 @@ const createStyles = (colors: Palette) =>
       fontSize: 12,
       color: colors.textSupplementary,
       fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    },
+    nwcRow: {
+      backgroundColor: colors.background,
+      borderRadius: 12,
+      padding: 14,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    nwcRowText: {
+      flex: 1,
+      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+      fontSize: 13,
+      color: colors.textBody,
+    },
+    qrPanel: {
+      backgroundColor: colors.white,
+      borderRadius: 12,
+      padding: 16,
+      alignItems: 'center',
+      gap: 12,
+      marginTop: 8,
+    },
+    qrHint: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      textAlign: 'center',
     },
     hintText: {
       fontSize: 12,
