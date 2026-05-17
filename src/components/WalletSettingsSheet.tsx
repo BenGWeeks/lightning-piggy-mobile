@@ -70,6 +70,16 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   // progress edits with the stored value — symptom: typing into Lightning
   // Address makes characters disappear.
   useEffect(() => {
+    // Eager reset of secret-bearing state on every walletId change —
+    // covers wallet switch, sheet close (walletId → null) and the
+    // on-chain branch alike. Without this nwcConnection (a wallet
+    // access secret) could persist in React state for the lifetime
+    // of HomeScreen after the user dismissed the sheet.
+    setRelayUrl(null);
+    setNwcConnection(null);
+    setNwcRevealed(false);
+    setNwcQrShown(false);
+
     if (wallet) {
       setAlias(wallet.alias);
       setLnAddress(wallet.lightningAddress ?? '');
@@ -78,7 +88,6 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
       // Load xpub for on-chain wallets
       if (wallet.walletType === 'onchain' && walletId) {
         getXpub(walletId).then((xpub) => setXpubDisplay(xpub));
-        setRelayUrl(null);
       } else if (wallet.walletType === 'nwc' && walletId) {
         setXpubDisplay(null);
         // Extract relay URL from NWC connection string, AND stash the
@@ -86,8 +95,6 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         // recovery row below.
         getNwcUrl(walletId).then((url) => {
           setNwcConnection(url);
-          setNwcRevealed(false);
-          setNwcQrShown(false);
           if (url) {
             try {
               const params = new URLSearchParams(url.split('?')[1] || '');
@@ -99,11 +106,9 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         });
       } else {
         setXpubDisplay(null);
-        setRelayUrl(null);
-        setNwcConnection(null);
-        setNwcRevealed(false);
-        setNwcQrShown(false);
       }
+    } else {
+      setXpubDisplay(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walletId]);
