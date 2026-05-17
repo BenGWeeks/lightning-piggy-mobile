@@ -127,8 +127,19 @@ const LocationPickerSheet: React.FC<Props> = ({
         })
         .catch(() => seed(54.0, -2.0, 5));
     }, 1500);
-    Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High })
+    // Request foreground permission BEFORE the fresh fix. Opening
+    // "Pick on map" directly from Hide-a-Piglet step 3 may be the
+    // very first GPS-touching surface in the session — without this
+    // request `getCurrentPositionAsync` rejects with a permission
+    // error and we silently fall through to the UK fallback.
+    Location.requestForegroundPermissionsAsync()
+      .then((perm) => {
+        if (cancelled) return;
+        if (perm.status !== 'granted') return; // last-known/UK paths take over
+        return Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      })
       .then((pos) => {
+        if (!pos || cancelled) return;
         clearTimeout(freshTimeout);
         seed(pos.coords.latitude, pos.coords.longitude, 16);
       })

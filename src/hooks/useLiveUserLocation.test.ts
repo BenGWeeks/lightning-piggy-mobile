@@ -6,12 +6,12 @@
  * PlaceDetailScreen, HuntScreen, HuntCreateScreen). Bugs here ripple
  * everywhere, so the contract is worth pinning down:
  *
- *   1. Dev-pinned position short-circuits the GPS ladder — emulator
- *      parity should NEVER touch hardware GPS even if the env vars
- *      are set.
- *   2. Permission denied flips `denied` and stops further work.
- *   3. The three-step ladder (last-known → current → watch) runs in
+ *   1. Permission denied flips `denied` and stops further work.
+ *   2. The three-step ladder (last-known → current → watch) runs in
  *      order, and a fresher rung overwrites a staler one.
+ *   3. Out-of-order fixes (older `LocationObject.timestamp` than the
+ *      last applied) are dropped — the watch + the parallel one-shot
+ *      can race.
  *   4. Unmounting tears down the watch subscription so we don't leak
  *      a background fix-stream across navigation.
  */

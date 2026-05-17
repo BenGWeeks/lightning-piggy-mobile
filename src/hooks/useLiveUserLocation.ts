@@ -17,8 +17,9 @@ import * as Location from 'expo-location';
  *   2. `getCurrentPositionAsync` → fresh fix to overwrite the stale
  *      last-known (often a few streets away in the same town —
  *      that's what #595 was about).
- *   3. `watchPositionAsync` → ongoing updates every ~5s / 10m so the
- *      user dot follows them as they walk around.
+ *   3. `watchPositionAsync` → ongoing updates every 30 s or every 50 m
+ *      of movement (whichever gates pass), so the user dot follows
+ *      them as they walk around without churning React renders.
  *
  * `denied` flips when the user has rejected the foreground-location
  * permission so callers can render a "grant location" CTA without
@@ -66,12 +67,14 @@ export interface UseLiveUserLocationOptions {
    *  for a foreground map screen; if you need to be frugal pass
    *  `Balanced` explicitly (callers without a map-on-screen). */
   accuracy?: Location.LocationAccuracy;
-  /** Min time between watch callbacks. Default 5 s — frequent enough
-   *  that the dot feels live on foot, infrequent enough that we
-   *  don't churn React state in city centres. */
+  /** Min time between watch callbacks. Default 30 s — paired with
+   *  `distanceIntervalM` below, the dot updates roughly every couple
+   *  of footsteps' worth of pace on a city walk, without churning
+   *  React state when standing still. */
   timeIntervalMs?: number;
-  /** Min distance change before a watch callback fires. Default 10 m
-   *  so the dot doesn't jitter while the user stands still. */
+  /** Min distance change before a watch callback fires. Default 50 m
+   *  so the dot doesn't jitter from GPS drift while standing still
+   *  and only moves when the user has actually walked somewhere. */
   distanceIntervalM?: number;
 }
 
@@ -129,6 +132,12 @@ export function useLiveUserLocation(
         setDenied(true);
         return;
       }
+      // Clear any sticky `denied` from a prior run — the user can
+      // grant location from system settings after initially refusing
+      // and we shouldn't keep showing the "grant location" CTA after
+      // they've already done so (the effect re-runs on
+      // focus/enabled/accuracy changes).
+      setDenied(false);
 
       // Step 1: last-known fix (instant, may be 10 min stale). Paints
       // the map while the parallel fetch + watch land below.
