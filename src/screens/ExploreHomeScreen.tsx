@@ -22,6 +22,7 @@ import {
 import TabHeader from '../components/TabHeader';
 import { ContentRail } from '../components/ContentRail';
 import { LibreMiniMap } from '../components/LibreMiniMap';
+import { useUserLocation } from '../contexts/UserLocationContext';
 import LegendSheet from '../components/LegendSheet';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import { courses, type Course } from '../data/learnContent';
@@ -65,7 +66,6 @@ import {
   geohashPrefixes,
   haversineMetres,
 } from '../utils/geohash';
-import { getDevPinnedLocation } from '../utils/devLocation';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { createExploreHomeScreenStyles } from '../styles/ExploreHomeScreen.styles';
@@ -144,24 +144,18 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // user-position halo until a real fix arrives).
   const [pos, setPos] = useState<{ lat: number; lon: number; accuracy: number | null } | null>(
     () => {
-      const dev = getDevPinnedLocation();
-      if (dev) return { ...dev, accuracy: null };
       const anchor = peekCachedAnchorSync();
       return anchor ? { ...anchor, accuracy: null } : null;
     },
   );
   const [locationDenied, setLocationDenied] = useState(false);
+  // Live position for the user dot — refreshes as the user walks
+  // around without re-running the BTC-merchant / cache / event fetches
+  // below (those fire once on the initial pos resolve).
+  const { pos: livePos } = useUserLocation();
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // Dev-only emulator fallback — see `getDevPinnedLocation`.
-      const pinned = getDevPinnedLocation();
-      if (pinned) {
-        // Dev pin → null accuracy so the halo is suppressed (the pin
-        // is a literal value, not a measurement).
-        if (!cancelled) setPos({ ...pinned, accuracy: null });
-        return;
-      }
       const perm = await Location.requestForegroundPermissionsAsync();
       if (cancelled) return;
       if (perm.status !== 'granted') {
@@ -189,7 +183,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
       }
       try {
         const current = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
+          accuracy: Location.Accuracy.High,
         });
         if (!cancelled) {
           setPos({
@@ -684,9 +678,20 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           </View>
         ) : (
           <LibreMiniMap
-            lat={pos?.lat ?? null}
-            lon={pos?.lon ?? null}
-            userAccuracyMetres={pos?.accuracy ?? null}
+            // Mini-map is non-interactive (zoom-only, follows GPS) — so
+            // the camera anchor SHOULD track the live position, not
+            // the stale one-shot `pos` (which was seeded from a cached
+            // merchant-centroid anchor on cold start). Falls back to
+            // `pos` only while the live fix is still resolving.
+            lat={livePos?.lat ?? pos?.lat ?? null}
+            lon={livePos?.lon ?? pos?.lon ?? null}
+            userLat={livePos?.lat ?? null}
+            userLon={livePos?.lon ?? null}
+            // Cached anchor accuracy is only useful BEFORE a live fix
+            // arrives. Once livePos exists, trust its accuracy (even
+            // if null) so the halo never renders around live coords
+            // using stale data from a different measurement.
+            userAccuracyMetres={livePos ? livePos.accuracy : (pos?.accuracy ?? null)}
             merchants={merchants}
             caches={cachesArr}
             events={eventsArr}
