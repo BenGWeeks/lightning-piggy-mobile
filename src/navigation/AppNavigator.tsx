@@ -1,10 +1,22 @@
-import React, { useMemo } from 'react';
-import { StyleSheet, ActivityIndicator, View, Platform, useWindowDimensions } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Linking,
+  StyleSheet,
+  ActivityIndicator,
+  View,
+  Platform,
+  useWindowDimensions,
+} from 'react-native';
 import {
   NavigationContainer,
+  NavigationState,
   StackActions,
   createNavigationContainerRef,
 } from '@react-navigation/native';
+import {
+  loadPersistedNavigationState,
+  persistNavigationState,
+} from '../utils/navigationStatePersistence';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createDrawerNavigator } from '@react-navigation/drawer';
@@ -315,6 +327,31 @@ export default function AppNavigator() {
   const { isLoading } = useWallet();
   const { scheme, colors } = useTheme();
 
+  // Persist + restore navigation state across cold-starts so the user
+  // lands back on the tab / screen they left (#598). The OS killing
+  // the backgrounded process — common on GrapheneOS, also stock Android
+  // under memory pressure — would otherwise drop them on Home every
+  // time. A pending deep-link short-circuits the restore: the existing
+  // Linking handler in App.tsx routes the user where the URL says.
+  const [isRestoringNavState, setIsRestoringNavState] = useState(true);
+  const [initialNavState, setInitialNavState] = useState<NavigationState | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const initialUrl = await Linking.getInitialURL();
+        if (initialUrl) return;
+        const saved = await loadPersistedNavigationState();
+        if (!cancelled && saved) setInitialNavState(saved);
+      } finally {
+        if (!cancelled) setIsRestoringNavState(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const navTheme = useMemo(
     () => ({
       dark: scheme === 'dark',
@@ -336,7 +373,7 @@ export default function AppNavigator() {
     [scheme, colors],
   );
 
-  if (isLoading) {
+  if (isLoading || isRestoringNavState) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: colors.brandPink }]}>
         <ActivityIndicator size="large" color={colors.white} />
@@ -345,7 +382,16 @@ export default function AppNavigator() {
   }
 
   return (
-    <NavigationContainer ref={navigationRef} theme={navTheme}>
+    <NavigationContainer
+      ref={navigationRef}
+      theme={navTheme}
+      initialState={initialNavState}
+      onStateChange={(state) => {
+        // Fire-and-forget — failures are swallowed inside the util so
+        // a flaky AsyncStorage write can't crash navigation.
+        void persistNavigationState(state);
+      }}
+    >
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Main" component={MainDrawer} />
         <Stack.Screen name="Conversation" component={ConversationScreen} />
