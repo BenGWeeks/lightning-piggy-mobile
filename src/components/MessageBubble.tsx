@@ -220,9 +220,11 @@ const MessageBubble: React.FC<Props> = ({
           {SenderLabel}
           <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>Secret Mode</Text>
           <Text style={[styles.invoiceMemo, fromMe && styles.invoiceMemoMe]}>
-            Unlocks dev / power-user surfaces in Lightning Piggy.
+            {fromMe
+              ? 'Lightning Piggy will offer the recipient a button to toggle Secret Mode.'
+              : 'Unlocks dev / power-user surfaces in Lightning Piggy.'}
           </Text>
-          {onToggleSecretMode && (
+          {!fromMe && onToggleSecretMode && (
             <TouchableOpacity
               style={styles.invoicePayButton}
               onPress={onToggleSecretMode}

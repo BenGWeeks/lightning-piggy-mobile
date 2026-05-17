@@ -19,7 +19,34 @@ jest.mock('../services/boltzService', () => ({
   },
 }));
 
-import { extractBitcoinUri } from './messageContent';
+import { extractBitcoinUri, isSecretModeTrigger } from './messageContent';
+
+describe('isSecretModeTrigger', () => {
+  it('matches the exact trigger word', () => {
+    expect(isSecretModeTrigger('secretthreewords')).toBe(true);
+  });
+
+  it('is case-insensitive', () => {
+    expect(isSecretModeTrigger('SECRETTHREEWORDS')).toBe(true);
+    expect(isSecretModeTrigger('SecretThreeWords')).toBe(true);
+  });
+
+  it('tolerates surrounding whitespace', () => {
+    expect(isSecretModeTrigger('  secretthreewords\n')).toBe(true);
+  });
+
+  it('rejects partial / embedded matches so the word can be discussed in chat', () => {
+    expect(isSecretModeTrigger('secretthreewords and more')).toBe(false);
+    expect(isSecretModeTrigger('hey secretthreewords')).toBe(false);
+    expect(isSecretModeTrigger('thesecretthreewords')).toBe(false);
+  });
+
+  it('rejects empty / non-matching input', () => {
+    expect(isSecretModeTrigger('')).toBe(false);
+    expect(isSecretModeTrigger('hello')).toBe(false);
+    expect(isSecretModeTrigger('secret three words')).toBe(false);
+  });
+});
 
 describe('extractBitcoinUri', () => {
   it('accepts a valid mainnet bech32 address (no amount)', () => {
