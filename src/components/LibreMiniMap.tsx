@@ -354,7 +354,16 @@ const LibreMiniMapInner: React.FC<Props> = ({
             zoom and dominate at close zoom. */}
         <Marker id="user" lngLat={[userLon ?? lon, userLat ?? lat]}>
           <View style={styles.userMarkerWrap}>
-            <Animated.View style={[styles.userDotPulse, { transform: [{ scale: pulse }] }]} />
+            {/* Pixel-marker pulse is only useful as a "find yourself"
+                affordance when no geographic halo is rendered (no
+                accuracy / dev-pinned position). Once the GeoJSON
+                accuracy halo is in place it makes the dot look like
+                it has two halos — drop the pixel pulse in that case. */}
+            {!haloFeature && (
+              <Animated.View
+                style={[styles.userDotPulse, { transform: [{ scale: pulse }] }]}
+              />
+            )}
             <View style={styles.userDot} />
           </View>
         </Marker>
