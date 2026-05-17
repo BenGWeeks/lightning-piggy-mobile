@@ -220,6 +220,15 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         // of bailing. LNURL stays empty — the user will paste a fresh
         // one if they want to re-write the tag, otherwise step 6 is
         // skippable and the save updates the listing only.
+        //
+        // Defer (return silently) when pubkey hasn't hydrated yet but
+        // fallbackCache is present: the effect's deps include `pubkey`,
+        // so it will re-run when NostrContext resolves the signer.
+        // Showing the error toast in this window would flash a false
+        // "Local record missing" before ownership can even be checked.
+        if (fallbackCache && !pubkey) {
+          return;
+        }
         if (
           fallbackCache &&
           pubkey &&
@@ -272,6 +281,26 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
           if (typeof fallbackCache.waitSeconds === 'number')
             setWaitMinutesText(String(Math.round(fallbackCache.waitSeconds / 60)));
           if (typeof fallbackCache.uses === 'number') setUsesText(String(fallbackCache.uses));
+          // Reverse-map the event's NIP-40 expiry back onto one of the
+          // picker chips so a metadata-only save doesn't silently
+          // change the listing's expiry (a `Never` cache would
+          // otherwise re-stamp as 365d on save). Same window-snap
+          // logic as the local-record branch below.
+          if (typeof fallbackCache.expiresAt !== 'number' || fallbackCache.expiresAt === null) {
+            setExpiryDays('never');
+          } else {
+            const windowSec = fallbackCache.expiresAt - fallbackCache.createdAt;
+            const day = 24 * 60 * 60;
+            const closest = [
+              { key: '30' as const, sec: 30 * day },
+              { key: '90' as const, sec: 90 * day },
+              { key: '180' as const, sec: 180 * day },
+              { key: '365' as const, sec: 365 * day },
+            ].reduce((best, opt) =>
+              Math.abs(opt.sec - windowSec) < Math.abs(best.sec - windowSec) ? opt : best,
+            ).key;
+            setExpiryDays(closest);
+          }
           // The cache is on-relay, so it must have been published —
           // default isPublic on. The user can flip it off on step 6
           // before save if they want to convert it to a private Piggy.
@@ -1265,9 +1294,17 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 </TouchableOpacity>
               ) : null}
               <TouchableOpacity
-                style={[styles.primaryButton, !nfcReady && styles.primaryButtonDisabled]}
+                style={[
+                  styles.primaryButton,
+                  (!nfcReady || !lnurl.trim()) && styles.primaryButtonDisabled,
+                ]}
                 onPress={handleOpenNfcSheet}
-                disabled={!nfcReady}
+                // Cross-device edit can reach this step with an empty
+                // LNURL — the listing-only-save path. `handleOpenNfcSheet`
+                // bails silently on `!lnurl.trim()` anyway, but the
+                // affordance needs to look disabled so the user knows
+                // to paste an LNURL on step 2 first.
+                disabled={!nfcReady || !lnurl.trim()}
                 testID="hunt-write-nfc-button"
               >
                 <Nfc size={18} color={colors.white} strokeWidth={2.5} />
@@ -1275,6 +1312,12 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                   {stage.kind === 'wrote-nfc' ? 'Write another tag' : 'Write to NFC tag'}
                 </Text>
               </TouchableOpacity>
+              {nfcReady && !lnurl.trim() ? (
+                <Text style={styles.helper}>
+                  No LNURL yet — paste a fresh withdraw link on step 2 to enable the tag write. Or
+                  skip this step: the listing already saved without touching the tag.
+                </Text>
+              ) : null}
               {/* Post-write PIN row — visible whenever we have lock
                   secrets in hand, either fresh from this session's
                   write or rehydrated from the saved HiddenPiggy in
@@ -1665,7 +1708,12 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 <TouchableOpacity
                   style={[
                     styles.primaryButton,
-                    (stage.kind === 'idle' || stage.kind === 'validating' || !pubkey) &&
+                    // Disabled when: still validating, no signer hydrated,
+                    // or stage is idle WITHOUT the cross-device-edit
+                    // override (which allows metadata-only saves).
+                    (stage.kind === 'validating' ||
+                      !pubkey ||
+                      (stage.kind === 'idle' && !crossDeviceEdit)) &&
                       styles.primaryButtonDisabled,
                   ]}
                   onPress={handleSave}
@@ -1673,7 +1721,11 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                   // Without this guard a tap mid-cold-start can fire
                   // SecureStore lookups with an empty per-account
                   // suffix and crash with "Invalid key" (#554-adjacent).
-                  disabled={stage.kind === 'idle' || stage.kind === 'validating' || !pubkey}
+                  disabled={
+                    stage.kind === 'validating' ||
+                    !pubkey ||
+                    (stage.kind === 'idle' && !crossDeviceEdit)
+                  }
                   testID="hunt-piggy-publish-button"
                   accessibilityLabel={isPublic ? 'Publish Piggy' : 'Save Piggy'}
                 >
@@ -1705,7 +1757,10 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                   // `handleSave` is the same handler the Publish
                   // button calls; it bails out cleanly on its own if
                   // the stage isn't validated.
-                  if (isEditMode && stage.kind === 'validated') {
+                  if (
+                    isEditMode &&
+                    (stage.kind === 'validated' || (crossDeviceEdit && stage.kind === 'idle'))
+                  ) {
                     await handleSave();
                   }
                   setCurrentStep(6);
