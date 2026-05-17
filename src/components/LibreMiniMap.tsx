@@ -122,56 +122,32 @@ interface Props {
 const MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/bright';
 
 /**
- * Geographic accuracy halo + its gentle opacity pulse, factored out
- * into its own component so the pulse's React-state churn doesn't
- * re-render `LibreMiniMapInner`'s marker-rich subtree. With the pulse
- * inlined into the parent, each setState (8 fps) was re-running the
- * full markers map every ~125 ms — on a dense MapScreen that's a lot
- * of work for an opacity oscillation. Isolated here, only the two
- * Layers re-render on pulse tick.
- *
- * The pulse itself signals "this is a live signal, not a frozen
- * snapshot". The halo's RADIUS already encodes precision (driven by
- * GPS accuracy in metres); this opacity oscillation is a separate
- * "alive" affordance.
+ * Geographic accuracy halo. The halo's RADIUS encodes precision
+ * (driven by `userAccuracyMetres` in metres) and CHANGES as the
+ * accuracy improves — walking outside shrinks the radius from
+ * ~250 m indoors to ~5 m outdoors within a few seconds, which is
+ * itself a visible "this is live" signal. An earlier iteration
+ * added an opacity pulse on top via setInterval, but the per-tick
+ * setState contended with PanResponder gesture handling on
+ * MapScreen and caused user-visible bottom-sheet drag jank
+ * (#597 review). Pulse removed; if we want one back, the proper
+ * path is an Animated.Value with `useNativeDriver: true`, or
+ * waiting until the PanResponder migrates to Reanimated.
  */
 const AccuracyHalo: React.FC<{ feature: Feature<Polygon> }> = ({ feature }) => {
-  const [pulse, setPulse] = useState(0);
-  useEffect(() => {
-    // 2 fps. Opacity changes are perceptually forgiving and 2 fps
-    // is still readable as "alive" (the eye smooths the transition
-    // anyway over a 1.6 s sine wave). The previous 4 fps was still
-    // contending with the hand-rolled PanResponder's per-frame JS
-    // setValue calls during merchant-sheet drag — caused visible
-    // jank that the user flagged. If we need to drop further, the
-    // proper fix is to migrate the PanResponder to a Reanimated
-    // gesture so the drag runs on the UI thread.
-    const PULSE_PERIOD_MS = 1600;
-    const PULSE_FPS = 2;
-    const start = Date.now();
-    const id = setInterval(() => {
-      const t = ((Date.now() - start) % PULSE_PERIOD_MS) / PULSE_PERIOD_MS;
-      setPulse(Math.sin(t * 2 * Math.PI));
-    }, 1000 / PULSE_FPS);
-    return () => clearInterval(id);
-  }, []);
-  // Base + amplitude — centralised so designers can tune without
-  // chasing literals across the two paint props below.
-  const fillOpacity = 0.175 + 0.045 * pulse;
-  const lineOpacity = 0.45 + 0.15 * pulse;
   return (
     <GeoJSONSource id="user-accuracy-source" data={feature}>
       <Layer
         id="user-accuracy-fill"
         type="fill"
-        paint={{ 'fill-color': '#4285F4', 'fill-opacity': fillOpacity }}
+        paint={{ 'fill-color': '#4285F4', 'fill-opacity': 0.18 }}
       />
       <Layer
         id="user-accuracy-outline"
         type="line"
         paint={{
           'line-color': '#4285F4',
-          'line-opacity': lineOpacity,
+          'line-opacity': 0.45,
           'line-width': 1,
         }}
       />

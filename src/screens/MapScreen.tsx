@@ -9,6 +9,7 @@ import {
   ScrollView,
   Animated,
   PanResponder,
+  Dimensions,
 } from 'react-native';
 import * as Location from 'expo-location';
 import {
@@ -513,16 +514,23 @@ function useDismissibleSheet(onClose: () => void): {
       onPanResponderRelease: (_e, g) => {
         const dismiss = g.dy > 100 || g.vy > 0.5;
         if (dismiss) {
+          // Animate fully off-screen, not the old hard-coded 600 px.
+          // The sheet has `maxHeight: '80%'`, so on a tall device
+          // (Pixel 8 ≈ 2400 px) 80% is ~1920 px — translateY=600
+          // left ~1320 px still visible at the moment we unmounted,
+          // which the user saw as the sheet flashing back to full
+          // size right before disappearing. Using the actual screen
+          // height as the off-screen target makes the animation end
+          // truly invisible before unmount.
+          const screenHeight = Dimensions.get('window').height;
           Animated.timing(translateY, {
-            toValue: 600,
+            toValue: screenHeight,
             duration: 180,
             useNativeDriver: true,
           }).start(() => {
-            // Don't reset translateY before unmounting — that snaps the
-            // sheet back to the open position for one frame ("flashes
-            // full size and then disappears"). The component unmounts
-            // when onClose flips the parent's selected state to null,
-            // and the next mount creates a fresh translateY at 0.
+            // No translateY reset — the sheet unmounts on `onClose`
+            // and the next mount creates a fresh translateY at 0
+            // via useDismissibleSheet's useRef.
             onClose();
           });
         } else {
