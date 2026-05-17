@@ -39,15 +39,16 @@ For each category I produce: **verdict** (✅ healthy / ⚠️ concerning / 🔴
 
 | Tool | When | How |
 |---|---|---|
-| `scripts/perf-explore-cold-start.sh` | Wall-clock cold-start to a known content visible. | `PIGGY_DEVICE=emulator-5554 bash scripts/perf-explore-cold-start.sh 5` |
-| `scripts/perf-startup.sh` | App-launch to first paint. | Same shape; `N` samples. |
-| `scripts/perf-scroll.sh` | Scroll smoothness on big lists. | Maestro fling + `dumpsys gfxinfo` parse. |
-| `dumpsys gfxinfo <pkg> reset` → action → `dumpsys gfxinfo <pkg>` | **Jank metrics:** legacy-jank %, p99 frame time, slowest frames. | Wrap in a script — reset, do thing, sample, parse. |
-| `perfetto` on device | **Trace what's actually happening** — JS thread, native bridge, GC. | Push config to `/data/local/tmp/`, run `perfetto -c <cfg> -o <out.pftrace>`, pull, drop on perfetto.dev. |
-| Hermes sampling profiler | **JS-thread flame graph.** Killer feature. | (Once #611 lands.) Start/stop in dev menu, save `.cpuprofile`, open in Chrome DevTools. |
-| `[PerfBlock]` console.log markers | **Phase breakdown in code paths I care about.** | `grep -E "PerfBlock" /tmp/logcat.log` — only useful when the markers actually fire (see #611 component 3). |
+| `scripts/lib/perf-stats.sh` | **Shared helpers** — every new `perf-*.sh` should source this. Provides `perf_stats_report` (min/p50/p95/p99/max/mean), `perf_gfxinfo_reset` + `perf_gfxinfo_sample` (jank %, p50/p95/p99 frame time), and `perf_perfetto_start` / `perf_perfetto_stop` for system traces. | `source "$(dirname "$0")/lib/perf-stats.sh"` at the top of any perf script. |
+| `scripts/perf-explore-cold-start.sh` | Cold-start to a known content visible **with** wall-clock distribution + per-run gfxinfo + optional Perfetto. | `PIGGY_DEVICE=emulator-5554 bash scripts/perf-explore-cold-start.sh 5` |
+| `PERFETTO=1 scripts/perf-explore-cold-start.sh` | One-command Perfetto trace pulled to `/tmp/`, ready for perfetto.dev. | The script captures a 40s window on the first run only. |
+| `scripts/perf-startup.sh` | App-launch to first paint. | Same shape; `N` samples. Adopt the shared lib when next touched. |
+| `scripts/perf-scroll.sh` | Scroll smoothness on big lists. | Maestro fling + the lib's gfxinfo helpers. |
+| Hermes sampling profiler | **JS-thread flame graph.** Killer feature. | (Once #611 component 1 lands.) Start/stop in dev menu, save `.cpuprofile`, open in Chrome DevTools. |
+| `[PerfBlock]` console.log markers | **Phase breakdown in code paths I care about.** | `grep -E "PerfBlock" /tmp/logcat.log` — only useful when the markers actually fire (see #611 component 3 — current state is unreliable). |
 | `React.Profiler` wrap | **Render-commit duration.** | Wrapped around `ExploreHomeScreen` already; expand to other big screens as needed. |
 | Static grep for anti-patterns | **Surface re-render bombs without running anything.** | `grep -rn "new Map(prev)" src/` finds every per-event Map clone; `grep -rn "ScrollView" src/` finds non-virtualized lists. |
+| `docs/PERFORMANCE.adoc` | **The how + the why** in one document. | Source of truth for output format, gfxinfo field meanings, AVD GPS setup. |
 
 ## How I run
 
