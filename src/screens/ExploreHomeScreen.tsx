@@ -334,6 +334,102 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     () => new Map(peekCachedEventsSync().map((e) => [e.coord, e])),
   );
 
+  // Coalesce per-event setState bursts during relay backfill (#31, audit
+  // P1, #605). The relay subscription `onevent` callback can fire 50+
+  // times in <200 ms on cold-start; pre-fix every event ran a Map clone
+  // + setState + render, blocking the JS thread for the entire backfill.
+  // Mirrors the DM inbox pattern in NostrContext.tsx (~3550).
+  //
+  // Per-event work stays cheap: trust filter + createdAt-staleness check
+  // run inline (no React state). Only the merge into the React Map is
+  // batched, so the rails still update incrementally as the queue
+  // flushes — just every ~100 ms instead of every event.
+  const pendingCachesRef = useRef<Map<string, ParsedCache>>(new Map());
+  const pendingEventsRef = useRef<Map<string, ParsedEvent>>(new Map());
+  const pendingCachesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingEventsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks whether the screen has unmounted entirely (logout / navigator
+  // reset). Distinct from focus blur, which only pauses the screen — the
+  // tab-blur cleanup still wants to flush so the next focus shows the
+  // tail of the queue. Full unmount means React will throw on any
+  // setState here, so flushers early-return.
+  const isUnmountedRef = useRef(false);
+  useEffect(
+    () => () => {
+      isUnmountedRef.current = true;
+    },
+    [],
+  );
+  // 100 ms flush window: feels instant to the user (the eye perceives
+  // ≤120 ms as same-frame), short enough that the rail doesn't sit
+  // empty during a slow backfill, long enough to coalesce a typical
+  // relay event burst (~50 events in 200 ms) into 2–3 commits.
+  const PENDING_FLUSH_MS = 100;
+  // 25-event threshold flushes early when a fast relay dumps a big
+  // backlog. Without it, a 200-event burst would sit in the buffer for
+  // the full 100 ms even if it landed in 20 ms.
+  const PENDING_FLUSH_THRESHOLD = 25;
+  const flushPendingCaches = useCallback(() => {
+    if (pendingCachesTimerRef.current) {
+      clearTimeout(pendingCachesTimerRef.current);
+      pendingCachesTimerRef.current = null;
+    }
+    // Clear buffer + skip setState on unmount so a stale subscription
+    // tear-down post-logout / navigator-reset doesn't trigger the
+    // "setState on unmounted component" warning (Copilot review on #612).
+    if (isUnmountedRef.current) {
+      pendingCachesRef.current = new Map();
+      return;
+    }
+    const batch = pendingCachesRef.current;
+    if (batch.size === 0) return;
+    pendingCachesRef.current = new Map();
+    setCaches((prev) => {
+      const __t0 = performance.now();
+      const next = new Map(prev);
+      for (const [coord, c] of batch) {
+        const existing = next.get(coord);
+        if (!existing || existing.createdAt < c.createdAt) next.set(coord, c);
+      }
+      const __dt = performance.now() - __t0;
+      if (__dt > 30) {
+        console.log(
+          `[PerfBlock] Explore setCaches flush: ${Math.round(__dt)}ms batch=${batch.size} size=${prev.size}→${next.size}`,
+        );
+      }
+      return next;
+    });
+  }, []);
+  const flushPendingEvents = useCallback(() => {
+    if (pendingEventsTimerRef.current) {
+      clearTimeout(pendingEventsTimerRef.current);
+      pendingEventsTimerRef.current = null;
+    }
+    // See flushPendingCaches above for the unmount guard rationale.
+    if (isUnmountedRef.current) {
+      pendingEventsRef.current = new Map();
+      return;
+    }
+    const batch = pendingEventsRef.current;
+    if (batch.size === 0) return;
+    pendingEventsRef.current = new Map();
+    setEvents((prev) => {
+      const __t0 = performance.now();
+      const next = new Map(prev);
+      for (const [coord, e] of batch) {
+        const existing = next.get(coord);
+        if (!existing || existing.startsAt !== e.startsAt) next.set(coord, e);
+      }
+      const __dt = performance.now() - __t0;
+      if (__dt > 30) {
+        console.log(
+          `[PerfBlock] Explore setEvents flush: ${Math.round(__dt)}ms batch=${batch.size} size=${prev.size}→${next.size}`,
+        );
+      }
+      return next;
+    });
+  }, []);
+
   // Stable array projections of the caches/events Maps so React.memo on
   // the consuming LibreMiniMap can short-circuit re-renders. Without
   // these the parent's `[...caches.values()]` literal returns a fresh
@@ -454,14 +550,29 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // into bridge dispatches for payment-settlement polls + QR-scan
   // callbacks (#554). Reconnect on re-focus is ~100 ms; foreground
   // JS-thread responsiveness is the better trade.
+  // Destructure pos into primitives so the focus effect's deps don't
+  // re-trigger every time `setPos` writes a fresh `{lat, lon, accuracy}`
+  // object (which happens 2–3 times on cold start: last-known fix →
+  // current fix → high-accuracy refinement). Pre-fix that thrashed the
+  // relay subscription open/close 2–3 times per cold-start; each round-
+  // trip is ~100–300 ms. Stev.ie's #612 review surfaced this.
+  const posLat = pos?.lat;
+  const posLon = pos?.lon;
   useFocusEffect(
     useCallback(() => {
       // `refreshKey` is intentionally listed in the deps below so that
       // pull-to-refresh (which bumps it) tears down + re-runs the
       // subscriptions, even though the value isn't referenced inside
       // the body.
-      if (!pos) return;
-      const myGh = encodeGeohash(pos.lat, pos.lon, 7);
+      if (typeof posLat !== 'number' || typeof posLon !== 'number') return;
+      // `cancelled` covers the window between focus-effect cleanup
+      // firing (subsCloserRef.current.forEach(c => c())) and the
+      // underlying relay socket actually closing — a stray event in
+      // that gap would otherwise mutate pendingCachesRef and arm a
+      // fresh flush timer that fires while the screen is blurred.
+      // Mirrors NostrContext.tsx's DM inbox precedent.
+      let cancelled = false;
+      const myGh = encodeGeohash(posLat, posLon, 7);
       // Caches sit at precision 5 (~5 km) — geocaching is inherently
       // hyper-local. Events broaden to precision 3 (~150 km) so a rural
       // user catches the nearest city's Bitcoin meetup; most NIP-52
@@ -471,6 +582,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
       subsCloserRef.current.push(
         subscribeNearbyCaches(cachePrefixes, (c) => {
+          if (cancelled) return;
           // WoT filter: silently drop caches from pubkeys outside the
           // trust graph (an unverified cache could be a phishing LNURL
           // or, worse, a physical lure). Surfaced as a count instead so
@@ -479,55 +591,53 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
             setUntrustedCacheCount((n) => n + 1);
             return;
           }
-          setCaches((prev) => {
-            const existing = prev.get(c.coord);
-            if (existing && existing.createdAt >= c.createdAt) return prev;
-            // The Map clone is O(N); cache it for the SLOW-path log so
-            // an unusually large mirror surfaces in logcat. Pre-fix the
-            // reducer ran silently for every relay event, even when
-            // doing a 1000-entry clone per push during a backfill burst.
-            const __t0 = performance.now();
-            const next = new Map(prev);
-            next.set(c.coord, c);
-            const __dt = performance.now() - __t0;
-            if (__dt > 30) {
-              console.log(
-                `[PerfBlock] Explore setCaches clone: ${Math.round(__dt)}ms size=${prev.size}→${next.size}`,
-              );
-            }
-            return next;
-          });
+          // Stale-event drop happens here too so a stale wrap doesn't
+          // even enter the pending queue. The flush re-checks against
+          // the committed state in case the queue itself raced.
+          const existing = pendingCachesRef.current.get(c.coord);
+          if (existing && existing.createdAt >= c.createdAt) return;
+          pendingCachesRef.current.set(c.coord, c);
+          if (pendingCachesRef.current.size >= PENDING_FLUSH_THRESHOLD) {
+            flushPendingCaches();
+            return;
+          }
+          if (pendingCachesTimerRef.current === null) {
+            pendingCachesTimerRef.current = setTimeout(flushPendingCaches, PENDING_FLUSH_MS);
+          }
         }),
       );
       subsCloserRef.current.push(
         subscribeNearbyEvents(eventPrefixes, (e) => {
+          if (cancelled) return;
           // Skip events that already started > 1h ago.
           if (e.startsAt && e.startsAt < Math.floor(Date.now() / 1000) - 60 * 60) return;
           if (!isTrustedRef.current(e.organiserPubkey)) {
             setUntrustedEventCount((n) => n + 1);
             return;
           }
-          setEvents((prev) => {
-            const existing = prev.get(e.coord);
-            if (existing && existing.startsAt === e.startsAt) return prev;
-            const __t0 = performance.now();
-            const next = new Map(prev);
-            next.set(e.coord, e);
-            const __dt = performance.now() - __t0;
-            if (__dt > 30) {
-              console.log(
-                `[PerfBlock] Explore setEvents clone: ${Math.round(__dt)}ms size=${prev.size}→${next.size}`,
-              );
-            }
-            return next;
-          });
+          const existing = pendingEventsRef.current.get(e.coord);
+          if (existing && existing.startsAt === e.startsAt) return;
+          pendingEventsRef.current.set(e.coord, e);
+          if (pendingEventsRef.current.size >= PENDING_FLUSH_THRESHOLD) {
+            flushPendingEvents();
+            return;
+          }
+          if (pendingEventsTimerRef.current === null) {
+            pendingEventsTimerRef.current = setTimeout(flushPendingEvents, PENDING_FLUSH_MS);
+          }
         }),
       );
       return () => {
+        cancelled = true;
         subsCloserRef.current.forEach((c) => c());
         subsCloserRef.current = [];
+        // Drain whatever's queued so a tab blur mid-backfill doesn't
+        // silently discard the last few events. Both flushers are
+        // null-safe + no-op when the buffer is already empty.
+        flushPendingCaches();
+        flushPendingEvents();
       };
-    }, [pos, refreshKey]),
+    }, [posLat, posLon, refreshKey, flushPendingCaches, flushPendingEvents]),
   );
 
   // ----- lessons progress (local) -----------------------------------------
