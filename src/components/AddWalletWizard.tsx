@@ -341,8 +341,8 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
                 <View style={styles.typeCardText}>
                   <Text style={styles.typeCardTitle}>Connect Existing Lightning Wallet</Text>
                   <Text style={styles.typeCardDesc}>
-                    Paste a Nostr Wallet Connect (NWC) string from a wallet you already use (Alby,
-                    LNbits, Mutiny, Phoenix, …).
+                    Paste a Nostr Wallet Connect (NWC) string from a wallet you already use (Alby
+                    Hub, LNbits, Mutiny, Zeus, …).
                   </Text>
                 </View>
               </TouchableOpacity>
