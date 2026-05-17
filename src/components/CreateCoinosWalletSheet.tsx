@@ -163,28 +163,25 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
         });
 
         const result = await addNwcWallet(minted.nwc, 'CoinOS', 'coinos');
-        if (!result.success) {
+        if (!result.success || !result.walletId) {
           setStep('custody');
           setError(result.error || 'Lightning Piggy could not connect to the new CoinOS wallet.');
           return;
         }
 
-        const newId =
-          walletsRef.current.find(
-            (w) => w.walletType === 'nwc' && w.theme === 'coinos' && w.alias === 'CoinOS',
-          )?.id ??
-          walletsRef.current[walletsRef.current.length - 1]?.id ??
-          null;
-
-        if (newId) {
-          newlyCreatedWalletIdRef.current = newId;
-          await walletStorage.saveCoinosRecovery(newId, {
-            baseUrl,
-            username,
-            password,
-            createdAt: new Date().toISOString(),
-          });
-        }
+        // Use the id addNwcWallet just minted — scanning wallets[] by
+        // alias / theme broke on a second create because find() returned
+        // the FIRST CoinOS-themed wallet, not the newest, so recovery
+        // info got stashed against the wrong walletId and never showed
+        // in Settings for the actual fresh wallet.
+        const newId = result.walletId;
+        newlyCreatedWalletIdRef.current = newId;
+        await walletStorage.saveCoinosRecovery(newId, {
+          baseUrl,
+          username,
+          password,
+          createdAt: new Date().toISOString(),
+        });
 
         setRecovery({ baseUrl, username, password, nwc: minted.nwc });
         setStep('recovery');
