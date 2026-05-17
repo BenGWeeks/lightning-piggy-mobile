@@ -10,6 +10,13 @@ import {
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+// `expo-file-system/legacy` keeps the `cacheDirectory` string + `getInfoAsync`
+// API. The v55 top-level module switched to the `Paths` / `File` class API;
+// the legacy entry-point is the path of least resistance for a Hermes-profiler
+// dump that just needs a string path to hand to Hermes' native API.
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
+import { Alert } from '../../components/BrandedAlert';
 import SecretModeCelebration from '../../components/SecretModeCelebration';
 import * as nip19 from 'nostr-tools/nip19';
 import { UserRound } from 'lucide-react-native';
@@ -116,6 +123,88 @@ const AboutScreen: React.FC = () => {
       cancelled = true;
     };
   }, []);
+
+  // Hermes sampling profiler — gated on __DEV__ || EXPO_PUBLIC_KEEP_PERF_LOGS
+  // so it never ships to production builds. Start writes samples in
+  // memory; Stop & Share dumps a .cpuprofile + opens the OS share sheet
+  // so the dev can save it to Files / airdrop it / drag-drop into Chrome
+  // DevTools' Performance panel for the JS-thread flame graph. See
+  // docs/PERFORMANCE.adoc + .claude/agents/stevie.md for context. (#611
+  // component 1.)
+  const profilerAvailable = __DEV__ || (process.env.EXPO_PUBLIC_KEEP_PERF_LOGS ?? '') === '1';
+  const [profilerRecording, setProfilerRecording] = useState(false);
+  const [profilerBusy, setProfilerBusy] = useState(false);
+  const handleProfilerStart = () => {
+    const hermes = (
+      globalThis as unknown as { HermesInternal?: { enableSamplingProfiler?: () => void } }
+    ).HermesInternal;
+    if (typeof hermes?.enableSamplingProfiler !== 'function') {
+      Alert.alert(
+        'Hermes profiler unavailable',
+        'This build does not expose the Hermes sampling profiler. Rebuild with Hermes enabled.',
+      );
+      return;
+    }
+    try {
+      hermes.enableSamplingProfiler();
+      setProfilerRecording(true);
+    } catch (e) {
+      Alert.alert('Could not start profiler', (e as Error).message);
+    }
+  };
+  const handleProfilerStopAndShare = async () => {
+    const hermes = (
+      globalThis as unknown as {
+        HermesInternal?: {
+          dumpSampledTraceToFile?: (path: string) => void;
+          disableSamplingProfiler?: () => void;
+        };
+      }
+    ).HermesInternal;
+    setProfilerBusy(true);
+    try {
+      const cacheDir = FileSystem.cacheDirectory ?? '';
+      const fileUri = `${cacheDir}hermes-profile-${Date.now()}.cpuprofile`;
+      // Hermes' native API expects a POSIX path, not a `file://` URI.
+      const filePath = fileUri.replace(/^file:\/\//, '');
+      if (typeof hermes?.dumpSampledTraceToFile === 'function') {
+        hermes.dumpSampledTraceToFile(filePath);
+      }
+      // Disable after dump to free sampler buffers; some Hermes builds
+      // expose only `disableSamplingProfiler(filename?)` which both
+      // stops and dumps. Try both surfaces defensively.
+      if (typeof hermes?.disableSamplingProfiler === 'function') {
+        try {
+          hermes.disableSamplingProfiler();
+        } catch {
+          // Some Hermes builds throw if called without a profile-in-flight.
+        }
+      }
+      setProfilerRecording(false);
+      // Verify the file landed before sharing — Hermes can no-op silently.
+      const info = await FileSystem.getInfoAsync(fileUri);
+      if (!info.exists || (info.size ?? 0) === 0) {
+        Alert.alert(
+          'Profile is empty',
+          'No samples were captured. Make sure Hermes is the active JS engine and the app did real work during the recording window.',
+        );
+        return;
+      }
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'application/json',
+          dialogTitle: 'Save Hermes .cpuprofile',
+          UTI: 'public.json',
+        });
+      } else {
+        Alert.alert('Profile saved', `Wrote ${info.size} B to ${filePath}`);
+      }
+    } catch (e) {
+      Alert.alert('Could not stop profiler', (e as Error).message);
+    } finally {
+      setProfilerBusy(false);
+    }
+  };
 
   const handleVersionTap = () => {
     versionTapCount.current += 1;
@@ -225,6 +314,52 @@ const AboutScreen: React.FC = () => {
           <Text style={styles.websiteLink}>www.lightningpiggy.com</Text>
         </TouchableOpacity>
       </View>
+
+      {profilerAvailable && (
+        <View style={[sharedAccountStyles.card, { marginTop: 16 }]} testID="hermes-profiler-card">
+          <Text style={styles.aboutTitle}>Performance profiler (dev)</Text>
+          <Text style={styles.aboutBody}>
+            Captures a Hermes JS-thread sampling profile. Start, reproduce the slow scenario, then
+            Stop & Share to save the .cpuprofile. Open it in Chrome DevTools → Performance → Load
+            profile for a flame graph.
+          </Text>
+          <View style={styles.profilerRow}>
+            <TouchableOpacity
+              onPress={handleProfilerStart}
+              disabled={profilerRecording || profilerBusy}
+              style={[
+                styles.profilerButton,
+                (profilerRecording || profilerBusy) && styles.profilerButtonDisabled,
+              ]}
+              accessibilityLabel="Start Hermes sampling profiler"
+              testID="hermes-profiler-start"
+            >
+              <Text style={styles.profilerButtonText}>
+                {profilerRecording ? 'Recording…' : 'Start'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleProfilerStopAndShare}
+              disabled={!profilerRecording || profilerBusy}
+              style={[
+                styles.profilerButton,
+                styles.profilerButtonPrimary,
+                (!profilerRecording || profilerBusy) && styles.profilerButtonDisabled,
+              ]}
+              accessibilityLabel="Stop Hermes profiler and share .cpuprofile"
+              testID="hermes-profiler-stop"
+            >
+              {profilerBusy ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <Text style={[styles.profilerButtonText, styles.profilerButtonTextPrimary]}>
+                  Stop &amp; Share
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
 
       <TouchableOpacity
         onPress={handleVersionTap}
@@ -370,6 +505,33 @@ const createStyles = (colors: Palette) =>
       fontWeight: '600',
       textAlign: 'center',
       paddingTop: 32,
+    },
+    profilerRow: {
+      flexDirection: 'row',
+      gap: 12,
+      marginTop: 12,
+    },
+    profilerButton: {
+      flex: 1,
+      backgroundColor: 'rgba(255,255,255,0.15)',
+      borderRadius: 10,
+      paddingVertical: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    profilerButtonPrimary: {
+      backgroundColor: colors.brandPink,
+    },
+    profilerButtonDisabled: {
+      opacity: 0.45,
+    },
+    profilerButtonText: {
+      color: colors.white,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    profilerButtonTextPrimary: {
+      color: colors.white,
     },
   });
 
