@@ -121,7 +121,7 @@ const ReceiveSheet: React.FC<Props> = ({
       try {
         const wId = capturedWalletId;
         if (!wId) return;
-        const inv = await makeInvoiceForWallet(wId, sats, 'Lightning Piggy');
+        const inv = await makeInvoiceForWallet(wId, sats, 'Sent with Lightning Piggy');
         setInvoice(inv);
 
         // Hand the invoice off to WalletContext.expectPayment, which
