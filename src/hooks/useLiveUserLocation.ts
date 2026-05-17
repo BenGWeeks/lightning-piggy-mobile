@@ -75,8 +75,13 @@ export interface UseLiveUserLocationOptions {
   distanceIntervalM?: number;
 }
 
-const DEFAULT_TIME_INTERVAL_MS = 5000;
-const DEFAULT_DISTANCE_INTERVAL_M = 10;
+// 30 s / 50 m. Frequent enough that walking outside shrinks the
+// halo + moves the dot within a couple of footsteps' worth of pace,
+// rare enough that the per-tick setState pressure on the JS thread
+// is negligible. Tuned with Ben after the initial 5 s / 10 m default
+// caused too many React renders on dense map screens.
+const DEFAULT_TIME_INTERVAL_MS = 30000;
+const DEFAULT_DISTANCE_INTERVAL_M = 50;
 
 export function useLiveUserLocation(
   opts: UseLiveUserLocationOptions = {},

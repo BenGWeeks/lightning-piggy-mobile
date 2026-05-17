@@ -297,13 +297,20 @@ const LibreMiniMapInner: React.FC<Props> = ({
   // interactive, leave the camera wherever the user panned it — the
   // recenter-on-me overlay button gives them an explicit affordance to
   // jump back to their location.
+  //
+  // 3-second pan when the position updates. The watch fires at most
+  // every 30 s, so the user perceives a smooth glide from the old
+  // centre to the new instead of a hard cut. The user-dot Marker has
+  // fixed lat/lon coords; MapLibre re-projects it every animation
+  // frame as the camera moves, so the dot smoothly slides into the
+  // viewport centre over those 3 s without any per-frame setState.
   useEffect(() => {
     if (interactive) return;
     if (lat === null || lon === null) return;
     cameraRef.current?.flyTo({
       center: [lon, lat],
       zoom: currentZoomRef.current,
-      duration: 250,
+      duration: 3000,
     });
   }, [lat, lon, interactive]);
 
