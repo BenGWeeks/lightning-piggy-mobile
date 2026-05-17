@@ -1,0 +1,68 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Add a CoinOS managed wallet — #287
+---
+# Walks the end-to-end flow added in #287:
+#   Home empty-state → Get Started → AddWalletWizard type chooser
+#   → Create a Lightning Wallet tile → custody disclosure
+#   → Create my wallet → spinner → recovery sheet
+#   → acknowledge → back to Home with the new wallet active.
+#
+# Requires:
+#   - Fresh install (no wallets yet) so the WelcomeWalletPrompt shows.
+#   - Network reachability to coinos.io. If the live API is gated by
+#     CloudFlare's bot-management challenge (see the PR body), the
+#     flow will surface a service-down error on the custody screen —
+#     `extendedWaitUntil` for the recovery sheet times out and the
+#     flow fails. That's a deliberate failure mode: the test is the
+#     canary for the upstream unblock.
+#
+# Run:
+#   maestro test tests/e2e/test-add-coinos-wallet.yaml
+
+- launchApp:
+    clearState: true
+    clearKeychain: true
+
+- waitForAnimationToEnd: { timeout: 6000 }
+
+# Empty-state welcome card. The toggle from earlier revisions is gone —
+# Get Started just opens the standard Add Wallet wizard now.
+- assertVisible: 'Welcome to Lightning Piggy'
+- tapOn: { id: 'welcome-get-started' }
+- waitForAnimationToEnd: { timeout: 2000 }
+
+# Type chooser. The CoinOS tile is the recommended first option.
+- assertVisible: 'Create a Lightning Wallet'
+- tapOn: { id: 'wallet-type-coinos' }
+- waitForAnimationToEnd: { timeout: 1500 }
+
+# Custody disclosure. Mandatory acknowledgement before we hit the network.
+- assertVisible: 'Heads-up: this is a custodial wallet'
+- tapOn: { id: 'coinos-create-button' }
+
+# Network-dependent step. We give it up to 60s — registration +
+# /app + /apps round-trip + the NWC websocket handshake all stack up
+# on a slow connection. If CoinOS is reachable end-to-end the
+# recovery sheet renders with the auto-generated username + password
+# the user MUST acknowledge before we let them onto Home.
+- extendedWaitUntil:
+    visible: "Save your recovery info"
+    timeout: 60000
+
+# Recovery sheet — verify the three credential rows are present.
+- assertVisible: 'Username'
+- assertVisible: 'Password'
+- assertVisible: 'NWC connection'
+
+# Acknowledgement is mandatory in post-create mode (sheet is
+# enablePanDownToClose=false). Tap the primary action explicitly.
+- tapOn: "I've saved this somewhere"
+- waitForAnimationToEnd: { timeout: 2000 }
+
+# Back on Home. The new wallet should be the active card — the
+# transactions empty-state is the cleanest "we landed" signal that
+# doesn't depend on any incoming-payment timing.
+- assertVisible:
+    text: 'No transactions yet'
+    optional: true
+- assertNotVisible: 'Welcome to Lightning Piggy'

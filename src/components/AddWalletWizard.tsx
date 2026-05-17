@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Keyboard,
   Platform,
+  Image,
 } from 'react-native';
 import { Alert } from './BrandedAlert';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -27,23 +28,17 @@ import { MiniWalletCard } from './WalletCard';
 import { validateNwcUrl } from '../services/nwcService';
 import { validateOnchainImport } from '../services/onchainService';
 import { LightningIcon, ChainIcon } from './icons/ArrowIcons';
-import { ClipboardPaste, QrCode, Sparkles } from 'lucide-react-native';
+import { ClipboardPaste, QrCode } from 'lucide-react-native';
 import CreateCoinosWalletSheet from './CreateCoinosWalletSheet';
-
-export type AddWalletInitialType = 'coinos' | 'nwc' | 'onchain';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
-  /** When set, skip the type-chooser and fast-path into that flow.
-   *  Used by the first-run welcome prompt to send users straight into
-   *  "Create CoinOS" without showing the type tile they just dismissed. */
-  initialType?: AddWalletInitialType;
 }
 
 type Step = 'type' | 'url' | 'xpub' | 'mnemonic' | 'alias' | 'theme';
 
-const AddWalletWizard: React.FC<Props> = ({ visible, onClose, initialType }) => {
+const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { addNwcWallet, addOnchainWallet, addHotWallet } = useWallet();
@@ -68,30 +63,6 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose, initialType }) => 
   useEffect(() => {
     AsyncStorage.getItem('secret_mode').then((v) => setSecretMode(v === 'true'));
   }, [visible]);
-
-  // First-run entry bypass: WelcomeWalletPrompt launches the wizard with
-  // initialType='coinos' so the user lands directly in the CoinOS create
-  // sheet without re-picking a tile. Other types pre-route to their
-  // respective input steps so a deep link / future entry point can do
-  // the same.
-  useEffect(() => {
-    if (!visible || !initialType) return;
-    if (initialType === 'coinos') {
-      // Same dismiss-then-present dance as the type-tile tap below — two
-      // BottomSheetModals stacked on top of each other leaves the lower
-      // one un-tappable.
-      bottomSheetRef.current?.dismiss();
-      setTimeout(() => setCoinosOpen(true), 250);
-    } else if (initialType === 'nwc') {
-      setWalletType('nwc');
-      setSelectedTheme('lightning-piggy');
-      setStep('url');
-    } else if (initialType === 'onchain') {
-      setWalletType('onchain');
-      setSelectedTheme('bitcoin');
-      setStep('xpub');
-    }
-  }, [visible, initialType]);
 
   const reset = useCallback(() => {
     setStep('type');
@@ -344,10 +315,14 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose, initialType }) => 
                 accessibilityLabel="Create a managed Lightning wallet on CoinOS"
               >
                 <View style={styles.typeCardIconWrapper}>
-                  <Sparkles size={28} color={colors.brandPink} strokeWidth={2.5} />
+                  <Image
+                    source={require('../../assets/images/coinos-logo-mark.png')}
+                    style={styles.coinosLogo}
+                    resizeMode="contain"
+                  />
                 </View>
                 <View style={styles.typeCardText}>
-                  <Text style={styles.typeCardTitle}>Create a Lightning Wallet</Text>
+                  <Text style={styles.typeCardTitle}>CoinOS Lightning Wallet</Text>
                   <Text style={styles.typeCardDesc}>
                     Auto-set-up a managed wallet on CoinOS in seconds. Custodial — best for getting
                     started with small amounts.
@@ -358,15 +333,16 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose, initialType }) => 
                 style={styles.typeCard}
                 onPress={() => handleTypeSelect('nwc')}
                 testID="wallet-type-nwc"
-                accessibilityLabel="Lightning NWC"
+                accessibilityLabel="Connect existing Lightning wallet via Nostr Wallet Connect"
               >
                 <View style={styles.typeCardIconWrapper}>
                   <LightningIcon size={28} color={colors.brandPink} strokeWidth={2.5} />
                 </View>
                 <View style={styles.typeCardText}>
-                  <Text style={styles.typeCardTitle}>Lightning (NWC)</Text>
+                  <Text style={styles.typeCardTitle}>Connect Existing Lightning Wallet</Text>
                   <Text style={styles.typeCardDesc}>
-                    Connect a Lightning wallet via Nostr Wallet Connect
+                    Paste a Nostr Wallet Connect (NWC) string from a wallet you already use (Alby,
+                    LNbits, Mutiny, Phoenix, …).
                   </Text>
                 </View>
               </TouchableOpacity>
@@ -753,6 +729,14 @@ const createStyles = (colors: Palette) =>
       height: 40,
       justifyContent: 'center',
       alignItems: 'center',
+    },
+    // CoinOS logo mark (rings + half-fill) on transparent background.
+    // `tintColor` recolours every non-transparent pixel so the rings
+    // pick up brand pink, matching the other tile icons.
+    coinosLogo: {
+      width: 32,
+      height: 32,
+      tintColor: colors.brandPink,
     },
     typeCardText: {
       flex: 1,

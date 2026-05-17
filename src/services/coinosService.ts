@@ -20,9 +20,12 @@
 import { getPublicKey } from 'nostr-tools/pure';
 import { hexToBytes } from '@noble/hashes/utils.js';
 
-/** Public, fully-managed CoinOS instance. Override per-call to point at
- *  a self-hosted instance (see Advanced section in the create flow). */
-export const DEFAULT_COINOS_BASE_URL = 'https://coinos.io';
+/** Public, fully-managed CoinOS instance. The Fastify API server lives
+ *  under `/api/*` — `coinos.io` itself serves the SvelteKit frontend
+ *  (which 415s any POST that isn't one of its routes). Override per
+ *  call to point at a self-hosted instance (see Advanced section in
+ *  the create flow); the same `/api` suffix convention applies there. */
+export const DEFAULT_COINOS_BASE_URL = 'https://coinos.io/api';
 
 /** Coarse, structured failure modes the UI can render with specific
  *  copy. Anything we can't classify lands in `unknown`. */
@@ -88,51 +91,86 @@ async function classifyError(res: Response): Promise<CoinosError> {
   try {
     bodyText = (await res.text()).trim();
   } catch {}
-  let bodyMessage = bodyText;
+
+  // Extract a human-readable message from the response body. CoinOS
+  // returns a few shapes depending on which layer rejected the request:
+  //   { message: "..." }                                  (Fastify default)
+  //   { error: "...", message: "..." }                    (some routes)
+  //   { type: "error", error: { message: "..." } }        (frontend proxy)
+  //   "raw text"                                          (5xx pass-throughs)
+  //   "<!DOCTYPE html>..."                                (CF challenge)
+  // The HTML / unrecognised shapes get dropped entirely so we never
+  // surface raw markup or JSON blobs to the user.
+  let bodyMessage = '';
   try {
     const parsed = JSON.parse(bodyText);
-    if (parsed && typeof parsed.message === 'string') bodyMessage = parsed.message;
-  } catch {}
+    if (typeof parsed?.error?.message === 'string') bodyMessage = parsed.error.message;
+    else if (typeof parsed?.message === 'string') bodyMessage = parsed.message;
+    else if (typeof parsed?.error === 'string') bodyMessage = parsed.error;
+  } catch {
+    // Non-JSON: only keep if it's clearly a short plain-text message,
+    // otherwise (HTML challenge pages, long error dumps) discard.
+    if (bodyText && bodyText.length < 200 && !bodyText.startsWith('<')) {
+      bodyMessage = bodyText;
+    }
+  }
 
   const lower = bodyMessage.toLowerCase();
   if (res.status === 429 || lower.includes('rate limit') || lower.includes('too many')) {
     return new CoinosError(
       'rate_limited',
-      bodyMessage || 'Rate limited — please wait and try again.',
+      'CoinOS is rate-limiting new accounts. Please wait a minute and try again.',
       res.status,
     );
   }
+  // 415 is what CoinOS returns when CloudFlare's bot-management challenge
+  // intercepts the request — the request never reaches the API. Surface
+  // that as a service-down rather than an invalid-input so the user
+  // isn't sent looking for something to change in their input.
   if (
-    res.status === 400 ||
-    lower.includes('username') ||
-    lower.includes('exists') ||
-    lower.includes('taken') ||
-    lower.includes('invalid')
+    res.status === 415 ||
+    lower.includes('unsupported media type') ||
+    lower.includes('just a moment')
   ) {
-    if (lower.includes('username') || lower.includes('exists') || lower.includes('taken')) {
-      return new CoinosError(
-        'username_taken',
-        bodyMessage || 'That username is already taken.',
-        res.status,
-      );
-    }
+    return new CoinosError(
+      'service_down',
+      "CoinOS isn't accepting wallet creations from this app right now. Please try again later.",
+      res.status,
+    );
+  }
+  if (lower.includes('username') || lower.includes('exists') || lower.includes('taken')) {
+    return new CoinosError(
+      'username_taken',
+      'That username is already taken — Lightning Piggy will try a different one.',
+      res.status,
+    );
+  }
+  if (res.status === 400 || lower.includes('invalid')) {
     return new CoinosError(
       'invalid_input',
-      bodyMessage || 'The CoinOS server rejected the request.',
+      'CoinOS rejected the request. Please try again.',
       res.status,
     );
   }
   if (res.status === 401 || res.status === 403) {
-    return new CoinosError('auth', bodyMessage || 'Authentication failed.', res.status);
+    return new CoinosError(
+      'auth',
+      "CoinOS isn't accepting wallet creations from this app right now. Please try again later.",
+      res.status,
+    );
   }
   if (res.status >= 500) {
     return new CoinosError(
       'service_down',
-      bodyMessage || 'CoinOS appears to be down — please try again later.',
+      'CoinOS appears to be down. Please try again later.',
       res.status,
     );
   }
-  return new CoinosError('unknown', bodyMessage || `HTTP ${res.status}`, res.status);
+  return new CoinosError(
+    'unknown',
+    "Couldn't create your CoinOS wallet — please try again.",
+    res.status,
+  );
 }
 
 // ─── /register ─────────────────────────────────────────────────────────────
@@ -176,11 +214,8 @@ export async function registerCoinosUser({
   password,
 }: CoinosRegisterArgs): Promise<CoinosRegisterResult> {
   const trimmedUser = username.trim();
-  if (!/^[a-z0-9_]{3,32}$/.test(trimmedUser)) {
-    throw new CoinosError(
-      'invalid_input',
-      'Username must be 3–32 lowercase letters, digits, or underscores.',
-    );
+  if (!/^[a-z0-9]{3,32}$/.test(trimmedUser)) {
+    throw new CoinosError('invalid_input', 'Username must be 3–32 lowercase letters or digits.');
   }
   if (password.length < 12) {
     throw new CoinosError('invalid_input', 'Password must be at least 12 characters.');
@@ -365,18 +400,129 @@ function randomHexBytes(len: number): string {
   return Array.from(buf, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+// Small wordlists for friendly auto-generated usernames. Kept short,
+// pronounceable, family-friendly. 48 × 48 × 100 ≈ 230k combinations —
+// enough that two devices booting at the same moment almost never
+// collide, and the on-collision retry loop in CreateCoinosWalletSheet
+// handles the rare case with a fresh draw. All lowercase alphanumeric
+// so the resulting username passes CoinOS's silently-strict validator.
+
+const USERNAME_ADJECTIVES = [
+  'happy',
+  'sunny',
+  'cosy',
+  'lucky',
+  'merry',
+  'shiny',
+  'tiny',
+  'brave',
+  'kind',
+  'jolly',
+  'witty',
+  'snug',
+  'spry',
+  'zesty',
+  'breezy',
+  'mellow',
+  'plucky',
+  'quick',
+  'silly',
+  'quiet',
+  'royal',
+  'cheery',
+  'noble',
+  'fancy',
+  'rosy',
+  'humble',
+  'crispy',
+  'fuzzy',
+  'bouncy',
+  'wavy',
+  'shy',
+  'bright',
+  'spicy',
+  'minty',
+  'foggy',
+  'snowy',
+  'misty',
+  'frosty',
+  'dusty',
+  'starry',
+  'sleepy',
+  'gentle',
+  'curious',
+  'eager',
+  'bold',
+  'calm',
+  'fast',
+  'wild',
+];
+
+const USERNAME_NOUNS = [
+  'piggy',
+  'otter',
+  'panda',
+  'koala',
+  'fox',
+  'owl',
+  'badger',
+  'beaver',
+  'wombat',
+  'hedgehog',
+  'narwhal',
+  'puffin',
+  'falcon',
+  'sparrow',
+  'robin',
+  'pigeon',
+  'pebble',
+  'comet',
+  'meadow',
+  'river',
+  'forest',
+  'sunset',
+  'sunrise',
+  'cloud',
+  'thunder',
+  'pearl',
+  'opal',
+  'amber',
+  'ember',
+  'maple',
+  'cedar',
+  'willow',
+  'lotus',
+  'tulip',
+  'daisy',
+  'clover',
+  'cherry',
+  'mango',
+  'lemon',
+  'peach',
+  'cookie',
+  'biscuit',
+  'muffin',
+  'waffle',
+  'noodle',
+  'pickle',
+  'pretzel',
+  'donut',
+];
+
 /**
- * Suggest a default username so the user isn't naming their own account
- * — `lp_<random>` is unguessable enough that two devices booting at the
- * same moment won't collide, and short enough to fit CoinOS's username
- * field. Lower-case + digits only matches the regex enforced in
- * `registerCoinosUser`.
+ * Suggest a default username so the user isn't naming their own
+ * account. Format: `<adjective><noun><NN>` where NN is two random
+ * digits, e.g. `happypiggy42`, `sunnyotter07`. Memorable, friendly,
+ * and short enough to recite over the phone if the user ever needs to
+ * recover via CoinOS support.
  */
 export function suggestUsername(): string {
-  const buf = new Uint8Array(4);
+  const buf = new Uint8Array(3);
   crypto.getRandomValues(buf);
-  const suffix = Array.from(buf, (b) => b.toString(16).padStart(2, '0')).join('');
-  return `lp_${suffix}`;
+  const adj = USERNAME_ADJECTIVES[buf[0] % USERNAME_ADJECTIVES.length];
+  const noun = USERNAME_NOUNS[buf[1] % USERNAME_NOUNS.length];
+  const num = (buf[2] % 100).toString().padStart(2, '0');
+  return `${adj}${noun}${num}`;
 }
 
 /**

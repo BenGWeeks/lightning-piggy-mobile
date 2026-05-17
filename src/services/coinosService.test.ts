@@ -31,11 +31,20 @@ function textResponse(body: string, status: number): Response {
 }
 
 describe('coinosService.suggestUsername', () => {
-  it('returns an `lp_<8 hex>` username matching the validation regex', () => {
+  it('returns a friendly `adjective+noun+NN` username matching CoinOS validation', () => {
     const u = suggestUsername();
-    expect(u).toMatch(/^lp_[0-9a-f]{8}$/);
-    // Two consecutive calls don't collide (CSPRNG, not a counter).
-    expect(suggestUsername()).not.toBe(u);
+    // Lowercase alphanumeric, ends in two digits, 3-32 chars total.
+    expect(u).toMatch(/^[a-z]+[a-z]+\d{2}$/);
+    expect(u.length).toBeGreaterThanOrEqual(7);
+    expect(u.length).toBeLessThanOrEqual(20);
+  });
+
+  it('produces varied output across many calls', () => {
+    // Not perfect entropy, but two samples colliding would be a strong
+    // signal the wordlist or seeding is broken.
+    const samples = new Set<string>();
+    for (let i = 0; i < 20; i++) samples.add(suggestUsername());
+    expect(samples.size).toBeGreaterThan(1);
   });
 });
 
@@ -69,36 +78,36 @@ describe('coinosService.registerCoinosUser', () => {
 
   it('rejects short passwords before hitting the network', async () => {
     await expect(
-      registerCoinosUser({ username: 'lp_aaaaaaaa', password: 'short' }),
+      registerCoinosUser({ username: 'lpaaaaaaaa', password: 'short' }),
     ).rejects.toBeInstanceOf(CoinosError);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('POSTs JSON to /register and returns the JWT on 200', async () => {
     fetchMock.mockResolvedValueOnce(
-      jsonResponse({ token: 'jwt-abc', sk: 'sk-hex', pubkey: 'pk-hex', username: 'lp_aaaaaaaa' }),
+      jsonResponse({ token: 'jwt-abc', sk: 'sk-hex', pubkey: 'pk-hex', username: 'lpaaaaaaaa' }),
     );
     const result = await registerCoinosUser({
-      username: 'lp_aaaaaaaa',
+      username: 'lpaaaaaaaa',
       password: 'longenoughpassword',
     });
     expect(result.token).toBe('jwt-abc');
     expect(result.sk).toBe('sk-hex');
     expect(result.pubkey).toBe('pk-hex');
-    expect(result.username).toBe('lp_aaaaaaaa');
+    expect(result.username).toBe('lpaaaaaaaa');
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe(`${DEFAULT_COINOS_BASE_URL}/register`);
     expect(init?.method).toBe('POST');
     const body = JSON.parse(init?.body as string);
-    expect(body).toEqual({ user: { username: 'lp_aaaaaaaa', password: 'longenoughpassword' } });
+    expect(body).toEqual({ user: { username: 'lpaaaaaaaa', password: 'longenoughpassword' } });
   });
 
   it('honours a custom self-hosted baseUrl and strips trailing slashes', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ token: 'jwt' }));
     await registerCoinosUser({
       baseUrl: 'https://my-coinos.example.com/',
-      username: 'lp_aaaaaaaa',
+      username: 'lpaaaaaaaa',
       password: 'longenoughpassword',
     });
     expect(fetchMock.mock.calls[0][0]).toBe('https://my-coinos.example.com/register');
@@ -107,35 +116,35 @@ describe('coinosService.registerCoinosUser', () => {
   it('classifies "username taken" as username_taken', async () => {
     fetchMock.mockResolvedValueOnce(textResponse('username already exists', 400));
     await expect(
-      registerCoinosUser({ username: 'lp_aaaaaaaa', password: 'longenoughpassword' }),
+      registerCoinosUser({ username: 'lpaaaaaaaa', password: 'longenoughpassword' }),
     ).rejects.toMatchObject({ code: 'username_taken' });
   });
 
   it('classifies HTTP 429 as rate_limited', async () => {
     fetchMock.mockResolvedValueOnce(textResponse('too many', 429));
     await expect(
-      registerCoinosUser({ username: 'lp_aaaaaaaa', password: 'longenoughpassword' }),
+      registerCoinosUser({ username: 'lpaaaaaaaa', password: 'longenoughpassword' }),
     ).rejects.toMatchObject({ code: 'rate_limited' });
   });
 
   it('classifies HTTP 5xx as service_down', async () => {
     fetchMock.mockResolvedValueOnce(textResponse('internal', 500));
     await expect(
-      registerCoinosUser({ username: 'lp_aaaaaaaa', password: 'longenoughpassword' }),
+      registerCoinosUser({ username: 'lpaaaaaaaa', password: 'longenoughpassword' }),
     ).rejects.toMatchObject({ code: 'service_down' });
   });
 
   it('classifies a thrown TypeError (DNS / offline) as network', async () => {
     fetchMock.mockRejectedValueOnce(new TypeError('Network request failed'));
     await expect(
-      registerCoinosUser({ username: 'lp_aaaaaaaa', password: 'longenoughpassword' }),
+      registerCoinosUser({ username: 'lpaaaaaaaa', password: 'longenoughpassword' }),
     ).rejects.toMatchObject({ code: 'network' });
   });
 
   it('rejects when the server returns 200 without a JWT', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({}));
     await expect(
-      registerCoinosUser({ username: 'lp_aaaaaaaa', password: 'longenoughpassword' }),
+      registerCoinosUser({ username: 'lpaaaaaaaa', password: 'longenoughpassword' }),
     ).rejects.toBeInstanceOf(CoinosError);
   });
 });

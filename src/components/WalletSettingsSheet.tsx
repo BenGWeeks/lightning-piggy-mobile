@@ -14,8 +14,14 @@ import type { Palette } from '../styles/palettes';
 import { CardTheme } from '../types/wallet';
 import { themeList } from '../themes/cardThemes';
 import { MiniWalletCard } from './WalletCard';
-import { getXpub, getNwcUrl, getCoinosRecovery } from '../services/walletStorageService';
+import {
+  getXpub,
+  getNwcUrl,
+  getCoinosRecovery,
+  type CoinosRecoveryInfo,
+} from '../services/walletStorageService';
 import CoinosRecoverySheet, { CoinosRecoveryDetails } from './CoinosRecoverySheet';
+import { Copy as CopyIcon } from 'lucide-react-native';
 
 interface Props {
   walletId: string | null;
@@ -54,11 +60,11 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const [selectedTheme, setSelectedTheme] = useState<CardTheme>('lightning-piggy');
   const [xpubDisplay, setXpubDisplay] = useState<string | null>(null);
   const [relayUrl, setRelayUrl] = useState<string | null>(null);
-  // Whether this NWC wallet was minted via the CoinOS managed-wallet
-  // flow (#287). Set to true when SecureStore has a recovery record
-  // for the wallet id; gates the "View recovery info" + "Migrate to
-  // self-custody" rows.
-  const [hasCoinosRecovery, setHasCoinosRecovery] = useState(false);
+  // CoinOS managed-wallet recovery info (#287). Loaded eagerly when
+  // the sheet opens so we can render the username inline and surface a
+  // masked password row with a copy button. Null = either not a CoinOS
+  // wallet or SecureStore had no record.
+  const [coinosRecovery, setCoinosRecovery] = useState<CoinosRecoveryInfo | null>(null);
   // Populated lazily when the user taps "View recovery info" — pulls
   // the username/password from SecureStore and the NWC URL from its
   // own SecureStore key, then assembles the CoinosRecoveryDetails for
@@ -94,39 +100,40 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
             }
           }
         });
-        // Probe for a CoinOS recovery record so we can light up the
-        // managed-wallet rows below. We only check existence here;
-        // the full record is fetched on-tap to avoid leaving the
-        // password sitting in JS state for the lifetime of the sheet.
-        getCoinosRecovery(walletId).then((rec) => setHasCoinosRecovery(!!rec));
+        // CoinOS managed-wallet recovery info. Held in JS state for
+        // the sheet's lifetime so we can render the username inline +
+        // a masked password row. The password is never logged or
+        // serialised — it only travels from SecureStore → state →
+        // Clipboard.setStringAsync when the user explicitly taps copy.
+        getCoinosRecovery(walletId).then((rec) => setCoinosRecovery(rec));
       } else {
         setXpubDisplay(null);
         setRelayUrl(null);
-        setHasCoinosRecovery(false);
+        setCoinosRecovery(null);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walletId]);
 
   const handleViewRecovery = useCallback(async () => {
-    if (!walletId) return;
+    if (!walletId || !coinosRecovery) return;
     setRecoveryError(null);
     try {
-      const [rec, nwcUrl] = await Promise.all([getCoinosRecovery(walletId), getNwcUrl(walletId)]);
-      if (!rec || !nwcUrl) {
+      const nwcUrl = await getNwcUrl(walletId);
+      if (!nwcUrl) {
         setRecoveryError('Recovery info is missing for this wallet.');
         return;
       }
       setRecoveryDetails({
-        baseUrl: rec.baseUrl,
-        username: rec.username,
-        password: rec.password,
+        baseUrl: coinosRecovery.baseUrl,
+        username: coinosRecovery.username,
+        password: coinosRecovery.password,
         nwc: nwcUrl,
       });
     } catch (e) {
       setRecoveryError(e instanceof Error ? e.message : 'Failed to load recovery info.');
     }
-  }, [walletId]);
+  }, [walletId, coinosRecovery]);
 
   const handleSheetChange = useCallback(
     (index: number) => {
@@ -285,18 +292,52 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
           <Text style={styles.saveButtonText}>Save</Text>
         </TouchableOpacity>
 
-        {/* CoinOS managed-wallet extras (#287). Only shown when this
-            wallet was minted via the auto-provision flow — gated by
-            SecureStore probe in the populate effect above. */}
-        {hasCoinosRecovery && (
+        {/* CoinOS managed-wallet credentials (#287). Inline username +
+            masked password with copy actions; full NWC string lives
+            behind the "View recovery info" button which opens the
+            CoinosRecoverySheet. Only shown for wallets minted via the
+            managed-wallet flow. */}
+        {coinosRecovery && (
           <View style={styles.coinosBlock}>
+            <Text style={[styles.label, { marginTop: 20 }]}>CoinOS Username</Text>
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={async () => {
+                await Clipboard.setStringAsync(coinosRecovery.username);
+                Alert.alert('Copied', 'CoinOS username copied to clipboard.');
+              }}
+              style={styles.credentialRow}
+              accessibilityLabel="Copy CoinOS username"
+              testID="settings-coinos-copy-username"
+            >
+              <Text style={styles.credentialText} selectable>
+                {coinosRecovery.username}
+              </Text>
+              <CopyIcon size={18} color={colors.brandPink} strokeWidth={2} />
+            </TouchableOpacity>
+
+            <Text style={[styles.label, { marginTop: 12 }]}>CoinOS Password</Text>
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={async () => {
+                await Clipboard.setStringAsync(coinosRecovery.password);
+                Alert.alert('Copied', 'CoinOS password copied to clipboard.');
+              }}
+              style={styles.credentialRow}
+              accessibilityLabel="Copy CoinOS password"
+              testID="settings-coinos-copy-password"
+            >
+              <Text style={styles.credentialText}>••••••••••••</Text>
+              <CopyIcon size={18} color={colors.brandPink} strokeWidth={2} />
+            </TouchableOpacity>
+
             <TouchableOpacity
               style={styles.coinosRow}
               onPress={handleViewRecovery}
-              accessibilityLabel="View CoinOS recovery info"
+              accessibilityLabel="View full CoinOS recovery info"
               testID="wallet-settings-view-recovery"
             >
-              <Text style={styles.coinosRowText}>View recovery info</Text>
+              <Text style={styles.coinosRowText}>View full recovery info</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.coinosRow, styles.coinosRowDisabled]}
@@ -419,6 +460,20 @@ const createStyles = (colors: Palette) =>
     coinosBlock: {
       marginTop: 16,
       gap: 8,
+    },
+    credentialRow: {
+      backgroundColor: colors.background,
+      borderRadius: 12,
+      padding: 14,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    credentialText: {
+      flex: 1,
+      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+      fontSize: 15,
+      color: colors.textBody,
     },
     coinosRow: {
       backgroundColor: colors.background,
