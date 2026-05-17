@@ -5,11 +5,22 @@
 - Use `npm start` (not `npx expo start`) — the start script includes `--dev-client` which is required for custom native modules
 - Native rebuild required after changing plugins or native modules: `npx expo run:android`
 
-## Deploying a release APK to a physical device
+## Cutting a release
 
-- The user's primary device is a Pixel running an EAS-built production install. **`npx expo run:android --variant release` will not upgrade it** — locally-signed APK fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE` (different keystore than EAS) and `INSTALL_FAILED_VERSION_DOWNGRADE` (local pipeline reads `versionCode` from `app.config.ts` directly, and that floor sits behind whatever EAS's cloud counter most recently published).
-- To preserve the user's app data (wallets, Nostr login, message history), use `eas build --local --profile production --platform android --non-interactive` instead. This runs EAS's pipeline on this machine, fetching the EAS upload keystore so the signature matches an existing EAS-installed app. **Important**: `appVersionSource: "remote"` in `eas.json` only affects EAS _cloud_ builds — `eas build --local` (and `expo run:android --variant release`) both read `versionCode` from `app.config.ts` directly. **Before each local prod build, bump `versionCode` in `app.config.ts` to ≥ the versionCode currently on the target device** (otherwise install fails with `INSTALL_FAILED_VERSION_DOWNGRADE`). Sideload with `adb -s <serial> install -r build-*.apk` (note: `adb` takes the serial, `expo run:android --device` takes the model name like `Pixel_8`).
-- Full recipe + rationale (case 1 vs case 2) lives in `docs/DEPLOYMENT.adoc` → "Local production builds". When a deploy fails for one of these reasons, update that section if anything's changed.
+- **Releases go through the GitHub Release workflow, not via `eas build --local`.** Bump with `npm version <patch|minor|major>`, push `main --follow-tags`, then publish a GitHub Release pointing at the tag. `.github/workflows/release.yml` kicks off EAS cloud builds for both platforms, auto-submits iOS to TestFlight, and attaches the Android APK to the Release page. Full recipe in `docs/DEPLOYMENT.adoc` → "Cutting a release".
+- **Why not run `eas build` manually for releases?** Manual builds detach the artifact from any tag — anything merged to `main` during the ~30 min build window quietly ends up "released" too, and the GitHub Release notes drift away from what actually shipped. The workflow tags first, then builds, so the artifacts are anchored to one commit.
+- **Marketing version lives in `package.json` / `app.config.ts`** (single source of truth, reviewable via PR). **`versionCode` / `buildNumber` are owned by EAS's remote counter** (`eas.json` → `"appVersionSource": "remote"` + `"autoIncrement": true`). Don't hand-edit the integer for releases — cloud builds auto-increment it past whatever's in the file.
+
+## Sideloading a release-flavor APK to a physical device (for testing, not release)
+
+- The user's primary device is a Pixel running an EAS-built install. A locally-signed APK won't upgrade it (`INSTALL_FAILED_UPDATE_INCOMPATIBLE` — different keystore). To validate release-mode behavior on real hardware without losing app data, pull the latest cloud-built APK instead of running `eas build --local`:
+  ```
+  eas build:list --platform android --profile production --status finished --limit 1   # find the URL
+  eas build:download --platform android --latest                                       # or fetch directly
+  adb -s <serial> install -r build-*.apk
+  ```
+- `adb` takes the adb serial; `expo run:android --device` takes the model name (`Pixel_8`). For dev iteration, `npx expo run:android --device Pixel_8` is still the right call — release-mode sideload is only needed when validating R8 / proguard behavior.
+- `eas build --local` survives as an offline fallback (no network, urgent). Documented in `docs/DEPLOYMENT.adoc` → "Local production builds (fallback)". It requires manually bumping `versionCode` in `app.config.ts` first, and is not the release path.
 
 ## Testing
 
