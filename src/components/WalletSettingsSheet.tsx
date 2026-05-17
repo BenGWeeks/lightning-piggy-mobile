@@ -76,7 +76,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   // defaults hidden so a password isn't on-screen by default when
   // the user opens settings near a colleague / camera.
   const [passwordRevealed, setPasswordRevealed] = useState(false);
-  // Full NWC connection string. Surfaced for every NWC wallet (#589 —
+  // Full NWC connection string. Surfaced for every NWC wallet (#588 —
   // not just CoinOS) so users can copy it back out and move the
   // wallet to another device / NWC client without losing access.
   // Hidden behind dots + eye toggle by default since the secret in
@@ -130,7 +130,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         // Extract relay URL from NWC connection string. Also stash
         // the full NWC string so:
         // - every NWC wallet's settings can surface a copyable +
-        //   QR-able NWC row (#589)
+        //   QR-able NWC row (#588)
         // - the CoinOS recovery callout (#287) can surface it
         //   alongside the username/password for managed wallets.
         getNwcUrl(walletId).then((url) => {
@@ -350,7 +350,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
 
               {/* NWC connection isn't repeated inside the CoinOS callout
                   — the standalone "NWC Connection" row below renders
-                  for every NWC wallet (#589) with the same masked +
+                  for every NWC wallet (#588) with the same masked +
                   copy affordance plus a QR overlay, so duplicating it
                   here would just be noise. */}
 
@@ -368,7 +368,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
             </>
           )}
 
-          {/* NWC wallet: full connection string (#589). Behind dots +
+          {/* NWC wallet: full connection string (#588). Behind dots +
               eye toggle by default — the secret in the URL grants
               wallet access, so we don't want it sitting on-screen if
               the user opens settings near a colleague / camera. Copy
@@ -389,9 +389,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
                 </Text>
                 <TouchableOpacity
                   onPress={() => setNwcRevealed((v) => !v)}
-                  accessibilityLabel={
-                    nwcRevealed ? 'Hide NWC connection' : 'Reveal NWC connection'
-                  }
+                  accessibilityLabel={nwcRevealed ? 'Hide NWC connection' : 'Reveal NWC connection'}
                   testID="settings-nwc-reveal"
                   hitSlop={8}
                 >
@@ -436,8 +434,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
                     color="#000000"
                   />
                   <Text style={styles.qrHint}>
-                    Scan from another Lightning Piggy install or NWC client to import this
-                    wallet.
+                    Scan from another Lightning Piggy install or NWC client to import this wallet.
                   </Text>
                 </View>
               )}
