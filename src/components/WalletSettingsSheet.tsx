@@ -15,6 +15,7 @@ import { CardTheme } from '../types/wallet';
 import { themeList } from '../themes/cardThemes';
 import { MiniWalletCard } from './WalletCard';
 import { getXpub, getNwcUrl } from '../services/walletStorageService';
+import { Copy as CopyIcon, Eye, EyeOff } from 'lucide-react-native';
 
 interface Props {
   walletId: string | null;
@@ -53,6 +54,13 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   const [selectedTheme, setSelectedTheme] = useState<CardTheme>('lightning-piggy');
   const [xpubDisplay, setXpubDisplay] = useState<string | null>(null);
   const [relayUrl, setRelayUrl] = useState<string | null>(null);
+  // Full NWC connection string. Surfaced for any NWC wallet so the
+  // user can copy it back out (move the wallet to another device /
+  // another NWC client without losing access). Hidden behind dots +
+  // an eye toggle by default since the secret in the URL grants
+  // wallet access.
+  const [nwcConnection, setNwcConnection] = useState<string | null>(null);
+  const [nwcRevealed, setNwcRevealed] = useState(false);
 
   // Populate fields ONCE when the sheet opens for a given walletId. Using
   // `wallet` as a dep would re-fire on every `wallets` array update (balance
@@ -71,8 +79,12 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         setRelayUrl(null);
       } else if (wallet.walletType === 'nwc' && walletId) {
         setXpubDisplay(null);
-        // Extract relay URL from NWC connection string
+        // Extract relay URL from NWC connection string, AND stash the
+        // full string so the user can copy it back out from the
+        // recovery row below.
         getNwcUrl(walletId).then((url) => {
+          setNwcConnection(url);
+          setNwcRevealed(false);
           if (url) {
             try {
               const params = new URLSearchParams(url.split('?')[1] || '');
@@ -85,6 +97,8 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
       } else {
         setXpubDisplay(null);
         setRelayUrl(null);
+        setNwcConnection(null);
+        setNwcRevealed(false);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -213,6 +227,53 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
           </>
         )}
 
+        {/* NWC wallet: full connection string. Behind dots + eye
+            toggle by default — the secret in the URL grants wallet
+            access, so we don't want it sitting on-screen if the user
+            opens settings near a colleague / camera. Copy button is
+            separate so paste into a password manager / new device
+            doesn't require revealing the secret first. */}
+        {wallet.walletType === 'nwc' && nwcConnection && (
+          <>
+            <Text style={[styles.label, { marginTop: 20 }]}>NWC Connection</Text>
+            <View style={styles.nwcRow}>
+              <Text
+                style={styles.nwcRowText}
+                selectable={nwcRevealed}
+                numberOfLines={nwcRevealed ? 3 : 1}
+              >
+                {nwcRevealed ? nwcConnection : '••••••••••••'}
+              </Text>
+              <TouchableOpacity
+                onPress={() => setNwcRevealed((v) => !v)}
+                accessibilityLabel={nwcRevealed ? 'Hide NWC connection' : 'Reveal NWC connection'}
+                testID="settings-nwc-reveal"
+                hitSlop={8}
+              >
+                {nwcRevealed ? (
+                  <EyeOff size={18} color={colors.textSupplementary} strokeWidth={2} />
+                ) : (
+                  <Eye size={18} color={colors.textSupplementary} strokeWidth={2} />
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={async () => {
+                  await Clipboard.setStringAsync(nwcConnection);
+                  Alert.alert('Copied', 'NWC connection copied to clipboard.');
+                }}
+                accessibilityLabel="Copy NWC connection"
+                testID="settings-nwc-copy"
+                hitSlop={8}
+              >
+                <CopyIcon size={18} color={colors.brandPink} strokeWidth={2} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.hintText}>
+              Use this string to move the wallet to another device or NWC client.
+            </Text>
+          </>
+        )}
+
         {/* On-chain wallet: show xpub (read-only) */}
         {wallet.walletType === 'onchain' && xpubDisplay && (
           <>
@@ -297,6 +358,20 @@ const createStyles = (colors: Palette) =>
       fontSize: 12,
       color: colors.textSupplementary,
       fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    },
+    nwcRow: {
+      backgroundColor: colors.background,
+      borderRadius: 12,
+      padding: 14,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    nwcRowText: {
+      flex: 1,
+      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+      fontSize: 13,
+      color: colors.textBody,
     },
     hintText: {
       fontSize: 12,
