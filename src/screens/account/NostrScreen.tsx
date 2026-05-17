@@ -22,12 +22,16 @@ type RelayRow = {
   /**
    * 'user' = user-added override only, removable from this screen.
    * 'default' = baked into the app, not removable here.
-   * 'nip65' = published in the user's kind-10002 (NIP-65) list.
-   * 'both-user-default' / 'both-user-nip65' = covered by multiple
-   * sources; treated as user-removable because the user explicitly
-   * opted in by re-adding it on top of the default/NIP-65.
+   * 'nip65' = published in the user's kind-10002 (NIP-65) list, no
+   * matching user override (also not removable from this screen —
+   * delete the kind-10002 event to drop these).
+   * 'both-user-default' = covered by BOTH a user override and a
+   * default; the user-added override means it's user-removable
+   * (removing here strips the user row, the default still keeps it
+   * in the merged list, but the user gets to "downgrade" any custom
+   * read/write flags they added on top of the default).
    */
-  source: 'user' | 'default' | 'nip65' | 'both-user-default' | 'both-user-nip65';
+  source: 'user' | 'default' | 'nip65' | 'both-user-default';
   read: boolean;
   write: boolean;
   connected: boolean;
@@ -70,8 +74,12 @@ const NostrScreen: React.FC = () => {
       else if (inUser) source = 'user';
       else if (inDefault) source = 'default';
       else source = 'nip65';
-      // A NIP-65 relay the user has also re-added explicitly is user-managed.
-      if (inUser && !inDefault && source !== 'user') source = 'both-user-nip65';
+      // NOTE: a "both-user-nip65" overlap (user explicitly re-added a
+      // relay that's also in their NIP-65 list) collapses to plain
+      // 'user' here — `relays` doesn't expose which entries came from
+      // NIP-65 vs the merge, so we can't disambiguate. Functionally
+      // equivalent: the user override row is still removable, and the
+      // NIP-65 event itself isn't editable from this screen.
       return {
         url: r.url,
         source,
@@ -146,14 +154,12 @@ const NostrScreen: React.FC = () => {
           const sourceLabel =
             r.source === 'both-user-default'
               ? 'user + default'
-              : r.source === 'both-user-nip65'
-                ? 'user + NIP-65'
-                : r.source === 'user'
-                  ? 'user'
-                  : r.source === 'nip65'
-                    ? 'NIP-65'
-                    : 'default';
-          const removable = r.source === 'user' || r.source === 'both-user-nip65';
+              : r.source === 'user'
+                ? 'user'
+                : r.source === 'nip65'
+                  ? 'NIP-65'
+                  : 'default';
+          const removable = r.source === 'user' || r.source === 'both-user-default';
           return (
             <View key={r.url} style={styles.relayRow}>
               <View

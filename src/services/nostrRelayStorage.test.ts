@@ -51,6 +51,11 @@ describe('validateRelayUrl', () => {
     expect(r.ok).toBe(true);
   });
 
+  it('accepts ws://*.local for LAN mDNS dev hosts', () => {
+    const r = validateRelayUrl('ws://strfry.local:7777');
+    expect(r.ok).toBe(true);
+  });
+
   it('rejects ws:// for non-local hosts', () => {
     const r = validateRelayUrl('ws://relay.example.com');
     expect(r.ok).toBe(false);
@@ -156,5 +161,19 @@ describe('mergeRelays', () => {
     });
     const matches = r.filter((x) => x.url === 'wss://default-a');
     expect(matches).toHaveLength(1);
+  });
+
+  it('dedupes trailing-slash variants across sources', () => {
+    // A relay listed in NIP-65 with a trailing slash should collapse
+    // with a default of the same URL without one — the user's flags
+    // (last write wins, in this case the NIP-65 entry) should apply.
+    const r = mergeRelays({
+      nip65: [{ url: 'wss://default-a/', read: true, write: false }],
+      user: [],
+      defaults,
+    });
+    const matches = r.filter((x) => x.url === 'wss://default-a');
+    expect(matches).toHaveLength(1);
+    expect(matches[0]).toEqual({ url: 'wss://default-a', read: true, write: false });
   });
 });

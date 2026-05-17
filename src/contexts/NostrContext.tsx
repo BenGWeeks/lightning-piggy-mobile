@@ -725,8 +725,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
         return [...userRelays, config];
       })();
-      setUserRelaysState(next);
+      // Persist before updating React state so a failed write doesn't
+      // leave the UI showing a row that will disappear on next reload.
+      // The caller surfaces the thrown error to the user.
       await setUserRelays(next);
+      setUserRelaysState(next);
     },
     [userRelays],
   );
@@ -734,8 +737,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const removeUserRelay = useCallback(
     async (url: string): Promise<void> => {
       const next = userRelays.filter((r) => r.url !== url);
-      setUserRelaysState(next);
+      // Persist before updating React state so a failed write doesn't
+      // leave the UI looking like the row was removed when it'll be
+      // back after a restart.
       await setUserRelays(next);
+      setUserRelaysState(next);
     },
     [userRelays],
   );
@@ -1301,7 +1307,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setIsLoggedIn(false);
 
     nostrService.cleanup();
-  }, []);
+  }, [pubkey]);
 
   const refreshProfile = useCallback(
     async (opts?: { force?: boolean }) => {

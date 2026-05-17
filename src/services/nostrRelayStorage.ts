@@ -48,8 +48,10 @@ export async function setUserRelays(relays: RelayConfig[]): Promise<void> {
 /**
  * Validate a relay URL. Accepts `wss://` for production and `ws://`
  * for local dev (`localhost`, `127.0.0.1`, `10.0.2.2` for Android
- * emulator). Anything else is rejected so we can't accidentally try
- * to open an `https://` URL as a websocket.
+ * emulator, and any `*.local` mDNS host so devs can reach a relay
+ * running on another machine on the LAN). Anything else is rejected
+ * so we can't accidentally try to open an `https://` URL as a
+ * websocket.
  *
  * Returns the normalised URL (trimmed, trailing slash removed) on
  * success, or an error message on failure.
@@ -79,7 +81,8 @@ export function validateRelayUrl(
     if (!isLocal) {
       return {
         ok: false,
-        error: 'Plain ws:// is only allowed for local dev (localhost / 127.0.0.1 / 10.0.2.2).',
+        error:
+          'Plain ws:// is only allowed for local dev (localhost / 127.0.0.1 / 10.0.2.2 / *.local).',
       };
     }
   } else {
@@ -111,16 +114,25 @@ export function mergeRelays(input: {
 }): RelayConfig[] {
   const defaults = input.defaults ?? DEFAULT_RELAYS;
   const byUrl = new Map<string, RelayConfig>();
+  // Canonicalise per-source URLs before dedup. `validateRelayUrl`
+  // strips trailing slashes for user-added rows, but NIP-65 / default
+  // sources don't pass through it — without this normaliser an event
+  // listing `wss://relay.example/` would dedupe separately from a
+  // default of `wss://relay.example`.
+  const norm = (u: string) => u.trim().replace(/\/+$/, '');
 
   // Lowest priority first so subsequent writes overwrite.
   for (const url of defaults) {
-    byUrl.set(url, { url, read: true, write: true });
+    const u = norm(url);
+    byUrl.set(u, { url: u, read: true, write: true });
   }
   for (const r of input.nip65) {
-    byUrl.set(r.url, { url: r.url, read: r.read, write: r.write });
+    const u = norm(r.url);
+    byUrl.set(u, { url: u, read: r.read, write: r.write });
   }
   for (const r of input.user) {
-    byUrl.set(r.url, { url: r.url, read: r.read, write: r.write });
+    const u = norm(r.url);
+    byUrl.set(u, { url: u, read: r.read, write: r.write });
   }
 
   return [...byUrl.values()];
