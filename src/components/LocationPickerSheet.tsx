@@ -82,6 +82,13 @@ const LocationPickerSheet: React.FC<Props> = ({
   // the caller passed a real initialLat/Lon (i.e. we're editing an
   // existing pin), treat that as already-chosen.
   const [userMoved, setUserMoved] = useState<boolean>(hasInitialPin);
+  // Mirror of `userMoved` for the async fresh-fix .then() to read.
+  // The closure captures the initial value at effect-start so we
+  // can't rely on the React state directly — a ref keeps the
+  // late-arriving fresh-fix race honest about whether the user has
+  // panned in the meantime.
+  const userMovedRef = useRef(userMoved);
+  userMovedRef.current = userMoved;
   // MapLibre's onRegionDidChange fires once on mount at the initial
   // centre — we must NOT count that as user intent or the confirm
   // button enables without any actual interaction. This ref swallows
@@ -96,25 +103,46 @@ const LocationPickerSheet: React.FC<Props> = ({
     }
     sheetRef.current?.present();
     let cancelled = false;
-    let seeded = false;
-    const seed = (lat: number, lon: number, zoom: number) => {
-      if (cancelled || seeded) return;
-      seeded = true;
+    // `seedSource` tracks WHY the camera is where it is, so a slow
+    // fresh fix can still overwrite the last-known fallback when it
+    // eventually lands (Copilot review on #597). The progression is:
+    //   none → fallback (provisional)
+    //   none → fresh (locked, fresh fix won the race)
+    //   fallback → fresh (provisional fallback upgraded to fresh)
+    //   anything → user-pan: locked (we check userMovedRef below)
+    // We use a ref for userMoved because the region-change callback
+    // writes to setUserMoved and we need to read its CURRENT value
+    // inside the async fresh-fix .then(), not the value captured at
+    // effect-start (which would always be the initial hasInitialPin).
+    let seedSource: 'none' | 'fallback' | 'fresh' = 'none';
+    const seed = (lat: number, lon: number, zoom: number, source: 'fallback' | 'fresh') => {
+      if (cancelled) return;
+      if (seedSource === 'fresh') return; // fresh always wins, never re-seed.
+      if (seedSource === 'fallback' && source === 'fallback') return; // first fallback wins.
+      if (seedSource === 'fallback' && source === 'fresh' && userMovedRef.current) {
+        // Fresh fix landed AFTER the user already panned — respect
+        // their manual choice; don't yank the camera back.
+        seedSource = 'fresh';
+        return;
+      }
+      seedSource = source;
       setResolvedStart({ lat, lon, zoom });
       setPicked({ lat, lon });
       setUserMoved(hasInitialPin);
     };
     if (hasInitialPin) {
-      seed(initialLat as number, initialLon as number, 16);
+      // Edit mode — caller-supplied pin is treated as the locked
+      // 'fresh' choice; no further auto-seeds run.
+      seed(initialLat as number, initialLon as number, 16, 'fresh');
       return () => {
         cancelled = true;
       };
     }
     // Fast-first / fresh-second: kick off a fresh GPS fix immediately,
     // but race it against a 1.5 s timeout that falls back to the OS's
-    // last-known fix so the sheet never hangs. Whichever lands first
-    // seeds the map (`seeded` guard); a stale fresh-fix arriving after
-    // we already fell back to last-known is dropped.
+    // last-known fix so the sheet never hangs. Both can seed the map;
+    // a fresh fix arriving AFTER the fallback still upgrades the
+    // camera (unless the user has manually panned in the meantime).
     //
     // Why not bare last-known (the pre-#595 behaviour)? `maxAge: 10 min`
     // means a fix from the *same town* a few streets away counts as
@@ -122,10 +150,10 @@ const LocationPickerSheet: React.FC<Props> = ({
     const freshTimeout = setTimeout(() => {
       Location.getLastKnownPositionAsync({ maxAge: 10 * 60 * 1000 })
         .then((known) => {
-          if (known) seed(known.coords.latitude, known.coords.longitude, 16);
-          else seed(54.0, -2.0, 5);
+          if (known) seed(known.coords.latitude, known.coords.longitude, 16, 'fallback');
+          else seed(54.0, -2.0, 5, 'fallback');
         })
-        .catch(() => seed(54.0, -2.0, 5));
+        .catch(() => seed(54.0, -2.0, 5, 'fallback'));
     }, 1500);
     // Request foreground permission BEFORE the fresh fix. Opening
     // "Pick on map" directly from Hide-a-Piglet step 3 may be the
@@ -141,7 +169,7 @@ const LocationPickerSheet: React.FC<Props> = ({
       .then((pos) => {
         if (!pos || cancelled) return;
         clearTimeout(freshTimeout);
-        seed(pos.coords.latitude, pos.coords.longitude, 16);
+        seed(pos.coords.latitude, pos.coords.longitude, 16, 'fresh');
       })
       .catch(() => {
         // Permission denied / hardware failure — let the timeout path
