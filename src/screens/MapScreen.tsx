@@ -153,17 +153,29 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
       let lat: number;
       let lon: number;
       let accuracy: number | null = null;
-      try {
-        const pos = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
-        });
-        if (cancelled) return;
-        lat = pos.coords.latitude;
-        lon = pos.coords.longitude;
-        accuracy = typeof pos.coords.accuracy === 'number' ? pos.coords.accuracy : null;
-      } catch (e) {
-        if (!cancelled) setError((e as Error).message);
-        return;
+      // Prefer the cached position from UserLocationContext when it's
+      // already populated (the user just came from Explore / Hunt etc.,
+      // so the shared watch has a recent fix). Running a second
+      // independent getCurrentPositionAsync here used to race the
+      // shared watch and snap the camera to a different, sometimes
+      // less-accurate point. The dot stays live via `livePos` below.
+      if (livePos !== null) {
+        lat = livePos.lat;
+        lon = livePos.lon;
+        accuracy = livePos.accuracy;
+      } else {
+        try {
+          const pos = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.High,
+          });
+          if (cancelled) return;
+          lat = pos.coords.latitude;
+          lon = pos.coords.longitude;
+          accuracy = typeof pos.coords.accuracy === 'number' ? pos.coords.accuracy : null;
+        } catch (e) {
+          if (!cancelled) setError((e as Error).message);
+          return;
+        }
       }
       try {
         if (cancelled) return;

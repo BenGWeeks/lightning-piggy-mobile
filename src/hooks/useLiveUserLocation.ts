@@ -17,9 +17,9 @@ import * as Location from 'expo-location';
  *   2. `getCurrentPositionAsync` → fresh fix to overwrite the stale
  *      last-known (often a few streets away in the same town —
  *      that's what #595 was about).
- *   3. `watchPositionAsync` → ongoing updates every 30 s or every 50 m
+ *   3. `watchPositionAsync` → ongoing updates every 15 s or every 20 m
  *      of movement (whichever gates pass), so the user dot follows
- *      them as they walk around without churning React renders.
+ *      them at walking pace without churning React renders.
  *
  * `denied` flips when the user has rejected the foreground-location
  * permission so callers can render a "grant location" CTA without
@@ -67,24 +67,25 @@ export interface UseLiveUserLocationOptions {
    *  for a foreground map screen; if you need to be frugal pass
    *  `Balanced` explicitly (callers without a map-on-screen). */
   accuracy?: Location.LocationAccuracy;
-  /** Min time between watch callbacks. Default 30 s — paired with
-   *  `distanceIntervalM` below, the dot updates roughly every couple
-   *  of footsteps' worth of pace on a city walk, without churning
-   *  React state when standing still. */
+  /** Min time between watch callbacks. Default 15 s — paired with
+   *  `distanceIntervalM` below, the dot updates frequently enough to
+   *  feel live while walking, without churning React state when
+   *  standing still. Tuned with Ben: 5 s churned too many renders,
+   *  30 s felt sluggish, 15 s is the middle ground. */
   timeIntervalMs?: number;
-  /** Min distance change before a watch callback fires. Default 50 m
-   *  so the dot doesn't jitter from GPS drift while standing still
-   *  and only moves when the user has actually walked somewhere. */
+  /** Min distance change before a watch callback fires. Default 20 m
+   *  so the dot doesn't jitter from GPS drift while standing still,
+   *  but moves on every couple of normal walking paces. */
   distanceIntervalM?: number;
 }
 
-// 30 s / 50 m. Frequent enough that walking outside shrinks the
-// halo + moves the dot within a couple of footsteps' worth of pace,
-// rare enough that the per-tick setState pressure on the JS thread
-// is negligible. Tuned with Ben after the initial 5 s / 10 m default
-// caused too many React renders on dense map screens.
-const DEFAULT_TIME_INTERVAL_MS = 30000;
-const DEFAULT_DISTANCE_INTERVAL_M = 50;
+// 15 s / 20 m. Frequent enough for the dot to feel responsive on an
+// outdoor walk (one update every ~15 m at brisk pace), rare enough
+// that the per-tick setState pressure stays modest. Tuned iteratively
+// with Ben: 5 s / 10 m churned too many React renders, 30 s / 50 m
+// felt sluggish, 15 s / 20 m is the sweet spot.
+const DEFAULT_TIME_INTERVAL_MS = 15000;
+const DEFAULT_DISTANCE_INTERVAL_M = 20;
 
 export function useLiveUserLocation(
   opts: UseLiveUserLocationOptions = {},
