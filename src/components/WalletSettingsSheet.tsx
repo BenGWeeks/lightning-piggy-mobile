@@ -306,8 +306,13 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
                 <QRCode
                   value={nwcConnection}
                   size={220}
-                  backgroundColor={colors.white}
-                  color={colors.textHeader}
+                  // Hard-code black-on-white so the QR stays scannable in
+                  // both themes — `colors.textHeader` is near-white
+                  // (#F5F6F7) in dark mode, which against the white
+                  // `qrPanel` background renders the QR effectively
+                  // invisible.
+                  backgroundColor="#FFFFFF"
+                  color="#000000"
                 />
                 <Text style={styles.qrHint}>
                   Scan from another Lightning Piggy install or NWC client to import this wallet.
