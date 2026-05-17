@@ -36,7 +36,6 @@ import {
   geohashPrefixes,
   haversineMetres,
 } from '../utils/geohash';
-import { getDevPinnedLocation } from '../utils/devLocation';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { type ParsedEvent } from '../services/nostrPlacesService';
 import { subscribeNearbyEvents } from '../services/nostrPlacesPublisher';
@@ -127,27 +126,19 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
     setUntrustedHidden(0);
     closerRef.current?.();
     try {
-      const pinned = getDevPinnedLocation();
-      let lat: number;
-      let lon: number;
-      if (pinned) {
-        lat = pinned.lat;
-        lon = pinned.lon;
-      } else {
-        const perm = await Location.requestForegroundPermissionsAsync();
-        if (perm.status !== 'granted') {
-          setError(
-            'Location permission required to discover nearby events. We use a coarse 5 km area, not your exact location.',
-          );
-          setLoading(false);
-          return;
-        }
-        const liveFix = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-        lat = liveFix.coords.latitude;
-        lon = liveFix.coords.longitude;
+      const perm = await Location.requestForegroundPermissionsAsync();
+      if (perm.status !== 'granted') {
+        setError(
+          'Location permission required to discover nearby events. We use a coarse 5 km area, not your exact location.',
+        );
+        setLoading(false);
+        return;
       }
+      const liveFix = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+      const lat = liveFix.coords.latitude;
+      const lon = liveFix.coords.longitude;
       setPos({ lat, lon });
       const myGh = encodeGeohash(lat, lon, 7);
       // Precision 3 (~150 km neighbourhood) — Bitcoin meetups cluster

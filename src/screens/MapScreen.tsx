@@ -48,7 +48,6 @@ import type { ParsedCache } from '../services/nostrPlacesService';
 import { fetchCachesByAuthor, subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
 import { useNostr } from '../contexts/NostrContext';
 import { decodeGeohash, encodeGeohash, geohashPrefixes } from '../utils/geohash';
-import { getDevPinnedLocation } from '../utils/devLocation';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import SocialIcon from '../components/SocialIcon';
 import WebOfTrustChip from '../components/WebOfTrustChip';
@@ -143,40 +142,27 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // Dev-only emulator fallback (see `getDevPinnedLocation`).
-      const pinned = getDevPinnedLocation();
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (cancelled) return;
+      if (status !== 'granted') {
+        setPermission('denied');
+        return;
+      }
+      setPermission('granted');
       let lat: number;
       let lon: number;
       let accuracy: number | null = null;
-      if (pinned) {
-        lat = pinned.lat;
-        lon = pinned.lon;
-        // Dev-pinned position is a literal lat/lon — no real-world
-        // accuracy applies. Leaving accuracy null suppresses the
-        // halo (drawAccuracyCircle no-ops on null) so the dev pin
-        // doesn't imply false-precision.
-        accuracy = null;
-        setPermission('granted');
-      } else {
-        const { status } = await Location.requestForegroundPermissionsAsync();
+      try {
+        const pos = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
         if (cancelled) return;
-        if (status !== 'granted') {
-          setPermission('denied');
-          return;
-        }
-        setPermission('granted');
-        try {
-          const pos = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
-          });
-          if (cancelled) return;
-          lat = pos.coords.latitude;
-          lon = pos.coords.longitude;
-          accuracy = typeof pos.coords.accuracy === 'number' ? pos.coords.accuracy : null;
-        } catch (e) {
-          if (!cancelled) setError((e as Error).message);
-          return;
-        }
+        lat = pos.coords.latitude;
+        lon = pos.coords.longitude;
+        accuracy = typeof pos.coords.accuracy === 'number' ? pos.coords.accuracy : null;
+      } catch (e) {
+        if (!cancelled) setError((e as Error).message);
+        return;
       }
       try {
         if (cancelled) return;

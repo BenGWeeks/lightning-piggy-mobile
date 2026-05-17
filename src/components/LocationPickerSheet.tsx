@@ -19,7 +19,6 @@ import { MapPin, Check, X } from 'lucide-react-native';
 import { LibreMiniMap } from './LibreMiniMap';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
-import { getDevPinnedLocation } from '../utils/devLocation';
 
 interface Props {
   visible: boolean;
@@ -64,11 +63,10 @@ const LocationPickerSheet: React.FC<Props> = ({
   // the location lands a few hundred ms after the sheet opens. Order
   // of preference:
   //   1. caller-supplied `initialLat`/`Lon` (edit-mode + already-pinned)
-  //   2. dev-pinned location (emulator parity — see useCompassNavigation)
-  //   3. `Location.getCurrentPositionAsync` (fresh GPS — up to 1.5 s)
-  //   4. `Location.getLastKnownPositionAsync` (instant, returns cached fix)
-  //   5. UK fallback (54.0, -2.0) at low zoom
-  // We race (3) against a 1.5 s timeout that falls through to (4); a
+  //   2. `Location.getCurrentPositionAsync` (fresh GPS — up to 1.5 s)
+  //   3. `Location.getLastKnownPositionAsync` (instant, returns cached fix)
+  //   4. UK fallback (54.0, -2.0) at low zoom
+  // We race (2) against a 1.5 s timeout that falls through to (3); a
   // fresh fix arrives before the user pans in the common case. The
   // bare last-known path is what caused #595 — a 10-min-old fix from
   // elsewhere in town quietly seeded the map.
@@ -112,15 +110,6 @@ const LocationPickerSheet: React.FC<Props> = ({
         cancelled = true;
       };
     }
-    // Emulator override — same source the rest of the app uses so dev
-    // pins agree across screens.
-    const pinned = getDevPinnedLocation();
-    if (pinned) {
-      seed(pinned.lat, pinned.lon, 16);
-      return () => {
-        cancelled = true;
-      };
-    }
     // Fast-first / fresh-second: kick off a fresh GPS fix immediately,
     // but race it against a 1.5 s timeout that falls back to the OS's
     // last-known fix so the sheet never hangs. Whichever lands first
@@ -138,7 +127,7 @@ const LocationPickerSheet: React.FC<Props> = ({
         })
         .catch(() => seed(54.0, -2.0, 5));
     }, 1500);
-    Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+    Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High })
       .then((pos) => {
         clearTimeout(freshTimeout);
         seed(pos.coords.latitude, pos.coords.longitude, 16);

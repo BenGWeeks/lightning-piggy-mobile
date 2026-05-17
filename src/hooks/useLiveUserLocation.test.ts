@@ -28,38 +28,14 @@ jest.mock('expo-location', () => ({
   Accuracy: { Balanced: 3, High: 4 },
 }));
 
-jest.mock('../utils/devLocation', () => ({
-  __esModule: true,
-  getDevPinnedLocation: jest.fn(),
-}));
-
-import { getDevPinnedLocation } from '../utils/devLocation';
-
 const mockedLocation = Location as jest.Mocked<typeof Location>;
-const mockedDevPin = getDevPinnedLocation as jest.MockedFunction<typeof getDevPinnedLocation>;
 
 beforeEach(() => {
   jest.clearAllMocks();
 });
 
 describe('useLiveUserLocation', () => {
-  it('surfaces a dev-pinned position immediately and skips the GPS ladder', async () => {
-    mockedDevPin.mockReturnValue({ lat: 51.5, lon: -0.1 });
-
-    const { result } = renderHook(() => useLiveUserLocation());
-
-    await waitFor(() => {
-      expect(result.current.pos).toEqual({ lat: 51.5, lon: -0.1, accuracy: null });
-    });
-
-    // No GPS calls should have been made when a dev pin is configured.
-    expect(mockedLocation.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
-    expect(mockedLocation.getCurrentPositionAsync).not.toHaveBeenCalled();
-    expect(mockedLocation.watchPositionAsync).not.toHaveBeenCalled();
-  });
-
   it('flips `denied` when permission is refused and stops the ladder', async () => {
-    mockedDevPin.mockReturnValue(null);
     mockedLocation.requestForegroundPermissionsAsync.mockResolvedValue({
       status: 'denied',
     } as Awaited<ReturnType<typeof Location.requestForegroundPermissionsAsync>>);
@@ -75,7 +51,6 @@ describe('useLiveUserLocation', () => {
   });
 
   it('walks the ladder: last-known → current → watch, each overwriting the last', async () => {
-    mockedDevPin.mockReturnValue(null);
     mockedLocation.requestForegroundPermissionsAsync.mockResolvedValue({
       status: 'granted',
     } as Awaited<ReturnType<typeof Location.requestForegroundPermissionsAsync>>);
@@ -111,7 +86,6 @@ describe('useLiveUserLocation', () => {
   });
 
   it('removes the watch subscription on unmount', async () => {
-    mockedDevPin.mockReturnValue(null);
     mockedLocation.requestForegroundPermissionsAsync.mockResolvedValue({
       status: 'granted',
     } as Awaited<ReturnType<typeof Location.requestForegroundPermissionsAsync>>);

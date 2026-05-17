@@ -665,7 +665,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         ]);
         return;
       }
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       const lat = pos.coords.latitude;
       const lon = pos.coords.longitude;
       setPin({ lat, lon, geohash: encodeGeohash(lat, lon, 9) });

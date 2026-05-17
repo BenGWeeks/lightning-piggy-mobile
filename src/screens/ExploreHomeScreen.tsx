@@ -66,7 +66,6 @@ import {
   geohashPrefixes,
   haversineMetres,
 } from '../utils/geohash';
-import { getDevPinnedLocation } from '../utils/devLocation';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { createExploreHomeScreenStyles } from '../styles/ExploreHomeScreen.styles';
@@ -145,8 +144,6 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // user-position halo until a real fix arrives).
   const [pos, setPos] = useState<{ lat: number; lon: number; accuracy: number | null } | null>(
     () => {
-      const dev = getDevPinnedLocation();
-      if (dev) return { ...dev, accuracy: null };
       const anchor = peekCachedAnchorSync();
       return anchor ? { ...anchor, accuracy: null } : null;
     },
@@ -159,14 +156,6 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // Dev-only emulator fallback — see `getDevPinnedLocation`.
-      const pinned = getDevPinnedLocation();
-      if (pinned) {
-        // Dev pin → null accuracy so the halo is suppressed (the pin
-        // is a literal value, not a measurement).
-        if (!cancelled) setPos({ ...pinned, accuracy: null });
-        return;
-      }
       const perm = await Location.requestForegroundPermissionsAsync();
       if (cancelled) return;
       if (perm.status !== 'granted') {
@@ -194,7 +183,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
       }
       try {
         const current = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
+          accuracy: Location.Accuracy.High,
         });
         if (!cancelled) {
           setPos({

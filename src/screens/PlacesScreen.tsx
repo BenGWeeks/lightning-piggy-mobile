@@ -35,7 +35,6 @@ import {
   lightningAddressOf,
 } from '../services/btcMapService';
 import { formatDistance, haversineMetres } from '../utils/geohash';
-import { getDevPinnedLocation } from '../utils/devLocation';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import BtcMapAttribution from '../components/BtcMapAttribution';
 import { LibreMiniMap } from '../components/LibreMiniMap';
@@ -92,27 +91,19 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
           if (cached.length > 0) setPlaces((prev) => (prev.length > 0 ? prev : cached));
         })
         .catch(() => {});
-      const pinned = getDevPinnedLocation();
-      let lat: number;
-      let lon: number;
-      if (pinned) {
-        lat = pinned.lat;
-        lon = pinned.lon;
-      } else {
-        const perm = await Location.requestForegroundPermissionsAsync();
-        if (perm.status !== 'granted') {
-          setError(
-            'Location permission required to show nearby Bitcoin-accepting places. We use a coarse area, not your exact position.',
-          );
-          setLoading(false);
-          return;
-        }
-        const fix = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-        lat = fix.coords.latitude;
-        lon = fix.coords.longitude;
+      const perm = await Location.requestForegroundPermissionsAsync();
+      if (perm.status !== 'granted') {
+        setError(
+          'Location permission required to show nearby Bitcoin-accepting places. We use a coarse area, not your exact position.',
+        );
+        setLoading(false);
+        return;
       }
+      const fix = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+      const lat = fix.coords.latitude;
+      const lon = fix.coords.longitude;
       setPos({ lat, lon });
       // ±2° (~220 km half-side) — wider than the on-screen mini-map's
       // min-zoom bbox so the user can zoom out and still see merchants.

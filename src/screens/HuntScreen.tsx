@@ -39,7 +39,6 @@ import {
   geohashPrefixes,
   haversineMetres,
 } from '../utils/geohash';
-import { getDevPinnedLocation } from '../utils/devLocation';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -170,18 +169,10 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   // to zero when a hider uses an unusual cache type.
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
 
-  // Location resolve — dev-fallback first, then real GPS.
+  // Location resolve.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const pinned = getDevPinnedLocation();
-      if (pinned) {
-        // Dev pin is a literal lat/lon — no real accuracy applies, so
-        // null suppresses the halo (drawAccuracyCircle in
-        // src/utils/mapMeDot.ts no-ops on null).
-        if (!cancelled) setPos({ ...pinned, accuracy: null });
-        return;
-      }
       try {
         const perm = await Location.requestForegroundPermissionsAsync();
         if (perm.status !== 'granted') {
@@ -189,7 +180,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
           return;
         }
         const fix = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
+          accuracy: Location.Accuracy.High,
         });
         if (!cancelled) {
           // `coords.accuracy` is 1-σ horizontal accuracy in metres on

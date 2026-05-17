@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import * as Location from 'expo-location';
-import { getDevPinnedLocation } from '../utils/devLocation';
 
 /**
  * Live user-location subscription for map views.
@@ -11,30 +10,32 @@ import { getDevPinnedLocation } from '../utils/devLocation';
  * user dot froze at wherever they were when the screen opened —
  * walking around with a map open did not move the dot.
  *
- * This hook replaces that pattern with the same three-step ladder
- * but adds a `watchPositionAsync` subscription that keeps the
- * returned `pos` fresh as the user moves:
- *   1. Dev-pinned location (emulator parity, `__DEV__` only) →
- *      surfaced immediately, no GPS hardware touched, no watch
- *      subscription (the pin is a literal value).
- *   2. `getLastKnownPositionAsync` → near-instant cached fix so the
+ * This hook replaces that pattern with a permission check followed
+ * by a three-step ladder that keeps `pos` fresh as the user moves:
+ *   1. `getLastKnownPositionAsync` → near-instant cached fix so the
  *      map paints content while a fresh fix lands in parallel.
- *   3. `getCurrentPositionAsync` → fresh fix to overwrite the stale
+ *   2. `getCurrentPositionAsync` → fresh fix to overwrite the stale
  *      last-known (often a few streets away in the same town —
  *      that's what #595 was about).
- *   4. `watchPositionAsync` → ongoing updates every ~5s / 10m so the
+ *   3. `watchPositionAsync` → ongoing updates every ~5s / 10m so the
  *      user dot follows them as they walk around.
  *
  * `denied` flips when the user has rejected the foreground-location
  * permission so callers can render a "grant location" CTA without
  * also asking expo for the permission state separately.
+ *
+ * Emulator note: on stock AVDs without Google Play Services, the
+ * default FusedLocationProvider (FLP — see docs/TERMS.adoc) returns
+ * null and `adb emu geo fix` injection never propagates. The
+ * `Accuracy.High` default forces PRIORITY_HIGH_ACCURACY which falls
+ * through to the raw LocationManager GPS provider in that case.
  */
 export interface LiveUserLocation {
   lat: number;
   lon: number;
-  /** Horizontal accuracy in metres, or `null` for dev-pinned positions
-   *  where accuracy is meaningless (no real measurement). The map
-   *  layers treat a null accuracy as "suppress the halo". */
+  /** Horizontal accuracy in metres, or `null` when the platform
+   *  doesn't report it. The map layers treat null as "suppress the
+   *  halo". */
   accuracy: number | null;
 }
 
@@ -50,9 +51,14 @@ export interface UseLiveUserLocationOptions {
    *  GPS ladder lands. */
   initial?: LiveUserLocation | null;
   /** Accuracy hint for both the one-shot fresh fix and the ongoing
-   *  watch. `Balanced` is the right default for map views (cheap on
-   *  battery, ~10 m precision). Pickers / hunts that care about
-   *  precision can pass `High`. */
+   *  watch. Defaults to `High` — this maps to Android's
+   *  `PRIORITY_HIGH_ACCURACY`, which on de-googled devices and on
+   *  emulator images without Google Play Services falls through to
+   *  the raw `LocationManager.GPS_PROVIDER` instead of Google's
+   *  FusedLocationProvider (which returns null fixes without GMS).
+   *  See docs/TERMS.adoc → `FLP` / `GMS`. Battery impact is small
+   *  for a foreground map screen; if you need to be frugal pass
+   *  `Balanced` explicitly (callers without a map-on-screen). */
   accuracy?: Location.LocationAccuracy;
   /** Min time between watch callbacks. Default 5 s — frequent enough
    *  that the dot feels live on foot, infrequent enough that we
@@ -76,20 +82,11 @@ export function useLiveUserLocation(
     let cancelled = false;
     let watch: Location.LocationSubscription | null = null;
 
-    const accuracy = opts.accuracy ?? Location.Accuracy.Balanced;
+    const accuracy = opts.accuracy ?? Location.Accuracy.High;
     const timeInterval = opts.timeIntervalMs ?? DEFAULT_TIME_INTERVAL_MS;
     const distanceInterval = opts.distanceIntervalM ?? DEFAULT_DISTANCE_INTERVAL_M;
 
     (async () => {
-      // Dev-pinned location short-circuits the GPS ladder entirely.
-      // Accuracy is null because the pin is a literal value, not a
-      // measurement — the map layers will suppress the halo.
-      const pinned = getDevPinnedLocation();
-      if (pinned) {
-        if (!cancelled) setPos({ lat: pinned.lat, lon: pinned.lon, accuracy: null });
-        return;
-      }
-
       const perm = await Location.requestForegroundPermissionsAsync();
       if (cancelled) return;
       if (perm.status !== 'granted') {
