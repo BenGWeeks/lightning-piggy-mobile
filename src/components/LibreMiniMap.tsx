@@ -138,15 +138,16 @@ const MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/bright';
 const AccuracyHalo: React.FC<{ feature: Feature<Polygon> }> = ({ feature }) => {
   const [pulse, setPulse] = useState(0);
   useEffect(() => {
-    // 4 fps is enough perceptually for an opacity-only pulse and
-    // halves the JS-thread load vs the previous 8 fps. Reported as a
-    // contributor to bottom-sheet drag jank when a merchant detail
-    // sheet was presented over the live map — the pulse interval
-    // kept firing during the gesture-handler animation. The sine
-    // wave still feels smooth because opacity changes are visually
-    // forgiving compared to position changes.
+    // 2 fps. Opacity changes are perceptually forgiving and 2 fps
+    // is still readable as "alive" (the eye smooths the transition
+    // anyway over a 1.6 s sine wave). The previous 4 fps was still
+    // contending with the hand-rolled PanResponder's per-frame JS
+    // setValue calls during merchant-sheet drag — caused visible
+    // jank that the user flagged. If we need to drop further, the
+    // proper fix is to migrate the PanResponder to a Reanimated
+    // gesture so the drag runs on the UI thread.
     const PULSE_PERIOD_MS = 1600;
-    const PULSE_FPS = 4;
+    const PULSE_FPS = 2;
     const start = Date.now();
     const id = setInterval(() => {
       const t = ((Date.now() - start) % PULSE_PERIOD_MS) / PULSE_PERIOD_MS;
