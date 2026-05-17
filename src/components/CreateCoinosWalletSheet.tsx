@@ -47,7 +47,7 @@ interface Props {
 const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { addNwcWallet, wallets, setActiveWallet } = useWallet();
+  const { addNwcWallet, setActiveWallet } = useWallet();
   const ref = useRef<BottomSheetModal>(null);
   // No explicit snapPoints — content-height only. Matches the rest of
   // the app's sheet convention (AddWalletWizard, NostrLoginSheet, …)
@@ -65,14 +65,6 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
   // the CoinOS recovery info against the right id and switch to it
   // before exiting.
   const newlyCreatedWalletIdRef = useRef<string | null>(null);
-
-  // Mirror wallets[] in a ref so the post-create id-resolver doesn't need
-  // to take wallets as a closure dep (which would re-fire and confuse the
-  // create flow on every balance tick).
-  const walletsRef = useRef(wallets);
-  useEffect(() => {
-    walletsRef.current = wallets;
-  }, [wallets]);
 
   useEffect(() => {
     if (visible) {
@@ -295,13 +287,15 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
                     autoCapitalize="none"
                     autoCorrect={false}
                     keyboardType="url"
-                    placeholder="https://coinos.example.com"
+                    placeholder="https://coinos.example.com/api"
                     placeholderTextColor={colors.textSupplementary}
                     testID="coinos-base-url-input"
                   />
                   <Text style={styles.advancedHint}>
                     Leave as {coinosService.DEFAULT_COINOS_BASE_URL} for the public managed
-                    instance, or paste the URL of a CoinOS server you trust.
+                    instance, or paste the URL of a CoinOS API server you trust. Include the `/api`
+                    path suffix — the bare host serves a frontend that won&apos;t accept register
+                    requests.
                   </Text>
                 </View>
               )}

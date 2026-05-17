@@ -228,6 +228,10 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   }, [visible]);
 
   useEffect(() => {
+    // Skip listener registration when no sheet is open — without this,
+    // keyboardHeight state churn from typing in unrelated sheets
+    // (SendSheet, NostrLoginSheet) would re-render this wizard.
+    if (!visible && !coinosOpen) return;
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
     const showSub = Keyboard.addListener(showEvent, (e) => {
@@ -239,7 +243,7 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
       showSub.remove();
       hideSub.remove();
     };
-  }, []);
+  }, [visible, coinosOpen]);
 
   // Note: we deliberately don't early-return on `!visible`. The CoinOS
   // create-sheet is rendered alongside this wizard and needs to outlive

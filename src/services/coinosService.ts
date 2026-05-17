@@ -548,12 +548,16 @@ export function generateStrongPassword(): string {
   return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-/** Strip protocol + trailing slash from a base URL to render the
- *  Lightning-address suffix in UI (`bigpiggy@coinos.io`). */
+/** Strip protocol, any trailing `/api` API-prefix segment, and any
+ *  trailing slash from a base URL to render the Lightning-address
+ *  suffix in UI (`bigpiggy@coinos.io`). Without the `/api` strip the
+ *  default `https://coinos.io/api` would yield an invalid lud16 like
+ *  `bigpiggy@coinos.io/api`. */
 export function hostFromBaseUrl(baseUrl: string): string {
   return baseUrl
     .trim()
     .replace(/^https?:\/\//, '')
+    .replace(/\/api\/*$/i, '')
     .replace(/\/+$/, '')
     .toLowerCase();
 }

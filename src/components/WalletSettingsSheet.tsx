@@ -96,6 +96,13 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         setRelayUrl(null);
       } else if (wallet.walletType === 'nwc' && walletId) {
         setXpubDisplay(null);
+        // Eager-clear before the async load so a fast wallet switch
+        // can't briefly show the previous wallet's relay / nwc string
+        // (the getNwcUrl promise for wallet A could still be in-flight
+        // when wallet B becomes active).
+        setRelayUrl(null);
+        setNwcConnection(null);
+        setNwcRevealed(false);
         // Extract relay URL from NWC connection string. Also stash
         // the full NWC string so the recovery callout can surface it
         // for managed CoinOS wallets.
@@ -108,6 +115,8 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
             } catch {
               setRelayUrl(null);
             }
+          } else {
+            setRelayUrl(null);
           }
         });
         // CoinOS managed-wallet recovery info. Held in JS state for

@@ -182,8 +182,11 @@ export async function deleteXpub(walletId: string): Promise<void> {
 const COINOS_RECOVERY_PREFIX = 'coinos_recovery_';
 
 export interface CoinosRecoveryInfo {
-  /** CoinOS instance the account lives on. Default `https://coinos.io`;
-   *  may be a self-hosted URL the user pointed LP at. */
+  /** Full API base URL — includes the `/api` path suffix (e.g.
+   *  `https://coinos.io/api`) since that's what `coinosService` posts
+   *  against. May be a self-hosted URL the user pointed LP at. To
+   *  render a host for a lud16 / sign-in URL, strip the `/api` —
+   *  `hostFromBaseUrl` in coinosService handles this. */
   baseUrl: string;
   username: string;
   password: string;
