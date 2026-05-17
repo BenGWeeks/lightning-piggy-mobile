@@ -1,0 +1,155 @@
+= Proposal: native Schnorr verification for Nostr events
+
+Status: **deferred** (2026-05-17)
+
+== Problem
+
+The 2026-05-17 CDP profile of the Explore tab warm tab-switch freeze
+(#31) showed **25–30 % of the active JS-thread time is Schnorr
+signature verification** of relay events. Top sampled frames:
+
+[cols="1,1,2", options="header"]
+|===
+| Samples (of 846 non-idle) | % | Function
+| 366 | 15.5 % | `mul` (BigInt multiply, secp256k1)
+| 113 | 4.8 %  | `add` (BigInt add)
+| 48  | 2.0 %  | `sub` (BigInt subtract)
+| 35  | 1.5 %  | `sqrtMod` (Schnorr verify)
+| 21  | 0.9 %  | `rotr` (SHA-256 rotate)
+| 16  | 0.7 %  | `update` (SHA-256 update)
+| 12  | 0.5 %  | `invert` (modular inverse)
+| 5   | 0.2 %  | `Maj` (SHA-256 majority)
+| 5   | 0.2 %  | `double` (EC point doubling)
+|===
+
+Every kind-37516 cache event arriving from a relay re-subscribe runs
+through `verifyEvent` at roughly **25 ms per event** on Hermes (no JIT,
+slow BigInt). A 50–200 event backfill burst means 1.2 – 5 seconds of
+pure crypto blocking the JS thread.
+
+== What's already shipped against this
+
+- **PR #618** (`perf(nostr): cache verified-event ids`) — module-level
+  `Set<string>` of event ids that passed schnorr. Re-subscribed events
+  hit the cache and skip the secp256k1 step entirely. Measured impact:
+  ~400 ms off a 16 100 ms baseline (-2.5 %). Smaller than expected
+  because the test setup has few cache events; the lift is proportional
+  to backfill size.
+
+- **PR #619** (`perf(nostr): skip schnorr for non-financial kinds`) —
+  fast-path validate-only for kinds 37516 (NIP-GC cache) and 31923
+  (NIP-52 meetup), where a malicious relay can at worst spoof
+  display-only content (no LNURL on the wire). Reduces the
+  *first-time-seen* event cost on cache + event subs to ~0 ms.
+
+== What native crypto would buy us
+
+Replacing the noble-based Schnorr verify with a true native (JSI)
+implementation would speed up the **remaining** verify path — primarily
+DM gift-wrap unwrapping (kind 14 / 1059), zap-receipt processing
+(kind 9735), and any direct `verifyEvent` call outside the pool.
+
+Estimated impact:
+
+- Per-verify cost: 25 ms (JS noble) → 0.5–1 ms (JSI native libsecp256k1)
+  ≈ **25–50× speedup**
+- DM cold-start with 200 wraps to unseal: 5 s → 0.1 s (-4.9 s)
+- Zap receipt burst on Home: ~1 s → ~50 ms (-0.95 s)
+- Explore freeze (post-#618 / #619): minimal additional improvement, since
+  the dominant remaining crypto is already cached/skipped
+
+So the natural win is **DM-heavy paths, not Explore**. This proposal is
+about that future workstream, not the Explore freeze.
+
+== Why we haven't done it yet (`@bitcoinerlab/secp256k1` is not it)
+
+The repo already imports `@bitcoinerlab/secp256k1` (used by the Boltz +
+swap-recovery paths). It exposes `verifySchnorr`, which looked like a
+drop-in replacement for nostr-tools' internal verify.
+
+But inspection of `node_modules/@bitcoinerlab/secp256k1/dist/index.js`
+shows it just wraps the same `@noble/curves/secp256k1` that
+`nostr-tools` already uses internally:
+
+[source,js]
+----
+var secp256k1 = require('@noble/curves/secp256k1');
+…
+function verifySchnorr(h, Q, signature) { … }
+exports.verifySchnorr = verifySchnorr;
+----
+
+A swap from `nostr-tools` → `@bitcoinerlab/secp256k1` gives **zero perf
+change** on React Native, because both ultimately run noble's pure-JS
+implementation. The bitcoinerlab/tiny-secp256k1 native binding only
+activates in Node.js environments; React Native falls back to the JS
+path.
+
+True native crypto requires a JSI-bridged secp256k1 implementation —
+not a lib repackaging.
+
+== The actual path
+
+Two non-trivial options, in order of effort:
+
+=== Option A: `react-native-quick-crypto` for the SHA-256 step only
+
+`react-native-quick-crypto` provides node-`crypto`-API-equivalent JSI
+bindings (OpenSSL under the hood). Includes SHA-256 and AES but
+**not secp256k1 / Schnorr**.
+
+A Schnorr verify consists roughly of:
+
+. Parse the 64-byte signature into (R, s)
+. Compute `e = sha256(R.x || P.x || message)`
+. Verify `s·G = R + e·P` (one EC double-scalar mul)
+
+Step 2 (SHA-256) is amenable to native acceleration; steps 1 + 3 stay
+on @noble. Estimated win: **~30 % of per-verify cost**, so 25 ms → ~18 ms.
+Not transformative, but multiplied across thousands of events it adds up.
+
+* Effort: ~1 day to install + wire up + verify correctness
+* Risk: low (we're keeping the EC math on the audited JS path)
+* Native dep: yes, expo prebuild required
+
+=== Option B: full native libsecp256k1 via a new RN module
+
+There's no maintained off-the-shelf JSI-bridged libsecp256k1 for RN as
+of 2026-05. Options:
+
+. Write our own using `react-native-nitro-modules` (recently popular
+  pattern) wrapping
+  https://github.com/bitcoin-core/secp256k1 directly. ~1 week.
+. Fork `react-native-secp256k1-tiny` (last commit 2022) and update for
+  current RN. Maintenance burden ongoing.
+. Wait for an upstream lib (none on the horizon).
+
+* Effort: ~1 week of dev + security review
+* Risk: high — crypto bugs are silent and devastating
+* Native dep: yes, custom module
+* Maintenance: ongoing — every RN major needs re-validation
+
+=== Recommendation
+
+**Defer.** The Explore freeze (the symptom that prompted this work)
+is already addressed by #618 + #619 + the audit's other items (#615
+AsyncStorage hydrate defer, focus-effect splitting). Crypto is no
+longer the bottleneck on that path.
+
+Native crypto becomes worth doing when:
+
+. DM cold-start time becomes the user complaint
+. AND we have a maintainer willing to own the native module long-term
+. AND we have a quarterly slot for the security review
+
+Until then, the pure-JS path with #618's caching is "good enough" for
+the kinds of events the app sees in production.
+
+== References
+
+- 2026-05-17 perf audit (issues #605–#615)
+- CDP profile: `/tmp/freeze-v2.cpuprofile` (8.9 MB, captured during a
+  16 s tab-switch on emulator)
+- PR #618 measurement: −400 ms / −2.5 % on 16.1 s baseline
+- PR #619 measurement: TBD
+- Stev.ie agent: `.claude/agents/stevie.md`
