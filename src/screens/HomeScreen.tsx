@@ -22,6 +22,7 @@ import TransferSheet from '../components/TransferSheet';
 import TransactionList from '../components/TransactionList';
 import WalletCarousel from '../components/WalletCarousel';
 import AddWalletWizard from '../components/AddWalletWizard';
+import WelcomeWalletPrompt from '../components/WelcomeWalletPrompt';
 import WalletSettingsSheet from '../components/WalletSettingsSheet';
 import TabHeader from '../components/TabHeader';
 import { ArrowDownIcon, ArrowUpIcon, ArrowLeftRightIcon } from '../components/icons/ArrowIcons';
@@ -66,6 +67,10 @@ const HomeScreen: React.FC = () => {
   const [sendToPubkey, setSendToPubkey] = useState<string | undefined>();
   const [sendToName, setSendToName] = useState<string | undefined>();
   const [wizardOpen, setWizardOpen] = useState(false);
+  // Lets WelcomeWalletPrompt steer the wizard between "auto-provision a
+  // CoinOS wallet" and "show the standard type chooser". Cleared on
+  // close so a subsequent FAB-driven open returns to the default flow.
+  const [wizardInitialType, setWizardInitialType] = useState<'coinos' | undefined>(undefined);
   const [settingsWalletId, setSettingsWalletId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -341,7 +346,14 @@ const HomeScreen: React.FC = () => {
           style={styles.transactionsContainer}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         >
-          {!hasWallets || activeWalletId === null ? (
+          {!hasWallets ? (
+            <WelcomeWalletPrompt
+              onChoose={(option) => {
+                setWizardInitialType(option === 'coinos' ? 'coinos' : undefined);
+                setWizardOpen(true);
+              }}
+            />
+          ) : activeWalletId === null ? (
             <View style={styles.emptyState}>
               <TouchableOpacity onPress={() => setWizardOpen(true)}>
                 <Text style={styles.addWalletText}>+ Add a Wallet</Text>
@@ -373,7 +385,14 @@ const HomeScreen: React.FC = () => {
         recipientName={sendToName}
       />
       <TransferSheet visible={transferOpen} onClose={() => setTransferOpen(false)} />
-      <AddWalletWizard visible={wizardOpen} onClose={() => setWizardOpen(false)} />
+      <AddWalletWizard
+        visible={wizardOpen}
+        onClose={() => {
+          setWizardOpen(false);
+          setWizardInitialType(undefined);
+        }}
+        initialType={wizardInitialType}
+      />
       <WalletSettingsSheet walletId={settingsWalletId} onClose={() => setSettingsWalletId(null)} />
     </View>
   );

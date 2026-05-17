@@ -872,6 +872,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       } else {
         nwcService.disconnect(walletId);
         await walletStorage.deleteNwcUrl(walletId);
+        // CoinOS-provisioned NWC wallets carry recovery info in
+        // SecureStore — drop it with the wallet so the per-walletId
+        // namespace stays tidy. No-op for NWC wallets imported by URL.
+        await walletStorage.deleteCoinosRecovery(walletId);
       }
 
       const currentList = await walletStorage.getWalletList();
