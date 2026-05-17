@@ -556,14 +556,29 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // into bridge dispatches for payment-settlement polls + QR-scan
   // callbacks (#554). Reconnect on re-focus is ~100 ms; foreground
   // JS-thread responsiveness is the better trade.
+  // Destructure pos into primitives so the focus effect's deps don't
+  // re-trigger every time `setPos` writes a fresh `{lat, lon, accuracy}`
+  // object (which happens 2–3 times on cold start: last-known fix →
+  // current fix → high-accuracy refinement). Pre-fix that thrashed the
+  // relay subscription open/close 2–3 times per cold-start; each round-
+  // trip is ~100–300 ms. Stev.ie's #612 review surfaced this.
+  const posLat = pos?.lat;
+  const posLon = pos?.lon;
   useFocusEffect(
     useCallback(() => {
       // `refreshKey` is intentionally listed in the deps below so that
       // pull-to-refresh (which bumps it) tears down + re-runs the
       // subscriptions, even though the value isn't referenced inside
       // the body.
-      if (!pos) return;
-      const myGh = encodeGeohash(pos.lat, pos.lon, 7);
+      if (typeof posLat !== 'number' || typeof posLon !== 'number') return;
+      // `cancelled` covers the window between focus-effect cleanup
+      // firing (subsCloserRef.current.forEach(c => c())) and the
+      // underlying relay socket actually closing — a stray event in
+      // that gap would otherwise mutate pendingCachesRef and arm a
+      // fresh flush timer that fires while the screen is blurred.
+      // Mirrors NostrContext.tsx's DM inbox precedent.
+      let cancelled = false;
+      const myGh = encodeGeohash(posLat, posLon, 7);
       // Caches sit at precision 5 (~5 km) — geocaching is inherently
       // hyper-local. Events broaden to precision 3 (~150 km) so a rural
       // user catches the nearest city's Bitcoin meetup; most NIP-52
@@ -573,6 +588,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
 
       subsCloserRef.current.push(
         subscribeNearbyCaches(cachePrefixes, (c) => {
+          if (cancelled) return;
           // WoT filter: silently drop caches from pubkeys outside the
           // trust graph (an unverified cache could be a phishing LNURL
           // or, worse, a physical lure). Surfaced as a count instead so
@@ -598,6 +614,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
       );
       subsCloserRef.current.push(
         subscribeNearbyEvents(eventPrefixes, (e) => {
+          if (cancelled) return;
           // Skip events that already started > 1h ago.
           if (e.startsAt && e.startsAt < Math.floor(Date.now() / 1000) - 60 * 60) return;
           if (!isTrustedRef.current(e.organiserPubkey)) {
@@ -617,6 +634,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         }),
       );
       return () => {
+        cancelled = true;
         subsCloserRef.current.forEach((c) => c());
         subsCloserRef.current = [];
         // Drain whatever's queued so a tab blur mid-backfill doesn't
@@ -625,7 +643,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         flushPendingCaches();
         flushPendingEvents();
       };
-    }, [pos, refreshKey, flushPendingCaches, flushPendingEvents]),
+    }, [posLat, posLon, refreshKey, flushPendingCaches, flushPendingEvents]),
   );
 
   // ----- lessons progress (local) -----------------------------------------
