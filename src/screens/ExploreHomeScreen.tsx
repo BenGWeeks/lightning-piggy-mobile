@@ -354,6 +354,18 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const pendingEventsRef = useRef<Map<string, ParsedEvent>>(new Map());
   const pendingCachesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingEventsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks whether the screen has unmounted entirely (logout / navigator
+  // reset). Distinct from focus blur, which only pauses the screen — the
+  // tab-blur cleanup still wants to flush so the next focus shows the
+  // tail of the queue. Full unmount means React will throw on any
+  // setState here, so flushers early-return.
+  const isUnmountedRef = useRef(false);
+  useEffect(
+    () => () => {
+      isUnmountedRef.current = true;
+    },
+    [],
+  );
   // 100 ms flush window: feels instant to the user (the eye perceives
   // ≤120 ms as same-frame), short enough that the rail doesn't sit
   // empty during a slow backfill, long enough to coalesce a typical
@@ -367,6 +379,13 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     if (pendingCachesTimerRef.current) {
       clearTimeout(pendingCachesTimerRef.current);
       pendingCachesTimerRef.current = null;
+    }
+    // Clear buffer + skip setState on unmount so a stale subscription
+    // tear-down post-logout / navigator-reset doesn't trigger the
+    // "setState on unmounted component" warning (Copilot review on #612).
+    if (isUnmountedRef.current) {
+      pendingCachesRef.current = new Map();
+      return;
     }
     const batch = pendingCachesRef.current;
     if (batch.size === 0) return;
@@ -391,6 +410,11 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     if (pendingEventsTimerRef.current) {
       clearTimeout(pendingEventsTimerRef.current);
       pendingEventsTimerRef.current = null;
+    }
+    // See flushPendingCaches above for the unmount guard rationale.
+    if (isUnmountedRef.current) {
+      pendingEventsRef.current = new Map();
+      return;
     }
     const batch = pendingEventsRef.current;
     if (batch.size === 0) return;
