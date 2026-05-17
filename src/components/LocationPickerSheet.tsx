@@ -65,8 +65,13 @@ const LocationPickerSheet: React.FC<Props> = ({
   // of preference:
   //   1. caller-supplied `initialLat`/`Lon` (edit-mode + already-pinned)
   //   2. dev-pinned location (emulator parity — see useCompassNavigation)
-  //   3. `Location.getLastKnownPositionAsync` (instant, returns cached fix)
-  //   4. UK fallback (54.0, -2.0) at low zoom
+  //   3. `Location.getCurrentPositionAsync` (fresh GPS — up to 1.5 s)
+  //   4. `Location.getLastKnownPositionAsync` (instant, returns cached fix)
+  //   5. UK fallback (54.0, -2.0) at low zoom
+  // We race (3) against a 1.5 s timeout that falls through to (4); a
+  // fresh fix arrives before the user pans in the common case. The
+  // bare last-known path is what caused #595 — a 10-min-old fix from
+  // elsewhere in town quietly seeded the map.
   const [resolvedStart, setResolvedStart] = useState<{
     lat: number;
     lon: number;
@@ -93,8 +98,10 @@ const LocationPickerSheet: React.FC<Props> = ({
     }
     sheetRef.current?.present();
     let cancelled = false;
+    let seeded = false;
     const seed = (lat: number, lon: number, zoom: number) => {
-      if (cancelled) return;
+      if (cancelled || seeded) return;
+      seeded = true;
       setResolvedStart({ lat, lon, zoom });
       setPicked({ lat, lon });
       setUserMoved(hasInitialPin);
@@ -114,16 +121,35 @@ const LocationPickerSheet: React.FC<Props> = ({
         cancelled = true;
       };
     }
-    // Last-known is nearly-instant (returns the OS's cached fix) so
-    // the sheet doesn't feel laggy. If null / denied, fall back to UK.
-    Location.getLastKnownPositionAsync({ maxAge: 10 * 60 * 1000 })
-      .then((known) => {
-        if (known) seed(known.coords.latitude, known.coords.longitude, 16);
-        else seed(54.0, -2.0, 5);
+    // Fast-first / fresh-second: kick off a fresh GPS fix immediately,
+    // but race it against a 1.5 s timeout that falls back to the OS's
+    // last-known fix so the sheet never hangs. Whichever lands first
+    // seeds the map (`seeded` guard); a stale fresh-fix arriving after
+    // we already fell back to last-known is dropped.
+    //
+    // Why not bare last-known (the pre-#595 behaviour)? `maxAge: 10 min`
+    // means a fix from the *same town* a few streets away counts as
+    // "known" — the map opens centred on yesterday's coffee shop.
+    const freshTimeout = setTimeout(() => {
+      Location.getLastKnownPositionAsync({ maxAge: 10 * 60 * 1000 })
+        .then((known) => {
+          if (known) seed(known.coords.latitude, known.coords.longitude, 16);
+          else seed(54.0, -2.0, 5);
+        })
+        .catch(() => seed(54.0, -2.0, 5));
+    }, 1500);
+    Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+      .then((pos) => {
+        clearTimeout(freshTimeout);
+        seed(pos.coords.latitude, pos.coords.longitude, 16);
       })
-      .catch(() => seed(54.0, -2.0, 5));
+      .catch(() => {
+        // Permission denied / hardware failure — let the timeout path
+        // take over (last-known → UK fallback).
+      });
     return () => {
       cancelled = true;
+      clearTimeout(freshTimeout);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, initialLat, initialLon]);
