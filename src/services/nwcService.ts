@@ -341,7 +341,7 @@ export async function makeInvoice(
   if (!provider) throw new Error('Not connected');
   const invoice = await provider.makeInvoice({
     amount,
-    defaultMemo: memo || 'Lightning Piggy',
+    defaultMemo: memo || 'Sent with Lightning Piggy',
   });
   return invoice.paymentRequest;
 }
