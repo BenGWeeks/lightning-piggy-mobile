@@ -8,16 +8,21 @@
 ## Cutting a release
 
 - **Releases go through the GitHub Release workflow, not via `eas build --local`.** Bump with `npm version <patch|minor|major>`, push `main --follow-tags`, then publish a GitHub Release pointing at the tag. `.github/workflows/release.yml` kicks off EAS cloud builds for both platforms, auto-submits iOS to TestFlight, and attaches the Android APK to the Release page. Full recipe in `docs/DEPLOYMENT.adoc` → "Cutting a release".
-- **Why not run `eas build` manually for releases?** Manual builds detach the artifact from any tag — anything merged to `main` during the ~30 min build window quietly ends up "released" too, and the GitHub Release notes drift away from what actually shipped. The workflow tags first, then builds, so the artifacts are anchored to one commit.
+- **Why not run `eas build` manually for releases?** Manual / local builds aren't anchored to a published tag — the artifact came from whatever local checkout (or whichever commit) you triggered it from, with no record of which source revision actually shipped. The GitHub Release notes then drift away from what's in users' hands. The workflow tags first, then builds, so the artifacts are pinned to one commit.
 - **Marketing version lives in `package.json` / `app.config.ts`** (single source of truth, reviewable via PR). **`versionCode` / `buildNumber` are owned by EAS's remote counter** (`eas.json` → `"appVersionSource": "remote"` + `"autoIncrement": true`). Don't hand-edit the integer for releases — cloud builds auto-increment it past whatever's in the file.
 
 ## Sideloading a release-flavor APK to a physical device (for testing, not release)
 
 - The user's primary device is a Pixel running an EAS-built install. A locally-signed APK won't upgrade it (`INSTALL_FAILED_UPDATE_INCOMPATIBLE` — different keystore). To validate release-mode behavior on real hardware without losing app data, pull the latest cloud-built APK instead of running `eas build --local`:
   ```
-  eas build:list --platform android --profile production --status finished --limit 1   # find the URL
-  eas build:download --platform android --latest                                       # or fetch directly
-  adb -s <serial> install -r build-*.apk
+  # 1. Find the most-recent production build's URL / ID.
+  eas build:list --platform android --profile production --status finished --limit 1
+  # 2. Download THAT build by URL or ID — don't use `--latest`, since it
+  #    isn't constrained to a profile and may hand back a development/
+  #    preview APK (which uses the `.dev` / `.preview` applicationId
+  #    and won't upgrade a production install).
+  eas build:view <build-id> --json | jq -r '.artifacts.buildUrl' | xargs -I{} curl -L -o build.apk {}
+  adb -s <serial> install -r build.apk
   ```
 - `adb` takes the adb serial; `expo run:android --device` takes the model name (`Pixel_8`). For dev iteration, `npx expo run:android --device Pixel_8` is still the right call — release-mode sideload is only needed when validating R8 / proguard behavior.
 - `eas build --local` survives as an offline fallback (no network, urgent). Documented in `docs/DEPLOYMENT.adoc` → "Local production builds (fallback)". It requires manually bumping `versionCode` in `app.config.ts` first, and is not the release path.
