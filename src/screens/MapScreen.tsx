@@ -55,7 +55,7 @@ import WebOfTrustChip from '../components/WebOfTrustChip';
 import WebOfTrustBottomSheet from '../components/WebOfTrustBottomSheet';
 import LegendSheet from '../components/LegendSheet';
 import { LibreMiniMap } from '../components/LibreMiniMap';
-import { useLiveUserLocation } from '../hooks/useLiveUserLocation';
+import { useUserLocation } from '../contexts/UserLocationContext';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -116,7 +116,7 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   // Live position for the user dot — refreshes as the user walks
   // around without re-centring the map (the camera stays anchored to
   // the user's initial pos so panning behaviour isn't fighting GPS).
-  const { pos: livePos } = useLiveUserLocation();
+  const { pos: livePos } = useUserLocation();
   const [places, setPlaces] = useState<BtcMapPlace[]>([]);
   const [caches, setCaches] = useState<Map<string, ParsedCache>>(new Map());
   const [selected, setSelected] = useState<BtcMapPlace | null>(null);

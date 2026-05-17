@@ -48,7 +48,7 @@ import {
 import { formatDistance, haversineMetres } from '../utils/geohash';
 import { getDevPinnedLocation } from '../utils/devLocation';
 import { LibreMiniMap } from '../components/LibreMiniMap';
-import { useLiveUserLocation } from '../hooks/useLiveUserLocation';
+import { useUserLocation } from '../contexts/UserLocationContext';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import SocialIcon, { socialLabel, type SocialNetwork } from '../components/SocialIcon';
 
@@ -126,7 +126,7 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   // Live position for the user dot on the merchant mini-map — the map
   // is centred on the merchant, but the user-dot follows the visitor
   // as they walk towards it.
-  const { pos: livePos } = useLiveUserLocation();
+  const { pos: livePos } = useUserLocation();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 

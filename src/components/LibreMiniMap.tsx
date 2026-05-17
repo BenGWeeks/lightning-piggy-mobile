@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, View, StyleSheet, TouchableOpacity, Text } from 'react-native';
 // Alias MapLibre's `Map` component so we can still use the built-in
 // `Map<K,V>` global for the coord → source lookups below.
@@ -218,6 +218,37 @@ const LibreMiniMapInner: React.FC<Props> = ({
     };
   }, [haloLat, haloLon, userAccuracyMetres]);
 
+  // Gentle opacity pulse on the geographic accuracy halo so the user
+  // sees that it's a live signal — not a frozen snapshot. The halo's
+  // RADIUS is the precision indicator (driven by GPS accuracy); this
+  // opacity pulse is a "this is alive" affordance separate from
+  // accuracy itself. ~1.6 s round-trip matches the user-dot pulse.
+  //
+  // MapLibre's paint prop doesn't natively accept animated drivers, so
+  // we modulate the opacity via React state at ~8 fps — smooth enough
+  // for an opacity-only pulse, cheap on the JS thread. The Layer
+  // re-renders on each state change; the halo's GeoJSON source stays
+  // stable so no projection recompute happens.
+  const [haloPulse, setHaloPulse] = useState(0);
+  const haloOn = haloFeature !== null;
+  useEffect(() => {
+    if (!haloOn) return;
+    const PULSE_PERIOD_MS = 1600;
+    const PULSE_FPS = 8;
+    const start = Date.now();
+    const id = setInterval(() => {
+      // Sine wave in [-1, +1]; consumers below map this to opacity
+      // ranges so the visual amplitude is centralised here.
+      const t = ((Date.now() - start) % PULSE_PERIOD_MS) / PULSE_PERIOD_MS;
+      setHaloPulse(Math.sin(t * 2 * Math.PI));
+    }, 1000 / PULSE_FPS);
+    return () => clearInterval(id);
+  }, [haloOn]);
+  // Centralise the opacity envelope so designers can tune without
+  // chasing literals in two places. Base + amplitude.
+  const haloFillOpacity = 0.175 + 0.045 * haloPulse;
+  const haloLineOpacity = 0.45 + 0.15 * haloPulse;
+
   // O(1) coord → original-source lookups so onSelect* handlers don't do
   // a linear .find() per rendered marker. The build cost is one
   // map-construction pass per render where caches/events change; the
@@ -345,12 +376,16 @@ const LibreMiniMapInner: React.FC<Props> = ({
             <Layer
               id="user-accuracy-fill"
               type="fill"
-              paint={{ 'fill-color': '#4285F4', 'fill-opacity': 0.18 }}
+              paint={{ 'fill-color': '#4285F4', 'fill-opacity': haloFillOpacity }}
             />
             <Layer
               id="user-accuracy-outline"
               type="line"
-              paint={{ 'line-color': '#4285F4', 'line-opacity': 0.45, 'line-width': 1 }}
+              paint={{
+                'line-color': '#4285F4',
+                'line-opacity': haloLineOpacity,
+                'line-width': 1,
+              }}
             />
           </GeoJSONSource>
         )}

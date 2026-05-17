@@ -31,7 +31,7 @@ import { loadCachedEvents, peekCachedEventsSync } from '../services/nostrPlacesS
 import { fetchEvent } from '../services/nostrPlacesPublisher';
 import { useNostr } from '../contexts/NostrContext';
 import { LibreMiniMap } from '../components/LibreMiniMap';
-import { useLiveUserLocation } from '../hooks/useLiveUserLocation';
+import { useUserLocation } from '../contexts/UserLocationContext';
 import { usePubkeyProfile } from '../hooks/usePubkeyProfile';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import Toast from '../components/BrandedToast';
@@ -88,7 +88,7 @@ const EventDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const { coord } = route.params;
   // Live user position for the dot on the event venue mini-map —
   // map stays centred on the venue, user dot follows the attendee.
-  const { pos: livePos } = useLiveUserLocation();
+  const { pos: livePos } = useUserLocation();
 
   const [event, setEvent] = useState<ParsedEvent | null>(() => {
     // Fast path: in-memory mirror already has the event.

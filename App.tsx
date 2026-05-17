@@ -13,6 +13,7 @@ import { NostrProvider } from './src/contexts/NostrContext';
 import { TrustGraphProvider } from './src/contexts/TrustGraphContext';
 import { GroupsProvider } from './src/contexts/GroupsContext';
 import { ThemeProvider, useTheme } from './src/contexts/ThemeContext';
+import { UserLocationProvider } from './src/contexts/UserLocationContext';
 import AppNavigator, {
   navigateToHuntFound,
   navigateToHuntPiggyDetail,
@@ -264,10 +265,16 @@ export default function App() {
                   {/* GroupsProvider sits inside Nostr so groups can subscribe
                     to multi-recipient gift wraps using the active signer. */}
                   <GroupsProvider>
-                    <BottomSheetModalProvider>
-                      <ThemedStatusBar />
-                      <AppNavigator />
-                    </BottomSheetModalProvider>
+                    {/* UserLocationProvider: ONE GPS watch subscription
+                        shared across every map surface, so all screens
+                        see the same live position + accuracy halo and
+                        we don't fan out to N concurrent watches. */}
+                    <UserLocationProvider>
+                      <BottomSheetModalProvider>
+                        <ThemedStatusBar />
+                        <AppNavigator />
+                      </BottomSheetModalProvider>
+                    </UserLocationProvider>
                     {/* BrandedToast: brand-themed wrapper around
                       `react-native-toast-message`. Single mount for the
                       app's toast slot — keeps styling (pink success

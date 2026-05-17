@@ -22,7 +22,7 @@ import {
 import TabHeader from '../components/TabHeader';
 import { ContentRail } from '../components/ContentRail';
 import { LibreMiniMap } from '../components/LibreMiniMap';
-import { useLiveUserLocation } from '../hooks/useLiveUserLocation';
+import { useUserLocation } from '../contexts/UserLocationContext';
 import LegendSheet from '../components/LegendSheet';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import { courses, type Course } from '../data/learnContent';
@@ -155,7 +155,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // Live position for the user dot — refreshes as the user walks
   // around without re-running the BTC-merchant / cache / event fetches
   // below (those fire once on the initial pos resolve).
-  const { pos: livePos } = useLiveUserLocation();
+  const { pos: livePos } = useUserLocation();
   useEffect(() => {
     let cancelled = false;
     (async () => {
