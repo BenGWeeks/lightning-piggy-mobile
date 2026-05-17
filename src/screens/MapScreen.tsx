@@ -55,6 +55,7 @@ import WebOfTrustChip from '../components/WebOfTrustChip';
 import WebOfTrustBottomSheet from '../components/WebOfTrustBottomSheet';
 import LegendSheet from '../components/LegendSheet';
 import { LibreMiniMap } from '../components/LibreMiniMap';
+import { useLiveUserLocation } from '../hooks/useLiveUserLocation';
 
 interface Props {
   navigation: ExploreNavigation;
@@ -112,6 +113,10 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
   const [pos, setPos] = useState<{ lat: number; lon: number; accuracy: number | null } | null>(
     null,
   );
+  // Live position for the user dot — refreshes as the user walks
+  // around without re-centring the map (the camera stays anchored to
+  // the user's initial pos so panning behaviour isn't fighting GPS).
+  const { pos: livePos } = useLiveUserLocation();
   const [places, setPlaces] = useState<BtcMapPlace[]>([]);
   const [caches, setCaches] = useState<Map<string, ParsedCache>>(new Map());
   const [selected, setSelected] = useState<BtcMapPlace | null>(null);
@@ -369,7 +374,9 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         <LibreMiniMap
           lat={pos?.lat ?? null}
           lon={pos?.lon ?? null}
-          userAccuracyMetres={pos?.accuracy ?? null}
+          userLat={livePos?.lat ?? null}
+          userLon={livePos?.lon ?? null}
+          userAccuracyMetres={livePos?.accuracy ?? pos?.accuracy ?? null}
           merchants={visibleMerchants}
           caches={visibleCaches}
           events={[]}

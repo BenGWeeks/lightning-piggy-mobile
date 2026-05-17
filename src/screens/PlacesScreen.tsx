@@ -39,6 +39,7 @@ import { getDevPinnedLocation } from '../utils/devLocation';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import BtcMapAttribution from '../components/BtcMapAttribution';
 import { LibreMiniMap } from '../components/LibreMiniMap';
+import { useLiveUserLocation } from '../hooks/useLiveUserLocation';
 import PlacesFilterSheet, { countActiveFilters } from '../components/PlacesFilterSheet';
 import LegendSheet from '../components/LegendSheet';
 
@@ -74,6 +75,10 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [pos, setPos] = useState<{ lat: number; lon: number } | null>(null);
+  // Live user-position for the dot on the embedded mini-map — refreshes
+  // as the user walks around without re-running the nearby-places fetch
+  // (that fires once from `pos` above).
+  const { pos: livePos } = useLiveUserLocation();
   const lastReloadRef = useRef<number>(0);
 
   const reload = useCallback(async () => {
@@ -268,7 +273,9 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
               <LibreMiniMap
                 lat={pos?.lat ?? null}
                 lon={pos?.lon ?? null}
-                userAccuracyMetres={null}
+                userLat={livePos?.lat ?? null}
+                userLon={livePos?.lon ?? null}
+                userAccuracyMetres={livePos?.accuracy ?? null}
                 merchants={sortedPlaces.map((p) => p.place)}
                 caches={[]}
                 events={[]}

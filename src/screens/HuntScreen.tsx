@@ -26,6 +26,7 @@ import HuntFilterSheet, { countActiveFilters } from '../components/HuntFilterShe
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
 import { LibreMiniMap } from '../components/LibreMiniMap';
+import { useLiveUserLocation } from '../hooks/useLiveUserLocation';
 import LegendSheet from '../components/LegendSheet';
 import { type ParsedCache } from '../services/nostrPlacesService';
 import { fetchCachesByAuthor, subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
@@ -63,6 +64,10 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   const [pos, setPos] = useState<{ lat: number; lon: number; accuracy: number | null } | null>(
     null,
   );
+  // Live position for the user dot — refreshes as the user walks
+  // around without re-firing the nearby-cache subscription (which is
+  // keyed on the initial `pos`).
+  const { pos: livePos } = useLiveUserLocation();
   const [caches, setCaches] = useState<Map<string, ParsedCache>>(
     () => new Map(peekCachedCachesSync().map((c) => [c.coord, c])),
   );
@@ -364,7 +369,9 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
         <LibreMiniMap
           lat={pos?.lat ?? null}
           lon={pos?.lon ?? null}
-          userAccuracyMetres={pos?.accuracy ?? null}
+          userLat={livePos?.lat ?? null}
+          userLon={livePos?.lon ?? null}
+          userAccuracyMetres={livePos?.accuracy ?? pos?.accuracy ?? null}
           merchants={[]}
           caches={filteredCaches.map((c) => c.cache)}
           events={[]}

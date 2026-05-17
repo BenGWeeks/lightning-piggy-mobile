@@ -22,6 +22,7 @@ import {
 import TabHeader from '../components/TabHeader';
 import { ContentRail } from '../components/ContentRail';
 import { LibreMiniMap } from '../components/LibreMiniMap';
+import { useLiveUserLocation } from '../hooks/useLiveUserLocation';
 import LegendSheet from '../components/LegendSheet';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import { courses, type Course } from '../data/learnContent';
@@ -151,6 +152,10 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     },
   );
   const [locationDenied, setLocationDenied] = useState(false);
+  // Live position for the user dot — refreshes as the user walks
+  // around without re-running the BTC-merchant / cache / event fetches
+  // below (those fire once on the initial pos resolve).
+  const { pos: livePos } = useLiveUserLocation();
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -686,7 +691,9 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           <LibreMiniMap
             lat={pos?.lat ?? null}
             lon={pos?.lon ?? null}
-            userAccuracyMetres={pos?.accuracy ?? null}
+            userLat={livePos?.lat ?? null}
+            userLon={livePos?.lon ?? null}
+            userAccuracyMetres={livePos?.accuracy ?? pos?.accuracy ?? null}
             merchants={merchants}
             caches={cachesArr}
             events={eventsArr}
