@@ -70,6 +70,13 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   // progress edits with the stored value — symptom: typing into Lightning
   // Address makes characters disappear.
   useEffect(() => {
+    // Cancellation token for the async secret loads below. If the user
+    // switches wallets / dismisses the sheet while getNwcUrl is still
+    // in-flight, the late-arriving callback would otherwise repopulate
+    // nwcConnection with the previous wallet's secret. Flip cancelled
+    // on cleanup so the .then writes no-op.
+    let cancelled = false;
+
     // Eager reset of secret-bearing state on every walletId change —
     // covers wallet switch, sheet close (walletId → null) and the
     // on-chain branch alike. Without this nwcConnection (a wallet
@@ -87,13 +94,17 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
 
       // Load xpub for on-chain wallets
       if (wallet.walletType === 'onchain' && walletId) {
-        getXpub(walletId).then((xpub) => setXpubDisplay(xpub));
+        getXpub(walletId).then((xpub) => {
+          if (cancelled) return;
+          setXpubDisplay(xpub);
+        });
       } else if (wallet.walletType === 'nwc' && walletId) {
         setXpubDisplay(null);
         // Extract relay URL from NWC connection string, AND stash the
         // full string so the user can copy it back out from the
         // recovery row below.
         getNwcUrl(walletId).then((url) => {
+          if (cancelled) return;
           setNwcConnection(url);
           if (url) {
             try {
@@ -110,6 +121,9 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
     } else {
       setXpubDisplay(null);
     }
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walletId]);
 
@@ -249,7 +263,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
               <Text
                 style={styles.nwcRowText}
                 selectable={nwcRevealed}
-                numberOfLines={nwcRevealed ? 3 : 1}
+                numberOfLines={nwcRevealed ? undefined : 1}
               >
                 {nwcRevealed ? nwcConnection : '••••••••••••'}
               </Text>
