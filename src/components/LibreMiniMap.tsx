@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { Animated, View, StyleSheet, TouchableOpacity, Text } from 'react-native';
 // Alias MapLibre's `Map` component so we can still use the built-in
 // `Map<K,V>` global for the coord → source lookups below.
