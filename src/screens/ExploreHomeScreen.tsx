@@ -542,103 +542,118 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const [untrustedCacheCount, setUntrustedCacheCount] = useState(0);
   const [untrustedEventCount, setUntrustedEventCount] = useState(0);
   const subsCloserRef = useRef<(() => void)[]>([]);
-  // NIP-GC + NIP-52 subscriptions are wrapped in useFocusEffect so they
-  // pause on tab blur. Previously the subs stayed open for the rest of
-  // the session once the user visited Explore even once — relay events
-  // kept landing on the JS thread (a Map clone per delivery is small
-  // but not free) while the user was on Home/Messages/Friends, eating
-  // into bridge dispatches for payment-settlement polls + QR-scan
-  // callbacks (#554). Reconnect on re-focus is ~100 ms; foreground
-  // JS-thread responsiveness is the better trade.
-  // Destructure pos into primitives so the focus effect's deps don't
+  // NIP-GC + NIP-52 subscriptions live on the *mount* lifecycle, not
+  // the focus lifecycle. Open once when ExploreHomeScreen first
+  // mounts (which is lazy on the tab navigator via `lazy: true`, so
+  // nothing fires before the user actually visits the tab); stay open
+  // across tab blur / focus; close only on full unmount (logout /
+  // navigator reset / pull-to-refresh).
+  //
+  // This is the standard pattern across production Nostr clients
+  // (Damus, Snort, Amethyst). The pre-existing `useFocusEffect` here
+  // tore down on every blur and re-opened on every focus. The
+  // rationale was "reconnect on re-focus is ~100 ms; saves JS-thread
+  // load while user is on Home" — but the actual measured cost of
+  // re-focus is **15-16 s** (#31 freeze), not 100 ms, because the
+  // relay re-emits its full geohash-prefix backlog every time we
+  // re-subscribe. The math was upside-down: we were paying a
+  // 15-second freeze on every tab return to save the user from
+  // <2 ms/min of background event processing.
+  //
+  // Subscriptions stay closed by the WebSocket reuse semantics of
+  // `nostr-tools`' `SimplePool` — closing a subscription just sends
+  // a CLOSE frame; the underlying WebSocket persists for future REQs.
+  // So even the "first visit" backfill happens once per app launch,
+  // not once per focus.
+  //
+  // Destructure pos into primitives so the effect's deps don't
   // re-trigger every time `setPos` writes a fresh `{lat, lon, accuracy}`
   // object (which happens 2–3 times on cold start: last-known fix →
-  // current fix → high-accuracy refinement). Pre-fix that thrashed the
-  // relay subscription open/close 2–3 times per cold-start; each round-
-  // trip is ~100–300 ms. Stev.ie's #612 review surfaced this.
+  // current fix → high-accuracy refinement). Pre-fix that thrashed
+  // the relay subscription open/close 2–3 times per cold-start.
+  // Stev.ie's #612 review surfaced this.
   const posLat = pos?.lat;
   const posLon = pos?.lon;
-  useFocusEffect(
-    useCallback(() => {
-      // `refreshKey` is intentionally listed in the deps below so that
-      // pull-to-refresh (which bumps it) tears down + re-runs the
-      // subscriptions, even though the value isn't referenced inside
-      // the body.
-      if (typeof posLat !== 'number' || typeof posLon !== 'number') return;
-      // `cancelled` covers the window between focus-effect cleanup
-      // firing (subsCloserRef.current.forEach(c => c())) and the
-      // underlying relay socket actually closing — a stray event in
-      // that gap would otherwise mutate pendingCachesRef and arm a
-      // fresh flush timer that fires while the screen is blurred.
-      // Mirrors NostrContext.tsx's DM inbox precedent.
-      let cancelled = false;
-      const myGh = encodeGeohash(posLat, posLon, 7);
-      // Caches sit at precision 5 (~5 km) — geocaching is inherently
-      // hyper-local. Events broaden to precision 3 (~150 km) so a rural
-      // user catches the nearest city's Bitcoin meetup; most NIP-52
-      // publishers emit g tags at every precision 3..9.
-      const cachePrefixes = geohashPrefixes(myGh, 5).filter((p) => p.length === 5);
-      const eventPrefixes = geohashPrefixes(myGh, 3).filter((p) => p.length === 3);
+  useEffect(() => {
+    // `refreshKey` is intentionally listed in the deps below so that
+    // pull-to-refresh (which bumps it) tears down + re-runs the
+    // subscriptions, even though the value isn't referenced inside
+    // the body.
+    if (typeof posLat !== 'number' || typeof posLon !== 'number') return;
+    // `cancelled` covers the window between effect cleanup firing
+    // (subsCloserRef.current.forEach(c => c())) and the underlying
+    // relay socket actually closing — a stray event in that gap
+    // would otherwise mutate pendingCachesRef and arm a fresh flush
+    // timer that fires after the cleanup. Mirrors NostrContext.tsx's
+    // DM inbox precedent.
+    let cancelled = false;
+    const myGh = encodeGeohash(posLat, posLon, 7);
+    // Caches sit at precision 5 (~5 km) — geocaching is inherently
+    // hyper-local. Events broaden to precision 3 (~150 km) so a rural
+    // user catches the nearest city's Bitcoin meetup; most NIP-52
+    // publishers emit g tags at every precision 3..9.
+    const cachePrefixes = geohashPrefixes(myGh, 5).filter((p) => p.length === 5);
+    const eventPrefixes = geohashPrefixes(myGh, 3).filter((p) => p.length === 3);
 
-      subsCloserRef.current.push(
-        subscribeNearbyCaches(cachePrefixes, (c) => {
-          if (cancelled) return;
-          // WoT filter: silently drop caches from pubkeys outside the
-          // trust graph (an unverified cache could be a phishing LNURL
-          // or, worse, a physical lure). Surfaced as a count instead so
-          // users know they exist without being lured into inspecting them.
-          if (!isTrustedRef.current(c.hiderPubkey)) {
-            setUntrustedCacheCount((n) => n + 1);
-            return;
-          }
-          // Stale-event drop happens here too so a stale wrap doesn't
-          // even enter the pending queue. The flush re-checks against
-          // the committed state in case the queue itself raced.
-          const existing = pendingCachesRef.current.get(c.coord);
-          if (existing && existing.createdAt >= c.createdAt) return;
-          pendingCachesRef.current.set(c.coord, c);
-          if (pendingCachesRef.current.size >= PENDING_FLUSH_THRESHOLD) {
-            flushPendingCaches();
-            return;
-          }
-          if (pendingCachesTimerRef.current === null) {
-            pendingCachesTimerRef.current = setTimeout(flushPendingCaches, PENDING_FLUSH_MS);
-          }
-        }),
-      );
-      subsCloserRef.current.push(
-        subscribeNearbyEvents(eventPrefixes, (e) => {
-          if (cancelled) return;
-          // Skip events that already started > 1h ago.
-          if (e.startsAt && e.startsAt < Math.floor(Date.now() / 1000) - 60 * 60) return;
-          if (!isTrustedRef.current(e.organiserPubkey)) {
-            setUntrustedEventCount((n) => n + 1);
-            return;
-          }
-          const existing = pendingEventsRef.current.get(e.coord);
-          if (existing && existing.startsAt === e.startsAt) return;
-          pendingEventsRef.current.set(e.coord, e);
-          if (pendingEventsRef.current.size >= PENDING_FLUSH_THRESHOLD) {
-            flushPendingEvents();
-            return;
-          }
-          if (pendingEventsTimerRef.current === null) {
-            pendingEventsTimerRef.current = setTimeout(flushPendingEvents, PENDING_FLUSH_MS);
-          }
-        }),
-      );
-      return () => {
-        cancelled = true;
-        subsCloserRef.current.forEach((c) => c());
-        subsCloserRef.current = [];
-        // Drain whatever's queued so a tab blur mid-backfill doesn't
-        // silently discard the last few events. Both flushers are
-        // null-safe + no-op when the buffer is already empty.
-        flushPendingCaches();
-        flushPendingEvents();
-      };
-    }, [posLat, posLon, refreshKey, flushPendingCaches, flushPendingEvents]),
-  );
+    subsCloserRef.current.push(
+      subscribeNearbyCaches(cachePrefixes, (c) => {
+        if (cancelled) return;
+        // WoT filter: silently drop caches from pubkeys outside the
+        // trust graph (an unverified cache could be a phishing LNURL
+        // or, worse, a physical lure). Surfaced as a count instead so
+        // users know they exist without being lured into inspecting them.
+        if (!isTrustedRef.current(c.hiderPubkey)) {
+          setUntrustedCacheCount((n) => n + 1);
+          return;
+        }
+        // Stale-event drop happens here too so a stale wrap doesn't
+        // even enter the pending queue. The flush re-checks against
+        // the committed state in case the queue itself raced.
+        const existing = pendingCachesRef.current.get(c.coord);
+        if (existing && existing.createdAt >= c.createdAt) return;
+        pendingCachesRef.current.set(c.coord, c);
+        if (pendingCachesRef.current.size >= PENDING_FLUSH_THRESHOLD) {
+          flushPendingCaches();
+          return;
+        }
+        if (pendingCachesTimerRef.current === null) {
+          pendingCachesTimerRef.current = setTimeout(flushPendingCaches, PENDING_FLUSH_MS);
+        }
+      }),
+    );
+    subsCloserRef.current.push(
+      subscribeNearbyEvents(eventPrefixes, (e) => {
+        if (cancelled) return;
+        // Skip events that already started > 1h ago.
+        if (e.startsAt && e.startsAt < Math.floor(Date.now() / 1000) - 60 * 60) return;
+        if (!isTrustedRef.current(e.organiserPubkey)) {
+          setUntrustedEventCount((n) => n + 1);
+          return;
+        }
+        const existing = pendingEventsRef.current.get(e.coord);
+        if (existing && existing.startsAt === e.startsAt) return;
+        pendingEventsRef.current.set(e.coord, e);
+        if (pendingEventsRef.current.size >= PENDING_FLUSH_THRESHOLD) {
+          flushPendingEvents();
+          return;
+        }
+        if (pendingEventsTimerRef.current === null) {
+          pendingEventsTimerRef.current = setTimeout(flushPendingEvents, PENDING_FLUSH_MS);
+        }
+      }),
+    );
+    return () => {
+      cancelled = true;
+      subsCloserRef.current.forEach((c) => c());
+      subsCloserRef.current = [];
+      // Drain whatever's queued so the last few events from a
+      // refresh-triggered tear-down (or full unmount) aren't lost.
+      // Both flushers are null-safe + no-op when the buffer is
+      // already empty.
+      flushPendingCaches();
+      flushPendingEvents();
+    };
+  }, [posLat, posLon, refreshKey, flushPendingCaches, flushPendingEvents]);
 
   // ----- lessons progress (local) -----------------------------------------
 
