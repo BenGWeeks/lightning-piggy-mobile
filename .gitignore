@@ -63,4 +63,10 @@ modules/*/android/build/
 # Generated documentation
 docs/*.pdf
 
-.claude/
+# `.claude/` per-machine artefacts (worktrees, settings, locks) stay out,
+# but `.claude/agents/` is shared with the repo so the team gets it.
+# Using `.claude/*` (not `.claude/`) so per-directory negation rules below
+# actually work — git ignores everything inside an ignored directory
+# regardless of subsequent `!` exceptions.
+.claude/*
+!.claude/agents/

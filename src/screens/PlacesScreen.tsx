@@ -35,10 +35,10 @@ import {
   lightningAddressOf,
 } from '../services/btcMapService';
 import { formatDistance, haversineMetres } from '../utils/geohash';
-import { getDevPinnedLocation } from '../utils/devLocation';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import BtcMapAttribution from '../components/BtcMapAttribution';
 import { LibreMiniMap } from '../components/LibreMiniMap';
+import { useUserLocation } from '../contexts/UserLocationContext';
 import PlacesFilterSheet, { countActiveFilters } from '../components/PlacesFilterSheet';
 import LegendSheet from '../components/LegendSheet';
 
@@ -74,6 +74,10 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [pos, setPos] = useState<{ lat: number; lon: number } | null>(null);
+  // Live user-position for the dot on the embedded mini-map — refreshes
+  // as the user walks around without re-running the nearby-places fetch
+  // (that fires once from `pos` above).
+  const { pos: livePos } = useUserLocation();
   const lastReloadRef = useRef<number>(0);
 
   const reload = useCallback(async () => {
@@ -87,27 +91,19 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
           if (cached.length > 0) setPlaces((prev) => (prev.length > 0 ? prev : cached));
         })
         .catch(() => {});
-      const pinned = getDevPinnedLocation();
-      let lat: number;
-      let lon: number;
-      if (pinned) {
-        lat = pinned.lat;
-        lon = pinned.lon;
-      } else {
-        const perm = await Location.requestForegroundPermissionsAsync();
-        if (perm.status !== 'granted') {
-          setError(
-            'Location permission required to show nearby Bitcoin-accepting places. We use a coarse area, not your exact position.',
-          );
-          setLoading(false);
-          return;
-        }
-        const fix = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-        lat = fix.coords.latitude;
-        lon = fix.coords.longitude;
+      const perm = await Location.requestForegroundPermissionsAsync();
+      if (perm.status !== 'granted') {
+        setError(
+          'Location permission required to show nearby Bitcoin-accepting places. We use a coarse area, not your exact position.',
+        );
+        setLoading(false);
+        return;
       }
+      const fix = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+      const lat = fix.coords.latitude;
+      const lon = fix.coords.longitude;
       setPos({ lat, lon });
       // ±2° (~220 km half-side) — wider than the on-screen mini-map's
       // min-zoom bbox so the user can zoom out and still see merchants.
@@ -266,9 +262,13 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
           <>
             <View style={styles.miniMapContainer}>
               <LibreMiniMap
-                lat={pos?.lat ?? null}
-                lon={pos?.lon ?? null}
-                userAccuracyMetres={null}
+                // Mini-map follows GPS — camera anchor should track
+                // the live position, not the stale one-shot `pos`.
+                lat={livePos?.lat ?? pos?.lat ?? null}
+                lon={livePos?.lon ?? pos?.lon ?? null}
+                userLat={livePos?.lat ?? null}
+                userLon={livePos?.lon ?? null}
+                userAccuracyMetres={livePos?.accuracy ?? null}
                 merchants={sortedPlaces.map((p) => p.place)}
                 caches={[]}
                 events={[]}

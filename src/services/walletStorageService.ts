@@ -170,6 +170,62 @@ export async function deleteXpub(walletId: string): Promise<void> {
   await SecureStore.deleteItemAsync(`${ONCHAIN_XPUB_PREFIX}${walletId}`);
 }
 
+// --- CoinOS managed-wallet recovery info (#287) ---
+//
+// Username + password for the coinos.io account that backs an NWC
+// wallet auto-provisioned via `coinosService`. Persisted to SecureStore
+// so Wallet Settings → "View recovery info" can re-display the same
+// sheet after the initial mandatory recovery-info acknowledgement;
+// without this the user has no way to recover the account if the
+// device is wiped.
+
+const COINOS_RECOVERY_PREFIX = 'coinos_recovery_';
+
+export interface CoinosRecoveryInfo {
+  /** Full API base URL — includes the `/api` path suffix (e.g.
+   *  `https://coinos.io/api`) since that's what `coinosService` posts
+   *  against. May be a self-hosted URL the user pointed LP at. To
+   *  render a host for a lud16 / sign-in URL, strip the `/api` —
+   *  `hostFromBaseUrl` in coinosService handles this. */
+  baseUrl: string;
+  username: string;
+  password: string;
+  /** ISO-8601 timestamp captured when the wallet was provisioned. */
+  createdAt: string;
+}
+
+export async function saveCoinosRecovery(
+  walletId: string,
+  info: CoinosRecoveryInfo,
+): Promise<void> {
+  await SecureStore.setItemAsync(
+    `${COINOS_RECOVERY_PREFIX}${walletId}`,
+    JSON.stringify(info),
+    SECURE_OPTIONS,
+  );
+}
+
+export async function getCoinosRecovery(walletId: string): Promise<CoinosRecoveryInfo | null> {
+  const raw = await SecureStore.getItemAsync(`${COINOS_RECOVERY_PREFIX}${walletId}`);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<CoinosRecoveryInfo>;
+    if (!parsed.baseUrl || !parsed.username || !parsed.password) return null;
+    return {
+      baseUrl: parsed.baseUrl,
+      username: parsed.username,
+      password: parsed.password,
+      createdAt: parsed.createdAt ?? new Date(0).toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteCoinosRecovery(walletId: string): Promise<void> {
+  await SecureStore.deleteItemAsync(`${COINOS_RECOVERY_PREFIX}${walletId}`);
+}
+
 // --- On-chain (mnemonic) ---
 
 const ONCHAIN_MNEMONIC_PREFIX = 'onchain_mnemonic_';

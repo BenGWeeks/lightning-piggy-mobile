@@ -60,6 +60,7 @@ import { LibreMiniMap } from '../components/LibreMiniMap';
 import CacheSpecSheet from '../components/CacheSpecSheet';
 import { decodeGeohash, formatDistance } from '../utils/geohash';
 import { useCompassNavigation } from '../hooks/useCompassNavigation';
+import { useUserLocation } from '../contexts/UserLocationContext';
 import { shortNpub } from '../utils/shortNpub';
 import {
   fetchCache,
@@ -221,12 +222,23 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     [cacheLatLon],
   );
   const {
-    user: userPos,
-    userAccuracy,
+    user: compassUser,
+    userAccuracy: compassAccuracy,
     heading,
     bearing,
     distanceMetres,
   } = useCompassNavigation(compassTarget);
+  // Pull the cached position from the app-wide UserLocationContext too.
+  // useCompassNavigation starts a fresh watch on mount and the first
+  // fix can take a couple of seconds — without this fallback, the dot
+  // briefly renders at the cache's coordinates (camera centre) until
+  // compass nav settles. The cached value is reference-stable across
+  // screen transitions, so the dot renders at the LAST KNOWN position
+  // from the first frame, then upgrades to compass nav's value when
+  // it lands.
+  const { pos: cachedUser } = useUserLocation();
+  const userPos = compassUser ?? (cachedUser ? { lat: cachedUser.lat, lon: cachedUser.lon } : null);
+  const userAccuracy = compassAccuracy ?? cachedUser?.accuracy ?? null;
   // lucide's Navigation2 glyph is a symmetric arrowhead pointing
   // straight up at rest, so rotation = (bearing − heading) puts the
   // apex on the cache relative to where the phone is facing. (The
@@ -527,7 +539,35 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         cache.hiderPubkey.toLowerCase() === pubkey.toLowerCase() &&
         cache.isLpPiggy ? (
           <TouchableOpacity
-            onPress={() => navigation.navigate('HuntCreate', { piggyId: cache.d })}
+            onPress={() =>
+              // Carry the published cache fields as a fallback so the
+              // wizard can hydrate even when the local HiddenPiggy
+              // record is missing — the cross-device edit path (#596).
+              // HuntCreate prefers the local record when present;
+              // fallbackCache only fires when ownership is provable via
+              // event.pubkey === activeIdentity.pubkey.
+              navigation.navigate('HuntCreate', {
+                piggyId: cache.d,
+                fallbackCache: {
+                  coord: cache.coord,
+                  hiderPubkey: cache.hiderPubkey,
+                  d: cache.d,
+                  name: cache.name,
+                  description: cache.description,
+                  geohash: cache.geohash,
+                  difficulty: cache.difficulty,
+                  terrain: cache.terrain,
+                  size: cache.size,
+                  cacheType: cache.cacheType,
+                  hint: cache.hint,
+                  imageUrl: cache.imageUrl,
+                  createdAt: cache.createdAt,
+                  expiresAt: cache.expiresAt,
+                  waitSeconds: cache.waitSeconds,
+                  uses: cache.uses,
+                },
+              })
+            }
             accessibilityLabel="Edit this Piglet"
             testID="hunt-piggy-detail-edit-button"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}

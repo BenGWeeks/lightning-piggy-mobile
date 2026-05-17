@@ -22,6 +22,7 @@ import TransferSheet from '../components/TransferSheet';
 import TransactionList from '../components/TransactionList';
 import WalletCarousel from '../components/WalletCarousel';
 import AddWalletWizard from '../components/AddWalletWizard';
+import WelcomeWalletPrompt from '../components/WelcomeWalletPrompt';
 import WalletSettingsSheet from '../components/WalletSettingsSheet';
 import TabHeader from '../components/TabHeader';
 import { ArrowDownIcon, ArrowUpIcon, ArrowLeftRightIcon } from '../components/icons/ArrowIcons';
@@ -341,7 +342,9 @@ const HomeScreen: React.FC = () => {
           style={styles.transactionsContainer}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         >
-          {!hasWallets || activeWalletId === null ? (
+          {!hasWallets ? (
+            <WelcomeWalletPrompt onGetStarted={() => setWizardOpen(true)} />
+          ) : activeWalletId === null ? (
             <View style={styles.emptyState}>
               <TouchableOpacity onPress={() => setWizardOpen(true)}>
                 <Text style={styles.addWalletText}>+ Add a Wallet</Text>

@@ -107,7 +107,7 @@ interface WalletContextType {
     nwcUrl: string,
     alias: string,
     theme: CardTheme,
-  ) => Promise<{ success: boolean; error?: string }>;
+  ) => Promise<{ success: boolean; error?: string; walletId?: string }>;
   addOnchainWallet: (
     xpub: string,
     alias: string,
@@ -739,7 +739,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setActiveWalletId(id);
       }
 
-      return { success: true };
+      // Return the new wallet's id so callers (e.g. CreateCoinosWalletSheet)
+      // can stash sidecar data — recovery info, NFC tag metadata — against
+      // the right id without racing the React state update. Without this
+      // the caller had to guess by scanning wallets[] which fails on a
+      // second create with the same alias / theme.
+      return { success: true, walletId: id };
     },
     // Deliberately depend on wallets.length (not wallets) — the callback only
     // cares about the count for duplicate checks. Adding wallets would bust
@@ -872,6 +877,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       } else {
         nwcService.disconnect(walletId);
         await walletStorage.deleteNwcUrl(walletId);
+        // CoinOS-provisioned NWC wallets carry recovery info in
+        // SecureStore — drop it with the wallet so the per-walletId
+        // namespace stays tidy. No-op for NWC wallets imported by URL.
+        await walletStorage.deleteCoinosRecovery(walletId);
       }
 
       const currentList = await walletStorage.getWalletList();
