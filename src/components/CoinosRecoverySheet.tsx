@@ -52,11 +52,23 @@ const CoinosRecoverySheet: React.FC<Props> = ({
   const ref = useRef<BottomSheetModal>(null);
   // Content-height only — matches the rest of the app's sheet pattern.
   const [copyHint, setCopyHint] = useState<string | null>(null);
+  // Track the copy-hint timeout so unmounting (or a fast second copy)
+  // cancels the previous timer — without this, a setTimeout fires
+  // setState after unmount and React warns. Lives in a ref so
+  // copyToClipboard can read/write the same handle across calls.
+  const copyHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (visible && details) ref.current?.present();
     else ref.current?.dismiss();
   }, [visible, details]);
+
+  // Cleanup outstanding copy-hint timer on unmount.
+  useEffect(() => {
+    return () => {
+      if (copyHintTimerRef.current) clearTimeout(copyHintTimerRef.current);
+    };
+  }, []);
 
   const handleSheetChange = useCallback(
     (index: number) => {
@@ -85,7 +97,11 @@ const CoinosRecoverySheet: React.FC<Props> = ({
   const copyToClipboard = useCallback(async (label: string, value: string) => {
     await Clipboard.setStringAsync(value);
     setCopyHint(label);
-    setTimeout(() => setCopyHint(null), 1500);
+    if (copyHintTimerRef.current) clearTimeout(copyHintTimerRef.current);
+    copyHintTimerRef.current = setTimeout(() => {
+      setCopyHint(null);
+      copyHintTimerRef.current = null;
+    }, 1500);
   }, []);
 
   if (!details) return null;

@@ -9,12 +9,14 @@ name: Add a CoinOS managed wallet — #287
 #
 # Requires:
 #   - Fresh install (no wallets yet) so the WelcomeWalletPrompt shows.
-#   - Network reachability to coinos.io. If the live API is gated by
-#     CloudFlare's bot-management challenge (see the PR body), the
-#     flow will surface a service-down error on the custody screen —
-#     `extendedWaitUntil` for the recovery sheet times out and the
-#     flow fails. That's a deliberate failure mode: the test is the
-#     canary for the upstream unblock.
+#   - Network reachability to the CoinOS API (`https://coinos.io/api`).
+#     If the API is unreachable — either because CloudFlare's bot-
+#     management challenge intercepts the request or because the
+#     baseUrl is mis-configured to point at the frontend instead of
+#     `/api` — the flow will surface a service-down error on the
+#     custody screen, `extendedWaitUntil` for the recovery sheet times
+#     out, and the flow fails. That's a deliberate failure mode: the
+#     test is the canary for those upstream / config issues.
 #
 # Run:
 #   maestro test tests/e2e/test-add-coinos-wallet.yaml
@@ -46,7 +48,7 @@ name: Add a CoinOS managed wallet — #287
 # recovery sheet renders with the auto-generated username + password
 # the user MUST acknowledge before we let them onto Home.
 - extendedWaitUntil:
-    visible: "Save your recovery info"
+    visible: 'Save your recovery info'
     timeout: 60000
 
 # Recovery sheet — verify the three credential rows are present.

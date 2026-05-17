@@ -123,10 +123,13 @@ async function classifyError(res: Response): Promise<CoinosError> {
       res.status,
     );
   }
-  // 415 is what CoinOS returns when CloudFlare's bot-management challenge
-  // intercepts the request — the request never reaches the API. Surface
-  // that as a service-down rather than an invalid-input so the user
-  // isn't sent looking for something to change in their input.
+  // 415 typically means the request never reached the actual API:
+  // either CloudFlare's bot-management challenge intercepted it, or
+  // (historically) the caller posted to the SvelteKit frontend
+  // (`https://coinos.io`) instead of the API endpoint
+  // (`https://coinos.io/api`). Surface as service-down rather than
+  // invalid-input so the user isn't sent looking for something to
+  // change in their input.
   if (
     res.status === 415 ||
     lower.includes('unsupported media type') ||

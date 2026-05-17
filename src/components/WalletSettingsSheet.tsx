@@ -20,6 +20,7 @@ import {
   getCoinosRecovery,
   type CoinosRecoveryInfo,
 } from '../services/walletStorageService';
+import { hostFromBaseUrl } from '../services/coinosService';
 import { Copy as CopyIcon, Eye, EyeOff, ShieldAlert } from 'lucide-react-native';
 
 interface Props {
@@ -85,6 +86,22 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   // progress edits with the stored value — symptom: typing into Lightning
   // Address makes characters disappear.
   useEffect(() => {
+    // Cancellation flag so a fast wallet-switch doesn't leak the
+    // previous wallet's CoinOS recovery / NWC string after the new
+    // wallet is active. Each .then() bails when cancelled is true.
+    let cancelled = false;
+
+    // Eager-clear all secret-bearing state on every walletId change —
+    // covers wallet switch, sheet close, on-chain branch. Without
+    // this the previous wallet's CoinOS username/password callout
+    // would briefly remain visible while the new wallet's
+    // getCoinosRecovery promise was still in-flight (privacy leak).
+    setRelayUrl(null);
+    setNwcConnection(null);
+    setNwcRevealed(false);
+    setCoinosRecovery(null);
+    setPasswordRevealed(false);
+
     if (wallet) {
       setAlias(wallet.alias);
       setLnAddress(wallet.lightningAddress ?? '');
@@ -92,21 +109,17 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
 
       // Load xpub for on-chain wallets
       if (wallet.walletType === 'onchain' && walletId) {
-        getXpub(walletId).then((xpub) => setXpubDisplay(xpub));
-        setRelayUrl(null);
+        getXpub(walletId).then((xpub) => {
+          if (cancelled) return;
+          setXpubDisplay(xpub);
+        });
       } else if (wallet.walletType === 'nwc' && walletId) {
         setXpubDisplay(null);
-        // Eager-clear before the async load so a fast wallet switch
-        // can't briefly show the previous wallet's relay / nwc string
-        // (the getNwcUrl promise for wallet A could still be in-flight
-        // when wallet B becomes active).
-        setRelayUrl(null);
-        setNwcConnection(null);
-        setNwcRevealed(false);
         // Extract relay URL from NWC connection string. Also stash
         // the full NWC string so the recovery callout can surface it
         // for managed CoinOS wallets.
         getNwcUrl(walletId).then((url) => {
+          if (cancelled) return;
           setNwcConnection(url);
           if (url) {
             try {
@@ -115,8 +128,6 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
             } catch {
               setRelayUrl(null);
             }
-          } else {
-            setRelayUrl(null);
           }
         });
         // CoinOS managed-wallet recovery info. Held in JS state for
@@ -125,19 +136,19 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         // serialised — it only travels from SecureStore → state →
         // Clipboard.setStringAsync when the user explicitly taps copy.
         getCoinosRecovery(walletId).then((rec) => {
+          if (cancelled) return;
           setCoinosRecovery(rec);
-          setPasswordRevealed(false);
-          setNwcRevealed(false);
         });
       } else {
         setXpubDisplay(null);
-        setRelayUrl(null);
-        setNwcConnection(null);
-        setCoinosRecovery(null);
-        setPasswordRevealed(false);
-        setNwcRevealed(false);
       }
+    } else {
+      setXpubDisplay(null);
     }
+
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walletId]);
 
@@ -270,8 +281,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
               <Text style={styles.recoveryCalloutBody}>
                 Lightning Piggy keeps these securely on this device, but a phone wipe loses access.
                 Save them somewhere safe (a password manager, written down) so you can sign back in
-                to {coinosRecovery.baseUrl.replace(/^https?:\/\//, '').replace(/\/api$/, '')} and
-                recover your funds.
+                to {hostFromBaseUrl(coinosRecovery.baseUrl)} and recover your funds.
               </Text>
 
               <Text style={styles.recoveryCalloutLabel}>Username</Text>

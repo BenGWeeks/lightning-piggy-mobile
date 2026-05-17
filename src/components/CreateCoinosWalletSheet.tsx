@@ -65,6 +65,12 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
   // the CoinOS recovery info against the right id and switch to it
   // before exiting.
   const newlyCreatedWalletIdRef = useRef<string | null>(null);
+  // Flip to true when the sheet is dismissed mid-flow so the
+  // `handleConfirmCustody` async chain (probe → register → mint → save)
+  // can bail before doing more work. Without this, dismissing during
+  // the self-hosted /health probe would still go on to register the
+  // user and mint an NWC connection in the background.
+  const cancelledRef = useRef(false);
 
   useEffect(() => {
     if (visible) {
@@ -76,8 +82,10 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
       setBaseUrl(coinosService.DEFAULT_COINOS_BASE_URL);
       setRecovery(null);
       newlyCreatedWalletIdRef.current = null;
+      cancelledRef.current = false;
       ref.current?.present();
     } else {
+      cancelledRef.current = true;
       ref.current?.dismiss();
     }
   }, [visible]);
@@ -132,6 +140,10 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
     if (baseUrl !== coinosService.DEFAULT_COINOS_BASE_URL) {
       setProbing(true);
       const ok = await coinosService.probeCoinosInstance(baseUrl).finally(() => setProbing(false));
+      // Bail if the user dismissed the sheet during the /health probe —
+      // we don't want to silently register a CoinOS account in the
+      // background after the UI has been closed.
+      if (cancelledRef.current) return;
       if (!ok) {
         setError('Could not reach that CoinOS instance. Check the URL and try again.');
         return;
@@ -145,9 +157,11 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
     let username = '';
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      if (cancelledRef.current) return;
       username = coinosService.suggestUsername();
       try {
         const reg = await coinosService.registerCoinosUser({ baseUrl, username, password });
+        if (cancelledRef.current) return;
         const minted = await coinosService.createCoinosNwcConnection({
           baseUrl,
           token: reg.token,
