@@ -49,7 +49,10 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { addNwcWallet, wallets, setActiveWallet } = useWallet();
   const ref = useRef<BottomSheetModal>(null);
-  const snapPoints = useMemo(() => ['90%'], []);
+  // No explicit snapPoints — content-height only. Matches the rest of
+  // the app's sheet convention (AddWalletWizard, NostrLoginSheet, …)
+  // and avoids the empty whitespace a 90% pin leaves under the Cancel
+  // button on the short custody step.
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   const [step, setStep] = useState<Step>('custody');
@@ -227,8 +230,6 @@ const CreateCoinosWalletSheet: React.FC<Props> = ({ visible, onClose, onComplete
     <>
       <BottomSheetModal
         ref={ref}
-        snapPoints={snapPoints}
-        enableDynamicSizing={false}
         // While we're creating we lock the swipe so a half-finished
         // registration can't be silently abandoned.
         enablePanDownToClose={step !== 'creating'}

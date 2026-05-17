@@ -50,7 +50,7 @@ const CoinosRecoverySheet: React.FC<Props> = ({
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const ref = useRef<BottomSheetModal>(null);
-  const snapPoints = useMemo(() => ['90%'], []);
+  // Content-height only — matches the rest of the app's sheet pattern.
   const [copyHint, setCopyHint] = useState<string | null>(null);
 
   useEffect(() => {
@@ -101,8 +101,6 @@ const CoinosRecoverySheet: React.FC<Props> = ({
   return (
     <BottomSheetModal
       ref={ref}
-      snapPoints={snapPoints}
-      enableDynamicSizing={false}
       enablePanDownToClose={!requireAcknowledge}
       onChange={handleSheetChange}
       backdropComponent={renderBackdrop}
