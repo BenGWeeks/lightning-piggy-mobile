@@ -109,7 +109,7 @@ export const enableGeofencing = async (): Promise<number | null> => {
   ensureTaskDefined();
 
   const pos = await Location.getCurrentPositionAsync({
-    accuracy: Location.Accuracy.Balanced,
+    accuracy: Location.Accuracy.High,
   });
   const bbox: Bbox = {
     minLon: pos.coords.longitude - FETCH_HALF_DEGREES,

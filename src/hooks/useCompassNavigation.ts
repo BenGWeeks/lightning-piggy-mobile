@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import * as Location from 'expo-location';
 import { bearingDegrees, haversineMetres } from '../utils/geohash';
-import { getDevPinnedLocation } from '../utils/devLocation';
 
 interface CompassNav {
   /** User's current position from `Location.watchPositionAsync`. `null`
@@ -65,51 +64,29 @@ export const useCompassNavigation = (target: { lat: number; lon: number } | null
     let hdgSub: Location.LocationSubscription | null = null;
 
     (async () => {
-      // Honour the dev-only pinned-location override the rest of the
-      // app uses (see src/utils/devLocation.ts). Without this, the
-      // emulator's Explore + Hunt screens think the user is in the
-      // EXPO_PUBLIC_DEV_LAT/LON spot while the compass arrow reads
-      // the real fused-location-provider value (often Mountain View
-      // on AVDs), so distances come out wildly inconsistent.
-      const pinned = getDevPinnedLocation();
-      if (pinned) {
-        setUser({ lat: pinned.lat, lon: pinned.lon });
-        // Dev-pinned locations are perfect-precision by construction —
-        // the override is a literal lat/lon, not a sensor reading. A
-        // 0-metre halo would still render as a 4-px dot from the
-        // border, so set null instead to suppress the circle entirely.
-        setUserAccuracy(null);
-      }
-
       const perm = await Location.requestForegroundPermissionsAsync();
       if (cancelled) return;
       if (perm.status !== 'granted') return;
       try {
-        // Accuracy.High forces the GPS radio to push fresh fixes
-        // while the cache-detail screen is open — typically 5-15 m
-        // horizontal accuracy on a real device, down from 30-50 m
-        // with Balanced (which falls back to network/cell). The
-        // tighter the fix, the steadier the bearing arrow and the
-        // smaller the accuracy halo when you're close to the cache —
-        // the user-visible payoff is worth the marginal battery cost
-        // since this hook only runs while a single screen is mounted.
-        //
-        // Skipped when a dev pin is in effect — that's a deliberate
-        // override and live GPS would just argue with it.
-        if (!pinned) {
-          posSub = await Location.watchPositionAsync(
-            { accuracy: Location.Accuracy.High, distanceInterval: 2 },
-            (loc) => {
-              if (cancelled) return;
-              setUser({ lat: loc.coords.latitude, lon: loc.coords.longitude });
-              // `coords.accuracy` is 1-σ horizontal accuracy in metres
-              // per expo-location docs. Null on platforms that don't
-              // report it; we expose null too so the map can omit the
-              // halo rather than guess.
-              setUserAccuracy(typeof loc.coords.accuracy === 'number' ? loc.coords.accuracy : null);
-            },
-          );
-        }
+        // Accuracy.High maps to PRIORITY_HIGH_ACCURACY on Android,
+        // which on de-googled / no-GMS devices falls through to raw
+        // LocationManager GPS_PROVIDER (see docs/TERMS.adoc → FLP).
+        // Pushes fresh fixes while this hook is mounted — 5-15 m on
+        // a real device, much better than `Balanced` which routes
+        // through the network provider (often unavailable without
+        // Google Play Services).
+        posSub = await Location.watchPositionAsync(
+          { accuracy: Location.Accuracy.High, distanceInterval: 2 },
+          (loc) => {
+            if (cancelled) return;
+            setUser({ lat: loc.coords.latitude, lon: loc.coords.longitude });
+            // `coords.accuracy` is 1-σ horizontal accuracy in metres
+            // per expo-location docs. Null on platforms that don't
+            // report it; we expose null too so the map can omit the
+            // halo rather than guess.
+            setUserAccuracy(typeof loc.coords.accuracy === 'number' ? loc.coords.accuracy : null);
+          },
+        );
       } catch {
         // Sim devices / GPS-off → stay null and the caller falls back.
       }

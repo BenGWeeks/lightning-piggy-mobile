@@ -60,6 +60,7 @@ import { LibreMiniMap } from '../components/LibreMiniMap';
 import CacheSpecSheet from '../components/CacheSpecSheet';
 import { decodeGeohash, formatDistance } from '../utils/geohash';
 import { useCompassNavigation } from '../hooks/useCompassNavigation';
+import { useUserLocation } from '../contexts/UserLocationContext';
 import { shortNpub } from '../utils/shortNpub';
 import {
   fetchCache,
@@ -221,12 +222,23 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     [cacheLatLon],
   );
   const {
-    user: userPos,
-    userAccuracy,
+    user: compassUser,
+    userAccuracy: compassAccuracy,
     heading,
     bearing,
     distanceMetres,
   } = useCompassNavigation(compassTarget);
+  // Pull the cached position from the app-wide UserLocationContext too.
+  // useCompassNavigation starts a fresh watch on mount and the first
+  // fix can take a couple of seconds — without this fallback, the dot
+  // briefly renders at the cache's coordinates (camera centre) until
+  // compass nav settles. The cached value is reference-stable across
+  // screen transitions, so the dot renders at the LAST KNOWN position
+  // from the first frame, then upgrades to compass nav's value when
+  // it lands.
+  const { pos: cachedUser } = useUserLocation();
+  const userPos = compassUser ?? (cachedUser ? { lat: cachedUser.lat, lon: cachedUser.lon } : null);
+  const userAccuracy = compassAccuracy ?? cachedUser?.accuracy ?? null;
   // lucide's Navigation2 glyph is a symmetric arrowhead pointing
   // straight up at rest, so rotation = (bearing − heading) puts the
   // apex on the cache relative to where the phone is facing. (The
