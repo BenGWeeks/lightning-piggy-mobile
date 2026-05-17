@@ -41,6 +41,19 @@ export interface SharedContactRef {
 
 export type BitcoinUri = ParsedBip21;
 
+// Magic string that triggers the "Toggle Secret Mode" inline card in
+// chat. Only Lightning Piggy installs render the card — other Nostr
+// clients show it as a plain text line, which is fine because to
+// non-LP clients it's a meaningless word. Case-insensitive match,
+// must be the entire trimmed body so users can still discuss the
+// trigger word without firing it.
+const SECRET_MODE_TRIGGER = 'secretthreewords';
+
+export function isSecretModeTrigger(text: string): boolean {
+  if (!text) return false;
+  return text.trim().toLowerCase() === SECRET_MODE_TRIGGER;
+}
+
 export function extractImageUrl(text: string): string | null {
   if (!text) return null;
   // Only treat a message as an image when the entire body is the URL. This
