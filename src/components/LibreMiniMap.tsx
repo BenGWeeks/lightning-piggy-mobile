@@ -213,8 +213,12 @@ const LibreMiniMapInner: React.FC<Props> = ({
   // cheap enough that re-computing on lat/lon/accuracy change is free.
   // Flat-earth lat/lon offsets — exact within sub-metre tolerance up
   // to several km, which is the worst-case civilian-GPS accuracy.
-  const haloLat = userLat ?? lat;
-  const haloLon = userLon ?? lon;
+  // Halo follows the same three-mode rule as the user dot below:
+  // explicit numbers win, explicit null suppresses (don't paint a halo
+  // around the cache while the cached fix is still loading), undefined
+  // falls back to camera centre (mini-map default).
+  const haloLat = userLat !== undefined ? userLat : lat;
+  const haloLon = userLon !== undefined ? userLon : lon;
   const haloFeature = useMemo<Feature<Polygon> | null>(() => {
     if (
       typeof userAccuracyMetres !== 'number' ||
@@ -390,25 +394,44 @@ const LibreMiniMapInner: React.FC<Props> = ({
             (dev-pinned positions, no-GPS state) — silently misleading
             the user about their precision was the pre-fix behaviour. */}
         {haloFeature && <AccuracyHalo feature={haloFeature} />}
-        {/* User position — solid dot. userLat/userLon (detail-screen
-            override) takes precedence over lat/lon (mini-map default
-            where camera centre + user dot are the same point). The dot
-            stays a pixel-sized Marker because it's a position indicator
-            — sizing it geographically would make it vanish at wide
-            zoom and dominate at close zoom. */}
-        <Marker id="user" lngLat={[userLon ?? lon, userLat ?? lat]}>
-          <View style={styles.userMarkerWrap}>
-            {/* Pixel-marker pulse is only useful as a "find yourself"
-                affordance when no geographic halo is rendered (no
-                accuracy / dev-pinned position). Once the GeoJSON
-                accuracy halo is in place it makes the dot look like
-                it has two halos — drop the pixel pulse in that case. */}
-            {!haloFeature && (
-              <Animated.View style={[styles.userDotPulse, { transform: [{ scale: pulse }] }]} />
-            )}
-            <View style={styles.userDot} />
-          </View>
-        </Marker>
+        {/* User position — solid dot. Three prop modes:
+              - userLat/userLon both numbers → render there.
+              - userLat/userLon both undefined (mini-map default: not
+                passed) → render at camera centre [lon, lat]; centre
+                IS the user in those flows.
+              - userLat/userLon explicitly null → the caller (a detail
+                screen) is telling us "we don't know yet". DON'T fall
+                through to camera centre — that would plant the dot
+                on the cache / merchant / event for one frame before
+                the cached fix arrives, which is exactly the
+                "location momentarily showed as the geo-cache then
+                jumped" bug we hit.
+            The pixel-sized Marker stays a position indicator — sizing
+            it geographically would make it vanish at wide zoom and
+            dominate at close zoom. */}
+        {(() => {
+          const userLatProvided = userLat !== undefined;
+          const userLonProvided = userLon !== undefined;
+          const dotLat = userLatProvided ? userLat : lat;
+          const dotLon = userLonProvided ? userLon : lon;
+          if (dotLat === null || dotLon === null) return null;
+          return (
+            <Marker id="user" lngLat={[dotLon, dotLat]}>
+              <View style={styles.userMarkerWrap}>
+                {/* Pixel-marker pulse is only useful as a "find
+                    yourself" affordance when no geographic halo is
+                    rendered (no accuracy / dev-pinned position). Once
+                    the GeoJSON halo is in place it makes the dot
+                    look like it has two halos — drop the pixel
+                    pulse in that case. */}
+                {!haloFeature && (
+                  <Animated.View style={[styles.userDotPulse, { transform: [{ scale: pulse }] }]} />
+                )}
+                <View style={styles.userDot} />
+              </View>
+            </Marker>
+          );
+        })()}
         {/* Merchants: pin colour signals payment type (pink Lightning,
             orange on-chain only). Glyph mirrors the BTC Map category
             icon the user sees on the Places-for-you rail card for the
