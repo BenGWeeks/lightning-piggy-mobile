@@ -1165,9 +1165,20 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       perfLog(
         `loadContactsFromCache: blob sizes contacts=${contactsJson?.length ?? 0}B profiles=${profilesJson?.length ?? 0}B`,
       );
+      // Previously: any contacts cache older than 24h short-circuited the
+      // whole bootstrap, discarding the still-useful profile map and
+      // painting an empty Friends tab while `loadContacts` ran the relay
+      // fetch (#642). Even a stale follow list is a better first paint
+      // than nothing — the relay refresh will overwrite it in seconds via
+      // the stale-while-revalidate path in `loadContacts`. Profiles in
+      // particular are identity data that change rarely; preserving them
+      // means the per-row zap gate hydrates from cache instead of reading
+      // `lightningAddress: null` for every contact during the kind-0
+      // batch refetch.
       if (contactsTsStr && Date.now() - parseInt(contactsTsStr, 10) > CACHE_MAX_AGE_MS) {
-        perfLog('loadContactsFromCache: contacts cache expired, skipping');
-        return false;
+        perfLog(
+          'loadContactsFromCache: contacts cache stale, still hydrating from disk (relay refresh will reconcile)',
+        );
       }
       if (contactsJson) {
         const tParse = Date.now();
