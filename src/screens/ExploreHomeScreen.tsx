@@ -238,6 +238,20 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // the async `getCachedPlaces()` — that fired AFTER the first render,
   // so the rail flashed empty for the AsyncStorage round-trip on cold
   // launch even though the data was sitting on disk.
+  //
+  // The dep array uses `posBucket` instead of raw `pos` so GPS jitter
+  // doesn't re-fire the effect. Raw `pos` updates on every Android
+  // GPS sample (~1 Hz on a real device), each with a new object
+  // identity even when the user is sitting still — that re-fired this
+  // effect and stacked overlapping fetches on the JS thread. Bucketing
+  // to ~3 decimals of lat/lon (~100 m ground resolution) means we only
+  // refetch when the user has genuinely moved enough to matter.
+  // setPos firing twice on mount (last-known then current position)
+  // also gets coalesced when both samples round to the same bucket.
+  const posBucket = useMemo(() => {
+    if (!pos) return null;
+    return `${pos.lat.toFixed(3)},${pos.lon.toFixed(3)}`;
+  }, [pos]);
   useEffect(() => {
     if (!pos) return;
     let cancelled = false;
@@ -276,7 +290,9 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     return () => {
       cancelled = true;
     };
-  }, [pos, refreshKey]);
+    // posBucket — not pos — is the trigger; see comment above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [posBucket, refreshKey]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
