@@ -111,11 +111,29 @@ export function formatFiat(amount: number, currency: FiatCurrency): string {
   });
 }
 
+// Currency symbol prefix used by the no-rate placeholder. Reused by
+// `currencySymbol()` below + the WalletCard's `£–` placeholder so the
+// symbol stays consistent with what `formatFiat` produces.
+export function currencySymbol(currency: FiatCurrency): string {
+  // `formatToParts` would be the principled API, but on Hermes its
+  // 'currency' part is reliably present only after Intl polyfills load.
+  // The replace-everything-non-symbol trick is what the rest of the
+  // file already uses (see `formatFiat`) and works on a cold Hermes JVM.
+  return (0).toLocaleString(undefined, { style: 'currency', currency }).replace(/[\d.,\s]/g, '');
+}
+
 export function satsToFiatString(
   sats: number,
   btcPrice: number | null,
   currency: FiatCurrency,
 ): string {
-  if (btcPrice === null) return '';
+  // When the BTC price isn't known (cold-start offline, mid-fetch,
+  // upstream API hiccup) we used to return an empty string and let
+  // callers hide the fiat row entirely. That made the user wonder if
+  // something was broken (#633). A `£–` / `$–` / `€–` placeholder is
+  // honest: we know your currency, we just don't have a rate right now.
+  // The em-dash (–) is intentional — cleaner typographically than
+  // a hyphen-minus.
+  if (btcPrice === null) return `${currencySymbol(currency)}–`;
   return formatFiat(satsToFiat(sats, btcPrice), currency);
 }

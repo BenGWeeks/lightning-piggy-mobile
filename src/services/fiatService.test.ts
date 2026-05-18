@@ -1,4 +1,11 @@
-import { CURRENCIES, CURRENCY_LIST, formatFiat, satsToFiat } from './fiatService';
+import {
+  CURRENCIES,
+  CURRENCY_LIST,
+  currencySymbol,
+  formatFiat,
+  satsToFiat,
+  satsToFiatString,
+} from './fiatService';
 
 // Hard-coded snapshot of CoinGecko's `simple/supported_vs_currencies`
 // captured 2026-05-07. This pins the codes we ship against a known
@@ -127,5 +134,33 @@ describe('formatFiat', () => {
   it('shows "< $0.01" sentinel for sub-cent positive amounts', () => {
     const out = formatFiat(0.001, 'USD');
     expect(out.startsWith('< ')).toBe(true);
+  });
+});
+
+describe('currencySymbol', () => {
+  // Locale-tolerant — Intl on Hermes can return the symbol with a non-
+  // breaking space tail; we strip whitespace as part of the helper but
+  // still allow any extra cruft just in case.
+  it.each([
+    ['GBP', '£'],
+    ['USD', '$'],
+    ['EUR', '€'],
+  ])('%s -> %s', (code, expected) => {
+    expect(currencySymbol(code as 'GBP' | 'USD' | 'EUR')).toContain(expected);
+  });
+});
+
+describe('satsToFiatString', () => {
+  // The placeholder branch lets WalletCard keep a stable-height row
+  // when the BTC price hasn't arrived yet (#633).
+  it('returns a currency-symbol + em-dash placeholder when btcPrice is null', () => {
+    const out = satsToFiatString(123_456, null, 'GBP');
+    expect(out).toContain('£');
+    expect(out.endsWith('–')).toBe(true);
+  });
+
+  it('formats the regular value when btcPrice is present', () => {
+    const out = satsToFiatString(100_000_000, 50_000, 'USD');
+    expect(out).toMatch(/50[.,]?0{3}/);
   });
 });
