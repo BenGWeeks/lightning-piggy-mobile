@@ -37,9 +37,58 @@ export const pool = new SimplePool();
 // runs every result through `slimDisplayProfile` to strip `lud16`, and
 // `fetchProfile` (single) re-runs full `verifyEvent` itself before its
 // `lud16` can feed a payment. Every other kind keeps full `verifyEvent`.
+//
+// Verified-event-id cache (#605 follow-up). The 2026-05-17 CDP profile
+// of the Explore tab freeze showed 25-30 % of the 16 s tab-switch is
+// Schnorr verification on the Hermes JS thread (`mul` / `sqrtMod` /
+// `pow2` / `Maj`). The relay's filter-EOSE replay on every re-subscribe
+// re-emits the same events we already verified on the previous focus,
+// and each one pays the full ~25 ms cost again. Caching the id of
+// every successfully-verified event lets re-subscribes skip the
+// secp256k1 work — same security posture (we only cache an id once
+// the full schnorr check passed), much faster.
+//
+// Bounded at 10 000 entries with a simple FIFO eviction so a long-
+// running session doesn't drift to unlimited memory. 10 000 event-ids
+// at 64 bytes each ≈ 640 KB — negligible. The cache is module-scoped
+// so it survives across screen focus / blur / tab switches.
+const VERIFIED_CACHE_CAP = 10_000;
+const verifiedEventIds = new Set<string>();
+const verifiedEventOrder: string[] = [];
+const rememberVerified = (id: string): void => {
+  if (verifiedEventIds.has(id)) return;
+  verifiedEventIds.add(id);
+  verifiedEventOrder.push(id);
+  if (verifiedEventOrder.length > VERIFIED_CACHE_CAP) {
+    const evicted = verifiedEventOrder.shift();
+    if (evicted) verifiedEventIds.delete(evicted);
+  }
+};
+// Exposed for tests and for the rare case a downstream code path
+// explicitly wants to invalidate (e.g. trust-graph change that
+// requires re-checking authorship).
+export const __resetVerifiedEventCache = (): void => {
+  verifiedEventIds.clear();
+  verifiedEventOrder.length = 0;
+};
+export const __verifiedEventCacheSize = (): number => verifiedEventIds.size;
+
 pool.verifyEvent = ((event: NostrEvent): event is VerifiedEvent => {
-  if (event.kind === 0) return validateEvent(event);
-  return verifyEvent(event);
+  // Skip the schnorr check if we've seen this exact event id pass it
+  // before (this run of the app). Per-event ids are 32-byte SHA-256
+  // hashes of the canonical event encoding — they include every signed
+  // field, so two events with the same id are byte-identical.
+  if (typeof event.id === 'string' && verifiedEventIds.has(event.id)) {
+    return true;
+  }
+  let ok: boolean;
+  if (event.kind === 0) {
+    ok = validateEvent(event);
+  } else {
+    ok = verifyEvent(event);
+  }
+  if (ok && typeof event.id === 'string') rememberVerified(event.id);
+  return ok;
 }) as typeof pool.verifyEvent;
 
 // Shared pubkey + read relays of the currently logged-in Nostr user.
