@@ -1,4 +1,5 @@
-import { SimplePool, useWebSocketImplementation } from 'nostr-tools/pool';
+import { SimplePool } from 'nostr-tools/pool';
+import { useWebSocketImplementation } from 'nostr-tools/relay';
 import { nip19 } from 'nostr-tools';
 import WebSocket from 'ws';
 // eslint-disable-next-line react-hooks/rules-of-hooks
@@ -22,11 +23,17 @@ console.log(`got ${evs.length} events total`);
 const re = /geo[- ]?cache\s*1\b/i;
 const matches = [];
 for (const ev of evs) {
-  const nameTag = ev.tags.find(t => t[0] === 'name')?.[1] ?? '';
-  const dTag = ev.tags.find(t => t[0] === 'd')?.[1] ?? '';
+  const nameTag = ev.tags.find((t) => t[0] === 'name')?.[1] ?? '';
+  const dTag = ev.tags.find((t) => t[0] === 'd')?.[1] ?? '';
   const content = ev.content ?? '';
   if (re.test(nameTag) || re.test(dTag) || re.test(content)) {
-    matches.push({ id: ev.id, pubkey: ev.pubkey, name: nameTag, d: dTag, created_at: ev.created_at });
+    matches.push({
+      id: ev.id,
+      pubkey: ev.pubkey,
+      name: nameTag,
+      d: dTag,
+      created_at: ev.created_at,
+    });
   }
 }
 console.log(`\n${matches.length} matches:`);
@@ -38,7 +45,7 @@ for (const m of matches) {
   console.log(`    name:    "${m.name}"`);
   console.log(`    d-tag:   "${m.d}"`);
   console.log(`    created: ${when}`);
-  console.log(`    event:   ${m.id.slice(0,16)}…`);
+  console.log(`    event:   ${m.id.slice(0, 16)}…`);
   console.log();
 }
 pool.close(relays);

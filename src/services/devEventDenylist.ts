@@ -30,7 +30,11 @@
 // Format: hex pubkeys (not npubs) — that's what `event.pubkey` carries
 // at the ingestion point, so no decode work per event.
 
-export const DEV_LEFTOVER_PUBKEYS: ReadonlySet<string> = new Set([
+// Module-private — the Set itself isn't exported because `ReadonlySet`
+// is a structural type guard only; consumers can still cast to `any`
+// and mutate. `isDevLeftover` below is the single public API surface.
+// Same pattern as `linkPreviewBlocklist.ts` etc.
+const DEV_LEFTOVER_PUBKEYS: ReadonlySet<string> = new Set([
   // Four disposable signers of `d=big-piggy-geo-cache-1` (name="Geo-Cache 1"),
   // discovered 2026-05-18 while testing #31 perf fixes on the emulator.
   // BIG Piggy's own ccedbff9… signer is *not* on this list — it's an
@@ -52,3 +56,9 @@ export const DEV_LEFTOVER_PUBKEYS: ReadonlySet<string> = new Set([
 // (relays return lowercase hex; the constants above are lowercase hex;
 // nostr-tools yields lowercase hex).
 export const isDevLeftover = (pubkey: string): boolean => DEV_LEFTOVER_PUBKEYS.has(pubkey);
+
+// Test-only access to the underlying Set. Tests import this rather
+// than the Set directly so production callers get a single, hard-to-
+// misuse API surface (`isDevLeftover`). Mirrors the convention used by
+// `linkPreviewBlocklist.ts`, `linkPreviewStorage.ts`, `zapSenderProfileStorage.ts`.
+export const __TEST__ = { DEV_LEFTOVER_PUBKEYS };

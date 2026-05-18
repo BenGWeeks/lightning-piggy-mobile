@@ -4,7 +4,8 @@
 // what it says, so a future refactor (e.g. switching from Set to Map,
 // or env-overriding the list) can't silently regress the predicate.
 
-import { DEV_LEFTOVER_PUBKEYS, isDevLeftover } from './devEventDenylist';
+import { __TEST__, isDevLeftover } from './devEventDenylist';
+const { DEV_LEFTOVER_PUBKEYS } = __TEST__;
 
 describe('devEventDenylist', () => {
   describe('DEV_LEFTOVER_PUBKEYS', () => {
