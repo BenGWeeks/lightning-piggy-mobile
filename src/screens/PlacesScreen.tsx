@@ -325,7 +325,7 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
                 <MapPin size={56} color={colors.textSupplementary} strokeWidth={1.5} />
                 <Text style={styles.emptyTitle}>No places nearby</Text>
                 <Text style={styles.subtle}>
-                  We searched a ~50 km area. Try opening the full map to pan further afield, or
+                  We searched a ~100 km area. Try opening the full map to pan further afield, or
                   refresh later — the OSM merchant list updates daily.
                 </Text>
               </View>
