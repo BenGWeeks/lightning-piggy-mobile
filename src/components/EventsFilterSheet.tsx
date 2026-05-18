@@ -79,7 +79,7 @@ const EventsFilterSheet: React.FC<Props> = ({
   const { wotTier } = useTrustGraph();
   const [wotSheetVisible, setWotSheetVisible] = useState(false);
 
-  const anyActive = maxDistanceMetres !== null || maxFromNowSec !== null || wotTier !== 'friends';
+  const anyActive = maxDistanceMetres !== null || maxFromNowSec !== null || wotTier !== 'all';
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -227,7 +227,7 @@ export const countActiveFilters = (params: {
   let n = 0;
   if (params.maxDistanceMetres !== null) n += 1;
   if (params.maxFromNowSec !== null) n += 1;
-  if (params.wotTier !== 'friends') n += 1;
+  if (params.wotTier !== 'all') n += 1;
   return n;
 };
 
