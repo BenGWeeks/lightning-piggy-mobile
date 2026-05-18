@@ -34,7 +34,7 @@ import {
 import {
   type BtcMapPlace,
   acceptsLightning,
-  fetchPlacesInBbox,
+  fetchNearestPlaces,
   formatAddress,
   isBoosted,
   lightningAddressOf,
@@ -251,23 +251,19 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
       if (merchants.length === 0) setMerchantsLoading(true);
       try {
         const __t0 = performance.now();
-        // ~50 km half-side around the user. Rural users (Longstanton,
-        // Highlands, mid-Wales) sit in 0-merchant 5 km tiles; widening
-        // to ~50 km surfaces the closest drive-away merchants on the
-        // rail without paying for a country-wide query.
-        const places = await fetchPlacesInBbox({
-          // ±2° (~220 km half-side) — keeps parity with PlacesScreen so
-          // zooming out on the hub mini-map surfaces the same merchant
-          // set the list page would. In-memory filter, no network cost.
-          minLon: pos.lon - 2,
-          minLat: pos.lat - 2,
-          maxLon: pos.lon + 2,
-          maxLat: pos.lat + 2,
-        });
+        // Tiered nearest-N fetch — walks 25 → 100 → 500 km until ≥10
+        // merchants come back. Bounded payload (~10-100 KB depending
+        // on density) replaces the previous ±2° / ~220 km bbox call,
+        // which pulled hundreds of merchants the hub never showed and
+        // blocked the JS thread for seconds at a time (#31). The hub
+        // mini-map intentionally diverges from PlacesScreen / MapScreen
+        // here — both of those have a map the user actively pans, so
+        // they keep the viewport-driven `fetchPlacesInBbox` path.
+        const places = await fetchNearestPlaces(pos.lat, pos.lon, 10);
         const __ms = Math.round(performance.now() - __t0);
         if (__ms > 200) {
           console.log(
-            `[PerfBlock] ExploreHome fetchPlacesInBbox: ${__ms}ms places=${places.length}`,
+            `[PerfBlock] ExploreHome fetchNearestPlaces: ${__ms}ms places=${places.length}`,
           );
         }
         if (!cancelled) setMerchants(places);
