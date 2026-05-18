@@ -20,6 +20,12 @@ interface Props {
   contact: ContactProfileBodyData | null;
   onZap?: () => void;
   onMessage?: () => void;
+  /** Whether the user can actually send a zap (wallet attached + contact
+   * has a Lightning address). When false, the zap button still renders
+   * but in a disabled state with `zapDisabledReason` surfaced in the
+   * accessibility label. */
+  canZap?: boolean;
+  zapDisabledReason?: string;
   // Optional drill-in: closes the sheet then navigates to the full
   // ContactProfile route. Renders a "View profile" pill in the sheet
   // body when wired up.
@@ -32,6 +38,8 @@ const ContactProfileSheet: React.FC<Props> = ({
   contact,
   onZap,
   onMessage,
+  canZap = false,
+  zapDisabledReason,
   onViewFullProfile,
 }) => {
   const colors = useThemeColors();
@@ -80,6 +88,8 @@ const ContactProfileSheet: React.FC<Props> = ({
           contact={contact}
           onZap={onZap}
           onMessage={onMessage}
+          canZap={canZap}
+          zapDisabledReason={zapDisabledReason}
           onViewFullProfile={onViewFullProfile}
         />
       </BottomSheetView>
