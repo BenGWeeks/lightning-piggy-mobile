@@ -94,47 +94,58 @@ const ContactListItem: React.FC<Props> = ({
           </Text>
         )}
       </View>
-      {/* Action buttons — always rendered, disabled state when not
-          usable so the row's right column has stable layout regardless
-          of profile load state. Greyed icon + screen-reader label
-          disclose *why* an action is unavailable (e.g. \"no Lightning
-          address set in this contact's Nostr profile\"). */}
-      <View style={styles.actions}>
-        <TouchableOpacity
-          style={[styles.iconButton, !canMessage && styles.iconButtonDisabled]}
-          onPress={canMessage ? onMessage : undefined}
-          disabled={!canMessage}
-          activeOpacity={0.6}
-          accessibilityRole="button"
-          accessibilityState={{ disabled: !canMessage }}
-          accessibilityLabel={canMessage ? `Message ${name}` : `Message ${name} (no Nostr key)`}
-          testID="contact-row-message"
-        >
-          <MessageCircle
-            size={20}
-            color={canMessage ? colors.brandPink : colors.textSupplementary}
-            strokeWidth={2}
-          />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.iconButton, !canZap && styles.iconButtonDisabled]}
-          onPress={canZap ? onZap : undefined}
-          disabled={!canZap}
-          activeOpacity={0.6}
-          accessibilityRole="button"
-          accessibilityState={{ disabled: !canZap }}
-          accessibilityLabel={
-            canZap ? `Zap ${name}` : `Zap ${name} (${zapDisabledReason ?? 'unavailable'})`
-          }
-          testID="contact-row-zap"
-        >
-          <Zap
-            size={20}
-            color={canZap ? colors.brandPink : colors.textSupplementary}
-            fill={canZap ? colors.brandPink : 'none'}
-          />
-        </TouchableOpacity>
-      </View>
+      {/* Action buttons — always rendered so the row's right column has
+          a stable width regardless of profile-load state. A single
+          composite boolean drives `disabled`, the styling, AND the
+          accessibility state for each button, so a button that's inert
+          because the host didn't wire a handler is announced as disabled
+          rather than as a tappable button that silently does nothing. */}
+      {(() => {
+        const messageDisabled = !canMessage || !onMessage;
+        const zapDisabled = !canZap || !onZap;
+        return (
+          <View style={styles.actions}>
+            <TouchableOpacity
+              style={[styles.iconButton, messageDisabled && styles.iconButtonDisabled]}
+              onPress={messageDisabled ? undefined : onMessage}
+              disabled={messageDisabled}
+              activeOpacity={0.6}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: messageDisabled }}
+              accessibilityLabel={
+                messageDisabled
+                  ? `Message ${name} (${!canMessage ? 'no Nostr key' : 'unavailable'})`
+                  : `Message ${name}`
+              }
+              testID="contact-row-message"
+            >
+              <MessageCircle
+                size={20}
+                color={messageDisabled ? colors.textSupplementary : colors.brandPink}
+                strokeWidth={2}
+              />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.iconButton, zapDisabled && styles.iconButtonDisabled]}
+              onPress={zapDisabled ? undefined : onZap}
+              disabled={zapDisabled}
+              activeOpacity={0.6}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: zapDisabled }}
+              accessibilityLabel={
+                zapDisabled ? `Zap ${name} (${zapDisabledReason ?? 'unavailable'})` : `Zap ${name}`
+              }
+              testID="contact-row-zap"
+            >
+              <Zap
+                size={20}
+                color={zapDisabled ? colors.textSupplementary : colors.brandPink}
+                fill={zapDisabled ? 'none' : colors.brandPink}
+              />
+            </TouchableOpacity>
+          </View>
+        );
+      })()}
     </TouchableOpacity>
   );
 };

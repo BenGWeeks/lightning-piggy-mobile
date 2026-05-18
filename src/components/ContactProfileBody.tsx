@@ -162,44 +162,65 @@ const ContactProfileBody: React.FC<Props> = ({
           Lightning address) so power and screen-reader users get the
           full context instead of a silently inert circle. */}
       <View style={styles.actionRowSheet}>
-        <TouchableOpacity
-          style={[styles.iconCircleButton, !contact.pubkey && styles.iconCircleButtonDisabled]}
-          onPress={contact.pubkey ? onMessage : undefined}
-          disabled={!contact.pubkey || !onMessage}
-          accessibilityRole="button"
-          accessibilityState={{ disabled: !contact.pubkey }}
-          accessibilityLabel={contact.pubkey ? 'Message' : 'Message (no Nostr key)'}
-          testID="contact-message-button"
-        >
-          <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-            <Path
-              d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
-              stroke={contact.pubkey ? colors.white : colors.textSupplementary}
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </Svg>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            styles.iconCircleButton,
-            styles.iconCircleButtonYellow,
-            !canZap && styles.iconCircleButtonDisabled,
-          ]}
-          onPress={canZap ? onZap : undefined}
-          disabled={!canZap || !onZap}
-          accessibilityRole="button"
-          accessibilityState={{ disabled: !canZap }}
-          accessibilityLabel={canZap ? 'Zap' : `Zap (${zapDisabledReason ?? 'unavailable'})`}
-          testID="profile-sheet-zap-button"
-        >
-          <Zap
-            size={20}
-            color={canZap ? colors.white : colors.textSupplementary}
-            fill={canZap ? colors.white : 'none'}
-          />
-        </TouchableOpacity>
+        {/* Compose the same boolean for `disabled` and `accessibilityState`
+            so a button that's inert because the host didn't wire a
+            handler is announced as disabled to screen readers (instead
+            of being read out as a tappable button that silently does
+            nothing on press). Same alignment applied to the zap button. */}
+        {(() => {
+          const messageDisabled = !contact.pubkey || !onMessage;
+          return (
+            <TouchableOpacity
+              style={[styles.iconCircleButton, messageDisabled && styles.iconCircleButtonDisabled]}
+              onPress={messageDisabled ? undefined : onMessage}
+              disabled={messageDisabled}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: messageDisabled }}
+              accessibilityLabel={
+                messageDisabled
+                  ? `Message (${!contact.pubkey ? 'no Nostr key' : 'unavailable'})`
+                  : 'Message'
+              }
+              testID="contact-message-button"
+            >
+              <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+                <Path
+                  d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+                  stroke={messageDisabled ? colors.textSupplementary : colors.white}
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </Svg>
+            </TouchableOpacity>
+          );
+        })()}
+        {(() => {
+          const zapDisabled = !canZap || !onZap;
+          return (
+            <TouchableOpacity
+              style={[
+                styles.iconCircleButton,
+                styles.iconCircleButtonYellow,
+                zapDisabled && styles.iconCircleButtonDisabled,
+              ]}
+              onPress={zapDisabled ? undefined : onZap}
+              disabled={zapDisabled}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: zapDisabled }}
+              accessibilityLabel={
+                zapDisabled ? `Zap (${zapDisabledReason ?? 'unavailable'})` : 'Zap'
+              }
+              testID="profile-sheet-zap-button"
+            >
+              <Zap
+                size={20}
+                color={zapDisabled ? colors.textSupplementary : colors.white}
+                fill={zapDisabled ? 'none' : colors.white}
+              />
+            </TouchableOpacity>
+          );
+        })()}
         {onViewFullProfile ? (
           <TouchableOpacity
             style={styles.viewProfileButton}
