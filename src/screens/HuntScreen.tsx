@@ -26,6 +26,7 @@ import HuntFilterSheet, { countActiveFilters } from '../components/HuntFilterShe
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
 import { LibreMiniMap } from '../components/LibreMiniMap';
+import { CacheDetailSheet } from '../components/CacheDetailSheet';
 import { useUserLocation } from '../contexts/UserLocationContext';
 import LegendSheet from '../components/LegendSheet';
 import { type ParsedCache } from '../services/nostrPlacesService';
@@ -160,6 +161,9 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   // Whether the bottom-sheet filter UI is open.
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const [legendVisible, setLegendVisible] = useState(false);
+  // Mini-map pin-tap → opens the shared `CacheDetailSheet`, same UX
+  // as the Explore mini-map + the full MapScreen. PR #630 follow-up.
+  const [selectedCache, setSelectedCache] = useState<ParsedCache | null>(null);
   // Map-touch tracking removed when the map moved out of the
   // FlatList header (commit eedd82e follow-up). Map and list are now
   // siblings, so touches on the map don't reach the FlatList at all.
@@ -373,6 +377,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
           caches={filteredCaches.map((c) => c.cache)}
           events={[]}
           onTapMap={() => navigation.navigate('Map')}
+          onSelectCache={(c) => setSelectedCache(c)}
           onOpenLegend={() => setLegendVisible(true)}
           // One zoom level wider than the default 13 so the Geo-caches
           // hub map shows a bigger catchment without the user having to
@@ -486,6 +491,21 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
         placesVisible={false}
         availableCategories={[]}
       />
+      {/* Mini-map pin-tap sheet — same component MapScreen +
+          ExploreHomeScreen use so the interaction shape is identical
+          across every map surface. PR #630 follow-up. */}
+      {selectedCache && (
+        <CacheDetailSheet
+          cache={selectedCache}
+          colors={colors}
+          onClose={() => setSelectedCache(null)}
+          onViewDetails={() => {
+            const coord = selectedCache.coord;
+            setSelectedCache(null);
+            navigation.navigate('HuntPiggyDetail', { coord });
+          }}
+        />
+      )}
     </View>
   );
 };
