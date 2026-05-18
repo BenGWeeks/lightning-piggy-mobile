@@ -52,7 +52,14 @@ export const MerchantDetailSheet: React.FC<Props> = ({ place, colors, onClose, o
 
   return (
     <View style={styles.sheetBackdrop} testID="merchant-detail-screen">
-      <TouchableOpacity style={styles.sheetTapAway} onPress={onClose} activeOpacity={1} />
+      <TouchableOpacity
+        style={styles.sheetTapAway}
+        onPress={onClose}
+        activeOpacity={1}
+        accessibilityRole="button"
+        accessibilityLabel="Close merchant details"
+        testID="merchant-detail-tap-away"
+      />
       <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>
         <View {...panHandlers} style={styles.sheetHandleGrabber} testID="merchant-detail-grabber">
           <View style={styles.sheetHandle} />

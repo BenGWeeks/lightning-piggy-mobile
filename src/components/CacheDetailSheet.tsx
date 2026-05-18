@@ -34,7 +34,14 @@ export const CacheDetailSheet: React.FC<Props> = ({ cache, colors, onClose, onVi
   ].filter(Boolean) as string[];
   return (
     <View style={styles.sheetBackdrop} testID="cache-detail-sheet">
-      <TouchableOpacity style={styles.sheetTapAway} onPress={onClose} activeOpacity={1} />
+      <TouchableOpacity
+        style={styles.sheetTapAway}
+        onPress={onClose}
+        activeOpacity={1}
+        accessibilityRole="button"
+        accessibilityLabel="Close cache details"
+        testID="cache-detail-tap-away"
+      />
       <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>
         <View {...panHandlers} style={styles.sheetHandleGrabber} testID="cache-detail-grabber">
           <View style={styles.sheetHandle} />

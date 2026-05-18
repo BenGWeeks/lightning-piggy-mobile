@@ -37,7 +37,7 @@ import {
   decodeGeohash,
   encodeGeohash,
   formatDistance,
-  geohashPrefixes,
+  geohashNeighbours,
   haversineMetres,
 } from '../utils/geohash';
 
@@ -210,8 +210,13 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   // Cache subscription — kicks off once we have a fix.
   useEffect(() => {
     if (!pos) return;
-    const myGeohash = encodeGeohash(pos.lat, pos.lon, 7);
-    const prefixes = geohashPrefixes(myGeohash, 5).filter((p) => p.length === 5);
+    // 9 prefixes (user's precision-5 tile + 8 neighbours) so caches
+    // hidden in adjacent ~5 km tiles surface too. The Explore mini-map
+    // got the same treatment earlier in this branch. Pre-#631 the
+    // previous `geohashPrefixes(...).filter((p) => p.length === 5)`
+    // returned only the user's own truncation, so a cache 500 m across
+    // a tile boundary stayed invisible.
+    const prefixes = geohashNeighbours(encodeGeohash(pos.lat, pos.lon, 5));
     // Load every nearby cache regardless of trust — the WoT filter is
     // applied at render time (sortedCaches), so flipping the tier
     // re-filters instantly with no re-subscribe or relay round-trip.
