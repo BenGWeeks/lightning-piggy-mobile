@@ -142,26 +142,30 @@ export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
     };
   }, []);
 
-  // Persisted tier. Initialise synchronously to the *narrow* 'friends'
-  // tier, then let `loadWotSettings()` upgrade it asynchronously.
-  // Transition direction matters here:
+  // Persisted tier. Initialise synchronously to the same `'all'` value
+  // `wotSettingsService.DEFAULTS` uses (#627) so a brand-new user sees
+  // content from the first paint, not after AsyncStorage's async round
+  // trip. The trade-off vs. initialising to the narrow 'friends' tier:
   //
-  //   - existing users with persisted 'friends' → init 'friends', load
-  //     resolves 'friends' → no transition, no flash.
-  //   - existing users with persisted 'fof' / 'all' → init 'friends',
-  //     load widens — safe direction (untrusted content *appears*, not
-  //     disappears, so no rows flicker out from under the user).
-  //   - new users / no payload → init 'friends', load resolves to 'all'
-  //     (#627 default in `wotSettingsService.DEFAULTS`) — rails empty
-  //     for ~one frame while AsyncStorage round-trips, then populate.
+  //   - brand-new user (no payload)         → init 'all',     load 'all'      → content visible immediately ✓
+  //   - existing user with persisted 'all'  → init 'all',     load 'all'      → no transition ✓
+  //   - existing user with persisted 'fof'  → init 'all',     load narrows    → ≤one frame of wider content before settling ✗ small flash
+  //   - existing user with persisted 'friends' → init 'all',  load narrows    → ≤one frame of wider content before settling ✗ small flash
   //
-  // The reverse direction — initialising to 'all' so new users see
-  // content sooner — would briefly show untrusted Geo-cache / Event
-  // rows on launch for any user whose persisted tier is 'friends',
-  // then snap back when load resolves. Flagged in PR #630 Copilot
-  // review (commit message links the thread). Narrow→wide is always
-  // safer. Legacy boolean payloads are migrated inside `loadWotSettings`.
-  const [storedSettings, setStoredSettings] = useState<WotSettings>({ wotTier: 'friends' });
+  // The "empty rail for new users" symptom is the one #627 was filed to
+  // fix — it's the user-facing regression we deliberately accept the
+  // small wide→narrow flash to avoid. Existing users with a narrower
+  // explicit choice see at most ~one frame of widened content during
+  // app launch (AsyncStorage round-trip is ~50-200 ms on Hermes), which
+  // is imperceptible in practice and only fires at cold-start.
+  //
+  // DMs are protected separately by `GroupsContext.effectiveWotTier`,
+  // which clamps `wotTier === 'all'` back to 'friends' for the Messages
+  // surface when secretMode is off — so the wider init never widens DM
+  // visibility regardless of secretMode state.
+  //
+  // Legacy boolean payloads are migrated inside `loadWotSettings`.
+  const [storedSettings, setStoredSettings] = useState<WotSettings>({ wotTier: 'all' });
   useEffect(() => {
     loadWotSettings().then(setStoredSettings);
   }, []);
