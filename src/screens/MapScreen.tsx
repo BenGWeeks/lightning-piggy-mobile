@@ -48,7 +48,7 @@ import {
 import type { ParsedCache } from '../services/nostrPlacesService';
 import { fetchCachesByAuthor, subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
 import { useNostr } from '../contexts/NostrContext';
-import { decodeGeohash, encodeGeohash, geohashPrefixes } from '../utils/geohash';
+import { decodeGeohash, encodeGeohash, geohashNeighbours } from '../utils/geohash';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import SocialIcon from '../components/SocialIcon';
 import WebOfTrustChip from '../components/WebOfTrustChip';
@@ -214,8 +214,12 @@ const MapScreen: React.FC<Props> = ({ navigation }) => {
         // label) AND standard NIP-GC caches (treasures.to /
         // TapTheSatsMap / etc.) as a different pin glyph alongside
         // BTC Map merchants. See project memory `treasures.to interop`.
-        const myGeohash = encodeGeohash(lat, lon, 7);
-        const prefixes = geohashPrefixes(myGeohash, 5).filter((p) => p.length === 5);
+        // Use 9-tile neighbourhood at precision 5 (centre + 8 surrounding
+        // tiles) so caches sitting just over a tile boundary still match.
+        // The plain-prefix path missed published Piglets in adjacent tiles
+        // (e.g. user in u1219, caches in u1218/u1213) — see #631.
+        const myTile = encodeGeohash(lat, lon, 5);
+        const prefixes = geohashNeighbours(myTile);
         cachesCloserRef.current?.();
         cachesCloserRef.current = subscribeNearbyCaches(prefixes, (cache) => {
           setCaches((prev) => {
