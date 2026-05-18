@@ -62,7 +62,7 @@ import NearbyScreen from '../screens/account/NearbyScreen';
 import SecurityScreen from '../screens/account/SecurityScreen';
 import AboutScreen from '../screens/account/AboutScreen';
 import AccountDrawerContent from '../components/AccountDrawerContent';
-import { perfLog, perfTabTap, perfTabRendered } from '../utils/perfLog';
+import { perfLog, perfTabTap, perfTabRendered, perfTabHidden } from '../utils/perfLog';
 
 let __appNavigatorFirstRenderLogged = false;
 
@@ -189,6 +189,7 @@ function HomeTabs() {
         listeners={{
           tabPress: () => perfTabTap('Home'),
           focus: () => perfTabRendered('Home'),
+          blur: () => perfTabHidden('Home'),
         }}
       />
       <Tab.Screen
@@ -204,6 +205,7 @@ function HomeTabs() {
         listeners={{
           tabPress: () => perfTabTap('Messages'),
           focus: () => perfTabRendered('Messages'),
+          blur: () => perfTabHidden('Messages'),
         }}
       />
       <Tab.Screen
@@ -259,6 +261,7 @@ function HomeTabs() {
             }
           },
           focus: () => perfTabRendered('Explore'),
+          blur: () => perfTabHidden('Explore'),
         })}
       />
       <Tab.Screen
@@ -274,6 +277,7 @@ function HomeTabs() {
         listeners={{
           tabPress: () => perfTabTap('Friends'),
           focus: () => perfTabRendered('Friends'),
+          blur: () => perfTabHidden('Friends'),
         }}
       />
     </Tab.Navigator>

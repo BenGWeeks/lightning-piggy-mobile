@@ -25,6 +25,7 @@ import { LibreMiniMap } from '../components/LibreMiniMap';
 import { useUserLocation } from '../contexts/UserLocationContext';
 import LegendSheet from '../components/LegendSheet';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
+import { perfPageReady } from '../utils/perfLog';
 import { courses, type Course } from '../data/learnContent';
 import {
   getProgress,
@@ -293,6 +294,16 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     // posBucket — not pos — is the trigger; see comment above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [posBucket, refreshKey]);
+
+  // Page-ready marker. Fires the first time the rail has content AND
+  // we have a real-or-anchored position fix, which together is what
+  // the user perceives as "Explore is loaded". perfPageReady itself
+  // dedupes per tap so re-renders here don't re-emit.
+  useEffect(() => {
+    if (pos && merchants.length > 0) {
+      perfPageReady('Explore', `${merchants.length} merchants`);
+    }
+  }, [pos, merchants.length]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

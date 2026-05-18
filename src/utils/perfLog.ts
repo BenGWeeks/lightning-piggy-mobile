@@ -50,6 +50,9 @@ export function perfAnchor(): void {
 const __tabTapAt = new Map<string, number>();
 export function perfTabTap(tabName: string): void {
   if (!PERF_LOGS_ENABLED) return;
+  // Re-arm the ready latch + clear any stale anchors so the next
+  // tap→ready delta starts from this fresh tap, not a leftover one.
+  __pageReadyEmitted.delete(tabName);
   __tabTapAt.set(tabName, Date.now());
   console.log(`[PerfTab] ${tabName} tap`);
 }
@@ -58,7 +61,59 @@ export function perfTabRendered(tabName: string): void {
   const tapAt = __tabTapAt.get(tabName);
   if (tapAt === undefined) return;
   console.log(`[PerfTab] ${tabName} focus tap→focus=${Date.now() - tapAt}ms`);
+  // Don't delete the tapAt yet — perfPageReady wants to compute its
+  // own tap→ready delta from the same anchor. We delete in perfTabTap
+  // on the next tap, which is the natural rotation point.
+}
+
+// Outgoing-tab blur marker. Fires when the *previous* tab finishes
+// hiding (its blur event landed). Pairs with `perfTabTap` to bracket
+// the navigation transition itself, separately from the destination
+// screen's render. Anything > 100 ms between tap and hidden means the
+// transition animation is itself janking, distinct from the new
+// screen's render cost. Stored anchor uses the *destination* tab name
+// so logs read in the order they happened on screen.
+const __tabHiddenAt = new Map<string, number>();
+export function perfTabHidden(outgoingTabName: string): void {
+  if (!PERF_LOGS_ENABLED) return;
+  // Walk every recorded tap — there's at most one in flight at a time —
+  // and emit the delta. We don't know which destination triggered this
+  // blur from here, so we log against the source.
+  for (const [destination, tapAt] of __tabTapAt) {
+    __tabHiddenAt.set(destination, Date.now());
+    console.log(`[PerfTab] ${outgoingTabName} hidden tap→hidden=${Date.now() - tapAt}ms`);
+  }
+}
+
+// "Page ready" marker — emitted by a destination screen when its
+// content is genuinely usable (rails populated, primary fetch
+// resolved). Distinct from `focus` (which fires the moment React
+// Navigation mounts the screen, often before any data has loaded)
+// and from `first render` (which can fire on a skeleton). The screen
+// owns the definition of "ready" — typically the first non-empty
+// merchant rail batch or the first 'visible' Maestro selector.
+//
+// Deduplicated per tab-name so it only logs the first ready event
+// per visit; subsequent re-renders don't pollute the log. Reset on
+// the next tab tap (we trust callers to call perfTabTap for each
+// honest user-initiated focus).
+const __pageReadyEmitted = new Set<string>();
+export function perfPageReady(tabName: string, detail?: string): void {
+  if (!PERF_LOGS_ENABLED) return;
+  if (__pageReadyEmitted.has(tabName)) return;
+  __pageReadyEmitted.add(tabName);
+  const tapAt = __tabTapAt.get(tabName);
+  const tapDelta = tapAt !== undefined ? `tap→ready=${Date.now() - tapAt}ms` : 'tap→ready=?ms';
+  console.log(`[PerfTab] ${tabName} ready ${tapDelta}${detail ? ` (${detail})` : ''}`);
+}
+
+// Internal — perfTabTap clears the per-tab ready latch so the next
+// honest tap re-arms it. Exported indirectly via perfTabTap's own
+// behaviour; tests can call this to reset state between scenarios.
+export function __perfResetTabReady(tabName: string): void {
+  __pageReadyEmitted.delete(tabName);
   __tabTapAt.delete(tabName);
+  __tabHiddenAt.delete(tabName);
 }
 
 // JS-thread heartbeat. A self-recurring `setTimeout(cb, 100)` that
