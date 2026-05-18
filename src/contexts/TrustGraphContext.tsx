@@ -142,13 +142,26 @@ export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
     };
   }, []);
 
-  // Persisted tier. Default 'all' (#627 — was 'friends' pre-#627 but
-  // that left new users with an empty rail on the Geo-caches + Events
-  // surfaces because they have no follows yet). DMs are independently
-  // clamped via `GroupsContext.effectiveWotTier` so 'all' here is safe
-  // for the Messages surface. Legacy boolean payloads are migrated
-  // inside `loadWotSettings`.
-  const [storedSettings, setStoredSettings] = useState<WotSettings>({ wotTier: 'all' });
+  // Persisted tier. Initialise synchronously to the *narrow* 'friends'
+  // tier, then let `loadWotSettings()` upgrade it asynchronously.
+  // Transition direction matters here:
+  //
+  //   - existing users with persisted 'friends' → init 'friends', load
+  //     resolves 'friends' → no transition, no flash.
+  //   - existing users with persisted 'fof' / 'all' → init 'friends',
+  //     load widens — safe direction (untrusted content *appears*, not
+  //     disappears, so no rows flicker out from under the user).
+  //   - new users / no payload → init 'friends', load resolves to 'all'
+  //     (#627 default in `wotSettingsService.DEFAULTS`) — rails empty
+  //     for ~one frame while AsyncStorage round-trips, then populate.
+  //
+  // The reverse direction — initialising to 'all' so new users see
+  // content sooner — would briefly show untrusted Geo-cache / Event
+  // rows on launch for any user whose persisted tier is 'friends',
+  // then snap back when load resolves. Flagged in PR #630 Copilot
+  // review (commit message links the thread). Narrow→wide is always
+  // safer. Legacy boolean payloads are migrated inside `loadWotSettings`.
+  const [storedSettings, setStoredSettings] = useState<WotSettings>({ wotTier: 'friends' });
   useEffect(() => {
     loadWotSettings().then(setStoredSettings);
   }, []);
