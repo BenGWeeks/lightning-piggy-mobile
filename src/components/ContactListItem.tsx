@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
-import { UserRound, Zap } from 'lucide-react-native';
+import { MessageCircle, UserRound, Zap } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 import { isSupportedImageUrl } from '../utils/imageUrl';
@@ -10,8 +10,24 @@ interface Props {
   name: string;
   picture?: string | null;
   lightningAddress?: string | null;
+  /** Truthy when this contact has a Nostr pubkey, i.e. is messageable.
+   * False for phone-book contacts who haven't been matched to a Nostr
+   * identity — the message button renders disabled in that case. */
+  canMessage?: boolean;
+  /** Truthy when we can actually send a zap from the current user to this
+   * contact. Two conditions must hold: the *user* has a wallet attached
+   * (otherwise there's nothing to pay from), AND the *contact* has a
+   * Lightning address in their Nostr profile (otherwise there's nowhere
+   * to pay to). The disabled state then tells the user *which* condition
+   * is missing via `zapDisabledReason`. */
+  canZap?: boolean;
+  /** Single-phrase explanation surfaced in the screen-reader label when
+   * `canZap` is false. Caller composes it (the host screen knows whether
+   * it's "no wallet" or "no Lightning address"). */
+  zapDisabledReason?: string;
   onPress?: () => void;
   onZap?: () => void;
+  onMessage?: () => void;
   testID?: string;
 }
 
@@ -19,8 +35,12 @@ const ContactListItem: React.FC<Props> = ({
   name,
   picture,
   lightningAddress,
+  canMessage = false,
+  canZap = false,
+  zapDisabledReason,
   onPress,
   onZap,
+  onMessage,
   testID,
 }) => {
   const colors = useThemeColors();
@@ -74,11 +94,47 @@ const ContactListItem: React.FC<Props> = ({
           </Text>
         )}
       </View>
-      {lightningAddress && onZap && (
-        <TouchableOpacity style={styles.zapButton} onPress={onZap} activeOpacity={0.6}>
-          <Zap size={22} color={colors.brandPink} fill={colors.brandPink} />
+      {/* Action buttons — always rendered, disabled state when not
+          usable so the row's right column has stable layout regardless
+          of profile load state. Greyed icon + screen-reader label
+          disclose *why* an action is unavailable (e.g. \"no Lightning
+          address set in this contact's Nostr profile\"). */}
+      <View style={styles.actions}>
+        <TouchableOpacity
+          style={[styles.iconButton, !canMessage && styles.iconButtonDisabled]}
+          onPress={canMessage ? onMessage : undefined}
+          disabled={!canMessage}
+          activeOpacity={0.6}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !canMessage }}
+          accessibilityLabel={canMessage ? `Message ${name}` : `Message ${name} (no Nostr key)`}
+          testID="contact-row-message"
+        >
+          <MessageCircle
+            size={20}
+            color={canMessage ? colors.brandPink : colors.textSupplementary}
+            strokeWidth={2}
+          />
         </TouchableOpacity>
-      )}
+        <TouchableOpacity
+          style={[styles.iconButton, !canZap && styles.iconButtonDisabled]}
+          onPress={canZap ? onZap : undefined}
+          disabled={!canZap}
+          activeOpacity={0.6}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !canZap }}
+          accessibilityLabel={
+            canZap ? `Zap ${name}` : `Zap ${name} (${zapDisabledReason ?? 'unavailable'})`
+          }
+          testID="contact-row-zap"
+        >
+          <Zap
+            size={20}
+            color={canZap ? colors.brandPink : colors.textSupplementary}
+            fill={canZap ? colors.brandPink : 'none'}
+          />
+        </TouchableOpacity>
+      </View>
     </TouchableOpacity>
   );
 };
@@ -126,13 +182,21 @@ const createStyles = (colors: Palette) =>
       color: colors.textSupplementary,
       marginTop: 2,
     },
-    zapButton: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
+    actions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    iconButton: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
       backgroundColor: colors.brandPinkLight,
       justifyContent: 'center',
       alignItems: 'center',
+    },
+    iconButtonDisabled: {
+      backgroundColor: colors.divider,
     },
   });
 

@@ -19,6 +19,7 @@ import { useNavigation, CompositeNavigationProp, useFocusEffect } from '@react-n
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNostr } from '../contexts/NostrContext';
+import { useWallet } from '../contexts/WalletContext';
 import TabHeader from '../components/TabHeader';
 import { useThemeColors } from '../contexts/ThemeContext';
 import ContactListItem, { CONTACT_LIST_ITEM_HEIGHT } from '../components/ContactListItem';
@@ -63,6 +64,11 @@ const FriendsScreen: React.FC = () => {
   const styles = useMemo(() => createFriendsScreenStyles(colors), [colors]);
   const navigation = useNavigation<FriendsNavigation>();
   const { isLoggedIn, profile, contacts, refreshContacts, refreshProfile, addContact } = useNostr();
+  // Wallet-attached flag drives the per-row zap gate alongside the
+  // contact's Lightning address. Without a wallet there's nothing to
+  // pay from, so the zap action is rendered disabled even when the
+  // contact has a perfectly valid lud16.
+  const { hasWallets } = useWallet();
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
   // Drives the expensive filter step off a deferred copy of `search`,
@@ -353,17 +359,46 @@ const FriendsScreen: React.FC = () => {
   );
 
   const renderItem = useCallback(
-    ({ item }: { item: ListItem }) => (
-      <ContactListItem
-        name={item.name}
-        picture={item.picture}
-        lightningAddress={item.lightningAddress}
-        onPress={() => handleContactPress(item)}
-        onZap={item.lightningAddress ? () => handleZap(item) : undefined}
-        testID={`friend-row-${item.id}`}
-      />
-    ),
-    [handleZap, handleContactPress],
+    ({ item }: { item: ListItem }) => {
+      // Both action buttons render unconditionally; the per-button gate
+      // surfaces *why* a tap won't work when the underlying data is
+      // missing. Message needs a Nostr pubkey (phone-only contacts
+      // don't have one); Zap needs both a wallet AND a Lightning
+      // address. The disabled-reason strings are shown to screen
+      // readers so users aren't left guessing.
+      const canZap = !!item.lightningAddress && hasWallets;
+      const zapDisabledReason = !hasWallets ? 'no wallet attached' : 'no Lightning address';
+      return (
+        <ContactListItem
+          name={item.name}
+          picture={item.picture}
+          lightningAddress={item.lightningAddress}
+          canMessage={!!item.pubkey}
+          canZap={canZap}
+          zapDisabledReason={zapDisabledReason}
+          onPress={() => handleContactPress(item)}
+          onZap={() => handleZap(item)}
+          onMessage={
+            // Capture pubkey in a non-null const so TS narrows it inside
+            // the closure — referencing item.pubkey directly inside the
+            // arrow body widens it back to `string | null`.
+            (() => {
+              const pubkey = item.pubkey;
+              if (!pubkey) return undefined;
+              return () =>
+                navigation.navigate('Conversation', {
+                  pubkey,
+                  name: item.name,
+                  picture: item.picture,
+                  lightningAddress: item.lightningAddress,
+                });
+            })()
+          }
+          testID={`friend-row-${item.id}`}
+        />
+      );
+    },
+    [handleZap, handleContactPress, hasWallets, navigation],
   );
 
   const filters: { key: Filter; label: string }[] = [
@@ -552,6 +587,8 @@ const FriendsScreen: React.FC = () => {
         }}
         contact={selectedContact}
         onViewFullProfile={handleViewFullProfile}
+        canZap={!!selectedContact?.lightningAddress && hasWallets}
+        zapDisabledReason={!hasWallets ? 'no wallet attached' : 'no Lightning address'}
         onZap={
           selectedContact?.lightningAddress
             ? () => {
