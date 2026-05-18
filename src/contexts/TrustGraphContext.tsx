@@ -142,9 +142,13 @@ export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
     };
   }, []);
 
-  // Persisted tier. Default 'friends' (#535). Legacy boolean payloads
-  // are migrated inside `loadWotSettings`.
-  const [storedSettings, setStoredSettings] = useState<WotSettings>({ wotTier: 'friends' });
+  // Persisted tier. Default 'all' (#627 — was 'friends' pre-#627 but
+  // that left new users with an empty rail on the Geo-caches + Events
+  // surfaces because they have no follows yet). DMs are independently
+  // clamped via `GroupsContext.effectiveWotTier` so 'all' here is safe
+  // for the Messages surface. Legacy boolean payloads are migrated
+  // inside `loadWotSettings`.
+  const [storedSettings, setStoredSettings] = useState<WotSettings>({ wotTier: 'all' });
   useEffect(() => {
     loadWotSettings().then(setStoredSettings);
   }, []);
