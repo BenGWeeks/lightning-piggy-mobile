@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { Animated, View, StyleSheet, TouchableOpacity, Text } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
 // Alias MapLibre's `Map` component so we can still use the built-in
 // `Map<K,V>` global for the coord → source lookups below.
 import {
@@ -184,9 +185,35 @@ const LibreMiniMapInner: React.FC<Props> = ({
 
   // Pulse the accuracy halo so the user can pick out their own dot
   // against busy maps. 1.0 → 1.18 → 1.0 over 1.6 s, native-driven so the
-  // JS thread stays free. Mirrors the Google Maps cadence.
+  // JS thread *should* stay free — but `Animated.loop` of a sequence
+  // still bounces through JS on each leg's completion callback to
+  // schedule the next leg, waking the JS thread every ~800 ms.
+  //
+  // Per Perfetto profile (2026-05-17 audit), this was THE cause of the
+  // multi-second tab-switch freeze (#31): the tab navigator's `lazy:
+  // true` keeps every visited screen mounted, so the pulse on
+  // ExploreHomeScreen's LibreMiniMap kept running while the user was
+  // on Home / Messages / Friends — every ~800 ms the JS thread woke
+  // to schedule the next animation leg. Tap-on-Explore from Home
+  // queued behind those pulses, delaying the tab transition by
+  // several seconds.
+  //
+  // Fix: gate the loop on `useIsFocused()`. Pulse only runs while the
+  // host screen is the current focus. On blur, the loop stops and the
+  // JS thread is freed for other tabs' work + future tap-handling.
+  // The halo itself remains visible (we leave `pulse` at 1.0 / its
+  // last value) — it's only the animation that pauses.
+  const isFocused = useIsFocused();
   const pulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
+    if (!isFocused) {
+      // Reset to base so the next focus starts at the same point in
+      // the cycle every time. Without this the halo would keep its
+      // last interpolated value across focus changes — harmless but
+      // visually inconsistent.
+      pulse.setValue(1);
+      return;
+    }
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, { toValue: 1.18, duration: 800, useNativeDriver: true }),
@@ -195,7 +222,7 @@ const LibreMiniMapInner: React.FC<Props> = ({
     );
     loop.start();
     return () => loop.stop();
-  }, [pulse]);
+  }, [isFocused, pulse]);
 
   // Build a many-sided polygon approximating a circle of
   // `userAccuracyMetres` radius around the user's lat/lon. Rendered as
