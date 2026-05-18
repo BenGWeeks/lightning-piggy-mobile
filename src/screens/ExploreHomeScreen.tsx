@@ -22,6 +22,8 @@ import {
 import TabHeader from '../components/TabHeader';
 import { ContentRail } from '../components/ContentRail';
 import { LibreMiniMap } from '../components/LibreMiniMap';
+import { MerchantDetailSheet } from '../components/MerchantDetailSheet';
+import { CacheDetailSheet } from '../components/CacheDetailSheet';
 import { useUserLocation } from '../contexts/UserLocationContext';
 import LegendSheet from '../components/LegendSheet';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
@@ -225,6 +227,13 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // down/re-open NIP-GC + NIP-52 subscriptions in one gesture.
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  // Mini-map pin-tap selections — open `MerchantDetailSheet` /
+  // `CacheDetailSheet` (same components MapScreen uses) so the
+  // interaction shape matches the full map. Events have no dedicated
+  // sheet in MapScreen either, so they keep navigating directly to
+  // EventDetail (consistent with MapScreen's behaviour). PR #630.
+  const [selectedMerchant, setSelectedMerchant] = useState<BtcMapPlace | null>(null);
+  const [selectedCache, setSelectedCache] = useState<ParsedCache | null>(null);
   // Map legend modal — same LegendSheet ExploreMiniMap renders inline,
   // but here it lives at the screen level so LibreMiniMap (which doesn't
   // own the sheet itself) can ask us to open it. Array memos for the
@@ -878,6 +887,15 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
             events={eventsArr}
             onTapMap={onTapMap}
             onOpenLegend={onOpenLegend}
+            // Pin-tap handlers — open the same MerchantDetailSheet /
+            // CacheDetailSheet that MapScreen renders so the interaction
+            // shape is identical across surfaces (PR #630). Events have
+            // no dedicated sheet in MapScreen either, so the event tap
+            // navigates directly to EventDetail — consistent with the
+            // event rail card tap below.
+            onSelectMerchant={(m) => setSelectedMerchant(m)}
+            onSelectCache={(c) => setSelectedCache(c)}
+            onSelectEvent={(e) => navigation.navigate('EventDetail', { coord: e.coord })}
             // Maestro flow test-explore-tab-rename.yaml asserts this
             // testID — preserved across the MapLibre swap so the e2e
             // smoke test doesn't need to be repointed.
@@ -960,9 +978,14 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         <ContentRail<{ event: ParsedEvent; distance: number }>
           title="Events near you"
           caption={
+            // Subtitle drops the "within ~150 km" claim — we surface
+            // events without `#g` geohash tags too (most NIP-52 publishers
+            // don't include one), so we can't enforce that distance.
+            // Each card shows the event's location string so the user
+            // can read the city / venue and decide.
             untrustedEventCount > 0
-              ? `Bitcoin meetups within ~150 km · ${untrustedEventCount} hidden from outside your trust graph`
-              : 'Bitcoin meetups within ~150 km · NIP-52'
+              ? `Bitcoin meetups (NIP-52) · ${untrustedEventCount} hidden from outside your trust graph`
+              : 'Bitcoin meetups (NIP-52)'
           }
           items={sortedEvents}
           loading={!!pos && events.size === 0 && false}
@@ -1016,6 +1039,33 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           ...new Set(merchants.flatMap((m) => m.categories ?? []).filter(Boolean)),
         ]}
       />
+      {/* Mini-map pin-tap sheets — share the components with MapScreen
+          so the interaction shape (drag-to-dismiss, tap-away, View
+          details action) is identical across surfaces. PR #630. */}
+      {selectedMerchant && (
+        <MerchantDetailSheet
+          place={selectedMerchant}
+          colors={colors}
+          onClose={() => setSelectedMerchant(null)}
+          onViewDetails={() => {
+            const placeId = selectedMerchant.id;
+            setSelectedMerchant(null);
+            navigation.navigate('PlaceDetail', { placeId });
+          }}
+        />
+      )}
+      {selectedCache && (
+        <CacheDetailSheet
+          cache={selectedCache}
+          colors={colors}
+          onClose={() => setSelectedCache(null)}
+          onViewDetails={() => {
+            const coord = selectedCache.coord;
+            setSelectedCache(null);
+            navigation.navigate('HuntPiggyDetail', { coord });
+          }}
+        />
+      )}
     </View>
   );
 };
