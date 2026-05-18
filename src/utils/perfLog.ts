@@ -47,23 +47,33 @@ export function perfAnchor(): void {
 // transition completes. Anything > 200 ms here is what the user
 // perceives as a sluggish tab; > 1 s is a noticeable freeze; > 5 s is
 // the kind of lockup that prompts "did I tap?" double-presses.
-const __tabTapAt = new Map<string, number>();
+// Single most-recent tab tap, replaces the previous per-tab Map. Only
+// one tab transition is ever in flight at a time (React Navigation
+// serialises tabPress / focus / blur per gesture), so a Map keyed by
+// tab name accumulated permanent entries — every visited tab kept its
+// last tap timestamp forever and `perfTabHidden` then logged one stale
+// `hidden` line per past tab on every subsequent blur (PR #628 review).
+// A single pair of variables expresses the actual invariant.
+let __lastTapAt: number | null = null;
+let __lastTapDestination: string | null = null;
+
 export function perfTabTap(tabName: string): void {
   if (!PERF_LOGS_ENABLED) return;
-  // Re-arm the ready latch + clear any stale anchors so the next
-  // tap→ready delta starts from this fresh tap, not a leftover one.
+  // Re-arm the ready latch for this destination so its next non-empty
+  // render fires `perfPageReady` rather than dedup-suppressing it.
   __pageReadyEmitted.delete(tabName);
-  __tabTapAt.set(tabName, Date.now());
+  __lastTapAt = Date.now();
+  __lastTapDestination = tabName;
   console.log(`[PerfTab] ${tabName} tap`);
 }
+
 export function perfTabRendered(tabName: string): void {
   if (!PERF_LOGS_ENABLED) return;
-  const tapAt = __tabTapAt.get(tabName);
-  if (tapAt === undefined) return;
-  console.log(`[PerfTab] ${tabName} focus tap→focus=${Date.now() - tapAt}ms`);
-  // Don't delete the tapAt yet — perfPageReady wants to compute its
-  // own tap→ready delta from the same anchor. We delete in perfTabTap
-  // on the next tap, which is the natural rotation point.
+  // Only emit when this destination matches the last tap — guards
+  // against stray `focus` events that React Navigation fires on cold
+  // launch without a paired user gesture.
+  if (__lastTapAt === null || __lastTapDestination !== tabName) return;
+  console.log(`[PerfTab] ${tabName} focus tap→focus=${Date.now() - __lastTapAt}ms`);
 }
 
 // Outgoing-tab blur marker. Fires when the *previous* tab finishes
@@ -71,18 +81,12 @@ export function perfTabRendered(tabName: string): void {
 // the navigation transition itself, separately from the destination
 // screen's render. Anything > 100 ms between tap and hidden means the
 // transition animation is itself janking, distinct from the new
-// screen's render cost. Stored anchor uses the *destination* tab name
-// so logs read in the order they happened on screen.
-const __tabHiddenAt = new Map<string, number>();
+// screen's render cost. Reads the single `__lastTapAt` so no stale
+// per-tab entries accumulate (PR #628 Copilot review).
 export function perfTabHidden(outgoingTabName: string): void {
   if (!PERF_LOGS_ENABLED) return;
-  // Walk every recorded tap — there's at most one in flight at a time —
-  // and emit the delta. We don't know which destination triggered this
-  // blur from here, so we log against the source.
-  for (const [destination, tapAt] of __tabTapAt) {
-    __tabHiddenAt.set(destination, Date.now());
-    console.log(`[PerfTab] ${outgoingTabName} hidden tap→hidden=${Date.now() - tapAt}ms`);
-  }
+  if (__lastTapAt === null) return;
+  console.log(`[PerfTab] ${outgoingTabName} hidden tap→hidden=${Date.now() - __lastTapAt}ms`);
 }
 
 // "Page ready" marker — emitted by a destination screen when its
@@ -102,18 +106,19 @@ export function perfPageReady(tabName: string, detail?: string): void {
   if (!PERF_LOGS_ENABLED) return;
   if (__pageReadyEmitted.has(tabName)) return;
   __pageReadyEmitted.add(tabName);
-  const tapAt = __tabTapAt.get(tabName);
-  const tapDelta = tapAt !== undefined ? `tap→ready=${Date.now() - tapAt}ms` : 'tap→ready=?ms';
+  const tapDelta =
+    __lastTapAt !== null ? `tap→ready=${Date.now() - __lastTapAt}ms` : 'tap→ready=?ms';
   console.log(`[PerfTab] ${tabName} ready ${tapDelta}${detail ? ` (${detail})` : ''}`);
 }
 
-// Internal — perfTabTap clears the per-tab ready latch so the next
-// honest tap re-arms it. Exported indirectly via perfTabTap's own
-// behaviour; tests can call this to reset state between scenarios.
+// Internal — clear all per-tab tracking. Used by tests and by code
+// paths that need to reset between scenarios.
 export function __perfResetTabReady(tabName: string): void {
   __pageReadyEmitted.delete(tabName);
-  __tabTapAt.delete(tabName);
-  __tabHiddenAt.delete(tabName);
+  if (__lastTapDestination === tabName) {
+    __lastTapAt = null;
+    __lastTapDestination = null;
+  }
 }
 
 // JS-thread heartbeat. A self-recurring `setTimeout(cb, 100)` that

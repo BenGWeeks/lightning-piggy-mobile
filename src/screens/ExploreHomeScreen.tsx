@@ -274,7 +274,14 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         // mini-map intentionally diverges from PlacesScreen / MapScreen
         // here — both of those have a map the user actively pans, so
         // they keep the viewport-driven `fetchPlacesInBbox` path.
-        const places = await fetchNearestPlaces(pos.lat, pos.lon, 10);
+        // `force: refreshKey > 0` is belt-and-suspenders alongside
+        // `refreshDataset()` wiping the cache before this effect re-runs
+        // — explicit beats relying on side-effect ordering, so a future
+        // refactor of refreshDataset can't silently regress pull-to-
+        // refresh into a cache hit. (PR #628 Stev.ie audit.)
+        const places = await fetchNearestPlaces(pos.lat, pos.lon, 10, {
+          force: refreshKey > 0,
+        });
         const __ms = Math.round(performance.now() - __t0);
         if (__ms > 200) {
           console.log(
@@ -694,11 +701,17 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // at the end. We tag each entry with a `distance` number so the
   // card variants can render an "X km" badge without recomputing.
 
+  // Sort memos depend on `posLat` / `posLon` rather than raw `pos` so a
+  // fresh `{lat, lon, accuracy}` object with identical primitives no
+  // longer re-runs the haversine sweep on every GPS sample (PR #628
+  // Stev.ie audit). The early-return path uses both being numbers as
+  // the truthiness check.
   const sortedMerchants = useMemo(() => {
-    if (!pos) return [] as { place: BtcMapPlace; distance: number }[];
+    if (typeof posLat !== 'number' || typeof posLon !== 'number')
+      return [] as { place: BtcMapPlace; distance: number }[];
     let items = merchants.map((place) => ({
       place,
-      distance: haversineMetres({ lat: pos.lat, lon: pos.lon }, { lat: place.lat, lon: place.lon }),
+      distance: haversineMetres({ lat: posLat, lon: posLon }, { lat: place.lat, lon: place.lon }),
     }));
     if (maxDistanceMetres !== null) {
       items = items.filter((m) => m.distance <= maxDistanceMetres);
@@ -719,15 +732,16 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         })
         .slice(0, 12)
     );
-  }, [merchants, pos, maxDistanceMetres]);
+  }, [merchants, posLat, posLon, maxDistanceMetres]);
 
   const sortedCaches = useMemo(() => {
     const lowerPubkey = signedInPubkey?.toLowerCase() ?? null;
+    const haveFix = typeof posLat === 'number' && typeof posLon === 'number';
     let items = [...caches.values()].map((cache) => {
       const center = cache.geohash ? decodeGeohash(cache.geohash) : null;
       const distance =
-        pos && center
-          ? haversineMetres({ lat: pos.lat, lon: pos.lon }, { lat: center.lat, lon: center.lng })
+        haveFix && center
+          ? haversineMetres({ lat: posLat, lon: posLon }, { lat: center.lat, lon: center.lng })
           : Number.POSITIVE_INFINITY;
       const isOwn = lowerPubkey !== null && cache.hiderPubkey.toLowerCase() === lowerPubkey;
       return { cache, distance, isOwn };
@@ -737,7 +751,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     const ownItems = items.filter((c) => c.isOwn);
     if (ownItems.length > 0) {
       console.log(
-        `[PerfBlock] sortedCaches own=${ownItems.length} maxDistance=${maxDistanceMetres ?? 'null'}m posSet=${pos !== null} ` +
+        `[PerfBlock] sortedCaches own=${ownItems.length} maxDistance=${maxDistanceMetres ?? 'null'}m posSet=${haveFix} ` +
           ownItems
             .map(
               (c) =>
@@ -765,14 +779,15 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     // disproportionately heavy. The "See all → Geo-caches" page
     // (HuntScreen) has no cap for the full list.
     return items.slice(0, 50);
-  }, [caches, pos, maxDistanceMetres, signedInPubkey]);
+  }, [caches, posLat, posLon, maxDistanceMetres, signedInPubkey]);
 
   const sortedEvents = useMemo(() => {
+    const haveFix = typeof posLat === 'number' && typeof posLon === 'number';
     let items = [...events.values()].map((event) => {
       const center = event.geohash ? decodeGeohash(event.geohash) : null;
       const distance =
-        pos && center
-          ? haversineMetres({ lat: pos.lat, lon: pos.lon }, { lat: center.lat, lon: center.lng })
+        haveFix && center
+          ? haversineMetres({ lat: posLat, lon: posLon }, { lat: center.lat, lon: center.lng })
           : Number.POSITIVE_INFINITY;
       return { event, distance };
     });
@@ -781,7 +796,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     }
     items.sort((a, b) => a.distance - b.distance);
     return items.slice(0, 50);
-  }, [events, pos, maxDistanceMetres]);
+  }, [events, posLat, posLon, maxDistanceMetres]);
 
   return (
     <View style={styles.container}>

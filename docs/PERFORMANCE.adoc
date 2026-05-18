@@ -196,6 +196,76 @@ hour, within 5 km, don't hit the network at all. Only use on
 surfaces where the map is decorative; PlacesScreen / MapScreen keep
 the bbox call.
 
+=== `Array.prototype.shift()` as a FIFO eviction on a large array
+
+**Shape:** a bounded cache holds N entries in an array, with a Set
+keyed by the same value for O(1) membership tests. On insert past N,
+the code calls `array.shift()` to evict the oldest entry. This was the
+original implementation of `nostrService.ts`'s `verifiedEventIds` cache
+— PR #628 review flagged it as O(N) per eviction once the cache fills,
+because every remaining element has to be re-indexed.
+
+**Symptom:** the cache itself was meant to *save* JS-thread time
+(skip schnorr re-verification). With `shift()` on a 10 000-entry array,
+the eviction cost ate into the savings — measurable on the same hot
+path the cache is supposed to speed up.
+
+**Fix:** circular buffer + head cursor:
+
+[source,ts]
+----
+const CAP = 10_000;
+const ids = new Set<string>();
+const order = new Array<string | null>(CAP).fill(null);
+let head = 0;
+const remember = (id: string): void => {
+  if (ids.has(id)) return;
+  const evicted = order[head];
+  if (evicted !== null) ids.delete(evicted);
+  order[head] = id;
+  ids.add(id);
+  head = (head + 1) % CAP;
+};
+----
+
+Both insert and evict are O(1). The initial `null` slots evict harmlessly
+during the warm-up window (Set.delete on null is a no-op). Resetting the
+cache is `ids.clear(); order.fill(null); head = 0;`.
+
+**Static test:** `grep -nE '\.shift\(\)' src/` and inspect each — most
+hits in this codebase are legitimate one-shot dequeues; the dangerous
+shape is `.shift()` inside the same function as a matching `.push()`
+when both run on a high-frequency callback.
+
+=== Per-tab Maps keyed by `tabName` for transient state
+
+**Shape:** a `Map<string, T>` keyed by tab name, populated on tap, never
+cleaned. Once the user has visited Home, Messages, Explore, Friends,
+the Map has 4 permanent entries. Any consumer that iterates the Map on
+a frequent event (e.g. an outgoing-tab blur listener that wants to
+emit "tap→hidden") then logs / processes one entry per tab visited.
+
+This was the original `__tabTapAt` in `perfLog.ts` — PR #628 review
+flagged it for accumulating stale entries.
+
+**Fix:** track the most-recent value as a single pair of variables
+rather than a Map. Only one tab transition is ever in flight at a time
+(React Navigation serialises tabPress / focus / blur per gesture), so
+the Map's invariants are stricter than its type — collapse to scalars:
+
+[source,ts]
+----
+let __lastTapAt: number | null = null;
+let __lastTapDestination: string | null = null;
+----
+
+`perfTabTap` writes both, `perfTabHidden` / `perfTabRendered` / `perfPageReady`
+read both. No leak by construction.
+
+**Static test:** `grep -nE 'new Map<string,' src/utils src/contexts` and
+ask "does this Map ever shrink?" If the answer is no AND the key space
+is finite AND only the latest matters, scalarise.
+
 === console.log left on a per-event hot path
 
 **Shape:** a `console.log` inside a Nostr `onevent` callback or a

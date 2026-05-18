@@ -48,28 +48,39 @@ export const pool = new SimplePool();
 // secp256k1 work — same security posture (we only cache an id once
 // the full schnorr check passed), much faster.
 //
-// Bounded at 10 000 entries with a simple FIFO eviction so a long-
-// running session doesn't drift to unlimited memory. 10 000 event-ids
-// at 64 bytes each ≈ 640 KB — negligible. The cache is module-scoped
-// so it survives across screen focus / blur / tab switches.
+// Bounded at 10 000 entries with O(1) circular-buffer eviction so a
+// long-running session doesn't drift to unlimited memory. 10 000
+// event-ids at 64 bytes each ≈ 640 KB — negligible. The cache is
+// module-scoped so it survives across screen focus / blur / tab
+// switches.
+//
+// Eviction was previously `Array.prototype.shift()` on a 10k-element
+// array — O(n) memmove per call once the cache filled, measurable on
+// the same hot path this cache is meant to speed up (PR #628 Copilot
+// review). Switching to a fixed-size circular buffer keeps both
+// insert + evict at O(1).
 const VERIFIED_CACHE_CAP = 10_000;
 const verifiedEventIds = new Set<string>();
-const verifiedEventOrder: string[] = [];
+const verifiedEventOrder = new Array<string | null>(VERIFIED_CACHE_CAP).fill(null);
+let verifiedHead = 0;
 const rememberVerified = (id: string): void => {
   if (verifiedEventIds.has(id)) return;
+  // Evict the slot we're about to overwrite (null on first cap-1 calls,
+  // then the oldest live id once the buffer wraps). Set.delete on null
+  // is a no-op so we don't need a separate branch for the cold path.
+  const evicted = verifiedEventOrder[verifiedHead];
+  if (evicted !== null) verifiedEventIds.delete(evicted);
+  verifiedEventOrder[verifiedHead] = id;
   verifiedEventIds.add(id);
-  verifiedEventOrder.push(id);
-  if (verifiedEventOrder.length > VERIFIED_CACHE_CAP) {
-    const evicted = verifiedEventOrder.shift();
-    if (evicted) verifiedEventIds.delete(evicted);
-  }
+  verifiedHead = (verifiedHead + 1) % VERIFIED_CACHE_CAP;
 };
 // Exposed for tests and for the rare case a downstream code path
 // explicitly wants to invalidate (e.g. trust-graph change that
 // requires re-checking authorship).
 export const __resetVerifiedEventCache = (): void => {
   verifiedEventIds.clear();
-  verifiedEventOrder.length = 0;
+  verifiedEventOrder.fill(null);
+  verifiedHead = 0;
 };
 export const __verifiedEventCacheSize = (): number => verifiedEventIds.size;
 
