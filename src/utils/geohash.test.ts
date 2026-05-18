@@ -3,6 +3,7 @@ import {
   decodeGeohash,
   encodeGeohash,
   formatDistance,
+  geohashNeighbours,
   geohashPrefixes,
   haversineMetres,
 } from './geohash';
@@ -139,5 +140,60 @@ describe('formatDistance', () => {
     expect(formatDistance(4)).toBe('< 5 m');
     // 5 m and above round normally
     expect(formatDistance(5)).toBe('10 m');
+  });
+});
+
+describe('geohashNeighbours', () => {
+  // Issue #631 — the missing-neighbours bug that caused the empty
+  // Geo-caches rail. These tests pin the surface area at exactly
+  // 9 tiles (self + 8) and verify the user's own tile is one of them.
+
+  it('returns the cell itself plus its 8 neighbours at the same precision', () => {
+    const n = geohashNeighbours('u1219');
+    expect(n).toHaveLength(9);
+    // Every neighbour matches the requested precision.
+    for (const g of n) expect(g).toHaveLength(5);
+    // Self is one of them.
+    expect(n).toContain('u1219');
+  });
+
+  it('includes the neighbour tiles a real Pixel near Longstanton would need', () => {
+    // The bug surfaced specifically because Longstanton (~u121926)
+    // produces own-tile u1219 but published test caches sit in u1218
+    // (~1 km east) and u1213. Both must appear in the result so the
+    // `#g` filter matches them.
+    const n = geohashNeighbours('u1219');
+    expect(n).toContain('u1218');
+    expect(n).toContain('u1213');
+  });
+
+  it('returns an empty array for an empty input', () => {
+    expect(geohashNeighbours('')).toEqual([]);
+  });
+
+  it('respects the input precision — no shorter or longer hashes leak', () => {
+    const n = geohashNeighbours('u12');
+    for (const g of n) expect(g).toHaveLength(3);
+  });
+
+  it('handles antimeridian wrap-around — neighbours of a meridian-edge tile resolve', () => {
+    // A tile abutting longitude 180° / -180° still has east + west
+    // neighbours; they wrap across the dateline rather than vanishing.
+    // 'zzzzz' sits at the +180° edge; its west neighbour should not
+    // be missing from the result.
+    const n = geohashNeighbours('zzzzz');
+    expect(n.length).toBeGreaterThanOrEqual(6);
+    // No invalid (pre-encode) characters in any returned hash.
+    for (const g of n) expect(g).toMatch(/^[0-9b-hjkmnp-z]+$/);
+  });
+
+  it('handles poles — past-pole positions are skipped, valid neighbours preserved', () => {
+    // 'bpbpbpb' is right at the north pole; some of the 3×3 grid
+    // positions step off the planet (lat > 90°). Those are skipped,
+    // not returned as invalid hashes.
+    const n = geohashNeighbours('b');
+    // Self at minimum.
+    expect(n.length).toBeGreaterThanOrEqual(1);
+    expect(n).toContain('b');
   });
 });

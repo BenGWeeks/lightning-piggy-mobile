@@ -64,7 +64,7 @@ import {
   decodeGeohash,
   encodeGeohash,
   formatDistance,
-  geohashPrefixes,
+  geohashNeighbours,
   haversineMetres,
 } from '../utils/geohash';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -617,13 +617,19 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     // timer that fires after the cleanup. Mirrors NostrContext.tsx's
     // DM inbox precedent.
     let cancelled = false;
-    const myGh = encodeGeohash(posLat, posLon, 7);
     // Caches sit at precision 5 (~5 km) — geocaching is inherently
     // hyper-local. Events broaden to precision 3 (~150 km) so a rural
     // user catches the nearest city's Bitcoin meetup; most NIP-52
     // publishers emit g tags at every precision 3..9.
-    const cachePrefixes = geohashPrefixes(myGh, 5).filter((p) => p.length === 5);
-    const eventPrefixes = geohashPrefixes(myGh, 3).filter((p) => p.length === 3);
+    //
+    // `geohashNeighbours` returns the user's own cell plus the 8
+    // surrounding tiles at that precision (9 prefixes for caches,
+    // 9 for events). Pre-#631 we used `geohashPrefixes(myGh, 5)`
+    // which returned only the user's own truncation chain — caches
+    // hidden in an adjacent precision-5 tile (e.g. 500 m across a
+    // tile boundary) never matched the `#g` filter.
+    const cachePrefixes = geohashNeighbours(encodeGeohash(posLat, posLon, 5));
+    const eventPrefixes = geohashNeighbours(encodeGeohash(posLat, posLon, 3));
 
     subsCloserRef.current.push(
       subscribeNearbyCaches(cachePrefixes, (c) => {
@@ -791,10 +797,22 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           : Number.POSITIVE_INFINITY;
       return { event, distance };
     });
+    // Keep events with no `g` tag (distance = ∞) — most NIP-52 publishers
+    // (OrangePillApp etc.) don't include one, so dropping them would leave
+    // the rail mostly empty even when legitimate Bitcoin meetups exist.
+    // The sort below puts geohash-ed events first, then unlocated ones
+    // tail-end. A future PR can split these into a separate "Events with
+    // no location" rail (task #51); for now lumping them in is the right
+    // trade-off.
     if (maxDistanceMetres !== null) {
-      items = items.filter((e) => e.distance <= maxDistanceMetres);
+      items = items.filter((e) => !Number.isFinite(e.distance) || e.distance <= maxDistanceMetres);
     }
-    items.sort((a, b) => a.distance - b.distance);
+    items.sort((a, b) => {
+      const af = Number.isFinite(a.distance);
+      const bf = Number.isFinite(b.distance);
+      if (af !== bf) return af ? -1 : 1;
+      return a.distance - b.distance;
+    });
     return items.slice(0, 50);
   }, [events, posLat, posLon, maxDistanceMetres]);
 
