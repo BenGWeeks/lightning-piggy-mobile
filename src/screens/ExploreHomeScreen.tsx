@@ -45,6 +45,7 @@ import {
   refreshDataset,
 } from '../services/btcMapService';
 import { useNearbyRadius } from '../hooks/useNearbyRadius';
+import { BOOSTED_RADIUS_METRES } from '../services/nearbyRadiusService';
 import { type ParsedCache, type ParsedEvent } from '../services/nostrPlacesService';
 import {
   fetchCachesByAuthor,
@@ -714,7 +715,15 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
       distance: haversineMetres({ lat: posLat, lon: posLon }, { lat: place.lat, lon: place.lon }),
     }));
     if (maxDistanceMetres !== null) {
-      items = items.filter((m) => m.distance <= maxDistanceMetres);
+      // Boosted/"Featured" merchants get a wider per-row cap so the user
+      // sees paid placements even when their general radius is tight.
+      // Max-wins: a user who's set the slider above 200 km keeps that.
+      items = items.filter((m) => {
+        const cap = isBoosted(m.place)
+          ? Math.max(maxDistanceMetres, BOOSTED_RADIUS_METRES)
+          : maxDistanceMetres;
+        return m.distance <= cap;
+      });
     }
     return (
       items

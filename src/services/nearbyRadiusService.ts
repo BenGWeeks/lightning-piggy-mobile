@@ -17,6 +17,14 @@ const STORAGE_KEY = '@lp:nearby-radius-v1';
 // the merchant payload doesn't grow unexpectedly.
 export const DEFAULT_RADIUS_METRES = 100_000; // 100 km
 
+// Boosted / "Featured" merchants from BTC Map are sparser per area than
+// regular merchants and the merchants themselves are explicitly paying
+// for distribution, so we widen the cap for them to 200 km regardless
+// of the user's general nearby radius. A user with the radius set to
+// 25 km still sees boosted merchants out to 200 km; a user with the
+// radius set wider than 200 km keeps their wider preference (max wins).
+export const BOOSTED_RADIUS_METRES = 200_000; // 200 km
+
 export interface RadiusOption {
   label: string;
   value: number | null; // metres; null = All
