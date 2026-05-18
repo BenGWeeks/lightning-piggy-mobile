@@ -25,6 +25,13 @@ import type { WotTier } from '../services/wotSettingsService';
 interface Props {
   visible: boolean;
   onClose: () => void;
+  /** Optional explicit "current" tier. When provided, the sheet renders
+   * that as the active row instead of reading the global value from
+   * `useTrustGraph()`. Lets a caller surface a *derived* tier in its
+   * chip — most cleanly used by the per-rail override design in #636.
+   * When omitted, falls back to the global persisted tier — every
+   * existing caller's behaviour. */
+  currentTier?: WotTier;
 }
 
 interface TierRowProps {
@@ -72,10 +79,15 @@ const TierRow: React.FC<TierRowProps> = ({ tier, title, subtitle, active, disabl
   );
 };
 
-const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose }) => {
+const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose, currentTier }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { wotTier, setWotTier } = useTrustGraph();
+  // `activeTier` is what the picker renders as "checked". Defaults to
+  // the global persisted tier; a caller can pass `currentTier` to
+  // override this when its chip surfaces a derived value (per-rail —
+  // #636) so the sheet's active state matches what the user just tapped.
+  const activeTier = currentTier ?? wotTier;
 
   // `lastTierRef` is retained for the future FoF re-enable so the
   // "compute now" affordance can compare incoming vs persisted tier
@@ -121,7 +133,7 @@ const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose }) => {
             tier="friends"
             title="Friends"
             subtitle="Only people you follow."
-            active={wotTier === 'friends'}
+            active={activeTier === 'friends'}
             disabled={false}
             onSelect={() => handleSelect('friends')}
           />
@@ -137,7 +149,7 @@ const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose }) => {
             tier="all"
             title="All"
             subtitle="Everything from every relay. Default until your trust graph is ready — switch to Friends to tighten."
-            active={wotTier === 'all'}
+            active={activeTier === 'all'}
             disabled={false}
             onSelect={() => handleSelect('all')}
           />
