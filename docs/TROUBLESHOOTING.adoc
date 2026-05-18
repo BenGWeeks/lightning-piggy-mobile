@@ -678,4 +678,18 @@ small test invoice and watch `adb logcat | grep '\[NWC lookupInvoice\]'`
 — the wire shape will tell you immediately whether you're on the WebLN
 or NIP-47 path. Cross-reference: PR #555 (`fix(nwc): cap lookupInvoice
 reply timeout`).
+
+| `[Perf]` / `[PerfTab]` / `[PerfBlock]` log lines missing on a real device
+| Production release builds strip every `console.log` via `babel.config.js`'s `transform-remove-console` plugin. `src/utils/perfLog.ts` is gated by the same `__DEV__ \|\| EXPO_PUBLIC_KEEP_PERF_LOGS === '1'` flag, so the whole module dead-code-eliminates in plain release builds. **The preview profile (`eas.json`) sets `EXPO_PUBLIC_KEEP_PERF_LOGS=1`** — so install the preview APK (`com.lightningpiggy.app.preview`), not the production one, when you need logcat-based perf attribution on a real device. `adb -s <serial> logcat -v time '*:S' ReactNativeJS:V` filters down to just JS console output.
+
+| Perfetto trace via `PERFETTO=1` returns an empty trace on a Pixel / production Android device
+| Consumer-shipped Android (`ro.build.flavor=shiba-user` etc.) runs the locked-down "user" SELinux policy. Perfetto's `linux.ftrace` data source — which our `scripts/lib/perf-stats.sh` config requests for `sched_switch` + atrace categories — is denied to the shell uid on user builds, so the daemon starts, enumerates processes/threads, then collects nothing else (the resulting `.pftrace` is ~500 KB of metadata only, `sched` / `slice` / `perf_sample` tables empty). +
+*Workaround:* the **emulator runs userdebug** by default, so Perfetto works there normally; use the emulator for system-level traces. For real-device JS-thread attribution, fall back to **logcat capture** during a Maestro flow: `adb logcat -c && adb logcat -v time '*:S' ReactNativeJS:V > /tmp/run.logcat &` + run the perf script + grep for `[PerfBlock]` / `[Perf] heartbeat gap=` markers. The heartbeat-gap pattern is what found the GPS-jitter cascade on #31.
+
+| Tab-switch perf script reports 20-30 s on the Pixel but the screen looks fully painted after ~1 s in screenshots
+| Maestro's `extendedWaitUntil: visible: text: "..."` polls UI Automator, which can be very slow on a busy JS thread. The thread might be busy with downstream rail / Nostr fetches that don't affect first paint — content is on screen but Maestro hasn't noticed yet. **Always cross-check the wall-clock number against an `adb exec-out screencap` time-lapse at the same intervals** (e.g. `for t in 1 3 6 10 15 20; do adb exec-out screencap -p > /tmp/t$t.png; sleep ...; done`) before concluding the app is genuinely slow. If md5sums are stable at t=1s onward, the freeze is Maestro's, not yours. The newer `[PerfTab] <tab> ready tap→ready=Xms` marker (`src/utils/perfLog.ts`) reports the in-app moment of usable content, decoupled from Maestro's polling.
+
+| Dev client on the Pixel fails to load with "no script URL provided" or similar after native deps change
+| The dev client APK on the device is paired with the bundle of native modules that was compiled into it. Adding or upgrading a native module (e.g. `@maplibre/maplibre-react-native`, `expo-nfc`, anything in the `plugins` array of `app.config.ts`) means the existing dev APK no longer has the native side of what the JS bundle calls. **Rebuild:** `npx expo run:android --device Pixel_8` (model name, not serial — see project memory `feedback-local-apk-for-pixel`). First time after a native dep churn is ~15 min; subsequent JS edits fast-refresh in ~2 s. Stale dev clients are easy to spot: `adb -s <serial> shell dumpsys package com.lightningpiggy.app.dev \| grep versionName` shows the package version vs. `pkg.version` in `package.json` — drift more than a few patch bumps means rebuild.
+
 |===

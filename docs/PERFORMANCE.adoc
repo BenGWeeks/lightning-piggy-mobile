@@ -94,6 +94,144 @@ Drop the `.pftrace` on https://ui.perfetto.dev. You can then:
 This is the canonical way to diagnose a freeze — wall-clock alone never
 names the culprit.
 
+== Per-screen markers via `[PerfTab]`
+
+`src/utils/perfLog.ts` exposes four bracketing markers around a tab
+switch. Two of them are emitted automatically by `AppNavigator.tsx`'s
+tab listeners; two are emitted by the destination screen itself.
+
+[cols="1,2,1", options="header"]
+|===
+| Marker | When | Source
+
+| `[PerfTab] <tab> tap`
+| `tabPress` event fires on the bottom tab button — closest thing to "user touched the screen".
+| `perfTabTap(name)` in the tab `listeners`.
+
+| `[PerfTab] <outgoing> hidden tap→hidden=Xms`
+| The blur event on the previously-focused tab landed. Brackets the navigation transition itself, so a slow `tap→hidden` means the animation is janking (not the destination).
+| `perfTabHidden(name)` in the tab `listeners` `blur:` handler.
+
+| `[PerfTab] <tab> focus tap→focus=Xms`
+| React Navigation completed routing to the new screen. Equivalent to "screen mounted / re-focused". Often very fast (under 200 ms) even when content is nowhere near ready.
+| `perfTabRendered(name)` in the tab `listeners` `focus:` handler.
+
+| `[PerfTab] <tab> ready tap→ready=Xms (detail)`
+| The destination screen judges its own content as usable. Deduplicated per tap so re-renders don't pollute the log.
+| `perfPageReady(name, detail?)` called from the destination screen — typically in a `useEffect` keyed off the first non-empty primary dataset.
+|===
+
+A healthy tab-switch reads:
+
+[source]
+----
+[PerfTab] Home hidden tap→hidden=120ms       ← old screen out
+[PerfTab] Explore focus tap→focus=180ms      ← new screen mounted
+[PerfTab] Explore ready tap→ready=420ms (10 merchants)
+----
+
+A degraded tab-switch (real example from #31 pre-fix on a Pixel 8):
+
+[source]
+----
+[PerfTab] Explore focus tap→focus=193ms
+[Perf] heartbeat #199 gap=7992ms             ← JS thread blocked 8s
+[PerfBlock] fetchCachesByAuthor: 4 events in 9402ms
+[PerfBlock] ExploreHome fetchPlacesInBbox: 10692ms places=367
+[PerfBlock] ExploreHome fetchPlacesInBbox: 11762ms places=367   ← second fetch!
+                                              (GPS-jitter cascade)
+----
+
+Focus event fired in 193 ms — fast — but `ready` would have come ~22 s
+later because the rail's `setMerchants` hadn't fired yet. **That's the
+gap between "screen is on" and "user can do something". Both numbers
+matter.**
+
+== Patterns to avoid
+
+These are concrete shapes that have caused user-perceived freezes in
+this codebase. Each one has a static test (greppable) and a runtime
+test (a marker that flares).
+
+=== GPS-jitter cascade (issue #31)
+
+**Shape:** a `useEffect` with `[pos]` (or another rapidly-changing
+context value) in its dep array kicks an async fetch. Android emits
+position samples ~1 Hz, each as a fresh `{lat, lon}` object — even
+when the user is sitting still and the lat/lon are byte-identical
+to the previous sample. React compares deps by reference, so the
+effect fires on every sample. Each fire spawns a new in-flight
+fetch; the previous one's Promise doesn't yield once it starts
+processing the response. They stack.
+
+**Symptom:** "first few clicks OK then really slows down" — the JS
+thread queue grows with each tab focus until it can't paint frames.
+`gfxinfo` collapses to single-digit frame counts per switch.
+
+**Fix:** derive a *bucketed* identity for the dep — round lat/lon to
+3 decimal places (~100 m) via `useMemo`, key the effect on that.
+Two samples that round to the same bucket = no re-fire. See
+`ExploreHomeScreen.tsx`'s `posBucket` for the canonical
+implementation. PlacesScreen / MapScreen don't need this — they
+have an actively-panned map where every metre matters.
+
+**Static test:** `grep -nE "useEffect\\(.*\\[.*pos.*\\]"` across screens.
+Anything matching deserves a bucket.
+
+=== Country-sized BTC Map bbox queries (also #31)
+
+**Shape:** `fetchPlacesInBbox({ minLat: pos.lat - 2, maxLat: pos.lat + 2, … })`
+covering a ±2° rectangle returns 300-400 merchants the screen only
+ever shows ~10 of. Network payload is large, post-response
+`Array.map(reshape)` blocks the JS thread for 5-8 s synchronously,
+every MapLibre marker becomes a `<Marker>` element React has to
+reconcile.
+
+**Fix:** **tiered nearest-N** via `fetchNearestPlaces(lat, lon, 10)`
+(see `src/services/btcMapService.ts`) — walks radii 25 → 100 → 500 km
+until at least N results come back. Urban callers do one ~10 KB
+round-trip; rural callers walk further. Pair with an
+anchor + time SWR short-circuit so repeated tab focuses inside an
+hour, within 5 km, don't hit the network at all. Only use on
+surfaces where the map is decorative; PlacesScreen / MapScreen keep
+the bbox call.
+
+=== console.log left on a per-event hot path
+
+**Shape:** a `console.log` inside a Nostr `onevent` callback or a
+streaming response handler. Each emission costs ~0.5-2 ms of
+formatting + IPC to the native bridge. 150 profile events on cold
+start = 75-300 ms of pure log overhead.
+
+**Fix:** guard with `if (__DEV__)`. The repo's `EXPO_PUBLIC_KEEP_PERF_LOGS`
+flag re-enables them when needed, but the default release path is
+stripped via `babel-plugin-transform-remove-console`.
+
+== Capturing logcat during a perf script (real device)
+
+Perfetto can't see system-level events on a "user" Android build
+(see TROUBLESHOOTING). For real-device JS-thread attribution,
+combine `adb logcat` with the perf script:
+
+[source,bash]
+----
+adb -s "$SERIAL" logcat -c
+adb -s "$SERIAL" logcat -v time '*:S' ReactNativeJS:V > /tmp/run.logcat &
+LOGCAT_PID=$!
+sleep 1
+PIGGY_DEVICE="$SERIAL" PIGGY_APP_ID=com.lightningpiggy.app.preview \
+  scripts/perf-explore-tab-switch.sh 8
+sleep 3
+kill $LOGCAT_PID
+grep -E "\\[PerfTab\\]|\\[PerfBlock\\]|\\[Perf\\] heartbeat gap=[0-9]{3,}" /tmp/run.logcat
+----
+
+The `[Perf] heartbeat gap=` filter narrows to gaps ≥100 ms — every
+synchronous JS-thread block that lasted longer than a frame budget.
+Pair with a per-iteration screenshot loop (see `TROUBLESHOOTING.adoc`'s
+"Tab-switch perf script reports 20-30 s..." entry) to confirm whether
+the freeze is real or a Maestro artefact.
+
 == Methodology
 
 Stev.ie owns the deeper methodology — see `.claude/agents/stevie.md`
