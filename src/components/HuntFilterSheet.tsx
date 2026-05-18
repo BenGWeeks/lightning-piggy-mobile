@@ -103,7 +103,7 @@ const HuntFilterSheet: React.FC<Props> = ({
     selectedDifficulties.size > 0 ||
     selectedTerrains.size > 0 ||
     selectedTypes.size > 0 ||
-    wotTier !== 'friends';
+    wotTier !== 'all';
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -313,7 +313,7 @@ export const countActiveFilters = (params: {
   if (params.selectedDifficulties.size > 0) n += 1;
   if (params.selectedTerrains.size > 0) n += 1;
   if (params.selectedTypes.size > 0) n += 1;
-  if (params.wotTier !== 'friends') n += 1;
+  if (params.wotTier !== 'all') n += 1;
   return n;
 };
 

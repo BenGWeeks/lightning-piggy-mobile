@@ -26,6 +26,7 @@ import HuntFilterSheet, { countActiveFilters } from '../components/HuntFilterShe
 import type { Palette } from '../styles/palettes';
 import { ExploreNavigation } from '../navigation/types';
 import { LibreMiniMap } from '../components/LibreMiniMap';
+import { CacheDetailSheet } from '../components/CacheDetailSheet';
 import { useUserLocation } from '../contexts/UserLocationContext';
 import LegendSheet from '../components/LegendSheet';
 import { type ParsedCache } from '../services/nostrPlacesService';
@@ -36,7 +37,7 @@ import {
   decodeGeohash,
   encodeGeohash,
   formatDistance,
-  geohashPrefixes,
+  geohashNeighbours,
   haversineMetres,
 } from '../utils/geohash';
 
@@ -160,6 +161,9 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   // Whether the bottom-sheet filter UI is open.
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const [legendVisible, setLegendVisible] = useState(false);
+  // Mini-map pin-tap → opens the shared `CacheDetailSheet`, same UX
+  // as the Explore mini-map + the full MapScreen. PR #630 follow-up.
+  const [selectedCache, setSelectedCache] = useState<ParsedCache | null>(null);
   // Map-touch tracking removed when the map moved out of the
   // FlatList header (commit eedd82e follow-up). Map and list are now
   // siblings, so touches on the map don't reach the FlatList at all.
@@ -206,8 +210,13 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   // Cache subscription — kicks off once we have a fix.
   useEffect(() => {
     if (!pos) return;
-    const myGeohash = encodeGeohash(pos.lat, pos.lon, 7);
-    const prefixes = geohashPrefixes(myGeohash, 5).filter((p) => p.length === 5);
+    // 9 prefixes (user's precision-5 tile + 8 neighbours) so caches
+    // hidden in adjacent ~5 km tiles surface too. The Explore mini-map
+    // got the same treatment earlier in this branch. Pre-#631 the
+    // previous `geohashPrefixes(...).filter((p) => p.length === 5)`
+    // returned only the user's own truncation, so a cache 500 m across
+    // a tile boundary stayed invisible.
+    const prefixes = geohashNeighbours(encodeGeohash(pos.lat, pos.lon, 5));
     // Load every nearby cache regardless of trust — the WoT filter is
     // applied at render time (sortedCaches), so flipping the tier
     // re-filters instantly with no re-subscribe or relay round-trip.
@@ -373,6 +382,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
           caches={filteredCaches.map((c) => c.cache)}
           events={[]}
           onTapMap={() => navigation.navigate('Map')}
+          onSelectCache={(c) => setSelectedCache(c)}
           onOpenLegend={() => setLegendVisible(true)}
           // One zoom level wider than the default 13 so the Geo-caches
           // hub map shows a bigger catchment without the user having to
@@ -486,6 +496,21 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
         placesVisible={false}
         availableCategories={[]}
       />
+      {/* Mini-map pin-tap sheet — same component MapScreen +
+          ExploreHomeScreen use so the interaction shape is identical
+          across every map surface. PR #630 follow-up. */}
+      {selectedCache && (
+        <CacheDetailSheet
+          cache={selectedCache}
+          colors={colors}
+          onClose={() => setSelectedCache(null)}
+          onViewDetails={() => {
+            const coord = selectedCache.coord;
+            setSelectedCache(null);
+            navigation.navigate('HuntPiggyDetail', { coord });
+          }}
+        />
+      )}
     </View>
   );
 };
