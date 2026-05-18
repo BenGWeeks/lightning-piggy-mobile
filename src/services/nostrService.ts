@@ -73,6 +73,22 @@ export const __resetVerifiedEventCache = (): void => {
 };
 export const __verifiedEventCacheSize = (): number => verifiedEventIds.size;
 
+// Non-financial event kinds where a malicious relay can at worst show
+// stale / fake content — there's no LNURL or wallet-relevant data inside
+// the event, so a forged one doesn't move funds. For these we skip
+// schnorr and run only the cheap structural validate.
+//
+// - 37516 NIP-GC cache listing: the LNURL bearer lives on the NFC tag,
+//   never on the Nostr event (see `feedback_lnurl_never_on_relays` in
+//   the buildCacheListing comment). Worst case: a fake cache appears
+//   on the map. Finder still has to scan a real tag to claim.
+// - 31923 NIP-52 time-based event: meetup metadata. A fake "Bitcoin
+//   meetup tonight" wastes the user's time, costs no money.
+//
+// Other kinds keep the full schnorr — DMs (4 / 14), reactions, zap
+// requests/receipts, comment kinds (1111), found logs (7516), etc.
+const SKIP_VERIFY_KINDS = new Set<number>([37516, 31923]);
+
 pool.verifyEvent = ((event: NostrEvent): event is VerifiedEvent => {
   // Skip the schnorr check if we've seen this exact event id pass it
   // before (this run of the app). Per-event ids are 32-byte SHA-256
@@ -82,7 +98,7 @@ pool.verifyEvent = ((event: NostrEvent): event is VerifiedEvent => {
     return true;
   }
   let ok: boolean;
-  if (event.kind === 0) {
+  if (event.kind === 0 || SKIP_VERIFY_KINDS.has(event.kind)) {
     ok = validateEvent(event);
   } else {
     ok = verifyEvent(event);
