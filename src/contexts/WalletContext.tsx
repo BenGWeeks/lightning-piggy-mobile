@@ -653,6 +653,24 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   }, [currency, fetchPrice]);
 
+  // Retry the fiat-price fetch when the app comes to foreground if we
+  // don't yet have a rate. Covers the cold-start-offline case: app
+  // launches without internet → `fetchPrice` returns null → `btcPrice`
+  // stays null → the wallet card's fiat line + the sats↔fiat toggle in
+  // `AmountEntryScreen` both silently disable (they gate on
+  // `btcPrice !== null`). Without this retry, the user has to wait up
+  // to 5 min for the interval tick or kill + relaunch the app to recover
+  // once connectivity returns. Gate on `btcPrice === null` so we don't
+  // spam CoinGecko in the happy path where the rate is already cached.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active' && btcPrice === null) {
+        fetchPrice(currency);
+      }
+    });
+    return () => sub.remove();
+  }, [btcPrice, currency, fetchPrice]);
+
   // NWC connection status: check WebSocket state every 30 seconds and
   // reconnect if dropped (prevents idle timeout disconnections).
   //
