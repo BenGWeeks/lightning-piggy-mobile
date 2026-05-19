@@ -138,25 +138,39 @@ describe('formatFiat', () => {
 });
 
 describe('currencySymbol', () => {
-  // Locale-tolerant — Intl on Hermes can return the symbol with a non-
-  // breaking space tail; we strip whitespace as part of the helper but
-  // still allow any extra cruft just in case.
+  // Reads straight from `CURRENCY_LIST` (the curated picker source),
+  // so this just spot-checks that the function plumbs the right field.
+  // Includes the codes whose Intl rendering varies most (AUD/BRL/CHF/SEK)
+  // — those are the ones the picker-symbol switch (#644 review) fixes.
   it.each([
-    ['GBP', '£'],
     ['USD', '$'],
     ['EUR', '€'],
+    ['GBP', '£'],
+    ['AUD', 'A$'],
+    ['BRL', 'R$'],
+    ['CHF', 'CHF'],
+    ['SEK', 'kr'],
   ])('%s -> %s', (code, expected) => {
-    expect(currencySymbol(code as 'GBP' | 'USD' | 'EUR')).toContain(expected);
+    expect(currencySymbol(code)).toBe(expected);
+  });
+
+  it('falls back to the ISO code for unknown currencies', () => {
+    expect(currencySymbol('ZZZ')).toBe('ZZZ');
   });
 });
 
 describe('satsToFiatString', () => {
   // The placeholder branch lets WalletCard keep a stable-height row
-  // when the BTC price hasn't arrived yet (#633).
-  it('returns a currency-symbol + em-dash placeholder when btcPrice is null', () => {
+  // when the BTC price hasn't arrived yet (#633). EN DASH (U+2013) is
+  // the deliberate glyph — see the comment on the function itself.
+  it('returns a currency-symbol + en-dash placeholder when btcPrice is null', () => {
     const out = satsToFiatString(123_456, null, 'GBP');
-    expect(out).toContain('£');
-    expect(out.endsWith('–')).toBe(true);
+    expect(out).toBe('£–');
+  });
+
+  it('uses the picker symbol for currencies whose Intl rendering varies (AUD)', () => {
+    const out = satsToFiatString(123_456, null, 'AUD');
+    expect(out).toBe('A$–');
   });
 
   it('formats the regular value when btcPrice is present', () => {
