@@ -32,6 +32,7 @@
     "@maplibre/maplibre-react-native": "^11.2.1",
     "@noble/hashes": "^2.0.1",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-community/netinfo": "^12.0.1",
     "@react-navigation/bottom-tabs": "^7.15.8",
     "@react-navigation/drawer": "^7.9.8",
     "@react-navigation/native": "^7.2.1",

@@ -24,6 +24,7 @@ import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
 import BootSplash from './src/components/BootSplash';
 import { BrandedAlertHost } from './src/components/BrandedAlert';
 import { BrandedToast, Toast } from './src/components/BrandedToast';
+import OfflineBanner from './src/components/OfflineBanner';
 
 // Renders the global incoming-payment celebration on top of the nav
 // stack. Lives inside the WalletProvider so it can subscribe to the
@@ -272,6 +273,12 @@ export default function App() {
                     <UserLocationProvider>
                       <BottomSheetModalProvider>
                         <ThemedStatusBar />
+                        {/* Sits above the navigator so a single banner
+                            covers every screen + tab when the device
+                            loses connectivity. Slides on/off via the
+                            internal `isConnected` check — no layout
+                            penalty when online (returns null). See #634. */}
+                        <OfflineBanner />
                         <AppNavigator />
                       </BottomSheetModalProvider>
                     </UserLocationProvider>
