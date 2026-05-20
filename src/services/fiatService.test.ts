@@ -138,19 +138,12 @@ describe('formatFiat', () => {
 });
 
 describe('currencySymbol', () => {
-  // Reads straight from `CURRENCY_LIST` (the curated picker source),
-  // so this just spot-checks that the function plumbs the right field.
-  // Includes the codes whose Intl rendering varies most (AUD/BRL/CHF/SEK)
-  // — those are the ones the picker-symbol switch (#644 review) fixes.
-  it.each([
-    ['USD', '$'],
-    ['EUR', '€'],
-    ['GBP', '£'],
-    ['AUD', 'A$'],
-    ['BRL', 'R$'],
-    ['CHF', 'CHF'],
-    ['SEK', 'kr'],
-  ])('%s -> %s', (code, expected) => {
+  // Cover *every* currency the settings picker offers, not a hand-picked
+  // few (#644 review): the placeholder renders for all 38, so all 38 need
+  // a known-good symbol. This also locks in the function's contract —
+  // it must always read from `CURRENCY_LIST`, never fall back to Intl,
+  // whose rendering diverges for AUD/BRL/CHF/SEK and others.
+  it.each(CURRENCY_LIST.map((c) => [c.code, c.symbol] as const))('%s -> %s', (code, expected) => {
     expect(currencySymbol(code)).toBe(expected);
   });
 
@@ -171,6 +164,12 @@ describe('satsToFiatString', () => {
   it('uses the picker symbol for currencies whose Intl rendering varies (AUD)', () => {
     const out = satsToFiatString(123_456, null, 'AUD');
     expect(out).toBe('A$–');
+  });
+
+  it('renders a stable placeholder for every settings currency when btcPrice is null', () => {
+    for (const c of CURRENCY_LIST) {
+      expect(satsToFiatString(123_456, null, c.code)).toBe(`${c.symbol}–`);
+    }
   });
 
   it('formats the regular value when btcPrice is present', () => {
