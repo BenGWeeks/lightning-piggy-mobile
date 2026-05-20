@@ -65,10 +65,18 @@ const createStyles = (colors: Palette, topInset: number) =>
     container: {
       // Sits below the system status bar (notch / camera cutout): the
       // safe-area inset clears the status icons, then the bar hugs the
-      // text with only a hairline of breathing room above and below so
-      // it doesn't shove the page down (#634 review).
+      // text with a hairline of breathing room above and below.
       paddingTop: topInset + 3,
       paddingBottom: 3,
+      // The screen below applies its OWN top safe-area inset, so without
+      // this the status-bar gap is reserved twice and the page drops by
+      // an extra `topInset` it doesn't need (#634 review). Cancel our
+      // share of that inset with a negative margin — the bar still paints
+      // over the status bar, but only its text height adds to the layout.
+      // zIndex/elevation keep it above the content it now overlaps.
+      marginBottom: -topInset,
+      zIndex: 10,
+      elevation: 10,
       backgroundColor: colors.brandPurple,
       paddingHorizontal: 16,
       alignItems: 'center',
