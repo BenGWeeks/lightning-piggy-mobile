@@ -63,13 +63,14 @@ export default OfflineBanner;
 const createStyles = (colors: Palette, topInset: number) =>
   StyleSheet.create<{ container: ViewStyle; text: TextStyle }>({
     container: {
-      // Sits below the system status bar (notch / camera cutout). The
-      // safe-area inset is added to a 28dp content height so the banner
-      // never collides with the status icons.
-      paddingTop: topInset,
-      backgroundColor: colors.brandPink,
+      // Sits below the system status bar (notch / camera cutout): the
+      // safe-area inset clears the status icons, then the bar hugs the
+      // text with only a hairline of breathing room above and below so
+      // it doesn't shove the page down (#634 review).
+      paddingTop: topInset + 3,
+      paddingBottom: 3,
+      backgroundColor: colors.brandPurple,
       paddingHorizontal: 16,
-      paddingBottom: 6,
       alignItems: 'center',
       justifyContent: 'center',
     },
@@ -77,6 +78,6 @@ const createStyles = (colors: Palette, topInset: number) =>
       color: colors.white,
       fontSize: 13,
       fontWeight: '600',
-      lineHeight: 18,
+      lineHeight: 16,
     },
   });

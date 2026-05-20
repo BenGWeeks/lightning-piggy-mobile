@@ -35,6 +35,10 @@ export const lightPalette = {
   // map pin + legend chip styles).
   cachePurple: '#7A5CFF',
   eventViolet: '#5B3AFF',
+  // Lightning Piggy card purple (the lighter top of the card's
+  // #9B40FF -> #7A30F3 gradient). Used by the offline banner so it reads
+  // as the brand's Nostr violet rather than the hot-pink alert colour.
+  brandPurple: '#9B40FF',
 };
 
 // Dark palette: keep the Lightning Piggy brand hot-pink intact, swap the
@@ -72,6 +76,8 @@ export const darkPalette: typeof lightPalette = {
   // themes so no adjustment needed.
   cachePurple: '#7A5CFF',
   eventViolet: '#5B3AFF',
+  // Same brand violet in both themes — reads well on light and dark.
+  brandPurple: '#9B40FF',
 };
 
 export type Palette = typeof lightPalette;
