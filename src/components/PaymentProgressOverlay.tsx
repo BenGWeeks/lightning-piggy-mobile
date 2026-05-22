@@ -25,7 +25,7 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated';
 import type { SharedValue } from 'react-native-reanimated';
-import { Check, X } from 'lucide-react-native';
+import { Check, X, WifiOff } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { lightPalette, type Palette } from '../styles/palettes';
 
@@ -33,6 +33,10 @@ export type PaymentProgressState =
   | 'sending'
   | 'in-flight-extended'
   | 'success'
+  // Relay/transport connectivity failure — outcome UNKNOWN, not a
+  // confirmed failure (#648). Distinct from 'error' so we never imply the
+  // payment failed when it may have settled.
+  | 'connection-lost'
   | 'error'
   | 'hidden';
 export type PaymentDirection = 'send' | 'receive';
@@ -369,6 +373,14 @@ export default function PaymentProgressOverlay({
         withTiming(0, { duration: 0 }),
         withSpring(1, { damping: 10, stiffness: 220 }),
       );
+    } else if (state === 'connection-lost') {
+      // Not a failure — keep the neutral palette (no red morph) but pop
+      // the icon in so the "couldn't confirm" card reads as resolved.
+      colorProgress.value = 0;
+      iconScale.value = withSequence(
+        withTiming(0, { duration: 0 }),
+        withSpring(1, { damping: 10, stiffness: 220 }),
+      );
     } else if (state === 'sending' || state === 'in-flight-extended') {
       colorProgress.value = 0;
       iconScale.value = 0;
@@ -411,6 +423,10 @@ export default function PaymentProgressOverlay({
           ? `from ${recipientName}`
           : `to ${recipientName}`
         : undefined;
+  } else if (state === 'connection-lost') {
+    title = 'Connection lost';
+    subtitle =
+      "We couldn't reach your wallet to confirm. Your payment may still have gone through — check your balance before trying again.";
   } else if (state === 'error') {
     title = 'Payment failed';
     subtitle = humanizedError.message;
@@ -480,6 +496,11 @@ export default function PaymentProgressOverlay({
           {state === 'error' && (
             <Animated.View style={[styles.iconSlot, styles.errorCircle, iconAnimatedStyle]}>
               <X size={44} color={colors.white} strokeWidth={3.5} />
+            </Animated.View>
+          )}
+          {state === 'connection-lost' && (
+            <Animated.View style={[styles.iconSlot, styles.connectionCircle, iconAnimatedStyle]}>
+              <WifiOff size={40} color={colors.white} strokeWidth={3} />
             </Animated.View>
           )}
 
@@ -606,6 +627,12 @@ const createStyles = (colors: Palette) =>
     errorCircle: {
       borderRadius: 36,
       backgroundColor: colors.red,
+    },
+    // Amber, not red: a connection loss is "couldn't confirm", not a
+    // confirmed failure (#648).
+    connectionCircle: {
+      borderRadius: 36,
+      backgroundColor: colors.zapYellow,
     },
     title: {
       fontSize: 20,

@@ -64,6 +64,28 @@ export function isReplyTimeoutError(error: unknown): boolean {
   return (error as Error)?.name === REPLY_TIMEOUT_ERROR_NAME;
 }
 
+// True when the failure is a relay/transport connectivity problem rather
+// than a confirmed payment outcome — e.g. the relay was unreachable
+// ("Failed to connect to wss://…", NWC code OTHER) or a publish never
+// completed. Like a reply-timeout, the payment status is UNKNOWN: it may
+// well have settled. Callers must NOT present these as "Payment failed"
+// (#648) — a user who trusts that may re-send and double-pay.
+export function isConnectionError(error: unknown): boolean {
+  const msg = (
+    (error as { message?: string } | undefined)?.message ?? String(error ?? '')
+  ).toLowerCase();
+  return (
+    msg.includes('failed to connect') ||
+    msg.includes('publish timed out') ||
+    msg.includes('publish failed') ||
+    msg.includes('could not connect') ||
+    msg.includes('network request failed') ||
+    msg.includes('websocket') ||
+    msg.includes('connection closed') ||
+    msg.includes('connection lost')
+  );
+}
+
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) throw createAbortError();
 }
