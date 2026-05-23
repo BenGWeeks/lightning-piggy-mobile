@@ -110,6 +110,7 @@ describe('isConnectionError (#648 — connection-lost vs confirmed failure)', ()
     'Failed to connect to wss://relay.coinos.io',
     'failed to connect to any relay',
     'publish timed out',
+    "Couldn't reach your wallet: relay publish timed out",
     '[NWC] Relay publish failed',
     'Network request failed',
     'WebSocket connection closed',

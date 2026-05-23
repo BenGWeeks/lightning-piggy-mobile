@@ -500,7 +500,7 @@ export default function PaymentProgressOverlay({
           )}
           {state === 'connection-lost' && (
             <Animated.View style={[styles.iconSlot, styles.connectionCircle, iconAnimatedStyle]}>
-              <WifiOff size={40} color={colors.white} strokeWidth={3} />
+              <WifiOff size={40} color={colors.zapYellowInk} strokeWidth={3} />
             </Animated.View>
           )}
 
