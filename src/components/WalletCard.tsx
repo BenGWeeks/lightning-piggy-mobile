@@ -155,9 +155,16 @@ const CardContent: React.FC<{
             <Text style={[styles.balance, { color: theme.textColor }]}>
               {hideBalance ? '***' : balance !== null ? `${balance!.toLocaleString()} sats` : '---'}
             </Text>
-            {!hideBalance && balance !== null && btcPrice !== null && currency && (
+            {/* Render the fiat row whenever we know the user's selected
+                currency, even if the BTC price hasn't arrived yet.
+                `satsToFiatString` now returns a `£–` (or `$–`, `€–`)
+                placeholder when `btcPrice === null` so the row keeps a
+                stable height while we're offline / mid-fetch — see #633.
+                The `btcPrice !== null` gate used to hide the row and
+                made users wonder if the wallet was broken. */}
+            {!hideBalance && balance !== null && currency && (
               <Text style={[styles.fiatBalance, { color: theme.textColor }]}>
-                {satsToFiatString(balance!, btcPrice!, currency)}
+                {satsToFiatString(balance!, btcPrice ?? null, currency)}
               </Text>
             )}
           </View>
