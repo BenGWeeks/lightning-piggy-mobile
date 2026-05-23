@@ -38,7 +38,7 @@ import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as SecureStore from 'expo-secure-store';
 import { npubEncode } from '../services/nostrService';
 import { recordOutgoing as recordOutgoingCounterparty } from '../services/zapCounterpartyStorage';
-import { isReplyTimeoutError } from '../services/nwcService';
+import { isReplyTimeoutError, isConnectionError } from '../services/nwcService';
 import PaymentProgressOverlay, { PaymentProgressState } from './PaymentProgressOverlay';
 import AmountEntryScreen from './AmountEntryScreen';
 import { perfLog } from '../utils/perfLog';
@@ -673,6 +673,16 @@ const SendSheet: React.FC<Props> = ({
         if (dismissedInFlightRef.current) return;
         setProgressError(undefined);
         setProgressState('in-flight-extended');
+        return;
+      }
+      // A relay/transport connectivity failure (relay unreachable, publish
+      // never completed) is an UNKNOWN outcome, not a confirmed failure —
+      // the payment may have settled. Surface "Connection lost" with a
+      // check-before-retry warning instead of "Payment failed" (#648).
+      if (isConnectionError(error)) {
+        if (dismissedInFlightRef.current) return;
+        setProgressError(undefined);
+        setProgressState('connection-lost');
         return;
       }
       if (dismissedInFlightRef.current) return;
