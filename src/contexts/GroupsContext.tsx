@@ -59,17 +59,16 @@ interface GroupsContextType {
   followingOnly: boolean;
   /**
    * @deprecated See `followingOnly`. Setting this maps onto `setWotTier`:
-   * true → 'friends', false → 'all' (clamped to 'friends' when not in
-   * secret mode, matching the production hard-lock).
+   * true → 'friends', false → 'all'. Since #640 removed the secret-mode
+   * clamp this is simply a pass-through to the global WoT picker — kept
+   * for any out-of-tree consumer that still flips the boolean.
    */
   setFollowingOnly: (next: boolean) => void;
-  // Effective WoT tier after the production hard-lock has been applied.
-  // Mirrors the persisted `wotTier` from TrustGraphContext except that
-  // 'all' is coerced to 'friends' when the user is not in secret mode —
-  // preventing a stale persisted 'all' from leaking past the parental-
-  // control gate after secretMode is flipped back off. Consumers should
-  // read this rather than `useTrustGraph().wotTier` when the visibility
-  // decision must honour the hard-lock.
+  // Effective WoT tier. Used to differ from `wotTier` via a secret-mode
+  // clamp (#547); since #640 removed that clamp the two values are
+  // identical. The field is retained so in-tree readers don't all need
+  // changing in one go — new code should prefer `useTrustGraph().wotTier`
+  // directly.
   effectiveWotTier: WotTier;
   /** Mirrors AsyncStorage `secret_mode`. Controls whether the chip is interactive. */
   secretMode: boolean;
@@ -306,14 +305,18 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     AsyncStorage.setItem('secret_mode', next ? 'true' : 'false').catch(() => {});
   }, []);
 
-  // Production hard-lock guard (#547). A stale persisted 'all' must never
-  // leak past the parental-control gate after secret mode has been
-  // flipped back off — clamp to 'friends' (the safest tier) in that case.
-  // The persisted wotTier itself is left alone so the user keeps their
-  // wider tier preference if they re-enable secret mode later. This
-  // mirrors the `followingOnly || !secretMode` defence-in-depth that
-  // visibleGroups used before #547 — same rule, three-tier shape.
-  const effectiveWotTier: WotTier = !secretMode && wotTier === 'all' ? 'friends' : wotTier;
+  // `effectiveWotTier` previously clamped 'all' → 'friends' when secret
+  // mode was off (#547 parental-control hard-lock). That clamp has been
+  // removed (#640): the WoT picker is now the single source of truth
+  // and what the user sees in the bottom sheet is what every surface —
+  // including Messages — actually applies. Secret mode still controls
+  // its other UI-affordance reveals (delete-group, dev build hash, etc.)
+  // but no longer over-rides the tier. The field is retained on the
+  // context so the wide audience of `useGroups().effectiveWotTier`
+  // readers (Messages, Groups, the dev-only TestID hooks, plus the
+  // deprecated `followingOnly` derivation below) don't all need
+  // changing this turn; it now simply mirrors `wotTier`.
+  const effectiveWotTier: WotTier = wotTier;
 
   // Deprecated boolean view of the tier — see the interface docstring.
   // Kept for any out-of-tree consumer; in-tree consumers should read

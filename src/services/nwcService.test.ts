@@ -28,7 +28,7 @@ jest.mock('@getalby/sdk', () => ({
   })),
 }));
 
-import { connect, getBalance } from './nwcService';
+import { connect, getBalance, isConnectionError, isReplyTimeoutError } from './nwcService';
 
 const VALID_NWC_URL =
   'nostr+walletconnect://' +
@@ -102,5 +102,33 @@ describe('nwcService.getBalance with replyTimeoutMs', () => {
     const balance = await getBalance(WALLET_ID);
     expect(balance).toBe(999);
     expect(calls).toBe(2);
+  });
+});
+
+describe('isConnectionError (#648 — connection-lost vs confirmed failure)', () => {
+  it.each([
+    'Failed to connect to wss://relay.coinos.io',
+    'failed to connect to any relay',
+    'publish timed out',
+    "Couldn't reach your wallet: relay publish timed out",
+    '[NWC] Relay publish failed',
+    'Network request failed',
+    'WebSocket connection closed',
+    'connection lost',
+  ])('treats %j as a connectivity (unknown-outcome) error', (msg) => {
+    expect(isConnectionError(new Error(msg))).toBe(true);
+  });
+
+  it.each(['Insufficient funds', 'invoice expired', 'no route', 'payment failed'])(
+    'does NOT treat %j (a confirmed wallet error) as a connection error',
+    (msg) => {
+      expect(isConnectionError(new Error(msg))).toBe(false);
+    },
+  );
+
+  it('a connection error is distinct from a reply-timeout', () => {
+    const connErr = new Error('Failed to connect to wss://relay.coinos.io');
+    expect(isConnectionError(connErr)).toBe(true);
+    expect(isReplyTimeoutError(connErr)).toBe(false);
   });
 });
