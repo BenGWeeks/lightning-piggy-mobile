@@ -174,6 +174,7 @@ describe('satsToFiatString', () => {
 
   it('formats the regular value when btcPrice is present', () => {
     const out = satsToFiatString(100_000_000, 50_000, 'USD');
-    expect(out).toMatch(/50[.,]?0{3}/);
+    // locale-tolerant: strip grouping/decimal marks (some locales use space/NBSP); 50000.00 → "5000000"
+    expect(out.replace(/\D/g, '')).toBe('5000000');
   });
 });
