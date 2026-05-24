@@ -820,7 +820,12 @@ interface NostrContextType {
   }) => Promise<boolean>;
   followContact: (pubkey: string) => Promise<boolean>;
   unfollowContact: (pubkey: string) => Promise<boolean>;
-  addContact: (npubOrHex: string) => Promise<{ success: boolean; error?: string }>;
+  addContact: (
+    npubOrHex: string,
+  ) => Promise<
+    | { success: true; pubkey: string; alreadyFollowing?: boolean }
+    | { success: false; error: string }
+  >;
   sendDirectMessage: (
     recipientPubkey: string,
     plaintext: string,
@@ -2257,7 +2262,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
 
   const addContact = useCallback(
-    async (npubOrHex: string): Promise<{ success: boolean; error?: string }> => {
+    async (
+      npubOrHex: string,
+    ): Promise<
+      | { success: true; pubkey: string; alreadyFollowing?: boolean }
+      | { success: false; error: string }
+    > => {
       try {
         let hex = npubOrHex.trim();
         // Strip nostr: URI prefix (NIP-21)
@@ -2273,11 +2283,13 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           return { success: false, error: 'Invalid public key format' };
         }
         if (contacts.some((c) => c.pubkey === hex)) {
-          return { success: false, error: 'Already following this contact' };
+          // Already a follow — not a failure. Surface it as a neutral
+          // "already connected" so the UI doesn't show a red error (#660).
+          return { success: true, alreadyFollowing: true, pubkey: hex };
         }
         const success = await followContact(hex);
         return success
-          ? { success: true }
+          ? { success: true, pubkey: hex }
           : { success: false, error: 'Failed to publish contact list' };
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : 'Invalid key' };
