@@ -25,10 +25,12 @@ describe('slimDisplayProfile', () => {
     expect(slimDisplayProfile(fullProfile).lud16).toBeNull();
   });
 
-  it('drops banner and about as dead weight the display paths never read', () => {
-    const slim = slimDisplayProfile(fullProfile);
-    expect(slim.banner).toBeNull();
-    expect(slim.about).toBeNull();
+  it('keeps the banner (cosmetic) — the quick-profile sheet renders it (#666/#18)', () => {
+    expect(slimDisplayProfile(fullProfile).banner).toBe('https://example.com/banner.png');
+  });
+
+  it('keeps about (cosmetic) so the bio isn’t empty on batch-fetched profiles', () => {
+    expect(slimDisplayProfile(fullProfile).about).toBe('pizza enjoyer');
   });
 
   it('keeps the display fields the zap resolver and contacts list render', () => {
