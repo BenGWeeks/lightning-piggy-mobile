@@ -333,8 +333,8 @@ eas env:list --environment production
 *Immediate recovery:* `adb reboot`, wait for `getprop sys.boot_completed` = 1, then `adb install -r android/app/build/outputs/apk/debug/app-debug.apk` — Expo's CLI install step is more fragile under memory pressure than raw `adb install`. +
 *Prevent:* bump AVD RAM + heap (see the "System UI isn't responding" entry above), and consider using a **Google APIs** (not Google Play) system image for dev — removes the Play Store + GMS daemons that consume ~300 MB RAM / 60% CPU.
 
-| Emulator crawls (heartbeat gaps, app at 100 %+ CPU) specifically while an NWC wallet is configured but its relay is unreachable
-| Distinct from RAM thrashing: an *unreachable* NWC relay used to make the app churn — it kept polling the dead relay every 10 s and retried `connect()` on every 30 s tick, pinning the JS thread (heartbeat gaps to 180 s+, app at 100–300 % CPU). Common trigger when developing remotely: the relay host (e.g. a self-hosted LNbits) is behind a home connection that's down, or only reachable over a VPN that isn't up. +
+| Emulator crawls (heartbeat gaps, app at 100%+ CPU) specifically while an NWC wallet is configured but its relay is unreachable
+| Distinct from RAM thrashing: an *unreachable* NWC relay used to make the app churn — it kept polling the dead relay every 10 s and retried `connect()` on every 30 s tick, pinning the JS thread (heartbeat gaps to 180 s+, app at 100–300% CPU). Common trigger when developing remotely: the relay host (e.g. a self-hosted LNbits) is behind a home connection that's down, or only reachable over a VPN that isn't up. +
 *Fix in app:* the relay-resilience work in #654/#656/#657 (merged as #658) stops this — a dead relay is marked Disconnected, parked with an escalating cooldown, and the constant `getBalance` poll is gone. Make sure your build includes it. +
 *Fix in environment:* confirm the relay is actually reachable from the host (`curl -sI https://<relay-host>`, or a websocket probe); if it's only reachable over a VPN, bring the tunnel up (see the WireGuard entry below). A reachable relay answers fast and the churn never starts.
 
