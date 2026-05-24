@@ -354,7 +354,12 @@ const HomeScreen: React.FC = () => {
             // On the "Add wallet" card (or no active wallet) show an add-wallet
             // prompt rather than the previous wallet's transactions (#666).
             <View style={styles.emptyState}>
-              <TouchableOpacity onPress={() => setWizardOpen(true)}>
+              <TouchableOpacity
+                onPress={() => setWizardOpen(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Add a wallet"
+                testID="home-add-wallet-empty"
+              >
                 <Text style={styles.addWalletText}>+ Add a Wallet</Text>
               </TouchableOpacity>
             </View>
