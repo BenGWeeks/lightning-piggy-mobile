@@ -99,6 +99,7 @@ const FriendsScreen: React.FC = () => {
   const [celebration, setCelebration] = useState<{
     pubkey: string;
     name: string;
+    picture: string | null;
     alreadyConnected: boolean;
   } | null>(null);
   const [sendOpen, setSendOpen] = useState(false);
@@ -371,7 +372,12 @@ const FriendsScreen: React.FC = () => {
           existing?.profile?.name?.trim() ||
           existing?.petname?.trim() ||
           `${nip19.npubEncode(pk).slice(0, 12)}…`;
-        setCelebration({ pubkey: pk, name, alreadyConnected: !!result.alreadyFollowing });
+        setCelebration({
+          pubkey: pk,
+          name,
+          picture: existing?.profile?.picture ?? null,
+          alreadyConnected: !!result.alreadyFollowing,
+        });
         return true;
       }
       Alert.alert('Error', result.error || 'Failed to add contact');
@@ -666,6 +672,7 @@ const FriendsScreen: React.FC = () => {
         visible={!!celebration}
         alreadyConnected={celebration?.alreadyConnected ?? false}
         name={celebration?.name ?? ''}
+        picture={celebration?.picture}
         onOpenProfile={handleCelebrationOpenProfile}
         onDismiss={() => setCelebration(null)}
       />

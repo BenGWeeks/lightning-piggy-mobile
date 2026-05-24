@@ -16,6 +16,7 @@ import Animated, {
   useAnimatedReaction,
   type SharedValue,
 } from 'react-native-reanimated';
+import { Image as ExpoImage } from 'expo-image';
 import { UserRoundCheck } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { lightPalette } from '../styles/palettes';
@@ -134,6 +135,10 @@ interface Props {
   // celebrate) — see #660.
   alreadyConnected: boolean;
   name: string;
+  // The contact's kind-0 avatar, shown in the card's icon slot. Falls back
+  // to a generic check icon when absent (e.g. a brand-new follow whose
+  // profile hasn't resolved yet, or a contact with no picture).
+  picture?: string | null;
   onOpenProfile: () => void;
   onDismiss: () => void;
 }
@@ -142,6 +147,7 @@ const AddContactCelebration: React.FC<Props> = ({
   visible,
   alreadyConnected,
   name,
+  picture,
   onOpenProfile,
   onDismiss,
 }) => {
@@ -197,8 +203,18 @@ const AddContactCelebration: React.FC<Props> = ({
         </View>
 
         <Animated.View style={[themed.card, cardAnimatedStyle]}>
-          <View style={[themed.iconSlot, themed.iconBg]}>
-            <UserRoundCheck size={36} color={colors.white} strokeWidth={2.5} />
+          <View style={[themed.iconSlot, !picture && themed.iconBg]}>
+            {picture ? (
+              <ExpoImage
+                source={{ uri: picture }}
+                style={themed.avatar}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                accessibilityLabel={`${name} profile picture`}
+              />
+            ) : (
+              <UserRoundCheck size={36} color={colors.white} strokeWidth={2.5} />
+            )}
           </View>
           <Text style={themed.title}>{alreadyConnected ? 'Already connected' : 'Connected!'}</Text>
           <Text style={themed.subtitle}>
@@ -261,9 +277,16 @@ const createStyles = (colors: Palette) =>
       alignItems: 'center',
       justifyContent: 'center',
       marginBottom: 18,
+      overflow: 'hidden',
     },
     iconBg: {
       backgroundColor: colors.brandPink,
+    },
+    avatar: {
+      width: 72,
+      height: 72,
+      borderRadius: 36,
+      backgroundColor: colors.background,
     },
     title: {
       fontSize: 20,
