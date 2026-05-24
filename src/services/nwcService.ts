@@ -69,7 +69,13 @@ function recordRelayOutcome(walletId: string, error?: unknown): void {
 // skip it until the cooldown expires rather than hammering it every tick (#656).
 export function isRelayInCooldown(walletId: string): boolean {
   const until = relayCooldownUntil.get(walletId);
-  return until !== undefined && Date.now() < until;
+  if (until === undefined) return false;
+  if (Date.now() >= until) {
+    // Expired — drop the entry so the Map can't grow unbounded.
+    relayCooldownUntil.delete(walletId);
+    return false;
+  }
+  return true;
 }
 
 // Per-wallet timestamp of the most recent relay-publish failure. Used
@@ -302,6 +308,9 @@ export async function connect(
 
     return { success: true, balance };
   } catch (error) {
+    // enable() couldn't reach any relay (full outage). Count it so the cooldown
+    // (#656) engages — otherwise the 30s connection-check retries forever.
+    recordRelayOutcome(walletId, error);
     providers.delete(walletId);
     nwcUrls.delete(walletId);
     const message = error instanceof Error ? error.message : String(error);
@@ -338,7 +347,12 @@ export function disconnect(walletId: string): void {
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new Error(`${label} timed out after ${ms}ms`));
+      // A withTimeout fire means the relay never replied in time — a
+      // reply-timeout, not a confirmed outcome. Reject with the typed error so
+      // recordRelayOutcome() counts it toward relay-dead (#654/#656); a generic
+      // Error slips through both isReplyTimeoutError and isConnectionError and
+      // would reset the counter on the very "relay hung" case this targets.
+      reject(createReplyTimeoutError(`${label} timed out after ${ms}ms`));
     }, ms);
     promise.then(
       (v) => {

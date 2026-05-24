@@ -447,7 +447,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               seenReceiptsRef.current.set(w.id, seeded);
               if (!seenRaw) persistSeenReceipts(w.id, seeded);
             } catch {
-              seenReceiptsRef.current.set(w.id, settledIncomingHashes(cachedTxs));
+              // Corrupt persisted value — overwrite with a fresh baseline so the
+              // next cold start doesn't keep hitting this catch (and possibly
+              // re-announcing off a stale tx cache).
+              const seeded = settledIncomingHashes(cachedTxs);
+              seenReceiptsRef.current.set(w.id, seeded);
+              persistSeenReceipts(w.id, seeded);
             }
             return {
               ...w,
@@ -625,7 +630,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 seenReceiptsRef.current.set(w.id, seeded);
                 if (!seenRaw) persistSeenReceipts(w.id, seeded);
               } catch {
-                seenReceiptsRef.current.set(w.id, settledIncomingHashes(cachedTxs));
+                // Corrupt persisted value — overwrite with a fresh baseline (see
+                // the startup-hydration path for the rationale).
+                const seeded = settledIncomingHashes(cachedTxs);
+                seenReceiptsRef.current.set(w.id, seeded);
+                persistSeenReceipts(w.id, seeded);
               }
               return {
                 ...w,

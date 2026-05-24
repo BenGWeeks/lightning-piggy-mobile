@@ -172,6 +172,18 @@ describe('isWalletConnected (#654 — relay responsiveness, not just transport)'
     expect(isWalletConnected(WALLET_ID)).toBe(true);
   });
 
+  it('flips to false when the relay HANGS (withTimeout fires) — the primary "relay hung" case', async () => {
+    // A hung relay: getBalance never resolves, so withTimeout rejects with a
+    // ReplyTimeoutError. That must count toward relay-dead, not reset the
+    // counter — a generic Error used to slip through both matchers (#654 review).
+    mockGetBalanceImpl = () => new Promise(() => {});
+    await getBalance(WALLET_ID, { replyTimeoutMs: 150 });
+    await getBalance(WALLET_ID, { replyTimeoutMs: 150 });
+    expect(isWalletConnected(WALLET_ID)).toBe(true); // 2 failures < threshold (3)
+    await getBalance(WALLET_ID, { replyTimeoutMs: 150 });
+    expect(isWalletConnected(WALLET_ID)).toBe(false); // 3rd timeout → dead
+  });
+
   it('does NOT mark a relay dead when the wallet answers with a non-connection error (e.g. a get_balance-less wallet)', async () => {
     // "method not supported" is the relay/wallet *answering* — capability-
     // agnostic: it must never be misread as a dead relay (#654).
