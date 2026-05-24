@@ -301,6 +301,10 @@ const MessagesScreen: React.FC = () => {
 
   // Hydrate the per-account non-follow profile cache on mount / identity change.
   useEffect(() => {
+    // Reset per-account state first so a previous account's profiles + the
+    // attempted set don't leak across a multi-account switch (#668 review).
+    nonFollowAttempted.current = new Set();
+    setNonFollowProfiles(new Map());
     if (!pubkey) return;
     let cancelled = false;
     AsyncStorage.getItem(`nonfollow_profiles_${pubkey}`)
@@ -345,25 +349,25 @@ const MessagesScreen: React.FC = () => {
   // attempted once per session so a profile-less sender isn't re-queried (#664).
   useEffect(() => {
     if (!pubkey) return;
-    const missing: string[] = [];
+    // De-dupe — dmInbox can hold multiple entries for the same partner.
+    const missingSet = new Set<string>();
     for (const entry of dmInbox) {
       const pk = entry.partnerPubkey?.toLowerCase();
       if (!pk || contactInfoMap.has(pk) || nonFollowAttempted.current.has(pk)) continue;
-      missing.push(pk);
+      missingSet.add(pk);
     }
-    if (missing.length === 0) return;
+    if (missingSet.size === 0) return;
+    const missing = [...missingSet];
     missing.forEach((pk) => nonFollowAttempted.current.add(pk));
     let cancelled = false;
     fetchProfilesForPubkeys(missing)
       .then((fetched) => {
         if (cancelled || fetched.size === 0) return;
+        // No side effects in the updater (Strict Mode may run it twice);
+        // persistence is handled by the dedicated effect below.
         setNonFollowProfiles((prev) => {
           const next = new Map(prev);
           for (const [pk, prof] of fetched) next.set(pk.toLowerCase(), prof);
-          AsyncStorage.setItem(
-            `nonfollow_profiles_${pubkey}`,
-            JSON.stringify(Object.fromEntries(next)),
-          ).catch(() => {});
           return next;
         });
       })
@@ -372,6 +376,16 @@ const MessagesScreen: React.FC = () => {
       cancelled = true;
     };
   }, [dmInbox, contactInfoMap, pubkey, fetchProfilesForPubkeys]);
+
+  // Persist the non-follow profile cache when it changes — kept out of the
+  // state updater so Strict Mode's double-invocation can't duplicate the write.
+  useEffect(() => {
+    if (!pubkey || nonFollowProfiles.size === 0) return;
+    AsyncStorage.setItem(
+      `nonfollow_profiles_${pubkey}`,
+      JSON.stringify(Object.fromEntries(nonFollowProfiles)),
+    ).catch(() => {});
+  }, [nonFollowProfiles, pubkey]);
 
   // useDeferredValue lets React deprioritise the (O(n)) summary rebuild when an urgent update — e.g. a tab-bar tap, scroll gesture — comes in during a relay-burst flush. The user's tap renders against the previous dmInbox; the new summary lands on the next idle frame. Keeps the bottom nav snappy when 25 wraps batch-flush via the live-sub queue (queueInboxEntry / flushPendingInbox).
   const deferredDmInbox = useDeferredValue(dmInbox);
