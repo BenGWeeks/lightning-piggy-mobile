@@ -25,6 +25,8 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import ContactListItem, { CONTACT_LIST_ITEM_HEIGHT } from '../components/ContactListItem';
 import ContactProfileSheet from '../components/ContactProfileSheet';
 import AddFriendSheet from '../components/AddFriendSheet';
+import AddContactCelebration from '../components/AddContactCelebration';
+import { nip19 } from 'nostr-tools';
 import SendSheet from '../components/SendSheet';
 import AlphabetBar from '../components/AlphabetBar';
 import { fetchPhoneContacts, PhoneContact } from '../services/contactsService';
@@ -47,6 +49,15 @@ const isFilter = (v: string | null): v is Filter =>
 // case- and accent-insensitive — appropriate for friend-list ordering.
 // See issue #245.
 const NAME_COLLATOR = new Intl.Collator(undefined, { sensitivity: 'base' });
+
+// First alphabet bucket for a name: NFKD-normalise + uppercase, then take the
+// first A-Z char, else '#'. Mirrors MessagesScreen — without the NFKD step an
+// accented INITIAL (É, Ö, …) fails the /[A-Z]/ test and wrongly lands in '#'
+// instead of E / O (#660 review).
+const firstAlpha = (name: string): string => {
+  const m = name.normalize('NFKD').toUpperCase().match(/[A-Z]/);
+  return m ? m[0] : '#';
+};
 
 interface ListItem {
   id: string;
@@ -83,6 +94,13 @@ const FriendsScreen: React.FC = () => {
   const [selectedContact, setSelectedContact] = useState<ListItem | null>(null);
   const [profileSheetVisible, setProfileSheetVisible] = useState(false);
   const [addFriendVisible, setAddFriendVisible] = useState(false);
+  // Add-contact celebration (#660): set on a successful add (or an
+  // already-following tap) to pop the confetti + "Open profile" card.
+  const [celebration, setCelebration] = useState<{
+    pubkey: string;
+    name: string;
+    alreadyConnected: boolean;
+  } | null>(null);
   const [sendOpen, setSendOpen] = useState(false);
   const [zapTarget, setZapTarget] = useState<ListItem | null>(null);
   const [currentLetter, setCurrentLetter] = useState<string | null>(null);
@@ -231,12 +249,7 @@ const FriendsScreen: React.FC = () => {
   const availableLetters = useMemo(() => {
     const letters = new Set<string>();
     for (const item of combinedList) {
-      const first = item.name.charAt(0).toUpperCase();
-      if (/[A-Z]/.test(first)) {
-        letters.add(first);
-      } else {
-        letters.add('#');
-      }
+      letters.add(firstAlpha(item.name));
     }
     return Array.from(letters).sort();
   }, [combinedList]);
@@ -262,8 +275,7 @@ const FriendsScreen: React.FC = () => {
       const offsetY = e.nativeEvent.contentOffset.y;
       const index = Math.floor(Math.max(0, offsetY - LIST_PADDING_TOP) / ITEM_HEIGHT);
       if (index >= 0 && index < combinedList.length) {
-        const first = combinedList[index].name.charAt(0).toUpperCase();
-        const letter = /[A-Z]/.test(first) ? first : '#';
+        const letter = firstAlpha(combinedList[index].name);
         if (letter !== currentLetter) {
           setCurrentLetter(letter);
         }
@@ -275,11 +287,7 @@ const FriendsScreen: React.FC = () => {
   const scrollToLetter = useCallback(
     (letter: string) => {
       const t0 = __DEV__ ? performance.now() : 0;
-      const index = combinedList.findIndex((item) => {
-        const first = item.name.charAt(0).toUpperCase();
-        if (letter === '#') return !/[A-Z]/.test(first);
-        return first === letter;
-      });
+      const index = combinedList.findIndex((item) => firstAlpha(item.name) === letter);
       if (index >= 0) {
         // Pause scroll tracking to prevent currentLetter flashing during scroll
         scrollTrackingPaused.current = true;
@@ -350,13 +358,44 @@ const FriendsScreen: React.FC = () => {
   const handleAddFriend = useCallback(
     async (npubOrHex: string) => {
       const result = await addContact(npubOrHex);
-      if (!result.success) {
-        Alert.alert('Error', result.error || 'Failed to add contact');
+      if (result.success && result.pubkey) {
+        const pk = result.pubkey;
+        // A brand-new follow isn't in `contacts` state yet (the append is
+        // async), so the npub prefix is the expected fallback there; an
+        // already-following tap resolves to the real name.
+        const existing = contacts.find((c) => c.pubkey === pk);
+        const name = (
+          existing?.profile?.displayName ||
+          existing?.profile?.name ||
+          existing?.petname ||
+          `${nip19.npubEncode(pk).slice(0, 12)}…`
+        ).trim();
+        setCelebration({ pubkey: pk, name, alreadyConnected: !!result.alreadyFollowing });
+        return true;
       }
-      return result.success;
+      Alert.alert('Error', result.error || 'Failed to add contact');
+      return false;
     },
-    [addContact],
+    [addContact, contacts],
   );
+
+  const handleCelebrationOpenProfile = useCallback(() => {
+    if (!celebration) return;
+    const pk = celebration.pubkey;
+    const existing = contacts.find((c) => c.pubkey === pk);
+    setCelebration(null);
+    navigation.navigate('ContactProfile', {
+      contact: {
+        pubkey: pk,
+        name: celebration.name,
+        picture: existing?.profile?.picture ?? null,
+        banner: existing?.profile?.banner ?? null,
+        nip05: existing?.profile?.nip05 ?? null,
+        lightningAddress: existing?.profile?.lud16 ?? null,
+        source: 'nostr',
+      },
+    });
+  }, [celebration, contacts, navigation]);
 
   const renderItem = useCallback(
     ({ item }: { item: ListItem }) => {
@@ -620,6 +659,14 @@ const FriendsScreen: React.FC = () => {
         visible={addFriendVisible}
         onClose={() => setAddFriendVisible(false)}
         onAdd={handleAddFriend}
+      />
+
+      <AddContactCelebration
+        visible={!!celebration}
+        alreadyConnected={celebration?.alreadyConnected ?? false}
+        name={celebration?.name ?? ''}
+        onOpenProfile={handleCelebrationOpenProfile}
+        onDismiss={() => setCelebration(null)}
       />
 
       <SendSheet
