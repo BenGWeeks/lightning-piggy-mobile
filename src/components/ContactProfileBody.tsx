@@ -1,11 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Share } from 'react-native';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
-import QrWithIdentityToggle from './QrWithIdentityToggle';
 import FullscreenImageModal from './FullscreenImageModal';
-import { Zap, UserRound, ChevronRight } from 'lucide-react-native';
-import { isNfcSupported } from '../services/nfcService';
+import { Zap, UserRound, ChevronRight, Share2 } from 'lucide-react-native';
 import { npubEncode } from '../services/nostrService';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
@@ -60,44 +58,37 @@ const ContactProfileBody: React.FC<Props> = ({
     [contact.pubkey],
   );
   const [avatarError, setAvatarError] = useState(false);
-  const [avatarLoaded, setAvatarLoaded] = useState(false);
-  const [nfcSupported, setNfcSupported] = useState(false);
   // Tap the avatar → view the picture full screen (#661).
   const [fullscreenUrl, setFullscreenUrl] = useState<string | null>(null);
 
-  // Probe NFC capability once on mount so the QR toggle's "Write to NFC"
-  // affordance can render correctly enabled / disabled.
-  useEffect(() => {
-    let cancelled = false;
-    isNfcSupported().then((ok) => {
-      if (!cancelled) setNfcSupported(ok);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Share the contact via the OS share sheet — njump.me web link + a plain
+  // name line. Replaces the QR box that used to live in this sheet (#666/#18).
+  const handleShare = async () => {
+    if (!npub) return;
+    const webUrl = `https://njump.me/${npub}`;
+    try {
+      await Share.share({ message: `${contact.name || 'a contact'}\n${webUrl}`, url: webUrl });
+    } catch {
+      // User dismissed / platform rejected — nothing to surface.
+    }
+  };
 
-  // Fallback to default avatar if the picture URL hasn't loaded in 8s.
-  useEffect(() => {
-    if (!contact.picture || avatarLoaded || avatarError) return;
-    const timer = setTimeout(() => {
-      if (!avatarLoaded) setAvatarError(true);
-    }, 8000);
-    return () => clearTimeout(timer);
-  }, [contact.picture, avatarLoaded, avatarError]);
-
+  // Reset the error flag when the picture URL changes so a previously-failed
+  // avatar gets a fresh chance. No load timeout: expo-image shows the image
+  // when ready and fires onError on a genuine failure — the old 8s timeout
+  // misfired (flipped to the default icon even while the image was displayed,
+  // because onLoad doesn't reliably fire for cached images). Matches
+  // ContactListItem's avatar handling.
   useEffect(() => {
     setAvatarError(false);
-    setAvatarLoaded(false);
   }, [contact.picture]);
 
   return (
     <View style={styles.sheetContent}>
       <View style={styles.bannerContainer}>
-        {/* Fall back to the brand pink-ostrich texture when the contact
-            has no kind-0 banner — matches the full-page ContactProfileScreen.
-            The empty placeholder used to render as a flat dark band,
-            which read as a broken image. */}
+        {/* When the contact has no kind-0 banner, fall back to a solid brand
+            violet (#9B40FF) rather than the white-background ostrich texture —
+            the white read as a broken/empty band in this sheet (#18). */}
         {contact.banner ? (
           <Image
             source={{ uri: contact.banner }}
@@ -108,12 +99,13 @@ const ContactProfileBody: React.FC<Props> = ({
             autoplay={false}
           />
         ) : (
-          <Image
-            source={require('../../assets/images/friends-bg.png')}
-            style={styles.bannerImage}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-          />
+          <View style={[styles.bannerImage, styles.bannerFallback]}>
+            <Image
+              source={require('../../assets/images/banner-ostriches.png')}
+              style={styles.bannerImage}
+              contentFit="cover"
+            />
+          </View>
         )}
         <View style={styles.handleOverlay}>
           <View style={styles.handleBar} />
@@ -137,7 +129,6 @@ const ContactProfileBody: React.FC<Props> = ({
               autoplay={false}
               transition={200}
               onError={() => setAvatarError(true)}
-              onLoad={() => setAvatarLoaded(true)}
             />
           </TouchableOpacity>
         ) : (
@@ -159,15 +150,9 @@ const ContactProfileBody: React.FC<Props> = ({
         </Text>
       ) : null}
 
-      {npub ? (
-        <View style={styles.qrToggleWrapper}>
-          <QrWithIdentityToggle
-            npub={npub}
-            lightningAddress={contact.lightningAddress}
-            nfcSupported={nfcSupported}
-          />
-        </View>
-      ) : null}
+      {/* The npub/Lightning QR box was dropped from this quick sheet to keep it
+          compact — sharing now lives in the action row's Share button, and the
+          full QR is still on the "View profile" page (#666/#18). */}
 
       {/* Action buttons — always rendered; disabled state when the
           per-button precondition isn't met. The accessibility labels
@@ -234,6 +219,21 @@ const ContactProfileBody: React.FC<Props> = ({
             </TouchableOpacity>
           );
         })()}
+        <TouchableOpacity
+          style={[styles.iconCircleButton, !npub && styles.iconCircleButtonDisabled]}
+          onPress={npub ? handleShare : undefined}
+          disabled={!npub}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !npub }}
+          accessibilityLabel={npub ? 'Share contact' : 'Share (no Nostr key)'}
+          testID="contact-share-button"
+        >
+          <Share2
+            size={20}
+            color={npub ? colors.white : colors.textSupplementary}
+            strokeWidth={2}
+          />
+        </TouchableOpacity>
         {onViewFullProfile ? (
           <TouchableOpacity
             style={styles.viewProfileButton}
@@ -254,10 +254,10 @@ const createStyles = (colors: Palette) =>
   StyleSheet.create({
     sheetContent: {
       alignItems: 'center',
-      // 80 leaves clear breathing room above the Android gesture-nav
-      // bar — the previous 40 was tight enough that the View-profile
-      // pill sat almost flush with the bar on a Pixel 8a.
-      paddingBottom: 80,
+      // 32 matches the other dynamic-sized sheets (AccountSwitcherSheet) so the
+      // bottom gap is consistent — the old 80 left a big white margin once the
+      // sheet switched to content-based dynamic sizing (#18).
+      paddingBottom: 32,
     },
     handleOverlay: {
       position: 'absolute',
@@ -277,10 +277,18 @@ const createStyles = (colors: Palette) =>
       height: 100,
       backgroundColor: colors.brandPinkLight,
       overflow: 'hidden',
+      // Match the sheet's 24px top corners (ContactProfileSheet.sheetBackground)
+      // so the banner doesn't square off the rounded sheet (#18).
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
     },
     bannerImage: {
       width: '100%',
       height: '100%',
+    },
+    // Solid brand violet (#9B40FF) used when the contact has no kind-0 banner.
+    bannerFallback: {
+      backgroundColor: colors.brandPurple,
     },
     avatarContainer: {
       marginTop: -36,
