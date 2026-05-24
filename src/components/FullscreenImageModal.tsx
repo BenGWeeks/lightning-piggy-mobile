@@ -6,8 +6,10 @@
 // here or the gestures silently no-op (known RNGH + Modal gotcha).
 
 import React, { useEffect } from 'react';
-import { Modal, StyleSheet, useWindowDimensions } from 'react-native';
+import { Modal, StyleSheet, TouchableOpacity, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image as ExpoImage } from 'expo-image';
+import { X } from 'lucide-react-native';
 import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Animated, {
   useSharedValue,
@@ -26,6 +28,7 @@ const DOUBLE_TAP_SCALE = 2.5;
 
 const FullscreenImageModal: React.FC<Props> = ({ url, onClose }) => {
   const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
   const tx = useSharedValue(0);
@@ -119,6 +122,8 @@ const FullscreenImageModal: React.FC<Props> = ({ url, onClose }) => {
                   style={{ width, height }}
                   contentFit="contain"
                   cachePolicy="memory-disk"
+                  recyclingKey={url}
+                  autoplay={false}
                   transition={150}
                   accessibilityLabel="Full-screen image"
                 />
@@ -126,6 +131,19 @@ const FullscreenImageModal: React.FC<Props> = ({ url, onClose }) => {
             ) : null}
           </Animated.View>
         </GestureDetector>
+        {/* Explicit close affordance: the backdrop dismiss is a gesture, which
+            isn't exposed as an accessibility action — screen-reader users (and
+            iOS, with no hardware back) need a real button (#669 review). */}
+        <TouchableOpacity
+          style={[styles.closeButton, { top: insets.top + 8 }]}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close full-screen image"
+          testID="fullscreen-image-close"
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        >
+          <X size={28} color="#fff" strokeWidth={2.5} />
+        </TouchableOpacity>
       </GestureHandlerRootView>
     </Modal>
   );
@@ -138,6 +156,16 @@ const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeButton: {
+    position: 'absolute',
+    right: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
     alignItems: 'center',
     justifyContent: 'center',
   },
