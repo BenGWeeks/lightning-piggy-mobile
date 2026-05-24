@@ -47,11 +47,14 @@ export interface IncomingPayment {
   // second payment with the same amount to the same wallet still
   // re-mounts the animation.
   at: number;
-  // Set when detection came via a known invoice hash (expectPayment
-  // path); null when it came via balance-diff (e.g. lightning-address
-  // receive). Consumers can use this to distinguish "exactly this
-  // invoice settled" from "something credited the wallet".
+  // The settled invoice's payment hash. Set on both detection paths now —
+  // expectPayment (by lookup) and the transaction-list detector (by tx
+  // identity). Kept nullable for backward-compat.
   paymentHash: string | null;
+  // True when the receipt was found in an already-current transaction list, so
+  // the post-receive refresh effect can skip a redundant list_transactions
+  // round-trip (#655 review).
+  fromTxList?: boolean;
 }
 
 const CURRENCY_KEY = 'user_fiat_currency';
@@ -231,11 +234,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [btcPrice, setBtcPrice] = useState<number | null>(null);
   const [lastIncomingPayment, setLastIncomingPayment] = useState<IncomingPayment | null>(null);
   const priceInterval = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Per-wallet baseline balances. Used to decide whether a balance
-  // change is an incoming payment (increment) or the local consequence
-  // of a send / send-like flow (decrement). First observation of a
-  // wallet seeds its baseline silently — we don't fire for the initial
-  // balance we happen to observe.
+  // Per-wallet last-seen balance. NOT used to detect/attribute receives any
+  // more (that's done by transaction hash — see seenReceiptsRef); it's only a
+  // trigger: a balance *increase* means something settled, so we refresh the
+  // transaction list and let the receive detector announce it (#653).
   const paymentBaselinesRef = useRef<Map<string, number>>(new Map());
   // Per-wallet set of settled-incoming payment_hashes we've already announced.
   // Receives are detected by transaction identity (hash), not balance-diffing,
@@ -1835,6 +1837,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // defined below without the closure-ordering dance.
   useEffect(() => {
     if (!lastIncomingPayment) return;
+    // The transaction-list detector already saw the tx in a current list, so a
+    // refresh here would be a redundant list_transactions round-trip. Only the
+    // expectPayment path needs it (the list may not yet include the settle).
+    if (lastIncomingPayment.fromTxList) return;
     fetchTransactionsForWallet(lastIncomingPayment.walletId).catch(() => {
       // Non-fatal: next organic refresh will pick the tx up.
     });
@@ -1876,6 +1882,18 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // (cache-hydrated) history: a silent baseline, so launch doesn't re-announce
   // past receives. Lives in the context so the overlay pops on any screen.
   useEffect(() => {
+    // Mark every new receipt seen (so none re-announces on a later refresh), but
+    // announce only ONE per render: the overlay shows a single payment and
+    // setLastIncomingPayment is one state value — calling it in a loop would
+    // batch and keep only the last, dropping the rest (#655 review). Pick the
+    // newest by settled_at, deterministically, across all wallets.
+    let newest: {
+      walletId: string;
+      amountSats: number;
+      paymentHash: string;
+      settledAt: number;
+    } | null = null;
+    let newestLabel = '';
     for (const wallet of wallets) {
       const txns = wallet.transactions ?? [];
       const seen = seenReceiptsRef.current.get(wallet.id);
@@ -1885,17 +1903,25 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
       for (const receipt of pickNewReceipts(txns, seen)) {
         seen.add(receipt.paymentHash);
-        if (__DEV__)
-          console.log(
-            `[Wallet] incoming payment detected: +${receipt.amountSats} sats on ${walletLabel(wallet)} (${receipt.paymentHash.slice(0, 12)}…)`,
-          );
-        setLastIncomingPayment({
-          walletId: wallet.id,
-          amountSats: receipt.amountSats,
-          at: Date.now(),
-          paymentHash: receipt.paymentHash,
-        });
+        if (!newest || receipt.settledAt > newest.settledAt) {
+          newest = { walletId: wallet.id, ...receipt };
+          newestLabel = walletLabel(wallet);
+        }
       }
+    }
+    if (newest) {
+      if (__DEV__)
+        console.log(
+          `[Wallet] incoming payment detected: +${newest.amountSats} sats on ${newestLabel} (${newest.paymentHash.slice(0, 12)}…)`,
+        );
+      setLastIncomingPayment({
+        walletId: newest.walletId,
+        amountSats: newest.amountSats,
+        at: Date.now(),
+        paymentHash: newest.paymentHash,
+        // Already detected from a current tx list — skip the redundant refresh.
+        fromTxList: true,
+      });
     }
   }, [wallets]);
 
