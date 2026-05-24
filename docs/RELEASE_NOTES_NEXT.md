@@ -43,4 +43,4 @@ See docs/DEPLOYMENT.adoc → "TestFlight 'What to Test' automation".
 - No more phantom "received 1 sat" toast on app open — receipts are deduped by payment hash and seeded silently from history.
 - The wallet no longer reconnects in a loop when a single relay goes offline.
 - The Add-wallet card now shows the "add a wallet" prompt instead of the previous wallet's transactions.
-- Invoices you create now carry a default "Sent with Lightning Piggy" memo instead of a blank description.
+- Invoices you create now carry a default "Sent with Lightning Piggy" memo (previously just "Lightning Piggy"), so whoever pays you sees a clearer label.
