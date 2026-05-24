@@ -45,8 +45,9 @@ const ContactProfileSheet: React.FC<Props> = ({
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
-  // 80% snap so the QR + action row + lud16 row all fit without scroll.
-  const snapPoints = useMemo(() => ['80%'], []);
+  // No explicit snapPoints — gorhom v5's default enableDynamicSizing sizes the
+  // sheet to its content (same as ReceiveSheet/SendSheet), so it stays compact
+  // after the QR box was removed and is consistent with the other sheets (#18).
 
   useEffect(() => {
     if (visible) {
@@ -77,7 +78,6 @@ const ContactProfileSheet: React.FC<Props> = ({
   return (
     <BottomSheetModal
       ref={sheetRef}
-      snapPoints={snapPoints}
       onDismiss={onClose}
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}
