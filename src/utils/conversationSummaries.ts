@@ -1,5 +1,5 @@
 import type { WalletState, WalletTransaction } from '../types/wallet';
-import type { NostrContact } from '../types/nostr';
+import type { NostrContact, NostrProfile } from '../types/nostr';
 
 export interface ConversationSummary {
   /**
@@ -208,6 +208,10 @@ export function buildDmSummaries(
   entries: DmInboxEntry[],
   contacts: NostrContact[],
   followPubkeys?: ReadonlySet<string>,
+  // Profiles for partners NOT in `contacts` (non-followed DM senders),
+  // fetched separately so their name + avatar resolve instead of showing a
+  // raw npub — keyed by lowercase pubkey (#664).
+  extraProfiles?: ReadonlyMap<string, NostrProfile>,
 ): ConversationSummary[] {
   const contactByPubkey = new Map<string, NostrContact>();
   for (const c of contacts) contactByPubkey.set(c.pubkey.toLowerCase(), c);
@@ -253,19 +257,23 @@ export function buildDmSummaries(
 
   const summaries: ConversationSummary[] = [];
   for (const entry of winner.values()) {
-    const contact = contactByPubkey.get(entry.partnerPubkey.toLowerCase());
+    const key = entry.partnerPubkey.toLowerCase();
+    const contact = contactByPubkey.get(key);
+    // Prefer the contact's profile; for a non-followed sender fall back to the
+    // separately-fetched profile so name + avatar still resolve (#664).
+    const prof = contact?.profile ?? extraProfiles?.get(key) ?? null;
     const name =
-      contact?.profile?.displayName?.trim() ||
-      contact?.profile?.name?.trim() ||
+      prof?.displayName?.trim() ||
+      prof?.name?.trim() ||
       contact?.petname?.trim() ||
       fallbackName(entry.partnerPubkey);
     summaries.push({
       id: entry.partnerPubkey,
       pubkey: entry.partnerPubkey,
       name,
-      picture: contact?.profile?.picture ?? null,
-      nip05: contact?.profile?.nip05 ?? null,
-      lightningAddress: contact?.profile?.lud16 ?? null,
+      picture: prof?.picture ?? null,
+      nip05: prof?.nip05 ?? null,
+      lightningAddress: prof?.lud16 ?? null,
       lastActivityAt: entry.createdAt,
       lastAmountSats: 0,
       lastDirection: entry.fromMe ? 'outgoing' : 'incoming',

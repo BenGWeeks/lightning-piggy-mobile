@@ -45,6 +45,7 @@ import {
 } from '../utils/conversationSummaries';
 import { createMessagesScreenStyles } from '../styles/MessagesScreen.styles';
 import type { MainTabParamList, RootStackParamList } from '../navigation/types';
+import type { NostrProfile } from '../types/nostr';
 
 type MessagesNavigation = CompositeNavigationProp<
   BottomTabNavigationProp<MainTabParamList, 'Messages'>,
@@ -72,6 +73,8 @@ const MessagesScreen: React.FC = () => {
     dmInbox,
     refreshDmInbox,
     armLiveDmSub,
+    fetchProfilesForPubkeys,
+    pubkey,
   } = useNostr();
   const { wallets } = useWallet();
   const { groupSummaries, effectiveWotTier } = useGroups();
@@ -289,6 +292,33 @@ const MessagesScreen: React.FC = () => {
   // handleConversationPress's picture/lightning-address fallback) now
   // all consult this map, so a 50-contact x N-row screen does O(contacts)
   // once per render instead of O(rows × contacts) per render. See #245.
+  // Non-followed DM senders aren't in `contacts`, so the contacts pipeline
+  // never fetches their kind-0 — they'd show a raw npub + blank avatar. We
+  // fetch their profiles on demand (see the effect below), cache to disk, and
+  // layer them into the resolution here + buildDmSummaries (#664).
+  const [nonFollowProfiles, setNonFollowProfiles] = useState<Map<string, NostrProfile>>(new Map());
+  const nonFollowAttempted = useRef<Set<string>>(new Set());
+
+  // Hydrate the per-account non-follow profile cache on mount / identity change.
+  useEffect(() => {
+    if (!pubkey) return;
+    let cancelled = false;
+    AsyncStorage.getItem(`nonfollow_profiles_${pubkey}`)
+      .then((raw) => {
+        if (cancelled || !raw) return;
+        try {
+          const obj = JSON.parse(raw) as Record<string, NostrProfile>;
+          setNonFollowProfiles(new Map(Object.entries(obj)));
+        } catch {
+          // Corrupt cache — ignore; the fetch effect repopulates.
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [pubkey]);
+
   const contactInfoMap = useMemo(() => {
     const map = new Map<string, ContactInfo>();
     for (const c of contacts) {
@@ -298,8 +328,50 @@ const MessagesScreen: React.FC = () => {
         lightningAddress: c.profile?.lud16 ?? null,
       });
     }
+    // Layer in non-followed senders' fetched profiles (never override a contact).
+    for (const [pk, prof] of nonFollowProfiles) {
+      if (map.has(pk)) continue;
+      map.set(pk, {
+        picture: prof.picture ?? null,
+        name: (prof.displayName || prof.name || '').trim() || null,
+        lightningAddress: prof.lud16 ?? null,
+      });
+    }
     return map;
-  }, [contacts]);
+  }, [contacts, nonFollowProfiles]);
+
+  // Fetch kind-0 for DM partners not in contacts and not yet cached, so their
+  // name + avatar resolve in the list (esp. with WoT: All). Each pubkey is
+  // attempted once per session so a profile-less sender isn't re-queried (#664).
+  useEffect(() => {
+    if (!pubkey) return;
+    const missing: string[] = [];
+    for (const entry of dmInbox) {
+      const pk = entry.partnerPubkey?.toLowerCase();
+      if (!pk || contactInfoMap.has(pk) || nonFollowAttempted.current.has(pk)) continue;
+      missing.push(pk);
+    }
+    if (missing.length === 0) return;
+    missing.forEach((pk) => nonFollowAttempted.current.add(pk));
+    let cancelled = false;
+    fetchProfilesForPubkeys(missing)
+      .then((fetched) => {
+        if (cancelled || fetched.size === 0) return;
+        setNonFollowProfiles((prev) => {
+          const next = new Map(prev);
+          for (const [pk, prof] of fetched) next.set(pk.toLowerCase(), prof);
+          AsyncStorage.setItem(
+            `nonfollow_profiles_${pubkey}`,
+            JSON.stringify(Object.fromEntries(next)),
+          ).catch(() => {});
+          return next;
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [dmInbox, contactInfoMap, pubkey, fetchProfilesForPubkeys]);
 
   // useDeferredValue lets React deprioritise the (O(n)) summary rebuild when an urgent update — e.g. a tab-bar tap, scroll gesture — comes in during a relay-burst flush. The user's tap renders against the previous dmInbox; the new summary lands on the next idle frame. Keeps the bottom nav snappy when 25 wraps batch-flush via the live-sub queue (queueInboxEntry / flushPendingInbox).
   const deferredDmInbox = useDeferredValue(dmInbox);
@@ -318,8 +390,9 @@ const MessagesScreen: React.FC = () => {
       deferredDmInbox,
       deferredContacts,
       enforceFollowingOnly ? followPubkeys : undefined,
+      nonFollowProfiles,
     );
-  }, [deferredDmInbox, deferredContacts, enforceFollowingOnly, followPubkeys]);
+  }, [deferredDmInbox, deferredContacts, enforceFollowingOnly, followPubkeys, nonFollowProfiles]);
   // Build the zap-counterparties memo separately so that toggling
   // `showZapCounterparties` off doesn't make every wallet update churn
   // the merged summary list — when the toggle is off this memo is built

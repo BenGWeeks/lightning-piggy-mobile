@@ -799,6 +799,8 @@ interface NostrContextType {
    */
   refreshProfile: (opts?: { force?: boolean }) => Promise<void>;
   refreshContacts: () => Promise<void>;
+  // Fetch kind-0 profiles for arbitrary pubkeys (non-followed DM senders) (#664).
+  fetchProfilesForPubkeys: (pubkeys: string[]) => Promise<Map<string, NostrProfile>>;
   signZapRequest: (
     recipientPubkey: string,
     amountSats: number,
@@ -1102,6 +1104,18 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     },
     [],
+  );
+
+  // Batch-fetch kind-0 profiles for arbitrary pubkeys (e.g. non-followed DM
+  // senders, which `loadContacts`/`fetchProfiles` never fetch). Reads from the
+  // user's relays; nostrService.fetchProfiles unions PROFILE_RELAYS for
+  // coverage. Returns a pubkey→profile map; the caller owns caching (#664).
+  const fetchProfilesForPubkeys = useCallback(
+    async (pubkeys: string[]): Promise<Map<string, NostrProfile>> => {
+      if (pubkeys.length === 0) return new Map();
+      return nostrService.fetchProfiles(pubkeys, getReadRelays());
+    },
+    [getReadRelays],
   );
 
   /** Eagerly hydrate own `profile` state from the per-account cache so
@@ -4112,6 +4126,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       logout,
       refreshProfile,
       refreshContacts,
+      fetchProfilesForPubkeys,
       signZapRequest,
       publishProfile,
       followContact,
@@ -4149,6 +4164,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       logout,
       refreshProfile,
       refreshContacts,
+      fetchProfilesForPubkeys,
       signZapRequest,
       publishProfile,
       followContact,
