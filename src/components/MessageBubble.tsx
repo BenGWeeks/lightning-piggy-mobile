@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, TouchableOpacity, Image, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, Image, StyleSheet, Linking } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Zap, MapPin, UserRound } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -24,6 +24,7 @@ import {
 } from '../utils/messageContent';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { extractUrls } from '../utils/extractUrls';
+import { linkifySegments, hasLink } from '../utils/linkify';
 import { isBlocklisted } from '../services/linkPreviewBlocklist';
 import MessageLinkPreview from './MessageLinkPreview';
 
@@ -449,8 +450,8 @@ const MessageBubble: React.FC<Props> = ({
   }
 
   // Plain text fallback — no rich content detected. Cap link previews
-  // at 1 per message: first non-blocklisted URL wins. Any other URLs in
-  // the body remain clickable as plain text via OS link recognition.
+  // at 1 per message: first non-blocklisted URL wins. All URLs in the body
+  // are rendered as tappable link spans below (see linkifySegments).
   const previewUrl = (() => {
     const urls = extractUrls(text);
     for (const u of urls) {
@@ -463,7 +464,30 @@ const MessageBubble: React.FC<Props> = ({
     <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
       <View style={[styles.bubble, fromMe ? styles.bubbleMe : styles.bubbleThem]}>
         {SenderLabel}
-        <Text style={[styles.bubbleText, fromMe && styles.bubbleTextMe]}>{text}</Text>
+        <Text style={[styles.bubbleText, fromMe && styles.bubbleTextMe]}>
+          {hasLink(text)
+            ? linkifySegments(text).map((seg, i) =>
+                seg.url ? (
+                  <Text
+                    key={i}
+                    style={[styles.bubbleLink, fromMe && styles.bubbleLinkMe]}
+                    onPress={() => {
+                      // openURL rejects on a malformed URL / missing handler —
+                      // swallow so a bad link can't raise an unhandled rejection.
+                      void Linking.openURL(seg.url as string).catch(() => {});
+                    }}
+                    accessibilityRole="link"
+                    accessibilityLabel={`Open link ${seg.url}`}
+                    testID={`${testIdPrefix}-link-${id}-${i}`}
+                  >
+                    {seg.text}
+                  </Text>
+                ) : (
+                  seg.text
+                ),
+              )
+            : text}
+        </Text>
         {previewUrl ? <MessageLinkPreview url={previewUrl} eventId={id} fromMe={fromMe} /> : null}
         <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
           {formatTime(createdAt)}
@@ -511,6 +535,17 @@ const createStyles = (colors: Palette) =>
     },
     bubbleTextMe: {
       color: colors.white,
+    },
+    // Tappable URL span inside a received bubble (surface bg) — brand accent.
+    bubbleLink: {
+      color: colors.brandPink,
+      textDecorationLine: 'underline',
+    },
+    // …and inside a sent bubble (pink bg) — white so it stays legible.
+    bubbleLinkMe: {
+      color: colors.white,
+      textDecorationLine: 'underline',
+      fontWeight: '600',
     },
     bubbleTime: {
       fontSize: 10,
