@@ -799,6 +799,8 @@ interface NostrContextType {
    */
   refreshProfile: (opts?: { force?: boolean }) => Promise<void>;
   refreshContacts: () => Promise<void>;
+  // Fetch kind-0 profiles for arbitrary pubkeys (non-followed DM senders) (#664).
+  fetchProfilesForPubkeys: (pubkeys: string[]) => Promise<Map<string, NostrProfile>>;
   signZapRequest: (
     recipientPubkey: string,
     amountSats: number,
@@ -820,7 +822,12 @@ interface NostrContextType {
   }) => Promise<boolean>;
   followContact: (pubkey: string) => Promise<boolean>;
   unfollowContact: (pubkey: string) => Promise<boolean>;
-  addContact: (npubOrHex: string) => Promise<{ success: boolean; error?: string }>;
+  addContact: (
+    npubOrHex: string,
+  ) => Promise<
+    | { success: true; pubkey: string; alreadyFollowing?: boolean }
+    | { success: false; error: string }
+  >;
   sendDirectMessage: (
     recipientPubkey: string,
     plaintext: string,
@@ -1104,6 +1111,18 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [],
   );
 
+  // Batch-fetch kind-0 profiles for arbitrary pubkeys (e.g. non-followed DM
+  // senders, which `loadContacts`/`fetchProfiles` never fetch). Reads from the
+  // user's relays; nostrService.fetchProfiles unions PROFILE_RELAYS for
+  // coverage. Returns a pubkey→profile map; the caller owns caching (#664).
+  const fetchProfilesForPubkeys = useCallback(
+    async (pubkeys: string[]): Promise<Map<string, NostrProfile>> => {
+      if (pubkeys.length === 0) return new Map();
+      return nostrService.fetchProfiles(pubkeys, getReadRelays());
+    },
+    [getReadRelays],
+  );
+
   /** Eagerly hydrate own `profile` state from the per-account cache so
    * the drawer header + tab profile avatar paint on cold start without
    * waiting for the deferred `loadProfile` relay round-trip. Matches the
@@ -1165,9 +1184,20 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       perfLog(
         `loadContactsFromCache: blob sizes contacts=${contactsJson?.length ?? 0}B profiles=${profilesJson?.length ?? 0}B`,
       );
+      // Previously: any contacts cache older than 24h short-circuited the
+      // whole bootstrap, discarding the still-useful profile map and
+      // painting an empty Friends tab while `loadContacts` ran the relay
+      // fetch (#642). Even a stale follow list is a better first paint
+      // than nothing — the relay refresh will overwrite it in seconds via
+      // the stale-while-revalidate path in `loadContacts`. Profiles in
+      // particular are identity data that change rarely; preserving them
+      // means the per-row zap gate hydrates from cache instead of reading
+      // `lightningAddress: null` for every contact during the kind-0
+      // batch refetch.
       if (contactsTsStr && Date.now() - parseInt(contactsTsStr, 10) > CACHE_MAX_AGE_MS) {
-        perfLog('loadContactsFromCache: contacts cache expired, skipping');
-        return false;
+        perfLog(
+          'loadContactsFromCache: contacts cache stale, still hydrating from disk (relay refresh will reconcile)',
+        );
       }
       if (contactsJson) {
         const tParse = Date.now();
@@ -2246,7 +2276,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
 
   const addContact = useCallback(
-    async (npubOrHex: string): Promise<{ success: boolean; error?: string }> => {
+    async (
+      npubOrHex: string,
+    ): Promise<
+      | { success: true; pubkey: string; alreadyFollowing?: boolean }
+      | { success: false; error: string }
+    > => {
       try {
         let hex = npubOrHex.trim();
         // Strip nostr: URI prefix (NIP-21)
@@ -2262,11 +2297,13 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           return { success: false, error: 'Invalid public key format' };
         }
         if (contacts.some((c) => c.pubkey === hex)) {
-          return { success: false, error: 'Already following this contact' };
+          // Already a follow — not a failure. Surface it as a neutral
+          // "already connected" so the UI doesn't show a red error (#660).
+          return { success: true, alreadyFollowing: true, pubkey: hex };
         }
         const success = await followContact(hex);
         return success
-          ? { success: true }
+          ? { success: true, pubkey: hex }
           : { success: false, error: 'Failed to publish contact list' };
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : 'Invalid key' };
@@ -4101,6 +4138,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       logout,
       refreshProfile,
       refreshContacts,
+      fetchProfilesForPubkeys,
       signZapRequest,
       publishProfile,
       followContact,
@@ -4138,6 +4176,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       logout,
       refreshProfile,
       refreshContacts,
+      fetchProfilesForPubkeys,
       signZapRequest,
       publishProfile,
       followContact,

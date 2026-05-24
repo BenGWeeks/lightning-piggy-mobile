@@ -66,6 +66,64 @@ export const geohashPrefixes = (gh: string, minLen = 3): string[] => {
 };
 
 /**
+ * Returns the geohash cell + its 8 immediate neighbours at the same
+ * precision. Used by the Explore "nearby" subscriptions to widen the
+ * `#g` filter beyond the user's single tile — a cache hidden 200 m
+ * across a tile boundary would otherwise be invisible (issue #631).
+ *
+ * Implementation: decode the cell's bounding box, walk a 3×3 grid of
+ * centroids one cell-width apart in each direction, encode at the
+ * same precision. The Set dedupes pole / antimeridian wrap-arounds.
+ *
+ * Returns 9 entries (or fewer at the poles where some grid positions
+ * collapse). Order isn't meaningful — the receiver Set-includes them.
+ */
+export const geohashNeighbours = (gh: string): string[] => {
+  if (gh.length === 0) return [];
+  let latLo = -90;
+  let latHi = 90;
+  let lonLo = -180;
+  let lonHi = 180;
+  let evenBit = true;
+  for (let i = 0; i < gh.length; i += 1) {
+    const idx = BASE32.indexOf(gh[i].toLowerCase());
+    if (idx < 0) continue;
+    for (let bit = 4; bit >= 0; bit -= 1) {
+      const set = (idx >> bit) & 1;
+      if (evenBit) {
+        const mid = (lonLo + lonHi) / 2;
+        if (set) lonLo = mid;
+        else lonHi = mid;
+      } else {
+        const mid = (latLo + latHi) / 2;
+        if (set) latLo = mid;
+        else latHi = mid;
+      }
+      evenBit = !evenBit;
+    }
+  }
+  const latStep = latHi - latLo;
+  const lonStep = lonHi - lonLo;
+  const lat = (latLo + latHi) / 2;
+  const lon = (lonLo + lonHi) / 2;
+  const out = new Set<string>();
+  for (let dLat = -1; dLat <= 1; dLat += 1) {
+    for (let dLon = -1; dLon <= 1; dLon += 1) {
+      const nLat = lat + dLat * latStep;
+      // Skip past-pole positions (no valid neighbour past ±90°).
+      if (nLat > 90 || nLat < -90) continue;
+      // Wrap longitude across the antimeridian so neighbours of u… and
+      // z… at the dateline still resolve.
+      let nLon = lon + dLon * lonStep;
+      if (nLon > 180) nLon -= 360;
+      else if (nLon < -180) nLon += 360;
+      out.add(encodeGeohash(nLat, nLon, gh.length));
+    }
+  }
+  return [...out];
+};
+
+/**
  * Decode a geohash to its centroid `{lat, lng}`. Inverse of
  * `encodeGeohash`. Returns the geometric centre of the cell, not a
  * corner — that's what the consumers (map pins, distance sort) want.

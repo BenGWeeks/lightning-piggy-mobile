@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, TouchableOpacity, Image, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, Image, StyleSheet, Linking } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Zap, MapPin, UserRound } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -18,11 +18,13 @@ import {
   extractInvoice,
   extractLightningAddress,
   extractSharedContact,
+  isSecretModeTrigger,
   formatTime,
   formatRelativeFuture,
 } from '../utils/messageContent';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { extractUrls } from '../utils/extractUrls';
+import { linkifySegments, hasLink } from '../utils/linkify';
 import { isBlocklisted } from '../services/linkPreviewBlocklist';
 import MessageLinkPreview from './MessageLinkPreview';
 
@@ -61,6 +63,11 @@ interface Props {
   // when omitted the cards still render but tap is a no-op.
   onOpenGifFullscreen?: (url: string) => void;
   onOpenImageFullscreen?: (url: string) => void;
+  // Tapping the "Toggle Secret Mode" button on the magic-trigger card
+  // (when the message body is exactly "secretthreewords"). Parent
+  // owns the secretMode setter + celebration overlay so a list of
+  // cells doesn't each render their own confetti instance.
+  onToggleSecretMode?: () => void;
   // Test-id prefix lets 1:1 and group bubbles coexist in the same Maestro
   // run with stable selectors. e.g. `conversation` → `conversation-pay-…`.
   testIdPrefix: string;
@@ -80,6 +87,7 @@ const MessageBubble: React.FC<Props> = ({
   onOpenLocation,
   onOpenGifFullscreen,
   onOpenImageFullscreen,
+  onToggleSecretMode,
   testIdPrefix,
 }) => {
   const colors = useThemeColors();
@@ -195,6 +203,43 @@ const MessageBubble: React.FC<Props> = ({
             {formatTime(createdAt)}
           </Text>
         </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // "secretthreewords" magic trigger — render an inline card with a
+  // Toggle Secret Mode button. Only LP renders the special UI; on
+  // other Nostr clients the recipient sees the plain word and won't
+  // know what it does. We render the card on BOTH sides (sender +
+  // receiver) so the sender sees a confirmation that the trigger
+  // landed, but only the receiver can usefully tap the button —
+  // sender's button is harmless (toggles their own mode).
+  if (isSecretModeTrigger(text)) {
+    return (
+      <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
+        <View style={[styles.invoiceCard, fromMe ? styles.invoiceCardMe : styles.invoiceCardThem]}>
+          {SenderLabel}
+          <Text style={[styles.invoiceLabel, fromMe && styles.invoiceLabelMe]}>Secret Mode</Text>
+          <Text style={[styles.invoiceMemo, fromMe && styles.invoiceMemoMe]}>
+            {fromMe
+              ? 'Lightning Piggy will offer the recipient a button to toggle Secret Mode.'
+              : 'Unlocks dev / power-user surfaces in Lightning Piggy.'}
+          </Text>
+          {!fromMe && onToggleSecretMode && (
+            <TouchableOpacity
+              style={styles.invoicePayButton}
+              onPress={onToggleSecretMode}
+              accessibilityRole="button"
+              accessibilityLabel="Toggle Secret Mode"
+              testID={`${testIdPrefix}-secret-mode-toggle-${id}`}
+            >
+              <Text style={styles.invoicePayText}>Toggle Secret Mode</Text>
+            </TouchableOpacity>
+          )}
+          <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
+            {formatTime(createdAt)}
+          </Text>
+        </View>
       </View>
     );
   }
@@ -405,8 +450,8 @@ const MessageBubble: React.FC<Props> = ({
   }
 
   // Plain text fallback — no rich content detected. Cap link previews
-  // at 1 per message: first non-blocklisted URL wins. Any other URLs in
-  // the body remain clickable as plain text via OS link recognition.
+  // at 1 per message: first non-blocklisted URL wins. All URLs in the body
+  // are rendered as tappable link spans below (see linkifySegments).
   const previewUrl = (() => {
     const urls = extractUrls(text);
     for (const u of urls) {
@@ -419,7 +464,30 @@ const MessageBubble: React.FC<Props> = ({
     <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
       <View style={[styles.bubble, fromMe ? styles.bubbleMe : styles.bubbleThem]}>
         {SenderLabel}
-        <Text style={[styles.bubbleText, fromMe && styles.bubbleTextMe]}>{text}</Text>
+        <Text style={[styles.bubbleText, fromMe && styles.bubbleTextMe]}>
+          {hasLink(text)
+            ? linkifySegments(text).map((seg, i) =>
+                seg.url ? (
+                  <Text
+                    key={i}
+                    style={[styles.bubbleLink, fromMe && styles.bubbleLinkMe]}
+                    onPress={() => {
+                      // openURL rejects on a malformed URL / missing handler —
+                      // swallow so a bad link can't raise an unhandled rejection.
+                      void Linking.openURL(seg.url as string).catch(() => {});
+                    }}
+                    accessibilityRole="link"
+                    accessibilityLabel={`Open link ${seg.url}`}
+                    testID={`${testIdPrefix}-link-${id}-${i}`}
+                  >
+                    {seg.text}
+                  </Text>
+                ) : (
+                  seg.text
+                ),
+              )
+            : text}
+        </Text>
         {previewUrl ? <MessageLinkPreview url={previewUrl} eventId={id} fromMe={fromMe} /> : null}
         <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
           {formatTime(createdAt)}
@@ -467,6 +535,17 @@ const createStyles = (colors: Palette) =>
     },
     bubbleTextMe: {
       color: colors.white,
+    },
+    // Tappable URL span inside a received bubble (surface bg) — brand accent.
+    bubbleLink: {
+      color: colors.brandPink,
+      textDecorationLine: 'underline',
+    },
+    // …and inside a sent bubble (pink bg) — white so it stays legible.
+    bubbleLinkMe: {
+      color: colors.white,
+      textDecorationLine: 'underline',
+      fontWeight: '600',
     },
     bubbleTime: {
       fontSize: 10,

@@ -9,8 +9,18 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STORAGE_KEY = '@lp:wot-settings:v1';
 
-// The 3 tiers from issue #535. Default 'friends' — only kind-3 follows pass.
-// 'fof' adds friends-of-follows (one hop). 'all' disables the filter entirely.
+// The 3 tiers from issue #535. Default 'all' — every signed event surfaces
+// on Geo-caches + Events rails so a brand-new user (no follows yet) sees
+// content on first launch. Issue #627: a 'friends' default on a fresh
+// install means an empty rail / empty map, because the WoT set is just
+// the user's own pubkey + seeds. 'fof' adds friends-of-follows (one hop).
+//
+// DMs are protected separately by `GroupsContext.effectiveWotTier`, which
+// clamps `wotTier === 'all'` back to 'friends' for the Messages surface
+// when secret mode is off — so this wider default does NOT widen DM
+// visibility. The clamp is the deliberate safety boundary between
+// "I want to discover content" and "I want to protect my inbox".
+//
 // Wider tiers are secret-mode-gated at the UI level (see WebOfTrustBottomSheet),
 // not at the storage layer — the persisted value still has to round-trip even
 // when secret mode is later disabled.
@@ -20,10 +30,13 @@ export interface WotSettings {
   wotTier: WotTier;
 }
 
-const DEFAULTS: WotSettings = { wotTier: 'friends' };
+const DEFAULTS: WotSettings = { wotTier: 'all' };
 
-// Mirror of trustGraphService's threat model: any payload we can't validate
-// strictly should fall back to the safest tier ('friends'), not the widest.
+// Validation predicate — any payload we can't strictly parse falls through
+// to DEFAULTS (now 'all'). Pre-#627 we deliberately fell back to 'friends'
+// for safety, but with the GroupsContext DM-clamp in place the wider
+// fallback is the strictly better UX trade-off: a corrupted blob shouldn't
+// silently re-introduce the empty-rail symptom #627 was filed to fix.
 const isWotTier = (v: unknown): v is WotTier => v === 'friends' || v === 'fof' || v === 'all';
 
 export const loadWotSettings = async (): Promise<WotSettings> => {

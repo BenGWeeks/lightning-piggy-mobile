@@ -17,6 +17,7 @@ import {
 } from '@gorhom/bottom-sheet';
 import { MapPin, Check, X } from 'lucide-react-native';
 import { LibreMiniMap } from './LibreMiniMap';
+import { useUserLocation } from '../contexts/UserLocationContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
 
@@ -50,6 +51,13 @@ const LocationPickerSheet: React.FC<Props> = ({
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
+  // Live user position for the dot on the picker map — separate from
+  // the camera centre (which is the saved pin in edit mode or the
+  // user's open-time fix in create mode) and from the crosshair
+  // (which tracks the camera). Without this the dot is wherever the
+  // CAMERA was seeded, which looks like the dot drifted as the user
+  // panned the crosshair to a new spot.
+  const { pos: livePos } = useUserLocation();
   // Map gets a fixed slice of the window (50%) so the sheet has a
   // determinate height for Gorhom's dynamic sizing to measure. Plenty of
   // pin-placement area, leaves the wizard header peeking behind, scales
@@ -256,7 +264,16 @@ const LocationPickerSheet: React.FC<Props> = ({
             <LibreMiniMap
               lat={resolvedStart.lat}
               lon={resolvedStart.lon}
-              userAccuracyMetres={null}
+              // Pass the LIVE user position explicitly so the dot
+              // renders where the user actually is, not at the
+              // seeded camera centre. Without these, LibreMiniMap's
+              // dot falls back to `lat`/`lon` (the initial seed),
+              // which on the edit-Piglet path is the SAVED pin —
+              // making the dot look like it drifted away from the
+              // user as the user pans the crosshair around.
+              userLat={livePos?.lat ?? null}
+              userLon={livePos?.lon ?? null}
+              userAccuracyMetres={livePos?.accuracy ?? null}
               merchants={[]}
               caches={[]}
               events={[]}

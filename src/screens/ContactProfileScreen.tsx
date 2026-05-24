@@ -32,6 +32,7 @@ import SendSheet from '../components/SendSheet';
 import FriendNoteFeed from '../components/FriendNoteFeed';
 import FriendPickerSheet, { PickedFriend } from '../components/FriendPickerSheet';
 import { type ContactProfileBodyData } from '../components/ContactProfileBody';
+import FullscreenImageModal from '../components/FullscreenImageModal';
 import { useNostr } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import type { Palette } from '../styles/palettes';
@@ -69,7 +70,8 @@ const ContactProfileScreen: React.FC = () => {
   const [loadingFollow, setLoadingFollow] = useState(false);
   const [savingLnAddress, setSavingLnAddress] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
-  const [avatarLoaded, setAvatarLoaded] = useState(false);
+  // Tap the avatar → view the picture full screen (#661 — same as the sheet).
+  const [fullscreenUrl, setFullscreenUrl] = useState<string | null>(null);
   const [editingLnAddress, setEditingLnAddress] = useState(false);
   const [lnAddressDraft, setLnAddressDraft] = useState(contact.lightningAddress ?? '');
   const [sendSheetOpen, setSendSheetOpen] = useState(false);
@@ -148,24 +150,17 @@ const ContactProfileScreen: React.FC = () => {
     };
   }, [contact.pubkey, contact.about, relays]);
 
-  // Fallback to default avatar if the picture URL hasn't loaded in 8s.
-  useEffect(() => {
-    if (!contact.picture || avatarLoaded || avatarError) return;
-    const timer = setTimeout(() => {
-      if (!avatarLoaded) setAvatarError(true);
-    }, 8000);
-    return () => clearTimeout(timer);
-  }, [contact.picture, avatarLoaded, avatarError]);
-
   useEffect(() => {
     if (contact.pubkey) {
       setFollowing(contacts.some((c) => c.pubkey === contact.pubkey));
     }
   }, [contact.pubkey, contacts]);
 
+  // Reset the avatar error when the picture changes (no load timeout — rely on
+  // onError, like ContactListItem; the old 8s timeout flipped a loaded cached
+  // avatar to the default icon when expo-image's onLoad didn't fire).
   useEffect(() => {
     setAvatarError(false);
-    setAvatarLoaded(false);
   }, [contact.picture]);
 
   useEffect(() => {
@@ -391,16 +386,23 @@ const ContactProfileScreen: React.FC = () => {
         <View style={styles.identityRow}>
           <View style={styles.avatarContainer}>
             {contact.picture && !avatarError ? (
-              <Image
-                source={{ uri: contact.picture }}
-                style={styles.avatar}
-                cachePolicy="memory-disk"
-                transition={200}
-                recyclingKey={contact.picture}
-                autoplay={false}
-                onError={() => setAvatarError(true)}
-                onLoad={() => setAvatarLoaded(true)}
-              />
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setFullscreenUrl(contact.picture)}
+                accessibilityRole="imagebutton"
+                accessibilityLabel="View profile picture full screen"
+                testID="profile-screen-avatar-fullscreen"
+              >
+                <Image
+                  source={{ uri: contact.picture }}
+                  style={styles.avatar}
+                  cachePolicy="memory-disk"
+                  transition={200}
+                  recyclingKey={contact.picture}
+                  autoplay={false}
+                  onError={() => setAvatarError(true)}
+                />
+              </TouchableOpacity>
             ) : (
               <View style={styles.avatarDefault}>
                 <UserRound size={48} color={colors.textBody} strokeWidth={1.5} />
@@ -611,6 +613,8 @@ const ContactProfileScreen: React.FC = () => {
         recipientPubkey={contact.pubkey ?? undefined}
         recipientName={contact.name}
       />
+
+      <FullscreenImageModal url={fullscreenUrl} onClose={() => setFullscreenUrl(null)} />
     </View>
   );
 };

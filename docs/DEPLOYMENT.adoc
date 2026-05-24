@@ -251,7 +251,9 @@ The fallbacks below are for two narrow cases:
 . **Sideloading a release-flavor APK to a device for testing** — usually for R8 / proguard validation. Prefer pulling the latest **production-profile** cloud-built APK instead: list with `eas build:list --platform android --profile production --status finished --limit 1`, then download the artifact by its build URL/ID (not `--latest`, which isn't profile-constrained and may hand back a `development` / `preview` APK with the `.dev` / `.preview` applicationId — that won't upgrade a production install). Only fall back to a local build when you're offline or the EAS queue is jammed.
 . **Reproducing a release-build issue locally** — e.g. a class got stripped and you need to bisect Gradle config.
 
-===== Case 1 (recommended): keep existing data on an EAS-built device
+===== Case 1 (offline fallback): keep existing data on an EAS-built device
+
+NOTE: The **recommended** path is to download a cloud-built production APK (see the bullet above) — it's already signed with the EAS upload keystore and needs no `versionCode` bookkeeping. Reach for the local build below only when you're offline or the EAS queue is jammed.
 
 Use `eas build --local --profile production`. This runs **EAS's production pipeline** on your machine — it fetches the EAS upload keystore at build time so the APK signature matches your existing install, and emits a sideload-able `.apk`:
 

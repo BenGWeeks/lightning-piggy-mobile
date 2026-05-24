@@ -10,6 +10,7 @@ import {
   type ParsedCache,
   type ParsedEvent,
 } from './nostrPlacesService';
+import { isDevLeftover } from './devEventDenylist';
 
 /** Structural shape of an event as returned by NostrContext.signEvent —
  * matches VerifiedEvent's data fields without the runtime brand symbol
@@ -80,6 +81,10 @@ export const subscribeNearbyCaches = (
   };
   const sub = pool.subscribeMany(relays, filter, {
     onevent: (e: NostrEvent) => {
+      // Filter out orphaned dev-leftover signers (see devEventDenylist.ts)
+      // before parsing — these are kind-37516 events from disposable nsecs
+      // we no longer hold a key for, so they sit on relays forever.
+      if (isDevLeftover(e.pubkey)) return;
       const __t0 = performance.now();
       const parsed = parseCache(e as VerifiedEvent);
       if (parsed) onEvent(parsed);
@@ -184,6 +189,7 @@ export const subscribeNearbyEvents = (
     const geoFilter: Filter = { kinds: [NIP52_TIME_BASED_KIND], '#g': prefixes };
     const geoSub = pool.subscribeMany(relays, geoFilter, {
       onevent: (e: NostrEvent) => {
+        if (isDevLeftover(e.pubkey)) return;
         const __t0 = performance.now();
         const parsed = parseNip52Event(e as VerifiedEvent);
         if (parsed) onEvent(parsed);
@@ -208,6 +214,7 @@ export const subscribeNearbyEvents = (
     };
     const tagSub = pool.subscribeMany(relays, tagFilter, {
       onevent: (e: NostrEvent) => {
+        if (isDevLeftover(e.pubkey)) return;
         const __t0 = performance.now();
         const parsed = parseNip52Event(e as VerifiedEvent);
         if (parsed) onEvent(parsed);
@@ -262,6 +269,8 @@ export const fetchCachesByAuthor = async (
   );
   const seen = new Map<string, ParsedCache>();
   for (const e of events) {
+    // Skip orphaned dev-leftover signers — see devEventDenylist.ts.
+    if (isDevLeftover(e.pubkey)) continue;
     const parsed = parseCache(e as VerifiedEvent);
     if (!parsed) continue;
     // Replaceable-event semantics: dedupe by coord, latest createdAt wins.
@@ -294,6 +303,8 @@ export const fetchCache = async (
   // Sort created_at desc — replaceable, latest wins; defensive vs
   // a misbehaving relay returning multiple revisions.
   events.sort((a: NostrEvent, b: NostrEvent) => b.created_at - a.created_at);
+  // Skip orphaned dev-leftover signers — see devEventDenylist.ts.
+  if (isDevLeftover(events[0].pubkey)) return null;
   return parseCache(events[0] as VerifiedEvent);
 };
 
@@ -321,5 +332,6 @@ export const fetchEvent = async (
   );
   if (events.length === 0) return null;
   events.sort((a: NostrEvent, b: NostrEvent) => b.created_at - a.created_at);
+  if (isDevLeftover(events[0].pubkey)) return null;
   return parseNip52Event(events[0] as VerifiedEvent);
 };

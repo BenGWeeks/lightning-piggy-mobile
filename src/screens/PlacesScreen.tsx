@@ -38,6 +38,7 @@ import { formatDistance, haversineMetres } from '../utils/geohash';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import BtcMapAttribution from '../components/BtcMapAttribution';
 import { LibreMiniMap } from '../components/LibreMiniMap';
+import { MerchantDetailSheet } from '../components/MerchantDetailSheet';
 import { useUserLocation } from '../contexts/UserLocationContext';
 import PlacesFilterSheet, { countActiveFilters } from '../components/PlacesFilterSheet';
 import LegendSheet from '../components/LegendSheet';
@@ -161,6 +162,9 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
   const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const [legendVisible, setLegendVisible] = useState(false);
+  // Mini-map pin-tap → opens the shared `MerchantDetailSheet`, same
+  // UX as the Explore mini-map + the full MapScreen. PR #630 follow-up.
+  const [selectedMerchant, setSelectedMerchant] = useState<BtcMapPlace | null>(null);
   const availableCategories = useMemo(() => {
     const seen = new Set<string>();
     for (const p of places) for (const c of p.categories ?? []) seen.add(c);
@@ -273,6 +277,7 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
                 caches={[]}
                 events={[]}
                 onTapMap={() => navigation.navigate('Map')}
+                onSelectMerchant={(m) => setSelectedMerchant(m)}
                 onBoundsChange={setMapBbox}
                 onOpenLegend={() => setLegendVisible(true)}
                 defaultZoom={10}
@@ -325,7 +330,7 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
                 <MapPin size={56} color={colors.textSupplementary} strokeWidth={1.5} />
                 <Text style={styles.emptyTitle}>No places nearby</Text>
                 <Text style={styles.subtle}>
-                  We searched a ~50 km area. Try opening the full map to pan further afield, or
+                  We searched a ~100 km area. Try opening the full map to pan further afield, or
                   refresh later — the OSM merchant list updates daily.
                 </Text>
               </View>
@@ -363,6 +368,21 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
         placesVisible
         availableCategories={availableCategories}
       />
+      {/* Mini-map pin-tap sheet — same component MapScreen +
+          ExploreHomeScreen use so the interaction shape is identical
+          across every map surface. PR #630 follow-up. */}
+      {selectedMerchant && (
+        <MerchantDetailSheet
+          place={selectedMerchant}
+          colors={colors}
+          onClose={() => setSelectedMerchant(null)}
+          onViewDetails={() => {
+            const placeId = selectedMerchant.id;
+            setSelectedMerchant(null);
+            navigation.navigate('PlaceDetail', { placeId });
+          }}
+        />
+      )}
     </View>
   );
 };

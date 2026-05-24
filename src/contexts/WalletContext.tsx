@@ -17,6 +17,8 @@ import * as zapCounterpartyStorage from '../services/zapCounterpartyStorage';
 import * as zapSenderProfileStorage from '../services/zapSenderProfileStorage';
 import * as zapResolverFingerprintStorage from '../services/zapResolverFingerprintStorage';
 import { computePendingHash, shouldSkipResolve } from '../utils/zapResolverGuard';
+import { singleFlight } from '../utils/singleFlight';
+import { pickNewReceipts, settledIncomingHashes } from '../utils/incomingReceipts';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
@@ -45,11 +47,14 @@ export interface IncomingPayment {
   // second payment with the same amount to the same wallet still
   // re-mounts the animation.
   at: number;
-  // Set when detection came via a known invoice hash (expectPayment
-  // path); null when it came via balance-diff (e.g. lightning-address
-  // receive). Consumers can use this to distinguish "exactly this
-  // invoice settled" from "something credited the wallet".
+  // The settled invoice's payment hash. Set on both detection paths now —
+  // expectPayment (by lookup) and the transaction-list detector (by tx
+  // identity). Kept nullable for backward-compat.
   paymentHash: string | null;
+  // True when the receipt was found in an already-current transaction list, so
+  // the post-receive refresh effect can skip a redundant list_transactions
+  // round-trip (#655 review).
+  fromTxList?: boolean;
 }
 
 const CURRENCY_KEY = 'user_fiat_currency';
@@ -215,6 +220,14 @@ interface WalletContextType {
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
 
+// Persist a wallet's announced-receipt hashes so a payment is announced once,
+// EVER — not once per JS session. The in-memory set resets on every cold start
+// / Metro re-eval, and the tx cache it seeds from can be stale (missing a
+// just-arrived receive), so without this a payment re-announced on reload (#653).
+function persistSeenReceipts(walletId: string, seen: ReadonlySet<string>): void {
+  AsyncStorage.setItem(`seenReceipts_${walletId}`, JSON.stringify([...seen])).catch(() => {});
+}
+
 export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   if (!__walletProviderFirstRenderLogged) {
     __walletProviderFirstRenderLogged = true;
@@ -229,12 +242,16 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [btcPrice, setBtcPrice] = useState<number | null>(null);
   const [lastIncomingPayment, setLastIncomingPayment] = useState<IncomingPayment | null>(null);
   const priceInterval = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Per-wallet baseline balances. Used to decide whether a balance
-  // change is an incoming payment (increment) or the local consequence
-  // of a send / send-like flow (decrement). First observation of a
-  // wallet seeds its baseline silently — we don't fire for the initial
-  // balance we happen to observe.
+  // Per-wallet last-seen balance. NOT used to detect/attribute receives any
+  // more (that's done by transaction hash — see seenReceiptsRef); it's only a
+  // trigger: a balance *increase* means something settled, so we refresh the
+  // transaction list and let the receive detector announce it (#653).
   const paymentBaselinesRef = useRef<Map<string, number>>(new Map());
+  // Per-wallet set of settled-incoming payment_hashes we've already announced.
+  // Receives are detected by transaction identity (hash), not balance-diffing,
+  // so a flapping/stale balance can't re-announce the same payment (#653).
+  // Seeded silently from existing history on first sight (no launch re-announce).
+  const seenReceiptsRef = useRef<Map<string, Set<string>>>(new Map());
 
   // Derived state
   const activeWallet = wallets.find((w) => w.id === activeWalletId) ?? null;
@@ -418,6 +435,25 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             } catch {
               // Corrupted balance cache — ignore; live fetch will repopulate.
             }
+            // Seed the announced-receipts set BEFORE the detector runs: prefer
+            // the persisted set, else baseline from cached history. In-memory
+            // alone reset on every JS re-eval and re-announced a payment whose
+            // hash wasn't in the (possibly stale) tx cache (#653 follow-up).
+            try {
+              const seenRaw = await AsyncStorage.getItem(`seenReceipts_${w.id}`);
+              const seeded = seenRaw
+                ? new Set<string>(JSON.parse(seenRaw) as string[])
+                : settledIncomingHashes(cachedTxs);
+              seenReceiptsRef.current.set(w.id, seeded);
+              if (!seenRaw) persistSeenReceipts(w.id, seeded);
+            } catch {
+              // Corrupt persisted value — overwrite with a fresh baseline so the
+              // next cold start doesn't keep hitting this catch (and possibly
+              // re-announcing off a stale tx cache).
+              const seeded = settledIncomingHashes(cachedTxs);
+              seenReceiptsRef.current.set(w.id, seeded);
+              persistSeenReceipts(w.id, seeded);
+            }
             return {
               ...w,
               isConnected: false,
@@ -584,6 +620,22 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               } catch {
                 // Ignore corrupted cache.
               }
+              // Seed the announced-receipts set before the detector runs (see
+              // the startup-hydration path for the rationale).
+              try {
+                const seenRaw = await AsyncStorage.getItem(`seenReceipts_${w.id}`);
+                const seeded = seenRaw
+                  ? new Set<string>(JSON.parse(seenRaw) as string[])
+                  : settledIncomingHashes(cachedTxs);
+                seenReceiptsRef.current.set(w.id, seeded);
+                if (!seenRaw) persistSeenReceipts(w.id, seeded);
+              } catch {
+                // Corrupt persisted value — overwrite with a fresh baseline (see
+                // the startup-hydration path for the rationale).
+                const seeded = settledIncomingHashes(cachedTxs);
+                seenReceiptsRef.current.set(w.id, seeded);
+                persistSeenReceipts(w.id, seeded);
+              }
               return {
                 ...w,
                 isConnected: false,
@@ -653,6 +705,24 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   }, [currency, fetchPrice]);
 
+  // Retry the fiat-price fetch when the app comes to foreground if we
+  // don't yet have a rate. Covers the cold-start-offline case: app
+  // launches without internet → `fetchPrice` returns null → `btcPrice`
+  // stays null → the wallet card's fiat line + the sats↔fiat toggle in
+  // `AmountEntryScreen` both silently disable (they gate on
+  // `btcPrice !== null`). Without this retry, the user has to wait up
+  // to 5 min for the interval tick or kill + relaunch the app to recover
+  // once connectivity returns. Gate on `btcPrice === null` so we don't
+  // spam CoinGecko in the happy path where the rate is already cached.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active' && btcPrice === null) {
+        fetchPrice(currency);
+      }
+    });
+    return () => sub.remove();
+  }, [btcPrice, currency, fetchPrice]);
+
   // NWC connection status: check WebSocket state every 30 seconds and
   // reconnect if dropped (prevents idle timeout disconnections).
   //
@@ -666,24 +736,38 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     walletsRef.current = wallets;
   }, [wallets]);
   useEffect(() => {
+    let checkInProgress = false;
     connectionCheckInterval.current = setInterval(async () => {
-      for (const w of walletsRef.current.filter((ww) => ww.walletType === 'nwc')) {
-        const connected = nwcService.isWalletConnected(w.id);
-        if (connected !== w.isConnected) {
-          if (!connected) {
+      // A reconnect on a dead relay can outlast the 30s tick; this guard stops
+      // checks stacking across ticks (#654).
+      if (checkInProgress) return;
+      checkInProgress = true;
+      try {
+        for (const w of walletsRef.current.filter((ww) => ww.walletType === 'nwc')) {
+          if (!nwcService.isWalletConnected(w.id) && !nwcService.isRelayInCooldown(w.id)) {
+            // Relay unresponsive (dead / hung) and not currently parked — try to
+            // (re)connect, which re-probes via its initial getBalance. The
+            // cooldown gate (#656) backs off a persistently-dead relay so we
+            // don't hammer it every 30s tick; a recovered relay reconnects once
+            // its cooldown lapses (no app-foreground reconnect-all to rely on).
             try {
               const nwcUrl = await walletStorage.getNwcUrl(w.id);
-              if (nwcUrl) {
-                const result = await nwcService.connect(w.id, nwcUrl);
-                updateWalletInState(w.id, { isConnected: result.success });
-              }
+              if (nwcUrl) await nwcService.connect(w.id, nwcUrl);
             } catch {
-              updateWalletInState(w.id, { isConnected: false });
+              // connect threw — the responsiveness read below reflects it
             }
-          } else {
-            updateWalletInState(w.id, { isConnected: connected });
+          }
+          // Sync stored state to relay *responsiveness* (does it answer?), not
+          // connect()'s socket-level success — so a dead relay stays
+          // Disconnected instead of flapping back to Connected (#654). Write
+          // only on change to avoid needless re-renders.
+          const responsive = nwcService.isWalletConnected(w.id);
+          if (responsive !== w.isConnected) {
+            updateWalletInState(w.id, { isConnected: responsive });
           }
         }
+      } finally {
+        checkInProgress = false;
       }
     }, 30 * 1000);
     return () => {
@@ -1745,12 +1829,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             // show a combined delta on the generic path; the explicit
             // amount is always correct.
             if (expectedAmountSats !== undefined && expectedAmountSats > 0) {
-              // Advance the balance-diff baseline to the current balance
-              // so the /same/ settle doesn't also fire via the diff path.
-              const currentBalance = walletsRef.current.find((w) => w.id === walletId)?.balance;
-              if (currentBalance !== null && currentBalance !== undefined) {
-                paymentBaselinesRef.current.set(walletId, currentBalance);
+              // Mark this hash announced so the transaction-list detector
+              // doesn't also fire for the same settle when the tx lands (#653).
+              let seen = seenReceiptsRef.current.get(walletId);
+              if (!seen) {
+                seen = new Set<string>();
+                seenReceiptsRef.current.set(walletId, seen);
               }
+              seen.add(paymentHash);
               setLastIncomingPayment({
                 walletId,
                 amountSats: expectedAmountSats,
@@ -1808,6 +1894,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // defined below without the closure-ordering dance.
   useEffect(() => {
     if (!lastIncomingPayment) return;
+    // The transaction-list detector already saw the tx in a current list, so a
+    // refresh here would be a redundant list_transactions round-trip. Only the
+    // expectPayment path needs it (the list may not yet include the settle).
+    if (lastIncomingPayment.fromTxList) return;
     fetchTransactionsForWallet(lastIncomingPayment.walletId).catch(() => {
       // Non-fatal: next organic refresh will pick the tx up.
     });
@@ -1817,52 +1907,90 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastIncomingPayment]);
 
-  // Incoming-payment detector. Watches every wallet's balance: the first
-  // time we see a wallet, we record its balance silently as a baseline;
-  // any subsequent increase fires a `lastIncomingPayment` event that the
-  // app-root overlay consumes. Decreases simply re-baseline (a send is
-  // not a "received payment" event). Because this lives in the context,
-  // the overlay pops regardless of which screen the user is on when
-  // money lands — ReceiveSheet being open is no longer required.
+  // Balance-change trigger. A balance increase means *something* settled, so
+  // refresh the transaction list promptly — the receive detector below then
+  // announces it by payment_hash. We no longer announce off the balance delta
+  // itself: a flapping / stale balance re-fired the same payment (#653).
   useEffect(() => {
     const baselines = paymentBaselinesRef.current;
     const liveIds = new Set(wallets.map((w) => w.id));
-
-    // Garbage-collect baselines for wallets that have been removed.
-    // Without this the Map grows monotonically (e.g. user adds and
-    // removes wallets repeatedly during onboarding / debugging).
-    for (const id of baselines.keys()) {
-      if (!liveIds.has(id)) baselines.delete(id);
-    }
+    // GC per-wallet state for wallets that have been removed.
+    for (const id of baselines.keys()) if (!liveIds.has(id)) baselines.delete(id);
+    for (const id of seenReceiptsRef.current.keys())
+      if (!liveIds.has(id)) {
+        seenReceiptsRef.current.delete(id);
+        AsyncStorage.removeItem(`seenReceipts_${id}`).catch(() => {});
+      }
 
     for (const wallet of wallets) {
       const bal = wallet.balance;
       if (bal === null || bal === undefined) continue;
       const prev = baselines.get(wallet.id);
-      if (prev === undefined) {
-        baselines.set(wallet.id, bal);
+      baselines.set(wallet.id, bal);
+      if (prev !== undefined && bal > prev) {
+        void fetchTransactionsForWallet(wallet.id).catch(() => {});
+      }
+    }
+    // fetchTransactionsForWallet is a stable useCallback; omitting it from deps
+    // avoids re-running on unrelated renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallets]);
+
+  // Receive detector. Announces each settled incoming payment exactly once,
+  // keyed by payment_hash — so a flapping / stale balance can't re-announce the
+  // same payment (#653). First sight of a wallet seeds the seen-set from its
+  // (cache-hydrated) history: a silent baseline, so launch doesn't re-announce
+  // past receives. Lives in the context so the overlay pops on any screen.
+  useEffect(() => {
+    // Mark every new receipt seen (so none re-announces on a later refresh), but
+    // announce only ONE per render: the overlay shows a single payment and
+    // setLastIncomingPayment is one state value — calling it in a loop would
+    // batch and keep only the last, dropping the rest (#655 review). Pick the
+    // newest by settled_at, deterministically, across all wallets.
+    let newest: {
+      walletId: string;
+      amountSats: number;
+      paymentHash: string;
+      settledAt: number;
+    } | null = null;
+    let newestLabel = '';
+    for (const wallet of wallets) {
+      const txns = wallet.transactions ?? [];
+      const seen = seenReceiptsRef.current.get(wallet.id);
+      if (seen === undefined) {
+        // Newly-added wallet (hydration already seeded existing ones): baseline
+        // its history silently and persist so it survives the next re-eval.
+        const seeded = settledIncomingHashes(txns);
+        seenReceiptsRef.current.set(wallet.id, seeded);
+        persistSeenReceipts(wallet.id, seeded);
         continue;
       }
-      if (bal > prev) {
-        const delta = bal - prev;
-        baselines.set(wallet.id, bal);
-        if (__DEV__)
-          console.log(
-            `[Wallet] incoming payment detected: +${delta} sats on ${walletLabel(wallet)} (${prev} → ${bal})`,
-          );
-        setLastIncomingPayment({
-          walletId: wallet.id,
-          amountSats: delta,
-          at: Date.now(),
-          // Balance-diff path doesn't know which invoice settled — only
-          // expectPayment can attribute by hash. Lightning-address /
-          // multi-invoice receives land here.
-          paymentHash: null,
-        });
-      } else if (bal < prev) {
-        // Outgoing payment or reorg adjustment — silently rebase.
-        baselines.set(wallet.id, bal);
+      let changed = false;
+      for (const receipt of pickNewReceipts(txns, seen)) {
+        seen.add(receipt.paymentHash);
+        changed = true;
+        if (!newest || receipt.settledAt > newest.settledAt) {
+          newest = { walletId: wallet.id, ...receipt };
+          newestLabel = walletLabel(wallet);
+        }
       }
+      // Persist the moment a new receipt is seen so a reload before the next
+      // write can't re-announce it.
+      if (changed) persistSeenReceipts(wallet.id, seen);
+    }
+    if (newest) {
+      if (__DEV__)
+        console.log(
+          `[Wallet] incoming payment detected: +${newest.amountSats} sats on ${newestLabel} (${newest.paymentHash.slice(0, 12)}…)`,
+        );
+      setLastIncomingPayment({
+        walletId: newest.walletId,
+        amountSats: newest.amountSats,
+        at: Date.now(),
+        paymentHash: newest.paymentHash,
+        // Already detected from a current tx list — skip the redundant refresh.
+        fromTxList: true,
+      });
     }
   }, [wallets]);
 
@@ -1919,52 +2047,34 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // (focus event in a balance-displaying screen).
     if (balancePollDemand <= 0) return;
 
+    // singleFlight drops a tick whose predecessor is still awaiting; replyTimeoutMs caps each to a single 8 s attempt (#650).
+    const pollBalance = singleFlight(async () => {
+      const b = await nwcService.getBalance(activeWalletId, { replyTimeoutMs: 8000 });
+      if (b !== null) updateWalletInState(activeWalletId, { balance: b });
+    });
     const refreshOnce = () => {
       // Bail if the wallet has since disconnected — we read through
       // `walletsRef` rather than the closure so this is current.
       const current = walletsRef.current.find((w) => w.id === activeWalletId);
       if (!current || !current.isConnected || current.walletType === 'onchain') return;
-      nwcService
-        .getBalance(activeWalletId)
-        .then((b) => {
-          if (b !== null) updateWalletInState(activeWalletId, { balance: b });
-        })
-        .catch(() => {});
+      // Skip a parked (dead/timing-out) relay so a refresh can't re-arm the
+      // churn the cooldown is trying to suppress (#656).
+      if (nwcService.isRelayInCooldown(activeWalletId)) return;
+      pollBalance().catch(() => {});
     };
 
-    let interval: ReturnType<typeof setInterval> | null = null;
-    const startPoll = () => {
-      if (interval) return;
-      // 10 s tick (down from 30 s). LUD-16 receives — payments sent to
-      // the user's lightning address rather than to a specific invoice
-      // we issued — can only be detected via the balance-diff polling
-      // here; the previous 30 s interval made these receives feel laggy
-      // in testing. Demand-gating (#569) means the poll only runs while
-      // a balance surface is focused, so this doesn't change idle
-      // battery / NWC traffic costs.
-      interval = setInterval(refreshOnce, 10000);
-    };
-    const stopPoll = () => {
-      if (interval) {
-        clearInterval(interval);
-        interval = null;
-      }
-    };
-
-    if (AppState.currentState === 'active') {
-      refreshOnce();
-      startPoll();
-    }
+    // Event-driven (#657): refresh on focus (this effect re-runs when a balance
+    // surface gains focus, via balancePollDemand) and on app-foreground — NOT on
+    // a constant interval. Receive *detection* is transaction-hash-based now
+    // (#653), so the old "poll to catch LUD-16 receives" rationale is gone, and
+    // the constant 10 s poll was the dominant relay load that rate-limited
+    // self-hosted relays. Unsolicited address receives surface on next focus /
+    // foreground (sends + the Receive-sheet expectPayment poll cover the rest).
+    if (AppState.currentState === 'active') refreshOnce();
     const sub = AppState.addEventListener('change', (next) => {
-      if (next === 'active') {
-        refreshOnce();
-        startPoll();
-      } else {
-        stopPoll();
-      }
+      if (next === 'active') refreshOnce();
     });
     return () => {
-      stopPoll();
       sub.remove();
     };
   }, [activeWalletId, activeWalletConnected, updateWalletInState, balancePollDemand]);

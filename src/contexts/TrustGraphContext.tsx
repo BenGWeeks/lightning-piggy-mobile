@@ -142,9 +142,30 @@ export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
     };
   }, []);
 
-  // Persisted tier. Default 'friends' (#535). Legacy boolean payloads
-  // are migrated inside `loadWotSettings`.
-  const [storedSettings, setStoredSettings] = useState<WotSettings>({ wotTier: 'friends' });
+  // Persisted tier. Initialise synchronously to the same `'all'` value
+  // `wotSettingsService.DEFAULTS` uses (#627) so a brand-new user sees
+  // content from the first paint, not after AsyncStorage's async round
+  // trip. The trade-off vs. initialising to the narrow 'friends' tier:
+  //
+  //   - brand-new user (no payload)         → init 'all',     load 'all'      → content visible immediately ✓
+  //   - existing user with persisted 'all'  → init 'all',     load 'all'      → no transition ✓
+  //   - existing user with persisted 'fof'  → init 'all',     load narrows    → ≤one frame of wider content before settling ✗ small flash
+  //   - existing user with persisted 'friends' → init 'all',  load narrows    → ≤one frame of wider content before settling ✗ small flash
+  //
+  // The "empty rail for new users" symptom is the one #627 was filed to
+  // fix — it's the user-facing regression we deliberately accept the
+  // small wide→narrow flash to avoid. Existing users with a narrower
+  // explicit choice see at most ~one frame of widened content during
+  // app launch (AsyncStorage round-trip is ~50-200 ms on Hermes), which
+  // is imperceptible in practice and only fires at cold-start.
+  //
+  // DMs are protected separately by `GroupsContext.effectiveWotTier`,
+  // which clamps `wotTier === 'all'` back to 'friends' for the Messages
+  // surface when secretMode is off — so the wider init never widens DM
+  // visibility regardless of secretMode state.
+  //
+  // Legacy boolean payloads are migrated inside `loadWotSettings`.
+  const [storedSettings, setStoredSettings] = useState<WotSettings>({ wotTier: 'all' });
   useEffect(() => {
     loadWotSettings().then(setStoredSettings);
   }, []);

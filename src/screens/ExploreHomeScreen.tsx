@@ -22,9 +22,12 @@ import {
 import TabHeader from '../components/TabHeader';
 import { ContentRail } from '../components/ContentRail';
 import { LibreMiniMap } from '../components/LibreMiniMap';
+import { MerchantDetailSheet } from '../components/MerchantDetailSheet';
+import { CacheDetailSheet } from '../components/CacheDetailSheet';
 import { useUserLocation } from '../contexts/UserLocationContext';
 import LegendSheet from '../components/LegendSheet';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
+import { perfPageReady } from '../utils/perfLog';
 import { courses, type Course } from '../data/learnContent';
 import {
   getProgress,
@@ -34,7 +37,7 @@ import {
 import {
   type BtcMapPlace,
   acceptsLightning,
-  fetchPlacesInBbox,
+  fetchNearestPlaces,
   formatAddress,
   isBoosted,
   lightningAddressOf,
@@ -44,6 +47,7 @@ import {
   refreshDataset,
 } from '../services/btcMapService';
 import { useNearbyRadius } from '../hooks/useNearbyRadius';
+import { BOOSTED_RADIUS_METRES } from '../services/nearbyRadiusService';
 import { type ParsedCache, type ParsedEvent } from '../services/nostrPlacesService';
 import {
   fetchCachesByAuthor,
@@ -63,7 +67,7 @@ import {
   decodeGeohash,
   encodeGeohash,
   formatDistance,
-  geohashPrefixes,
+  geohashNeighbours,
   haversineMetres,
 } from '../utils/geohash';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -224,6 +228,13 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // down/re-open NIP-GC + NIP-52 subscriptions in one gesture.
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  // Mini-map pin-tap selections — open `MerchantDetailSheet` /
+  // `CacheDetailSheet` (same components MapScreen uses) so the
+  // interaction shape matches the full map. Events have no dedicated
+  // sheet in MapScreen either, so they keep navigating directly to
+  // EventDetail (consistent with MapScreen's behaviour). PR #630.
+  const [selectedMerchant, setSelectedMerchant] = useState<BtcMapPlace | null>(null);
+  const [selectedCache, setSelectedCache] = useState<ParsedCache | null>(null);
   // Map legend modal — same LegendSheet ExploreMiniMap renders inline,
   // but here it lives at the screen level so LibreMiniMap (which doesn't
   // own the sheet itself) can ask us to open it. Array memos for the
@@ -238,6 +249,20 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // the async `getCachedPlaces()` — that fired AFTER the first render,
   // so the rail flashed empty for the AsyncStorage round-trip on cold
   // launch even though the data was sitting on disk.
+  //
+  // The dep array uses `posBucket` instead of raw `pos` so GPS jitter
+  // doesn't re-fire the effect. Raw `pos` updates on every Android
+  // GPS sample (~1 Hz on a real device), each with a new object
+  // identity even when the user is sitting still — that re-fired this
+  // effect and stacked overlapping fetches on the JS thread. Bucketing
+  // to ~3 decimals of lat/lon (~100 m ground resolution) means we only
+  // refetch when the user has genuinely moved enough to matter.
+  // setPos firing twice on mount (last-known then current position)
+  // also gets coalesced when both samples round to the same bucket.
+  const posBucket = useMemo(() => {
+    if (!pos) return null;
+    return `${pos.lat.toFixed(3)},${pos.lon.toFixed(3)}`;
+  }, [pos]);
   useEffect(() => {
     if (!pos) return;
     let cancelled = false;
@@ -251,23 +276,26 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
       if (merchants.length === 0) setMerchantsLoading(true);
       try {
         const __t0 = performance.now();
-        // ~50 km half-side around the user. Rural users (Longstanton,
-        // Highlands, mid-Wales) sit in 0-merchant 5 km tiles; widening
-        // to ~50 km surfaces the closest drive-away merchants on the
-        // rail without paying for a country-wide query.
-        const places = await fetchPlacesInBbox({
-          // ±2° (~220 km half-side) — keeps parity with PlacesScreen so
-          // zooming out on the hub mini-map surfaces the same merchant
-          // set the list page would. In-memory filter, no network cost.
-          minLon: pos.lon - 2,
-          minLat: pos.lat - 2,
-          maxLon: pos.lon + 2,
-          maxLat: pos.lat + 2,
+        // Tiered nearest-N fetch — walks 25 → 100 → 500 km until ≥10
+        // merchants come back. Bounded payload (~10-100 KB depending
+        // on density) replaces the previous ±2° / ~220 km bbox call,
+        // which pulled hundreds of merchants the hub never showed and
+        // blocked the JS thread for seconds at a time (#31). The hub
+        // mini-map intentionally diverges from PlacesScreen / MapScreen
+        // here — both of those have a map the user actively pans, so
+        // they keep the viewport-driven `fetchPlacesInBbox` path.
+        // `force: refreshKey > 0` is belt-and-suspenders alongside
+        // `refreshDataset()` wiping the cache before this effect re-runs
+        // — explicit beats relying on side-effect ordering, so a future
+        // refactor of refreshDataset can't silently regress pull-to-
+        // refresh into a cache hit. (PR #628 Stev.ie audit.)
+        const places = await fetchNearestPlaces(pos.lat, pos.lon, 10, {
+          force: refreshKey > 0,
         });
         const __ms = Math.round(performance.now() - __t0);
         if (__ms > 200) {
           console.log(
-            `[PerfBlock] ExploreHome fetchPlacesInBbox: ${__ms}ms places=${places.length}`,
+            `[PerfBlock] ExploreHome fetchNearestPlaces: ${__ms}ms places=${places.length}`,
           );
         }
         if (!cancelled) setMerchants(places);
@@ -280,7 +308,19 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     return () => {
       cancelled = true;
     };
-  }, [pos, refreshKey]);
+    // posBucket — not pos — is the trigger; see comment above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [posBucket, refreshKey]);
+
+  // Page-ready marker. Fires the first time the rail has content AND
+  // we have a real-or-anchored position fix, which together is what
+  // the user perceives as "Explore is loaded". perfPageReady itself
+  // dedupes per tap so re-renders here don't re-emit.
+  useEffect(() => {
+    if (pos && merchants.length > 0) {
+      perfPageReady('Explore', `${merchants.length} merchants`);
+    }
+  }, [pos, merchants.length]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -542,103 +582,124 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const [untrustedCacheCount, setUntrustedCacheCount] = useState(0);
   const [untrustedEventCount, setUntrustedEventCount] = useState(0);
   const subsCloserRef = useRef<(() => void)[]>([]);
-  // NIP-GC + NIP-52 subscriptions are wrapped in useFocusEffect so they
-  // pause on tab blur. Previously the subs stayed open for the rest of
-  // the session once the user visited Explore even once — relay events
-  // kept landing on the JS thread (a Map clone per delivery is small
-  // but not free) while the user was on Home/Messages/Friends, eating
-  // into bridge dispatches for payment-settlement polls + QR-scan
-  // callbacks (#554). Reconnect on re-focus is ~100 ms; foreground
-  // JS-thread responsiveness is the better trade.
-  // Destructure pos into primitives so the focus effect's deps don't
+  // NIP-GC + NIP-52 subscriptions live on the *mount* lifecycle, not
+  // the focus lifecycle. Open once when ExploreHomeScreen first
+  // mounts (which is lazy on the tab navigator via `lazy: true`, so
+  // nothing fires before the user actually visits the tab); stay open
+  // across tab blur / focus; close only on full unmount (logout /
+  // navigator reset / pull-to-refresh).
+  //
+  // This is the standard pattern across production Nostr clients
+  // (Damus, Snort, Amethyst). The pre-existing `useFocusEffect` here
+  // tore down on every blur and re-opened on every focus. The
+  // rationale was "reconnect on re-focus is ~100 ms; saves JS-thread
+  // load while user is on Home" — but the actual measured cost of
+  // re-focus is **15-16 s** (#31 freeze), not 100 ms, because the
+  // relay re-emits its full geohash-prefix backlog every time we
+  // re-subscribe. The math was upside-down: we were paying a
+  // 15-second freeze on every tab return to save the user from
+  // <2 ms/min of background event processing.
+  //
+  // Subscriptions stay closed by the WebSocket reuse semantics of
+  // `nostr-tools`' `SimplePool` — closing a subscription just sends
+  // a CLOSE frame; the underlying WebSocket persists for future REQs.
+  // So even the "first visit" backfill happens once per app launch,
+  // not once per focus.
+  //
+  // Destructure pos into primitives so the effect's deps don't
   // re-trigger every time `setPos` writes a fresh `{lat, lon, accuracy}`
   // object (which happens 2–3 times on cold start: last-known fix →
-  // current fix → high-accuracy refinement). Pre-fix that thrashed the
-  // relay subscription open/close 2–3 times per cold-start; each round-
-  // trip is ~100–300 ms. Stev.ie's #612 review surfaced this.
+  // current fix → high-accuracy refinement). Pre-fix that thrashed
+  // the relay subscription open/close 2–3 times per cold-start.
+  // Stev.ie's #612 review surfaced this.
   const posLat = pos?.lat;
   const posLon = pos?.lon;
-  useFocusEffect(
-    useCallback(() => {
-      // `refreshKey` is intentionally listed in the deps below so that
-      // pull-to-refresh (which bumps it) tears down + re-runs the
-      // subscriptions, even though the value isn't referenced inside
-      // the body.
-      if (typeof posLat !== 'number' || typeof posLon !== 'number') return;
-      // `cancelled` covers the window between focus-effect cleanup
-      // firing (subsCloserRef.current.forEach(c => c())) and the
-      // underlying relay socket actually closing — a stray event in
-      // that gap would otherwise mutate pendingCachesRef and arm a
-      // fresh flush timer that fires while the screen is blurred.
-      // Mirrors NostrContext.tsx's DM inbox precedent.
-      let cancelled = false;
-      const myGh = encodeGeohash(posLat, posLon, 7);
-      // Caches sit at precision 5 (~5 km) — geocaching is inherently
-      // hyper-local. Events broaden to precision 3 (~150 km) so a rural
-      // user catches the nearest city's Bitcoin meetup; most NIP-52
-      // publishers emit g tags at every precision 3..9.
-      const cachePrefixes = geohashPrefixes(myGh, 5).filter((p) => p.length === 5);
-      const eventPrefixes = geohashPrefixes(myGh, 3).filter((p) => p.length === 3);
+  useEffect(() => {
+    // `refreshKey` is intentionally listed in the deps below so that
+    // pull-to-refresh (which bumps it) tears down + re-runs the
+    // subscriptions, even though the value isn't referenced inside
+    // the body.
+    if (typeof posLat !== 'number' || typeof posLon !== 'number') return;
+    // `cancelled` covers the window between effect cleanup firing
+    // (subsCloserRef.current.forEach(c => c())) and the underlying
+    // relay socket actually closing — a stray event in that gap
+    // would otherwise mutate pendingCachesRef and arm a fresh flush
+    // timer that fires after the cleanup. Mirrors NostrContext.tsx's
+    // DM inbox precedent.
+    let cancelled = false;
+    // Caches sit at precision 5 (~5 km) — geocaching is inherently
+    // hyper-local. Events broaden to precision 3 (~150 km) so a rural
+    // user catches the nearest city's Bitcoin meetup; most NIP-52
+    // publishers emit g tags at every precision 3..9.
+    //
+    // `geohashNeighbours` returns the user's own cell plus the 8
+    // surrounding tiles at that precision (9 prefixes for caches,
+    // 9 for events). Pre-#631 we used `geohashPrefixes(myGh, 5)`
+    // which returned only the user's own truncation chain — caches
+    // hidden in an adjacent precision-5 tile (e.g. 500 m across a
+    // tile boundary) never matched the `#g` filter.
+    const cachePrefixes = geohashNeighbours(encodeGeohash(posLat, posLon, 5));
+    const eventPrefixes = geohashNeighbours(encodeGeohash(posLat, posLon, 3));
 
-      subsCloserRef.current.push(
-        subscribeNearbyCaches(cachePrefixes, (c) => {
-          if (cancelled) return;
-          // WoT filter: silently drop caches from pubkeys outside the
-          // trust graph (an unverified cache could be a phishing LNURL
-          // or, worse, a physical lure). Surfaced as a count instead so
-          // users know they exist without being lured into inspecting them.
-          if (!isTrustedRef.current(c.hiderPubkey)) {
-            setUntrustedCacheCount((n) => n + 1);
-            return;
-          }
-          // Stale-event drop happens here too so a stale wrap doesn't
-          // even enter the pending queue. The flush re-checks against
-          // the committed state in case the queue itself raced.
-          const existing = pendingCachesRef.current.get(c.coord);
-          if (existing && existing.createdAt >= c.createdAt) return;
-          pendingCachesRef.current.set(c.coord, c);
-          if (pendingCachesRef.current.size >= PENDING_FLUSH_THRESHOLD) {
-            flushPendingCaches();
-            return;
-          }
-          if (pendingCachesTimerRef.current === null) {
-            pendingCachesTimerRef.current = setTimeout(flushPendingCaches, PENDING_FLUSH_MS);
-          }
-        }),
-      );
-      subsCloserRef.current.push(
-        subscribeNearbyEvents(eventPrefixes, (e) => {
-          if (cancelled) return;
-          // Skip events that already started > 1h ago.
-          if (e.startsAt && e.startsAt < Math.floor(Date.now() / 1000) - 60 * 60) return;
-          if (!isTrustedRef.current(e.organiserPubkey)) {
-            setUntrustedEventCount((n) => n + 1);
-            return;
-          }
-          const existing = pendingEventsRef.current.get(e.coord);
-          if (existing && existing.startsAt === e.startsAt) return;
-          pendingEventsRef.current.set(e.coord, e);
-          if (pendingEventsRef.current.size >= PENDING_FLUSH_THRESHOLD) {
-            flushPendingEvents();
-            return;
-          }
-          if (pendingEventsTimerRef.current === null) {
-            pendingEventsTimerRef.current = setTimeout(flushPendingEvents, PENDING_FLUSH_MS);
-          }
-        }),
-      );
-      return () => {
-        cancelled = true;
-        subsCloserRef.current.forEach((c) => c());
-        subsCloserRef.current = [];
-        // Drain whatever's queued so a tab blur mid-backfill doesn't
-        // silently discard the last few events. Both flushers are
-        // null-safe + no-op when the buffer is already empty.
-        flushPendingCaches();
-        flushPendingEvents();
-      };
-    }, [posLat, posLon, refreshKey, flushPendingCaches, flushPendingEvents]),
-  );
+    subsCloserRef.current.push(
+      subscribeNearbyCaches(cachePrefixes, (c) => {
+        if (cancelled) return;
+        // WoT filter: silently drop caches from pubkeys outside the
+        // trust graph (an unverified cache could be a phishing LNURL
+        // or, worse, a physical lure). Surfaced as a count instead so
+        // users know they exist without being lured into inspecting them.
+        if (!isTrustedRef.current(c.hiderPubkey)) {
+          setUntrustedCacheCount((n) => n + 1);
+          return;
+        }
+        // Stale-event drop happens here too so a stale wrap doesn't
+        // even enter the pending queue. The flush re-checks against
+        // the committed state in case the queue itself raced.
+        const existing = pendingCachesRef.current.get(c.coord);
+        if (existing && existing.createdAt >= c.createdAt) return;
+        pendingCachesRef.current.set(c.coord, c);
+        if (pendingCachesRef.current.size >= PENDING_FLUSH_THRESHOLD) {
+          flushPendingCaches();
+          return;
+        }
+        if (pendingCachesTimerRef.current === null) {
+          pendingCachesTimerRef.current = setTimeout(flushPendingCaches, PENDING_FLUSH_MS);
+        }
+      }),
+    );
+    subsCloserRef.current.push(
+      subscribeNearbyEvents(eventPrefixes, (e) => {
+        if (cancelled) return;
+        // Skip events that already started > 1h ago.
+        if (e.startsAt && e.startsAt < Math.floor(Date.now() / 1000) - 60 * 60) return;
+        if (!isTrustedRef.current(e.organiserPubkey)) {
+          setUntrustedEventCount((n) => n + 1);
+          return;
+        }
+        const existing = pendingEventsRef.current.get(e.coord);
+        if (existing && existing.startsAt === e.startsAt) return;
+        pendingEventsRef.current.set(e.coord, e);
+        if (pendingEventsRef.current.size >= PENDING_FLUSH_THRESHOLD) {
+          flushPendingEvents();
+          return;
+        }
+        if (pendingEventsTimerRef.current === null) {
+          pendingEventsTimerRef.current = setTimeout(flushPendingEvents, PENDING_FLUSH_MS);
+        }
+      }),
+    );
+    return () => {
+      cancelled = true;
+      subsCloserRef.current.forEach((c) => c());
+      subsCloserRef.current = [];
+      // Drain whatever's queued so the last few events from a
+      // refresh-triggered tear-down (or full unmount) aren't lost.
+      // Both flushers are null-safe + no-op when the buffer is
+      // already empty.
+      flushPendingCaches();
+      flushPendingEvents();
+    };
+  }, [posLat, posLon, refreshKey, flushPendingCaches, flushPendingEvents]);
 
   // ----- lessons progress (local) -----------------------------------------
 
@@ -656,14 +717,28 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // at the end. We tag each entry with a `distance` number so the
   // card variants can render an "X km" badge without recomputing.
 
+  // Sort memos depend on `posLat` / `posLon` rather than raw `pos` so a
+  // fresh `{lat, lon, accuracy}` object with identical primitives no
+  // longer re-runs the haversine sweep on every GPS sample (PR #628
+  // Stev.ie audit). The early-return path uses both being numbers as
+  // the truthiness check.
   const sortedMerchants = useMemo(() => {
-    if (!pos) return [] as { place: BtcMapPlace; distance: number }[];
+    if (typeof posLat !== 'number' || typeof posLon !== 'number')
+      return [] as { place: BtcMapPlace; distance: number }[];
     let items = merchants.map((place) => ({
       place,
-      distance: haversineMetres({ lat: pos.lat, lon: pos.lon }, { lat: place.lat, lon: place.lon }),
+      distance: haversineMetres({ lat: posLat, lon: posLon }, { lat: place.lat, lon: place.lon }),
     }));
     if (maxDistanceMetres !== null) {
-      items = items.filter((m) => m.distance <= maxDistanceMetres);
+      // Boosted/"Featured" merchants get a wider per-row cap so the user
+      // sees paid placements even when their general radius is tight.
+      // Max-wins: a user who's set the slider above 200 km keeps that.
+      items = items.filter((m) => {
+        const cap = isBoosted(m.place)
+          ? Math.max(maxDistanceMetres, BOOSTED_RADIUS_METRES)
+          : maxDistanceMetres;
+        return m.distance <= cap;
+      });
     }
     return (
       items
@@ -681,15 +756,16 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         })
         .slice(0, 12)
     );
-  }, [merchants, pos, maxDistanceMetres]);
+  }, [merchants, posLat, posLon, maxDistanceMetres]);
 
   const sortedCaches = useMemo(() => {
     const lowerPubkey = signedInPubkey?.toLowerCase() ?? null;
+    const haveFix = typeof posLat === 'number' && typeof posLon === 'number';
     let items = [...caches.values()].map((cache) => {
       const center = cache.geohash ? decodeGeohash(cache.geohash) : null;
       const distance =
-        pos && center
-          ? haversineMetres({ lat: pos.lat, lon: pos.lon }, { lat: center.lat, lon: center.lng })
+        haveFix && center
+          ? haversineMetres({ lat: posLat, lon: posLon }, { lat: center.lat, lon: center.lng })
           : Number.POSITIVE_INFINITY;
       const isOwn = lowerPubkey !== null && cache.hiderPubkey.toLowerCase() === lowerPubkey;
       return { cache, distance, isOwn };
@@ -699,7 +775,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     const ownItems = items.filter((c) => c.isOwn);
     if (ownItems.length > 0) {
       console.log(
-        `[PerfBlock] sortedCaches own=${ownItems.length} maxDistance=${maxDistanceMetres ?? 'null'}m posSet=${pos !== null} ` +
+        `[PerfBlock] sortedCaches own=${ownItems.length} maxDistance=${maxDistanceMetres ?? 'null'}m posSet=${haveFix} ` +
           ownItems
             .map(
               (c) =>
@@ -727,23 +803,36 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
     // disproportionately heavy. The "See all → Geo-caches" page
     // (HuntScreen) has no cap for the full list.
     return items.slice(0, 50);
-  }, [caches, pos, maxDistanceMetres, signedInPubkey]);
+  }, [caches, posLat, posLon, maxDistanceMetres, signedInPubkey]);
 
   const sortedEvents = useMemo(() => {
+    const haveFix = typeof posLat === 'number' && typeof posLon === 'number';
     let items = [...events.values()].map((event) => {
       const center = event.geohash ? decodeGeohash(event.geohash) : null;
       const distance =
-        pos && center
-          ? haversineMetres({ lat: pos.lat, lon: pos.lon }, { lat: center.lat, lon: center.lng })
+        haveFix && center
+          ? haversineMetres({ lat: posLat, lon: posLon }, { lat: center.lat, lon: center.lng })
           : Number.POSITIVE_INFINITY;
       return { event, distance };
     });
+    // Keep events with no `g` tag (distance = ∞) — most NIP-52 publishers
+    // (OrangePillApp etc.) don't include one, so dropping them would leave
+    // the rail mostly empty even when legitimate Bitcoin meetups exist.
+    // The sort below puts geohash-ed events first, then unlocated ones
+    // tail-end. A future PR can split these into a separate "Events with
+    // no location" rail (task #51); for now lumping them in is the right
+    // trade-off.
     if (maxDistanceMetres !== null) {
-      items = items.filter((e) => e.distance <= maxDistanceMetres);
+      items = items.filter((e) => !Number.isFinite(e.distance) || e.distance <= maxDistanceMetres);
     }
-    items.sort((a, b) => a.distance - b.distance);
+    items.sort((a, b) => {
+      const af = Number.isFinite(a.distance);
+      const bf = Number.isFinite(b.distance);
+      if (af !== bf) return af ? -1 : 1;
+      return a.distance - b.distance;
+    });
     return items.slice(0, 50);
-  }, [events, pos, maxDistanceMetres]);
+  }, [events, posLat, posLon, maxDistanceMetres]);
 
   return (
     <View style={styles.container}>
@@ -807,6 +896,15 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
             events={eventsArr}
             onTapMap={onTapMap}
             onOpenLegend={onOpenLegend}
+            // Pin-tap handlers — open the same MerchantDetailSheet /
+            // CacheDetailSheet that MapScreen renders so the interaction
+            // shape is identical across surfaces (PR #630). Events have
+            // no dedicated sheet in MapScreen either, so the event tap
+            // navigates directly to EventDetail — consistent with the
+            // event rail card tap below.
+            onSelectMerchant={(m) => setSelectedMerchant(m)}
+            onSelectCache={(c) => setSelectedCache(c)}
+            onSelectEvent={(e) => navigation.navigate('EventDetail', { coord: e.coord })}
             // Maestro flow test-explore-tab-rename.yaml asserts this
             // testID — preserved across the MapLibre swap so the e2e
             // smoke test doesn't need to be repointed.
@@ -889,9 +987,14 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
         <ContentRail<{ event: ParsedEvent; distance: number }>
           title="Events near you"
           caption={
+            // Subtitle drops the "within ~150 km" claim — we surface
+            // events without `#g` geohash tags too (most NIP-52 publishers
+            // don't include one), so we can't enforce that distance.
+            // Each card shows the event's location string so the user
+            // can read the city / venue and decide.
             untrustedEventCount > 0
-              ? `Bitcoin meetups within ~150 km · ${untrustedEventCount} hidden from outside your trust graph`
-              : 'Bitcoin meetups within ~150 km · NIP-52'
+              ? `Bitcoin meetups (NIP-52) · ${untrustedEventCount} hidden from outside your trust graph`
+              : 'Bitcoin meetups (NIP-52)'
           }
           items={sortedEvents}
           loading={!!pos && events.size === 0 && false}
@@ -945,6 +1048,33 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
           ...new Set(merchants.flatMap((m) => m.categories ?? []).filter(Boolean)),
         ]}
       />
+      {/* Mini-map pin-tap sheets — share the components with MapScreen
+          so the interaction shape (drag-to-dismiss, tap-away, View
+          details action) is identical across surfaces. PR #630. */}
+      {selectedMerchant && (
+        <MerchantDetailSheet
+          place={selectedMerchant}
+          colors={colors}
+          onClose={() => setSelectedMerchant(null)}
+          onViewDetails={() => {
+            const placeId = selectedMerchant.id;
+            setSelectedMerchant(null);
+            navigation.navigate('PlaceDetail', { placeId });
+          }}
+        />
+      )}
+      {selectedCache && (
+        <CacheDetailSheet
+          cache={selectedCache}
+          colors={colors}
+          onClose={() => setSelectedCache(null)}
+          onViewDetails={() => {
+            const coord = selectedCache.coord;
+            setSelectedCache(null);
+            navigation.navigate('HuntPiggyDetail', { coord });
+          }}
+        />
+      )}
     </View>
   );
 };

@@ -47,18 +47,78 @@ export function perfAnchor(): void {
 // transition completes. Anything > 200 ms here is what the user
 // perceives as a sluggish tab; > 1 s is a noticeable freeze; > 5 s is
 // the kind of lockup that prompts "did I tap?" double-presses.
-const __tabTapAt = new Map<string, number>();
+// Single most-recent tab tap, replaces the previous per-tab Map. Only
+// one tab transition is ever in flight at a time (React Navigation
+// serialises tabPress / focus / blur per gesture), so a Map keyed by
+// tab name accumulated permanent entries — every visited tab kept its
+// last tap timestamp forever and `perfTabHidden` then logged one stale
+// `hidden` line per past tab on every subsequent blur (PR #628 review).
+// A single pair of variables expresses the actual invariant.
+let __lastTapAt: number | null = null;
+let __lastTapDestination: string | null = null;
+
 export function perfTabTap(tabName: string): void {
   if (!PERF_LOGS_ENABLED) return;
-  __tabTapAt.set(tabName, Date.now());
+  // Re-arm the ready latch for this destination so its next non-empty
+  // render fires `perfPageReady` rather than dedup-suppressing it.
+  __pageReadyEmitted.delete(tabName);
+  __lastTapAt = Date.now();
+  __lastTapDestination = tabName;
   console.log(`[PerfTab] ${tabName} tap`);
 }
+
 export function perfTabRendered(tabName: string): void {
   if (!PERF_LOGS_ENABLED) return;
-  const tapAt = __tabTapAt.get(tabName);
-  if (tapAt === undefined) return;
-  console.log(`[PerfTab] ${tabName} focus tap→focus=${Date.now() - tapAt}ms`);
-  __tabTapAt.delete(tabName);
+  // Only emit when this destination matches the last tap — guards
+  // against stray `focus` events that React Navigation fires on cold
+  // launch without a paired user gesture.
+  if (__lastTapAt === null || __lastTapDestination !== tabName) return;
+  console.log(`[PerfTab] ${tabName} focus tap→focus=${Date.now() - __lastTapAt}ms`);
+}
+
+// Outgoing-tab blur marker. Fires when the *previous* tab finishes
+// hiding (its blur event landed). Pairs with `perfTabTap` to bracket
+// the navigation transition itself, separately from the destination
+// screen's render. Anything > 100 ms between tap and hidden means the
+// transition animation is itself janking, distinct from the new
+// screen's render cost. Reads the single `__lastTapAt` so no stale
+// per-tab entries accumulate (PR #628 Copilot review).
+export function perfTabHidden(outgoingTabName: string): void {
+  if (!PERF_LOGS_ENABLED) return;
+  if (__lastTapAt === null) return;
+  console.log(`[PerfTab] ${outgoingTabName} hidden tap→hidden=${Date.now() - __lastTapAt}ms`);
+}
+
+// "Page ready" marker — emitted by a destination screen when its
+// content is genuinely usable (rails populated, primary fetch
+// resolved). Distinct from `focus` (which fires the moment React
+// Navigation mounts the screen, often before any data has loaded)
+// and from `first render` (which can fire on a skeleton). The screen
+// owns the definition of "ready" — typically the first non-empty
+// merchant rail batch or the first 'visible' Maestro selector.
+//
+// Deduplicated per tab-name so it only logs the first ready event
+// per visit; subsequent re-renders don't pollute the log. Reset on
+// the next tab tap (we trust callers to call perfTabTap for each
+// honest user-initiated focus).
+const __pageReadyEmitted = new Set<string>();
+export function perfPageReady(tabName: string, detail?: string): void {
+  if (!PERF_LOGS_ENABLED) return;
+  if (__pageReadyEmitted.has(tabName)) return;
+  __pageReadyEmitted.add(tabName);
+  const tapDelta =
+    __lastTapAt !== null ? `tap→ready=${Date.now() - __lastTapAt}ms` : 'tap→ready=?ms';
+  console.log(`[PerfTab] ${tabName} ready ${tapDelta}${detail ? ` (${detail})` : ''}`);
+}
+
+// Internal — clear all per-tab tracking. Used by tests and by code
+// paths that need to reset between scenarios.
+export function __perfResetTabReady(tabName: string): void {
+  __pageReadyEmitted.delete(tabName);
+  if (__lastTapDestination === tabName) {
+    __lastTapAt = null;
+    __lastTapDestination = null;
+  }
 }
 
 // JS-thread heartbeat. A self-recurring `setTimeout(cb, 100)` that

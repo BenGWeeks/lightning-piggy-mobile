@@ -255,6 +255,29 @@ let lastResult: BtcMapPlace[] = [];
 // empty until `pos` lands, which on a real device can be 100s of ms
 // to a few seconds — the original symptom that prompted this fix).
 let lastAnchor: { lat: number; lon: number } | null = null;
+// Unix-ms timestamp of the last successful fetch. Feeds the
+// `fetchNearestPlaces` SWR short-circuit: re-use the cached set when
+// the user is close to the anchor AND the cache is recent. Null when
+// nothing's been fetched yet, or when the persisted blob predates the
+// field (older envelopes omit it — treated as expired, re-fetch).
+let lastFetchedAtMs: number | null = null;
+
+// Tier ladder for `fetchNearestPlaces`. Start at 25 km — covers a
+// dense urban user in one round-trip (~10-30 KB) and stops there if it
+// returns enough. Widen to 100 km for semi-rural users (Longstanton at
+// 25 km has 7 places; at 100 km has 161). 500 km is the safety net for
+// the truly remote so the rail still populates rather than stay empty.
+// Each tier costs roughly its predecessor + the new ring's merchant
+// density, so urban callers never pay for the wider tiers.
+const NEAREST_RADIUS_TIERS_KM = [25, 100, 500] as const;
+
+// Cache freshness rule for the `fetchNearestPlaces` short-circuit. Both
+// conditions must hold to skip the network: caller is within 5 km of
+// the anchor (cached set is still spatially relevant) AND the cache is
+// younger than 1 h (gives BTC Map an hour to surface new merchants).
+// Pull-to-refresh bypasses both via the `force` option.
+const FRESH_ANCHOR_DISTANCE_M = 5_000;
+const FRESH_TTL_MS = 60 * 60 * 1000;
 
 // Convert a viewport bbox into the `lat` / `lon` / `radius_km` the
 // `/v4/places/search` endpoint wants. Centre is the bbox midpoint; the
@@ -391,10 +414,15 @@ const lastResultFile = () => new File(Paths.document, 'btcmap-last-result.json')
 // anchored the search so the next cold start can paint a sorted rail
 // before GPS resolves. Older blobs were a bare BtcMapPlace[] — when
 // we read one we treat anchor as null and let the live fetch overwrite.
+//
+// `fetchedAtMs` was added later to gate the SWR short-circuit; older
+// envelopes omit it, which we read as "expired" (re-fetch immediately).
+// Field is optional so the schema stays at v: 1.
 interface PersistedLastResult {
   v: 1;
   anchor: { lat: number; lon: number } | null;
   places: BtcMapPlace[];
+  fetchedAtMs?: number;
 }
 
 // Drop the legacy worldwide-dump cache (file + AsyncStorage row) so it
@@ -415,12 +443,18 @@ const evictLegacyCache = (): void => {
 const persistLastResult = (
   places: BtcMapPlace[],
   anchor: { lat: number; lon: number } | null,
+  fetchedAtMs: number | null,
 ): void => {
   try {
     const f = lastResultFile();
     if (f.exists) f.delete();
     f.create();
-    const envelope: PersistedLastResult = { v: 1, anchor, places };
+    const envelope: PersistedLastResult = {
+      v: 1,
+      anchor,
+      places,
+      ...(fetchedAtMs !== null ? { fetchedAtMs } : {}),
+    };
     f.write(JSON.stringify(envelope));
   } catch {
     // Persist failures are non-fatal — `lastResult` still serves the
@@ -463,6 +497,9 @@ const hydrateLastResult = async (): Promise<void> => {
       } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.places)) {
         if (lastResult.length === 0) lastResult = parsed.places;
         if (!lastAnchor && parsed.anchor) lastAnchor = parsed.anchor;
+        if (lastFetchedAtMs === null && typeof parsed.fetchedAtMs === 'number') {
+          lastFetchedAtMs = parsed.fetchedAtMs;
+        }
         placeCount = parsed.places.length;
       }
       const readMs = Math.round(__tParse - __t0);
@@ -544,7 +581,8 @@ export const fetchPlacesInBbox = async (bbox: Bbox): Promise<BtcMapPlace[]> => {
     // Anchor the cache at the centre of the requested viewport. Next
     // cold start uses this to sort + filter the rail before GPS lands.
     lastAnchor = { lat, lon };
-    persistLastResult(places, lastAnchor);
+    lastFetchedAtMs = Date.now();
+    persistLastResult(places, lastAnchor, lastFetchedAtMs);
     return places;
   } catch {
     // Offline / timeout / server error — fall back to the last cached
@@ -554,6 +592,91 @@ export const fetchPlacesInBbox = async (bbox: Bbox): Promise<BtcMapPlace[]> => {
   } finally {
     clearTimeout(timer);
   }
+};
+
+// Single-radius shot at `/v4/places/search`. Returns null on a network
+// failure so the caller can decide whether to widen, retry, or fall
+// back to cache. The slim `V4_FIELDS` set is reused — same fields as
+// `fetchPlacesInBbox`, so the rail + mini-map work identically.
+const fetchPlacesAtRadius = async (
+  lat: number,
+  lon: number,
+  radiusKm: number,
+): Promise<BtcMapPlace[] | null> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const url =
+      `${BTCMAP_V4_SEARCH_URL}?lat=${lat}&lon=${lon}&radius_km=${radiusKm}` +
+      `&fields=${encodeURIComponent(V4_FIELDS)}`;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as Record<string, unknown>[];
+    return (Array.isArray(json) ? json : [])
+      .map(reshape)
+      .filter((p): p is BtcMapPlace => p !== null);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+/**
+ * Fetch a small set of merchants centred on the user, walking radii
+ * 25 → 100 → 500 km until at least `minCount` come back. Returns the
+ * first tier that satisfies the floor (or whatever the final 500 km
+ * tier returned, even if it's still short — better an under-populated
+ * rail than an empty one).
+ *
+ * SWR short-circuit: when `lastAnchor` is within 5 km of the caller
+ * AND the cached set is younger than 1 h, returns the cache without
+ * touching the network. Pull-to-refresh callers pass `{ force: true }`
+ * to bypass.
+ *
+ * Designed for the Explore hub's "Places near you" rail + the
+ * decorative mini-map. PlacesScreen / HuntScreen keep using the
+ * viewport-driven `fetchPlacesInBbox` — they have a map the user
+ * actively pans, so list ↔ map coupling matters there.
+ */
+export const fetchNearestPlaces = async (
+  lat: number,
+  lon: number,
+  minCount = 10,
+  opts: { force?: boolean } = {},
+): Promise<BtcMapPlace[]> => {
+  evictLegacyCache();
+
+  if (!opts.force && lastAnchor && lastFetchedAtMs !== null && lastResult.length > 0) {
+    const distMetres = haversineMetres(lastAnchor, { lat, lon });
+    const ageMs = Date.now() - lastFetchedAtMs;
+    if (distMetres <= FRESH_ANCHOR_DISTANCE_M && ageMs <= FRESH_TTL_MS) {
+      return lastResult;
+    }
+  }
+
+  for (let i = 0; i < NEAREST_RADIUS_TIERS_KM.length; i++) {
+    const radiusKm = NEAREST_RADIUS_TIERS_KM[i];
+    const places = await fetchPlacesAtRadius(lat, lon, radiusKm);
+    if (places === null) continue;
+    const isLastTier = i === NEAREST_RADIUS_TIERS_KM.length - 1;
+    if (places.length >= minCount || isLastTier) {
+      lastResult = places;
+      lastAnchor = { lat, lon };
+      lastFetchedAtMs = Date.now();
+      persistLastResult(places, lastAnchor, lastFetchedAtMs);
+      return places;
+    }
+  }
+
+  // Every tier failed (network down across all attempts). Fall back to
+  // whatever was cached so the rail isn't blank offline.
+  if (lastResult.length === 0) await hydrateLastResult();
+  return lastResult;
 };
 
 /**
@@ -700,6 +823,7 @@ export const prefetchDataset = (): void => {
 export const __resetCacheForTest = (): void => {
   lastResult = [];
   lastAnchor = null;
+  lastFetchedAtMs = null;
   hydratePromise = null;
   legacyEvicted = false;
   try {
@@ -719,6 +843,7 @@ export const __resetCacheForTest = (): void => {
 export const refreshDataset = async (): Promise<void> => {
   lastResult = [];
   lastAnchor = null;
+  lastFetchedAtMs = null;
   hydratePromise = null;
   try {
     const f = lastResultFile();

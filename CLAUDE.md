@@ -13,9 +13,14 @@
 
 ## Sideloading a release-flavor APK to a physical device (for testing, not release)
 
-- The user's primary device is a Pixel running an EAS-built install. A locally-signed APK won't upgrade it (`INSTALL_FAILED_UPDATE_INCOMPATIBLE` — different keystore). To validate release-mode behavior on real hardware without losing app data, pull the latest cloud-built APK instead of running `eas build --local`:
+- The user's primary device is a Pixel running an EAS-built install. A locally-signed APK won't upgrade it (`INSTALL_FAILED_UPDATE_INCOMPATIBLE` — different keystore). To validate release-mode behavior on real hardware without losing app data, pull a cloud-built production APK instead of running `eas build --local`:
   ```
-  # 1. Find the most-recent production build's URL / ID.
+  # 0. The APK you install must actually contain the code under test. The
+  #    "latest" finished build may be the PREVIOUS release — if your fix
+  #    isn't merged + cloud-built yet, kick off a build of it first and
+  #    download THAT one (by id), rather than blindly taking --limit 1:
+  #      eas build --profile production --platform android
+  # 1. Otherwise, find the most-recent production build's URL / ID.
   eas build:list --platform android --profile production --status finished --limit 1
   # 2. Download THAT build by URL or ID — don't use `--latest`, since it
   #    isn't constrained to a profile and may hand back a development/

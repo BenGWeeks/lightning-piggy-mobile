@@ -167,7 +167,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       },
     ],
     // Floor for local/dev builds only — cloud releases use EAS's remote counter. See docs/DEPLOYMENT.adoc → "Local production builds (fallback)".
-    versionCode: 66,
+    versionCode: 70,
   },
   web: {
     favicon: './assets/favicon.png',

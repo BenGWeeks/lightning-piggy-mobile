@@ -20,6 +20,12 @@ interface Props {
   contact: ContactProfileBodyData | null;
   onZap?: () => void;
   onMessage?: () => void;
+  /** Whether the user can actually send a zap (wallet attached + contact
+   * has a Lightning address). When false, the zap button still renders
+   * but in a disabled state with `zapDisabledReason` surfaced in the
+   * accessibility label. */
+  canZap?: boolean;
+  zapDisabledReason?: string;
   // Optional drill-in: closes the sheet then navigates to the full
   // ContactProfile route. Renders a "View profile" pill in the sheet
   // body when wired up.
@@ -32,13 +38,16 @@ const ContactProfileSheet: React.FC<Props> = ({
   contact,
   onZap,
   onMessage,
+  canZap = false,
+  zapDisabledReason,
   onViewFullProfile,
 }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
-  // 80% snap so the QR + action row + lud16 row all fit without scroll.
-  const snapPoints = useMemo(() => ['80%'], []);
+  // No explicit snapPoints — gorhom v5's default enableDynamicSizing sizes the
+  // sheet to its content (same as ReceiveSheet/SendSheet), so it stays compact
+  // after the QR box was removed and is consistent with the other sheets (#18).
 
   useEffect(() => {
     if (visible) {
@@ -69,7 +78,6 @@ const ContactProfileSheet: React.FC<Props> = ({
   return (
     <BottomSheetModal
       ref={sheetRef}
-      snapPoints={snapPoints}
       onDismiss={onClose}
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.sheetBackground}
@@ -80,6 +88,8 @@ const ContactProfileSheet: React.FC<Props> = ({
           contact={contact}
           onZap={onZap}
           onMessage={onMessage}
+          canZap={canZap}
+          zapDisabledReason={zapDisabledReason}
           onViewFullProfile={onViewFullProfile}
         />
       </BottomSheetView>

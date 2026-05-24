@@ -98,10 +98,7 @@ export function satsToFiat(sats: number, btcPrice: number): number {
 
 export function formatFiat(amount: number, currency: FiatCurrency): string {
   if (amount > 0 && amount < 0.01) {
-    const symbol = (0)
-      .toLocaleString(undefined, { style: 'currency', currency })
-      .replace(/[\d.,\s]/g, '');
-    return `< ${symbol}0.01`;
+    return `< ${currencySymbol(currency)}0.01`;
   }
   return amount.toLocaleString(undefined, {
     style: 'currency',
@@ -111,11 +108,32 @@ export function formatFiat(amount: number, currency: FiatCurrency): string {
   });
 }
 
+// Currency symbol prefix used by the no-rate placeholder. Reads from
+// the curated `CURRENCY_LIST` (e.g. `A$`, `R$`, `د.إ`, `CHF`, `kr`) so
+// the placeholder always matches what the picker shows the user for
+// that currency — the `Intl.NumberFormat`-strip trick we considered
+// earlier produced different results across ICU builds (Hermes vs
+// React Native's bundled ICU can render `AUD` as `A$0.00` or just
+// `$0.00`, and codes like `CHF`/`SEK` sometimes come back as the ISO
+// code rather than a symbol). The list is authoritative; fall back to
+// the ISO code itself if a caller passes a currency we don't know.
+export function currencySymbol(currency: FiatCurrency): string {
+  return CURRENCY_LIST.find((c) => c.code === currency)?.symbol ?? currency;
+}
+
 export function satsToFiatString(
   sats: number,
   btcPrice: number | null,
   currency: FiatCurrency,
 ): string {
-  if (btcPrice === null) return '';
+  // When the BTC price isn't known (cold-start offline, mid-fetch,
+  // upstream API hiccup) we used to return an empty string and let
+  // callers hide the fiat row entirely. That made the user wonder if
+  // something was broken (#633). A `£–` / `$–` / `€–` placeholder is
+  // honest: we know your currency, we just don't have a rate right now.
+  // The character is U+2013 (EN DASH) — typographically the right
+  // glyph for a "blank value" placeholder (a full em-dash would feel
+  // visually too wide next to a one-character currency symbol).
+  if (btcPrice === null) return `${currencySymbol(currency)}–`;
   return formatFiat(satsToFiat(sats, btcPrice), currency);
 }

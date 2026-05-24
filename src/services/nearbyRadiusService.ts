@@ -10,7 +10,20 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
  */
 const STORAGE_KEY = '@lp:nearby-radius-v1';
 
-export const DEFAULT_RADIUS_METRES = 50_000; // 50 km
+// Bumped from 50 km on user feedback — 50 km from a sparser area left
+// rails like "Places near you" with only 1-2 BTC Map merchants visible.
+// 100 km comfortably reaches a city centre from most suburbs/villages
+// while still staying well under the fetcher's outer tier (500 km), so
+// the merchant payload doesn't grow unexpectedly.
+export const DEFAULT_RADIUS_METRES = 100_000; // 100 km
+
+// Boosted / "Featured" merchants from BTC Map are sparser per area than
+// regular merchants and the merchants themselves are explicitly paying
+// for distribution, so we widen the cap for them to 200 km regardless
+// of the user's general nearby radius. A user with the radius set to
+// 25 km still sees boosted merchants out to 200 km; a user with the
+// radius set wider than 200 km keeps their wider preference (max wins).
+export const BOOSTED_RADIUS_METRES = 200_000; // 200 km
 
 export interface RadiusOption {
   label: string;
@@ -27,6 +40,7 @@ export const RADIUS_OPTIONS: ReadonlyArray<RadiusOption> = [
   { label: '5 km', value: 5_000 },
   { label: '25 km', value: 25_000 },
   { label: '50 km', value: 50_000 },
+  { label: '100 km', value: 100_000 },
   { label: '150 km', value: 150_000 },
   { label: 'All', value: null },
 ];

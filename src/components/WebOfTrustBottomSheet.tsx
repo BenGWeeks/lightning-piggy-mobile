@@ -1,9 +1,10 @@
 // Bottom-sheet explainer + tier picker for the Web of Trust filter (#535).
 //
 // Tapping any of the three WoT chips (Messages, Hunt, Events) opens this
-// sheet. Friends is always selectable; FoF + All are secret-mode gated.
-// First-time selection of FoF kicks off the FoF compute (kind-3 batch
-// fetch + heuristics in `friendsOfFriendsService`) with a progress modal.
+// sheet. Friends + All are both selectable post-#627; FoF stays gated
+// until #565 lands the foreground compute dialog. First-time selection
+// of FoF will then kick off the FoF compute (kind-3 batch fetch +
+// heuristics in `friendsOfFriendsService`) with a progress modal.
 
 import React, { useMemo, useRef } from 'react';
 import {
@@ -24,6 +25,13 @@ import type { WotTier } from '../services/wotSettingsService';
 interface Props {
   visible: boolean;
   onClose: () => void;
+  /** Optional explicit "current" tier. When provided, the sheet renders
+   * that as the active row instead of reading the global value from
+   * `useTrustGraph()`. Lets a caller surface a *derived* tier in its
+   * chip — most cleanly used by the per-rail override design in #636.
+   * When omitted, falls back to the global persisted tier — every
+   * existing caller's behaviour. */
+  currentTier?: WotTier;
 }
 
 interface TierRowProps {
@@ -71,10 +79,15 @@ const TierRow: React.FC<TierRowProps> = ({ tier, title, subtitle, active, disabl
   );
 };
 
-const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose }) => {
+const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose, currentTier }) => {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { wotTier, setWotTier } = useTrustGraph();
+  // `activeTier` is what the picker renders as "checked". Defaults to
+  // the global persisted tier; a caller can pass `currentTier` to
+  // override this when its chip surfaces a derived value (per-rail —
+  // #636) so the sheet's active state matches what the user just tapped.
+  const activeTier = currentTier ?? wotTier;
 
   // `lastTierRef` is retained for the future FoF re-enable so the
   // "compute now" affordance can compare incoming vs persisted tier
@@ -82,11 +95,12 @@ const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose }) => {
   const lastTierRef = useRef<WotTier>(wotTier);
 
   const handleSelect = (next: WotTier): void => {
-    // Only `friends` is currently selectable — fof + all are disabled
-    // until #565 lands the foreground compute dialog. Defensive guard
-    // so any future regression on the TierRow disabled prop doesn't
-    // silently switch tier under us.
-    if (next !== 'friends') return;
+    // `fof` remains disabled until #565 lands the foreground compute
+    // dialog — `friends` and `all` are both selectable now that `all`
+    // is the new default for content surfaces (#627). Defensive guard
+    // so a future regression on the TierRow disabled prop can't
+    // silently switch into the unsupported tier.
+    if (next !== 'friends' && next !== 'all') return;
     lastTierRef.current = next;
     setWotTier(next);
   };
@@ -119,7 +133,7 @@ const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose }) => {
             tier="friends"
             title="Friends"
             subtitle="Only people you follow."
-            active={wotTier === 'friends'}
+            active={activeTier === 'friends'}
             disabled={false}
             onSelect={() => handleSelect('friends')}
           />
@@ -134,15 +148,15 @@ const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose }) => {
           <TierRow
             tier="all"
             title="All"
-            subtitle="Not yet implemented — coming soon. Will let you opt out of the trust filter entirely once the foreground compute flow lands."
-            active={false}
-            disabled
-            onSelect={() => {}}
+            subtitle="Everything from every relay. Default until your trust graph is ready — switch to Friends to tighten."
+            active={activeTier === 'all'}
+            disabled={false}
+            onSelect={() => handleSelect('all')}
           />
 
           <Text style={styles.gateHint} testID="wot-sheet-gate-hint">
-            The wider tiers are temporarily disabled while we rework the trust-graph compute (#565).
-            Stick to Friends for now — it's the safest feed regardless.
+            Friends-of-friends is temporarily disabled while we rework the trust-graph compute
+            (#565). Friends is the safest feed; All is the broadest.
           </Text>
 
           {/* The computing banner + fof meta row + error row hang off L2 state
