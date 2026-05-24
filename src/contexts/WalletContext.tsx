@@ -685,24 +685,36 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     walletsRef.current = wallets;
   }, [wallets]);
   useEffect(() => {
+    let checkInProgress = false;
     connectionCheckInterval.current = setInterval(async () => {
-      for (const w of walletsRef.current.filter((ww) => ww.walletType === 'nwc')) {
-        const connected = nwcService.isWalletConnected(w.id);
-        if (connected !== w.isConnected) {
-          if (!connected) {
+      // A reconnect on a dead relay can outlast the 30s tick; this guard stops
+      // checks stacking across ticks (#654).
+      if (checkInProgress) return;
+      checkInProgress = true;
+      try {
+        for (const w of walletsRef.current.filter((ww) => ww.walletType === 'nwc')) {
+          if (!nwcService.isWalletConnected(w.id)) {
+            // Relay unresponsive (dead / hung) — (re)connect, which re-probes
+            // via its initial getBalance. Runs while down so a recovered relay
+            // is detected (no app-foreground reconnect-all exists to rely on).
             try {
               const nwcUrl = await walletStorage.getNwcUrl(w.id);
-              if (nwcUrl) {
-                const result = await nwcService.connect(w.id, nwcUrl);
-                updateWalletInState(w.id, { isConnected: result.success });
-              }
+              if (nwcUrl) await nwcService.connect(w.id, nwcUrl);
             } catch {
-              updateWalletInState(w.id, { isConnected: false });
+              // connect threw — the responsiveness read below reflects it
             }
-          } else {
-            updateWalletInState(w.id, { isConnected: connected });
+          }
+          // Sync stored state to relay *responsiveness* (does it answer?), not
+          // connect()'s socket-level success — so a dead relay stays
+          // Disconnected instead of flapping back to Connected (#654). Write
+          // only on change to avoid needless re-renders.
+          const responsive = nwcService.isWalletConnected(w.id);
+          if (responsive !== w.isConnected) {
+            updateWalletInState(w.id, { isConnected: responsive });
           }
         }
+      } finally {
+        checkInProgress = false;
       }
     }, 30 * 1000);
     return () => {
