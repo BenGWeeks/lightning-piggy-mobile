@@ -336,14 +336,15 @@ export interface GetBalanceOptions {
    * retry loop. When set, the call runs *without* retries so the ceiling
    * is a true upper bound (one attempt × replyTimeoutMs).
    *
-   * Currently only the post-payment poll in `WalletContext.expectPayment`
-   * passes this (`replyTimeoutMs: 2500`) — that path is tick-gated by
-   * a 1 s `expectPayment` interval + an `inFlight` guard, so a stalled
-   * read would block the next tick. Quick give-up + a fresh poll on the
-   * next tick beats waiting 10 s for a reply that may never arrive. The
-   * 30 s foreground refresh and per-wallet refresh deliberately stay on
-   * the default (with retries) — they're not tick-gated, so a slower-
-   * but-more-reliable read is the better tradeoff there. (#133)
+   * Passed by the two tick-gated balance pollers in `WalletContext`: the
+   * post-payment poll in `expectPayment` (`replyTimeoutMs: 2500`, gated by
+   * a 1 s interval + an `inFlight` guard) and the demand-gated 10 s
+   * foreground balance poll (`replyTimeoutMs: 8000`, gated by a 10 s
+   * interval + `singleFlight`). For both, a stalled read is dropped and
+   * retried on the next tick — far better than blocking the JS thread for
+   * 22–115 s on a slow relay (#650). The one-shot / per-wallet manual
+   * refresh paths deliberately stay on the default (with retries): they're
+   * not tick-gated, so a slower-but-more-reliable read wins there. (#133, #650)
    */
   replyTimeoutMs?: number;
 }

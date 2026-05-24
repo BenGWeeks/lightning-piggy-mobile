@@ -17,6 +17,7 @@ import * as zapCounterpartyStorage from '../services/zapCounterpartyStorage';
 import * as zapSenderProfileStorage from '../services/zapSenderProfileStorage';
 import * as zapResolverFingerprintStorage from '../services/zapResolverFingerprintStorage';
 import { computePendingHash, shouldSkipResolve } from '../utils/zapResolverGuard';
+import { singleFlight } from '../utils/singleFlight';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
@@ -1937,17 +1938,17 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // (focus event in a balance-displaying screen).
     if (balancePollDemand <= 0) return;
 
+    // singleFlight drops a tick whose predecessor is still awaiting, so a slow relay can't stack polls; replyTimeoutMs caps each to a single 8 s attempt (#650).
+    const pollBalance = singleFlight(async () => {
+      const b = await nwcService.getBalance(activeWalletId, { replyTimeoutMs: 8000 });
+      if (b !== null) updateWalletInState(activeWalletId, { balance: b });
+    });
     const refreshOnce = () => {
       // Bail if the wallet has since disconnected — we read through
       // `walletsRef` rather than the closure so this is current.
       const current = walletsRef.current.find((w) => w.id === activeWalletId);
       if (!current || !current.isConnected || current.walletType === 'onchain') return;
-      nwcService
-        .getBalance(activeWalletId)
-        .then((b) => {
-          if (b !== null) updateWalletInState(activeWalletId, { balance: b });
-        })
-        .catch(() => {});
+      pollBalance().catch(() => {});
     };
 
     let interval: ReturnType<typeof setInterval> | null = null;
