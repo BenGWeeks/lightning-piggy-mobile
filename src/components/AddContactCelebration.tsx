@@ -4,7 +4,7 @@
 // deliberately keep a focused copy of the confetti spec generator + render
 // rather than threading a shared abstraction through several state machines.
 
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Modal, View, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -19,6 +19,7 @@ import Animated, {
 import { Image as ExpoImage } from 'expo-image';
 import { UserRoundCheck } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
+import { isSupportedImageUrl } from '../utils/imageUrl';
 import { lightPalette } from '../styles/palettes';
 import type { Palette } from '../styles/palettes';
 
@@ -166,6 +167,16 @@ const AddContactCelebration: React.FC<Props> = ({
   const cardScale = useSharedValue(0.9);
   const cardOpacity = useSharedValue(0);
 
+  // Avatar handling mirrors ContactListItem / GroupAvatar: pre-filter
+  // unsupported URLs (.svg/.heic etc that crash expo-image's decoder) and fall
+  // back to the icon on a load error. Reset the error flag when the URL changes
+  // so a fresh follow whose picture resolves later still gets a chance (#662).
+  const [avatarError, setAvatarError] = useState(false);
+  useEffect(() => {
+    setAvatarError(false);
+  }, [picture]);
+  const showAvatar = !!picture && !avatarError && isSupportedImageUrl(picture);
+
   useEffect(() => {
     if (visible) {
       cardScale.value = withSpring(1, { damping: 14, stiffness: 180 });
@@ -203,13 +214,17 @@ const AddContactCelebration: React.FC<Props> = ({
         </View>
 
         <Animated.View style={[themed.card, cardAnimatedStyle]}>
-          <View style={[themed.iconSlot, !picture && themed.iconBg]}>
-            {picture ? (
+          <View style={[themed.iconSlot, !showAvatar && themed.iconBg]}>
+            {showAvatar ? (
               <ExpoImage
-                source={{ uri: picture }}
+                source={{ uri: picture as string }}
                 style={themed.avatar}
                 contentFit="cover"
                 cachePolicy="memory-disk"
+                transition={200}
+                recyclingKey={picture || undefined}
+                autoplay={false}
+                onError={() => setAvatarError(true)}
                 accessibilityLabel={`${name} profile picture`}
               />
             ) : (

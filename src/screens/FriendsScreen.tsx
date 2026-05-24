@@ -386,6 +386,22 @@ const FriendsScreen: React.FC = () => {
     [addContact, contacts],
   );
 
+  // Resolve the celebration's name + avatar LIVE from `contacts` rather than the
+  // snapshot taken at add-time: a brand-new follow isn't in `contacts` yet when
+  // the card opens, but followContact fetches its kind-0 and updates `contacts`
+  // shortly after — recomputing here makes the avatar + real name appear in the
+  // open card the moment they resolve (#662). Falls back to the snapshot.
+  const celebDisplay = useMemo(() => {
+    if (!celebration) return { name: '', picture: null as string | null };
+    const c = contacts.find((x) => x.pubkey === celebration.pubkey);
+    const name =
+      c?.profile?.displayName?.trim() ||
+      c?.profile?.name?.trim() ||
+      c?.petname?.trim() ||
+      celebration.name;
+    return { name, picture: c?.profile?.picture ?? celebration.picture ?? null };
+  }, [celebration, contacts]);
+
   const handleCelebrationOpenProfile = useCallback(() => {
     if (!celebration) return;
     const pk = celebration.pubkey;
@@ -671,8 +687,8 @@ const FriendsScreen: React.FC = () => {
       <AddContactCelebration
         visible={!!celebration}
         alreadyConnected={celebration?.alreadyConnected ?? false}
-        name={celebration?.name ?? ''}
-        picture={celebration?.picture}
+        name={celebDisplay.name}
+        picture={celebDisplay.picture}
         onOpenProfile={handleCelebrationOpenProfile}
         onDismiss={() => setCelebration(null)}
       />
