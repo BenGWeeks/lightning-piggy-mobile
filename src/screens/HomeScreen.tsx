@@ -60,6 +60,11 @@ const HomeScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
 
   const [receiveOpen, setReceiveOpen] = useState(false);
+  // True while the carousel's trailing "Add wallet" card is the active page, so
+  // the tx list shows an add-wallet prompt instead of the pinned wallet's
+  // history (#666). Kept separate from activeWalletId, which #166 deliberately
+  // pins to the last real wallet on the add card to keep Send/Receive usable.
+  const [addCardActive, setAddCardActive] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [sendToAddress, setSendToAddress] = useState<string | undefined>();
@@ -290,6 +295,7 @@ const HomeScreen: React.FC = () => {
           onWalletChange={handleWalletChange}
           onAddWallet={() => setWizardOpen(true)}
           onSettingsPress={handleSettingsPress}
+          onAddCardActiveChange={setAddCardActive}
         />
 
         {/* Send/Receive/Transfer buttons */}
@@ -344,7 +350,9 @@ const HomeScreen: React.FC = () => {
         >
           {!hasWallets ? (
             <WelcomeWalletPrompt onGetStarted={() => setWizardOpen(true)} />
-          ) : activeWalletId === null ? (
+          ) : addCardActive || activeWalletId === null ? (
+            // On the "Add wallet" card (or no active wallet) show an add-wallet
+            // prompt rather than the previous wallet's transactions (#666).
             <View style={styles.emptyState}>
               <TouchableOpacity onPress={() => setWizardOpen(true)}>
                 <Text style={styles.addWalletText}>+ Add a Wallet</Text>
