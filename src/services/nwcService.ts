@@ -26,11 +26,19 @@ const getBalancesInFlight = new Map<string, Promise<number | null>>();
 // "Connected" (#654). isWalletConnected() treats a run of unanswered requests
 // as not-connected so the UI is honest and the reconnect path kicks in.
 const relayFailures = new Map<string, number>();
+// Per-wallet timestamp until which a dead/timing-out relay is "parked" — once it
+// looks dead we back off with an escalating cooldown instead of retrying every
+// reconnect/poll tick (the churn behind the lag when a relay goes offline, #656).
+const relayCooldownUntil = new Map<string, number>();
 const RELAY_DEAD_AFTER_FAILURES = 3;
+const RELAY_COOLDOWN_BASE_MS = 30_000;
+const RELAY_COOLDOWN_MAX_MS = 5 * 60_000;
 
-// Reset on a fresh connect or any answered request.
+// Reset the failure count AND clear any cooldown — on a fresh connect or any
+// answered request.
 function markRelayResponsive(walletId: string): void {
   relayFailures.set(walletId, 0);
+  relayCooldownUntil.delete(walletId);
 }
 
 // Record the outcome of a NIP-47 request against its relay-health counter.
@@ -39,13 +47,29 @@ function markRelayResponsive(walletId: string): void {
 // "method not supported" (NWC wallets that don't implement `get_balance`) or
 // "insufficient funds". So this is capability-agnostic: it keys off whether the
 // relay *responded*, not which method succeeded, and never false-disconnects a
-// wallet that simply lacks a method (#654).
+// wallet that simply lacks a method (#654). Past the dead threshold, park the
+// relay with an escalating backoff (#656).
 function recordRelayOutcome(walletId: string, error?: unknown): void {
   if (error !== undefined && (isReplyTimeoutError(error) || isConnectionError(error))) {
-    relayFailures.set(walletId, (relayFailures.get(walletId) ?? 0) + 1);
+    const failures = (relayFailures.get(walletId) ?? 0) + 1;
+    relayFailures.set(walletId, failures);
+    if (failures >= RELAY_DEAD_AFTER_FAILURES) {
+      const backoff = Math.min(
+        RELAY_COOLDOWN_BASE_MS * 2 ** (failures - RELAY_DEAD_AFTER_FAILURES),
+        RELAY_COOLDOWN_MAX_MS,
+      );
+      relayCooldownUntil.set(walletId, Date.now() + backoff);
+    }
   } else {
     markRelayResponsive(walletId);
   }
+}
+
+// True while a dead/timing-out relay is parked: reconnect/poll callers should
+// skip it until the cooldown expires rather than hammering it every tick (#656).
+export function isRelayInCooldown(walletId: string): boolean {
+  const until = relayCooldownUntil.get(walletId);
+  return until !== undefined && Date.now() < until;
 }
 
 // Per-wallet timestamp of the most recent relay-publish failure. Used
