@@ -358,18 +358,19 @@ const FriendsScreen: React.FC = () => {
   const handleAddFriend = useCallback(
     async (npubOrHex: string) => {
       const result = await addContact(npubOrHex);
-      if (result.success && result.pubkey) {
+      if (result.success) {
         const pk = result.pubkey;
         // A brand-new follow isn't in `contacts` state yet (the append is
         // async), so the npub prefix is the expected fallback there; an
-        // already-following tap resolves to the real name.
+        // already-following tap resolves to the real name. Trim each
+        // candidate so a whitespace-only display name doesn't win and leave
+        // the card reading "connected to ." (#662 review).
         const existing = contacts.find((c) => c.pubkey === pk);
-        const name = (
-          existing?.profile?.displayName ||
-          existing?.profile?.name ||
-          existing?.petname ||
-          `${nip19.npubEncode(pk).slice(0, 12)}…`
-        ).trim();
+        const name =
+          existing?.profile?.displayName?.trim() ||
+          existing?.profile?.name?.trim() ||
+          existing?.petname?.trim() ||
+          `${nip19.npubEncode(pk).slice(0, 12)}…`;
         setCelebration({ pubkey: pk, name, alreadyConnected: !!result.alreadyFollowing });
         return true;
       }

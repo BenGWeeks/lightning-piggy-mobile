@@ -822,7 +822,10 @@ interface NostrContextType {
   unfollowContact: (pubkey: string) => Promise<boolean>;
   addContact: (
     npubOrHex: string,
-  ) => Promise<{ success: boolean; error?: string; alreadyFollowing?: boolean; pubkey?: string }>;
+  ) => Promise<
+    | { success: true; pubkey: string; alreadyFollowing?: boolean }
+    | { success: false; error: string }
+  >;
   sendDirectMessage: (
     recipientPubkey: string,
     plaintext: string,
@@ -2261,12 +2264,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const addContact = useCallback(
     async (
       npubOrHex: string,
-    ): Promise<{
-      success: boolean;
-      error?: string;
-      alreadyFollowing?: boolean;
-      pubkey?: string;
-    }> => {
+    ): Promise<
+      | { success: true; pubkey: string; alreadyFollowing?: boolean }
+      | { success: false; error: string }
+    > => {
       try {
         let hex = npubOrHex.trim();
         // Strip nostr: URI prefix (NIP-21)
