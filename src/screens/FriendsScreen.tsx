@@ -410,15 +410,18 @@ const FriendsScreen: React.FC = () => {
     navigation.navigate('ContactProfile', {
       contact: {
         pubkey: pk,
-        name: celebration.name,
-        picture: existing?.profile?.picture ?? null,
+        // Use the same live-resolved values the card shows (celebDisplay) so a
+        // profile that resolved while the card was open doesn't hand the
+        // profile screen the stale npub/null snapshot (#662 review).
+        name: celebDisplay.name,
+        picture: celebDisplay.picture,
         banner: existing?.profile?.banner ?? null,
         nip05: existing?.profile?.nip05 ?? null,
         lightningAddress: existing?.profile?.lud16 ?? null,
         source: 'nostr',
       },
     });
-  }, [celebration, contacts, navigation]);
+  }, [celebration, celebDisplay, contacts, navigation]);
 
   const renderItem = useCallback(
     ({ item }: { item: ListItem }) => {
