@@ -70,7 +70,6 @@ const ContactProfileScreen: React.FC = () => {
   const [loadingFollow, setLoadingFollow] = useState(false);
   const [savingLnAddress, setSavingLnAddress] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
-  const [avatarLoaded, setAvatarLoaded] = useState(false);
   // Tap the avatar → view the picture full screen (#661 — same as the sheet).
   const [fullscreenUrl, setFullscreenUrl] = useState<string | null>(null);
   const [editingLnAddress, setEditingLnAddress] = useState(false);
@@ -151,24 +150,17 @@ const ContactProfileScreen: React.FC = () => {
     };
   }, [contact.pubkey, contact.about, relays]);
 
-  // Fallback to default avatar if the picture URL hasn't loaded in 8s.
-  useEffect(() => {
-    if (!contact.picture || avatarLoaded || avatarError) return;
-    const timer = setTimeout(() => {
-      if (!avatarLoaded) setAvatarError(true);
-    }, 8000);
-    return () => clearTimeout(timer);
-  }, [contact.picture, avatarLoaded, avatarError]);
-
   useEffect(() => {
     if (contact.pubkey) {
       setFollowing(contacts.some((c) => c.pubkey === contact.pubkey));
     }
   }, [contact.pubkey, contacts]);
 
+  // Reset the avatar error when the picture changes (no load timeout — rely on
+  // onError, like ContactListItem; the old 8s timeout flipped a loaded cached
+  // avatar to the default icon when expo-image's onLoad didn't fire).
   useEffect(() => {
     setAvatarError(false);
-    setAvatarLoaded(false);
   }, [contact.picture]);
 
   useEffect(() => {
@@ -409,7 +401,6 @@ const ContactProfileScreen: React.FC = () => {
                   recyclingKey={contact.picture}
                   autoplay={false}
                   onError={() => setAvatarError(true)}
-                  onLoad={() => setAvatarLoaded(true)}
                 />
               </TouchableOpacity>
             ) : (
