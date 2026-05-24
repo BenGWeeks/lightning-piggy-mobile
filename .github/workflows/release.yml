@@ -277,9 +277,16 @@ jobs:
         run: |
           set -uo pipefail
 
-          # Pick the most recent FINISHED Android production build (the one we just submitted).
-          # Filter by the git commit of the Release tag so we don't accidentally grab an
-          # unrelated older build.
+          # Pick the FINISHED Android production build for THIS commit, filtering
+          # by gitCommitHash so we never grab an unrelated older build.
+          #
+          # This job runs right after build-and-submit, and there's a brief
+          # window where the just-finished build hasn't yet surfaced as
+          # "finished" in `eas build:list` (eventual consistency). A single-shot
+          # query raced here on v1.2.0 and produced a spurious "No Android build
+          # artifact" failure (#674). So POLL: treat both a failed call and an
+          # empty/lagging result as "retry", and only error out once the poll
+          # is exhausted.
 
           fetch() {
             local out_file="$1" err_file="$2"
@@ -291,44 +298,39 @@ jobs:
 
           OUT=$(mktemp)
           ERR=$(mktemp)
-          if ! fetch "$OUT" "$ERR"; then
-            echo "::warning title=eas build:list failed once — retrying in 8 s::Transient EAS API hiccup; see grouped logs below if the retry also fails."
-            sleep 8
-            if ! fetch "$OUT" "$ERR"; then
-              echo "::error title=eas build:list failed twice::See grouped logs below for stderr and stdout."
-              echo "::group::eas build:list stderr"
-              cat "$ERR"
-              echo "::endgroup::"
-              echo "::group::eas build:list stdout"
-              cat "$OUT"
-              echo "::endgroup::"
-              exit 1
-            fi
-          fi
-
-          # Strip any non-JSON prefix lines (deprecation banners, error noise
-          # written to stdout) — find the first `[` line and keep everything
-          # from there.
           CLEAN=$(mktemp)
-          sed -n '/^\[/,$p' "$OUT" > "$CLEAN"
+          url=""
+          attempts=12
+          for i in $(seq 1 "$attempts"); do
+            if ! fetch "$OUT" "$ERR"; then
+              echo "::warning title=eas build:list call failed (attempt $i/$attempts)::Transient EAS API hiccup; retrying in 20 s."
+              sleep 20
+              continue
+            fi
 
-          if ! url=$(jq -r --arg sha "${{ github.sha }}" \
-                       '[.[] | select(.gitCommitHash == $sha)][0].artifacts.buildUrl // empty' \
-                       "$CLEAN" 2>/dev/null); then
-            echo "::error title=jq parse failed on eas build:list output::See grouped logs below for raw stdout and the stripped JSON we tried to parse."
-            echo "::group::raw stdout"
-            cat "$OUT"
-            echo "::endgroup::"
-            echo "::group::stripped JSON (post sed)"
-            cat "$CLEAN"
-            echo "::endgroup::"
-            exit 1
-          fi
+            # Strip any non-JSON prefix lines (deprecation banners / progress
+            # noise written to stdout) — keep from the first `[` line onward.
+            sed -n '/^\[/,$p' "$OUT" > "$CLEAN"
+
+            url=$(jq -r --arg sha "${{ github.sha }}" \
+                    '[.[] | select(.gitCommitHash == $sha)][0].artifacts.buildUrl // empty' \
+                    "$CLEAN" 2>/dev/null || true)
+            if [ -n "$url" ] && [ "$url" != "null" ]; then
+              echo "Resolved Android APK URL on attempt $i/$attempts."
+              break
+            fi
+
+            echo "::warning title=Finished Android build not surfaced yet (attempt $i/$attempts)::eas build:list has no finished build for ${{ github.sha }} yet; retrying in 20 s."
+            sleep 20
+          done
 
           if [ -z "$url" ] || [ "$url" = "null" ]; then
-            echo "::error title=No Android build artifact for commit ${{ github.sha }}::EAS build may still be running, or failed. Recent builds dumped in the grouped log below."
+            echo "::error title=No Android build artifact for commit ${{ github.sha }} after $attempts attempts::EAS build may have failed, or build:list never surfaced it. Recent builds + last stderr dumped below."
             echo "::group::recent builds (cleaned)"
             cat "$CLEAN"
+            echo "::endgroup::"
+            echo "::group::last eas build:list stderr"
+            cat "$ERR"
             echo "::endgroup::"
             exit 1
           fi
