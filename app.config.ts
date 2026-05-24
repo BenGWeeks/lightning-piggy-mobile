@@ -166,20 +166,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         data: [{ scheme: 'lightning' }],
       },
     ],
-    // Floor for the local-build versionCode. EAS *cloud* production
-    // builds use a separate remote counter (`eas.json` →
-    // `appVersionSource: "remote"`) and ignore this. EAS *local* builds
-    // (`eas build --local`) and `expo run:android --variant release`
-    // BOTH read it directly — `appVersionSource: "remote"` only affects
-    // cloud builds. So this floor must be ≥ the highest versionCode
-    // currently installed on any target device, or the local install
-    // fails with INSTALL_FAILED_VERSION_DOWNGRADE.
-    //
-    // Bump rule: set to `(latest cloud versionCode) + 1`. Get the
-    // current cloud value with:
-    //   eas build:list --platform android --status finished --limit 1
-    //
-    // See docs/DEPLOYMENT.adoc → "Local production builds".
+    // Floor for local/dev builds only — cloud releases use EAS's remote counter. See docs/DEPLOYMENT.adoc → "Local production builds (fallback)".
     versionCode: 70,
   },
   web: {

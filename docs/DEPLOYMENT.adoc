@@ -242,16 +242,18 @@ The build number (iOS `CFBundleVersion` / Android `versionCode`) is independent 
 
 NOTE: The pre-`npm version` flow had `app.config.ts` hardcoded to `'1.0.0'` and a `sed` step in `release.yml` that overwrote it from the tag — but the sed only ran on actual GitHub Release events, so `workflow_dispatch` re-runs and local `eas build` invocations always shipped `1.0.0` regardless of the tag. The current flow eliminates that drift.
 
-==== Local production builds
+==== Local production builds (fallback)
 
-There are two reasons to build a release APK locally:
+WARNING: **This is not the release path.** Cutting a release goes through `.github/workflows/release.yml` (see "Cutting a release" below), which runs EAS cloud builds anchored to the published tag. Running `eas build --local` manually for a release detaches the artifact from any published tag — the build comes from the local checkout snapshot whenever you happened to invoke it, with no record of which source revision actually shipped. The GitHub Release notes then drift away from what's in users' hands. We hit exactly this on v1.1.0 (the local build artifact wasn't anchored to the tag, and reconstructing what the binary contained meant inspecting working-tree state after the fact).
 
-. **You want to sideload the prod APK over an existing EAS-built install** to validate a fix on real hardware without pushing a tag (and without losing your wallets / Nostr login).
-. **You're testing the release-build pipeline itself** — for instance verifying R8 didn't strip a class.
+The fallbacks below are for two narrow cases:
 
-The right command depends on which case you're in.
+. **Sideloading a release-flavor APK to a device for testing** — usually for R8 / proguard validation. Prefer pulling the latest **production-profile** cloud-built APK instead: list with `eas build:list --platform android --profile production --status finished --limit 1`, then download the artifact by its build URL/ID (not `--latest`, which isn't profile-constrained and may hand back a `development` / `preview` APK with the `.dev` / `.preview` applicationId — that won't upgrade a production install). Only fall back to a local build when you're offline or the EAS queue is jammed.
+. **Reproducing a release-build issue locally** — e.g. a class got stripped and you need to bisect Gradle config.
 
-===== Case 1 (recommended): keep existing data on an EAS-built device
+===== Case 1 (offline fallback): keep existing data on an EAS-built device
+
+NOTE: The **recommended** path is to download a cloud-built production APK (see the bullet above) — it's already signed with the EAS upload keystore and needs no `versionCode` bookkeeping. Reach for the local build below only when you're offline or the EAS queue is jammed.
 
 Use `eas build --local --profile production`. This runs **EAS's production pipeline** on your machine — it fetches the EAS upload keystore at build time so the APK signature matches your existing install, and emits a sideload-able `.apk`:
 
@@ -355,11 +357,16 @@ eas build:list --platform android --status finished --limit 1 \
 
 ==== Cutting a release
 
+**Always go through this workflow — never run `eas build` manually for a release.** The workflow tags first then builds, so artifacts are anchored to one commit; manual / local builds aren't tied to a published tag, so there's no record of which source revision actually shipped and the GitHub Release notes drift away from the binary in users' hands (v1.1.0 hit this — the local build artifact wasn't anchored to the tag).
+
 . **Bump the version locally first** — `npm version <patch|minor|major|x.y.z>` writes `package.json`, creates a commit, and tags `vX.Y.Z` atomically. Push it: `git push origin main --follow-tags`.
 . Go to https://github.com/BenGWeeks/lightning-piggy-mobile/releases → *Draft a new release*.
 . Choose a tag like `v1.0.1` (create on publish) targeted at `main`. **The tag is the source of truth for the user-visible version** — the workflow strips the leading `v` and writes it into `package.json` via `npm version --no-git-tag-version`. `app.config.ts` reads `version: pkg.version`, so iOS `CFBundleShortVersionString`, Android `versionName`, and the in-app version label (drawer + About screen, via `src/utils/appVersion.ts`) all flow from that single value. Pre-release suffixes (e.g. `v1.0.0-rc1`) are stripped to keep the store-facing version a strict `X.Y.Z`.
 . Write release notes, click *Publish release*.
 . Watch *Actions → Release*. When it finishes, the Release page has the APK and PDF attached; TestFlight has the iOS build (auto-distributed to the Public Beta external group via `eas.json` `submit.production.ios.groups`).
+. *What to Test* fills itself in — the `set-testflight-whats-new` workflow job reads `docs/RELEASE_NOTES_NEXT.md`, polls App Store Connect for the just-submitted build, and PATCHes the localisation via `scripts/asc-set-whats-new.mjs` (see "TestFlight 'What to Test' notes" below). Manual pasting is only needed when the `ASC_KEY_ID` / `ASC_ISSUER_ID` / `ASC_API_KEY_P8` secrets aren't configured.
+
+NOTE: `versionCode` (Android) and `buildNumber` (iOS) are managed by EAS's remote counter (`eas.json` → `"appVersionSource": "remote"` + `"autoIncrement": true`). Don't hand-edit them for releases — cloud builds auto-increment past whatever's in `app.config.ts`. The integer in the file is only the floor for `eas build --local` and `expo run:android --variant release`, both of which are dev-test paths, not release paths.
 
 `npm version` accepts pre-release suffixes too: `npm version 1.0.1-rc1` → tag `v1.0.1-rc1`, `package.json` `1.0.1-rc1`. `app.config.ts` reads `package.json` verbatim; if you ship a non-strict-X.Y.Z value, Apple's validator will reject the upload (`CFBundleShortVersionString` must be three numeric components separated by dots). For RC builds, prefer bumping `package.json` to the *target* X.Y.Z and using the GitHub Release page's "Pre-release" checkbox to mark it as such.
 
