@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, TouchableOpacity, Image, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, Image, StyleSheet, Linking } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Zap, MapPin, UserRound } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -24,6 +24,7 @@ import {
 } from '../utils/messageContent';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { extractUrls } from '../utils/extractUrls';
+import { linkifySegments } from '../utils/linkify';
 import { isBlocklisted } from '../services/linkPreviewBlocklist';
 import MessageLinkPreview from './MessageLinkPreview';
 
@@ -463,7 +464,22 @@ const MessageBubble: React.FC<Props> = ({
     <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
       <View style={[styles.bubble, fromMe ? styles.bubbleMe : styles.bubbleThem]}>
         {SenderLabel}
-        <Text style={[styles.bubbleText, fromMe && styles.bubbleTextMe]}>{text}</Text>
+        <Text style={[styles.bubbleText, fromMe && styles.bubbleTextMe]}>
+          {linkifySegments(text).map((seg, i) =>
+            seg.url ? (
+              <Text
+                key={i}
+                style={[styles.bubbleLink, fromMe && styles.bubbleLinkMe]}
+                onPress={() => Linking.openURL(seg.url as string)}
+                accessibilityRole="link"
+              >
+                {seg.text}
+              </Text>
+            ) : (
+              seg.text
+            ),
+          )}
+        </Text>
         {previewUrl ? <MessageLinkPreview url={previewUrl} eventId={id} fromMe={fromMe} /> : null}
         <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
           {formatTime(createdAt)}
@@ -511,6 +527,17 @@ const createStyles = (colors: Palette) =>
     },
     bubbleTextMe: {
       color: colors.white,
+    },
+    // Tappable URL span inside a received bubble (surface bg) — brand accent.
+    bubbleLink: {
+      color: colors.brandPink,
+      textDecorationLine: 'underline',
+    },
+    // …and inside a sent bubble (pink bg) — white so it stays legible.
+    bubbleLinkMe: {
+      color: colors.white,
+      textDecorationLine: 'underline',
+      fontWeight: '600',
     },
     bubbleTime: {
       fontSize: 10,
