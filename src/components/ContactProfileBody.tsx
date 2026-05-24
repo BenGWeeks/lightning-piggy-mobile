@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
 import QrWithIdentityToggle from './QrWithIdentityToggle';
+import FullscreenImageModal from './FullscreenImageModal';
 import { Zap, UserRound, ChevronRight } from 'lucide-react-native';
 import { isNfcSupported } from '../services/nfcService';
 import { npubEncode } from '../services/nostrService';
@@ -61,6 +62,8 @@ const ContactProfileBody: React.FC<Props> = ({
   const [avatarError, setAvatarError] = useState(false);
   const [avatarLoaded, setAvatarLoaded] = useState(false);
   const [nfcSupported, setNfcSupported] = useState(false);
+  // Tap the avatar → view the picture full screen (#661).
+  const [fullscreenUrl, setFullscreenUrl] = useState<string | null>(null);
 
   // Probe NFC capability once on mount so the QR toggle's "Write to NFC"
   // affordance can render correctly enabled / disabled.
@@ -119,22 +122,32 @@ const ContactProfileBody: React.FC<Props> = ({
 
       <View style={styles.avatarContainer}>
         {contact.picture && !avatarError ? (
-          <Image
-            source={{ uri: contact.picture }}
-            style={styles.avatar}
-            cachePolicy="memory-disk"
-            recyclingKey={contact.picture}
-            autoplay={false}
-            transition={200}
-            onError={() => setAvatarError(true)}
-            onLoad={() => setAvatarLoaded(true)}
-          />
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => setFullscreenUrl(contact.picture)}
+            accessibilityRole="imagebutton"
+            accessibilityLabel="View profile picture full screen"
+            testID="profile-avatar-fullscreen"
+          >
+            <Image
+              source={{ uri: contact.picture }}
+              style={styles.avatar}
+              cachePolicy="memory-disk"
+              recyclingKey={contact.picture}
+              autoplay={false}
+              transition={200}
+              onError={() => setAvatarError(true)}
+              onLoad={() => setAvatarLoaded(true)}
+            />
+          </TouchableOpacity>
         ) : (
           <View style={styles.avatarDefault}>
             <UserRound size={40} color={colors.textBody} strokeWidth={1.5} />
           </View>
         )}
       </View>
+
+      <FullscreenImageModal url={fullscreenUrl} onClose={() => setFullscreenUrl(null)} />
 
       <Text style={styles.name} numberOfLines={1}>
         {contact.name}
