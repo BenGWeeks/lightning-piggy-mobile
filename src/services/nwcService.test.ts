@@ -28,7 +28,14 @@ jest.mock('@getalby/sdk', () => ({
   })),
 }));
 
-import { connect, getBalance, isConnectionError, isReplyTimeoutError } from './nwcService';
+import {
+  connect,
+  getBalance,
+  isConnectionError,
+  isRelayInCooldown,
+  isReplyTimeoutError,
+  isWalletConnected,
+} from './nwcService';
 
 const VALID_NWC_URL =
   'nostr+walletconnect://' +
@@ -130,5 +137,99 @@ describe('isConnectionError (#648 — connection-lost vs confirmed failure)', ()
     const connErr = new Error('Failed to connect to wss://relay.coinos.io');
     expect(isConnectionError(connErr)).toBe(true);
     expect(isReplyTimeoutError(connErr)).toBe(false);
+  });
+});
+
+describe('isWalletConnected (#654 — relay responsiveness, not just transport)', () => {
+  // beforeEach connect()s with a responsive mock relay, so we start "connected".
+  // We use replyTimeoutMs so each failing getBalance gives up immediately
+  // (single attempt, no retry/backoff) and records exactly one outcome.
+  const failConnect = async () => {
+    throw new Error('Failed to connect to wss://relay.example.com');
+  };
+
+  it('is true after a fresh connect with a responsive relay', () => {
+    expect(isWalletConnected(WALLET_ID)).toBe(true);
+  });
+
+  it('flips to false only after a run of unanswered (connection-error) requests', async () => {
+    mockGetBalanceImpl = failConnect;
+    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
+    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
+    expect(isWalletConnected(WALLET_ID)).toBe(true); // 2 failures < threshold (3)
+    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
+    expect(isWalletConnected(WALLET_ID)).toBe(false); // 3rd → relay considered dead
+  });
+
+  it('recovers to true as soon as the relay answers again', async () => {
+    mockGetBalanceImpl = failConnect;
+    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
+    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
+    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
+    expect(isWalletConnected(WALLET_ID)).toBe(false);
+    mockGetBalanceImpl = async () => ({ balance: 42 });
+    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
+    expect(isWalletConnected(WALLET_ID)).toBe(true);
+  });
+
+  it('flips to false when the relay HANGS (withTimeout fires) — the primary "relay hung" case', async () => {
+    // A hung relay: getBalance never resolves, so withTimeout rejects with a
+    // ReplyTimeoutError. That must count toward relay-dead, not reset the
+    // counter — a generic Error used to slip through both matchers (#654 review).
+    mockGetBalanceImpl = () => new Promise(() => {});
+    await getBalance(WALLET_ID, { replyTimeoutMs: 150 });
+    await getBalance(WALLET_ID, { replyTimeoutMs: 150 });
+    expect(isWalletConnected(WALLET_ID)).toBe(true); // 2 failures < threshold (3)
+    await getBalance(WALLET_ID, { replyTimeoutMs: 150 });
+    expect(isWalletConnected(WALLET_ID)).toBe(false); // 3rd timeout → dead
+  });
+
+  it('does NOT mark a relay dead when the wallet answers with a non-connection error (e.g. a get_balance-less wallet)', async () => {
+    // "method not supported" is the relay/wallet *answering* — capability-
+    // agnostic: it must never be misread as a dead relay (#654).
+    mockGetBalanceImpl = async () => {
+      throw new Error('method not supported');
+    };
+    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
+    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
+    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
+    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
+    expect(isWalletConnected(WALLET_ID)).toBe(true);
+  });
+});
+
+describe('isRelayInCooldown (#656 — back off a dead relay instead of hammering it)', () => {
+  const failConnect = async () => {
+    throw new Error('Failed to connect to wss://relay.example.com');
+  };
+
+  it('is false for a fresh, responsive connection', () => {
+    expect(isRelayInCooldown(WALLET_ID)).toBe(false);
+  });
+
+  it('stays false until the relay crosses the dead threshold', async () => {
+    mockGetBalanceImpl = failConnect;
+    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
+    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
+    expect(isRelayInCooldown(WALLET_ID)).toBe(false); // 2 failures < threshold (3)
+  });
+
+  it('enters cooldown once the relay is considered dead', async () => {
+    mockGetBalanceImpl = failConnect;
+    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
+    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
+    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
+    expect(isRelayInCooldown(WALLET_ID)).toBe(true);
+  });
+
+  it('clears cooldown the moment the relay answers again', async () => {
+    mockGetBalanceImpl = failConnect;
+    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
+    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
+    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
+    expect(isRelayInCooldown(WALLET_ID)).toBe(true);
+    mockGetBalanceImpl = async () => ({ balance: 7 });
+    await getBalance(WALLET_ID, { replyTimeoutMs: 2500 });
+    expect(isRelayInCooldown(WALLET_ID)).toBe(false);
   });
 });

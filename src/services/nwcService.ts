@@ -19,6 +19,65 @@ const reconnectsInFlight = new Map<string, Promise<NostrWebLNProvider>>();
 // gets a fresh response.
 const getBalancesInFlight = new Map<string, Promise<number | null>>();
 
+// Per-wallet count of consecutive NIP-47 requests that got no answer from the
+// relay (reply-timeout / connection error). A WebSocket can stay `connected`
+// while the relay hangs or the link dies (no clean close → TCP lingers in
+// ESTABLISHED for ~2h), so transport state alone reports a dead relay as
+// "Connected" (#654). isWalletConnected() treats a run of unanswered requests
+// as not-connected so the UI is honest and the reconnect path kicks in.
+const relayFailures = new Map<string, number>();
+// Per-wallet timestamp until which a dead/timing-out relay is "parked" — once it
+// looks dead we back off with an escalating cooldown instead of retrying every
+// reconnect/poll tick (the churn behind the lag when a relay goes offline, #656).
+const relayCooldownUntil = new Map<string, number>();
+const RELAY_DEAD_AFTER_FAILURES = 3;
+const RELAY_COOLDOWN_BASE_MS = 30_000;
+const RELAY_COOLDOWN_MAX_MS = 5 * 60_000;
+
+// Reset the failure count AND clear any cooldown — on a fresh connect or any
+// answered request.
+function markRelayResponsive(walletId: string): void {
+  relayFailures.set(walletId, 0);
+  relayCooldownUntil.delete(walletId);
+}
+
+// Record the outcome of a NIP-47 request against its relay-health counter.
+// Only a reply-timeout / connection error (the relay never answered) counts
+// toward "dead". ANY answer resets it — including a wallet-level error such as
+// "method not supported" (NWC wallets that don't implement `get_balance`) or
+// "insufficient funds". So this is capability-agnostic: it keys off whether the
+// relay *responded*, not which method succeeded, and never false-disconnects a
+// wallet that simply lacks a method (#654). Past the dead threshold, park the
+// relay with an escalating backoff (#656).
+function recordRelayOutcome(walletId: string, error?: unknown): void {
+  if (error !== undefined && (isReplyTimeoutError(error) || isConnectionError(error))) {
+    const failures = (relayFailures.get(walletId) ?? 0) + 1;
+    relayFailures.set(walletId, failures);
+    if (failures >= RELAY_DEAD_AFTER_FAILURES) {
+      const backoff = Math.min(
+        RELAY_COOLDOWN_BASE_MS * 2 ** (failures - RELAY_DEAD_AFTER_FAILURES),
+        RELAY_COOLDOWN_MAX_MS,
+      );
+      relayCooldownUntil.set(walletId, Date.now() + backoff);
+    }
+  } else {
+    markRelayResponsive(walletId);
+  }
+}
+
+// True while a dead/timing-out relay is parked: reconnect/poll callers should
+// skip it until the cooldown expires rather than hammering it every tick (#656).
+export function isRelayInCooldown(walletId: string): boolean {
+  const until = relayCooldownUntil.get(walletId);
+  if (until === undefined) return false;
+  if (Date.now() >= until) {
+    // Expired — drop the entry so the Map can't grow unbounded.
+    relayCooldownUntil.delete(walletId);
+    return false;
+  }
+  return true;
+}
+
 // Per-wallet timestamp of the most recent relay-publish failure. Used
 // to fast-fail pay_invoice when the relay is unreachable (see #175).
 // A "reply timeout" that lands within PUBLISH_FAILURE_FRESH_MS of a
@@ -206,6 +265,20 @@ export async function connect(
     // established even if getBalance fails (e.g. slow relay response).
     providers.set(walletId, provider);
     nwcUrls.set(walletId, nwcUrl.trim());
+    // Enable relay-pool keepalive pings so a dead link is noticed promptly
+    // rather than lingering in TCP ESTABLISHED for ~2h (#654). Best-effort —
+    // `client.pool` is an internal SDK shape and may be absent.
+    // NB: we deliberately do NOT reset the responsiveness counter here —
+    // re-opening the socket doesn't prove the relay answers. Status only
+    // returns to "connected" once a real request succeeds (the initial
+    // getBalance probe below), else a dead relay flaps Disconnected↔Connected
+    // on every 30s reconnect.
+    try {
+      (provider as { client?: { pool?: { enablePing?: boolean } } }).client!.pool!.enablePing =
+        true;
+    } catch {
+      // internal SDK shape unavailable — pings stay at the SDK default
+    }
 
     // Guard the consumer callback so a UI-side throw can't unwind into our
     // catch block and falsely tear down a healthy provider.
@@ -215,7 +288,10 @@ export async function connect(
       if (__DEV__) console.warn('[NWC] onEnabled callback threw — connection unaffected', cbErr);
     }
 
-    // Try to get initial balance, but don't fail the connection if it times out
+    // Try to get initial balance, but don't fail the connection if it times
+    // out. Doubles as the relay-responsiveness probe (#654): an answer resets
+    // the failure counter (→ Connected); a timeout/connection error advances it
+    // (so a dead relay stays Disconnected instead of flapping).
     let balance: number | undefined;
     try {
       const b = await withRetry(() => provider.getBalance(), {
@@ -224,12 +300,17 @@ export async function connect(
         delayMs: 2000,
       });
       balance = b.balance;
-    } catch {
+      recordRelayOutcome(walletId);
+    } catch (e) {
+      recordRelayOutcome(walletId, e);
       if (__DEV__) console.log('[NWC] Initial getBalance failed, wallet still connected');
     }
 
     return { success: true, balance };
   } catch (error) {
+    // enable() couldn't reach any relay (full outage). Count it so the cooldown
+    // (#656) engages — otherwise the 30s connection-check retries forever.
+    recordRelayOutcome(walletId, error);
     providers.delete(walletId);
     nwcUrls.delete(walletId);
     const message = error instanceof Error ? error.message : String(error);
@@ -266,7 +347,12 @@ export function disconnect(walletId: string): void {
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new Error(`${label} timed out after ${ms}ms`));
+      // A withTimeout fire means the relay never replied in time — a
+      // reply-timeout, not a confirmed outcome. Reject with the typed error so
+      // recordRelayOutcome() counts it toward relay-dead (#654/#656); a generic
+      // Error slips through both isReplyTimeoutError and isConnectionError and
+      // would reset the counter on the very "relay hung" case this targets.
+      reject(createReplyTimeoutError(`${label} timed out after ${ms}ms`));
     }, ms);
     promise.then(
       (v) => {
@@ -337,6 +423,7 @@ export async function getBalance(
           `[PerfBlock] NWC.getBalance: ${Math.round(__dt)}ms (walletId=${walletId.slice(0, 8)}…)`,
         );
       }
+      recordRelayOutcome(walletId);
       return b.balance;
     } catch (error) {
       const __dt = performance.now() - __t0;
@@ -344,6 +431,7 @@ export async function getBalance(
         `[PerfBlock] NWC.getBalance FAILED after ${Math.round(__dt)}ms (walletId=${walletId.slice(0, 8)}…)`,
       );
       console.warn(`getBalance error for ${walletId}:`, error);
+      recordRelayOutcome(walletId, error);
       return null;
     }
   };
@@ -912,5 +1000,10 @@ export function isWalletConnected(walletId: string): boolean {
   if (!provider) return false;
   // Check the actual WebSocket connection state
   const client = (provider as any).client;
-  return client?.connected ?? false;
+  if (!(client?.connected ?? false)) return false;
+  // Transport "connected" can lie: a hung relay / dead link leaves the socket
+  // in ESTABLISHED while nothing gets through. Treat a run of unanswered
+  // requests as not-connected so the UI is honest and the 30s connection-check
+  // triggers a reconnect (#654).
+  return (relayFailures.get(walletId) ?? 0) < RELAY_DEAD_AFTER_FAILURES;
 }

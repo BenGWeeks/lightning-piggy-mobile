@@ -220,6 +220,14 @@ interface WalletContextType {
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
 
+// Persist a wallet's announced-receipt hashes so a payment is announced once,
+// EVER — not once per JS session. The in-memory set resets on every cold start
+// / Metro re-eval, and the tx cache it seeds from can be stale (missing a
+// just-arrived receive), so without this a payment re-announced on reload (#653).
+function persistSeenReceipts(walletId: string, seen: ReadonlySet<string>): void {
+  AsyncStorage.setItem(`seenReceipts_${walletId}`, JSON.stringify([...seen])).catch(() => {});
+}
+
 export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   if (!__walletProviderFirstRenderLogged) {
     __walletProviderFirstRenderLogged = true;
@@ -427,6 +435,25 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             } catch {
               // Corrupted balance cache — ignore; live fetch will repopulate.
             }
+            // Seed the announced-receipts set BEFORE the detector runs: prefer
+            // the persisted set, else baseline from cached history. In-memory
+            // alone reset on every JS re-eval and re-announced a payment whose
+            // hash wasn't in the (possibly stale) tx cache (#653 follow-up).
+            try {
+              const seenRaw = await AsyncStorage.getItem(`seenReceipts_${w.id}`);
+              const seeded = seenRaw
+                ? new Set<string>(JSON.parse(seenRaw) as string[])
+                : settledIncomingHashes(cachedTxs);
+              seenReceiptsRef.current.set(w.id, seeded);
+              if (!seenRaw) persistSeenReceipts(w.id, seeded);
+            } catch {
+              // Corrupt persisted value — overwrite with a fresh baseline so the
+              // next cold start doesn't keep hitting this catch (and possibly
+              // re-announcing off a stale tx cache).
+              const seeded = settledIncomingHashes(cachedTxs);
+              seenReceiptsRef.current.set(w.id, seeded);
+              persistSeenReceipts(w.id, seeded);
+            }
             return {
               ...w,
               isConnected: false,
@@ -593,6 +620,22 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               } catch {
                 // Ignore corrupted cache.
               }
+              // Seed the announced-receipts set before the detector runs (see
+              // the startup-hydration path for the rationale).
+              try {
+                const seenRaw = await AsyncStorage.getItem(`seenReceipts_${w.id}`);
+                const seeded = seenRaw
+                  ? new Set<string>(JSON.parse(seenRaw) as string[])
+                  : settledIncomingHashes(cachedTxs);
+                seenReceiptsRef.current.set(w.id, seeded);
+                if (!seenRaw) persistSeenReceipts(w.id, seeded);
+              } catch {
+                // Corrupt persisted value — overwrite with a fresh baseline (see
+                // the startup-hydration path for the rationale).
+                const seeded = settledIncomingHashes(cachedTxs);
+                seenReceiptsRef.current.set(w.id, seeded);
+                persistSeenReceipts(w.id, seeded);
+              }
               return {
                 ...w,
                 isConnected: false,
@@ -693,24 +736,38 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     walletsRef.current = wallets;
   }, [wallets]);
   useEffect(() => {
+    let checkInProgress = false;
     connectionCheckInterval.current = setInterval(async () => {
-      for (const w of walletsRef.current.filter((ww) => ww.walletType === 'nwc')) {
-        const connected = nwcService.isWalletConnected(w.id);
-        if (connected !== w.isConnected) {
-          if (!connected) {
+      // A reconnect on a dead relay can outlast the 30s tick; this guard stops
+      // checks stacking across ticks (#654).
+      if (checkInProgress) return;
+      checkInProgress = true;
+      try {
+        for (const w of walletsRef.current.filter((ww) => ww.walletType === 'nwc')) {
+          if (!nwcService.isWalletConnected(w.id) && !nwcService.isRelayInCooldown(w.id)) {
+            // Relay unresponsive (dead / hung) and not currently parked — try to
+            // (re)connect, which re-probes via its initial getBalance. The
+            // cooldown gate (#656) backs off a persistently-dead relay so we
+            // don't hammer it every 30s tick; a recovered relay reconnects once
+            // its cooldown lapses (no app-foreground reconnect-all to rely on).
             try {
               const nwcUrl = await walletStorage.getNwcUrl(w.id);
-              if (nwcUrl) {
-                const result = await nwcService.connect(w.id, nwcUrl);
-                updateWalletInState(w.id, { isConnected: result.success });
-              }
+              if (nwcUrl) await nwcService.connect(w.id, nwcUrl);
             } catch {
-              updateWalletInState(w.id, { isConnected: false });
+              // connect threw — the responsiveness read below reflects it
             }
-          } else {
-            updateWalletInState(w.id, { isConnected: connected });
+          }
+          // Sync stored state to relay *responsiveness* (does it answer?), not
+          // connect()'s socket-level success — so a dead relay stays
+          // Disconnected instead of flapping back to Connected (#654). Write
+          // only on change to avoid needless re-renders.
+          const responsive = nwcService.isWalletConnected(w.id);
+          if (responsive !== w.isConnected) {
+            updateWalletInState(w.id, { isConnected: responsive });
           }
         }
+      } finally {
+        checkInProgress = false;
       }
     }, 30 * 1000);
     return () => {
@@ -1860,7 +1917,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // GC per-wallet state for wallets that have been removed.
     for (const id of baselines.keys()) if (!liveIds.has(id)) baselines.delete(id);
     for (const id of seenReceiptsRef.current.keys())
-      if (!liveIds.has(id)) seenReceiptsRef.current.delete(id);
+      if (!liveIds.has(id)) {
+        seenReceiptsRef.current.delete(id);
+        AsyncStorage.removeItem(`seenReceipts_${id}`).catch(() => {});
+      }
 
     for (const wallet of wallets) {
       const bal = wallet.balance;
@@ -1898,16 +1958,25 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const txns = wallet.transactions ?? [];
       const seen = seenReceiptsRef.current.get(wallet.id);
       if (seen === undefined) {
-        seenReceiptsRef.current.set(wallet.id, settledIncomingHashes(txns));
+        // Newly-added wallet (hydration already seeded existing ones): baseline
+        // its history silently and persist so it survives the next re-eval.
+        const seeded = settledIncomingHashes(txns);
+        seenReceiptsRef.current.set(wallet.id, seeded);
+        persistSeenReceipts(wallet.id, seeded);
         continue;
       }
+      let changed = false;
       for (const receipt of pickNewReceipts(txns, seen)) {
         seen.add(receipt.paymentHash);
+        changed = true;
         if (!newest || receipt.settledAt > newest.settledAt) {
           newest = { walletId: wallet.id, ...receipt };
           newestLabel = walletLabel(wallet);
         }
       }
+      // Persist the moment a new receipt is seen so a reload before the next
+      // write can't re-announce it.
+      if (changed) persistSeenReceipts(wallet.id, seen);
     }
     if (newest) {
       if (__DEV__)
@@ -1978,7 +2047,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // (focus event in a balance-displaying screen).
     if (balancePollDemand <= 0) return;
 
-    // singleFlight drops a tick whose predecessor is still awaiting, so a slow relay can't stack polls; replyTimeoutMs caps each to a single 8 s attempt (#650).
+    // singleFlight drops a tick whose predecessor is still awaiting; replyTimeoutMs caps each to a single 8 s attempt (#650).
     const pollBalance = singleFlight(async () => {
       const b = await nwcService.getBalance(activeWalletId, { replyTimeoutMs: 8000 });
       if (b !== null) updateWalletInState(activeWalletId, { balance: b });
@@ -1988,42 +2057,24 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // `walletsRef` rather than the closure so this is current.
       const current = walletsRef.current.find((w) => w.id === activeWalletId);
       if (!current || !current.isConnected || current.walletType === 'onchain') return;
+      // Skip a parked (dead/timing-out) relay so a refresh can't re-arm the
+      // churn the cooldown is trying to suppress (#656).
+      if (nwcService.isRelayInCooldown(activeWalletId)) return;
       pollBalance().catch(() => {});
     };
 
-    let interval: ReturnType<typeof setInterval> | null = null;
-    const startPoll = () => {
-      if (interval) return;
-      // 10 s tick (down from 30 s). LUD-16 receives — payments sent to
-      // the user's lightning address rather than to a specific invoice
-      // we issued — can only be detected via the balance-diff polling
-      // here; the previous 30 s interval made these receives feel laggy
-      // in testing. Demand-gating (#569) means the poll only runs while
-      // a balance surface is focused, so this doesn't change idle
-      // battery / NWC traffic costs.
-      interval = setInterval(refreshOnce, 10000);
-    };
-    const stopPoll = () => {
-      if (interval) {
-        clearInterval(interval);
-        interval = null;
-      }
-    };
-
-    if (AppState.currentState === 'active') {
-      refreshOnce();
-      startPoll();
-    }
+    // Event-driven (#657): refresh on focus (this effect re-runs when a balance
+    // surface gains focus, via balancePollDemand) and on app-foreground — NOT on
+    // a constant interval. Receive *detection* is transaction-hash-based now
+    // (#653), so the old "poll to catch LUD-16 receives" rationale is gone, and
+    // the constant 10 s poll was the dominant relay load that rate-limited
+    // self-hosted relays. Unsolicited address receives surface on next focus /
+    // foreground (sends + the Receive-sheet expectPayment poll cover the rest).
+    if (AppState.currentState === 'active') refreshOnce();
     const sub = AppState.addEventListener('change', (next) => {
-      if (next === 'active') {
-        refreshOnce();
-        startPoll();
-      } else {
-        stopPoll();
-      }
+      if (next === 'active') refreshOnce();
     });
     return () => {
-      stopPoll();
       sub.remove();
     };
   }, [activeWalletId, activeWalletConnected, updateWalletInState, balancePollDemand]);
