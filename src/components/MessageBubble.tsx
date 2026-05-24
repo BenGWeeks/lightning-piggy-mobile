@@ -24,7 +24,7 @@ import {
 } from '../utils/messageContent';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import { extractUrls } from '../utils/extractUrls';
-import { linkifySegments } from '../utils/linkify';
+import { linkifySegments, hasLink } from '../utils/linkify';
 import { isBlocklisted } from '../services/linkPreviewBlocklist';
 import MessageLinkPreview from './MessageLinkPreview';
 
@@ -450,8 +450,8 @@ const MessageBubble: React.FC<Props> = ({
   }
 
   // Plain text fallback — no rich content detected. Cap link previews
-  // at 1 per message: first non-blocklisted URL wins. Any other URLs in
-  // the body remain clickable as plain text via OS link recognition.
+  // at 1 per message: first non-blocklisted URL wins. All URLs in the body
+  // are rendered as tappable link spans below (see linkifySegments).
   const previewUrl = (() => {
     const urls = extractUrls(text);
     for (const u of urls) {
@@ -465,20 +465,28 @@ const MessageBubble: React.FC<Props> = ({
       <View style={[styles.bubble, fromMe ? styles.bubbleMe : styles.bubbleThem]}>
         {SenderLabel}
         <Text style={[styles.bubbleText, fromMe && styles.bubbleTextMe]}>
-          {linkifySegments(text).map((seg, i) =>
-            seg.url ? (
-              <Text
-                key={i}
-                style={[styles.bubbleLink, fromMe && styles.bubbleLinkMe]}
-                onPress={() => Linking.openURL(seg.url as string)}
-                accessibilityRole="link"
-              >
-                {seg.text}
-              </Text>
-            ) : (
-              seg.text
-            ),
-          )}
+          {hasLink(text)
+            ? linkifySegments(text).map((seg, i) =>
+                seg.url ? (
+                  <Text
+                    key={i}
+                    style={[styles.bubbleLink, fromMe && styles.bubbleLinkMe]}
+                    onPress={() => {
+                      // openURL rejects on a malformed URL / missing handler —
+                      // swallow so a bad link can't raise an unhandled rejection.
+                      void Linking.openURL(seg.url as string).catch(() => {});
+                    }}
+                    accessibilityRole="link"
+                    accessibilityLabel={`Open link ${seg.url}`}
+                    testID={`${testIdPrefix}-link-${id}-${i}`}
+                  >
+                    {seg.text}
+                  </Text>
+                ) : (
+                  seg.text
+                ),
+              )
+            : text}
         </Text>
         {previewUrl ? <MessageLinkPreview url={previewUrl} eventId={id} fromMe={fromMe} /> : null}
         <Text style={[styles.bubbleTime, fromMe && styles.bubbleTimeMe]}>
