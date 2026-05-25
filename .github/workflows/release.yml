@@ -148,16 +148,21 @@ jobs:
 
       - name: Verify ASC API key is wired
         env:
-          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
-          ASC_API_KEY_ISSUER_ID: ${{ secrets.ASC_API_KEY_ISSUER_ID }}
-          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+          # The ASC API key is stored under the EXPO_ASC_* secret names (the
+          # same key EAS uses for `eas submit`). Map them onto the ASC_* env
+          # vars the script reads. The earlier ASC_* secret names never
+          # existed, so this job silently soft-skipped and left "What to Test"
+          # blank on every release until v1.2.1.
+          ASC_API_KEY_ID: ${{ secrets.EXPO_ASC_API_KEY_ID }}
+          ASC_API_KEY_ISSUER_ID: ${{ secrets.EXPO_ASC_API_KEY_ISSUER_ID }}
+          ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
         run: |
           # The same .p8 EAS uses for `eas submit` is needed here. This is a
           # one-time GH Secrets setup; see docs/DEPLOYMENT.adoc → "TestFlight
           # 'What to Test' automation". If absent, soft-skip rather than fail
           # the release — Ben can fill in "What to Test" manually for this build.
           if [ -z "$ASC_API_KEY_ID" ] || [ -z "$ASC_API_KEY_ISSUER_ID" ] || [ -z "$ASC_API_KEY_P8" ]; then
-            echo "::warning title=ASC API key not configured::Skipping auto-populate of TestFlight 'What to Test'. Add ASC_API_KEY_ID, ASC_API_KEY_ISSUER_ID, ASC_API_KEY_P8 to repo secrets to enable. See docs/DEPLOYMENT.adoc."
+            echo "::warning title=ASC API key not configured::Skipping auto-populate of TestFlight 'What to Test'. Set EXPO_ASC_API_KEY_ID, EXPO_ASC_API_KEY_ISSUER_ID, EXPO_ASC_API_KEY_P8 repo secrets to enable. See docs/DEPLOYMENT.adoc."
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -201,9 +206,9 @@ jobs:
       - name: PATCH whatsNew via App Store Connect API
         if: steps.gate.outputs.skip != 'true' && steps.iosbuild.outputs.version != ''
         env:
-          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
-          ASC_API_KEY_ISSUER_ID: ${{ secrets.ASC_API_KEY_ISSUER_ID }}
-          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+          ASC_API_KEY_ID: ${{ secrets.EXPO_ASC_API_KEY_ID }}
+          ASC_API_KEY_ISSUER_ID: ${{ secrets.EXPO_ASC_API_KEY_ISSUER_ID }}
+          ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
           ASC_APP_ID: '6762218164' # matches eas.json → submit.production.ios.ascAppId
           ASC_BUILD_VERSION: ${{ steps.iosbuild.outputs.version }}
           WHATS_NEW: ${{ steps.changelog.outputs.whatsnew }}
